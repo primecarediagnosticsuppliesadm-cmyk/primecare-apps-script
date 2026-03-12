@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+  <body style="font-family:Arial,sans-serif;color:#111827;">
+    <div style="max-width:800px;margin:0 auto;padding:24px;">
+      <h2 style="margin:0 0 8px 0;"><?= companyName ?></h2>
+      <p style="margin:0 0 20px 0;">Invoice ID: <strong><?= order.invoiceId ?></strong></p>
+
+      <div style="margin-bottom:20px;">
+        <div><strong>Lab Name:</strong> <?= order.labName ?></div>
+        <div><strong>Lab ID:</strong> <?= order.labId ?></div>
+        <div><strong>Contact Person:</strong> <?= order.contactPerson ?></div>
+        <div><strong>Mobile:</strong> <?= order.mobileNumber ?></div>
+        <div><strong>Email:</strong> <?= order.emailAddress ?></div>
+        <div><strong>Delivery Address:</strong> <?= order.deliveryAddress ?></div>
+      </div>
+
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr>
+            <th style="border-bottom:1px solid #ddd;padding:8px;text-align:left;">Product</th>
+            <th style="border-bottom:1px solid #ddd;padding:8px;text-align:left;">Qty</th>
+            <th style="border-bottom:1px solid #ddd;padding:8px;text-align:left;">Unit Price</th>
+            <th style="border-bottom:1px solid #ddd;padding:8px;text-align:left;">Tax</th>
+            <th style="border-bottom:1px solid #ddd;padding:8px;text-align:left;">Net Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          <? for (var i = 0; i < lines.length; i++) { ?>
+            <tr>
+              <td style="border-bottom:1px solid #eee;padding:8px;"><?= lines[i].productName ?></td>
+              <td style="border-bottom:1px solid #eee;padding:8px;"><?= lines[i].quantity ?></td>
+              <td style="border-bottom:1px solid #eee;padding:8px;"><?= lines[i].unitSellingPrice ?></td>
+              <td style="border-bottom:1px solid #eee;padding:8px;"><?= lines[i].taxAmount ?></td>
+              <td style="border-bottom:1px solid #eee;padding:8px;"><?= lines[i].netLineTotal ?></td>
+            </tr>
+          <? } ?>
+        </tbody>
+      </table>
+
+      <h3 style="margin-top:20px;">Grand Total: ₹<?= order.orderTotal ?></h3>
+      <p>Thank you for ordering from <?= companyName ?>.</p>
+    </div>
+  </body>
+</html>

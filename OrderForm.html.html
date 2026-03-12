@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f6f8fb;
+      margin: 0;
+      padding: 24px;
+      color: #1f2937;
+    }
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.08);
+      padding: 24px;
+    }
+    h1, h2 {
+      margin-top: 0;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0,1fr));
+      gap: 14px;
+    }
+    .full {
+      grid-column: 1 / -1;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    input, textarea, select, button {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      font-size: 14px;
+    }
+    textarea {
+      min-height: 90px;
+      resize: vertical;
+    }
+    .items {
+      margin-top: 20px;
+    }
+    .item-row {
+      display: grid;
+      grid-template-columns: 2fr 120px 140px 140px 44px;
+      gap: 10px;
+      margin-bottom: 10px;
+      align-items: end;
+    }
+    .muted {
+      color: #6b7280;
+      font-size: 12px;
+    }
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      margin-top: 18px;
+      flex-wrap: wrap;
+    }
+    .btn-primary {
+      background: #111827;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+    }
+    .btn-secondary {
+      background: #fff;
+      color: #111827;
+      border: 1px solid #d1d5db;
+      cursor: pointer;
+    }
+    .summary {
+      margin-top: 18px;
+      padding: 14px;
+      border-radius: 12px;
+      background: #f9fafb;
+    }
+    .success {
+      margin-top: 18px;
+      padding: 14px;
+      border-radius: 12px;
+      background: #ecfdf5;
+      border: 1px solid #a7f3d0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
+    }
+    th, td {
+      border-bottom: 1px solid #e5e7eb;
+      padding: 10px 8px;
+      text-align: left;
+      font-size: 14px;
+    }
+    @media (max-width: 768px) {
+      .grid { grid-template-columns: 1fr; }
+      .item-row { grid-template-columns: 1fr; }
+    }
+    .field-error {
+  border: 1px solid #dc2626 !important;
+  background: #fef2f2 !important;
+}
+
+.message {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.message-info {
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  color: #1d4ed8;
+}
+
+.message-success {
+  background: #ecfdf5;
+  border: 1px solid #86efac;
+  color: #166534;
+}
+
+.message-error {
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  color: #991b1b;
+}
+
+.message-warning {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+}
+
+.btn-primary[disabled],
+.btn-secondary[disabled] {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.loading-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.loading-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  display: inline-block;
+  animation: blink 1s infinite ease-in-out;
+}
+
+.loading-dot:nth-child(2) { animation-delay: 0.15s; }
+.loading-dot:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes blink {
+  0%, 80%, 100% { opacity: 0.25; }
+  40% { opacity: 1; }
+}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>PrimeCare Diagnostics Supplies</h1>
+<div class="muted">Lab Ordering Portal</div>
+
+    <div class="grid" style="margin-top:18px;">
+      <div>
+        <label>Lab ID</label>
+        <input id="labId" />
+      </div>
+      <div>
+        <label>Lab Name</label>
+        <input id="labName" />
+      </div>
+      <div>
+        <label>Contact Person</label>
+        <input id="contactPerson" />
+      </div>
+      <div>
+        <label>Mobile Number</label>
+        <input id="mobileNumber" />
+      </div>
+      <div>
+        <label>Email Address</label>
+        <input id="emailAddress" />
+      </div>
+      <div>
+        <label>Delivery Address</label>
+        <input id="deliveryAddress" />
+      </div>
+      <div class="full">
+        <label>Notes</label>
+        <textarea id="notes"></textarea>
+      </div>
+    </div>
+
+    <div class="items">
+      <h2>Items</h2>
+      <div id="itemsContainer"></div>
+      <div class="btn-row">
+        <button class="btn-secondary" onclick="addItemRow()">Add Item</button>
+      </div>
+    </div>
+
+    <div class="summary" id="summaryBox">
+      <strong>Estimated Total:</strong> ₹<span id="grandTotal">0.00</span>
+    </div>
+
+    <div class="btn-row">
+  <button id="submitBtn" class="btn-primary" type="button" onclick="submitOrder()">Submit Order</button>
+  <button id="historyBtn" class="btn-secondary" type="button" onclick="loadHistory()">Load Order History</button>
+</div>
+
+<div id="formMessage"></div>
+<div id="result"></div>
+<div id="history"></div>
+  </div>
+
+  <script>
+  let APP = { products: [] };
+  let IS_SUBMITTING = false;
+
+  function init() {
+    google.script.run
+      .withSuccessHandler(data => {
+        APP = data || { products: [] };
+        addItemRow();
+      })
+      .withFailureHandler(err => {
+        showMessage("formMessage", "Failed to load app data: " + (err.message || err), "error");
+      })
+      .pcGetAppBootstrapData();
+  }
+
+  function addItemRow() {
+    const container = document.getElementById("itemsContainer");
+    const row = document.createElement("div");
+    row.className = "item-row";
+
+    const options = ['<option value="">Select product</option>']
+      .concat(
+        APP.products.map(
+          p => `<option value="${escapeHtml(p.productName)}" data-price="${p.unitSellingPrice}" data-tax="${p.taxRate}">
+                  ${escapeHtml(p.productName)}
+                </option>`
+        )
+      )
+      .join("");
+
+    row.innerHTML = `
+      <div>
+        <label>Product <span style="color:#dc2626">*</span></label>
+        <select class="productSelect" onchange="recalcTotals(); clearFieldError(this);">
+          ${options}
+        </select>
+      </div>
+      <div>
+        <label>Qty <span style="color:#dc2626">*</span></label>
+        <input type="number" class="qtyInput" min="1" value="1" oninput="recalcTotals(); clearFieldError(this);" />
+      </div>
+      <div>
+        <label>Unit Price</label>
+        <input class="priceView" disabled />
+      </div>
+      <div>
+        <label>Line Total</label>
+        <input class="lineTotalView" disabled />
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <button type="button" class="btn-secondary" onclick="removeItemRow(this)">X</button>
+      </div>
+    `;
+
+    container.appendChild(row);
+    recalcTotals();
+  }
+
+  function removeItemRow(btn) {
+    btn.closest(".item-row").remove();
+    recalcTotals();
+  }
+
+  function recalcTotals() {
+    const rows = document.querySelectorAll(".item-row");
+    let grand = 0;
+
+    rows.forEach(row => {
+      const select = row.querySelector(".productSelect");
+      const qty = Number(row.querySelector(".qtyInput").value || 0);
+      const selectedOption = select.options[select.selectedIndex];
+      const price = Number(selectedOption?.dataset?.price || 0);
+      const tax = Number(selectedOption?.dataset?.tax || 0);
+      const total = (qty * price) * (1 + tax);
+
+      row.querySelector(".priceView").value = price ? price.toFixed(2) : "";
+      row.querySelector(".lineTotalView").value = total ? total.toFixed(2) : "";
+      grand += total;
+    });
+
+    document.getElementById("grandTotal").textContent = grand.toFixed(2);
+  }
+
+  function collectPayload() {
+    const rows = Array.from(document.querySelectorAll(".item-row"));
+    const items = rows.map(row => ({
+      productName: row.querySelector(".productSelect").value,
+      quantity: Number(row.querySelector(".qtyInput").value || 0)
+    })).filter(x => x.productName && x.quantity > 0);
+
+          return {
+        submissionToken: window.__pcSubmissionToken || generateSubmissionToken(),
+        labId: document.getElementById("labId").value.trim(),
+        labName: document.getElementById("labName").value.trim(),
+        contactPerson: document.getElementById("contactPerson").value.trim(),
+        mobileNumber: document.getElementById("mobileNumber").value.trim(),
+        emailAddress: document.getElementById("emailAddress").value.trim(),
+        deliveryAddress: document.getElementById("deliveryAddress").value.trim(),
+        notes: document.getElementById("notes").value.trim(),
+        items: items
+      };
+  }
+
+  function generateSubmissionToken() {
+  const token =
+    "PC-" +
+    Date.now() + "-" +
+    Math.random().toString(36).slice(2, 10);
+
+  window.__pcSubmissionToken = token;
+  return token;
+}
+
+function init() {
+  generateSubmissionToken();
+
+  google.script.run
+    .withSuccessHandler(data => {
+      APP = data || { products: [] };
+      addItemRow();
+    })
+    .withFailureHandler(err => {
+      showMessage("formMessage", "Failed to load app data: " + (err.message || err), "error");
+    })
+    .pcGetAppBootstrapData();
+}
+
+  function validateForm() {
+    let isValid = true;
+
+    clearAllFieldErrors();
+    showMessage("formMessage", "", "");
+
+    const fields = [
+      {
+        el: document.getElementById("labId"),
+        valid: v => v.trim() !== "",
+        msg: "Lab ID is required."
+      },
+      {
+        el: document.getElementById("labName"),
+        valid: v => v.trim() !== "",
+        msg: "Lab Name is required."
+      },
+      {
+        el: document.getElementById("contactPerson"),
+        valid: v => v.trim() !== "",
+        msg: "Contact Person is required."
+      },
+      {
+        el: document.getElementById("mobileNumber"),
+        valid: v => /^[0-9]{10,15}$/.test(v.replace(/\D/g, "")),
+        msg: "Enter a valid mobile number."
+      },
+      {
+        el: document.getElementById("emailAddress"),
+        valid: v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()),
+        msg: "Enter a valid email address."
+      },
+      {
+        el: document.getElementById("deliveryAddress"),
+        valid: v => v.trim() !== "",
+        msg: "Delivery Address is required."
+      }
+    ];
+
+    const errors = [];
+
+    fields.forEach(field => {
+      const value = field.el.value || "";
+      if (!field.valid(value)) {
+        markFieldError(field.el);
+        errors.push(field.msg);
+        isValid = false;
+      }
+    });
+
+    const itemRows = Array.from(document.querySelectorAll(".item-row"));
+    if (!itemRows.length) {
+      errors.push("At least one item is required.");
+      isValid = false;
+    }
+
+    itemRows.forEach((row, idx) => {
+      const productEl = row.querySelector(".productSelect");
+      const qtyEl = row.querySelector(".qtyInput");
+      const product = (productEl.value || "").trim();
+      const qty = Number(qtyEl.value || 0);
+
+      if (!product) {
+        markFieldError(productEl);
+        errors.push(`Select a product in item row ${idx + 1}.`);
+        isValid = false;
+      }
+
+      if (!(qty > 0)) {
+        markFieldError(qtyEl);
+        errors.push(`Quantity must be greater than zero in item row ${idx + 1}.`);
+        isValid = false;
+      }
+    });
+
+    if (!isValid) {
+      showMessage(
+        "formMessage",
+        "<strong>Please fix these issues:</strong><br>" + errors.map(e => "• " + escapeHtml(e)).join("<br>"),
+        "warning"
+      );
+    }
+
+    return isValid;
+  }
+
+  function submitOrder() {
+    if (IS_SUBMITTING) return;
+
+    if (!validateForm()) return;
+
+    const payload = collectPayload();
+
+    IS_SUBMITTING = true;
+    setSubmittingState(true);
+
+    showMessage(
+      "formMessage",
+      `<span class="loading-text">Submitting order
+        <span class="loading-dot"></span>
+        <span class="loading-dot"></span>
+        <span class="loading-dot"></span>
+      </span>`,
+      "info"
+    );
+
+    document.getElementById("result").innerHTML = "";
+    document.getElementById("history").innerHTML = "";
+
+    google.script.run
+      .withSuccessHandler(res => {
+  IS_SUBMITTING = false;
+  setSubmittingState(false);
+
+  document.getElementById("result").innerHTML = `
+    <div class="success">
+      <strong>${res.duplicate ? "Duplicate submission prevented." : "Order submitted successfully."}</strong><br>
+      Order ID: ${escapeHtml(res.orderId)}<br>
+      Invoice ID: ${escapeHtml(res.invoiceId)}<br>
+      Total: ₹${Number(res.orderTotal || 0).toFixed(2)}<br><br>
+      ${res.invoicePdfLink ? `<a href="${res.invoicePdfLink}" target="_blank">Open Invoice PDF</a><br>` : ""}
+      ${res.whatsappLink ? `<a href="${res.whatsappLink}" target="_blank">Open WhatsApp Message</a>` : ""}
+    </div>
+  `;
+
+  const popupMessage =
+    (res.duplicate ? "Duplicate submission prevented.\n\n" : "Order submitted successfully.\n\n") +
+    "Order ID: " + (res.orderId || "") + "\n" +
+    "Invoice ID: " + (res.invoiceId || "") + "\n" +
+    "Total: ₹" + Number(res.orderTotal || 0).toFixed(2) + "\n\n" +
+    "Click OK to prepare the form for the next order.";
+
+  alert(popupMessage);
+
+  resetFormAfterSubmit();
+  generateSubmissionToken();
+  window.location.reload();
+})
+      .withFailureHandler(err => {
+        IS_SUBMITTING = false;
+        setSubmittingState(false);
+
+        showMessage(
+          "formMessage",
+          "<strong>Submission failed:</strong> " + escapeHtml(err.message || String(err)),
+          "error"
+        );
+      })
+      .pcSubmitOrder(payload);
+  }
+
+  function loadHistory() {
+    const labId = document.getElementById("labId").value.trim();
+    if (!labId) {
+      markFieldError(document.getElementById("labId"));
+      showMessage("formMessage", "Enter Lab ID first to load order history.", "warning");
+      return;
+    }
+
+    document.getElementById("history").innerHTML = "Loading history...";
+
+    google.script.run
+      .withSuccessHandler(rows => {
+        if (!rows || !rows.length) {
+          document.getElementById("history").innerHTML = `<div class="summary">No orders found for this Lab ID.</div>`;
+          return;
+        }
+
+        const html = `
+          <h2 style="margin-top:24px;">Order History</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Order ID</th>
+                <th>Order Date</th>
+                <th>Invoice ID</th>
+                <th>Invoice Status</th>
+                <th>Payment Status</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r => `
+                <tr>
+                  <td>${escapeHtml(r.orderId || "")}</td>
+                  <td>${escapeHtml(String(r.orderDate || ""))}</td>
+                  <td>${escapeHtml(r.invoiceId || "")}</td>
+                  <td>${escapeHtml(r.invoiceStatus || "")}</td>
+                  <td>${escapeHtml(r.paymentStatus || "")}</td>
+                  <td>${escapeHtml(String(r.totalAmount || ""))}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        `;
+        document.getElementById("history").innerHTML = html;
+      })
+      .withFailureHandler(err => {
+        document.getElementById("history").innerHTML = `<div class="summary">Error: ${escapeHtml(err.message || err)}</div>`;
+      })
+      .pcGetOrderHistoryByLab(labId);
+  }
+
+  function setSubmittingState(isSubmitting, keepSubmitDisabledAfterSuccess) {
+    const submitBtn = document.getElementById("submitBtn");
+    const historyBtn = document.getElementById("historyBtn");
+
+    if (isSubmitting) {
+      submitBtn.disabled = true;
+      historyBtn.disabled = true;
+      submitBtn.textContent = "Submitting...";
+      return;
+    }
+
+    submitBtn.disabled = !!keepSubmitDisabledAfterSuccess;
+    historyBtn.disabled = false;
+    submitBtn.textContent = keepSubmitDisabledAfterSuccess ? "Submitted" : "Submit Order";
+  }
+
+  function resetFormAfterSubmit() {
+    document.getElementById("labId").value = "";
+    document.getElementById("labName").value = "";
+    document.getElementById("contactPerson").value = "";
+    document.getElementById("mobileNumber").value = "";
+    document.getElementById("emailAddress").value = "";
+    document.getElementById("deliveryAddress").value = "";
+    document.getElementById("notes").value = "";
+
+    document.getElementById("itemsContainer").innerHTML = "";
+    addItemRow();
+    recalcTotals();
+  }
+
+  function showMessage(targetId, html, type) {
+    const el = document.getElementById(targetId);
+    if (!el) return;
+
+    if (!html) {
+      el.innerHTML = "";
+      return;
+    }
+
+    const className =
+      type === "success" ? "message message-success" :
+      type === "error" ? "message message-error" :
+      type === "warning" ? "message message-warning" :
+      "message message-info";
+
+    el.innerHTML = `<div class="${className}">${html}</div>`;
+  }
+
+  function markFieldError(el) {
+    if (el) el.classList.add("field-error");
+  }
+
+  function clearFieldError(el) {
+    if (el) el.classList.remove("field-error");
+  }
+
+  function clearAllFieldErrors() {
+    document.querySelectorAll(".field-error").forEach(el => el.classList.remove("field-error"));
+  }
+
+  function escapeHtml(str) {
+    return String(str || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  window.onload = init;
+</script>
+</body>
+</html>
