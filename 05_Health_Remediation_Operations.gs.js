@@ -10,8 +10,6 @@ function pcaiRunSystemHealthEngine() {
   findings.push(...pcaiCheckBlankCriticalFields_());
   findings.push(...pcaiCheckCreditRisk_());
   findings.push(...pcaiCheckStockRisk_());
-
-  // New v2 checks
   findings.push(...pcaiCheckLabsNearCreditLimit_());
   findings.push(...pcaiCheckProductsBelowMinStock_());
   findings.push(...pcaiCheckPendingPaymentAging_());
@@ -23,6 +21,7 @@ function pcaiRunSystemHealthEngine() {
 
 function pcaiCheckRequiredSheets_() {
   const existing = pcaiGetSS_().getSheets().map(s => s.getName());
+
   return PCAI_HEALTH.REQUIRED_SHEETS.map(name => ({
     Category: "STRUCTURE",
     Check_Name: "Required Sheet Exists",
@@ -35,6 +34,7 @@ function pcaiCheckRequiredSheets_() {
 
 function pcaiCheckRequiredHeaders_() {
   const findings = [];
+
   Object.keys(PCAI_HEALTH.REQUIRED_HEADERS).forEach(sheetName => {
     const sh = pcaiGetSS_().getSheetByName(sheetName);
     if (!sh) return;
@@ -54,6 +54,7 @@ function pcaiCheckRequiredHeaders_() {
       });
     });
   });
+
   return findings;
 }
 
@@ -62,22 +63,55 @@ function pcaiCheckInvalidStatuses_() {
   if (!pcaiSheetExists_(PCAI_SHEETS.ORDERS)) return findings;
 
   const rows = pcaiGetRowsAsObjects_(pcaiGetSheetRequired_(PCAI_SHEETS.ORDERS), "Order_ID");
+
   rows.forEach((r, idx) => {
     const rowNum = idx + 2;
-    if (r.Order_Status && !PCAI_ENUMS.ORDER_STATUS.includes(String(r.Order_Status).trim())) {
-      findings.push(pcaiBuildHealthFinding_("DATA_QUALITY", "Invalid Order_Status", "Orders row " + rowNum, "HIGH", "FAIL", "Invalid value: " + r.Order_Status));
+
+    if (r.Order_Status && PCAI_ENUMS.ORDER_STATUS && !PCAI_ENUMS.ORDER_STATUS.includes(String(r.Order_Status).trim())) {
+      findings.push(pcaiBuildHealthFinding_(
+        "DATA_QUALITY",
+        "Invalid Order_Status",
+        "Orders row " + rowNum,
+        "HIGH",
+        "FAIL",
+        "Invalid value: " + r.Order_Status
+      ));
     }
+
     if (r.Invoice_Status && !PCAI_ENUMS.INVOICE_STATUS.includes(String(r.Invoice_Status).trim())) {
-      findings.push(pcaiBuildHealthFinding_("DATA_QUALITY", "Invalid Invoice_Status", "Orders row " + rowNum, "HIGH", "FAIL", "Invalid value: " + r.Invoice_Status));
+      findings.push(pcaiBuildHealthFinding_(
+        "DATA_QUALITY",
+        "Invalid Invoice_Status",
+        "Orders row " + rowNum,
+        "HIGH",
+        "FAIL",
+        "Invalid value: " + r.Invoice_Status
+      ));
     }
+
     if (r.Payment_Status && !PCAI_ENUMS.PAYMENT_STATUS.includes(String(r.Payment_Status).trim())) {
-      findings.push(pcaiBuildHealthFinding_("DATA_QUALITY", "Invalid Payment_Status", "Orders row " + rowNum, "HIGH", "FAIL", "Invalid value: " + r.Payment_Status));
+      findings.push(pcaiBuildHealthFinding_(
+        "DATA_QUALITY",
+        "Invalid Payment_Status",
+        "Orders row " + rowNum,
+        "HIGH",
+        "FAIL",
+        "Invalid value: " + r.Payment_Status
+      ));
     }
   });
 
   if (!findings.length) {
-    findings.push(pcaiBuildHealthFinding_("DATA_QUALITY", "Status Scan", "Orders", "INFO", "PASS", "No invalid statuses found"));
+    findings.push(pcaiBuildHealthFinding_(
+      "DATA_QUALITY",
+      "Status Scan",
+      "Orders",
+      "INFO",
+      "PASS",
+      "No invalid statuses found"
+    ));
   }
+
   return findings;
 }
 
@@ -100,6 +134,7 @@ function pcaiCheckBlankCriticalFields_() {
 
     rows.forEach((r, idx) => {
       const rowNum = idx + 2;
+
       criticalMap[sheetName].forEach(field => {
         if (r[field] === "" || r[field] === null || r[field] === undefined) {
           findings.push(pcaiBuildHealthFinding_(
@@ -134,24 +169,48 @@ function pcaiCheckCreditRisk_() {
   if (!pcaiSheetExists_(PCAI_SHEETS.AR)) return findings;
 
   const rows = pcaiGetRowsAsObjects_(pcaiGetSheetRequired_(PCAI_SHEETS.AR), "Lab_ID");
+
   rows.forEach((r, idx) => {
     const rowNum = idx + 2;
     const outstanding = pcaiNum_(r.Outstanding);
     const limit = pcaiNum_(r.Credit_Limit);
     const days = pcaiNum_(r.Days_Overdue);
-    const hold = String(r.Credit_Hold || "").trim();
+    const hold = String(r.Credit_Hold || "").trim().toUpperCase();
 
     if (limit > 0 && outstanding > limit && hold !== "HOLD") {
-      findings.push(pcaiBuildHealthFinding_("BUSINESS_RISK", "Credit Hold Logic Gap", "AR row " + rowNum, "CRITICAL", "FAIL", "Outstanding exceeds limit but not HOLD"));
+      findings.push(pcaiBuildHealthFinding_(
+        "BUSINESS_RISK",
+        "Credit Hold Logic Gap",
+        "AR row " + rowNum,
+        "CRITICAL",
+        "FAIL",
+        "Outstanding exceeds limit but not HOLD"
+      ));
     }
+
     if (days > 30) {
-      findings.push(pcaiBuildHealthFinding_("BUSINESS_RISK", "Severe Overdue Lab", "AR row " + rowNum, "HIGH", "FAIL", "Days_Overdue = " + days));
+      findings.push(pcaiBuildHealthFinding_(
+        "BUSINESS_RISK",
+        "Severe Overdue Lab",
+        "AR row " + rowNum,
+        "HIGH",
+        "FAIL",
+        "Days_Overdue = " + days
+      ));
     }
   });
 
   if (!findings.length) {
-    findings.push(pcaiBuildHealthFinding_("BUSINESS_RISK", "Credit Risk Scan", "AR_Credit_Control", "INFO", "PASS", "No critical credit-risk exceptions"));
+    findings.push(pcaiBuildHealthFinding_(
+      "BUSINESS_RISK",
+      "Credit Risk Scan",
+      "AR_Credit_Control",
+      "INFO",
+      "PASS",
+      "No critical credit-risk exceptions"
+    ));
   }
+
   return findings;
 }
 
@@ -160,23 +219,47 @@ function pcaiCheckStockRisk_() {
   if (!pcaiSheetExists_(PCAI_SHEETS.INVENTORY)) return findings;
 
   const rows = pcaiGetRowsAsObjects_(pcaiGetSheetRequired_(PCAI_SHEETS.INVENTORY), "Product_ID");
+
   rows.forEach((r, idx) => {
     const rowNum = idx + 2;
     const stock = pcaiNum_(r.Current_Stock);
     const min = pcaiNum_(r.Min_Stock);
-    const reorder = String(r.Reorder_Status || "").trim();
+    const reorder = String(r.Reorder_Status || "").trim().toUpperCase();
 
     if (stock < min && reorder !== "REORDER") {
-      findings.push(pcaiBuildHealthFinding_("BUSINESS_RISK", "Reorder Logic Gap", "Inventory row " + rowNum, "CRITICAL", "FAIL", "Stock below min but not REORDER"));
+      findings.push(pcaiBuildHealthFinding_(
+        "BUSINESS_RISK",
+        "Reorder Logic Gap",
+        "Inventory row " + rowNum,
+        "CRITICAL",
+        "FAIL",
+        "Stock below min but not REORDER"
+      ));
     }
+
     if (stock === 0) {
-      findings.push(pcaiBuildHealthFinding_("BUSINESS_RISK", "Stockout", "Inventory row " + rowNum, "HIGH", "FAIL", "Current_Stock is zero"));
+      findings.push(pcaiBuildHealthFinding_(
+        "BUSINESS_RISK",
+        "Stockout",
+        "Inventory row " + rowNum,
+        "HIGH",
+        "FAIL",
+        "Current_Stock is zero"
+      ));
     }
   });
 
   if (!findings.length) {
-    findings.push(pcaiBuildHealthFinding_("BUSINESS_RISK", "Stock Risk Scan", "Inventory", "INFO", "PASS", "No critical stock-risk exceptions"));
+    findings.push(pcaiBuildHealthFinding_(
+      "BUSINESS_RISK",
+      "Stock Risk Scan",
+      "Inventory",
+      "INFO",
+      "PASS",
+      "No critical stock-risk exceptions"
+    ));
   }
+
   return findings;
 }
 
@@ -192,7 +275,8 @@ function pcaiBuildHealthFinding_(category, checkName, objectName, severity, resu
 }
 
 function pcaiWriteSystemHealthSheet_(findings) {
-  const sh = pcaiDeleteAndRecreateSheet_(PCAI_SHEETS.SYSTEM_HEALTH);
+  const sh = pcaiResetSheetContents_(PCAI_SHEETS.SYSTEM_HEALTH);
+
   sh.getRange("A1").setValue("PrimeCare System Health").setFontSize(16).setFontWeight("bold");
   sh.getRange("A3:F3").setValues([["Category", "Check_Name", "Object_Name", "Severity", "Result", "Notes"]]);
 
@@ -201,7 +285,8 @@ function pcaiWriteSystemHealthSheet_(findings) {
       findings.map(f => [f.Category, f.Check_Name, f.Object_Name, f.Severity, f.Result, f.Notes])
     );
   }
-  sh.autoResizeColumns(1, 6);
+
+  sh.setFrozenRows(3);
 }
 
 function pcaiRunSystemRemediation() {
@@ -241,8 +326,11 @@ function pcaiFillMissingOutstanding_() {
   const sh = pcaiGetSheetRequired_(PCAI_SHEETS.AR);
   const map = pcaiGetHeaderMap_(sh);
   const required = ["Total_Delivered", "Total_Paid", "Outstanding"];
+
   for (const field of required) {
-    if (!map[field]) return [pcaiBuildRemediationAction_(PCAI_SHEETS.AR, 0, "FILL_OUTSTANDING", "SKIPPED", "Missing header: " + field)];
+    if (!map[field]) {
+      return [pcaiBuildRemediationAction_(PCAI_SHEETS.AR, 0, "FILL_OUTSTANDING", "SKIPPED", "Missing header: " + field)];
+    }
   }
 
   const rows = pcaiGetRowsWithNumbers_(sh, "Lab_ID");
@@ -260,7 +348,10 @@ function pcaiFillMissingOutstanding_() {
     }
   });
 
-  if (!actions.length) actions.push(pcaiBuildRemediationAction_(PCAI_SHEETS.AR, 0, "FILL_OUTSTANDING", "NO_CHANGE", "No missing outstanding values"));
+  if (!actions.length) {
+    actions.push(pcaiBuildRemediationAction_(PCAI_SHEETS.AR, 0, "FILL_OUTSTANDING", "NO_CHANGE", "No missing outstanding values"));
+  }
+
   return actions;
 }
 
@@ -272,8 +363,11 @@ function pcaiFixCreditHoldLogic_() {
   const sh = pcaiGetSheetRequired_(PCAI_SHEETS.AR);
   const map = pcaiGetHeaderMap_(sh);
   const required = ["Outstanding", "Credit_Limit", "Credit_Hold"];
+
   for (const field of required) {
-    if (!map[field]) return [pcaiBuildRemediationAction_(PCAI_SHEETS.AR, 0, "FIX_CREDIT_HOLD", "SKIPPED", "Missing header: " + field)];
+    if (!map[field]) {
+      return [pcaiBuildRemediationAction_(PCAI_SHEETS.AR, 0, "FIX_CREDIT_HOLD", "SKIPPED", "Missing header: " + field)];
+    }
   }
 
   const rows = pcaiGetRowsWithNumbers_(sh, "Lab_ID");
@@ -285,7 +379,7 @@ function pcaiFixCreditHoldLogic_() {
     if (o === "" || l === "") return;
 
     const expected = pcaiNum_(r.Outstanding) > pcaiNum_(r.Credit_Limit) ? "HOLD" : "OK";
-    const actual = String(r.Credit_Hold || "").trim();
+    const actual = String(r.Credit_Hold || "").trim().toUpperCase();
 
     if (actual !== expected) {
       sh.getRange(r.__rowNum, map.Credit_Hold).setValue(expected);
@@ -293,7 +387,10 @@ function pcaiFixCreditHoldLogic_() {
     }
   });
 
-  if (!actions.length) actions.push(pcaiBuildRemediationAction_(PCAI_SHEETS.AR, 0, "FIX_CREDIT_HOLD", "NO_CHANGE", "No credit hold issues found"));
+  if (!actions.length) {
+    actions.push(pcaiBuildRemediationAction_(PCAI_SHEETS.AR, 0, "FIX_CREDIT_HOLD", "NO_CHANGE", "No credit hold issues found"));
+  }
+
   return actions;
 }
 
@@ -305,8 +402,11 @@ function pcaiFixReorderLogic_() {
   const sh = pcaiGetSheetRequired_(PCAI_SHEETS.INVENTORY);
   const map = pcaiGetHeaderMap_(sh);
   const required = ["Current_Stock", "Min_Stock", "Reorder_Status"];
+
   for (const field of required) {
-    if (!map[field]) return [pcaiBuildRemediationAction_(PCAI_SHEETS.INVENTORY, 0, "FIX_REORDER_STATUS", "SKIPPED", "Missing header: " + field)];
+    if (!map[field]) {
+      return [pcaiBuildRemediationAction_(PCAI_SHEETS.INVENTORY, 0, "FIX_REORDER_STATUS", "SKIPPED", "Missing header: " + field)];
+    }
   }
 
   const rows = pcaiGetRowsWithNumbers_(sh, "Product_ID");
@@ -318,7 +418,7 @@ function pcaiFixReorderLogic_() {
     if (s === "" || m === "") return;
 
     const expected = pcaiNum_(r.Current_Stock) < pcaiNum_(r.Min_Stock) ? "REORDER" : "OK";
-    const actual = String(r.Reorder_Status || "").trim();
+    const actual = String(r.Reorder_Status || "").trim().toUpperCase();
 
     if (actual !== expected) {
       sh.getRange(r.__rowNum, map.Reorder_Status).setValue(expected);
@@ -326,7 +426,10 @@ function pcaiFixReorderLogic_() {
     }
   });
 
-  if (!actions.length) actions.push(pcaiBuildRemediationAction_(PCAI_SHEETS.INVENTORY, 0, "FIX_REORDER_STATUS", "NO_CHANGE", "No reorder issues found"));
+  if (!actions.length) {
+    actions.push(pcaiBuildRemediationAction_(PCAI_SHEETS.INVENTORY, 0, "FIX_REORDER_STATUS", "NO_CHANGE", "No reorder issues found"));
+  }
+
   return actions;
 }
 
@@ -340,9 +443,21 @@ function pcaiBuildRemediationAction_(sheetName, rowNum, actionType, status, note
     Notes: notes
   };
 }
+function pcaiResetSheetContents_(name) {
+  const sh = pcaiGetOrCreateSheet_(name);
+  const maxRows = sh.getMaxRows();
+  const maxCols = sh.getMaxColumns();
+
+  if (maxRows > 0 && maxCols > 0) {
+    sh.getRange(1, 1, maxRows, maxCols).clearContent();
+  }
+
+  return sh;
+}
 
 function pcaiWriteRemediationReport_(actions) {
-  const sh = pcaiDeleteAndRecreateSheet_(PCAI_SHEETS.REMEDIATION_REPORT);
+  const sh = pcaiResetSheetContents_(PCAI_SHEETS.REMEDIATION_REPORT);
+
   sh.getRange("A1").setValue("PrimeCare Remediation Report").setFontSize(16).setFontWeight("bold");
   sh.getRange("A3:F3").setValues([["Timestamp", "Sheet_Name", "Row_Number", "Action_Type", "Status", "Notes"]]);
 
@@ -351,14 +466,16 @@ function pcaiWriteRemediationReport_(actions) {
       actions.map(a => [a.Timestamp, a.Sheet_Name, a.Row_Number, a.Action_Type, a.Status, a.Notes])
     );
   }
-  sh.autoResizeColumns(1, 6);
+
+  sh.setFrozenRows(3);
 }
 
 function pcaiUpdateSystemStatusDashboard() {
   const health = pcaiSheetExists_(PCAI_SHEETS.SYSTEM_HEALTH) ? pcaiGetSheetRequired_(PCAI_SHEETS.SYSTEM_HEALTH) : null;
   const remediation = pcaiSheetExists_(PCAI_SHEETS.REMEDIATION_REPORT) ? pcaiGetSheetRequired_(PCAI_SHEETS.REMEDIATION_REPORT) : null;
   const sh = pcaiGetOrCreateSheet_(PCAI_SHEETS.SYSTEM_STATUS);
-  sh.clear();
+
+  sh.clearContent();
 
   sh.getRange("A1").setValue("PrimeCare System Status").setFontWeight("bold").setFontSize(16);
   sh.getRange("A3:B8").setValues([
@@ -374,7 +491,7 @@ function pcaiUpdateSystemStatusDashboard() {
   let dataIssues = 0;
   let systemStatus = "NOT RUN";
 
-  if (health) {
+  if (health && health.getLastRow() >= 4) {
     const values = health.getDataRange().getValues();
     const headers = values[2] || [];
     const map = {};
@@ -387,6 +504,7 @@ function pcaiUpdateSystemStatusDashboard() {
         if (String(row[map.Severity] || "").trim() === "MEDIUM") dataIssues++;
       }
     }
+
     systemStatus = critical > 0 ? "FAIL" : "PASS";
   }
 
@@ -396,12 +514,11 @@ function pcaiUpdateSystemStatusDashboard() {
   sh.getRange("B6").setValue(pcaiGetScenarioTestStatus_());
   sh.getRange("B7").setValue(new Date());
   sh.getRange("B8").setValue(remediation ? new Date() : "");
-  sh.autoResizeColumns(1, 2);
 }
 
 function pcaiUpdateOperationsDashboard() {
   const dash = pcaiGetOrCreateSheet_(PCAI_SHEETS.OPERATIONS_DASHBOARD);
-  dash.clear();
+  dash.clearContent();
 
   const orders = pcaiSheetExists_(PCAI_SHEETS.ORDERS) ? pcaiGetRowsAsObjects_(pcaiGetSheetRequired_(PCAI_SHEETS.ORDERS), "Order_ID") : [];
   const inventory = pcaiSheetExists_(PCAI_SHEETS.INVENTORY) ? pcaiGetRowsAsObjects_(pcaiGetSheetRequired_(PCAI_SHEETS.INVENTORY), "Product_ID") : [];
@@ -415,26 +532,28 @@ function pcaiUpdateOperationsDashboard() {
   const labRevenue = {};
 
   orders.forEach(r => {
-    const amount = pcaiNum_(r.Total_Amount);
+    const amount = pcaiNum_(r.Order_Total || r.Total_Amount || 0);
     const lab = String(r.Lab_ID || "").trim();
     const payment = String(r.Payment_Status || "").trim();
 
     revenue += amount;
     ordersCount++;
+
     if (payment !== "Received") unpaid++;
     if (lab) labRevenue[lab] = (labRevenue[lab] || 0) + amount;
   });
 
   inventory.forEach(r => {
-    if (String(r.Reorder_Status || "").trim() === "REORDER") reorder++;
+    if (String(r.Reorder_Status || "").trim().toUpperCase() === "REORDER") reorder++;
   });
 
   credit.forEach(r => {
-    if (String(r.Credit_Hold || "").trim() === "HOLD") holds++;
+    if (String(r.Credit_Hold || "").trim().toUpperCase() === "HOLD") holds++;
   });
 
   let topLab = "";
   let topRevenue = 0;
+
   Object.keys(labRevenue).forEach(lab => {
     if (labRevenue[lab] > topRevenue) {
       topRevenue = labRevenue[lab];
@@ -451,16 +570,15 @@ function pcaiUpdateOperationsDashboard() {
     ["Items On Reorder", reorder],
     ["Top Revenue Lab", topLab]
   ]);
-
-  dash.autoResizeColumns(1, 2);
 }
 
 function pcaiCheckLabsNearCreditLimit_() {
   const findings = [];
-  const sh = pcaiGetSS_().getSheetByName("AR_Credit_Control");
+  const sh = pcaiGetSS_().getSheetByName(PCAI_SHEETS.AR);
   if (!sh) return findings;
 
   const rows = pcaiGetRowsAsObjects_(sh, "Lab_ID");
+
   rows.forEach((r, idx) => {
     const rowNum = idx + 2;
     const outstanding = Number(r.Outstanding || 0);
@@ -497,10 +615,11 @@ function pcaiCheckLabsNearCreditLimit_() {
 
 function pcaiCheckProductsBelowMinStock_() {
   const findings = [];
-  const sh = pcaiGetSS_().getSheetByName("Inventory");
+  const sh = pcaiGetSS_().getSheetByName(PCAI_SHEETS.INVENTORY);
   if (!sh) return findings;
 
   const rows = pcaiGetRowsAsObjects_(sh, "Product_ID");
+
   rows.forEach((r, idx) => {
     const rowNum = idx + 2;
     const currentStock = Number(r.Current_Stock || 0);
@@ -534,7 +653,7 @@ function pcaiCheckProductsBelowMinStock_() {
 
 function pcaiCheckPendingPaymentAging_() {
   const findings = [];
-  const sh = pcaiGetSS_().getSheetByName("Orders");
+  const sh = pcaiGetSS_().getSheetByName(PCAI_SHEETS.ORDERS);
   if (!sh) return findings;
 
   const rows = pcaiGetRowsAsObjects_(sh, "Order_ID");

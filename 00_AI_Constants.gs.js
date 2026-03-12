@@ -13,11 +13,13 @@ const PCAI_SHEETS = {
   INVENTORY: "Inventory",
   AR: "AR_Credit_Control",
   PRODUCT_MASTER: "Product_Master",
+  REMEDIATION_REPORT: "Remediation_Report",
 
   /* ================================
      AI OUTPUT SHEETS
      ================================ */
 
+  DASHBOARD: "Dashboard",
   SYSTEM_HEALTH: "AI_System_Health",
   ALERTS: "AI_Alerts",
   RECOMMENDATIONS: "AI_Recommendations",
@@ -34,6 +36,7 @@ const PCAI_SHEETS = {
   SYSTEM_STATUS: "System_Status",
   OPERATIONS_DASHBOARD: "Operations_Dashboard",
   ACTION_LOG: "AI_Action_Log",
+  GROWTH_ENGINE: "Growth_Engine",
 
   /* ================================
      SANDBOX
@@ -45,6 +48,7 @@ const PCAI_SHEETS = {
   TEST_RESULTS: "AI_Test_Results",
   TEST_CASES: "AI_Test_Cases",
   REGRESSION_SUMMARY: "AI_Regression_Summary",
+  TEST_DASHBOARD: "AI_Regression_Summary",
   SCENARIO_BENCHMARKS: "AI_Scenario_Benchmarks"
 };
 
@@ -54,7 +58,14 @@ const PCAI_SHEETS = {
  ************************************************************/
 
 const PCAI_ENUMS = {
-
+    ORDER_STATUS: [
+    "Draft",
+    "Confirmed",
+    "Packed",
+    "Delivered",
+    "Cancelled"
+  ],
+  
   PAYMENT_STATUS: [
     "Pending",
     "Partial",
@@ -73,16 +84,11 @@ const PCAI_ENUMS = {
     "OK",
     "REORDER"
   ]
-
 };
 
 
 /************************************************************
  * HEALTH ENGINE
- ************************************************************/
-
-/************************************************************
- * HEALTH ENGINE (OPERATIONS WORKBOOK)
  ************************************************************/
 
 const PCAI_HEALTH = {
@@ -145,11 +151,33 @@ const PCAI_HEALTH = {
   },
 
   CRITICAL_FIELDS: {
-    Orders: ["Order_ID", "Lab_ID", "Invoice_ID", "Order_Total"],
-    Order_Lines: ["Order_Line_ID", "Order_ID", "Product_ID", "Quantity", "Unit_Selling_Price", "Net_Line_Total"],
-    Inventory: ["Product_ID", "Current_Stock"],
-    AR_Credit_Control: ["Lab_ID", "Credit_Hold"],
-    Product_Master: ["Product_ID", "Product_Name", "Unit_Selling_Price"]
+    Orders: [
+      "Order_ID",
+      "Lab_ID",
+      "Invoice_ID",
+      "Order_Total"
+    ],
+    Order_Lines: [
+      "Order_Line_ID",
+      "Order_ID",
+      "Product_ID",
+      "Quantity",
+      "Unit_Selling_Price",
+      "Net_Line_Total"
+    ],
+    Inventory: [
+      "Product_ID",
+      "Current_Stock"
+    ],
+    AR_Credit_Control: [
+      "Lab_ID",
+      "Credit_Hold"
+    ],
+    Product_Master: [
+      "Product_ID",
+      "Product_Name",
+      "Unit_Selling_Price"
+    ]
   },
 
   CREDIT_LIMIT_WARNING_RATIO: 0.8,
@@ -163,7 +191,6 @@ const PCAI_HEALTH = {
 
 const PCAI_ALERTS = {
   SHEET: PCAI_SHEETS.ALERTS,
-
   CREDIT_RISK_THRESHOLD: 0.9,
   OVERDUE_DAYS_ALERT: 30,
   LOW_STOCK_THRESHOLD: 0.2
