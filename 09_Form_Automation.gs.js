@@ -49,7 +49,7 @@ function handleOrderFormSubmit(e) {
     Logger.log("PrimeCare form processed successfully: " + ids.orderId);
   } catch (err) {
     pcformHandleFormProcessingError_(e, err);
-    Logger.log("PrimeCare form processing failed: " + err.message);
+    Logger.log("PrimeCare form processing failed: " + (err && err.message ? err.message : err));
     throw err;
   } finally {
     lock.releaseLock();
@@ -78,6 +78,7 @@ function pcformParseFormSubmission_(e) {
   for (let i = 1; i <= 5; i++) {
     const productName = pcformGetFirstNonBlank_(rowObj, ["Product_" + i]);
     const quantityRaw = pcformGetFirstNonBlank_(rowObj, ["Qty_" + i]);
+
     if (String(productName || "").trim() !== "") {
       items.push({
         productName: String(productName || "").trim(),
@@ -89,6 +90,7 @@ function pcformParseFormSubmission_(e) {
   if (!items.length) {
     const productName = pcformGetFirstNonBlank_(rowObj, ["Product_Name", "Product Name"]);
     const quantityRaw = pcformGetFirstNonBlank_(rowObj, ["Quantity", "Qty"]);
+
     if (String(productName || "").trim() !== "") {
       items.push({
         productName: String(productName || "").trim(),
@@ -115,7 +117,9 @@ function pcformParseFormSubmission_(e) {
 function pcformGetFirstNonBlank_(rowObj, keys) {
   for (let i = 0; i < keys.length; i++) {
     const v = rowObj[keys[i]];
-    if (v !== undefined && v !== null && String(v).trim() !== "") return v;
+    if (v !== undefined && v !== null && String(v).trim() !== "") {
+      return v;
+    }
   }
   return "";
 }
@@ -129,8 +133,12 @@ function pcformValidateFormPayload_(payload) {
   if (!payload.items || !payload.items.length) throw new Error("At least one product must be submitted.");
 
   payload.items.forEach((item, idx) => {
-    if (!item.productName) throw new Error("Missing product name in item row " + (idx + 1));
-    if (!item.quantity || item.quantity <= 0) throw new Error("Quantity must be greater than zero for product " + item.productName);
+    if (!item.productName) {
+      throw new Error("Missing product name in item row " + (idx + 1));
+    }
+    if (!item.quantity || item.quantity <= 0) {
+      throw new Error("Quantity must be greater than zero for product " + item.productName);
+    }
   });
 
   const productMap = pcformGetProductMasterMap_();
@@ -212,10 +220,14 @@ function pcformGetProductMasterMap_() {
 
   const headers = data[0].map(h => String(h || "").trim());
   const idx = {};
-  headers.forEach((h, i) => idx[h] = i);
+  headers.forEach((h, i) => {
+    idx[h] = i;
+  });
 
   ["Product_ID", "Product_Name", "Unit_Selling_Price"].forEach(req => {
-    if (idx[req] === undefined) throw new Error("Missing required Product_Master column: " + req);
+    if (idx[req] === undefined) {
+      throw new Error("Missing required Product_Master column: " + req);
+    }
   });
 
   const map = {};
@@ -234,6 +246,7 @@ function pcformGetProductMasterMap_() {
       taxRate: idx["Tax_Rate"] !== undefined ? Number(row[idx["Tax_Rate"]] || 0) : 0
     };
   }
+
   return map;
 }
 
@@ -279,7 +292,9 @@ function pcformWriteOrderHeader_(orderSummary) {
     "Email_Address": orderSummary.emailAddress,
     "Delivery_Address": orderSummary.deliveryAddress,
     "Notes": orderSummary.notes,
-    "Created_At": orderSummary.createdAt
+    "Created_At": orderSummary.createdAt,
+    "Total_Amount": orderSummary.orderTotal,
+    "Order_Total": orderSummary.orderTotal
   });
 
   sh.appendRow(row);
@@ -426,7 +441,7 @@ function pcformHandleFormProcessingError_(e, err) {
     const row = e.range.getRow();
 
     sh.getRange(row, map["Processing_Status"]).setValue("ERROR");
-    sh.getRange(row, map["Processing_Message"]).setValue(String(err.message || err));
+    sh.getRange(row, map["Processing_Message"]).setValue(String(err && err.message ? err.message : err));
     sh.getRange(row, map["Processed_At"]).setValue(new Date());
   } catch (innerErr) {
     Logger.log("Error while writing form processing error: " + innerErr.message);
@@ -480,7 +495,7 @@ function pcformSetupPrimeCareMissingStructure() {
 function pcformRepairOrdersSheetHeaders_() {
   pcformCreateOrRepairSheet_(PCFORM.ORDERS_SHEET, [
     "Order_ID", "Order_Date", "Lab_ID", "Lab_Name", "Product_ID", "Product_Name",
-    "Quantity", "Unit_Selling_Price", "Total_Amount", "Invoice_ID", "Invoice_Status",
+    "Quantity", "Unit_Selling_Price", "Total_Amount", "Order_Total", "Invoice_ID", "Invoice_Status",
     "Payment_Status", "Contact_Person", "Mobile_Number", "Email_Address",
     "Delivery_Address", "Notes", "Created_At"
   ]);
@@ -605,32 +620,44 @@ function pcformCreateOrRepairSheet_(sheetName, requiredHeaders) {
     sh = ss.insertSheet(sheetName);
   }
 
-  const minCols = Math.max(requiredHeaders.length, 20);
+  const existingLastCol = Math.max(sh.getLastColumn(), sh.getMaxColumns(), 1);
+  const minCols = Math.max(existingLastCol, requiredHeaders.length, 20);
   const minRows = Math.max(sh.getMaxRows(), 100);
 
   if (sh.getMaxColumns() < minCols) {
     sh.insertColumnsAfter(sh.getMaxColumns(), minCols - sh.getMaxColumns());
   }
 
-  // Important: clear validations/notes in a larger safe range
-  const fullRange = sh.getRange(1, 1, minRows, Math.max(sh.getMaxColumns(), minCols));
-  fullRange.clearDataValidations();
-  fullRange.clearNote();
-
-  // Unmerge anything that may block header writes
-  fullRange.breakApart();
-
-  // Rewrite header row fresh
-  sh.getRange(1, 1, 1, requiredHeaders.length).setValues([requiredHeaders]);
-
-  // Clear extra header cells to the right
-  const extraCols = Math.max(sh.getMaxColumns(), minCols) - requiredHeaders.length;
-  if (extraCols > 0) {
-    sh.getRange(1, requiredHeaders.length + 1, 1, extraCols).clearContent();
+  if (sh.getMaxRows() < minRows) {
+    sh.insertRowsAfter(sh.getMaxRows(), minRows - sh.getMaxRows());
   }
 
+  const fullRange = sh.getRange(1, 1, minRows, minCols);
+  fullRange.clearDataValidations();
+  fullRange.clearNote();
+  fullRange.breakApart();
+
+  const existingHeaders = sh.getRange(1, 1, 1, minCols).getValues()[0].map(h => String(h || "").trim());
+  const finalHeaders = existingHeaders.slice();
+
+  requiredHeaders.forEach(header => {
+    if (finalHeaders.indexOf(header) === -1) {
+      const blankIdx = finalHeaders.findIndex(h => !h);
+      if (blankIdx >= 0) {
+        finalHeaders[blankIdx] = header;
+      } else {
+        finalHeaders.push(header);
+      }
+    }
+  });
+
+  while (finalHeaders.length < minCols) {
+    finalHeaders.push(existingHeaders[finalHeaders.length] || "");
+  }
+
+  sh.getRange(1, 1, 1, finalHeaders.length).setValues([finalHeaders]);
   sh.setFrozenRows(1);
-  sh.autoResizeColumns(1, requiredHeaders.length);
+  sh.autoResizeColumns(1, Math.max(requiredHeaders.length, 1));
 }
 
 function pcformGetRequiredSheet_(sheetName) {
@@ -651,7 +678,9 @@ function pcformGetHeaderIndexMap_(sheet) {
 }
 
 function pcformGetHeaderRow_(sheet) {
-  return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => String(h || "").trim());
+  return sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1))
+    .getValues()[0]
+    .map(h => String(h || "").trim());
 }
 
 function pcformBuildRowFromHeaders_(headers, valuesObj) {
@@ -676,7 +705,7 @@ function pcformPadNumberLocal_(num, size) {
   while (s.length < size) s = "0" + s;
   return s;
 }
- 
+
 function pcformClearHeaderValidationsEverywhere_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   ss.getSheets().forEach(sh => {

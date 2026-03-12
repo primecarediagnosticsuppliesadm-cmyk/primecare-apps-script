@@ -3,25 +3,32 @@
  ************************************************************/
 
 function pcaiUpdateExecutiveCommandDashboard() {
-  const dash = pcaiResetSheetContents_(PCAI_SHEETS.EXEC_DASHBOARD);
+  const dash = pcaiResetSheetContents_(pcaiGetOrCreateSheetSafe_(PCAI_SHEETS.EXEC_DASHBOARD));
 
-  const status = pcaiSheetExists_(PCAI_SHEETS.SYSTEM_STATUS)
-    ? pcaiGetSheetRequired_(PCAI_SHEETS.SYSTEM_STATUS)
-    : null;
-  const ops = pcaiSheetExists_(PCAI_SHEETS.OPERATIONS_DASHBOARD)
-    ? pcaiGetSheetRequired_(PCAI_SHEETS.OPERATIONS_DASHBOARD)
-    : null;
-  const alerts = pcaiSheetExists_(PCAI_SHEETS.ALERTS)
-    ? pcaiGetSheetRequired_(PCAI_SHEETS.ALERTS)
-    : null;
-  const recs = pcaiSheetExists_(PCAI_SHEETS.RECOMMENDATIONS)
-    ? pcaiGetSheetRequired_(PCAI_SHEETS.RECOMMENDATIONS)
-    : null;
-  const risks = pcaiSheetExists_(PCAI_SHEETS.RISK)
-    ? pcaiGetSheetRequired_(PCAI_SHEETS.RISK)
+  const status = pcaiSheetExistsSafe_(PCAI_SHEETS.SYSTEM_STATUS)
+    ? pcaiGetSheetRequiredSafe_(PCAI_SHEETS.SYSTEM_STATUS)
     : null;
 
-  dash.getRange("A1").setValue("PrimeCare Executive Command Dashboard").setFontWeight("bold").setFontSize(18);
+  const ops = pcaiSheetExistsSafe_(PCAI_SHEETS.OPERATIONS_DASHBOARD)
+    ? pcaiGetSheetRequiredSafe_(PCAI_SHEETS.OPERATIONS_DASHBOARD)
+    : null;
+
+  const alerts = pcaiSheetExistsSafe_(PCAI_SHEETS.ALERTS)
+    ? pcaiGetSheetRequiredSafe_(PCAI_SHEETS.ALERTS)
+    : null;
+
+  const recs = pcaiSheetExistsSafe_(PCAI_SHEETS.RECOMMENDATIONS)
+    ? pcaiGetSheetRequiredSafe_(PCAI_SHEETS.RECOMMENDATIONS)
+    : null;
+
+  const risks = pcaiSheetExistsSafe_(PCAI_SHEETS.RISK)
+    ? pcaiGetSheetRequiredSafe_(PCAI_SHEETS.RISK)
+    : null;
+
+  dash.getRange("A1")
+    .setValue("PrimeCare Executive Command Dashboard")
+    .setFontWeight("bold")
+    .setFontSize(18);
 
   dash.getRange("A4").setValue("System Status").setFontWeight("bold");
   dash.getRange("A5:B10").setValues([
@@ -77,7 +84,9 @@ function pcaiWriteTopRowsToDashboard_(sourceSheet, targetSheet, targetRow, targe
   }
 
   targetSheet.getRange(targetRow, targetCol, output.length, output[0].length).setValues(output);
-  targetSheet.getRange(targetRow, targetCol, 1, output[0].length).setFontWeight("bold").setBackground("#d9eaf7");
+  targetSheet.getRange(targetRow, targetCol, 1, output[0].length)
+    .setFontWeight("bold")
+    .setBackground("#d9eaf7");
 }
 
 function pcaiWriteRiskBlock_(riskSheet, targetSheet, targetRow, targetCol, sourceRangeA1) {
@@ -89,26 +98,35 @@ function pcaiWriteRiskBlock_(riskSheet, targetSheet, targetRow, targetCol, sourc
   if (!cleaned.length) return;
 
   targetSheet.getRange(targetRow, targetCol, cleaned.length, cleaned[0].length).setValues(cleaned);
-  targetSheet.getRange(targetRow, targetCol, 1, cleaned[0].length).setFontWeight("bold").setBackground("#d9eaf7");
+  targetSheet.getRange(targetRow, targetCol, 1, cleaned[0].length)
+    .setFontWeight("bold")
+    .setBackground("#d9eaf7");
 }
 
 function pcaiExportDailySummary() {
-  const sh = pcaiResetSheetContents_(PCAI_SHEETS.DAILY_SUMMARY);
+  const sh = pcaiResetSheetContents_(pcaiGetOrCreateSheetSafe_(PCAI_SHEETS.DAILY_SUMMARY));
 
-  const status = pcaiSheetExists_(PCAI_SHEETS.SYSTEM_STATUS)
-    ? pcaiGetSheetRequired_(PCAI_SHEETS.SYSTEM_STATUS)
-    : null;
-  const ops = pcaiSheetExists_(PCAI_SHEETS.OPERATIONS_DASHBOARD)
-    ? pcaiGetSheetRequired_(PCAI_SHEETS.OPERATIONS_DASHBOARD)
-    : null;
-  const alerts = pcaiSheetExists_(PCAI_SHEETS.ALERTS)
-    ? pcaiGetSheetRequired_(PCAI_SHEETS.ALERTS)
-    : null;
-  const recs = pcaiSheetExists_(PCAI_SHEETS.RECOMMENDATIONS)
-    ? pcaiGetSheetRequired_(PCAI_SHEETS.RECOMMENDATIONS)
+  const status = pcaiSheetExistsSafe_(PCAI_SHEETS.SYSTEM_STATUS)
+    ? pcaiGetSheetRequiredSafe_(PCAI_SHEETS.SYSTEM_STATUS)
     : null;
 
-  sh.getRange("A1").setValue("PrimeCare Daily Summary").setFontWeight("bold").setFontSize(16);
+  const ops = pcaiSheetExistsSafe_(PCAI_SHEETS.OPERATIONS_DASHBOARD)
+    ? pcaiGetSheetRequiredSafe_(PCAI_SHEETS.OPERATIONS_DASHBOARD)
+    : null;
+
+  const alerts = pcaiSheetExistsSafe_(PCAI_SHEETS.ALERTS)
+    ? pcaiGetSheetRequiredSafe_(PCAI_SHEETS.ALERTS)
+    : null;
+
+  const recs = pcaiSheetExistsSafe_(PCAI_SHEETS.RECOMMENDATIONS)
+    ? pcaiGetSheetRequiredSafe_(PCAI_SHEETS.RECOMMENDATIONS)
+    : null;
+
+  sh.getRange("A1")
+    .setValue("PrimeCare Daily Summary")
+    .setFontWeight("bold")
+    .setFontSize(16);
+
   sh.getRange("A2").setValue("Generated: " + new Date());
 
   sh.getRange("A4").setValue("System Status").setFontWeight("bold");
@@ -137,7 +155,13 @@ function pcaiExportDailySummary() {
 
     sh.getRange("A13").setValue("Top 5 Recommendations").setFontWeight("bold");
     if (rows.length) {
-      sh.getRange(14, 1, 1, 5).setValues([["Category", "Priority", "Object_Name", "Recommendation", "Reason"]]);
+      sh.getRange(14, 1, 1, 5).setValues([[
+        "Category",
+        "Priority",
+        "Object_Name",
+        "Recommendation",
+        "Reason"
+      ]]);
       sh.getRange(15, 1, rows.length, 5).setValues(rows);
       sh.getRange(14, 1, 1, 5).setFontWeight("bold").setBackground("#d9eaf7");
     }
@@ -149,7 +173,14 @@ function pcaiExportDailySummary() {
 
     sh.getRange("H13").setValue("Top Alerts").setFontWeight("bold");
     if (rows.length) {
-      sh.getRange(14, 8, 1, 6).setValues([["Timestamp", "Alert_Type", "Object_Name", "Severity", "Status", "Notes"]]);
+      sh.getRange(14, 8, 1, 6).setValues([[
+        "Timestamp",
+        "Alert_Type",
+        "Object_Name",
+        "Severity",
+        "Status",
+        "Notes"
+      ]]);
       sh.getRange(15, 8, rows.length, 6).setValues(rows);
       sh.getRange(14, 8, 1, 6).setFontWeight("bold").setBackground("#d9eaf7");
     }
@@ -159,25 +190,33 @@ function pcaiExportDailySummary() {
 }
 
 function pcaiGenerateWeeklyBusinessReview() {
-  const sh = pcaiResetSheetContents_(PCAI_SHEETS.WEEKLY_REVIEW);
+  const sh = pcaiResetSheetContents_(pcaiGetOrCreateSheetSafe_(PCAI_SHEETS.WEEKLY_BUSINESS_REVIEW));
 
-  const status = pcaiSheetExists_(PCAI_SHEETS.SYSTEM_STATUS)
-    ? pcaiGetSheetRequired_(PCAI_SHEETS.SYSTEM_STATUS)
-    : null;
-  const ops = pcaiSheetExists_(PCAI_SHEETS.OPERATIONS_DASHBOARD)
-    ? pcaiGetSheetRequired_(PCAI_SHEETS.OPERATIONS_DASHBOARD)
-    : null;
-  const alerts = pcaiSheetExists_(PCAI_SHEETS.ALERTS)
-    ? pcaiGetSheetRequired_(PCAI_SHEETS.ALERTS)
-    : null;
-  const recs = pcaiSheetExists_(PCAI_SHEETS.RECOMMENDATIONS)
-    ? pcaiGetSheetRequired_(PCAI_SHEETS.RECOMMENDATIONS)
-    : null;
-  const risks = pcaiSheetExists_(PCAI_SHEETS.RISK)
-    ? pcaiGetSheetRequired_(PCAI_SHEETS.RISK)
+  const status = pcaiSheetExistsSafe_(PCAI_SHEETS.SYSTEM_STATUS)
+    ? pcaiGetSheetRequiredSafe_(PCAI_SHEETS.SYSTEM_STATUS)
     : null;
 
-  sh.getRange("A1").setValue("PrimeCare Weekly Business Review").setFontWeight("bold").setFontSize(18);
+  const ops = pcaiSheetExistsSafe_(PCAI_SHEETS.OPERATIONS_DASHBOARD)
+    ? pcaiGetSheetRequiredSafe_(PCAI_SHEETS.OPERATIONS_DASHBOARD)
+    : null;
+
+  const alerts = pcaiSheetExistsSafe_(PCAI_SHEETS.ALERTS)
+    ? pcaiGetSheetRequiredSafe_(PCAI_SHEETS.ALERTS)
+    : null;
+
+  const recs = pcaiSheetExistsSafe_(PCAI_SHEETS.RECOMMENDATIONS)
+    ? pcaiGetSheetRequiredSafe_(PCAI_SHEETS.RECOMMENDATIONS)
+    : null;
+
+  const risks = pcaiSheetExistsSafe_(PCAI_SHEETS.RISK)
+    ? pcaiGetSheetRequiredSafe_(PCAI_SHEETS.RISK)
+    : null;
+
+  sh.getRange("A1")
+    .setValue("PrimeCare Weekly Business Review")
+    .setFontWeight("bold")
+    .setFontSize(18);
+
   sh.getRange("A2").setValue("Generated: " + new Date());
 
   sh.getRange("A4").setValue("Executive Summary").setFontWeight("bold");
@@ -206,7 +245,14 @@ function pcaiGenerateWeeklyBusinessReview() {
 
     sh.getRange("A13").setValue("Top Alerts").setFontWeight("bold");
     if (rows.length) {
-      sh.getRange(14, 1, 1, 6).setValues([["Timestamp", "Alert_Type", "Object_Name", "Severity", "Status", "Notes"]]);
+      sh.getRange(14, 1, 1, 6).setValues([[
+        "Timestamp",
+        "Alert_Type",
+        "Object_Name",
+        "Severity",
+        "Status",
+        "Notes"
+      ]]);
       sh.getRange(15, 1, rows.length, 6).setValues(rows);
       sh.getRange(14, 1, 1, 6).setFontWeight("bold").setBackground("#d9eaf7");
     }
@@ -218,7 +264,13 @@ function pcaiGenerateWeeklyBusinessReview() {
 
     sh.getRange("H13").setValue("Top Recommendations").setFontWeight("bold");
     if (rows.length) {
-      sh.getRange(14, 8, 1, 5).setValues([["Category", "Priority", "Object_Name", "Recommendation", "Reason"]]);
+      sh.getRange(14, 8, 1, 5).setValues([[
+        "Category",
+        "Priority",
+        "Object_Name",
+        "Recommendation",
+        "Reason"
+      ]]);
       sh.getRange(15, 8, rows.length, 5).setValues(rows);
       sh.getRange(14, 8, 1, 5).setFontWeight("bold").setBackground("#d9eaf7");
     }
@@ -230,8 +282,8 @@ function pcaiGenerateWeeklyBusinessReview() {
 function pcaiGetTodaysOwnerBriefing() {
   const lines = ["PrimeCare Owner Briefing", ""];
 
-  if (pcaiSheetExists_(PCAI_SHEETS.SYSTEM_STATUS)) {
-    const sh = pcaiGetSheetRequired_(PCAI_SHEETS.SYSTEM_STATUS);
+  if (pcaiSheetExistsSafe_(PCAI_SHEETS.SYSTEM_STATUS)) {
+    const sh = pcaiGetSheetRequiredSafe_(PCAI_SHEETS.SYSTEM_STATUS);
     lines.push("System Health: " + sh.getRange("B3").getValue());
     lines.push("Critical Risks: " + sh.getRange("B4").getValue());
     lines.push("Data Quality Issues: " + sh.getRange("B5").getValue());
@@ -239,8 +291,8 @@ function pcaiGetTodaysOwnerBriefing() {
     lines.push("");
   }
 
-  if (pcaiSheetExists_(PCAI_SHEETS.OPERATIONS_DASHBOARD)) {
-    const sh = pcaiGetSheetRequired_(PCAI_SHEETS.OPERATIONS_DASHBOARD);
+  if (pcaiSheetExistsSafe_(PCAI_SHEETS.OPERATIONS_DASHBOARD)) {
+    const sh = pcaiGetSheetRequiredSafe_(PCAI_SHEETS.OPERATIONS_DASHBOARD);
     lines.push("Revenue: " + sh.getRange("B3").getValue());
     lines.push("Orders: " + sh.getRange("B4").getValue());
     lines.push("Unpaid Orders: " + sh.getRange("B5").getValue());
@@ -250,22 +302,28 @@ function pcaiGetTodaysOwnerBriefing() {
     lines.push("");
   }
 
-  if (pcaiSheetExists_(PCAI_SHEETS.ALERTS)) {
-    const vals = pcaiGetSheetRequired_(PCAI_SHEETS.ALERTS).getDataRange().getValues();
+  if (pcaiSheetExistsSafe_(PCAI_SHEETS.ALERTS)) {
+    const vals = pcaiGetSheetRequiredSafe_(PCAI_SHEETS.ALERTS).getDataRange().getValues();
     const rows = vals.slice(3).filter(r => String(r[0] || "").trim() !== "").slice(0, 3);
+
     if (rows.length) {
       lines.push("Top Alerts:");
-      rows.forEach((r, i) => lines.push((i + 1) + ". " + r[1] + " | " + r[2] + " | " + r[3] + " | " + r[5]));
+      rows.forEach((r, i) => {
+        lines.push((i + 1) + ". " + r[1] + " | " + r[2] + " | " + r[3] + " | " + r[5]);
+      });
       lines.push("");
     }
   }
 
-  if (pcaiSheetExists_(PCAI_SHEETS.RECOMMENDATIONS)) {
-    const vals = pcaiGetSheetRequired_(PCAI_SHEETS.RECOMMENDATIONS).getDataRange().getValues();
+  if (pcaiSheetExistsSafe_(PCAI_SHEETS.RECOMMENDATIONS)) {
+    const vals = pcaiGetSheetRequiredSafe_(PCAI_SHEETS.RECOMMENDATIONS).getDataRange().getValues();
     const rows = vals.slice(3).filter(r => String(r[0] || "").trim() !== "").slice(0, 3);
+
     if (rows.length) {
       lines.push("Top Recommended Actions:");
-      rows.forEach((r, i) => lines.push((i + 1) + ". " + r[3] + " | Reason: " + r[4]));
+      rows.forEach((r, i) => {
+        lines.push((i + 1) + ". " + r[3] + " | Reason: " + r[4]);
+      });
     }
   }
 
@@ -275,8 +333,8 @@ function pcaiGetTodaysOwnerBriefing() {
 function pcaiGetTop3IssuesRightNow() {
   const issues = [];
 
-  if (pcaiSheetExists_(PCAI_SHEETS.ALERTS)) {
-    const vals = pcaiGetSheetRequired_(PCAI_SHEETS.ALERTS).getDataRange().getValues();
+  if (pcaiSheetExistsSafe_(PCAI_SHEETS.ALERTS)) {
+    const vals = pcaiGetSheetRequiredSafe_(PCAI_SHEETS.ALERTS).getDataRange().getValues();
     vals.slice(3).filter(r => String(r[0] || "").trim() !== "").forEach(r => {
       issues.push({
         priority: pcaiAlertPriority_(String(r[3] || "").trim()),
@@ -285,8 +343,8 @@ function pcaiGetTop3IssuesRightNow() {
     });
   }
 
-  if (pcaiSheetExists_(PCAI_SHEETS.RECOMMENDATIONS)) {
-    const vals = pcaiGetSheetRequired_(PCAI_SHEETS.RECOMMENDATIONS).getDataRange().getValues();
+  if (pcaiSheetExistsSafe_(PCAI_SHEETS.RECOMMENDATIONS)) {
+    const vals = pcaiGetSheetRequiredSafe_(PCAI_SHEETS.RECOMMENDATIONS).getDataRange().getValues();
     vals.slice(3).filter(r => String(r[0] || "").trim() !== "").forEach(r => {
       issues.push({
         priority: pcaiAlertPriority_(String(r[1] || "").trim()),
@@ -308,14 +366,16 @@ function pcaiGetTop3IssuesRightNow() {
 }
 
 function pcaiGetWhatShouldIChaseBeforeNoon() {
-  if (!pcaiSheetExists_(PCAI_SHEETS.RECOMMENDATIONS)) return "Update AI Recommendations first.";
+  if (!pcaiSheetExistsSafe_(PCAI_SHEETS.RECOMMENDATIONS)) {
+    return "Update AI Recommendations first.";
+  }
 
-  const vals = pcaiGetSheetRequired_(PCAI_SHEETS.RECOMMENDATIONS).getDataRange().getValues();
+  const vals = pcaiGetSheetRequiredSafe_(PCAI_SHEETS.RECOMMENDATIONS).getDataRange().getValues();
   const rows = vals.slice(3).filter(r => String(r[0] || "").trim() !== "");
 
   if (!rows.length) return "Nothing urgent to chase before noon.";
 
-  const criticalOrHigh = rows.filter(r => ["CRITICAL", "HIGH"].includes(String(r[1] || "").trim()));
+  const criticalOrHigh = rows.filter(r => ["CRITICAL", "HIGH"].includes(String(r[1] || "").trim().toUpperCase()));
   const pick = criticalOrHigh.length ? criticalOrHigh.slice(0, 3) : rows.slice(0, 3);
 
   let out = "What you should chase before noon:\n\n";
@@ -329,8 +389,8 @@ function pcaiGetWhatShouldIChaseBeforeNoon() {
 function pcaiGetWhatIsBlockingScaleToday() {
   const blockers = [];
 
-  if (pcaiSheetExists_(PCAI_SHEETS.OPERATIONS_DASHBOARD)) {
-    const sh = pcaiGetSheetRequired_(PCAI_SHEETS.OPERATIONS_DASHBOARD);
+  if (pcaiSheetExistsSafe_(PCAI_SHEETS.OPERATIONS_DASHBOARD)) {
+    const sh = pcaiGetSheetRequiredSafe_(PCAI_SHEETS.OPERATIONS_DASHBOARD);
     const holds = Number(sh.getRange("B6").getValue() || 0);
     const reorder = Number(sh.getRange("B7").getValue() || 0);
     const unpaid = Number(sh.getRange("B5").getValue() || 0);
@@ -340,14 +400,14 @@ function pcaiGetWhatIsBlockingScaleToday() {
     if (unpaid > 0) blockers.push("Unpaid orders: " + unpaid);
   }
 
-  if (pcaiSheetExists_(PCAI_SHEETS.ALERTS)) {
-    const vals = pcaiGetSheetRequired_(PCAI_SHEETS.ALERTS).getDataRange().getValues();
-    const critical = vals.slice(3).filter(r => String(r[3] || "").trim() === "CRITICAL").length;
+  if (pcaiSheetExistsSafe_(PCAI_SHEETS.ALERTS)) {
+    const vals = pcaiGetSheetRequiredSafe_(PCAI_SHEETS.ALERTS).getDataRange().getValues();
+    const critical = vals.slice(3).filter(r => String(r[3] || "").trim().toUpperCase() === "CRITICAL").length;
     if (critical > 0) blockers.push("Critical alerts open: " + critical);
   }
 
-  if (pcaiSheetExists_(PCAI_SHEETS.RISK)) {
-    const sh = pcaiGetSheetRequired_(PCAI_SHEETS.RISK);
+  if (pcaiSheetExistsSafe_(PCAI_SHEETS.RISK)) {
+    const sh = pcaiGetSheetRequiredSafe_(PCAI_SHEETS.RISK);
     const creditLab = sh.getRange("A5").getValue();
     const stockSku = sh.getRange("H5").getValue();
 
@@ -355,7 +415,9 @@ function pcaiGetWhatIsBlockingScaleToday() {
     if (stockSku) blockers.push("Top stock risk SKU: " + stockSku);
   }
 
-  if (!blockers.length) return "What is blocking scale today:\n\nNo major blocker detected right now.";
+  if (!blockers.length) {
+    return "What is blocking scale today:\n\nNo major blocker detected right now.";
+  }
 
   let out = "What is blocking scale today:\n\n";
   blockers.forEach((b, i) => {
@@ -366,9 +428,11 @@ function pcaiGetWhatIsBlockingScaleToday() {
 }
 
 function pcaiGetTopLabsToFollowUpToday() {
-  if (!pcaiSheetExists_(PCAI_SHEETS.AR)) throw new Error("AR_Credit_Control sheet not found.");
+  if (!pcaiSheetExistsSafe_(PCAI_SHEETS.AR)) {
+    throw new Error("AR_Credit_Control sheet not found.");
+  }
 
-  const rows = pcaiGetRowsAsObjects_(pcaiGetSheetRequired_(PCAI_SHEETS.AR), "Lab_ID");
+  const rows = pcaiGetRowsAsObjects_(pcaiGetSheetRequiredSafe_(PCAI_SHEETS.AR), "Lab_ID");
 
   const ranked = rows.map(r => {
     const outstanding = pcaiNum_(r.Outstanding);
@@ -383,9 +447,11 @@ function pcaiGetTopLabsToFollowUpToday() {
       else if (util >= 0.8) score += 3;
       else if (util >= 0.6) score += 1;
     }
+
     if (overdue > 30) score += 5;
     else if (overdue > 15) score += 3;
     else if (overdue > 7) score += 1;
+
     if (hold === "HOLD") score += 3;
 
     return {
@@ -396,7 +462,9 @@ function pcaiGetTopLabsToFollowUpToday() {
       Credit_Hold: hold,
       Score: score
     };
-  }).filter(r => r.Score > 0).sort((a, b) => b.Score - a.Score).slice(0, 5);
+  }).filter(r => r.Score > 0)
+    .sort((a, b) => b.Score - a.Score)
+    .slice(0, 5);
 
   if (!ranked.length) return "No labs need urgent follow-up today.";
 
@@ -414,9 +482,11 @@ function pcaiGetTopLabsToFollowUpToday() {
 }
 
 function pcaiGetTopReorderProducts() {
-  if (!pcaiSheetExists_(PCAI_SHEETS.INVENTORY)) throw new Error("Inventory sheet not found.");
+  if (!pcaiSheetExistsSafe_(PCAI_SHEETS.INVENTORY)) {
+    throw new Error("Inventory sheet not found.");
+  }
 
-  const rows = pcaiGetRowsAsObjects_(pcaiGetSheetRequired_(PCAI_SHEETS.INVENTORY), "Product_ID");
+  const rows = pcaiGetRowsAsObjects_(pcaiGetSheetRequiredSafe_(PCAI_SHEETS.INVENTORY), "Product_ID");
 
   const ranked = rows.map(r => {
     const stock = pcaiNum_(r.Current_Stock);
@@ -440,7 +510,9 @@ function pcaiGetTopReorderProducts() {
       Reorder_Status: reorder,
       Score: score
     };
-  }).filter(r => r.Score > 0).sort((a, b) => b.Score - a.Score).slice(0, 5);
+  }).filter(r => r.Score > 0)
+    .sort((a, b) => b.Score - a.Score)
+    .slice(0, 5);
 
   if (!ranked.length) return "No products need urgent reorder right now.";
 
@@ -458,18 +530,20 @@ function pcaiGetTopReorderProducts() {
 }
 
 function pcaiGetBiggestRiskToday() {
-  if (pcaiSheetExists_(PCAI_SHEETS.ALERTS)) {
-    const vals = pcaiGetSheetRequired_(PCAI_SHEETS.ALERTS).getDataRange().getValues();
+  if (pcaiSheetExistsSafe_(PCAI_SHEETS.ALERTS)) {
+    const vals = pcaiGetSheetRequiredSafe_(PCAI_SHEETS.ALERTS).getDataRange().getValues();
     const rows = vals.slice(3).filter(r => String(r[0] || "").trim() !== "");
-    const critical = rows.find(r => String(r[3] || "").trim() === "CRITICAL");
+    const critical = rows.find(r => String(r[3] || "").trim().toUpperCase() === "CRITICAL");
+
     if (critical) {
       return "Biggest risk today: " + critical[1] + " on " + critical[2] + " — " + critical[5];
     }
   }
 
-  if (pcaiSheetExists_(PCAI_SHEETS.RECOMMENDATIONS)) {
-    const vals = pcaiGetSheetRequired_(PCAI_SHEETS.RECOMMENDATIONS).getDataRange().getValues();
+  if (pcaiSheetExistsSafe_(PCAI_SHEETS.RECOMMENDATIONS)) {
+    const vals = pcaiGetSheetRequiredSafe_(PCAI_SHEETS.RECOMMENDATIONS).getDataRange().getValues();
     const rows = vals.slice(3).filter(r => String(r[0] || "").trim() !== "");
+
     if (rows.length) {
       return "Biggest risk today: " + rows[0][0] + " | " + rows[0][2] + " — " + rows[0][3];
     }
@@ -479,9 +553,11 @@ function pcaiGetBiggestRiskToday() {
 }
 
 function pcaiGetWhatShouldIDoFirstToday() {
-  if (!pcaiSheetExists_(PCAI_SHEETS.RECOMMENDATIONS)) return "Update AI Recommendations first.";
+  if (!pcaiSheetExistsSafe_(PCAI_SHEETS.RECOMMENDATIONS)) {
+    return "Update AI Recommendations first.";
+  }
 
-  const vals = pcaiGetSheetRequired_(PCAI_SHEETS.RECOMMENDATIONS).getDataRange().getValues();
+  const vals = pcaiGetSheetRequiredSafe_(PCAI_SHEETS.RECOMMENDATIONS).getDataRange().getValues();
   const rows = vals.slice(3).filter(r => String(r[0] || "").trim() !== "");
 
   if (!rows.length) return "No action needed right now.";
@@ -496,15 +572,15 @@ function pcaiGetOwnerAssistantView() {
 function pcaiGetOperationsAssistantView() {
   let out = "Operations Assistant View\n\n";
 
-  if (pcaiSheetExists_(PCAI_SHEETS.OPERATIONS_DASHBOARD)) {
-    const sh = pcaiGetSheetRequired_(PCAI_SHEETS.OPERATIONS_DASHBOARD);
+  if (pcaiSheetExistsSafe_(PCAI_SHEETS.OPERATIONS_DASHBOARD)) {
+    const sh = pcaiGetSheetRequiredSafe_(PCAI_SHEETS.OPERATIONS_DASHBOARD);
     out += "Total Orders: " + sh.getRange("B4").getValue() + "\n";
     out += "Unpaid Orders: " + sh.getRange("B5").getValue() + "\n";
     out += "Items On Reorder: " + sh.getRange("B7").getValue() + "\n\n";
   }
 
-  if (pcaiSheetExists_(PCAI_SHEETS.ALERTS)) {
-    const vals = pcaiGetSheetRequired_(PCAI_SHEETS.ALERTS).getDataRange().getValues();
+  if (pcaiSheetExistsSafe_(PCAI_SHEETS.ALERTS)) {
+    const vals = pcaiGetSheetRequiredSafe_(PCAI_SHEETS.ALERTS).getDataRange().getValues();
     const rows = vals.slice(3).filter(r => String(r[0] || "").trim() !== "").slice(0, 5);
 
     if (rows.length) {
@@ -539,23 +615,26 @@ function pcaiRunDailyMonitoringLoop() {
   pcaiUpdateGrowthEngine();
   pcaiExportDailySummary();
 
-  pcaiLogAction_("DAILY_MONITORING_LOOP", "Daily monitoring completed");
+  pcaiLogActionSafe_("DAILY_MONITORING_LOOP", "Daily monitoring completed");
 }
 
 function pcaiGetTopHealthIssues_(maxItems) {
-  const sh = pcaiGetSS_().getSheetByName(PCAI_SHEETS.SYSTEM_HEALTH);
+  const sh = pcaiGetSSSafe_().getSheetByName(PCAI_SHEETS.SYSTEM_HEALTH);
   if (!sh || sh.getLastRow() < 4) return [];
 
   const values = sh.getDataRange().getValues();
   const headers = values[2].map(h => String(h || "").trim());
   const idx = {};
-  headers.forEach((h, i) => idx[h] = i);
+
+  headers.forEach((h, i) => {
+    idx[h] = i;
+  });
 
   const severityRank = {
-    "CRITICAL": 1,
-    "HIGH": 2,
-    "MEDIUM": 3,
-    "INFO": 4
+    CRITICAL: 1,
+    HIGH: 2,
+    MEDIUM: 3,
+    INFO: 4
   };
 
   return values.slice(3)
@@ -591,7 +670,9 @@ function pcaiWriteTop5IssuesCard_(dash, startRow, startCol) {
   }
 
   dash.getRange(startRow + 1, startCol, output.length, output[0].length).setValues(output);
-  dash.getRange(startRow + 1, startCol, 1, output[0].length).setFontWeight("bold").setBackground("#d9eaf7");
+  dash.getRange(startRow + 1, startCol, 1, output[0].length)
+    .setFontWeight("bold")
+    .setBackground("#d9eaf7");
 
   if (output.length > 1) {
     pcaiColorSeverityColumn_(dash, startRow + 2, startCol, output.length - 1);
@@ -673,7 +754,9 @@ function pcaiWriteTop5ActionsCard_(dash, startRow, startCol) {
   }
 
   dash.getRange(startRow + 1, startCol, output.length, output[0].length).setValues(output);
-  dash.getRange(startRow + 1, startCol, 1, output[0].length).setFontWeight("bold").setBackground("#d9eaf7");
+  dash.getRange(startRow + 1, startCol, 1, output[0].length)
+    .setFontWeight("bold")
+    .setBackground("#d9eaf7");
 
   if (output.length > 1) {
     pcaiColorSeverityColumn_(dash, startRow + 2, startCol, output.length - 1);
@@ -681,28 +764,30 @@ function pcaiWriteTop5ActionsCard_(dash, startRow, startCol) {
 }
 
 function pcaiWriteTopRecommendationsCard_(dash, startRow, startCol, maxItems) {
-  const sh = pcaiGetSS_().getSheetByName(PCAI_SHEETS.RECOMMENDATIONS);
+  const sh = pcaiGetSSSafe_().getSheetByName(PCAI_SHEETS.RECOMMENDATIONS);
   dash.getRange(startRow, startCol).setValue("Top Recommendations").setFontWeight("bold");
 
   const output = [["Priority", "Action", "Object", "Owner", "Due"]];
 
-  if (!sh || sh.getLastRow() < 2) {
+  if (!sh || sh.getLastRow() < 4) {
     output.push(["INFO", "No recommendations available", "-", "Owner", "Today"]);
   } else {
     const values = sh.getDataRange().getValues();
-    const rows = values.slice(1).filter(r => String(r[0] || "").trim() !== "");
+    const rows = values.slice(3).filter(r => String(r[0] || "").trim() !== "");
 
     if (!rows.length) {
       output.push(["INFO", "No recommendations available", "-", "Owner", "Today"]);
     } else {
       rows.slice(0, maxItems || 5).forEach(r => {
-        output.push([r[0], r[1], r[2], r[3], r[4]]);
+        output.push([r[1], r[3], r[2], "Owner", "Today"]);
       });
     }
   }
 
   dash.getRange(startRow + 1, startCol, output.length, output[0].length).setValues(output);
-  dash.getRange(startRow + 1, startCol, 1, output[0].length).setFontWeight("bold").setBackground("#d9eaf7");
+  dash.getRange(startRow + 1, startCol, 1, output[0].length)
+    .setFontWeight("bold")
+    .setBackground("#d9eaf7");
 
   if (output.length > 1) {
     pcaiColorSeverityColumn_(dash, startRow + 2, startCol, output.length - 1);
