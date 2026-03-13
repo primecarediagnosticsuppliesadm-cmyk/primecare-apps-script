@@ -330,12 +330,6 @@ function pcformWriteInvoiceRegister_(orderSummary) {
   const sh = pcformGetRequiredSheet_(PCFORM.INVOICE_REGISTER_SHEET);
   const headers = pcformGetHeaderRow_(sh);
 
-  const whatsappText =
-    "Dear " + orderSummary.labName + ",\n\n" +
-    "Your PrimeCare invoice " + orderSummary.invoiceId +
-    " for ₹" + orderSummary.orderTotal + " has been generated.\n\n" +
-    "Thank you,\nPrimeCare Diagnostics Supplies";
-
   const row = pcformBuildRowFromHeaders_(headers, {
     "Invoice_ID": orderSummary.invoiceId,
     "Invoice_Date": orderSummary.orderDate,
@@ -345,11 +339,10 @@ function pcformWriteInvoiceRegister_(orderSummary) {
     "Email_Address": orderSummary.emailAddress,
     "Mobile_Number": orderSummary.mobileNumber,
     "Invoice_Total": orderSummary.orderTotal,
-    "Invoice_PDF_File_ID": "",
-    "Invoice_PDF_Link": "",
+    "Invoice_HTML": "",
+    "WhatsApp_Link": "",
     "Email_Sent_To_Lab": "No",
     "Email_Sent_To_Owner": "No",
-    "WhatsApp_Message_Text": whatsappText,
     "ERP_Export_Status": "Pending",
     "Salesforce_Export_Status": "Pending",
     "Created_At": new Date()
@@ -382,7 +375,6 @@ function pcformWriteERPExportRows_(orderSummary, pricedLines) {
     "Line_Total": line.lineTotal,
     "Net_Line_Total": line.netLineTotal,
     "Payment_Status": orderSummary.paymentStatus,
-    "Invoice_PDF_Link": "",
     "Exported_At": new Date()
   }));
 
@@ -467,8 +459,8 @@ function pcformSetupPrimeCareMissingStructure() {
 
   pcformCreateOrRepairSheet_(PCFORM.INVOICE_REGISTER_SHEET, [
     "Invoice_ID", "Invoice_Date", "Order_ID", "Lab_ID", "Lab_Name", "Email_Address",
-    "Mobile_Number", "Invoice_Total", "Invoice_PDF_File_ID", "Invoice_PDF_Link",
-    "Email_Sent_To_Lab", "Email_Sent_To_Owner", "WhatsApp_Message_Text",
+    "Mobile_Number", "Invoice_Total", "Invoice_HTML", "WhatsApp_Link",
+    "Email_Sent_To_Lab", "Email_Sent_To_Owner",
     "ERP_Export_Status", "Salesforce_Export_Status", "Created_At"
   ]);
 
@@ -477,7 +469,7 @@ function pcformSetupPrimeCareMissingStructure() {
   pcformCreateOrRepairSheet_(PCFORM.ERP_EXPORT_SHEET, [
     "Invoice_ID", "Invoice_Date", "Order_ID", "Lab_ID", "Lab_Name", "Product_ID",
     "Product_Name", "Quantity", "Unit_Selling_Price", "Tax_Rate", "Tax_Amount",
-    "Line_Total", "Net_Line_Total", "Payment_Status", "Invoice_PDF_Link", "Exported_At"
+    "Line_Total", "Net_Line_Total", "Payment_Status", "Exported_At"
   ]);
 
   pcformCreateOrRepairSheet_(PCFORM.SF_EXPORT_SHEET, [
