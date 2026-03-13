@@ -4,19 +4,12 @@
  ************************************************************/
 
 const PCAI_SHEETS = Object.freeze({
-  /* ================================
-     LIVE DATA SHEETS IN CURRENT WORKBOOK
-     ================================ */
   ORDERS: "Orders",
   ORDER_LINES: "Order_Lines",
   INVENTORY: "Inventory",
   AR: "AR_Credit_Control",
   PRODUCT_MASTER: "Product_Master",
 
-  /* ================================
-     AI OUTPUT SHEETS
-     ================================ */
-  DASHBOARD: "Dashboard",
   SYSTEM_HEALTH: "AI_System_Health",
   ALERTS: "AI_Alerts",
   RECOMMENDATIONS: "AI_Recommendations",
@@ -25,22 +18,25 @@ const PCAI_SHEETS = Object.freeze({
   DAILY_SUMMARY: "AI_Daily_Summary",
   WEEKLY_BUSINESS_REVIEW: "AI_Weekly_Business_Review",
   FORECASTS: "AI_Forecasts",
-  REMEDIATION_REPORT: "AI_Remediation_Report",
+
   SYSTEM_STATUS: "AI_System_Status",
   OPERATIONS_DASHBOARD: "AI_Operations_Dashboard",
+  REMEDIATION_REPORT: "AI_Remediation_Report",
   ACTION_LOG: "AI_Action_Log",
-  GROWTH_ENGINE: "Growth_Engine",
+  GROWTH_ENGINE: "AI_Growth_Engine",
 
-  /* ================================
-     SANDBOX
-     ================================ */
+  COLLECTIONS_RISK: "AI_Collections_Risk",
+  REORDER_URGENCY: "AI_Reorder_Urgency",
+  TOP_LAB_RISK: "AI_Top_Lab_Risk",
+  STOCK_RISK: "AI_Stock_Risk",
+
   TEST_ORDERS: "TEST_Orders",
   TEST_INVENTORY: "TEST_Inventory",
   TEST_AR: "TEST_AR_Credit_Control",
   TEST_RESULTS: "AI_Test_Results",
   TEST_CASES: "AI_Test_Cases",
- TEST_DASHBOARD: "AI_Test_Dashboard",
-REGRESSION_SUMMARY: "AI_Regression_Summary",
+  TEST_DASHBOARD: "TEST_Dashboard_Checks",
+  REGRESSION_SUMMARY: "AI_Regression_Summary",
   SCENARIO_BENCHMARKS: "AI_Scenario_Benchmarks"
 });
 
