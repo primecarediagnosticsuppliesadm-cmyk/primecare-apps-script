@@ -33,25 +33,6 @@ function handleOrderFormSubmit(e) {
   lock.waitLock(30000);
 
   try {
-    if (!e || !e.range) {
-      throw new Error("Form submit event object missing range.");
-    }
-
-    const rawSheet = e.range.getSheet();
-    const rowNumber = e.range.getRow();
-
-    if (rawSheet.getName() !== PCFORM.RAW_SHEET) {
-      Logger.log("Skipping submit from non-raw sheet: " + rawSheet.getName());
-      return;
-    }
-
-    if (pcformIsAlreadyProcessed_(rawSheet, rowNumber)) {
-      Logger.log("Skipping already processed row: " + rowNumber);
-      return;
-    }
-
-    pcformMarkRawResponseProcessing_(rawSheet, rowNumber);
-
     const payload = pcformParseFormSubmission_(e);
     pcformValidateFormPayload_(payload);
 
@@ -349,6 +330,12 @@ function pcformWriteInvoiceRegister_(orderSummary) {
   const sh = pcformGetRequiredSheet_(PCFORM.INVOICE_REGISTER_SHEET);
   const headers = pcformGetHeaderRow_(sh);
 
+  const whatsappText =
+    "Dear " + orderSummary.labName + ",\n\n" +
+    "Your PrimeCare invoice " + orderSummary.invoiceId +
+    " for ₹" + orderSummary.orderTotal + " has been generated.\n\n" +
+    "Thank you,\nPrimeCare Diagnostics Supplies";
+
   const row = pcformBuildRowFromHeaders_(headers, {
     "Invoice_ID": orderSummary.invoiceId,
     "Invoice_Date": orderSummary.orderDate,
@@ -358,10 +345,11 @@ function pcformWriteInvoiceRegister_(orderSummary) {
     "Email_Address": orderSummary.emailAddress,
     "Mobile_Number": orderSummary.mobileNumber,
     "Invoice_Total": orderSummary.orderTotal,
-    "Invoice_HTML": "",
-    "WhatsApp_Link": "",
+    "Invoice_PDF_File_ID": "",
+    "Invoice_PDF_Link": "",
     "Email_Sent_To_Lab": "No",
     "Email_Sent_To_Owner": "No",
+    "WhatsApp_Message_Text": whatsappText,
     "ERP_Export_Status": "Pending",
     "Salesforce_Export_Status": "Pending",
     "Created_At": new Date()
@@ -394,6 +382,7 @@ function pcformWriteERPExportRows_(orderSummary, pricedLines) {
     "Line_Total": line.lineTotal,
     "Net_Line_Total": line.netLineTotal,
     "Payment_Status": orderSummary.paymentStatus,
+    "Invoice_PDF_Link": "",
     "Exported_At": new Date()
   }));
 
@@ -478,8 +467,8 @@ function pcformSetupPrimeCareMissingStructure() {
 
   pcformCreateOrRepairSheet_(PCFORM.INVOICE_REGISTER_SHEET, [
     "Invoice_ID", "Invoice_Date", "Order_ID", "Lab_ID", "Lab_Name", "Email_Address",
-    "Mobile_Number", "Invoice_Total", "Invoice_HTML", "WhatsApp_Link",
-    "Email_Sent_To_Lab", "Email_Sent_To_Owner",
+    "Mobile_Number", "Invoice_Total", "Invoice_PDF_File_ID", "Invoice_PDF_Link",
+    "Email_Sent_To_Lab", "Email_Sent_To_Owner", "WhatsApp_Message_Text",
     "ERP_Export_Status", "Salesforce_Export_Status", "Created_At"
   ]);
 
@@ -488,7 +477,7 @@ function pcformSetupPrimeCareMissingStructure() {
   pcformCreateOrRepairSheet_(PCFORM.ERP_EXPORT_SHEET, [
     "Invoice_ID", "Invoice_Date", "Order_ID", "Lab_ID", "Lab_Name", "Product_ID",
     "Product_Name", "Quantity", "Unit_Selling_Price", "Tax_Rate", "Tax_Amount",
-    "Line_Total", "Net_Line_Total", "Payment_Status", "Exported_At"
+    "Line_Total", "Net_Line_Total", "Payment_Status", "Invoice_PDF_Link", "Exported_At"
   ]);
 
   pcformCreateOrRepairSheet_(PCFORM.SF_EXPORT_SHEET, [
@@ -766,38 +755,4 @@ function runResetSettingsSheetCompletely() {
   ]);
 
   return "Settings sheet fully reset.";
-}
-function pcformIsAlreadyProcessed_(sheet, rowNumber) {
-  const map = pcformGetHeaderIndexMap_(sheet);
-
-  const status = map["Processing_Status"]
-    ? sheet.getRange(rowNumber, map["Processing_Status"]).getValue()
-    : "";
-
-  const orderId = map["Order_ID"]
-    ? sheet.getRange(rowNumber, map["Order_ID"]).getValue()
-    : "";
-
-  const invoiceId = map["Invoice_ID"]
-    ? sheet.getRange(rowNumber, map["Invoice_ID"]).getValue()
-    : "";
-
-  return String(status || "").trim() === "PROCESSED" ||
-         String(orderId || "").trim() !== "" ||
-         String(invoiceId || "").trim() !== "";
-}
-
-function pcformMarkRawResponseProcessing_(sheet, rowNumber) {
-  pcformEnsureRawResponseStatusColumns_(sheet);
-  const map = pcformGetHeaderIndexMap_(sheet);
-
-  if (map["Processing_Status"]) {
-    sheet.getRange(rowNumber, map["Processing_Status"]).setValue("PROCESSING");
-  }
-  if (map["Processing_Message"]) {
-    sheet.getRange(rowNumber, map["Processing_Message"]).setValue("In progress");
-  }
-  if (map["Processed_At"]) {
-    sheet.getRange(rowNumber, map["Processed_At"]).setValue(new Date());
-  }
 }
