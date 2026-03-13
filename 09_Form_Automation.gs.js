@@ -33,6 +33,25 @@ function handleOrderFormSubmit(e) {
   lock.waitLock(30000);
 
   try {
+    if (!e || !e.range) {
+      throw new Error("Form submit event object missing range.");
+    }
+
+    const rawSheet = e.range.getSheet();
+    const rowNumber = e.range.getRow();
+
+    if (rawSheet.getName() !== PCFORM.RAW_SHEET) {
+      Logger.log("Skipping submit from non-raw sheet: " + rawSheet.getName());
+      return;
+    }
+
+    if (pcformIsAlreadyProcessed_(rawSheet, rowNumber)) {
+      Logger.log("Skipping already processed row: " + rowNumber);
+      return;
+    }
+
+    pcformMarkRawResponseProcessing_(rawSheet, rowNumber);
+
     const payload = pcformParseFormSubmission_(e);
     pcformValidateFormPayload_(payload);
 
@@ -747,4 +766,38 @@ function runResetSettingsSheetCompletely() {
   ]);
 
   return "Settings sheet fully reset.";
+}
+function pcformIsAlreadyProcessed_(sheet, rowNumber) {
+  const map = pcformGetHeaderIndexMap_(sheet);
+
+  const status = map["Processing_Status"]
+    ? sheet.getRange(rowNumber, map["Processing_Status"]).getValue()
+    : "";
+
+  const orderId = map["Order_ID"]
+    ? sheet.getRange(rowNumber, map["Order_ID"]).getValue()
+    : "";
+
+  const invoiceId = map["Invoice_ID"]
+    ? sheet.getRange(rowNumber, map["Invoice_ID"]).getValue()
+    : "";
+
+  return String(status || "").trim() === "PROCESSED" ||
+         String(orderId || "").trim() !== "" ||
+         String(invoiceId || "").trim() !== "";
+}
+
+function pcformMarkRawResponseProcessing_(sheet, rowNumber) {
+  pcformEnsureRawResponseStatusColumns_(sheet);
+  const map = pcformGetHeaderIndexMap_(sheet);
+
+  if (map["Processing_Status"]) {
+    sheet.getRange(rowNumber, map["Processing_Status"]).setValue("PROCESSING");
+  }
+  if (map["Processing_Message"]) {
+    sheet.getRange(rowNumber, map["Processing_Message"]).setValue("In progress");
+  }
+  if (map["Processed_At"]) {
+    sheet.getRange(rowNumber, map["Processed_At"]).setValue(new Date());
+  }
 }
