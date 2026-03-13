@@ -26,9 +26,9 @@ const PCAI_SHEETS = Object.freeze({
   GROWTH_ENGINE: "AI_Growth_Engine",
 
   COLLECTIONS_RISK: "AI_Collections_Risk",
-  REORDER_URGENCY: "AI_Reorder_Urgency",
-  TOP_LAB_RISK: "AI_Top_Lab_Risk",
-  STOCK_RISK: "AI_Stock_Risk",
+REORDER_URGENCY: "AI_Reorder_Urgency",
+TOP_LAB_RISK: "AI_Top_Lab_Risk",
+STOCK_RISK: "AI_Stock_Risk",
 
   TEST_ORDERS: "TEST_Orders",
   TEST_INVENTORY: "TEST_Inventory",
