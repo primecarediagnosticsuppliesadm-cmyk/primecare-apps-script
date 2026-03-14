@@ -2,8 +2,9 @@
  * 11_AI_Summary_Builders.gs
  ************************************************************/
 
-function pcaiBuildCollectionsRiskSummary_() {
-  const sh = pcaiResetSheetContents_(pcaiGetOrCreateSheetSafe_(PCAI_SHEETS.COLLECTIONS_RISK));
+function pcaiBuildCollectionsRiskSummary() {
+ const sh = pcaiGetOrCreateSheet_(PCAI_SHEETS.COLLECTIONS_RISK);
+pcaiResetSheetContents_(sh);
 
   sh.getRange("A1")
     .setValue("AI Collections Risk")
@@ -19,12 +20,12 @@ function pcaiBuildCollectionsRiskSummary_() {
     "Risk_Score"
   ]]);
 
-  if (!pcaiSheetExistsSafe_(PCAI_SHEETS.AR)) {
+  if (!pcaiSheetExists_(PCAI_SHEETS.AR)) {
     sh.getRange("A4").setValue("AR_Credit_Control sheet not found");
     return;
   }
 
-  const rows = pcaiGetRowsAsObjects_(pcaiGetSheetRequiredSafe_(PCAI_SHEETS.AR), "Lab_ID");
+  const rows = pcaiGetRowsAsObjects_(pcaiGetSheetRequired_(PCAI_SHEETS.AR), "Lab_ID");
   const output = [];
 
   rows.forEach(r => {
