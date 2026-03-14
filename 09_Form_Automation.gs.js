@@ -33,6 +33,48 @@ function handleOrderFormSubmit(e) {
   lock.waitLock(30000);
 
   try {
+    if (!e || !e.range) {
+      throw new Error("Form submit event object missing range.");
+    }
+
+    const rawSheet = e.range.getSheet();
+    const rowNumber = e.range.getRow();
+
+    if (rawSheet.getName() !== PCFORM.RAW_SHEET) {
+      Logger.log("Skipping submit from non-raw sheet: " + rawSheet.getName());
+      return;
+    }
+
+    pcformEnsureRawResponseStatusColumns_(rawSheet);
+    const map = pcformGetHeaderIndexMap_(rawSheet);
+
+    const existingStatus = map["Processing_Status"]
+      ? String(rawSheet.getRange(rowNumber, map["Processing_Status"]).getValue() || "").trim()
+      : "";
+
+    const existingOrderId = map["Order_ID"]
+      ? String(rawSheet.getRange(rowNumber, map["Order_ID"]).getValue() || "").trim()
+      : "";
+
+    const existingInvoiceId = map["Invoice_ID"]
+      ? String(rawSheet.getRange(rowNumber, map["Invoice_ID"]).getValue() || "").trim()
+      : "";
+
+    if (existingStatus === "PROCESSED" || existingOrderId || existingInvoiceId) {
+      Logger.log("Skipping already processed row: " + rowNumber);
+      return;
+    }
+
+    if (map["Processing_Status"]) {
+      rawSheet.getRange(rowNumber, map["Processing_Status"]).setValue("PROCESSING");
+    }
+    if (map["Processing_Message"]) {
+      rawSheet.getRange(rowNumber, map["Processing_Message"]).setValue("In progress");
+    }
+    if (map["Processed_At"]) {
+      rawSheet.getRange(rowNumber, map["Processed_At"]).setValue(new Date());
+    }
+
     const payload = pcformParseFormSubmission_(e);
     pcformValidateFormPayload_(payload);
 
@@ -73,7 +115,7 @@ function pcformParseFormSubmission_(e) {
     rowObj[h] = values[i];
   });
 
-  const items = [];
+  let items = [];
 
   for (let i = 1; i <= 5; i++) {
     const productName = pcformGetFirstNonBlank_(rowObj, ["Product_" + i]);
@@ -99,10 +141,41 @@ function pcformParseFormSubmission_(e) {
     }
   }
 
+  if (!items.length) {
+    const itemsJsonRaw = pcformGetFirstNonBlank_(rowObj, ["Items_JSON", "Items Json", "Items JSON"]);
+    if (String(itemsJsonRaw || "").trim() !== "") {
+      try {
+        const parsed = JSON.parse(String(itemsJsonRaw).trim());
+        if (Array.isArray(parsed)) {
+          items = parsed
+            .map(item => ({
+              productName: String(
+                item.productName ||
+                item.Product_Name ||
+                item.product ||
+                item.name ||
+                ""
+              ).trim(),
+              quantity: Number(
+                item.quantity ||
+                item.Quantity ||
+                item.qty ||
+                item.Qty ||
+                0
+              )
+            }))
+            .filter(item => item.productName && item.quantity > 0);
+        }
+      } catch (err) {
+        throw new Error("Invalid Items_JSON format: " + err.message);
+      }
+    }
+  }
+
   return {
     sourceSheetName: sheet.getName(),
     sourceRowNumber: rowNumber,
-    responseTimestamp: pcformGetFirstNonBlank_(rowObj, ["Timestamp", "Response_Timestamp", "Response Timestamp"]) || new Date(),
+    responseTimestamp: pcformGetFirstNonBlank_(rowObj, ["Timestamp", "Response_Timestamp", "Response Timestamp", "Created_At"]) || new Date(),
     labId: String(pcformGetFirstNonBlank_(rowObj, ["Lab_ID", "Lab ID"]) || "").trim(),
     labName: String(pcformGetFirstNonBlank_(rowObj, ["Lab_Name", "Lab Name", "Lab_Name_Normalized"]) || "").trim(),
     contactPerson: String(pcformGetFirstNonBlank_(rowObj, ["Contact_Person", "Contact Name"]) || "").trim(),
