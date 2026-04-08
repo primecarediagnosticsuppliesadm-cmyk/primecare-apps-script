@@ -753,3 +753,16 @@ function pcaiMenuRunMonthEndLoad() {
 function pcaiMenuRunCombinedStressScenario() {
   return pcaiRunSandboxScenarioByName("combined stress scenario");
 }
+function pcformTestLatestRawRow() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PCFORM.RAW_SHEET);
+  if (!sh) throw new Error("Raw sheet not found: " + PCFORM.RAW_SHEET);
+
+  const row = sh.getLastRow();
+  if (row < 2) throw new Error("No data rows found in raw sheet.");
+
+  const fakeEvent = {
+    range: sh.getRange(row, 1)
+  };
+
+  handleOrderFormSubmit(fakeEvent);
+}

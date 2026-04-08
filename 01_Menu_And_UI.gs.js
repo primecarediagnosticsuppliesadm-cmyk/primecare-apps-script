@@ -11,8 +11,12 @@ function pcBuildPrimeCareMenu_() {
   const menu = ui.createMenu("PrimeCare");
 
   menu
+  .addItem("Stock Dashboard", "openStockDashboard")
+.addItem("Agent Visit Updates", "openAgentUpdatesPage")
     .addItem("Open Order Form", "openOrderForm")
     .addItem("Open AI Sidebar", "pcaiOpenSidebar")
+    .addItem("Open Stock Dashboard", "openStockDashboard")
+.addItem("Open Agent Updates", "openAgentUpdatesPage")
     .addSeparator();
 
   menu
@@ -88,6 +92,9 @@ function pcBuildPrimeCareMenu_() {
     .addItem("Hard Reset AI Outputs", "pcHardResetAIWorkbookOutputs")
     .addItem("Hard Reset Sandbox Outputs", "pcHardResetSandboxWorkbookOutputs")
     .addItem("Apply Operational Validations", "pcApplyOperationalValidations")
+  .addItem("Mark Unprocessed Rows NEW", "runMarkUnprocessedRowsNew")
+.addItem("Requeue Error Rows", "runRequeueErrorRows")
+.addItem("Process Form Queue", "runProcessFormQueue")
     .addToUi();
 }
 

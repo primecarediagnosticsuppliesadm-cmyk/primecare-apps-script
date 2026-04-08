@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background: #f8fafc;
+      color: #0f172a;
+    }
+    .topnav {
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      background: #2563eb;
+      padding: 12px;
+    }
+    .topnav a {
+      color: white;
+      text-decoration: none;
+      font-weight: bold;
+    }
+    .wrap {
+      padding: 16px;
+    }
+    .card {
+      background: white;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .msg {
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      background: #e0f2fe;
+    }
+    .err {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+  </style>
+</head>
+<body>
+  <div class="topnav">
+    <a href="?page=agent">Agent Update</a>
+    <a href="?page=stock">Stock Dashboard</a>
+  </div>
+
+  <div class="wrap">
+    <h2>PrimeCare Stock Dashboard</h2>
+    <div id="message" class="msg">Loading stock data...</div>
+    <div id="content"></div>
+  </div>
+
+  <script>
+    function showMessage(text, isError) {
+      var el = document.getElementById('message');
+      el.innerHTML = text;
+      el.className = isError ? 'msg err' : 'msg';
+    }
+
+    function renderData(data) {
+      showMessage('Stock data loaded successfully.', false);
+
+      var html = '';
+      html += '<div class="card"><b>Total SKUs:</b> ' + ((data && data.stats && data.stats.totalSkus) || 0) + '</div>';
+      html += '<div class="card"><b>Critical Items:</b> ' + ((data && data.stats && data.stats.criticalItems) || 0) + '</div>';
+      html += '<div class="card"><b>Reorder Items:</b> ' + ((data && data.stats && data.stats.reorderItems) || 0) + '</div>';
+
+      var items = (data && data.inventory) || [];
+      if (items.length === 0) {
+        html += '<div class="card">No inventory rows returned.</div>';
+      } else {
+        for (var i = 0; i < Math.min(items.length, 20); i++) {
+          var item = items[i];
+          html += '<div class="card">';
+          html += '<b>' + (item.productName || '-') + '</b><br>';
+          html += 'Product ID: ' + (item.productId || '-') + '<br>';
+          html += 'Category: ' + (item.category || '-') + '<br>';
+          html += 'Current Stock: ' + (item.currentStock || 0) + '<br>';
+          html += 'Min Stock: ' + (item.minStock || 0) + '<br>';
+          html += 'Reorder Qty: ' + (item.reorderQty || 0) + '<br>';
+          html += 'Stock Health: ' + (item.stockHealth || '-') + '<br>';
+          html += '</div>';
+        }
+      }
+
+      document.getElementById('content').innerHTML = html;
+    }
+
+    function loadData() {
+      google.script.run
+        .withSuccessHandler(function(data) {
+          renderData(data);
+        })
+        .withFailureHandler(function(err) {
+          showMessage('Failed to load stock data: ' + (err && err.message ? err.message : JSON.stringify(err)), true);
+        })
+        .pcwebGetStockDashboardData();
+    }
+
+    loadData();
+  </script>
+</body>
+</html>

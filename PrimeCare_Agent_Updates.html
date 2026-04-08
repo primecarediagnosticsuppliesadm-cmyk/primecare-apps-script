@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root{
+      --bg:#f8fafc;
+      --card:#ffffff;
+      --text:#0f172a;
+      --muted:#64748b;
+      --border:#e2e8f0;
+      --accent:#2563eb;
+      --good:#16a34a;
+      --warn:#d97706;
+      --bad:#dc2626;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:Arial,sans-serif;
+      background:var(--bg);
+      color:var(--text);
+    }
+    .wrap{
+      padding:14px;
+      max-width:100%;
+    }
+    .title{
+      font-size:22px;
+      font-weight:700;
+      margin-bottom:6px;
+    }
+    .subtitle{
+      color:var(--muted);
+      font-size:13px;
+      margin-bottom:16px;
+    }
+    .card{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:16px;
+      padding:14px;
+      box-shadow:0 1px 4px rgba(0,0,0,.04);
+    }
+    .section-title{
+      font-size:16px;
+      font-weight:700;
+      margin-bottom:10px;
+    }
+    .field{
+      margin-bottom:12px;
+    }
+    .label{
+      font-size:12px;
+      color:var(--muted);
+      margin-bottom:6px;
+      display:block;
+    }
+    input, select, textarea, button{
+      width:100%;
+      font-size:14px;
+      border-radius:12px;
+      border:1px solid var(--border);
+      padding:12px;
+      font-family:Arial,sans-serif;
+    }
+    textarea{
+      min-height:88px;
+      resize:vertical;
+    }
+    button{
+      background:var(--accent);
+      color:#fff;
+      border:none;
+      font-weight:700;
+      cursor:pointer;
+      margin-top:8px;
+    }
+    button:disabled{
+      opacity:.6;
+      cursor:not-allowed;
+    }
+    .status{
+      margin-top:12px;
+      padding:12px;
+      border-radius:12px;
+      font-size:13px;
+      display:none;
+    }
+    .ok{
+      background:#dcfce7;
+      color:#166534;
+      display:block;
+    }
+    .err{
+      background:#fee2e2;
+      color:#991b1b;
+      display:block;
+    }
+    .row{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:10px;
+    }
+    @media (max-width:640px){
+      .row{grid-template-columns:1fr}
+    }
+        .topnav{
+      display:flex;
+      justify-content:space-around;
+      align-items:center;
+      background:var(--accent);
+      padding:12px;
+      position:sticky;
+      top:0;
+      z-index:1000;
+    }
+    .topnav a{
+      color:#fff;
+      text-decoration:none;
+      font-weight:700;
+      font-size:14px;
+    }
+  </style>
+</head>
+<body>
+  <body>
+  <div class="topnav">
+    <a href="?page=agent">Agent Update</a>
+    <a href="?page=stock">Stock Dashboard</a>
+  </div>
+
+   
+  <div class="wrap">
+    <div class="title">PrimeCare Agent Updates</div>
+    <div class="subtitle">Log lab visits, demos, sales, stock needs, and next actions</div>
+
+    <div class="card">
+      <div class="section-title">Field Visit Entry</div>
+
+      <div class="row">
+        <div class="field">
+          <label class="label">Visit Date</label>
+          <input id="visitDate" type="date">
+        </div>
+        <div class="field">
+          <label class="label">Agent Name</label>
+          <input id="agentName" type="text" placeholder="Enter agent name">
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label class="label">Lab ID</label>
+          <input id="labId" type="text" placeholder="Enter lab ID">
+        </div>
+        <div class="field">
+          <label class="label">Lab Name</label>
+          <input id="labName" type="text" placeholder="Enter lab name">
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label class="label">Area</label>
+          <input id="area" type="text" placeholder="Enter area / locality">
+        </div>
+        <div class="field">
+          <label class="label">Visit Type</label>
+          <select id="visitType">
+            <option>New Lead</option>
+            <option>Follow-up</option>
+            <option>Closing</option>
+            <option>Collection</option>
+            <option>Support Visit</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label class="label">Samples Given</label>
+          <input id="samplesGiven" type="number" min="0" placeholder="0">
+        </div>
+        <div class="field">
+          <label class="label">Demo Given</label>
+          <select id="demoGiven">
+            <option>Yes</option>
+            <option selected>No</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label class="label">Lab Response</label>
+          <select id="labResponse">
+            <option>Interested</option>
+            <option selected>Warm</option>
+            <option>Not Interested</option>
+            <option>Converted</option>
+            <option>Need Follow-up</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="label">Sold Value</label>
+          <input id="soldValue" type="number" min="0" placeholder="0">
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label class="label">Stock Available</label>
+          <select id="stockAvailable">
+            <option selected>Yes</option>
+            <option>No</option>
+            <option>Partial</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="label">Needs New Stock</label>
+          <select id="needsNewStock">
+            <option>Yes</option>
+            <option selected>No</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="label">Next Action</label>
+        <input id="nextAction" type="text" placeholder="Follow-up, sample drop, quote, collection, etc.">
+      </div>
+
+      <div class="field">
+        <label class="label">Notes</label>
+        <textarea id="notes" placeholder="Any extra notes about the lab visit..."></textarea>
+      </div>
+
+      <button id="saveBtn" onclick="saveVisit()">Save Agent Visit</button>
+
+      <div id="statusBox" class="status"></div>
+    </div>
+  </div>
+
+  <script>
+    function setToday() {
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      document.getElementById('visitDate').value = `${yyyy}-${mm}-${dd}`;
+    }
+
+    function showStatus(message, ok) {
+      const box = document.getElementById('statusBox');
+      box.className = ok ? 'status ok' : 'status err';
+      box.textContent = message;
+    }
+
+    function getFormData() {
+      return {
+        visitDate: document.getElementById('visitDate').value,
+        agentName: document.getElementById('agentName').value.trim(),
+        labId: document.getElementById('labId').value.trim(),
+        labName: document.getElementById('labName').value.trim(),
+        area: document.getElementById('area').value.trim(),
+        visitType: document.getElementById('visitType').value,
+        samplesGiven: document.getElementById('samplesGiven').value || 0,
+        demoGiven: document.getElementById('demoGiven').value,
+        labResponse: document.getElementById('labResponse').value,
+        soldValue: document.getElementById('soldValue').value || 0,
+        stockAvailable: document.getElementById('stockAvailable').value,
+        needsNewStock: document.getElementById('needsNewStock').value,
+        nextAction: document.getElementById('nextAction').value.trim(),
+        notes: document.getElementById('notes').value.trim()
+      };
+    }
+
+    function validateForm(data) {
+      if (!data.visitDate) return 'Visit date is required.';
+      if (!data.agentName) return 'Agent name is required.';
+      if (!data.labName) return 'Lab name is required.';
+      if (!data.area) return 'Area is required.';
+      return '';
+    }
+
+    function resetFormKeepAgent() {
+      const agentName = document.getElementById('agentName').value;
+      setToday();
+      document.getElementById('labId').value = '';
+      document.getElementById('labName').value = '';
+      document.getElementById('area').value = '';
+      document.getElementById('visitType').value = 'New Lead';
+      document.getElementById('samplesGiven').value = '';
+      document.getElementById('demoGiven').value = 'No';
+      document.getElementById('labResponse').value = 'Warm';
+      document.getElementById('soldValue').value = '';
+      document.getElementById('stockAvailable').value = 'Yes';
+      document.getElementById('needsNewStock').value = 'No';
+      document.getElementById('nextAction').value = '';
+      document.getElementById('notes').value = '';
+      document.getElementById('agentName').value = agentName;
+    }
+
+    function saveVisit() {
+      const btn = document.getElementById('saveBtn');
+      const data = getFormData();
+      const error = validateForm(data);
+
+      if (error) {
+        showStatus(error, false);
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+
+      google.script.run
+        .withSuccessHandler((msg) => {
+          showStatus(msg || 'Saved successfully.', true);
+          resetFormKeepAgent();
+          btn.disabled = false;
+          btn.textContent = 'Save Agent Visit';
+        })
+        .withFailureHandler((err) => {
+          showStatus('Failed to save: ' + (err && err.message ? err.message : err), false);
+          btn.disabled = false;
+          btn.textContent = 'Save Agent Visit';
+        })
+        .pcwebSaveAgentVisit(data);
+    }
+
+    setToday();
+  </script>
+   
+</body>
+</html>

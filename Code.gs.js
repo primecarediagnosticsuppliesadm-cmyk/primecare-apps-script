@@ -33,7 +33,7 @@ function openOrderForm() {
 /* =========================================================
  * WEB APP
  * =======================================================*/
-function doGet(e) {
+/*function doGet(e) {
   const page = (e && e.parameter && e.parameter.page) ? e.parameter.page : "form";
 
   if (page === "history") {
@@ -45,7 +45,7 @@ function doGet(e) {
   return HtmlService.createHtmlOutputFromFile("OrderForm")
     .setTitle("PrimeCare Diagnostics Supplies - Lab Ordering Portal")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-}
+}*/
 
 /* =========================================================
  * PUBLIC APP FUNCTIONS FOR HTML
