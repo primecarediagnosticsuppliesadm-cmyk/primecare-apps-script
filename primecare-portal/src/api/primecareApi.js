@@ -1,7 +1,7 @@
  const API_BASE =
   import.meta.env.VITE_PRIMECARE_PROXY_URL ||
   "/api/primecare"; 
-  //VITE_PRIMECARE_PROXY_URL=https://script.google.com/macros/s/AKfycbzBV1N2Ae3PZttnMcJ4YdUiljYf3cHPMrQo129kTDv0I57gNQwcHduCCXx58qJ_OKf43w/exec
+  //VITE_PRIMECARE_PROXY_URL=https://script.google.com/macros/s/npx @google/clasp create-version "add GET currentUser and pingDebug"/exec
 
 /************************************************************
  * Core request helpers

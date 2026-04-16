@@ -85,7 +85,12 @@ export default function PrimeCareWebPortal({
   if (role === ROLES.ADMIN) {
     switch (activePage) {
       case "dashboard":
-        return <AdminDashboard currentUser={currentUser} />;
+  return (
+    <AdminDashboard
+      currentUser={currentUser}
+      setActivePage={setActivePage}
+    />
+  );
 
       case "visits":
         return (
