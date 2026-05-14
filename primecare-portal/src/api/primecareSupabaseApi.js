@@ -561,22 +561,24 @@ async function fetchLabsNameMap() {
 }
 
 /**
- * Read-only order list: `select *` from `orders` (no status/tenant/search filters here).
+ * Read-only order list: bare `from("orders").select("*")` (no filters, limits, or ranges).
  * Never throws.
  */
 export async function getOrdersRead(_params = {}) {
   void _params;
+  console.log("SUPABASE URL:", import.meta.env.VITE_SUPABASE_URL);
+
   if (!supabase) {
     return { success: true, data: { orders: [] } };
   }
 
   try {
-    const { data, error } = await supabase.from("orders").select("*").limit(2000);
+    const { data, error } = await supabase.from("orders").select("*");
 
     console.log("SUPABASE ORDERS RAW:", data);
+    console.log("SUPABASE ORDERS ERROR:", error);
 
     if (error) {
-      console.warn("[getOrdersRead] orders:", error.message, error);
       return { success: true, data: { orders: [] } };
     }
 
