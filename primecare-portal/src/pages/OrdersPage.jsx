@@ -13,7 +13,8 @@ export default function OrdersPage() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [details, setDetails] = useState(null);
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("");
+  /** Sentinel for "All Statuses" — not sent to Supabase while list read is unfiltered. */
+  const [status, setStatus] = useState("ALL");
   const [loading, setLoading] = useState(true);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
@@ -23,16 +24,16 @@ export default function OrdersPage() {
 
   useEffect(() => {
     loadOrders();
-  }, [status]);
+  }, []);
 
   async function loadOrders() {
     try {
       setLoading(true);
       setError("");
-      const res = await getOrdersRead({ status });
+      const res = await getOrdersRead();
       const result = res?.data || res || {};
       const rows = Array.isArray(result?.orders) ? result.orders : [];
-      console.log("SUPABASE ORDERS:", rows);
+      console.log("SUPABASE ORDERS MAPPED:", rows);
       setOrders(rows);
     } catch (err) {
       console.warn("OrdersPage loadOrders:", err);
@@ -100,11 +101,12 @@ export default function OrdersPage() {
   }
 
   const filteredOrders = useMemo(() => {
-    return orders.filter((o) =>
-      `${o.orderId} ${o.labName} ${o.labId}`
-        .toLowerCase()
-        .includes(search.toLowerCase())
-    );
+    const q = search.trim().toLowerCase();
+    if (!q) return orders;
+    return orders.filter((o) => {
+      const hay = `${o.orderId ?? ""} ${o.labName ?? ""} ${o.labId ?? ""} ${o.orderStatus ?? ""}`.toLowerCase();
+      return hay.includes(q);
+    });
   }, [orders, search]);
 
   return (
@@ -147,7 +149,7 @@ export default function OrdersPage() {
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
               >
-                <option value="">All Statuses</option>
+                <option value="ALL">All Statuses</option>
                 <option value="Placed">Placed</option>
                 <option value="Processing">Processing</option>
                 <option value="Fulfilled">Fulfilled</option>
@@ -164,9 +166,9 @@ export default function OrdersPage() {
               <div className="text-sm text-slate-500">No orders found.</div>
             ) : (
               <div className="space-y-3">
-                {filteredOrders.map((order) => (
+                {filteredOrders.map((order, idx) => (
                   <div
-                    key={order.orderId}
+                    key={`${order.orderId}-${idx}`}
                     className={`rounded-2xl border p-4 shadow-sm ${
                       selectedOrder === order.orderId ? "ring-2 ring-slate-200" : ""
                     }`}
