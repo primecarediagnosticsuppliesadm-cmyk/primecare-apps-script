@@ -233,6 +233,8 @@ export function mapReorderCandidateRow(row) {
     monthlyDemand,
     daysLeft,
     urgency: normalizeUrgencyLabel(urgencyRaw),
+    minStock: num(row.min_stock ?? row.minStock ?? row.Min_Stock),
+    reorderQty: num(row.reorder_qty ?? row.reorderQty ?? row.Reorder_Qty),
     suggestedOrderQty: num(
       row.suggested_order_qty ??
         row.suggestedOrderQty ??

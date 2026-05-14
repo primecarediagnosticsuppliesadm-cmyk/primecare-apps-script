@@ -1,10 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  getPurchaseDashboard,
+  getPurchaseOrders,
+  getAutoPurchaseTriggers,
+  getSmartReorder,
   createPurchaseOrder,
   receivePurchaseOrder,
   bulkCreateDraftPurchaseOrders,
 } from "@/api/primecareApi";
+import { getReorderForecastRead } from "@/api/primecareSupabaseApi";
 
 const emptyCreateForm = {
   productId: "",
@@ -63,8 +66,22 @@ function formatTriggerBasis(triggerBasis) {
     .join(" ");
 }
 
+/** Map Supabase reorder forecast row → PurchaseOrdersPage "Reorder Candidates" card shape. */
+function mapForecastToPurchaseReorderCandidate(f) {
+  const suggested = numberValue(f.suggestedOrderQty);
+  const reorder = numberValue(f.reorderQty);
+  return {
+    productId: f.productId,
+    productName: f.productName,
+    stockHealth: f.stockHealth || f.urgency || "Reorder",
+    currentStock: f.currentStock,
+    minStock: numberValue(f.minStock),
+    reorderQty: reorder > 0 ? reorder : suggested,
+    suggestedQty: suggested > 0 ? suggested : reorder,
+  };
+}
+
 export default function PurchaseOrdersPage() {
-  const [dashboard, setDashboard] = useState(null);
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [reorderCandidates, setReorderCandidates] = useState([]);
   const [smartReorder, setSmartReorder] = useState([]);
@@ -93,18 +110,63 @@ export default function PurchaseOrdersPage() {
   const [bulkResult, setBulkResult] = useState(null);
 
   const loadPurchaseDashboard = async () => {
-    const res = await getPurchaseDashboard();
-    const payload = res?.data || {};
+    const forecastRes = await getReorderForecastRead();
+    if (!forecastRes?.success) {
+      throw new Error(forecastRes?.error || "Failed to load reorder candidates from Supabase");
+    }
 
-    setDashboard(payload || null);
-    setPurchaseOrders(Array.isArray(payload?.purchaseOrders) ? payload.purchaseOrders : []);
-    setReorderCandidates(Array.isArray(payload?.reorderCandidates) ? payload.reorderCandidates : []);
-    setSmartReorder(Array.isArray(payload?.smartReorder?.items) ? payload.smartReorder.items : []);
-    setSmartReorderSummary(payload?.smartReorder?.summary || null);
-    setSupplierDashboard(Array.isArray(payload?.supplierDashboard?.suppliers) ? payload.supplierDashboard.suppliers : []);
-    setSupplierSummary(payload?.supplierDashboard?.summary || null);
-    setAutoTriggers(Array.isArray(payload?.autoPurchaseTriggers?.triggers) ? payload.autoPurchaseTriggers.triggers : []);
-    setAutoTriggerSummary(payload?.autoPurchaseTriggers?.summary || null);
+    const forecast = forecastRes.data?.forecast || [];
+    const rows = forecast.map(mapForecastToPurchaseReorderCandidate);
+    console.log("SUPABASE PURCHASE REORDER:", rows);
+    setReorderCandidates(rows);
+
+    setSupplierDashboard([]);
+    setSupplierSummary(null);
+
+    const [poResult, triggersResult, smartResult] = await Promise.allSettled([
+      getPurchaseOrders(),
+      getAutoPurchaseTriggers(),
+      getSmartReorder(),
+    ]);
+
+    if (poResult.status === "fulfilled" && poResult.value?.success) {
+      const d = poResult.value.data;
+      setPurchaseOrders(
+        Array.isArray(d) ? d : Array.isArray(d?.purchaseOrders) ? d.purchaseOrders : []
+      );
+    } else {
+      setPurchaseOrders([]);
+    }
+
+    if (triggersResult.status === "fulfilled" && triggersResult.value?.success) {
+      const d = triggersResult.value.data;
+      const triggers = Array.isArray(d?.triggers)
+        ? d.triggers
+        : Array.isArray(d?.autoPurchaseTriggers?.triggers)
+        ? d.autoPurchaseTriggers.triggers
+        : Array.isArray(d)
+        ? d
+        : [];
+      setAutoTriggers(triggers);
+      setAutoTriggerSummary(d?.summary || d?.autoPurchaseTriggers?.summary || null);
+    } else {
+      setAutoTriggers([]);
+      setAutoTriggerSummary(null);
+    }
+
+    if (smartResult.status === "fulfilled" && smartResult.value?.success) {
+      const d = smartResult.value.data;
+      const items = Array.isArray(d?.items)
+        ? d.items
+        : Array.isArray(d?.smartReorder?.items)
+        ? d.smartReorder.items
+        : [];
+      setSmartReorder(items);
+      setSmartReorderSummary(d?.summary || d?.smartReorder?.summary || null);
+    } else {
+      setSmartReorder([]);
+      setSmartReorderSummary(null);
+    }
   };
 
   const refreshAll = async () => {
