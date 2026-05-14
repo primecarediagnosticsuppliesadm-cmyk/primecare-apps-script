@@ -5,6 +5,7 @@ import {
   getAIInsights,
   getRecentVisits,
 } from "@/api/primecareApi";
+import { getStockDashboard, getLabsCredit, getReorderForecastRead } from "@/api/primecareSupabaseApi";
 import {
   TrendingUp,
   AlertTriangle,
@@ -98,6 +99,95 @@ function normalizeVisit(visit) {
   };
 }
 
+const EMPTY_STOCK_STATS = {
+  totalSkus: 0,
+  criticalItems: 0,
+  reorderItems: 0,
+  healthyItems: 0,
+};
+
+async function fetchSupabaseAdminSlice() {
+  const slice = { stock: null, labs: null, forecast: null };
+  try {
+    slice.stock = await getStockDashboard();
+  } catch (e) {
+    console.warn("[AdminDashboard] Supabase stock skipped:", e?.message || e);
+  }
+  try {
+    slice.labs = await getLabsCredit();
+  } catch (e) {
+    console.warn("[AdminDashboard] Supabase labs skipped:", e?.message || e);
+  }
+  try {
+    slice.forecast = await getReorderForecastRead();
+  } catch (e) {
+    console.warn("[AdminDashboard] Supabase reorder forecast skipped:", e?.message || e);
+  }
+  return slice;
+}
+
+function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) {
+  const stockStats =
+    (supabaseSlice.stock?.success && supabaseSlice.stock?.data?.stats) ||
+    summaryIn?.stockStats ||
+    EMPTY_STOCK_STATS;
+
+  const labs = Array.isArray(supabaseSlice.labs?.data) ? supabaseSlice.labs.data : [];
+  const forecast =
+    supabaseSlice.forecast?.success && Array.isArray(supabaseSlice.forecast?.data?.forecast)
+      ? supabaseSlice.forecast.data.forecast
+      : [];
+
+  const summary = {
+    ...summaryIn,
+    stockStats,
+    recentVisits: summaryIn?.recentVisits ?? 0,
+    totalSoldValue: summaryIn?.totalSoldValue ?? 0,
+  };
+
+  const labsCreditRiskCount = labs.filter((l) => {
+    const s = String(l.creditStatus || "").toUpperCase();
+    return s === "HOLD" || s === "NEAR_LIMIT";
+  }).length;
+
+  const urgentForecastCount = forecast.filter((r) => {
+    const u = String(r.urgency || "").trim().toLowerCase();
+    return u === "critical" || u === "high";
+  }).length;
+
+  const nearStockoutDerived = Math.max(
+    urgentForecastCount,
+    Number(stockStats.criticalItems || 0) + Number(stockStats.reorderItems || 0)
+  );
+
+  const topLabsDerived = [...labs]
+    .sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0))
+    .slice(0, 5)
+    .map((l) => ({
+      labName: l.labName || l.labId || "Lab",
+      revenue: Number(l.revenue || 0),
+    }));
+
+  const executive = {
+    todaysRevenue: executiveIn?.todaysRevenue ?? executiveIn?.todays_revenue ?? 0,
+    outstandingReceivables:
+      executiveIn?.outstandingReceivables ?? executiveIn?.outstanding_receivables ?? 0,
+    labsAtCreditRisk:
+      executiveIn?.labsAtCreditRisk ??
+      executiveIn?.labs_at_credit_risk ??
+      labsCreditRiskCount,
+    productsNearStockout:
+      executiveIn?.productsNearStockout ??
+      executiveIn?.products_near_stockout ??
+      nearStockoutDerived,
+    topLabsByRevenue: Array.isArray(executiveIn?.topLabsByRevenue) && executiveIn.topLabsByRevenue.length
+      ? executiveIn.topLabsByRevenue
+      : topLabsDerived,
+  };
+
+  return { summary, executive };
+}
+
 export default function AdminDashboard({ currentUser, setActivePage }) {
   const [summaryData, setSummaryData] = useState(adminDashboardCache.dashboard);
   const [executiveData, setExecutiveData] = useState(adminDashboardCache.executive);
@@ -121,21 +211,50 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       return;
     }
 
-    const [dashboardRes, executiveRes] = await Promise.all([
+    const supabaseSlice = await fetchSupabaseAdminSlice();
+    const data = {
+      stock: supabaseSlice.stock?.data ?? null,
+      labs: Array.isArray(supabaseSlice.labs?.data)
+        ? { rowCount: supabaseSlice.labs.data.length }
+        : supabaseSlice.labs?.data ?? null,
+      forecast: supabaseSlice.forecast?.data ?? null,
+    };
+    console.log("SUPABASE ADMIN DASHBOARD:", data);
+
+    const [dashboardRes, executiveRes] = await Promise.allSettled([
       getDashboard(),
       getExecutiveSnapshot(),
     ]);
 
-    const dashboardPayload = dashboardRes?.data || dashboardRes || {};
-    const executivePayload = executiveRes?.data || executiveRes || {};
+    const dashboardPayload =
+      dashboardRes.status === "fulfilled" && dashboardRes.value
+        ? dashboardRes.value?.data || dashboardRes.value || {}
+        : {};
+    if (dashboardRes.status === "rejected") {
+      console.warn("[AdminDashboard] getDashboard failed:", dashboardRes.reason);
+    }
 
-    adminDashboardCache.dashboard = dashboardPayload;
-    adminDashboardCache.executive = executivePayload;
+    const executivePayload =
+      executiveRes.status === "fulfilled" && executiveRes.value
+        ? executiveRes.value?.data || executiveRes.value || {}
+        : {};
+    if (executiveRes.status === "rejected") {
+      console.warn("[AdminDashboard] getExecutiveSnapshot failed:", executiveRes.reason);
+    }
+
+    const merged = mergeAdminDashboardWithSupabase(
+      supabaseSlice,
+      dashboardPayload,
+      executivePayload
+    );
+
+    adminDashboardCache.dashboard = merged.summary;
+    adminDashboardCache.executive = merged.executive;
     adminDashboardCache.dashboardLoadedAt = Date.now();
     adminDashboardCache.executiveLoadedAt = Date.now();
 
-    setSummaryData(dashboardPayload);
-    setExecutiveData(executivePayload);
+    setSummaryData(merged.summary);
+    setExecutiveData(merged.executive);
   };
 
   const loadSecondaryData = async ({ force = false } = {}) => {
@@ -148,12 +267,21 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
 
     if (!insightsFresh) {
       tasks.push(
-        getAIInsights().then((res) => {
-          const payload = res?.data || res || {};
-          adminDashboardCache.insights = payload;
-          adminDashboardCache.insightsLoadedAt = Date.now();
-          setInsightsData(payload);
-        })
+        (async () => {
+          try {
+            const res = await getAIInsights();
+            const payload = res?.data || res || {};
+            adminDashboardCache.insights = payload;
+            adminDashboardCache.insightsLoadedAt = Date.now();
+            setInsightsData(payload);
+          } catch (err) {
+            console.warn("[AdminDashboard] getAIInsights failed:", err);
+            const empty = { insights: [], recommendedActions: [] };
+            adminDashboardCache.insights = empty;
+            adminDashboardCache.insightsLoadedAt = Date.now();
+            setInsightsData(empty);
+          }
+        })()
       );
     } else {
       setInsightsData(adminDashboardCache.insights);
@@ -161,12 +289,21 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
 
     if (!visitsFresh) {
       tasks.push(
-        getRecentVisits().then((res) => {
-          const payload = res?.data || res || {};
-          adminDashboardCache.visits = payload;
-          adminDashboardCache.visitsLoadedAt = Date.now();
-          setRecentVisitsData(payload);
-        })
+        (async () => {
+          try {
+            const res = await getRecentVisits();
+            const payload = res?.data || res || {};
+            adminDashboardCache.visits = payload;
+            adminDashboardCache.visitsLoadedAt = Date.now();
+            setRecentVisitsData(payload);
+          } catch (err) {
+            console.warn("[AdminDashboard] getRecentVisits failed:", err);
+            const empty = { visits: [] };
+            adminDashboardCache.visits = empty;
+            adminDashboardCache.visitsLoadedAt = Date.now();
+            setRecentVisitsData(empty);
+          }
+        })()
       );
     } else {
       setRecentVisitsData(adminDashboardCache.visits);
