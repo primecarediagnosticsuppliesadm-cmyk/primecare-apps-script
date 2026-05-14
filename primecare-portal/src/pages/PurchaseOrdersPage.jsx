@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   getPurchaseOrders,
-  getAutoPurchaseTriggers,
   getSmartReorder,
   createPurchaseOrder,
   receivePurchaseOrder,
@@ -81,6 +80,46 @@ function mapForecastToPurchaseReorderCandidate(f) {
   };
 }
 
+/** Placeholder auto-trigger rows derived from Supabase reorder forecast (read-only migration). */
+function buildPlaceholderAutoTriggersFromForecast(forecast) {
+  return forecast.map((f) => {
+    const urgencyRaw = String(f.urgency || "Medium").trim();
+    const urgencyUpper = urgencyRaw.toUpperCase();
+    const dailyFromMonthly =
+      numberValue(f.monthlyDemand) > 0 ? Math.round((numberValue(f.monthlyDemand) / 30) * 100) / 100 : 0;
+
+    return {
+      productId: f.productId,
+      productName: f.productName,
+      urgency: urgencyUpper === "CRITICAL" ? "CRITICAL" : urgencyUpper,
+      hasOpenPo: false,
+      canAutoCreate: true,
+      autoTriggerReason: `Derived from Supabase reorder forecast (${f.stockHealth || urgencyRaw}). Apps Script auto-triggers API is not used in this load.`,
+      currentStock: numberValue(f.currentStock),
+      minStock: numberValue(f.minStock),
+      dailyConsumption: dailyFromMonthly,
+      daysLeft: numberValue(f.daysLeft),
+      suggestedOrderQty: numberValue(f.suggestedOrderQty),
+      supplier: "",
+      triggerBasis: "supabase_reorder_forecast",
+      openPoId: "",
+      openPoStatus: "",
+      estimatedCost: 0,
+    };
+  });
+}
+
+function summarizePlaceholderTriggers(triggers) {
+  const u = (s) => String(s || "").trim().toUpperCase();
+  return {
+    criticalCount: triggers.filter((t) => u(t.urgency) === "CRITICAL").length,
+    highCount: triggers.filter((t) => u(t.urgency) === "HIGH").length,
+    mediumCount: triggers.filter((t) => u(t.urgency) === "MEDIUM").length,
+    blockedByOpenPo: triggers.filter((t) => t.hasOpenPo).length,
+    totalEstimatedCost: triggers.reduce((sum, t) => sum + numberValue(t.estimatedCost), 0),
+  };
+}
+
 export default function PurchaseOrdersPage() {
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [reorderCandidates, setReorderCandidates] = useState([]);
@@ -123,9 +162,13 @@ export default function PurchaseOrdersPage() {
     setSupplierDashboard([]);
     setSupplierSummary(null);
 
-    const [poResult, triggersResult, smartResult] = await Promise.allSettled([
+    const triggerRows = buildPlaceholderAutoTriggersFromForecast(forecast);
+    console.log("SUPABASE AUTO PURCHASE TRIGGERS:", triggerRows);
+    setAutoTriggers(triggerRows);
+    setAutoTriggerSummary(summarizePlaceholderTriggers(triggerRows));
+
+    const [poResult, smartResult] = await Promise.allSettled([
       getPurchaseOrders(),
-      getAutoPurchaseTriggers(),
       getSmartReorder(),
     ]);
 
@@ -136,22 +179,6 @@ export default function PurchaseOrdersPage() {
       );
     } else {
       setPurchaseOrders([]);
-    }
-
-    if (triggersResult.status === "fulfilled" && triggersResult.value?.success) {
-      const d = triggersResult.value.data;
-      const triggers = Array.isArray(d?.triggers)
-        ? d.triggers
-        : Array.isArray(d?.autoPurchaseTriggers?.triggers)
-        ? d.autoPurchaseTriggers.triggers
-        : Array.isArray(d)
-        ? d
-        : [];
-      setAutoTriggers(triggers);
-      setAutoTriggerSummary(d?.summary || d?.autoPurchaseTriggers?.summary || null);
-    } else {
-      setAutoTriggers([]);
-      setAutoTriggerSummary(null);
     }
 
     if (smartResult.status === "fulfilled" && smartResult.value?.success) {
