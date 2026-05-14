@@ -101,13 +101,38 @@ export default function OrdersPage() {
   }
 
   const filteredOrders = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return orders;
-    return orders.filter((o) => {
-      const hay = `${o.orderId ?? ""} ${o.labName ?? ""} ${o.labId ?? ""} ${o.orderStatus ?? ""}`.toLowerCase();
-      return hay.includes(q);
-    });
-  }, [orders, search]);
+    console.log("ORDERS STATE BEFORE FILTER:", orders);
+
+    const q = String(search || "").trim().toLowerCase();
+
+    let list = Array.isArray(orders) ? orders : [];
+
+    if (q) {
+      list = list.filter((o) => {
+        const hay = [
+          String(o.orderId || "").toLowerCase(),
+          String(o.labId || "").toLowerCase(),
+          String(o.labName || "").toLowerCase(),
+          String(o.orderStatus || "").toLowerCase(),
+          String(o.paymentStatus || "").toLowerCase(),
+          String(o.invoiceStatus || "").toLowerCase(),
+          String(o.createdBy || "").toLowerCase(),
+          String(o.notes || "").toLowerCase(),
+        ].join(" ");
+        return hay.includes(q);
+      });
+    }
+
+    if (status !== "ALL") {
+      const st = String(status || "").toLowerCase();
+      list = list.filter(
+        (o) => String(o.orderStatus || "").toLowerCase() === st
+      );
+    }
+
+    console.log("ORDERS AFTER FILTER:", list);
+    return list;
+  }, [orders, search, status]);
 
   return (
     <div className="space-y-5">
