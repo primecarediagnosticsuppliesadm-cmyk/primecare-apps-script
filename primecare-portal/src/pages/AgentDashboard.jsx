@@ -18,9 +18,9 @@ import {
 } from "lucide-react";
 
 import {
-  getAgentWorkspace,
-  completeAgentTask,
-} from "@/api/primecareApi";
+  getAgentWorkspaceRead,
+} from "@/api/primecareSupabaseApi";
+import { completeAgentTask } from "@/api/primecareApi";
 
 const EMPTY_WORKSPACE = {
   summary: {
@@ -210,8 +210,7 @@ export default function AgentDashboard({ currentUser, setActivePage, authToken }
 
         setError("");
 
-        const params = authToken ? { sessionToken: authToken } : {};
-        const res = await getAgentWorkspace(params);
+        const res = await getAgentWorkspaceRead(currentUser);
 
         if (!res?.success) {
           throw new Error(res?.error || "Failed to load agent workspace");
@@ -237,7 +236,7 @@ export default function AgentDashboard({ currentUser, setActivePage, authToken }
         setRefreshing(false);
       }
     },
-    [authToken]
+    [currentUser]
   );
 
   useEffect(() => {

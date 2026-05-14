@@ -1,4 +1,9 @@
 import { supabase } from "./supabaseClient.js";
+import {
+  filterCollectionsForUser,
+  filterLabsForUser,
+  filterVisitsForUser,
+} from "@/utils/accessFilters.js";
 
 function num(v) {
   const n = Number(v);
@@ -469,6 +474,171 @@ export async function getCollectionsRead() {
         collections: [],
       },
     };
+  }
+}
+
+const EMPTY_AGENT_WORKSPACE = {
+  summary: {
+    todayVisits: 0,
+    pendingCollections: 0,
+    totalOutstanding: 0,
+    activeLabs: 0,
+    openTasks: 0,
+    highPriorityTasks: 0,
+  },
+  tasks: [],
+  assignedLabs: [],
+  recentVisits: [],
+  pendingCollections: [],
+};
+
+function mapVisitRowForAgentDashboard(row) {
+  const visitDate = str(
+    row.visit_date ?? row.visitDate ?? row.date ?? row.Visit_Date ?? ""
+  ).slice(0, 10);
+  const created = str(row.created_at ?? row.createdAt ?? "");
+  const agent = str(row.agent_name ?? row.Agent_Name ?? row.agent ?? row.agentName ?? "");
+  return {
+    visitId: str(row.visit_id ?? row.id ?? row.Visit_ID ?? ""),
+    visitDate: visitDate || created.slice(0, 10),
+    labName: str(row.lab_name ?? row.Lab_Name ?? row.labName ?? ""),
+    area: str(row.area ?? row.Area ?? ""),
+    visitType: str(row.visit_type ?? row.Visit_Type ?? row.visitType ?? ""),
+    labResponse: str(row.lab_response ?? row.Lab_Response ?? row.labResponse ?? ""),
+    agent,
+    agentName: agent,
+    labId: str(row.lab_id ?? row.Lab_ID ?? row.labId ?? ""),
+  };
+}
+
+function mapAgentTaskRow(row) {
+  return {
+    taskId: str(row.task_id ?? row.id ?? ""),
+    labId: str(row.lab_id ?? row.labId ?? ""),
+    labName: str(row.lab_name ?? row.labName ?? ""),
+    taskType: str(row.task_type ?? row.taskType ?? row.type ?? "FOLLOW_UP").toUpperCase(),
+    taskDescription: str(
+      row.task_description ?? row.description ?? row.notes ?? row.body ?? ""
+    ),
+    priority: str(row.priority ?? "MEDIUM").toUpperCase(),
+    dueDate: str(row.due_date ?? row.dueDate ?? row.due_at ?? "").slice(0, 10),
+    nextAction: str(row.next_action ?? row.nextAction ?? ""),
+    status: str(row.status ?? row.task_status ?? "open"),
+    assignedAgent: str(
+      row.assigned_agent ?? row.assigned_to ?? row.agent_name ?? row.Agent_Name ?? ""
+    ),
+  };
+}
+
+function isOpenAgentTaskRow(row) {
+  const u = str(row.status ?? row.task_status ?? "open").toLowerCase();
+  if (["done", "completed", "cancelled", "closed"].includes(u)) return false;
+  return true;
+}
+
+function agentTaskRowAssignedToUser(row, currentUser) {
+  const name = str(currentUser?.name || currentUser?.agentName || "");
+  if (!name) return false;
+  const assignee = str(
+    row.assigned_agent ?? row.assigned_to ?? row.agent_name ?? row.Agent_Name ?? row.agent ?? ""
+  );
+  return assignee.toLowerCase() === name.toLowerCase();
+}
+
+/**
+ * Read-only agent workspace: labs (v_labs_credit), collections (reuse getCollectionsRead),
+ * visits (`visits` or `v_visits`), open tasks (`agent_tasks` or `tasks`).
+ * Shapes match AgentDashboard expectations. Never throws.
+ */
+export async function getAgentWorkspaceRead(currentUser) {
+  if (!supabase) {
+    return { success: true, data: { ...EMPTY_AGENT_WORKSPACE } };
+  }
+
+  try {
+    const collectionsRes = await getCollectionsRead();
+    const allCollections = Array.isArray(collectionsRes?.data?.collections)
+      ? collectionsRes.data.collections
+      : [];
+    const pendingCollections = filterCollectionsForUser(allCollections, currentUser);
+
+    const { data: labsRaw, error: labsErr } = await supabase.from("v_labs_credit").select("*");
+    if (labsErr) {
+      console.warn("[getAgentWorkspaceRead] v_labs_credit:", labsErr.message);
+    }
+    const allLabs = (labsRaw || [])
+      .map(mapLabsCreditRow)
+      .filter((l) => l.labId || l.labName);
+    const assignedLabs = filterLabsForUser(allLabs, currentUser);
+
+    let visitRows = [];
+    const v1 = await supabase.from("visits").select("*");
+    if (v1.error) {
+      console.warn("[getAgentWorkspaceRead] visits:", v1.error.message);
+      const v2 = await supabase.from("v_visits").select("*");
+      if (!v2.error && Array.isArray(v2.data)) visitRows = v2.data;
+    } else if (Array.isArray(v1.data)) {
+      visitRows = v1.data;
+    }
+
+    const mappedVisits = visitRows.map(mapVisitRowForAgentDashboard);
+    const scopedVisits = filterVisitsForUser(mappedVisits, currentUser);
+    const recentVisits = [...scopedVisits].sort((a, b) => {
+      const tb = new Date(b.visitDate || 0).getTime();
+      const ta = new Date(a.visitDate || 0).getTime();
+      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+    }).slice(0, 10);
+
+    const todayYmd = localDateYmd();
+    const todayVisits = scopedVisits.filter(
+      (v) => str(v.visitDate || "").slice(0, 10) === todayYmd
+    ).length;
+
+    let taskRows = [];
+    const t1 = await supabase.from("agent_tasks").select("*");
+    if (t1.error) {
+      console.warn("[getAgentWorkspaceRead] agent_tasks:", t1.error.message);
+      const t2 = await supabase.from("tasks").select("*");
+      if (!t2.error && Array.isArray(t2.data)) taskRows = t2.data;
+    } else if (Array.isArray(t1.data)) {
+      taskRows = t1.data;
+    }
+
+    const tasks = taskRows
+      .filter((r) => isOpenAgentTaskRow(r) && agentTaskRowAssignedToUser(r, currentUser))
+      .map(mapAgentTaskRow);
+
+    const highPriorityTasks = tasks.filter((t) =>
+      ["HIGH", "CRITICAL"].includes(str(t.priority || "").toUpperCase())
+    ).length;
+
+    const totalOutstanding = assignedLabs.reduce(
+      (s, l) => s + num(l.outstanding ?? l.outstandingAmount ?? 0),
+      0
+    );
+
+    const summary = {
+      todayVisits,
+      pendingCollections: pendingCollections.length,
+      totalOutstanding,
+      activeLabs: assignedLabs.length,
+      openTasks: tasks.length,
+      highPriorityTasks,
+    };
+
+    return {
+      success: true,
+      data: {
+        summary,
+        tasks,
+        assignedLabs,
+        recentVisits,
+        pendingCollections,
+      },
+    };
+  } catch (err) {
+    console.warn("[getAgentWorkspaceRead] failed:", err?.message || err);
+    return { success: true, data: { ...EMPTY_AGENT_WORKSPACE } };
   }
 }
 
