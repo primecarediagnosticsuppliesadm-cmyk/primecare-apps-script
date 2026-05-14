@@ -19,6 +19,31 @@ import {
 
 const DASHBOARD_CACHE_TTL = 60 * 1000;
 
+/**
+ * When true, AdminDashboard does not call Apps Script reads (getDashboard,
+ * getExecutiveSnapshot, getAIInsights, getRecentVisits) — avoids backend helpers
+ * like pcaiSheetExists_ during local Supabase migration.
+ *
+ * Enabled when: `VITE_ADMIN_DASHBOARD_SUPABASE_ONLY=true`, or in Vite `DEV` with
+ * both `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` set. Set
+ * `VITE_ADMIN_DASHBOARD_SUPABASE_ONLY=false` to force Apps Script reads in dev.
+ */
+function adminDashboardSkipAppsScriptReads() {
+  const override = String(import.meta.env.VITE_ADMIN_DASHBOARD_SUPABASE_ONLY || "")
+    .trim()
+    .toLowerCase();
+  if (override === "false" || override === "0") return false;
+  if (override === "true" || override === "1") return true;
+
+  const hasSupabase =
+    String(import.meta.env.VITE_SUPABASE_URL || "").trim() !== "" &&
+    String(import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim() !== "";
+  return Boolean(import.meta.env.DEV && hasSupabase);
+}
+
+const EMPTY_AI_INSIGHTS = { insights: [], recommendedActions: [] };
+const EMPTY_VISITS_PAYLOAD = { visits: [] };
+
 const adminDashboardCache = {
   dashboard: null,
   executive: null,
@@ -221,25 +246,31 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     };
     console.log("SUPABASE ADMIN DASHBOARD:", data);
 
-    const [dashboardRes, executiveRes] = await Promise.allSettled([
-      getDashboard(),
-      getExecutiveSnapshot(),
-    ]);
+    const skipAppsScript = adminDashboardSkipAppsScriptReads();
+    let dashboardPayload = {};
+    let executivePayload = {};
 
-    const dashboardPayload =
-      dashboardRes.status === "fulfilled" && dashboardRes.value
-        ? dashboardRes.value?.data || dashboardRes.value || {}
-        : {};
-    if (dashboardRes.status === "rejected") {
-      console.warn("[AdminDashboard] getDashboard failed:", dashboardRes.reason);
-    }
+    if (!skipAppsScript) {
+      const [dashboardRes, executiveRes] = await Promise.allSettled([
+        getDashboard(),
+        getExecutiveSnapshot(),
+      ]);
 
-    const executivePayload =
-      executiveRes.status === "fulfilled" && executiveRes.value
-        ? executiveRes.value?.data || executiveRes.value || {}
-        : {};
-    if (executiveRes.status === "rejected") {
-      console.warn("[AdminDashboard] getExecutiveSnapshot failed:", executiveRes.reason);
+      dashboardPayload =
+        dashboardRes.status === "fulfilled" && dashboardRes.value
+          ? dashboardRes.value?.data || dashboardRes.value || {}
+          : {};
+      if (dashboardRes.status === "rejected") {
+        console.warn("[AdminDashboard] getDashboard failed:", dashboardRes.reason);
+      }
+
+      executivePayload =
+        executiveRes.status === "fulfilled" && executiveRes.value
+          ? executiveRes.value?.data || executiveRes.value || {}
+          : {};
+      if (executiveRes.status === "rejected") {
+        console.warn("[AdminDashboard] getExecutiveSnapshot failed:", executiveRes.reason);
+      }
     }
 
     const merged = mergeAdminDashboardWithSupabase(
@@ -264,47 +295,58 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       !force && adminDashboardCache.visits && isFresh(adminDashboardCache.visitsLoadedAt);
 
     const tasks = [];
+    const skipAppsScript = adminDashboardSkipAppsScriptReads();
 
     if (!insightsFresh) {
-      tasks.push(
-        (async () => {
-          try {
-            const res = await getAIInsights();
-            const payload = res?.data || res || {};
-            adminDashboardCache.insights = payload;
-            adminDashboardCache.insightsLoadedAt = Date.now();
-            setInsightsData(payload);
-          } catch (err) {
-            console.warn("[AdminDashboard] getAIInsights failed:", err);
-            const empty = { insights: [], recommendedActions: [] };
-            adminDashboardCache.insights = empty;
-            adminDashboardCache.insightsLoadedAt = Date.now();
-            setInsightsData(empty);
-          }
-        })()
-      );
+      if (skipAppsScript) {
+        adminDashboardCache.insights = EMPTY_AI_INSIGHTS;
+        adminDashboardCache.insightsLoadedAt = Date.now();
+        setInsightsData(EMPTY_AI_INSIGHTS);
+      } else {
+        tasks.push(
+          (async () => {
+            try {
+              const res = await getAIInsights();
+              const payload = res?.data || res || {};
+              adminDashboardCache.insights = payload;
+              adminDashboardCache.insightsLoadedAt = Date.now();
+              setInsightsData(payload);
+            } catch (err) {
+              console.warn("[AdminDashboard] getAIInsights failed:", err);
+              adminDashboardCache.insights = EMPTY_AI_INSIGHTS;
+              adminDashboardCache.insightsLoadedAt = Date.now();
+              setInsightsData(EMPTY_AI_INSIGHTS);
+            }
+          })()
+        );
+      }
     } else {
       setInsightsData(adminDashboardCache.insights);
     }
 
     if (!visitsFresh) {
-      tasks.push(
-        (async () => {
-          try {
-            const res = await getRecentVisits();
-            const payload = res?.data || res || {};
-            adminDashboardCache.visits = payload;
-            adminDashboardCache.visitsLoadedAt = Date.now();
-            setRecentVisitsData(payload);
-          } catch (err) {
-            console.warn("[AdminDashboard] getRecentVisits failed:", err);
-            const empty = { visits: [] };
-            adminDashboardCache.visits = empty;
-            adminDashboardCache.visitsLoadedAt = Date.now();
-            setRecentVisitsData(empty);
-          }
-        })()
-      );
+      if (skipAppsScript) {
+        adminDashboardCache.visits = EMPTY_VISITS_PAYLOAD;
+        adminDashboardCache.visitsLoadedAt = Date.now();
+        setRecentVisitsData(EMPTY_VISITS_PAYLOAD);
+      } else {
+        tasks.push(
+          (async () => {
+            try {
+              const res = await getRecentVisits();
+              const payload = res?.data || res || {};
+              adminDashboardCache.visits = payload;
+              adminDashboardCache.visitsLoadedAt = Date.now();
+              setRecentVisitsData(payload);
+            } catch (err) {
+              console.warn("[AdminDashboard] getRecentVisits failed:", err);
+              adminDashboardCache.visits = EMPTY_VISITS_PAYLOAD;
+              adminDashboardCache.visitsLoadedAt = Date.now();
+              setRecentVisitsData(EMPTY_VISITS_PAYLOAD);
+            }
+          })()
+        );
+      }
     } else {
       setRecentVisitsData(adminDashboardCache.visits);
     }
