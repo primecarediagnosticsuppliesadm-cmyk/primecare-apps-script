@@ -100,3 +100,80 @@ export async function getStockDashboard() {
     },
   };
 }
+
+/**
+ * Maps v_labs_credit rows (snake_case) to the camelCase lab objects LabsPage
+ * feeds into normalizeLab (legacy getLabs shape).
+ */
+export function mapLabsCreditRow(row) {
+  const creditWarningsRaw =
+    row.credit_warnings ?? row.creditWarnings ?? row.Credit_Warnings;
+  let creditWarnings = [];
+  if (Array.isArray(creditWarningsRaw)) {
+    creditWarnings = creditWarningsRaw;
+  } else if (typeof creditWarningsRaw === "string" && creditWarningsRaw.trim()) {
+    try {
+      const parsed = JSON.parse(creditWarningsRaw);
+      creditWarnings = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      creditWarnings = [];
+    }
+  }
+
+  return {
+    labId: str(row.lab_id ?? row.labId ?? row.Lab_ID),
+    labName: str(row.lab_name ?? row.labName ?? row.Lab_Name),
+    ownerName: str(row.owner_name ?? row.ownerName ?? row.Owner_Name),
+    phone: str(row.phone ?? row.Phone ?? row.phone_number ?? row.phoneNumber),
+    area: str(row.area ?? row.Area),
+    assignedAgent: str(
+      row.assigned_agent ?? row.assignedAgent ?? row.Assigned_Agent ?? row.agent_name
+    ),
+    status: str(row.status ?? row.Status),
+    activeFlag: str(row.active_flag ?? row.activeFlag ?? row.Active_Flag ?? ""),
+    stage: str(row.stage ?? row.Stage),
+    lastVisit: str(row.last_visit ?? row.lastVisit ?? row.Last_Visit) || "-",
+    nextFollowUp: str(row.next_follow_up ?? row.nextFollowUp ?? row.Next_Follow_Up) || "-",
+    outstanding: num(row.outstanding ?? row.outstanding_amount ?? row.outstandingAmount),
+    outstandingAmount: num(
+      row.outstanding_amount ?? row.outstandingAmount ?? row.outstanding ?? row.Outstanding
+    ),
+    creditLimit: num(row.credit_limit ?? row.creditLimit ?? row.Credit_Limit),
+    daysOverdue: num(row.days_overdue ?? row.daysOverdue ?? row.overdue_days ?? row.Overdue_Days),
+    overdueDays: num(row.overdue_days ?? row.days_overdue),
+    allowedOverdueDays: num(
+      row.allowed_overdue_days ?? row.allowedOverdueDays ?? row.Allowed_Overdue_Days ?? 15
+    ),
+    creditHold: str(row.credit_hold ?? row.creditHold ?? row.Credit_Hold),
+    creditReason: str(row.credit_reason ?? row.creditReason ?? row.Credit_Reason),
+    creditStatus: str(row.credit_status ?? row.creditStatus ?? row.Credit_Status),
+    creditTerms: str(row.credit_terms ?? row.creditTerms ?? row.Credit_Terms),
+    creditWarnings,
+    visitCount: num(row.visit_count ?? row.visitCount ?? row.Visit_Count),
+    revenue: num(row.revenue ?? row.Revenue),
+  };
+}
+
+/**
+ * Read-only labs / credit directory from Supabase view v_labs_credit.
+ */
+export async function getLabsCredit() {
+  if (!supabase) {
+    throw new Error(
+      "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
+    );
+  }
+
+  const { data: rawRows, error } = await supabase.from("v_labs_credit").select("*");
+
+  if (error) {
+    throw new Error(error.message || "Supabase labs read failed");
+  }
+
+  const labs = (rawRows || []).map(mapLabsCreditRow).filter((lab) => lab.labId || lab.labName);
+
+  return {
+    success: true,
+    data: labs,
+  };
+}

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Building2, Users, MapPin, ClipboardCheck, AlertTriangle, ShieldAlert } from "lucide-react";
-import { getLabs } from "@/api/primecareApi";
+import { getLabsCredit } from "@/api/primecareSupabaseApi";
 
 function StatCard({ title, value, icon: Icon, subtitle }) {
   return (
@@ -138,11 +138,8 @@ export default function LabsPage({ currentUser, authToken }) {
         console.log("LabsPage currentUser:", currentUser);
         console.log("LabsPage authToken:", authToken);
 
-        const params = authToken ? { sessionToken: authToken } : {};
-        console.log("LabsPage getLabs params:", params);
-
-        const res = await getLabs(params);
-        console.log("LabsPage getLabs response:", res);
+        const res = await getLabsCredit();
+        console.log("LabsPage getLabsCredit response:", res);
 
         if (!res?.success) {
           throw new Error(res?.error || "Failed to load labs");
@@ -155,7 +152,7 @@ export default function LabsPage({ currentUser, authToken }) {
           : [];
 
         const rows = rawLabs.map(normalizeLab);
-        console.log("LabsPage normalized rows:", rows);
+        console.log("SUPABASE LABS:", rows);
 
         setLabs(rows);
 
