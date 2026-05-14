@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  getCollections,
   getCollectionDetails,
   getCollectionHistory,
   updateCollection,
   completeAgentTask,
 } from "@/api/primecareApi";
+import { getCollectionsRead } from "@/api/primecareSupabaseApi";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -57,9 +57,11 @@ export default function CollectionsPage({ currentUser, authToken }) {
       setLoading(true);
       setError("");
 
-      const params = authToken ? { sessionToken: authToken } : {};
-      const res = await getCollections(params);
+      const res = await getCollectionsRead();
       const payload = res?.data || {};
+
+      const rows = Array.isArray(payload.collections) ? payload.collections : [];
+      console.log("SUPABASE COLLECTIONS:", rows);
 
       setSummary(
         payload.summary || {
@@ -70,9 +72,16 @@ export default function CollectionsPage({ currentUser, authToken }) {
         }
       );
 
-      setCollections(Array.isArray(payload.collections) ? payload.collections : []);
+      setCollections(rows);
     } catch (err) {
-      setError(err.message || "Failed to load collections");
+      console.warn("CollectionsPage loadCollections:", err);
+      setSummary({
+        totalOutstanding: 0,
+        overdueCount: 0,
+        highRiskCount: 0,
+        todayCollections: 0,
+      });
+      setCollections([]);
     } finally {
       setLoading(false);
     }
@@ -222,9 +231,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
         .includes(search.toLowerCase())
     );
   }, [collections, search]);
- console.log("CollectionsPage authToken", authToken);
   return (
-   
     <div className="space-y-5">
       <div className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">Collections</h1>

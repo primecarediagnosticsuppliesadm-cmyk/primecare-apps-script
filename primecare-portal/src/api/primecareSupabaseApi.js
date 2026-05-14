@@ -286,3 +286,188 @@ export async function getReorderForecastRead() {
     },
   };
 }
+
+const EMPTY_COLLECTIONS_SUMMARY = {
+  totalOutstanding: 0,
+  overdueCount: 0,
+  highRiskCount: 0,
+  todayCollections: 0,
+};
+
+function deriveCollectionRiskStatus(m) {
+  const hold = String(m.creditHold || "").trim().toUpperCase();
+  const cs = String(m.creditStatus || "").trim().toUpperCase();
+  const od = num(m.daysOverdue);
+  const allowed = num(m.allowedOverdueDays) || 15;
+  if (cs === "HOLD" || hold === "YES" || hold === "HOLD") return "High";
+  if (od > allowed) return "High";
+  if (cs === "NEAR_LIMIT") return "Medium";
+  if (od > 0) return "Medium";
+  return "Low";
+}
+
+/**
+ * Maps v_labs_credit (+ optional AR fields on same row) to CollectionsPage row shape.
+ */
+export function mapCollectionsRowFromLabsCredit(rawRow) {
+  const m = mapLabsCreditRow(rawRow);
+
+  const lastFollowUp = str(
+    rawRow.last_follow_up ??
+      rawRow.lastFollowUp ??
+      rawRow.collection_last_follow_up ??
+      m.nextFollowUp ??
+      m.lastVisit
+  );
+  const nextAction = str(
+    rawRow.next_action ?? rawRow.nextAction ?? rawRow.collection_next_action ?? ""
+  );
+  const explicitPaymentStatus = str(
+    rawRow.payment_status ?? rawRow.paymentStatus ?? rawRow.ar_payment_status ?? ""
+  );
+
+  const outstandingAmount = m.outstandingAmount;
+  const paymentStatus =
+    explicitPaymentStatus || (outstandingAmount > 0 ? "Pending" : "Current");
+
+  return {
+    labId: m.labId,
+    labName: m.labName,
+    assignedAgent: m.assignedAgent,
+    outstandingAmount,
+    overdueDays: num(m.daysOverdue),
+    riskStatus: deriveCollectionRiskStatus(m),
+    lastFollowUp: lastFollowUp === "-" ? "" : lastFollowUp,
+    nextAction,
+    paymentStatus: paymentStatus || "Pending",
+    area: m.area,
+    creditHold: m.creditHold,
+    creditLimit: m.creditLimit,
+  };
+}
+
+function mergeArCreditOntoCollection(base, arRow) {
+  if (!arRow) return base;
+  const lf = str(arRow.last_follow_up ?? arRow.lastFollowUp ?? arRow.last_followup ?? "");
+  const na = str(arRow.next_action ?? arRow.nextAction ?? "");
+  const ps = str(arRow.payment_status ?? arRow.paymentStatus ?? arRow.status ?? "");
+  const rs = str(arRow.risk_status ?? arRow.riskStatus ?? "");
+  return {
+    ...base,
+    nextAction: na || base.nextAction,
+    lastFollowUp: lf || base.lastFollowUp,
+    paymentStatus: ps || base.paymentStatus,
+    riskStatus: rs || base.riskStatus,
+  };
+}
+
+function localDateYmd(d = new Date()) {
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${day}`;
+}
+
+function sumTodayPayments(paymentRows) {
+  const today = localDateYmd();
+  let sum = 0;
+  for (const p of paymentRows || []) {
+    const raw = str(p.payment_date ?? p.paymentDate ?? p.collected_at ?? p.collectedAt ?? "");
+    const d = raw.slice(0, 10);
+    if (d === today) {
+      sum += num(p.amount_collected ?? p.amountCollected ?? p.amount ?? p.payment_amount);
+    }
+  }
+  return sum;
+}
+
+function buildCollectionsSummary(collections, todayCollections) {
+  const totalOutstanding = collections.reduce((s, c) => s + num(c.outstandingAmount), 0);
+  const overdueCount = collections.filter((c) => num(c.overdueDays) > 0).length;
+  const highRiskCount = collections.filter(
+    (c) => String(c.riskStatus || "").toLowerCase() === "high"
+  ).length;
+  return {
+    totalOutstanding,
+    overdueCount,
+    highRiskCount,
+    todayCollections: num(todayCollections),
+  };
+}
+
+/**
+ * Read-only collections / receivables list: v_labs_credit, merged with ar_credit_control
+ * when present; optional payments sum for today's collections.
+ * Never throws — returns empty payloads on failure (safe for UI).
+ */
+export async function getCollectionsRead() {
+  if (!supabase) {
+    return {
+      success: true,
+      data: {
+        summary: { ...EMPTY_COLLECTIONS_SUMMARY },
+        collections: [],
+      },
+    };
+  }
+
+  try {
+    const { data: labsRaw, error: labsErr } = await supabase.from("v_labs_credit").select("*");
+    if (labsErr) {
+      console.warn("[getCollectionsRead] v_labs_credit:", labsErr.message);
+      return {
+        success: true,
+        data: {
+          summary: { ...EMPTY_COLLECTIONS_SUMMARY },
+          collections: [],
+        },
+      };
+    }
+
+    const { data: arRaw, error: arErr } = await supabase.from("ar_credit_control").select("*");
+    const arByLab = new Map();
+    if (!arErr && Array.isArray(arRaw)) {
+      for (const r of arRaw) {
+        const id = str(r.lab_id ?? r.labId ?? r.Lab_ID);
+        if (id) arByLab.set(id, r);
+      }
+    } else if (arErr) {
+      console.warn("[getCollectionsRead] ar_credit_control:", arErr.message);
+    }
+
+    let todayCollections = 0;
+    const { data: payRaw, error: payErr } = await supabase.from("payments").select("*");
+    if (!payErr && Array.isArray(payRaw)) {
+      todayCollections = sumTodayPayments(payRaw);
+    } else if (payErr) {
+      console.warn("[getCollectionsRead] payments:", payErr.message);
+    }
+
+    const collections = (labsRaw || [])
+      .map((row) => {
+        const base = mapCollectionsRowFromLabsCredit(row);
+        const ar = arByLab.get(base.labId);
+        return mergeArCreditOntoCollection(base, ar);
+      })
+      .filter((c) => c.labId);
+
+    const summary = buildCollectionsSummary(collections, todayCollections);
+
+    return {
+      success: true,
+      data: {
+        summary,
+        collections,
+      },
+    };
+  } catch (err) {
+    console.warn("[getCollectionsRead] failed:", err?.message || err);
+    return {
+      success: true,
+      data: {
+        summary: { ...EMPTY_COLLECTIONS_SUMMARY },
+        collections: [],
+      },
+    };
+  }
+}
