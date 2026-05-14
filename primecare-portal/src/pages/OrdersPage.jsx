@@ -1,9 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  getOrders,
-  getOrderDetails,
-  updateOrderStatus,
-} from "@/api/primecareApi";
+import { updateOrderStatus } from "@/api/primecareApi";
+import { getOrdersRead, getOrderDetailsRead } from "@/api/primecareSupabaseApi";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -32,11 +29,14 @@ export default function OrdersPage() {
     try {
       setLoading(true);
       setError("");
-      const res = await getOrders({ status });
+      const res = await getOrdersRead({ status });
       const result = res?.data || res || {};
-      setOrders(Array.isArray(result?.orders) ? result.orders : []);
+      const rows = Array.isArray(result?.orders) ? result.orders : [];
+      console.log("SUPABASE ORDERS:", rows);
+      setOrders(rows);
     } catch (err) {
-      setError(err.message || "Failed to load orders");
+      console.warn("OrdersPage loadOrders:", err);
+      setOrders([]);
     } finally {
       setLoading(false);
     }
@@ -47,12 +47,18 @@ export default function OrdersPage() {
       setDetailsLoading(true);
       setError("");
       setSuccessMessage("");
-      const res = await getOrderDetails(orderId);
+      const res = await getOrderDetailsRead(orderId);
       const result = res?.data || res || {};
+      const data = {
+        order: result.order || null,
+        lines: Array.isArray(result.lines) ? result.lines : [],
+      };
+      console.log("SUPABASE ORDER DETAILS:", data);
       setSelectedOrder(orderId);
-      setDetails(result);
+      setDetails(data);
     } catch (err) {
-      setError(err.message || "Failed to load order details");
+      console.warn("OrdersPage openOrder:", err);
+      setDetails({ order: null, lines: [] });
     } finally {
       setDetailsLoading(false);
     }

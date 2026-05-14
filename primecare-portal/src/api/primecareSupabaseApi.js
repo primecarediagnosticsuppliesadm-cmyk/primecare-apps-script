@@ -471,3 +471,168 @@ export async function getCollectionsRead() {
     };
   }
 }
+
+/**
+ * Maps `orders` row (snake_case) to OrdersPage list/detail header shape.
+ */
+export function mapOrderRow(row, labNameFallback = "") {
+  return {
+    orderId: str(row.order_id ?? row.orderId ?? row.id),
+    orderDate: str(row.order_date ?? row.orderDate ?? row.created_at ?? "").slice(0, 10),
+    labId: str(row.lab_id ?? row.labId ?? ""),
+    labName: str(row.lab_name ?? row.labName ?? labNameFallback),
+    contactPerson: str(row.contact_person ?? row.contactPerson ?? ""),
+    invoiceId: str(row.invoice_id ?? row.invoiceId ?? ""),
+    invoiceStatus: str(row.invoice_status ?? row.invoiceStatus ?? ""),
+    paymentStatus: str(row.payment_status ?? row.paymentStatus ?? ""),
+    orderStatus: str(row.order_status ?? row.orderStatus ?? row.status ?? "Placed"),
+    orderTotal: num(row.order_total ?? row.orderTotal ?? row.total ?? row.amount),
+    createdAt: str(row.created_at ?? row.createdAt ?? ""),
+    notes: str(row.notes ?? row.order_notes ?? ""),
+    mobileNumber: str(row.mobile_number ?? row.mobileNumber ?? row.phone ?? row.contact_phone ?? ""),
+  };
+}
+
+/**
+ * Maps `order_lines` row to OrdersPage line item shape.
+ */
+export function mapOrderLineRow(row) {
+  return {
+    orderLineId: str(
+      row.order_line_id ?? row.orderLineId ?? row.id ?? `${row.product_id ?? row.productId ?? "line"}`
+    ),
+    orderId: str(row.order_id ?? row.orderId ?? ""),
+    productId: str(row.product_id ?? row.productId ?? ""),
+    productName: str(row.product_name ?? row.productName ?? ""),
+    quantity: num(row.quantity),
+    unitSellingPrice: num(
+      row.unit_selling_price ?? row.unitSellingPrice ?? row.unit_price ?? row.unitPrice
+    ),
+    taxAmount: num(row.tax_amount ?? row.taxAmount ?? row.tax ?? 0),
+    netLineTotal: num(row.net_line_total ?? row.netLineTotal ?? row.line_total ?? row.lineTotal),
+  };
+}
+
+async function fetchLabsNameMap() {
+  const map = new Map();
+  if (!supabase) return map;
+  const { data: labsRows, error } = await supabase.from("labs").select("*");
+  if (error || !Array.isArray(labsRows)) return map;
+  for (const l of labsRows) {
+    const id = str(l.lab_id ?? l.labId ?? l.id);
+    const name = str(l.lab_name ?? l.labName ?? l.name ?? "");
+    if (id) map.set(id, name);
+  }
+  return map;
+}
+
+/**
+ * Read-only order list from `orders` (+ optional `labs` for lab name).
+ * Filters `status` query param client-side against mapped `orderStatus`.
+ * Never throws.
+ */
+export async function getOrdersRead(params = {}) {
+  if (!supabase) {
+    return { success: true, data: { orders: [] } };
+  }
+
+  try {
+    const statusFilter = str(params.status);
+    const labMap = await fetchLabsNameMap();
+
+    const { data: rows, error } = await supabase
+      .from("orders")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(500);
+
+    if (error) {
+      console.warn("[getOrdersRead] orders:", error.message);
+      return { success: true, data: { orders: [] } };
+    }
+
+    let orders = (rows || [])
+      .map((r) => {
+        const labId = str(r.lab_id ?? r.labId);
+        return mapOrderRow(r, labMap.get(labId) || "");
+      })
+      .filter((o) => o.orderId);
+
+    if (statusFilter) {
+      const want = statusFilter.toLowerCase();
+      orders = orders.filter((o) => String(o.orderStatus || "").toLowerCase() === want);
+    }
+
+    return { success: true, data: { orders } };
+  } catch (err) {
+    console.warn("[getOrdersRead] failed:", err?.message || err);
+    return { success: true, data: { orders: [] } };
+  }
+}
+
+/**
+ * Read-only single order + lines from `orders`, `order_lines`, and `labs`.
+ * `orderId` may match `orders.order_id` or `orders.id`.
+ * Never throws.
+ */
+export async function getOrderDetailsRead(orderId) {
+  const empty = { success: true, data: { order: null, lines: [] } };
+  if (!supabase) return empty;
+
+  try {
+    const oid = str(orderId);
+    if (!oid) return empty;
+
+    let orderRow = null;
+    const byBusinessId = await supabase.from("orders").select("*").eq("order_id", oid).limit(1);
+    if (!byBusinessId.error && Array.isArray(byBusinessId.data) && byBusinessId.data[0]) {
+      orderRow = byBusinessId.data[0];
+    } else if (byBusinessId.error) {
+      console.warn("[getOrderDetailsRead] orders by order_id:", byBusinessId.error.message);
+    }
+
+    if (!orderRow) {
+      const byPk = await supabase.from("orders").select("*").eq("id", oid).limit(1);
+      if (!byPk.error && Array.isArray(byPk.data) && byPk.data[0]) orderRow = byPk.data[0];
+      else if (byPk.error) {
+        console.warn("[getOrderDetailsRead] orders by id:", byPk.error.message);
+      }
+    }
+
+    if (!orderRow) {
+      return empty;
+    }
+
+    const labMap = await fetchLabsNameMap();
+    const labId = str(orderRow.lab_id ?? orderRow.labId);
+    const order = mapOrderRow(orderRow, labMap.get(labId) || "");
+
+    const fk = orderRow.id ?? orderRow.order_id;
+    let lineRows = [];
+
+    const q1 = await supabase.from("order_lines").select("*").eq("order_id", str(fk));
+    if (!q1.error && Array.isArray(q1.data)) {
+      lineRows = q1.data;
+    } else if (q1.error) {
+      console.warn("[getOrderDetailsRead] order_lines:", q1.error.message);
+    }
+
+    if (!lineRows.length && str(orderRow.order_id)) {
+      const q2 = await supabase.from("order_lines").select("*").eq("order_id", str(orderRow.order_id));
+      if (!q2.error && Array.isArray(q2.data)) lineRows = q2.data;
+    }
+
+    const lines = (lineRows || []).map(mapOrderLineRow).filter((l) => l.productId || l.productName);
+
+    return {
+      success: true,
+      data: {
+        order,
+        lines,
+      },
+    };
+  } catch (err) {
+    console.warn("[getOrderDetailsRead] failed:", err?.message || err);
+    return empty;
+  }
+}
