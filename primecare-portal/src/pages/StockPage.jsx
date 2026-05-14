@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getStock } from "../api/primecareApi";
+import { getStockDashboard } from "../api/primecareSupabaseApi";
 
 export default function StockPage() {
   const [data, setData] = useState({ stats: {}, inventory: [] });
@@ -10,11 +10,14 @@ export default function StockPage() {
   useEffect(() => {
     async function loadStock() {
       try {
-        const res = await getStock();
+        const res = await getStockDashboard();
 
         if (!res.success) {
           throw new Error(res.error || "Failed to load stock");
         }
+
+        const rows = res.data?.inventory ?? [];
+        console.log("SUPABASE STOCK:", rows);
 
         setData(res.data || { stats: {}, inventory: [] });
       } catch (err) {
@@ -27,7 +30,7 @@ export default function StockPage() {
     loadStock();
   }, []);
 
-  const rows = (data.inventory || []).filter((item) => {
+  const filteredRows = (data.inventory || []).filter((item) => {
     const q = search.toLowerCase().trim();
     if (!q) return true;
 
@@ -76,10 +79,10 @@ export default function StockPage() {
       />
 
       <div style={styles.list}>
-        {rows.length === 0 ? (
+        {filteredRows.length === 0 ? (
           <div style={styles.card}>No stock items found.</div>
         ) : (
-          rows.map((item, idx) => (
+          filteredRows.map((item, idx) => (
             <div key={idx} style={styles.card}>
               <div style={styles.itemTitle}>{item.productName || "-"}</div>
               <div style={styles.itemMeta}>

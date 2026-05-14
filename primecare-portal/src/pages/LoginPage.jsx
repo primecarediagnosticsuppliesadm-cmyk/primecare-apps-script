@@ -3,7 +3,7 @@ import { useAuth } from "@/context/AuthContext";
 import { logClientError } from "@/utils/debugLogger";
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, devLoginLocalAdmin } = useAuth();
   const [loginId, setLoginId] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -87,6 +87,24 @@ export default function LoginPage() {
             {submitting ? "Signing in..." : "Login"}
           </button>
         </form>
+
+        {import.meta.env.DEV === true ? (
+          <div className="mt-6 border-t border-amber-200 pt-6">
+            <p className="mb-3 text-xs font-medium uppercase tracking-wide text-amber-800">
+              Local development only
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setErrorMessage("");
+                devLoginLocalAdmin();
+              }}
+              className="w-full rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-950 hover:bg-amber-100"
+            >
+              Dev Login as Admin (Local Only)
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

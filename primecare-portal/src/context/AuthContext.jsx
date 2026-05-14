@@ -1,9 +1,26 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { getCurrentUser, loginUser, logoutUser } from "@/api/primecareApi";
 
 const AuthContext = createContext(null);
 
 const STORAGE_KEY = "primecare_auth_token";
+
+/** Local Vite-only session marker; never sent to Apps Script (bootstrap skips API). */
+const DEV_SESSION_PREFIX = "__PRIMECARE_DEV_SESSION__:";
+
+function encodeDevSessionUser(user) {
+  return DEV_SESSION_PREFIX + btoa(JSON.stringify(user));
+}
+
+function decodeDevSessionUser(token) {
+  if (!token || !token.startsWith(DEV_SESSION_PREFIX)) return null;
+  try {
+    const raw = token.slice(DEV_SESSION_PREFIX.length);
+    return JSON.parse(atob(raw));
+  } catch {
+    return null;
+  }
+}
 
 export function AuthProvider({ children }) {
   const [authToken, setAuthToken] = useState(localStorage.getItem(STORAGE_KEY) || "");
@@ -23,6 +40,15 @@ export function AuthProvider({ children }) {
         console.log("⚠️ No token found, clearing user");
         setCurrentUser(null);
         return;
+      }
+
+      if (import.meta.env.DEV === true) {
+        const devUser = decodeDevSessionUser(token);
+        if (devUser) {
+          console.log("🧪 Dev session bootstrap (no Apps Script)", { userId: devUser.userId });
+          setCurrentUser(devUser);
+          return;
+        }
       }
 
       const res = await getCurrentUser({ sessionToken: token });
@@ -70,6 +96,29 @@ export function AuthProvider({ children }) {
     };
   }, [authToken]);
 
+  const devLoginLocalAdmin = useCallback(() => {
+    if (import.meta.env.DEV !== true) return;
+
+    const user = {
+      userId: "admin001",
+      id: "admin001",
+      userName: "Admin User",
+      name: "Admin User",
+      role: "ADMIN",
+      email: "admin@primecare.local",
+      tenantId: "6fe055e2-e05d-423b-8e39-26138f2045d6",
+      labId: "",
+      agentName: "",
+      assignedArea: "",
+      defaultPage: "dashboard",
+    };
+
+    const token = encodeDevSessionUser(user);
+    localStorage.setItem(STORAGE_KEY, token);
+    setAuthToken(token);
+    setCurrentUser(user);
+  }, []);
+
   const login = async ({ loginId, password }) => {
     console.log("🔐 LOGIN START", { loginId });
 
@@ -100,7 +149,10 @@ export function AuthProvider({ children }) {
     console.log("🚪 LOGOUT START");
 
     try {
-      if (authToken) {
+      const isDevSession =
+        import.meta.env.DEV === true && authToken && decodeDevSessionUser(authToken);
+
+      if (authToken && !isDevSession) {
         await logoutUser({ sessionToken: authToken });
       }
     } catch (err) {
@@ -128,10 +180,11 @@ export function AuthProvider({ children }) {
       authLoading,
       isAuthenticated: !!currentUser,
       login,
+      devLoginLocalAdmin,
       signOut,
       logout: signOut,
     };
-  }, [authToken, currentUser, authLoading]);
+  }, [authToken, currentUser, authLoading, devLoginLocalAdmin]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
