@@ -474,22 +474,57 @@ export async function getCollectionsRead() {
 
 /**
  * Maps `orders` row (snake_case) to OrdersPage list/detail header shape.
+ * Safe with sparse rows: always yields a non-empty `orderId` when possible.
  */
-export function mapOrderRow(row, labNameFallback = "") {
+export function mapOrderRow(row, labNameFallback = "", rowIndex = 0) {
+  let orderId = str(
+    row.order_id ??
+      row.orderId ??
+      row.order_number ??
+      row.orderNumber ??
+      row.external_id ??
+      row.external_order_id ??
+      ""
+  );
+  if (!orderId && row.id != null && String(row.id).trim() !== "") {
+    orderId = String(row.id).trim();
+  }
+  if (!orderId) {
+    orderId = `order-row-${rowIndex}`;
+  }
+
+  const dateRaw = str(
+    row.order_date ??
+      row.orderDate ??
+      row.order_dt ??
+      row.created_at ??
+      row.createdAt ??
+      row.inserted_at ??
+      row.updated_at ??
+      ""
+  );
+  const orderDate = dateRaw ? dateRaw.slice(0, 10) : "";
+
   return {
-    orderId: str(row.order_id ?? row.orderId ?? row.id),
-    orderDate: str(row.order_date ?? row.orderDate ?? row.created_at ?? "").slice(0, 10),
-    labId: str(row.lab_id ?? row.labId ?? ""),
-    labName: str(row.lab_name ?? row.labName ?? labNameFallback),
-    contactPerson: str(row.contact_person ?? row.contactPerson ?? ""),
-    invoiceId: str(row.invoice_id ?? row.invoiceId ?? ""),
+    orderId,
+    orderDate,
+    labId: str(row.lab_id ?? row.labId ?? row.lab_uuid ?? row.labUUID ?? ""),
+    labName: str(row.lab_name ?? row.labName ?? row.lab_title ?? labNameFallback),
+    contactPerson: str(row.contact_person ?? row.contactPerson ?? row.contact_name ?? ""),
+    invoiceId: str(row.invoice_id ?? row.invoiceId ?? row.invoice_number ?? ""),
     invoiceStatus: str(row.invoice_status ?? row.invoiceStatus ?? ""),
-    paymentStatus: str(row.payment_status ?? row.paymentStatus ?? ""),
-    orderStatus: str(row.order_status ?? row.orderStatus ?? row.status ?? "Placed"),
-    orderTotal: num(row.order_total ?? row.orderTotal ?? row.total ?? row.amount),
-    createdAt: str(row.created_at ?? row.createdAt ?? ""),
-    notes: str(row.notes ?? row.order_notes ?? ""),
-    mobileNumber: str(row.mobile_number ?? row.mobileNumber ?? row.phone ?? row.contact_phone ?? ""),
+    paymentStatus: str(row.payment_status ?? row.paymentStatus ?? row.payment_state ?? ""),
+    orderStatus: str(
+      row.order_status ?? row.orderStatus ?? row.status ?? row.state ?? "Placed"
+    ),
+    orderTotal: num(
+      row.order_total ?? row.orderTotal ?? row.total ?? row.amount ?? row.grand_total ?? 0
+    ),
+    createdAt: str(row.created_at ?? row.createdAt ?? row.inserted_at ?? ""),
+    notes: str(row.notes ?? row.order_notes ?? row.remark ?? ""),
+    mobileNumber: str(
+      row.mobile_number ?? row.mobileNumber ?? row.phone ?? row.contact_phone ?? ""
+    ),
   };
 }
 
@@ -516,52 +551,52 @@ export function mapOrderLineRow(row) {
 async function fetchLabsNameMap() {
   const map = new Map();
   if (!supabase) return map;
-  const { data: labsRows, error } = await supabase.from("labs").select("*");
-  if (error || !Array.isArray(labsRows)) return map;
-  for (const l of labsRows) {
-    const id = str(l.lab_id ?? l.labId ?? l.id);
-    const name = str(l.lab_name ?? l.labName ?? l.name ?? "");
-    if (id) map.set(id, name);
+  try {
+    const { data: labsRows, error } = await supabase.from("labs").select("*");
+    if (error || !Array.isArray(labsRows)) return map;
+    for (const l of labsRows) {
+      const id = str(l.lab_id ?? l.labId ?? l.id);
+      const name = str(l.lab_name ?? l.labName ?? l.name ?? "");
+      if (id) map.set(id, name);
+    }
+  } catch {
+    /* ignore — orders list still works without lab names */
   }
   return map;
 }
 
 /**
- * Read-only order list from `orders` (+ optional `labs` for lab name).
- * Filters `status` query param client-side against mapped `orderStatus`.
+ * Read-only order list: `select *` from `orders` (debug path — no status/tenant filters).
  * Never throws.
  */
-export async function getOrdersRead(params = {}) {
+export async function getOrdersRead(_params = {}) {
   if (!supabase) {
     return { success: true, data: { orders: [] } };
   }
 
   try {
-    const statusFilter = str(params.status);
-    const labMap = await fetchLabsNameMap();
+    const { data: rows, error } = await supabase.from("orders").select("*").limit(2000);
 
-    const { data: rows, error } = await supabase
-      .from("orders")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(500);
+    console.log("SUPABASE ORDERS RAW:", rows);
 
     if (error) {
       console.warn("[getOrdersRead] orders:", error.message);
       return { success: true, data: { orders: [] } };
     }
 
-    let orders = (rows || [])
-      .map((r) => {
-        const labId = str(r.lab_id ?? r.labId);
-        return mapOrderRow(r, labMap.get(labId) || "");
-      })
-      .filter((o) => o.orderId);
+    const rawList = Array.isArray(rows) ? rows : [];
 
-    if (statusFilter) {
-      const want = statusFilter.toLowerCase();
-      orders = orders.filter((o) => String(o.orderStatus || "").toLowerCase() === want);
+    let labMap = new Map();
+    try {
+      labMap = await fetchLabsNameMap();
+    } catch {
+      labMap = new Map();
     }
+
+    const orders = rawList.map((r, idx) => {
+      const labId = str(r.lab_id ?? r.labId ?? r.lab_uuid ?? r.labUUID ?? "");
+      return mapOrderRow(r, labMap.get(labId) || "", idx);
+    });
 
     return { success: true, data: { orders } };
   } catch (err) {
