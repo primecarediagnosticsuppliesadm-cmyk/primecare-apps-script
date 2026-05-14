@@ -177,3 +177,110 @@ export async function getLabsCredit() {
     data: labs,
   };
 }
+
+function normalizeUrgencyLabel(raw) {
+  const v = String(raw || "").trim().toLowerCase();
+  if (v === "critical" || v === "crit") return "Critical";
+  if (v === "high") return "High";
+  if (v === "medium" || v === "med") return "Medium";
+  if (v === "low") return "Low";
+  if (String(raw || "").trim()) {
+    const s = String(raw).trim();
+    return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+  }
+  return "Medium";
+}
+
+const FORECAST_URGENCY_RANK = { Critical: 1, High: 2, Medium: 3, Low: 4 };
+
+function sortForecastRows(rows) {
+  return [...rows].sort(
+    (a, b) =>
+      (FORECAST_URGENCY_RANK[a.urgency] || 99) - (FORECAST_URGENCY_RANK[b.urgency] || 99)
+  );
+}
+
+/**
+ * Maps v_reorder_candidates (snake_case) to ReorderForecastPage item shape.
+ */
+export function mapReorderCandidateRow(row) {
+  const daysLeft = num(
+    row.days_left ?? row.daysLeft ?? row.Days_Left ?? row.days_until_stockout ?? row.days_to_stockout
+  );
+
+  let urgencyRaw = str(row.urgency ?? row.Urgency);
+  if (!urgencyRaw) {
+    if (daysLeft <= 7) urgencyRaw = "Critical";
+    else if (daysLeft <= 14) urgencyRaw = "High";
+    else if (daysLeft <= 30) urgencyRaw = "Medium";
+    else urgencyRaw = "Low";
+  }
+
+  const monthlyFromRow = num(
+    row.monthly_demand ?? row.monthlyDemand ?? row.Monthly_Demand ?? row.avg_monthly_demand
+  );
+  const daily = num(
+    row.avg_daily_sales_30d ?? row.avg_daily_sales ?? row.avgDailySales ?? row.Avg_Daily_Sales_30D
+  );
+  const monthlyDemand =
+    monthlyFromRow > 0 ? monthlyFromRow : daily > 0 ? Math.round(daily * 30) : 0;
+
+  return {
+    productId: str(row.product_id ?? row.productId ?? row.Product_ID),
+    productName: str(row.product_name ?? row.productName ?? row.Product_Name),
+    stockHealth: str(row.stock_health ?? row.stockHealth ?? row.Stock_Health),
+    currentStock: num(row.current_stock ?? row.currentStock ?? row.Current_Stock),
+    monthlyDemand,
+    daysLeft,
+    urgency: normalizeUrgencyLabel(urgencyRaw),
+    suggestedOrderQty: num(
+      row.suggested_order_qty ??
+        row.suggestedOrderQty ??
+        row.reorder_qty ??
+        row.Reorder_Qty ??
+        row.suggested_reorder_qty
+    ),
+  };
+}
+
+function buildReorderSummaryFromForecast(forecast) {
+  return {
+    criticalItems: forecast.filter((x) => x.urgency === "Critical").length,
+    highUrgencyItems: forecast.filter((x) => x.urgency === "High").length,
+    mediumUrgencyItems: forecast.filter((x) => x.urgency === "Medium").length,
+    totalSuggestedOrderQty: forecast.reduce((sum, x) => sum + num(x.suggestedOrderQty), 0),
+  };
+}
+
+/**
+ * Read-only reorder forecast from Supabase view v_reorder_candidates.
+ */
+export async function getReorderForecastRead() {
+  if (!supabase) {
+    throw new Error(
+      "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
+    );
+  }
+
+  const { data: rawRows, error } = await supabase.from("v_reorder_candidates").select("*");
+
+  if (error) {
+    throw new Error(error.message || "Supabase reorder forecast read failed");
+  }
+
+  const forecast = sortForecastRows(
+    (rawRows || [])
+      .map(mapReorderCandidateRow)
+      .filter((row) => row.productId || row.productName)
+  );
+
+  const summary = buildReorderSummaryFromForecast(forecast);
+
+  return {
+    success: true,
+    data: {
+      summary,
+      forecast,
+    },
+  };
+}

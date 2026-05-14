@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, Package, ClipboardCheck, TrendingUp } from "lucide-react";
-import { getReorderForecast } from "@/api/primecareApi";
+import { getReorderForecastRead } from "@/api/primecareSupabaseApi";
 
 function StatCard({ title, value, icon: Icon, subtitle }) {
   return (
@@ -38,9 +38,12 @@ export default function ReorderForecastPage() {
   useEffect(() => {
     async function loadForecast() {
       try {
-        const res = await getReorderForecast();
+        const res = await getReorderForecastRead();
         if (!res.success) throw new Error(res.error || "Failed to load reorder forecast");
-        setData(res.data || {});
+        const payload = res.data || {};
+        const rows = payload.forecast || [];
+        console.log("SUPABASE REORDER:", rows);
+        setData(payload);
       } catch (err) {
         setError(err.message || "Failed to load reorder forecast");
       } finally {
