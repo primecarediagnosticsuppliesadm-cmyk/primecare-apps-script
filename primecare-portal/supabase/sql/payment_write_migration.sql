@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS public.payments (
 CREATE INDEX IF NOT EXISTS idx_payments_lab_id ON public.payments (lab_id);
 CREATE INDEX IF NOT EXISTS idx_payments_payment_date ON public.payments (payment_date);
 
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS note text;
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS collected_by text;
+
 ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "temp_anon_payments_select" ON public.payments;

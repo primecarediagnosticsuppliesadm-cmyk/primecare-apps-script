@@ -704,6 +704,34 @@ function buildCollectionsSummary(collections, todayCollections) {
   };
 }
 
+function isMissingPaymentsOptionalColumnError(err) {
+  const msg = String(err?.message ?? err ?? "").toLowerCase();
+  return (
+    (msg.includes("schema cache") ||
+      msg.includes("could not find") ||
+      msg.includes("does not exist")) &&
+    (msg.includes("collected_by") || msg.includes("'note'") || msg.includes(" note"))
+  );
+}
+
+/** Inserts payment row; retries without optional note/collected_by if columns are not migrated yet. */
+async function insertPaymentsRow(paymentRow) {
+  const attempt = (row) => supabase.from("payments").insert([row]).select();
+  let res = await attempt(paymentRow);
+  if (!res.error) return res;
+
+  if (!isMissingPaymentsOptionalColumnError(res.error)) return res;
+
+  const slim = { ...paymentRow };
+  delete slim.collected_by;
+  delete slim.note;
+  console.warn(
+    "[createPaymentWrite] payments.note/collected_by missing in Supabase — retrying core columns only. Run primecare-portal/supabase/sql/collections_notes_migration.sql",
+    res.error.message
+  );
+  return attempt(slim);
+}
+
 /**
  * Records a collection payment in `payments` and rolls `ar_credit_control` forward for the lab.
  * Payload: { labId, amountReceived | amountCollected, paymentMode | mode, paymentDate?, orderId?, tenantId?, outstandingBefore?, collectedBy? }
@@ -787,7 +815,7 @@ export async function createPaymentWrite(payload = {}) {
     if (note) paymentRow.note = note;
     if (collected_by) paymentRow.collected_by = collected_by;
 
-    const { data: payData, error: payErr } = await supabase.from("payments").insert([paymentRow]).select();
+    const { data: payData, error: payErr } = await insertPaymentsRow(paymentRow);
 
     if (payErr) {
       console.warn("[createPaymentWrite] payments insert:", payErr.message);
