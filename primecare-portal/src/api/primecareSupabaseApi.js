@@ -531,7 +531,11 @@ export function mapCollectionsRowFromLabsCredit(rawRow) {
     overdueDays: num(m.daysOverdue),
     riskStatus: deriveCollectionRiskStatus(m),
     lastFollowUp: lastFollowUp === "-" ? "" : lastFollowUp,
+    nextFollowUp: str(
+      rawRow.next_follow_up_date ?? rawRow.next_follow_up ?? rawRow.nextFollowUp ?? ""
+    ).slice(0, 10),
     nextAction,
+    collectionsNotes: str(rawRow.collections_notes ?? rawRow.collectionsNotes ?? ""),
     paymentStatus: paymentStatus || "Pending",
     area: m.area,
     creditHold: m.creditHold,
@@ -595,19 +599,19 @@ export function mapCollectionsRowFromArCredit(
   });
 
   const lastFollowUp = str(
-    arRow.last_follow_up ??
+    arRow.last_follow_up_date ??
+      arRow.last_follow_up ??
       arRow.lastFollowUp ??
       arRow.last_followup ??
-      arRow.last_follow_up_date ??
-      m?.nextFollowUp ??
+      m?.lastFollowUp ??
       ""
-  );
-  const nextAction = str(
-    arRow.next_action ??
-      arRow.nextAction ??
-      arRow.collections_notes ??
-      arRow.collectionsNotes ??
-      ""
+  ).slice(0, 10);
+  const nextFollowUp = str(
+    arRow.next_follow_up_date ?? arRow.next_follow_up ?? arRow.nextFollowUp ?? m?.nextFollowUp ?? ""
+  ).slice(0, 10);
+  const nextAction = str(arRow.next_action ?? arRow.nextAction ?? "");
+  const collectionsNotes = str(
+    arRow.collections_notes ?? arRow.collectionsNotes ?? arRow.Collections_Notes ?? ""
   );
 
   return {
@@ -622,9 +626,31 @@ export function mapCollectionsRowFromArCredit(
     riskStatus,
     creditHold,
     lastFollowUp: lastFollowUp === "-" ? "" : lastFollowUp,
+    nextFollowUp: nextFollowUp === "-" ? "" : nextFollowUp,
     nextAction,
+    collectionsNotes,
     paymentStatus,
     area,
+  };
+}
+
+function appendTimestampedCollectionNote(existingNotes, noteText) {
+  const existing = str(existingNotes);
+  const note = str(noteText);
+  if (!note) return existing;
+  const timestamp = new Date().toISOString().slice(0, 19).replace("T", " ");
+  const line = `[${timestamp}] ${note}`;
+  return existing ? `${existing}\n${line}` : line;
+}
+
+function buildCollectionDetailFromSources(arRow, labsCreditRow, paymentsForLab = []) {
+  const base = mapCollectionsRowFromArCredit(arRow, labsCreditRow, paymentsForLab);
+  return {
+    ...base,
+    allowedOverdueDays: num(
+      arRow?.allowed_overdue_days ?? arRow?.allowedOverdueDays ?? arRow?.Allowed_Overdue_Days ?? 0
+    ),
+    note: base.collectionsNotes,
   };
 }
 
@@ -756,6 +782,10 @@ export async function createPaymentWrite(payload = {}) {
     console.log("AR BEFORE PAYMENT", arRow || { lab_id, total_paid: old_total_paid, outstanding: old_outstanding });
 
     const paymentRow = { ...writePayload };
+    const note = str(payload.note);
+    const collected_by = str(payload.collectedBy ?? payload.collected_by);
+    if (note) paymentRow.note = note;
+    if (collected_by) paymentRow.collected_by = collected_by;
 
     const { data: payData, error: payErr } = await supabase.from("payments").insert([paymentRow]).select();
 
@@ -966,10 +996,177 @@ export async function getCollectionHistoryRead(labId, options = {}) {
     });
 
     const history = matchedRaw.map(mapPaymentHistoryRow).filter((h) => h.amountCollected > 0);
+    console.log("COLLECTION HISTORY SUPABASE", {
+      labId: labKey,
+      count: history.length,
+      history,
+    });
     return { success: true, data: { history } };
   } catch (err) {
     console.warn("[getCollectionHistoryRead] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: { history: [] } };
+  }
+}
+
+/**
+ * Collection detail for one lab from `ar_credit_control` (+ `v_labs_credit`, payments enrichment).
+ */
+export async function getCollectionDetailRead(labId, options = {}) {
+  const labKey = normalizeLabIdKey(labId);
+  traceSupabaseRead("Collections.getCollectionDetailRead", {
+    tables: ["ar_credit_control", "v_labs_credit", "payments"],
+    labId: labKey,
+  });
+  if (!supabase || !labKey) {
+    return { success: false, error: "lab_id is required", data: { collection: null } };
+  }
+
+  try {
+    let arRow = options.arRow ?? null;
+    if (!arRow) {
+      const arSel = await supabase.from("ar_credit_control").select("*").eq("lab_id", labKey).limit(1);
+      if (arSel.error) {
+        console.warn("[getCollectionDetailRead] ar_credit_control:", arSel.error.message);
+        return { success: false, error: arSel.error.message, data: { collection: null } };
+      }
+      arRow = Array.isArray(arSel.data) && arSel.data[0] ? arSel.data[0] : null;
+    }
+
+    let labsCreditRow = options.labsCreditRow ?? null;
+    let paymentsForLab = options.paymentsForLab ?? null;
+    if (!labsCreditRow) {
+      const labsRes = await supabase.from("v_labs_credit").select("*");
+      if (!labsRes.error) {
+        labsCreditRow = buildLabsCreditMapByLabId(labsRes.data || []).get(labKey) ?? null;
+      }
+    }
+    if (!paymentsForLab) {
+      const payRes = await supabase.from("payments").select("*");
+      if (!payRes.error) {
+        paymentsForLab = buildPaymentsByNormalizedLabId(payRes.data || []).byLab.get(labKey) || [];
+      } else {
+        paymentsForLab = [];
+      }
+    }
+
+    if (!arRow) {
+      if (labsCreditRow) {
+        const mapped = mapCollectionsRowFromLabsCredit(labsCreditRow);
+        const collection = {
+          ...mapped,
+          collectionsNotes: "",
+          note: "",
+        };
+        console.log("COLLECTION DETAIL SUPABASE", {
+          labId: labKey,
+          source: "v_labs_credit_only",
+          collection,
+        });
+        return { success: true, data: { collection } };
+      }
+      console.log("COLLECTION DETAIL SUPABASE", { labId: labKey, source: "none", collection: null });
+      return { success: true, data: { collection: null } };
+    }
+
+    const collection = buildCollectionDetailFromSources(arRow, labsCreditRow, paymentsForLab || []);
+    console.log("COLLECTION DETAIL SUPABASE", {
+      labId: labKey,
+      source: "ar_credit_control",
+      collection,
+    });
+    return { success: true, data: { collection } };
+  } catch (err) {
+    console.warn("[getCollectionDetailRead] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: { collection: null } };
+  }
+}
+
+/**
+ * Updates collection notes / follow-up on `ar_credit_control` (amount = 0 path).
+ * Payload: { labId, note?, nextFollowUp?, nextAction? }
+ */
+export async function updateCollectionNotesWrite(payload = {}) {
+  traceSupabaseRead("Collections.updateCollectionNotesWrite", { table: "ar_credit_control" });
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+
+  try {
+    const lab_id = normalizeLabIdKey(payload.labId ?? payload.lab_id);
+    if (!lab_id) {
+      return { success: false, error: "lab_id is required", data: null };
+    }
+
+    const note = str(payload.note);
+    const next_follow_up_date = str(payload.nextFollowUp ?? payload.next_follow_up_date).slice(0, 10);
+    const next_action = str(payload.nextAction ?? payload.next_action);
+
+    const arSel = await supabase.from("ar_credit_control").select("*").eq("lab_id", lab_id).limit(1);
+    if (arSel.error) {
+      console.warn("[updateCollectionNotesWrite] ar_credit_control select:", arSel.error.message);
+      return { success: false, error: arSel.error.message, data: null };
+    }
+
+    const arRow = Array.isArray(arSel.data) && arSel.data[0];
+    if (!arRow) {
+      return { success: false, error: `Lab not found in ar_credit_control: ${lab_id}`, data: null };
+    }
+
+    const outstandingAmount = num(
+      arRow.outstanding ?? arRow.outstanding_amount ?? arRow.outstandingAmount ?? arRow.balance ?? 0
+    );
+    const totalPaid = num(arRow.total_paid ?? arRow.totalPaid ?? arRow.amount_paid ?? 0);
+    const patch = {
+      updated_at: new Date().toISOString(),
+      payment_status: deriveCollectionPaymentStatus({
+        outstandingAmount,
+        totalPaid,
+        explicitStatus: arRow.payment_status ?? arRow.paymentStatus ?? "",
+      }),
+    };
+
+    if (next_follow_up_date) patch.next_follow_up_date = next_follow_up_date;
+    if (next_action) patch.next_action = next_action;
+    if (note) {
+      patch.collections_notes = appendTimestampedCollectionNote(
+        arRow.collections_notes ?? arRow.collectionsNotes,
+        note
+      );
+      patch.last_follow_up_date = localDateYmd(new Date());
+    } else if (next_follow_up_date || next_action) {
+      patch.last_follow_up_date = localDateYmd(new Date());
+    }
+
+    console.log("COLLECTION NOTES WRITE PAYLOAD", {
+      lab_id,
+      note,
+      next_follow_up_date: next_follow_up_date || null,
+      next_action: next_action || null,
+      patch,
+    });
+
+    const arUpd = await supabase
+      .from("ar_credit_control")
+      .update(patch)
+      .eq("lab_id", lab_id)
+      .select();
+
+    if (arUpd.error) {
+      console.warn("[updateCollectionNotesWrite] ar_credit_control update:", arUpd.error.message);
+      return { success: false, error: arUpd.error.message, data: null };
+    }
+
+    const saved = Array.isArray(arUpd.data) ? arUpd.data[0] : arUpd.data;
+    console.log("SUPABASE COLLECTION NOTES SAVED", saved);
+
+    return {
+      success: true,
+      data: { ar: saved },
+      error: null,
+    };
+  } catch (err) {
+    console.warn("[updateCollectionNotesWrite] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: null };
   }
 }
 

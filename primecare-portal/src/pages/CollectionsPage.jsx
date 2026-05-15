@@ -7,8 +7,10 @@ import {
 } from "@/api/primecareApi";
 import {
   createPaymentWrite,
+  getCollectionDetailRead,
   getCollectionHistoryRead,
   getCollectionsRead,
+  updateCollectionNotesWrite,
 } from "@/api/primecareSupabaseApi";
 import { supabase } from "@/api/supabaseClient.js";
 import {
@@ -176,47 +178,79 @@ export default function CollectionsPage({ currentUser, authToken }) {
       const params = authToken ? { sessionToken: authToken } : {};
 
       let historyRows = [];
+      let sbDetail = null;
+      let sbDetailOk = false;
+      let sbHistoryOk = false;
+
       if (supabase) {
         logSupabaseFeatureSource("Collections.history", { api: "getCollectionHistoryRead" });
         const histRead = await getCollectionHistoryRead(canonicalLabId);
+        sbHistoryOk = Boolean(histRead?.success);
         if (histRead?.success && Array.isArray(histRead?.data?.history)) {
           historyRows = histRead.data.history;
         }
+
+        logSupabaseFeatureSource("Collections.details", { api: "getCollectionDetailRead" });
+        const detailRead = await getCollectionDetailRead(canonicalLabId);
+        sbDetailOk = Boolean(detailRead?.success);
+        sbDetail = detailRead?.data?.collection ?? null;
       }
 
-      logPartialMigrationWarning(
-        "Collections.details",
-        "getCollectionDetails still uses Apps Script for notes/follow-up enrichment."
-      );
-      const detailsRes = await getCollectionDetails(canonicalLabId, params);
-      if (!historyRows.length) {
+      let apiCollection = sbDetail;
+      const useAppsScriptDetail = !sbDetailOk && !import.meta.env.DEV;
+      const useAppsScriptHistory = !sbHistoryOk && !historyRows.length && !import.meta.env.DEV;
+
+      if (useAppsScriptDetail) {
+        logPartialMigrationWarning(
+          "Collections.details",
+          "Falling back to Apps Script getCollectionDetails."
+        );
+        logAppsScriptFallbackUsed("Collections.details", "Supabase detail read failed");
+        const detailsRes = await getCollectionDetails(canonicalLabId, params);
+        const detailsPayload = detailsRes?.data || detailsRes || {};
+        apiCollection = detailsPayload.collection || apiCollection;
+      }
+
+      if (useAppsScriptHistory) {
         logPartialMigrationWarning(
           "Collections.history",
           "Falling back to Apps Script getCollectionHistory."
         );
+        logAppsScriptFallbackUsed("Collections.history", "Supabase history read failed");
         const historyRes = await getCollectionHistory(canonicalLabId, params);
         const historyPayload = historyRes?.data || historyRes || {};
         historyRows = Array.isArray(historyPayload.history) ? historyPayload.history : [];
       }
 
-      const detailsPayload = detailsRes?.data || detailsRes || {};
-      const apiCollection = detailsPayload.collection || null;
-
       let collection = listMatch || null;
       if (apiCollection) {
-        collection = { ...listMatch, ...apiCollection, labId: canonicalLabId };
+        const mergedNotes =
+          apiCollection.collectionsNotes ??
+          apiCollection.note ??
+          listMatch?.collectionsNotes ??
+          "";
+        collection = {
+          ...listMatch,
+          ...apiCollection,
+          labId: labIdKey(apiCollection.labId ?? canonicalLabId),
+          collectionsNotes: mergedNotes,
+          nextFollowUp:
+            apiCollection.nextFollowUp ?? listMatch?.nextFollowUp ?? "",
+          nextAction: apiCollection.nextAction ?? listMatch?.nextAction ?? "",
+        };
       }
 
       console.log("COLLECTION DETAIL MATCH", {
         canonicalLabId,
         listMatch: listMatch || null,
+        supabaseDetail: Boolean(sbDetail),
         apiReturnedCollection: Boolean(apiCollection),
-        resolvedFrom: listMatch
-          ? apiCollection
-            ? "supabase_list_merged_api"
-            : "supabase_list"
-          : apiCollection
-            ? "apps_script"
+        resolvedFrom: apiCollection
+          ? sbDetail
+            ? "supabase_detail"
+            : "apps_script_detail"
+          : listMatch
+            ? "supabase_list"
             : "none",
         collection,
       });
@@ -229,7 +263,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
 
       setAmountCollected("");
       setPaymentMode("Cash");
-      setNote("");
+      setNote(collection?.collectionsNotes || collection?.note || "");
       setNextFollowUp(collection?.nextFollowUp || "");
       setNextAction(
         options?.taskContext?.nextAction ||
@@ -279,6 +313,39 @@ export default function CollectionsPage({ currentUser, authToken }) {
       };
 
       const amt = Number(amountCollected || 0);
+      const notesPayload = {
+        labId: labIdKey(selectedLabId),
+        note,
+        nextFollowUp,
+        nextAction,
+      };
+
+      if (supabase && amt <= 0) {
+        logSupabaseFeatureSource("Collections.notesWrite", { api: "updateCollectionNotesWrite" });
+        const notesRes = await updateCollectionNotesWrite(notesPayload);
+        if (notesRes.success) {
+          setSuccessMessage(
+            pendingTaskContext?.taskId
+              ? "Collection updated successfully. You can now mark the linked task complete."
+              : "Collection updated successfully"
+          );
+          await loadCollections();
+          await openCollection(selectedLabId, {
+            fromTask: !!pendingTaskContext,
+            taskContext: pendingTaskContext,
+          });
+          return;
+        }
+
+        if (import.meta.env.DEV) {
+          throw new Error(notesRes.error || "Supabase collection notes write failed.");
+        }
+
+        logAppsScriptFallbackUsed("Collections.notesWrite", notesRes.error);
+        throw new Error(
+          notesRes.error || "Failed to save collection notes. Apps Script does not support zero-amount updates."
+        );
+      }
 
       if (supabase && amt > 0) {
         const sbRes = await createPaymentWrite({
@@ -289,10 +356,15 @@ export default function CollectionsPage({ currentUser, authToken }) {
           paymentMode,
           outstandingBefore: Number(selectedCollection?.outstandingAmount ?? 0),
           collectedBy: currentUser?.name || "System User",
+          note,
         });
 
         logSupabaseFeatureSource("Collections.paymentWrite", { api: "createPaymentWrite" });
         if (sbRes.success) {
+          if (note || nextFollowUp || nextAction) {
+            await updateCollectionNotesWrite(notesPayload);
+          }
+
           setSuccessMessage(
             pendingTaskContext?.taskId
               ? "Collection updated successfully. You can now mark the linked task complete."
@@ -314,9 +386,13 @@ export default function CollectionsPage({ currentUser, authToken }) {
         logAppsScriptFallbackUsed("Collections.paymentWrite", sbRes.error);
       }
 
+      if (amt <= 0) {
+        throw new Error("Enter an amount collected or save notes via Supabase when configured.");
+      }
+
       logPartialMigrationWarning(
         "Collections.paymentWrite",
-        "Using updateCollection (Apps Script) for notes/follow-up or after Supabase failure."
+        "Using updateCollection (Apps Script) after Supabase payment failure."
       );
       const res = await updateCollection(basePayload);
       const responsePayload = res?.data || res || {};
