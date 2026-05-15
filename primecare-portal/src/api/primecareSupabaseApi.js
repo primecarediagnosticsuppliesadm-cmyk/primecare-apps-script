@@ -667,40 +667,6 @@ export async function createAgentVisitWrite(payload = {}) {
 }
 
 /**
- * Writable stock table for lab-order deduction. Schema: `public.inventory`
- * (`product_id`, `current_stock`). Override with VITE_SUPABASE_INVENTORY_TABLE only if needed.
- */
-function getInventoryTableName() {
-  const fromEnv =
-    typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_SUPABASE_INVENTORY_TABLE
-      ? str(import.meta.env.VITE_SUPABASE_INVENTORY_TABLE)
-      : "";
-  return fromEnv || "inventory";
-}
-
-/** Reads numeric on-hand quantity from an `inventory` (or compatible) row. */
-function readStockFromProductRow(row) {
-  return num(
-    row?.current_stock ??
-      row?.currentStock ??
-      row?.stock ??
-      row?.qty_on_hand ??
-      row?.quantity_on_hand ??
-      row?.qty ??
-      0
-  );
-}
-
-/** Picks the DB column name to update for stock (snake_case for PostgREST). */
-function pickStockColumnKey(row) {
-  if (!row || typeof row !== "object") return "current_stock";
-  if (Object.prototype.hasOwnProperty.call(row, "current_stock")) return "current_stock";
-  if (Object.prototype.hasOwnProperty.call(row, "stock")) return "stock";
-  if (Object.prototype.hasOwnProperty.call(row, "qty_on_hand")) return "qty_on_hand";
-  return "current_stock";
-}
-
-/**
  * Inserts rows into `inventory_ledger` (e.g. ORDER_OUT lines after a lab order).
  * @param {object[]} ledgerRows
  * @returns {{ success: boolean, data?: object[], error?: string|null }}
@@ -735,7 +701,10 @@ export async function createInventoryLedgerWrite(ledgerRows) {
  */
 async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenant_id, created_by }) {
   if (!supabase) return;
-  const table = getInventoryTableName();
+
+  const tableName = "inventory";
+  console.log("INVENTORY TABLE TARGET", tableName);
+
   const oid = str(order_id);
   const lines = Array.isArray(savedLineItems) ? savedLineItems : [];
   const ledgerBatch = [];
@@ -747,7 +716,7 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
     const qty = num(line.quantity);
     if (!product_id || qty <= 0) continue;
 
-    const sel = await supabase.from(table).select("*").eq("product_id", product_id).limit(1);
+    const sel = await supabase.from("inventory").select("*").eq("product_id", product_id).limit(1);
 
     if (sel.error) {
       console.warn(
@@ -764,30 +733,30 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
         "[createOrderWrite] INVENTORY: no stock row for product — order is NOT rolled back:",
         product_id,
         "table:",
-        table
+        tableName
       );
       continue;
     }
 
-    const stock_before = readStockFromProductRow(row);
+    const stock_before = num(row.current_stock ?? row.currentStock ?? 0);
     const stock_after = Math.max(0, stock_before - qty);
-    const stockKey = str(table) === "inventory" ? "current_stock" : pickStockColumnKey(row);
 
     console.log("INVENTORY BEFORE UPDATE", {
-      table,
+      table: tableName,
       product_id,
-      stock_column: stockKey,
+      stock_column: "current_stock",
       stock_before,
       quantity_out: qty,
       stock_after,
     });
 
     const updatePatch = {
-      [stockKey]: stock_after,
+      current_stock: stock_after,
       updated_at: new Date().toISOString(),
     };
+    console.log("INVENTORY UPDATE PATCH", updatePatch);
 
-    const upd = await supabase.from(table).update(updatePatch).eq("product_id", product_id);
+    const upd = await supabase.from("inventory").update(updatePatch).eq("product_id", product_id);
 
     if (upd.error) {
       console.warn(
