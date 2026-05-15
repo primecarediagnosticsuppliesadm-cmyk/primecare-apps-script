@@ -128,13 +128,20 @@ export default function CollectionsPage({ currentUser, authToken }) {
   async function openCollection(labId, options = {}) {
     console.log("COLLECTION OPEN CLICKED", { labId, normalized: normalizeLabId(labId) });
 
+    const listMatch = findCollectionByLabId(collections, labId);
+    const canonicalLabId = listMatch?.labId ?? labId;
+
     try {
       setDetailsLoading(true);
       setError("");
       setSuccessMessage("");
 
-      const listMatch = findCollectionByLabId(collections, labId);
-      const canonicalLabId = listMatch?.labId ?? labId;
+      if (listMatch) {
+        setSelectedLabId(canonicalLabId);
+        setSelectedCollection(listMatch);
+      } else {
+        setSelectedLabId(canonicalLabId);
+      }
 
       const params = authToken ? { sessionToken: authToken } : {};
 
@@ -145,16 +152,24 @@ export default function CollectionsPage({ currentUser, authToken }) {
 
       const detailsPayload = detailsRes?.data || detailsRes || {};
       const historyPayload = historyRes?.data || historyRes || {};
-      let collection = detailsPayload.collection || null;
-      if (!collection && listMatch) {
-        collection = listMatch;
+      const apiCollection = detailsPayload.collection || null;
+
+      let collection = listMatch || null;
+      if (apiCollection) {
+        collection = { ...listMatch, ...apiCollection, labId: canonicalLabId };
       }
 
       console.log("COLLECTION DETAIL MATCH", {
         canonicalLabId,
         listMatch: listMatch || null,
-        apiReturnedCollection: Boolean(detailsPayload.collection),
-        resolvedFrom: detailsPayload.collection ? "apps_script" : listMatch ? "supabase_list" : "none",
+        apiReturnedCollection: Boolean(apiCollection),
+        resolvedFrom: listMatch
+          ? apiCollection
+            ? "supabase_list_merged_api"
+            : "supabase_list"
+          : apiCollection
+            ? "apps_script"
+            : "none",
         collection,
       });
 
@@ -180,7 +195,18 @@ export default function CollectionsPage({ currentUser, authToken }) {
         );
       }
     } catch (err) {
-      setError(err.message || "Failed to load collection details");
+      if (listMatch) {
+        setSelectedLabId(canonicalLabId);
+        setSelectedCollection(listMatch);
+        console.log("SELECTED COLLECTION SET", {
+          selectedLabId: canonicalLabId,
+          collection: listMatch,
+          source: "supabase_list_after_api_error",
+        });
+        setHistory([]);
+      } else {
+        setError(err.message || "Failed to load collection details");
+      }
     } finally {
       setDetailsLoading(false);
     }
