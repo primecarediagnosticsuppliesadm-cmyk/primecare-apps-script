@@ -546,8 +546,8 @@ function agentTaskRowAssignedToUser(row, currentUser) {
 }
 
 /**
- * Read-only agent workspace: labs (v_labs_credit), collections (reuse getCollectionsRead),
- * visits (`visits` or `v_visits`), open tasks (`agent_tasks` or `tasks`).
+ * Read-only agent workspace: labs/credit (`v_labs_credit`), collections (`getCollectionsRead`),
+ * visits (`agent_visits`), optional open tasks (`agent_tasks` only — empty if table missing).
  * Shapes match AgentDashboard expectations. Never throws.
  */
 export async function getAgentWorkspaceRead(currentUser) {
@@ -572,13 +572,11 @@ export async function getAgentWorkspaceRead(currentUser) {
     const assignedLabs = filterLabsForUser(allLabs, currentUser);
 
     let visitRows = [];
-    const v1 = await supabase.from("visits").select("*");
-    if (v1.error) {
-      console.warn("[getAgentWorkspaceRead] visits:", v1.error.message);
-      const v2 = await supabase.from("v_visits").select("*");
-      if (!v2.error && Array.isArray(v2.data)) visitRows = v2.data;
-    } else if (Array.isArray(v1.data)) {
-      visitRows = v1.data;
+    const av = await supabase.from("agent_visits").select("*");
+    if (av.error) {
+      console.warn("[getAgentWorkspaceRead] agent_visits:", av.error.message);
+    } else if (Array.isArray(av.data)) {
+      visitRows = av.data;
     }
 
     const mappedVisits = visitRows.map(mapVisitRowForAgentDashboard);
@@ -595,13 +593,12 @@ export async function getAgentWorkspaceRead(currentUser) {
     ).length;
 
     let taskRows = [];
-    const t1 = await supabase.from("agent_tasks").select("*");
-    if (t1.error) {
-      console.warn("[getAgentWorkspaceRead] agent_tasks:", t1.error.message);
-      const t2 = await supabase.from("tasks").select("*");
-      if (!t2.error && Array.isArray(t2.data)) taskRows = t2.data;
-    } else if (Array.isArray(t1.data)) {
-      taskRows = t1.data;
+    const at = await supabase.from("agent_tasks").select("*");
+    if (at.error) {
+      console.warn("[getAgentWorkspaceRead] agent_tasks:", at.error.message);
+      taskRows = [];
+    } else if (Array.isArray(at.data)) {
+      taskRows = at.data;
     }
 
     const tasks = taskRows
@@ -626,15 +623,18 @@ export async function getAgentWorkspaceRead(currentUser) {
       highPriorityTasks,
     };
 
+    const data = {
+      summary,
+      tasks,
+      assignedLabs,
+      recentVisits,
+      pendingCollections,
+    };
+    console.log("SUPABASE AGENT WORKSPACE:", data);
+
     return {
       success: true,
-      data: {
-        summary,
-        tasks,
-        assignedLabs,
-        recentVisits,
-        pendingCollections,
-      },
+      data,
     };
   } catch (err) {
     console.warn("[getAgentWorkspaceRead] failed:", err?.message || err);
