@@ -513,7 +513,7 @@ function mapVisitRowForAgentDashboard(row) {
 
 /**
  * Read-only agent workspace: labs/credit (`v_labs_credit`), collections (`getCollectionsRead`),
- * visits (`agent_visits`). Tasks list is empty until `agent_tasks` exists in Supabase.
+ * visits (`agent_visits`). Task queue is always `[]` here (no Supabase task query).
  * Shapes match AgentDashboard expectations. Never throws.
  */
 export async function getAgentWorkspaceRead(currentUser) {
@@ -558,6 +558,7 @@ export async function getAgentWorkspaceRead(currentUser) {
       (v) => str(v.visitDate || "").slice(0, 10) === todayYmd
     ).length;
 
+    /* No Supabase task read — tasks stay empty until a task source is added. */
     const tasks = [];
     const highPriorityTasks = 0;
 
