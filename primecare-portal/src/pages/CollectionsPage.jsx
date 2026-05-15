@@ -14,6 +14,19 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, IndianRupee, CheckCircle2, ClipboardCheck } from "lucide-react";
 
+function normalizeLabId(labId) {
+  return String(labId ?? "").trim().toUpperCase();
+}
+
+function findCollectionByLabId(list, labId) {
+  const target = normalizeLabId(labId);
+  if (!target) return null;
+  for (const row of list) {
+    if (normalizeLabId(row?.labId) === target) return row;
+  }
+  return null;
+}
+
 export default function CollectionsPage({ currentUser, authToken }) {
   const [summary, setSummary] = useState({
     totalOutstanding: 0,
@@ -113,24 +126,42 @@ export default function CollectionsPage({ currentUser, authToken }) {
   }
 
   async function openCollection(labId, options = {}) {
+    console.log("COLLECTION OPEN CLICKED", { labId, normalized: normalizeLabId(labId) });
+
     try {
       setDetailsLoading(true);
       setError("");
       setSuccessMessage("");
 
+      const listMatch = findCollectionByLabId(collections, labId);
+      const canonicalLabId = listMatch?.labId ?? labId;
+
       const params = authToken ? { sessionToken: authToken } : {};
 
       const [detailsRes, historyRes] = await Promise.all([
-        getCollectionDetails(labId, params),
-        getCollectionHistory(labId, params),
+        getCollectionDetails(canonicalLabId, params),
+        getCollectionHistory(canonicalLabId, params),
       ]);
 
       const detailsPayload = detailsRes?.data || detailsRes || {};
       const historyPayload = historyRes?.data || historyRes || {};
-      const collection = detailsPayload.collection || null;
+      let collection = detailsPayload.collection || null;
+      if (!collection && listMatch) {
+        collection = listMatch;
+      }
 
-      setSelectedLabId(labId);
+      console.log("COLLECTION DETAIL MATCH", {
+        canonicalLabId,
+        listMatch: listMatch || null,
+        apiReturnedCollection: Boolean(detailsPayload.collection),
+        resolvedFrom: detailsPayload.collection ? "apps_script" : listMatch ? "supabase_list" : "none",
+        collection,
+      });
+
+      setSelectedLabId(canonicalLabId);
       setSelectedCollection(collection);
+      console.log("SELECTED COLLECTION SET", { selectedLabId: canonicalLabId, collection });
+
       setHistory(Array.isArray(historyPayload.history) ? historyPayload.history : []);
 
       setAmountCollected("");
@@ -145,7 +176,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
 
       if (options?.fromTask && options?.taskContext) {
         setSuccessMessage(
-          `Collection task loaded for ${options.taskContext.labName || collection?.labName || labId}.`
+          `Collection task loaded for ${options.taskContext.labName || collection?.labName || canonicalLabId}.`
         );
       }
     } catch (err) {
@@ -372,7 +403,9 @@ export default function CollectionsPage({ currentUser, authToken }) {
                   <div
                     key={item.labId}
                     className={`rounded-2xl border p-4 shadow-sm ${
-                      selectedLabId === item.labId ? "ring-2 ring-slate-200" : ""
+                      normalizeLabId(selectedLabId) === normalizeLabId(item.labId)
+                        ? "ring-2 ring-slate-200"
+                        : ""
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3">
