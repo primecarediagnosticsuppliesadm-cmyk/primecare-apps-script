@@ -667,6 +667,128 @@ export async function createAgentVisitWrite(payload = {}) {
 }
 
 /**
+ * Inserts a lab order into `orders` and line rows into `order_items`.
+ * Payload mirrors LabOrderingPage: { labId, labName?, notes?, items: [{ productId, quantity, unitSellingPrice }], tenantId?, createdBy?, orderId?, orderDate?, status? }
+ * Apps Script `submitLabOrder` remains the fallback caller when this returns failure.
+ */
+export async function createOrderWrite(payload = {}) {
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+
+  try {
+    const lab_id = str(payload.labId ?? payload.lab_id);
+    const tenant_id = str(payload.tenantId ?? payload.tenant_id) || null;
+    const created_by = str(
+      payload.createdBy ?? payload.created_by ?? payload.labName ?? payload.lab_name ?? ""
+    );
+    const order_date = str(
+      payload.orderDate ?? payload.order_date ?? new Date().toISOString().slice(0, 10)
+    ).slice(0, 10);
+    let order_id = str(payload.orderId ?? payload.order_id);
+    if (!order_id) {
+      order_id = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    }
+    const status = str(payload.status ?? "Placed");
+    const notesRaw = str(payload.notes);
+    const items = Array.isArray(payload.items) ? payload.items : [];
+
+    if (!lab_id) {
+      return { success: false, error: "lab_id is required", data: null };
+    }
+    if (!items.length) {
+      return { success: false, error: "items are required", data: null };
+    }
+
+    const normalizedLines = items.map((it) => {
+      const product_id = str(it.productId ?? it.product_id);
+      const quantity = num(it.quantity);
+      const unit_price = num(it.unitSellingPrice ?? it.unitPrice ?? it.unit_price);
+      const total_price = Math.round(quantity * unit_price * 100) / 100;
+      return { product_id, quantity, unit_price, total_price };
+    });
+
+    const total_amount = normalizedLines.reduce((s, l) => s + l.total_price, 0);
+
+    const writePayload = {
+      order_id,
+      tenant_id,
+      lab_id,
+      order_date,
+      status,
+      total_amount,
+      created_by,
+      created_at: new Date().toISOString(),
+      items: normalizedLines,
+    };
+    console.log("ORDER WRITE PAYLOAD", writePayload);
+
+    const orderRow = {
+      order_id,
+      tenant_id,
+      lab_id,
+      order_date,
+      status,
+      total_amount,
+      created_by,
+      created_at: writePayload.created_at,
+      notes: notesRaw || null,
+    };
+
+    const { data: orderData, error: orderError } = await supabase
+      .from("orders")
+      .insert([orderRow])
+      .select();
+
+    if (orderError) {
+      console.warn("[createOrderWrite] orders:", orderError.message);
+      return { success: false, error: orderError.message || "Order insert failed", data: null };
+    }
+
+    const savedOrder = Array.isArray(orderData) ? orderData[0] : orderData;
+    console.log("SUPABASE ORDER SAVED", savedOrder);
+
+    const itemRows = normalizedLines.map((line, idx) => ({
+      order_item_id: `OIN-${order_id}-${idx}-${Date.now()}`,
+      order_id,
+      product_id: line.product_id,
+      quantity: line.quantity,
+      unit_price: line.unit_price,
+      total_price: line.total_price,
+    }));
+
+    const { data: itemsData, error: itemsError } = await supabase
+      .from("order_items")
+      .insert(itemRows)
+      .select();
+
+    if (itemsError) {
+      console.warn("[createOrderWrite] order_items:", itemsError.message);
+      return {
+        success: false,
+        error: itemsError.message || "Order items insert failed",
+        data: { order: savedOrder, items: [] },
+      };
+    }
+
+    console.log("SUPABASE ORDER ITEMS SAVED", itemsData);
+
+    return {
+      success: true,
+      data: {
+        order: savedOrder,
+        items: itemsData,
+        orderId: order_id,
+      },
+      error: null,
+    };
+  } catch (err) {
+    console.warn("[createOrderWrite] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: null };
+  }
+}
+
+/**
  * Maps `orders` row (snake_case) to OrdersPage list/detail header shape.
  * Primary columns match Supabase `public.orders`: order_id, lab_id, status, total_amount,
  * order_date, created_at, created_by. Null lab_id / order_date does not drop the row.
@@ -723,7 +845,12 @@ export function mapOrderRow(row, labNameFallback = "", rowIndex = 0) {
 export function mapOrderLineRow(row) {
   return {
     orderLineId: str(
-      row.order_line_id ?? row.orderLineId ?? row.id ?? `${row.product_id ?? row.productId ?? "line"}`
+      row.order_line_id ??
+        row.orderLineId ??
+        row.order_item_id ??
+        row.orderItemId ??
+        row.id ??
+        `${row.product_id ?? row.productId ?? "line"}`
     ),
     orderId: str(row.order_id ?? row.orderId ?? ""),
     productId: str(row.product_id ?? row.productId ?? ""),
@@ -733,7 +860,14 @@ export function mapOrderLineRow(row) {
       row.unit_selling_price ?? row.unitSellingPrice ?? row.unit_price ?? row.unitPrice
     ),
     taxAmount: num(row.tax_amount ?? row.taxAmount ?? row.tax ?? 0),
-    netLineTotal: num(row.net_line_total ?? row.netLineTotal ?? row.line_total ?? row.lineTotal),
+    netLineTotal: num(
+      row.net_line_total ??
+        row.netLineTotal ??
+        row.line_total ??
+        row.lineTotal ??
+        row.total_price ??
+        row.totalPrice
+    ),
   };
 }
 
@@ -798,7 +932,7 @@ export async function getOrdersRead(_params = {}) {
 }
 
 /**
- * Read-only single order + lines from `orders`, `order_lines`, and `labs`.
+ * Read-only single order + lines from `orders`, `order_lines` or `order_items`, and `labs`.
  * `orderId` may match `orders.order_id` or `orders.id`.
  * Never throws.
  */
@@ -847,6 +981,17 @@ export async function getOrderDetailsRead(orderId) {
     if (!lineRows.length && str(orderRow.order_id)) {
       const q2 = await supabase.from("order_lines").select("*").eq("order_id", str(orderRow.order_id));
       if (!q2.error && Array.isArray(q2.data)) lineRows = q2.data;
+    }
+
+    if (!lineRows.length && str(orderRow.order_id)) {
+      const qi = await supabase
+        .from("order_items")
+        .select("*")
+        .eq("order_id", str(orderRow.order_id));
+      if (!qi.error && Array.isArray(qi.data)) lineRows = qi.data;
+      else if (qi.error) {
+        console.warn("[getOrderDetailsRead] order_items:", qi.error.message);
+      }
     }
 
     const lines = (lineRows || []).map(mapOrderLineRow).filter((l) => l.productId || l.productName);

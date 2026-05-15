@@ -29,6 +29,8 @@ import {
   getOrderDetails,
   submitLabOrder,
 } from "@/api/primecareApi";
+import { createOrderWrite, getOrderDetailsRead } from "@/api/primecareSupabaseApi";
+import { supabase } from "@/api/supabaseClient.js";
 
 function QuickStat({ title, value, icon: Icon }) {
   return (
@@ -450,6 +452,14 @@ export default function LabOrderingPage({ currentUser }) {
         labId,
         labName,
         notes,
+        tenantId: currentUser?.tenantId || currentUser?.tenant_id || null,
+        createdBy:
+          currentUser?.email ||
+          currentUser?.userId ||
+          currentUser?.id ||
+          labName ||
+          labId ||
+          null,
         items: cartItems.map((item) => ({
           productId: item.productId,
           productName: item.productName,
@@ -457,6 +467,38 @@ export default function LabOrderingPage({ currentUser }) {
           unitSellingPrice: Number(item.unitPrice || 0),
         })),
       };
+
+      if (supabase) {
+        const sbRes = await createOrderWrite(requestPayload);
+        if (sbRes?.success) {
+          const orderId =
+            sbRes.data?.orderId ?? sbRes.data?.order?.order_id ?? "";
+          setSubmitResult({ success: true, orderId, invoiceId: null });
+          setCartItems([]);
+          setNotes("");
+          setStatusMessage(
+            orderId
+              ? `Order submitted successfully (Supabase): ${orderId}`
+              : "Order submitted successfully (Supabase)."
+          );
+
+          await loadRecentOrders();
+          await loadCatalog();
+
+          if (orderId) {
+            const detail = await getOrderDetailsRead(orderId);
+            if (detail?.data?.order) {
+              setSelectedOrderId(orderId);
+              setSelectedOrderDetails(detail.data);
+            }
+          }
+          return;
+        }
+        console.warn(
+          "[LabOrderingPage] Supabase order write failed, falling back to Apps Script:",
+          sbRes?.error
+        );
+      }
 
       const res = await submitLabOrder(requestPayload);
       const result = res?.data || res || {};
