@@ -135,11 +135,38 @@ function sortVisitsByRecency(visits) {
   return [...visits].sort((a, b) => visitRecencyTimestamp(b) - visitRecencyTimestamp(a));
 }
 
+function cleanActivityText(value) {
+  const s = String(value ?? "").trim();
+  if (!s || s === "-" || s === "—" || s.toLowerCase() === "null" || s.toLowerCase() === "undefined") {
+    return "";
+  }
+  return s;
+}
+
+function normalizeLabelKey(value) {
+  return cleanActivityText(value).toLowerCase().replace(/\s+/g, " ");
+}
+
+function isOutcomeDuplicateOfVisitType(outcomeLabel, visitType) {
+  const outcome = normalizeLabelKey(outcomeLabel);
+  const type = normalizeLabelKey(visitType);
+  if (!outcome || !type) return false;
+  if (outcome === type) return true;
+  if (outcome.includes("follow") && type.includes("follow")) return true;
+  return false;
+}
+
+function truncateActivityText(value, max = 80) {
+  const s = cleanActivityText(value);
+  if (!s) return "";
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
 function formatRelativeVisitDate(visit) {
   const dateOnly = String(visit?.date || visit?.visitDate || "").slice(0, 10);
   const createdOnly = String(visit?.createdAt || visit?.created_at || "").slice(0, 10);
   const anchor = dateOnly || createdOnly;
-  if (!anchor) return "-";
+  if (!anchor) return "";
 
   const anchorMs = new Date(`${anchor}T12:00:00`).getTime();
   if (!Number.isFinite(anchorMs)) return anchor;
@@ -189,16 +216,18 @@ function formatLabResponseLabel(labResponse) {
   return lr;
 }
 
-function buildVisitActivitySubtitle(visit) {
-  const nextAction = String(visit?.nextAction ?? visit?.next_action ?? visit?.Next_Action ?? "").trim();
-  const notes = String(visit?.notes ?? visit?.Notes ?? "").trim();
+/** Line 2 detail only — never repeats visit_type (shown once as badge on line 1). */
+function buildVisitMetaDetail(visit) {
+  const visitType = cleanActivityText(visit?.visitType ?? visit?.Visit_Type);
+  const nextAction = cleanActivityText(visit?.nextAction ?? visit?.next_action ?? visit?.Next_Action);
+  const notes = cleanActivityText(visit?.notes ?? visit?.Notes);
   const labResponse = formatLabResponseLabel(visit?.labResponse ?? visit?.Lab_Response);
-  const visitType = String(visit?.visitType ?? visit?.Visit_Type ?? "").trim();
 
-  if (nextAction) return nextAction;
-  if (notes) return notes.length > 96 ? `${notes.slice(0, 96)}…` : notes;
-  if (labResponse) return labResponse;
-  if (visitType) return visitType;
+  if (nextAction) return truncateActivityText(nextAction);
+  if (notes) return truncateActivityText(notes);
+  if (labResponse && !isOutcomeDuplicateOfVisitType(labResponse, visitType)) {
+    return labResponse;
+  }
   return "";
 }
 
@@ -240,12 +269,16 @@ function normalizeVisit(visit) {
 
 function normalizeVisitForActivity(visit) {
   const normalized = normalizeVisit(visit);
+  const visitType = cleanActivityText(normalized.visitType);
+  const relativeDate = formatRelativeVisitDate(normalized);
   const enriched = {
     ...normalized,
-    relativeDate: formatRelativeVisitDate(normalized),
-    visitTypeClass: visitTypeBadgeClass(normalized.visitType),
-    labResponseLabel: formatLabResponseLabel(normalized.labResponse),
-    subtitle: buildVisitActivitySubtitle(normalized),
+    labName: cleanActivityText(normalized.labName),
+    agent: cleanActivityText(normalized.agent),
+    visitType,
+    relativeDate: relativeDate === "-" ? "" : relativeDate,
+    visitTypeClass: visitTypeBadgeClass(visitType),
+    metaDetail: buildVisitMetaDetail(normalized),
     sortTimestamp: visitRecencyTimestamp(normalized),
   };
   console.log("RECENT FIELD ACTIVITY NORMALIZED", enriched);
@@ -262,7 +295,7 @@ function openVisitFromActivity(visit, setActivePage) {
         labId: visit.labId || "",
         labName: visit.labName || "",
         visitType: visit.visitType || "Follow-up",
-        nextAction: visit.nextAction || visit.subtitle || "",
+        nextAction: visit.nextAction || visit.metaDetail || "",
         visitId: visit.id || "",
         source: "admin_dashboard_recent_activity",
       })
@@ -845,18 +878,17 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
               {recentVisits.map((visit, idx) => {
                 const cardKey = `${visit.id || visit.labName}-${idx}`;
                 const cardInner = (
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="font-semibold text-slate-900">{visit.labName || "-"}</div>
-                        <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
-                          {visit.relativeDate}
-                        </span>
-                      </div>
-                      <div className="mt-1 text-sm text-slate-500">
-                        {[visit.agent, visit.area].filter(Boolean).join(" • ") || "—"}
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        {visit.labName ? (
+                          <div className="font-semibold text-slate-900">{visit.labName}</div>
+                        ) : null}
+                        {visit.relativeDate ? (
+                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
+                            {visit.relativeDate}
+                          </span>
+                        ) : null}
                         {visit.visitType ? (
                           <span
                             className={`rounded-full border px-2 py-0.5 text-xs font-medium ${visit.visitTypeClass}`}
@@ -864,17 +896,14 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
                             {visit.visitType}
                           </span>
                         ) : null}
-                        {visit.labResponseLabel ? (
-                          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-600">
-                            {visit.labResponseLabel}
-                          </span>
-                        ) : null}
                       </div>
-                      {visit.subtitle ? (
-                        <p className="mt-2 line-clamp-2 text-sm text-slate-600">{visit.subtitle}</p>
+                      {visit.agent || visit.metaDetail ? (
+                        <div className="line-clamp-1 text-sm text-slate-500">
+                          {[visit.agent, visit.metaDetail].filter(Boolean).join(" • ")}
+                        </div>
                       ) : null}
                     </div>
-                    <div className="min-w-[4.5rem] shrink-0 text-right text-sm font-semibold text-slate-900">
+                    <div className="min-w-[4rem] shrink-0 text-right text-sm font-semibold text-slate-900">
                       {visit.showRevenue && Number(visit.soldValue) > 0
                         ? currency(visit.soldValue)
                         : null}
@@ -901,7 +930,6 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
                   </div>
                 );
               })}
-              ))}
             </div>
           )}
         </SectionCard>
