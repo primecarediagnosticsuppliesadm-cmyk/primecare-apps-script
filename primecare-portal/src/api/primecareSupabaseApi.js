@@ -1268,9 +1268,29 @@ function resolveOrderAmount(orderRow, lineTotalByOrderId) {
   return amount;
 }
 
+function normalizedOrderRowStatus(orderRow) {
+  return str(
+    orderRow?.status ??
+      orderRow?.order_status ??
+      orderRow?.orderStatus ??
+      orderRow?.Order_Status ??
+      "Placed"
+  ).trim();
+}
+
+function orderOperationalExcludedFromIndices(orderRow) {
+  return normalizedOrderRowStatus(orderRow).toLowerCase() === "cancelled";
+}
+
+/** Dashboard / revenue numbers: fulfilled deliveries only (per business rule). */
+function orderCountsTowardDashboardRevenue(orderRow) {
+  return normalizedOrderRowStatus(orderRow).toLowerCase() === "fulfilled";
+}
+
 function buildOrdersByLabDateIndex(ordersRaw, lineTotalByOrderId) {
   const index = new Map();
   for (const o of ordersRaw || []) {
+    if (orderOperationalExcludedFromIndices(o)) continue;
     const labId = normalizeLabIdKey(o.lab_id ?? o.labId);
     const orderDate = str(o.order_date ?? o.orderDate ?? o.created_at ?? "").slice(0, 10);
     const orderId = str(o.order_id ?? o.orderId ?? o.id);
@@ -1542,22 +1562,46 @@ export async function getAdminDashboardRead() {
 
     let todaysRevenue = 0;
     let totalSoldValue = 0;
+    /** Non-cancelled order rows for summaries (excludes Cancelled pipeline noise). */
+    let activeOrdersCount = 0;
+    let fulfilledOrdersCount = 0;
     const revenueByLab = new Map();
 
     const ordersByLabDate = buildOrdersByLabDateIndex(ordersRaw, lineTotalByOrderId);
 
     for (const o of ordersRaw) {
+      const st = normalizedOrderRowStatus(o);
+      if (orderOperationalExcludedFromIndices(o)) continue;
+
+      activeOrdersCount += 1;
       const orderDate = str(o.order_date ?? o.orderDate ?? o.created_at ?? "").slice(0, 10);
       const amount = resolveOrderAmount(o, lineTotalByOrderId);
       const labId = normalizeLabIdKey(o.lab_id ?? o.labId);
-      totalSoldValue += amount;
-      if (orderDate === today) todaysRevenue += amount;
-      if (!labId) continue;
-      const prev = revenueByLab.get(labId) || { revenue: 0, labName: labNameById.get(labId) || labId };
-      prev.revenue += amount;
-      if (!prev.labName) prev.labName = labNameById.get(labId) || labId;
-      revenueByLab.set(labId, prev);
+
+      const revenueEligible = orderCountsTowardDashboardRevenue(o);
+      if (revenueEligible) {
+        fulfilledOrdersCount += 1;
+        totalSoldValue += amount;
+        if (orderDate === today) todaysRevenue += amount;
+        if (!labId) continue;
+        const prev = revenueByLab.get(labId) || { revenue: 0, labName: labNameById.get(labId) || labId };
+        prev.revenue += amount;
+        if (!prev.labName) prev.labName = labNameById.get(labId) || labId;
+        revenueByLab.set(labId, prev);
+      }
     }
+
+    console.log("DASHBOARD SOURCE RECALCULATED", {
+      source: "Supabase",
+      definitions: {
+        revenue: "sum non-Cancelled orders with status=Fulfilled (order_date for today)",
+        receivables: "ar_credit_control.outstanding sums",
+      },
+      todaysRevenue,
+      fulfilledTotalAllTimeApprox: totalSoldValue,
+      activeOrdersNonCancelled: activeOrdersCount,
+      fulfilledOrdersForRevenue: fulfilledOrdersCount,
+    });
 
     let outstandingReceivables = 0;
     let labsAtCreditRisk = 0;
@@ -2100,18 +2144,47 @@ export async function createOrderWrite(payload = {}) {
 
     console.log("SUPABASE ORDER ITEMS SAVED", itemsData);
 
-    try {
-      await applyLabOrderInventoryDeduction({
-        savedLineItems: itemsData,
+    if (str(status).toLowerCase() === "fulfilled") {
+      console.log("ORDER STATUS BUSINESS RULE", {
+        branch: "createOrderWrite: Fulfill-on-submit — deduct inventory once + AR post once",
         order_id,
-        tenant_id,
-        created_by,
+        lab_id,
       });
-    } catch (invErr) {
-      console.warn(
-        "[createOrderWrite] inventory deduction threw — order is NOT rolled back:",
-        invErr?.message || invErr
-      );
+      try {
+        await applyLabOrderInventoryDeduction({
+          savedLineItems: itemsData,
+          order_id,
+          tenant_id,
+          created_by,
+        });
+      } catch (invErr) {
+        console.warn(
+          "[createOrderWrite] Fulfilled order inventory deduction threw — order is NOT rolled back:",
+          invErr?.message || invErr
+        );
+      }
+
+      const amt = normalizedLines.reduce((s, l) => s + num(l.total_price), 0);
+      const bump = await bumpArOutstandingForFulfillment({ lab_id, deltaAmount: amt });
+      if (bump.success && !bump.skipped) {
+        console.log("AR POSTED FOR ORDER", {
+          phase: "createOrderWrite",
+          order_id,
+          lab_id,
+          delta: amt,
+        });
+      }
+
+      const flagPatch = {
+        fulfilled_at: new Date().toISOString(),
+        inventory_updated: true,
+        ar_posted: Boolean(bump.success && !bump.skipped),
+        updated_at: new Date().toISOString(),
+      };
+      const uf = await supabase.from("orders").update(flagPatch).eq("order_id", order_id).select();
+      if (uf.error) {
+        console.warn("[createOrderWrite] Fulfillment flags update:", uf.error.message);
+      }
     }
 
     return {
@@ -2446,6 +2519,65 @@ function appendOrderStatusNote(existingNotes, nextStatus, noteText) {
   return existing ? `${existing}\n${line}` : line;
 }
 
+function coercePgBoolTruth(value) {
+  if (value === true || value === 1) return true;
+  if (value === false || value === 0) return false;
+  const s = str(value).toLowerCase();
+  return s === "yes" || s === "true" || s === "1";
+}
+
+async function ledgerHasOrderOutMovement(orderId) {
+  if (!supabase) return false;
+  const oid = str(orderId);
+  if (!oid) return false;
+  const q = await supabase
+    .from("inventory_ledger")
+    .select("id")
+    .eq("order_id", oid)
+    .eq("movement_type", "ORDER_OUT")
+    .limit(1);
+  if (q.error) return false;
+  return Array.isArray(q.data) && q.data.length > 0;
+}
+
+async function bumpArOutstandingForFulfillment({ lab_id, deltaAmount }) {
+  if (!supabase || !lab_id || num(deltaAmount) <= 0) {
+    return { success: true, skipped: true };
+  }
+  const sid = normalizeLabIdKey(lab_id);
+  const sel = await supabase.from("ar_credit_control").select("*").eq("lab_id", sid).limit(1);
+  if (sel.error) {
+    return { success: false, error: sel.error.message, skipped: true };
+  }
+  const row = Array.isArray(sel.data) && sel.data[0];
+  if (!row) {
+    console.warn("[bumpArOutstandingForFulfillment] No ar_credit_control row for lab:", sid);
+    return { success: false, error: "No AR row for lab", skipped: true };
+  }
+  const d = num(deltaAmount);
+  const curOut = num(
+    row.outstanding ??
+      row.outstanding_amount ??
+      row.outstandingAmount ??
+      row.balance ??
+      0
+  );
+  let patch = {
+    outstanding: curOut + d,
+    updated_at: new Date().toISOString(),
+  };
+  const td = num(row.total_delivered ?? row.totalDelivered ?? 0);
+  if (td >= 0) {
+    patch.total_delivered = td + d;
+  }
+  let upd = await supabase.from("ar_credit_control").update(patch).eq("lab_id", sid);
+  if (!upd.error) return { success: true, skipped: false };
+  delete patch.total_delivered;
+  upd = await supabase.from("ar_credit_control").update(patch).eq("lab_id", sid);
+  if (!upd.error) return { success: true, skipped: false };
+  return { success: false, error: upd.error.message, skipped: true };
+}
+
 /** Resolves order row and the eq() column for updates (order_id or id). */
 async function resolveOrderRowForUpdate(orderId) {
   const oid = str(orderId);
@@ -2495,6 +2627,17 @@ async function patchOrderRow(updateKey, updateValue, patch) {
     slim = { status: statusOnly.status, ...(updated_at ? { updated_at } : {}) };
     res = await attempt(slim);
   }
+  for (const extraCol of ["fulfilled_at", "cancelled_at", "inventory_updated", "ar_posted"]) {
+    if (!res.error) break;
+    if (!(extraCol in slim)) continue;
+    if (isMissingOrdersColumnError(res.error, extraCol)) {
+      delete slim[extraCol];
+      console.warn(
+        `[updateOrderStatusWrite] orders.${extraCol} missing in schema — retrying without it`
+      );
+      res = await attempt(slim);
+    }
+  }
   if (res.error && Object.keys(slim).length > 1) {
     res = await attempt({ status: patch.status });
   }
@@ -2533,14 +2676,110 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
       return { success: false, error: `Order not found: ${oid}`, data: null };
     }
 
-    const previousStatus = str(
-      orderRow.status ?? orderRow.order_status ?? orderRow.orderStatus ?? ""
+    const prevNorm = normalizedOrderRowStatus(orderRow);
+    const businessOrderId = str(orderRow.order_id ?? orderRow.orderId ?? oid);
+    const labId = normalizeLabIdKey(orderRow.lab_id ?? orderRow.labId);
+
+    console.log("ORDER STATUS BUSINESS RULE", {
+      orderId: businessOrderId,
+      labId,
+      prevStatus: prevNorm,
+      nextStatus,
+      placedMeansPendingFulfillment:
+        prevNorm === "Placed" || nextStatus === "Placed" ? true : undefined,
+      processingNoFinanceOrInventoryFinalize: nextStatus === "Processing",
+      fulfilmentAddsReceivableOnce: nextStatus === "Fulfilled",
+      cancelledExcludedFromAnalytics: nextStatus === "Cancelled",
+      inventoryDeductionIdempotentFlag: true,
+    });
+    console.log("ORDER STATUS SYNC START", {
+      orderId: businessOrderId,
+      prevStatus: prevNorm,
+      nextStatus,
+    });
+
+    const prevKey = prevNorm.toLowerCase();
+    const becomingFulfilled = nextStatus === "Fulfilled" && prevKey !== "fulfilled";
+    const becomingCancelled = nextStatus === "Cancelled" && prevKey !== "cancelled";
+
+    let fetchedLineItems = [];
+    if (becomingFulfilled) {
+      const li = await supabase
+        .from("order_items")
+        .select("*")
+        .eq("order_id", businessOrderId);
+      fetchedLineItems = Array.isArray(li.data) ? li.data : [];
+    }
+
+    const amtFromLines = (fetchedLineItems || []).reduce(
+      (s, l) => s + num(l.total_price ?? l.totalPrice ?? l.net_line_total ?? 0),
+      0
     );
+    const emptyLineMap = new Map();
+    const amtHeader = resolveOrderAmount(orderRow, emptyLineMap);
+    const orderAmt = amtHeader > 0 ? amtHeader : amtFromLines;
+
+    let inventoryDoneFlag = coercePgBoolTruth(orderRow.inventory_updated ?? orderRow.inventoryUpdated);
+    let arDoneFlag = coercePgBoolTruth(orderRow.ar_posted ?? orderRow.arPosted);
+
+    if (becomingFulfilled) {
+      const hasLedgerOut = await ledgerHasOrderOutMovement(businessOrderId);
+      if (inventoryDoneFlag || hasLedgerOut) {
+        inventoryDoneFlag = true;
+        console.log("INVENTORY DEDUCTION SKIPPED_ALREADY_DONE", {
+          orderId: businessOrderId,
+          reason: hasLedgerOut ? "ledger_ORDER_OUT_present" : "orders.inventory_updated",
+        });
+      } else if (fetchedLineItems.length) {
+        await applyLabOrderInventoryDeduction({
+          savedLineItems: fetchedLineItems,
+          order_id: businessOrderId,
+          tenant_id: str(orderRow.tenant_id ?? orderRow.tenantId) || null,
+          created_by: str(orderRow.created_by ?? orderRow.createdBy) || null,
+        });
+        inventoryDoneFlag = Boolean(await ledgerHasOrderOutMovement(businessOrderId));
+        if (!inventoryDoneFlag) {
+          console.warn(
+            "[updateOrderStatusWrite] Fulfilled but no ORDER_OUT ledger rows after deduction attempt:",
+            businessOrderId
+          );
+        }
+      } else {
+        console.warn("[updateOrderStatusWrite] Fulfilled — no order_items rows:", businessOrderId);
+      }
+
+      if (!arDoneFlag && labId && orderAmt > 0) {
+        const bump = await bumpArOutstandingForFulfillment({
+          lab_id: labId,
+          deltaAmount: orderAmt,
+        });
+        if (bump.success && !bump.skipped) {
+          console.log("AR POSTED FOR ORDER", {
+            orderId: businessOrderId,
+            labId,
+            deltaAmount: orderAmt,
+          });
+          arDoneFlag = true;
+        } else if (!bump.skipped) {
+          console.warn("[updateOrderStatusWrite] AR bump failed:", bump.error || bump);
+        }
+      }
+    }
 
     const patch = {
       status: nextStatus,
       updated_at: new Date().toISOString(),
     };
+
+    if (becomingFulfilled) {
+      patch.fulfilled_at = new Date().toISOString();
+      patch.inventory_updated = inventoryDoneFlag;
+      patch.ar_posted = arDoneFlag;
+    }
+
+    if (becomingCancelled) {
+      patch.cancelled_at = new Date().toISOString();
+    }
 
     if (note) {
       const mergedNote = appendOrderStatusNote(
@@ -2554,9 +2793,10 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
 
     console.log("ORDER STATUS WRITE PAYLOAD", {
       orderId: oid,
+      businessOrderId,
       updateKey,
       updateValue,
-      previousStatus,
+      previousStatus: prevNorm,
       patch,
     });
 
@@ -2568,13 +2808,18 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
 
     const saved = Array.isArray(data) ? data[0] : data;
     console.log("SUPABASE ORDER STATUS UPDATED", saved);
+    console.log("CROSS MODULE SYNC COMPLETE", {
+      orderId: businessOrderId,
+      status: nextStatus,
+      fulfilmentRan: Boolean(becomingFulfilled),
+    });
 
     return {
       success: true,
       data: {
         order: saved,
         orderId: oid,
-        previousStatus,
+        previousStatus: prevNorm,
         orderStatus: nextStatus,
       },
       error: null,

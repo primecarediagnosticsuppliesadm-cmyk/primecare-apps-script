@@ -11,6 +11,7 @@ import {
   logPartialMigrationWarning,
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
+import { invalidateAdminDashboardCaches } from "@/utils/dashboardInvalidate.js";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -174,6 +175,7 @@ export default function OrdersPage() {
           await openOrder(id, { preserveSuccess: true });
           setSelectedOrder(id);
           console.log("ORDER STATUS UPDATE UI REFRESHED", { orderId: id, nextStatus });
+          invalidateAdminDashboardCaches();
           return;
         }
 
@@ -216,6 +218,7 @@ export default function OrdersPage() {
       await openOrder(id, { preserveSuccess: true });
       setSelectedOrder(id);
       console.log("ORDER STATUS UPDATE UI REFRESHED", { orderId: id, nextStatus });
+      invalidateAdminDashboardCaches();
     } catch (err) {
       setError(err.message || "Failed to update order status");
     } finally {

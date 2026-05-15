@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   getDashboard,
   getExecutiveSnapshot,
@@ -17,6 +17,7 @@ import {
   logPartialMigrationWarning,
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
+import { ADMIN_DASHBOARD_INVALIDATE_EVENT } from "@/utils/dashboardInvalidate.js";
 import {
   TrendingUp,
   AlertTriangle,
@@ -621,6 +622,15 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       setBackgroundLoading(false);
     }
   };
+
+  const dashboardInvalidateRef = useRef(() => {});
+  dashboardInvalidateRef.current = () => loadAll({ force: true });
+
+  useEffect(() => {
+    const listener = () => dashboardInvalidateRef.current();
+    window.addEventListener(ADMIN_DASHBOARD_INVALIDATE_EVENT, listener);
+    return () => window.removeEventListener(ADMIN_DASHBOARD_INVALIDATE_EVENT, listener);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
