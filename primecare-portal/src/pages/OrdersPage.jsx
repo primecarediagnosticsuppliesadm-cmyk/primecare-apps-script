@@ -18,6 +18,40 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2 } from "lucide-react";
 
+function orderStatusSuccessMessage(nextStatus) {
+  switch (nextStatus) {
+    case "Fulfilled":
+      return "Order marked Fulfilled";
+    case "Processing":
+      return "Order moved to Processing";
+    case "Placed":
+      return "Order reset to Placed";
+    case "Cancelled":
+      return "Order cancelled";
+    default:
+      return `Order status updated to ${nextStatus}`;
+  }
+}
+
+/** Tailwind classes for stronger order-status recognition (outline Badge). */
+function orderStatusBadgeClass(statusRaw) {
+  const s = String(statusRaw || "Placed").trim();
+  if (s === "Fulfilled") {
+    return "border-emerald-300 bg-emerald-50 text-emerald-900 shadow-sm ring-1 ring-emerald-200/70 font-semibold";
+  }
+  if (s === "Processing") {
+    return "border-amber-300 bg-amber-50 text-amber-950 shadow-sm ring-1 ring-amber-200/70 font-semibold";
+  }
+  if (s === "Cancelled") {
+    return "border-red-300 bg-red-50 text-red-900 shadow-sm ring-1 ring-red-200/70 font-semibold";
+  }
+  const low = s.toLowerCase();
+  if (low === "pending" || low === "placed") {
+    return "border-slate-300 bg-slate-100 text-slate-900 shadow-sm font-semibold";
+  }
+  return "border-blue-200 bg-blue-50 text-blue-950 shadow-sm font-semibold";
+}
+
 export default function OrdersPage() {
   const [orders, setOrders] = useState([]);
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -36,9 +70,12 @@ export default function OrdersPage() {
     loadOrders();
   }, []);
 
-  async function loadOrders() {
+  async function loadOrders(options = {}) {
+    const silent = Boolean(options?.silent);
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
       setError("");
       const res = await getOrdersRead();
       const result = res?.data || res || {};
@@ -49,15 +86,44 @@ export default function OrdersPage() {
       console.warn("OrdersPage loadOrders:", err);
       setOrders([]);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }
 
-  async function openOrder(orderId) {
+  function patchOrdersListStatus(orderId, nextStatus) {
+    setOrders((prev) =>
+      (Array.isArray(prev) ? prev : []).map((o) =>
+        o.orderId === orderId ? { ...o, orderStatus: nextStatus } : o
+      )
+    );
+  }
+
+  function patchDetailsOrderStatus(orderId, nextStatus) {
+    setDetails((d) => {
+      if (!d?.order || d.order.orderId !== orderId) return d;
+      return {
+        ...d,
+        order: { ...d.order, orderStatus: nextStatus },
+      };
+    });
+  }
+
+  /** Instant status sync in list + panel before reloadOrders finishes. */
+  function applyOptimisticOrderStatus(orderId, nextStatus) {
+    patchOrdersListStatus(orderId, nextStatus);
+    patchDetailsOrderStatus(orderId, nextStatus);
+  }
+
+  async function openOrder(orderId, options = {}) {
+    const { preserveSuccess = false } = options;
     try {
       setDetailsLoading(true);
       setError("");
-      setSuccessMessage("");
+      if (!preserveSuccess) {
+        setSuccessMessage("");
+      }
       const res = await getOrderDetailsRead(orderId);
       const result = res?.data || res || {};
       const data = {
@@ -78,6 +144,12 @@ export default function OrdersPage() {
   async function handleUpdateStatus(nextStatus) {
     if (!selectedOrder) return;
 
+    const id = selectedOrder;
+    console.log("ORDER STATUS UPDATE START", {
+      orderId: id,
+      nextStatus,
+    });
+
     try {
       setUpdatingStatus(true);
       setError("");
@@ -87,16 +159,21 @@ export default function OrdersPage() {
 
       if (supabase) {
         logSupabaseFeatureSource("Orders.statusWrite", { api: "updateOrderStatusWrite" });
-        const sbRes = await updateOrderStatusWrite(selectedOrder, nextStatus, statusPayload);
+        const sbRes = await updateOrderStatusWrite(id, nextStatus, statusPayload);
         if (sbRes.success) {
-          setSuccessMessage(
-            nextStatus === "Fulfilled"
-              ? "Order status updated to Fulfilled in Supabase"
-              : `Order status updated to ${nextStatus}`
-          );
+          setSuccessMessage(orderStatusSuccessMessage(nextStatus));
           setStatusNote("");
-          await loadOrders();
-          await openOrder(selectedOrder);
+          applyOptimisticOrderStatus(id, nextStatus);
+          console.log("ORDER STATUS UPDATE SUCCESS", {
+            orderId: id,
+            nextStatus,
+            source: "supabase",
+          });
+
+          await loadOrders({ silent: true });
+          await openOrder(id, { preserveSuccess: true });
+          setSelectedOrder(id);
+          console.log("ORDER STATUS UPDATE UI REFRESHED", { orderId: id, nextStatus });
           return;
         }
 
@@ -112,7 +189,7 @@ export default function OrdersPage() {
         "Falling back to Apps Script updateOrderStatus (inventory side-effects on Fulfilled)."
       );
       const res = await updateOrderStatus({
-        orderId: selectedOrder,
+        orderId: id,
         orderStatus: nextStatus,
         note: statusNote,
       });
@@ -124,13 +201,21 @@ export default function OrdersPage() {
 
       setSuccessMessage(
         nextStatus === "Fulfilled"
-          ? "Order fulfilled and inventory updated successfully"
-          : `Order status updated to ${nextStatus}`
+          ? "Order marked Fulfilled. Inventory updated."
+          : orderStatusSuccessMessage(nextStatus)
       );
       setStatusNote("");
+      applyOptimisticOrderStatus(id, nextStatus);
+      console.log("ORDER STATUS UPDATE SUCCESS", {
+        orderId: id,
+        nextStatus,
+        source: "apps_script",
+      });
 
-      await loadOrders();
-      await openOrder(selectedOrder);
+      await loadOrders({ silent: true });
+      await openOrder(id, { preserveSuccess: true });
+      setSelectedOrder(id);
+      console.log("ORDER STATUS UPDATE UI REFRESHED", { orderId: id, nextStatus });
     } catch (err) {
       setError(err.message || "Failed to update order status");
     } finally {
@@ -188,8 +273,14 @@ export default function OrdersPage() {
       ) : null}
 
       {successMessage ? (
-        <div className="rounded-xl bg-green-50 p-3 text-sm text-green-700">
-          {successMessage}
+        <div
+          className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 shadow-sm"
+          role="status"
+        >
+          <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs text-white">
+            ✓
+          </span>
+          <span>{successMessage}</span>
         </div>
       ) : null}
 
@@ -232,8 +323,10 @@ export default function OrdersPage() {
                 {filteredOrders.map((order, idx) => (
                   <div
                     key={`${order.orderId}-${idx}`}
-                    className={`rounded-2xl border p-4 shadow-sm ${
-                      selectedOrder === order.orderId ? "ring-2 ring-slate-200" : ""
+                    className={`rounded-2xl p-4 transition-shadow ${
+                      selectedOrder === order.orderId
+                        ? "border-2 border-slate-900 bg-slate-50 shadow-lg ring-2 ring-slate-900/10"
+                        : "border border-slate-200 bg-white shadow-sm"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -248,7 +341,10 @@ export default function OrdersPage() {
                       </div>
 
                       <div className="flex flex-wrap gap-2">
-                        <Badge variant="secondary">
+                        <Badge
+                          variant="outline"
+                          className={orderStatusBadgeClass(order.orderStatus)}
+                        >
                           {order.orderStatus || "Placed"}
                         </Badge>
                         <Badge variant="outline">
@@ -264,6 +360,7 @@ export default function OrdersPage() {
                       <Button
                         variant="outline"
                         className="rounded-xl"
+                        disabled={updatingStatus}
                         onClick={() => openOrder(order.orderId)}
                       >
                         View Details
@@ -301,7 +398,15 @@ export default function OrdersPage() {
 
                 <div className="text-sm space-y-1">
                   <div>Invoice: {details.order.invoiceId || "-"}</div>
-                  <div>Status: {details.order.orderStatus || "-"}</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-slate-600">Status:</span>
+                    <Badge
+                      variant="outline"
+                      className={`text-xs ${orderStatusBadgeClass(details.order.orderStatus)}`}
+                    >
+                      {details.order.orderStatus || "Placed"}
+                    </Badge>
+                  </div>
                   <div>Payment: {details.order.paymentStatus || "-"}</div>
                   <div>
                     Total: ₹
@@ -320,6 +425,7 @@ export default function OrdersPage() {
                     placeholder="Optional note for this status update..."
                     value={statusNote}
                     onChange={(e) => setStatusNote(e.target.value)}
+                    disabled={updatingStatus || detailsLoading}
                     className="min-h-[90px] rounded-xl"
                   />
 
@@ -327,37 +433,65 @@ export default function OrdersPage() {
                     <Button
                       variant="outline"
                       className="rounded-xl"
-                      disabled={updatingStatus}
+                      disabled={updatingStatus || detailsLoading}
                       onClick={() => handleUpdateStatus("Processing")}
                     >
-                      {updatingStatus ? "Updating..." : "Mark Processing"}
+                      {updatingStatus ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Updating...
+                        </>
+                      ) : (
+                        "Mark Processing"
+                      )}
                     </Button>
 
                     <Button
                       variant="outline"
                       className="rounded-xl"
-                      disabled={updatingStatus}
+                      disabled={updatingStatus || detailsLoading}
                       onClick={() => handleUpdateStatus("Fulfilled")}
                     >
-                      {updatingStatus ? "Updating..." : "Mark Fulfilled"}
+                      {updatingStatus ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Updating...
+                        </>
+                      ) : (
+                        "Mark Fulfilled"
+                      )}
                     </Button>
 
                     <Button
                       variant="outline"
                       className="rounded-xl"
-                      disabled={updatingStatus}
+                      disabled={updatingStatus || detailsLoading}
                       onClick={() => handleUpdateStatus("Placed")}
                     >
-                      {updatingStatus ? "Updating..." : "Reset to Placed"}
+                      {updatingStatus ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Updating...
+                        </>
+                      ) : (
+                        "Reset to Placed"
+                      )}
                     </Button>
 
                     <Button
                       variant="outline"
                       className="rounded-xl border-red-200 text-red-600 hover:bg-red-50"
-                      disabled={updatingStatus}
+                      disabled={updatingStatus || detailsLoading}
                       onClick={() => handleUpdateStatus("Cancelled")}
                     >
-                      {updatingStatus ? "Updating..." : "Cancel Order"}
+                      {updatingStatus ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Updating...
+                        </>
+                      ) : (
+                        "Cancel Order"
+                      )}
                     </Button>
                   </div>
                 </div>
