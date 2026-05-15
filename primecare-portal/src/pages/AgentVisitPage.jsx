@@ -22,6 +22,8 @@ import {
 } from "lucide-react";
 
 import { getLabs, getRecentVisits, saveAgentVisit, getCollections } from "@/api/primecareApi";
+import { createAgentVisitWrite } from "@/api/primecareSupabaseApi";
+import { supabase } from "@/api/supabaseClient.js";
 import { logClientError } from "@/utils/debugLogger";
 
 function QuickStat({ title, value, icon: Icon }) {
@@ -440,7 +442,38 @@ export default function AgentVisitPage({ currentUser, authToken }) {
         notes: form.notes,
       };
 
-      const res = await saveAgentVisit(payload);
+      let res;
+      if (supabase) {
+        const sbRes = await createAgentVisitWrite({
+          tenantId: currentUser?.tenantId,
+          agentId: currentUser?.id || currentUser?.userId,
+          visitDate: form.visitDate,
+          visitType: form.visitType,
+          labId: form.labId,
+          notes: form.notes,
+          nextFollowUpDate: form.nextFollowUpDate,
+          labResponse: form.labResponse,
+          agentName: form.agentName,
+        });
+
+        if (sbRes?.success && sbRes.data) {
+          const vid =
+            sbRes.data.visit_id ??
+            sbRes.data.visitId ??
+            sbRes.data.id ??
+            "";
+          res = { success: true, data: { visitId: vid } };
+        } else {
+          console.warn(
+            "[AgentVisitPage] Supabase save failed, falling back to Apps Script:",
+            sbRes?.error || "unknown"
+          );
+          res = await saveAgentVisit(payload);
+        }
+      } else {
+        res = await saveAgentVisit(payload);
+      }
+
       if (!res.success) throw new Error(res.error || "Failed to save visit");
 
       const newVisit = normalizeVisit({

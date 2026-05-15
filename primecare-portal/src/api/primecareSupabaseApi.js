@@ -596,6 +596,77 @@ export async function getAgentWorkspaceRead(currentUser) {
 }
 
 /**
+ * Inserts one row into `agent_visits` (PrimeCare agent visit log).
+ * Maps frontend payload to: tenant_id, visit_id, lab_id, agent_id, visit_date, visit_type,
+ * notes, follow_up_required, next_follow_up_date.
+ * @returns {{ success: boolean, data?: object, error?: string }}
+ */
+export async function createAgentVisitWrite(payload = {}) {
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+
+  try {
+    let visit_id = str(payload.visitId ?? payload.visit_id);
+    if (!visit_id) {
+      visit_id = `VIS-${Date.now()}`;
+    }
+
+    const tenant_id = str(payload.tenantId ?? payload.tenant_id) || null;
+    const lab_id = str(payload.labId ?? payload.lab_id);
+    const agent_id = str(
+      payload.agentId ?? payload.agent_id ?? payload.userId ?? payload.agentName ?? ""
+    );
+    const visit_date = str(payload.visitDate ?? payload.visit_date).slice(0, 10);
+    const visit_type = str(payload.visitType ?? payload.visit_type);
+    const notesRaw = str(payload.notes);
+    const next_follow_up_date = str(
+      payload.nextFollowUpDate ?? payload.next_follow_up_date ?? ""
+    ).slice(0, 10);
+    const labResponse = str(payload.labResponse ?? payload.lab_response);
+
+    if (!lab_id) {
+      return { success: false, error: "lab_id is required", data: null };
+    }
+    if (!visit_date) {
+      return { success: false, error: "visit_date is required", data: null };
+    }
+    if (!visit_type) {
+      return { success: false, error: "visit_type is required", data: null };
+    }
+
+    const follow_up_required =
+      Boolean(next_follow_up_date) || labResponse === "Need Follow-up";
+
+    const insertRow = {
+      tenant_id,
+      visit_id,
+      lab_id,
+      agent_id: agent_id || null,
+      visit_date,
+      visit_type,
+      notes: notesRaw || null,
+      follow_up_required,
+      next_follow_up_date: next_follow_up_date || null,
+    };
+
+    const { data, error } = await supabase.from("agent_visits").insert([insertRow]).select();
+
+    if (error) {
+      console.warn("[createAgentVisitWrite]", error.message);
+      return { success: false, error: error.message || "Insert failed", data: null };
+    }
+
+    const saved = Array.isArray(data) ? data[0] : data;
+    console.log("SUPABASE AGENT VISIT SAVED:", saved);
+    return { success: true, data: saved ?? null, error: null };
+  } catch (err) {
+    console.warn("[createAgentVisitWrite] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: null };
+  }
+}
+
+/**
  * Maps `orders` row (snake_case) to OrdersPage list/detail header shape.
  * Primary columns match Supabase `public.orders`: order_id, lab_id, status, total_amount,
  * order_date, created_at, created_by. Null lab_id / order_date does not drop the row.
