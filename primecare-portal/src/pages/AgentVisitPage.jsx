@@ -148,8 +148,8 @@ function displayResponseLabel(value) {
   return v || "-";
 }
 
-/** Radix Select passes string values; API lab ids may be numbers — normalize before compare. */
-function resolveLabBySelectValue(labs, value) {
+/** Match dropdown value to a lab (native select string values). */
+function resolveLabByOptionValue(labs, value) {
   if (value == null) return null;
   const raw = String(value).trim();
   if (!raw) return null;
@@ -270,6 +270,10 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   const visibleCollections = useMemo(() => collections, [collections]);
 
   useEffect(() => {
+    console.log("AGENT VISIT LAB OPTIONS:", visibleLabs);
+  }, [visibleLabs]);
+
+  useEffect(() => {
     function handleOpenVisitTask(event) {
       const detail = event?.detail || {};
       const task = detail.task || {};
@@ -338,6 +342,10 @@ export default function AgentVisitPage({ currentUser, authToken }) {
     return visibleLabs.find((lab) => String(lab.labId) === String(form.labId)) || null;
   }, [visibleLabs, form.labId]);
 
+  useEffect(() => {
+    console.log("AGENT VISIT SELECTED LAB:", selectedLab);
+  }, [selectedLab]);
+
   const selectedLabVisits = useMemo(() => {
     return visibleVisits
       .filter((visit) => String(visit.labId) === String(form.labId))
@@ -393,19 +401,32 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   }, [form.labId, latestLabVisit, selectedLabCollection]);
 
   function handleLabChange(value) {
-    const selected = resolveLabBySelectValue(visibleLabs, value);
-    console.log("AGENT VISIT SELECTED LAB:", selected);
+    const raw = String(value ?? "").trim();
+    if (!raw) {
+      setForm((prev) => ({
+        ...prev,
+        labId: "",
+        labName: "",
+        area: currentUser?.assignedArea || prev.area || "",
+        nextAction: "",
+        nextFollowUpDate: "",
+        nextFollowUpType: "Call",
+      }));
+      return;
+    }
 
-    const labId = selected
-      ? String(selected.labId ?? "").trim()
-      : String(value ?? "").trim();
+    const selected = resolveLabByOptionValue(visibleLabs, raw);
+    const labId = selected ? String(selected.labId ?? "").trim() : raw;
     const labName = selected ? String(selected.labName ?? "").trim() : "";
 
     setForm((prev) => ({
       ...prev,
       labId,
       labName: labName || prev.labName,
-      area: selected?.area || prev.area,
+      area:
+        selected && String(selected.area ?? "").trim() !== ""
+          ? String(selected.area).trim()
+          : prev.area,
       nextAction: "",
       nextFollowUpDate: "",
       nextFollowUpType: "Call",
@@ -413,22 +434,28 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   }
 
   async function handleSaveVisit() {
-    const resolvedLab =
-      selectedLab ||
-      resolveLabBySelectValue(visibleLabs, form.labId) ||
-      resolveLabBySelectValue(visibleLabs, form.labName);
-
-    const normalizedLabId = String(resolvedLab?.labId ?? form.labId ?? "").trim();
-    const normalizedLabName = String(resolvedLab?.labName ?? form.labName ?? "").trim();
-
-    if (!form.agentName || !normalizedLabName || !form.visitDate || !form.visitType) {
-      setStatusMessage("Please fill agent name, lab, date, and visit type.");
+    if (!form.agentName || !form.visitDate || !form.visitType) {
+      setStatusMessage("Please fill agent name, date, and visit type.");
       setStatusType("error");
       return;
     }
 
-    if (!normalizedLabId) {
+    if (!String(form.labId ?? "").trim()) {
       setStatusMessage("Please select a lab from the dropdown.");
+      setStatusType("error");
+      return;
+    }
+
+    const resolvedLab =
+      selectedLab ||
+      resolveLabByOptionValue(visibleLabs, form.labId) ||
+      resolveLabByOptionValue(visibleLabs, form.labName);
+
+    const normalizedLabId = String(resolvedLab?.labId ?? form.labId ?? "").trim();
+    const normalizedLabName = String(resolvedLab?.labName ?? form.labName ?? "").trim();
+
+    if (!normalizedLabName) {
+      setStatusMessage("Please fill agent name, lab, date, and visit type.");
       setStatusType("error");
       return;
     }
@@ -623,23 +650,21 @@ export default function AgentVisitPage({ currentUser, authToken }) {
 
               <div className="md:col-span-2">
                 <FieldLabel helper="Select the lab to auto-load context">Select Lab</FieldLabel>
-                <Select
+                <select
+                  className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-base text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-slate-300"
                   value={form.labId ? String(form.labId) : ""}
-                  onValueChange={handleLabChange}
+                  onChange={(e) => handleLabChange(e.target.value)}
                 >
-                  <SelectTrigger className="h-12 rounded-xl text-base">
-                    <SelectValue placeholder="Select lab" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {visibleLabs
-                      .filter((lab) => String(lab.labId ?? "").trim() !== "")
-                      .map((lab) => (
-                        <SelectItem key={String(lab.labId)} value={String(lab.labId)}>
-                          {lab.labName} ({lab.labId})
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
+                  <option value="">Select lab…</option>
+                  {visibleLabs
+                    .filter((lab) => String(lab.labId ?? "").trim() !== "")
+                    .map((lab) => (
+                      <option key={String(lab.labId)} value={String(lab.labId)}>
+                        {lab.labName}
+                        {lab.labId ? ` (${lab.labId})` : ""}
+                      </option>
+                    ))}
+                </select>
               </div>
 
               <div>
