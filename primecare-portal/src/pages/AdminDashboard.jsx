@@ -122,10 +122,91 @@ function severityBadgeClass(severity) {
   return "bg-green-100 text-green-700 border-green-200";
 }
 
+function visitRecencyTimestamp(visit) {
+  const createdMs = new Date(visit?.createdAt || visit?.created_at || 0).getTime();
+  if (Number.isFinite(createdMs) && createdMs > 0) return createdMs;
+  const dateOnly = String(visit?.date || visit?.visitDate || "").slice(0, 10);
+  if (!dateOnly) return 0;
+  const dateMs = new Date(`${dateOnly}T12:00:00`).getTime();
+  return Number.isFinite(dateMs) ? dateMs : 0;
+}
+
+function sortVisitsByRecency(visits) {
+  return [...visits].sort((a, b) => visitRecencyTimestamp(b) - visitRecencyTimestamp(a));
+}
+
+function formatRelativeVisitDate(visit) {
+  const dateOnly = String(visit?.date || visit?.visitDate || "").slice(0, 10);
+  const createdOnly = String(visit?.createdAt || visit?.created_at || "").slice(0, 10);
+  const anchor = dateOnly || createdOnly;
+  if (!anchor) return "-";
+
+  const anchorMs = new Date(`${anchor}T12:00:00`).getTime();
+  if (!Number.isFinite(anchorMs)) return anchor;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const anchorDay = new Date(anchorMs);
+  anchorDay.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((today.getTime() - anchorDay.getTime()) / 86400000);
+
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays > 1 && diffDays < 14) return `${diffDays} days ago`;
+
+  return anchorDay.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function visitTypeBadgeClass(visitType) {
+  const vt = String(visitType || "").trim().toLowerCase();
+  if (vt === "follow-up" || vt === "follow up") {
+    return "bg-blue-50 text-blue-800 border-blue-200";
+  }
+  if (vt === "new lead") {
+    return "bg-green-50 text-green-800 border-green-200";
+  }
+  if (vt === "collection") {
+    return "bg-orange-50 text-orange-800 border-orange-200";
+  }
+  if (vt.includes("demo") || vt === "closing") {
+    return "bg-purple-50 text-purple-800 border-purple-200";
+  }
+  if (vt.includes("complaint") || vt === "support visit") {
+    return "bg-red-50 text-red-800 border-red-200";
+  }
+  return "bg-slate-50 text-slate-700 border-slate-200";
+}
+
+function formatLabResponseLabel(labResponse) {
+  const lr = String(labResponse || "").trim();
+  if (!lr) return "";
+  if (lr === "Converted") return "Order confirmed";
+  if (lr === "Need Follow-up") return "Follow-up needed";
+  return lr;
+}
+
+function buildVisitActivitySubtitle(visit) {
+  const nextAction = String(visit?.nextAction ?? visit?.next_action ?? visit?.Next_Action ?? "").trim();
+  const notes = String(visit?.notes ?? visit?.Notes ?? "").trim();
+  const labResponse = formatLabResponseLabel(visit?.labResponse ?? visit?.Lab_Response);
+  const visitType = String(visit?.visitType ?? visit?.Visit_Type ?? "").trim();
+
+  if (nextAction) return nextAction;
+  if (notes) return notes.length > 96 ? `${notes.slice(0, 96)}…` : notes;
+  if (labResponse) return labResponse;
+  if (visitType) return visitType;
+  return "";
+}
+
 function normalizeVisit(visit) {
   const base = {
     id: visit?.id || visit?.Visit_ID || visit?.visitId || "",
     date: visit?.date || visit?.Visit_Date || visit?.visitDate || "",
+    createdAt: visit?.createdAt || visit?.created_at || visit?.Created_At || "",
     agent: visit?.agent || visit?.Agent_Name || visit?.agentName || "",
     labName: visit?.labName || visit?.Lab_Name || "",
     labId: visit?.labId || visit?.Lab_ID || "",
@@ -133,6 +214,8 @@ function normalizeVisit(visit) {
     visitType: visit?.visitType || visit?.Visit_Type || "",
     soldValue: Number(visit?.soldValue || visit?.Sold_Value || 0),
     labResponse: visit?.labResponse || visit?.Lab_Response || "",
+    notes: visit?.notes ?? visit?.Notes ?? "",
+    nextAction: visit?.nextAction ?? visit?.next_action ?? visit?.Next_Action ?? "",
   };
 
   if (visit?.valueSource != null && visit?.showRevenue != null) {
@@ -153,6 +236,42 @@ function normalizeVisit(visit) {
     valueSource: revenue.valueSource,
     linkedOrderId: revenue.linkedOrderId,
   };
+}
+
+function normalizeVisitForActivity(visit) {
+  const normalized = normalizeVisit(visit);
+  const enriched = {
+    ...normalized,
+    relativeDate: formatRelativeVisitDate(normalized),
+    visitTypeClass: visitTypeBadgeClass(normalized.visitType),
+    labResponseLabel: formatLabResponseLabel(normalized.labResponse),
+    subtitle: buildVisitActivitySubtitle(normalized),
+    sortTimestamp: visitRecencyTimestamp(normalized),
+  };
+  console.log("RECENT FIELD ACTIVITY NORMALIZED", enriched);
+  return enriched;
+}
+
+function openVisitFromActivity(visit, setActivePage) {
+  if (typeof setActivePage !== "function") return;
+
+  try {
+    sessionStorage.setItem(
+      "primecare_pending_visit_task",
+      JSON.stringify({
+        labId: visit.labId || "",
+        labName: visit.labName || "",
+        visitType: visit.visitType || "Follow-up",
+        nextAction: visit.nextAction || visit.subtitle || "",
+        visitId: visit.id || "",
+        source: "admin_dashboard_recent_activity",
+      })
+    );
+  } catch (err) {
+    console.warn("[AdminDashboard] Failed to store visit context:", err);
+  }
+
+  setActivePage("visits");
 }
 
 const EMPTY_STOCK_STATS = {
@@ -493,9 +612,12 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   const recommendedActions = Array.isArray(insightsData?.recommendedActions)
     ? insightsData.recommendedActions
     : [];
-  const recentVisits = Array.isArray(recentVisitsData?.visits)
-    ? recentVisitsData.visits.map(normalizeVisit).slice(0, 5)
-    : [];
+  const recentVisits = useMemo(() => {
+    if (!Array.isArray(recentVisitsData?.visits)) return [];
+    return sortVisitsByRecency(recentVisitsData.visits.map(normalizeVisitForActivity)).slice(0, 5);
+  }, [recentVisitsData]);
+
+  const canOpenVisits = typeof setActivePage === "function";
 
   const topLabs = useMemo(() => {
     return Array.isArray(executive?.topLabsByRevenue)
@@ -720,30 +842,65 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
             <div className="text-sm text-slate-500">No recent visit data found.</div>
           ) : (
             <div className="space-y-3">
-              {recentVisits.map((visit, idx) => (
-                <div key={`${visit.id || visit.labName}-${idx}`} className="rounded-2xl border p-4">
+              {recentVisits.map((visit, idx) => {
+                const cardKey = `${visit.id || visit.labName}-${idx}`;
+                const cardInner = (
                   <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="font-semibold text-slate-900">{visit.labName || "-"}</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="font-semibold text-slate-900">{visit.labName || "-"}</div>
+                        <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
+                          {visit.relativeDate}
+                        </span>
+                      </div>
                       <div className="mt-1 text-sm text-slate-500">
-                        {visit.agent || "-"} • {visit.area || "-"} • {visit.date || "-"}
+                        {[visit.agent, visit.area].filter(Boolean).join(" • ") || "—"}
                       </div>
                       <div className="mt-2 flex flex-wrap gap-2">
-                        <span className="rounded-full border bg-slate-50 px-2 py-0.5 text-xs text-slate-700">
-                          {visit.visitType || "-"}
-                        </span>
-                        <span className="rounded-full border bg-slate-50 px-2 py-0.5 text-xs text-slate-700">
-                          {visit.labResponse || "-"}
-                        </span>
+                        {visit.visitType ? (
+                          <span
+                            className={`rounded-full border px-2 py-0.5 text-xs font-medium ${visit.visitTypeClass}`}
+                          >
+                            {visit.visitType}
+                          </span>
+                        ) : null}
+                        {visit.labResponseLabel ? (
+                          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-600">
+                            {visit.labResponseLabel}
+                          </span>
+                        ) : null}
                       </div>
+                      {visit.subtitle ? (
+                        <p className="mt-2 line-clamp-2 text-sm text-slate-600">{visit.subtitle}</p>
+                      ) : null}
                     </div>
-                    <div className="min-w-[4.5rem] text-right text-sm font-semibold text-slate-900">
+                    <div className="min-w-[4.5rem] shrink-0 text-right text-sm font-semibold text-slate-900">
                       {visit.showRevenue && Number(visit.soldValue) > 0
                         ? currency(visit.soldValue)
                         : null}
                     </div>
                   </div>
-                </div>
+                );
+
+                if (canOpenVisits) {
+                  return (
+                    <button
+                      key={cardKey}
+                      type="button"
+                      onClick={() => openVisitFromActivity(visit, setActivePage)}
+                      className="w-full rounded-2xl border p-4 text-left transition-colors hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+                    >
+                      {cardInner}
+                    </button>
+                  );
+                }
+
+                return (
+                  <div key={cardKey} className="rounded-2xl border p-4">
+                    {cardInner}
+                  </div>
+                );
+              })}
               ))}
             </div>
           )}

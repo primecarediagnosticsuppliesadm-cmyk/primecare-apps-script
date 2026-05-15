@@ -963,6 +963,8 @@ function mapAdminDashboardVisit(row, labNameById, ordersByLabDate) {
     visitType: str(row.visit_type ?? row.visitType ?? row.Visit_Type ?? ""),
     soldValue: num(row.sold_value ?? row.soldValue ?? row.Sold_Value ?? 0),
     labResponse: str(row.lab_response ?? row.labResponse ?? row.Lab_Response ?? ""),
+    notes: str(row.notes ?? row.Notes ?? ""),
+    nextAction: str(row.next_action ?? row.nextAction ?? row.Next_Action ?? ""),
     createdAt: str(row.created_at ?? row.createdAt ?? ""),
   };
   const revenue = resolveAdminVisitRevenue(base, ordersByLabDate, row);
@@ -1142,9 +1144,14 @@ export async function getAdminDashboardRead() {
       .map((row) => mapAdminDashboardVisit(row, labNameById, ordersByLabDate))
       .filter((v) => v.id || v.labName || v.labId)
       .sort((a, b) => {
-        const tb = new Date(b.createdAt || b.date || 0).getTime();
-        const ta = new Date(a.createdAt || a.date || 0).getTime();
-        return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+        const createdB = new Date(b.createdAt || 0).getTime();
+        const createdA = new Date(a.createdAt || 0).getTime();
+        const cb = Number.isFinite(createdB) ? createdB : 0;
+        const ca = Number.isFinite(createdA) ? createdA : 0;
+        if (cb !== ca) return cb - ca;
+        const dateB = new Date(`${b.date || ""}T12:00:00`).getTime();
+        const dateA = new Date(`${a.date || ""}T12:00:00`).getTime();
+        return (Number.isFinite(dateB) ? dateB : 0) - (Number.isFinite(dateA) ? dateA : 0);
       })
       .slice(0, 10);
 
