@@ -36,6 +36,29 @@ function findCollectionByLabId(list, labId) {
   return null;
 }
 
+function displayAgentName(agent) {
+  const s = String(agent ?? "").trim();
+  if (!s || s === "-" || s === "—" || s.toLowerCase() === "null") return "";
+  return s;
+}
+
+function displayPaymentStatus(item) {
+  const status = String(item?.paymentStatus || "").trim();
+  const paid = Number(item?.totalPaid || 0);
+  const outstanding = Number(item?.outstandingAmount || 0);
+  if (status === "Paid" && paid <= 0 && outstanding <= 0) return "Current";
+  if (status === "Paid" && paid <= 0) return outstanding > 0 ? "Pending" : "Current";
+  return status || (outstanding > 0 ? "Pending" : "Current");
+}
+
+function shouldShowPaidLabel(item) {
+  return Number(item?.totalPaid || 0) > 0;
+}
+
+function formatMetaSegment(parts) {
+  return parts.filter(Boolean).join(" • ");
+}
+
 export default function CollectionsPage({ currentUser, authToken }) {
   const [summary, setSummary] = useState({
     totalOutstanding: 0,
@@ -468,20 +491,25 @@ export default function CollectionsPage({ currentUser, authToken }) {
                       <div>
                         <div className="font-semibold">{item.labName}</div>
                         <div className="text-sm text-slate-500">
-                          {item.labId} • {item.area || "-"}
+                          {formatMetaSegment([item.labId, item.area || null])}
                         </div>
-                        <div className="mt-1 text-xs text-slate-500">
-                          Agent: {item.assignedAgent || "-"}
-                          {" • "}
-                          Paid: ₹{Number(item.totalPaid || 0).toLocaleString()}
-                        </div>
+                        {displayAgentName(item.assignedAgent) || shouldShowPaidLabel(item) ? (
+                          <div className="mt-1 text-xs text-slate-500">
+                            {formatMetaSegment([
+                              displayAgentName(item.assignedAgent)
+                                ? `Agent: ${displayAgentName(item.assignedAgent)}`
+                                : null,
+                              shouldShowPaidLabel(item)
+                                ? `Paid: ₹${Number(item.totalPaid).toLocaleString()}`
+                                : null,
+                            ])}
+                          </div>
+                        ) : null}
                       </div>
 
                       <div className="flex flex-wrap gap-2">
                         <Badge variant="secondary">{item.riskStatus || "Low"}</Badge>
-                        <Badge variant="outline">
-                          {item.paymentStatus || "Pending"}
-                        </Badge>
+                        <Badge variant="outline">{displayPaymentStatus(item)}</Badge>
                         <Badge>
                           ₹{Number(item.outstandingAmount || 0).toLocaleString()}
                         </Badge>
@@ -532,13 +560,17 @@ export default function CollectionsPage({ currentUser, authToken }) {
                     Outstanding: ₹
                     {Number(selectedCollection.outstandingAmount || 0).toLocaleString()}
                   </div>
-                  <div>
-                    Total Paid: ₹
-                    {Number(selectedCollection.totalPaid || 0).toLocaleString()}
-                  </div>
-                  <div>Risk: {selectedCollection.riskStatus || "-"}</div>
-                  <div>Status: {selectedCollection.paymentStatus || "-"}</div>
-                  <div>Overdue Days: {selectedCollection.overdueDays || 0}</div>
+                  {shouldShowPaidLabel(selectedCollection) ? (
+                    <div>
+                      Total Paid: ₹
+                      {Number(selectedCollection.totalPaid || 0).toLocaleString()}
+                    </div>
+                  ) : null}
+                  <div>Risk: {selectedCollection.riskStatus || "Low"}</div>
+                  <div>Status: {displayPaymentStatus(selectedCollection)}</div>
+                  {Number(selectedCollection.overdueDays || 0) > 0 ? (
+                    <div>Overdue Days: {selectedCollection.overdueDays}</div>
+                  ) : null}
                 </div>
 
                 <div className="space-y-2">

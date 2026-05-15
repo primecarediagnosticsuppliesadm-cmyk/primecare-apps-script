@@ -22,10 +22,178 @@ function str(v) {
   return String(v ?? "").trim();
 }
 
-/** Standard lab key for Supabase writes (e.g. LAB_001). */
+/** Standard lab key for Supabase reads/writes (e.g. LAB_001). Trims and uppercases. */
 function normalizeLabIdKey(labId) {
   const s = String(labId ?? "").trim();
   return s ? s.toUpperCase() : "";
+}
+
+function cleanCollectionAgentName(agent) {
+  const s = str(agent);
+  if (!s || s === "-" || s === "—" || s.toLowerCase() === "null") return "";
+  return s;
+}
+
+function paymentAmountFromRow(p) {
+  return num(
+    p?.amount_received ??
+      p?.amountReceived ??
+      p?.amount_collected ??
+      p?.amountCollected ??
+      p?.amount ??
+      p?.payment_amount ??
+      0
+  );
+}
+
+/** Index payments by normalized lab_id (fixes LAB_001 vs Lab_001 query misses). */
+export function buildPaymentsByNormalizedLabId(paymentRows) {
+  const byLab = new Map();
+  const casingVariants = [];
+
+  for (const p of paymentRows || []) {
+    const rawLab = str(p.lab_id ?? p.labId ?? p.Lab_ID);
+    const key = normalizeLabIdKey(rawLab);
+    if (!key) continue;
+    if (rawLab && rawLab !== key) {
+      casingVariants.push({ raw: rawLab, normalized: key, payment_id: p.payment_id ?? p.id });
+    }
+    if (!byLab.has(key)) byLab.set(key, []);
+    byLab.get(key).push(p);
+  }
+
+  for (const list of byLab.values()) {
+    list.sort((a, b) => {
+      const tb = new Date(b.payment_date ?? b.created_at ?? 0).getTime();
+      const ta = new Date(a.payment_date ?? a.created_at ?? 0).getTime();
+      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+    });
+  }
+
+  return { byLab, casingVariants };
+}
+
+export function sumPaymentsForLabRows(paymentList) {
+  return (paymentList || []).reduce((s, p) => s + paymentAmountFromRow(p), 0);
+}
+
+/**
+ * Derives display payment status from AR + payment totals.
+ * Avoids "Paid" when nothing was ever paid and outstanding is zero.
+ */
+export function deriveCollectionPaymentStatus({
+  outstandingAmount,
+  totalPaid,
+  explicitStatus = "",
+}) {
+  const outstanding = num(outstandingAmount);
+  const paid = num(totalPaid);
+  const explicit = str(explicitStatus).trim();
+  const explicitLower = explicit.toLowerCase();
+
+  let derived;
+  if (outstanding > 0) {
+    derived = paid > 0 ? "Partially Paid" : "Pending";
+  } else if (paid > 0) {
+    derived = "Paid";
+  } else {
+    derived = "Current";
+  }
+
+  if (explicit) {
+    if (explicitLower === "paid" && outstanding > 0) {
+      derived = paid > 0 ? "Partially Paid" : "Pending";
+    } else if (explicitLower === "pending" && outstanding <= 0) {
+      derived = paid > 0 ? "Paid" : "Current";
+    } else if (explicitLower === "partially paid" || explicitLower === "partial") {
+      derived = outstanding > 0 && paid > 0 ? "Partially Paid" : derived;
+    } else if (
+      explicitLower !== "paid" &&
+      explicitLower !== "pending" &&
+      explicitLower !== "current"
+    ) {
+      derived = explicit;
+    } else if (explicitLower === "paid" && paid <= 0 && outstanding <= 0) {
+      derived = "Current";
+    }
+  }
+
+  console.log("COLLECTION STATUS DERIVED", {
+    outstanding,
+    totalPaid: paid,
+    explicitStatus: explicit || null,
+    derived,
+  });
+
+  return derived;
+}
+
+/** Rows with no receivables activity are hidden from the collections list. */
+export function hasCollectionArRelevance(row) {
+  const outstanding = num(row?.outstandingAmount);
+  const totalPaid = num(row?.totalPaid);
+  const totalDelivered = num(row?.totalDelivered);
+  const overdueDays = num(row?.overdueDays);
+  if (outstanding > 0 || totalPaid > 0 || totalDelivered > 0 || overdueDays > 0) return true;
+  const hold = str(row?.creditHold).toUpperCase();
+  if (hold === "HOLD" || hold === "YES") return true;
+  const risk = str(row?.riskStatus).toLowerCase();
+  if (risk === "high" || risk === "medium") return true;
+  return false;
+}
+
+export function auditCollectionDataInconsistencies(arRaw, payRaw, collections) {
+  const issues = [];
+  const { byLab, casingVariants } = buildPaymentsByNormalizedLabId(payRaw);
+
+  if (casingVariants.length) {
+    issues.push({
+      type: "lab_id_casing_in_payments",
+      count: casingVariants.length,
+      samples: casingVariants.slice(0, 5),
+    });
+  }
+
+  for (const c of collections || []) {
+    const labKey = normalizeLabIdKey(c.labId);
+    const pays = byLab.get(labKey) || [];
+    const paySum = sumPaymentsForLabRows(pays);
+
+    if (c.paymentStatus === "Paid" && num(c.totalPaid) <= 0) {
+      issues.push({ type: "paid_status_zero_total_paid", labId: labKey, paySum });
+    }
+    if (c.paymentStatus === "Pending" && num(c.outstandingAmount) <= 0 && paySum > 0) {
+      issues.push({ type: "pending_with_no_outstanding_but_payments", labId: labKey, paySum });
+    }
+    if (paySum > 0 && pays.length && num(c.totalPaid) < paySum - 0.01) {
+      issues.push({
+        type: "ar_total_paid_below_payments_sum",
+        labId: labKey,
+        arTotalPaid: c.totalPaid,
+        paymentsSum: paySum,
+      });
+    }
+    if (pays.length && !arRaw?.some((ar) => normalizeLabIdKey(ar.lab_id ?? ar.labId) === labKey)) {
+      issues.push({ type: "payments_without_ar_row", labId: labKey, paymentCount: pays.length });
+    }
+  }
+
+  for (const ar of arRaw || []) {
+    const labKey = normalizeLabIdKey(ar.lab_id ?? ar.labId);
+    const outstanding = num(ar.outstanding ?? ar.outstanding_amount ?? 0);
+    const totalPaid = num(ar.total_paid ?? ar.totalPaid ?? 0);
+    if (outstanding <= 0 && totalPaid <= 0) {
+      const pays = byLab.get(labKey) || [];
+      if (!pays.length) {
+        issues.push({ type: "ar_row_no_activity", labId: labKey });
+      }
+    }
+  }
+
+  if (issues.length) {
+    console.warn("COLLECTION DATA INCONSISTENCIES", issues);
+  }
+  return issues;
 }
 
 /**
@@ -141,7 +309,7 @@ export function mapLabsCreditRow(row) {
   }
 
   return {
-    labId: str(row.lab_id ?? row.labId ?? row.Lab_ID),
+    labId: normalizeLabIdKey(row.lab_id ?? row.labId ?? row.Lab_ID),
     labName: str(row.lab_name ?? row.labName ?? row.Lab_Name),
     ownerName: str(row.owner_name ?? row.ownerName ?? row.Owner_Name),
     phone: str(row.phone ?? row.Phone ?? row.phone_number ?? row.phoneNumber),
@@ -349,15 +517,19 @@ export function mapCollectionsRowFromLabsCredit(rawRow) {
   );
 
   const outstandingAmount = m.outstandingAmount;
-  const paymentStatus =
-    explicitPaymentStatus || (outstandingAmount > 0 ? "Pending" : "Current");
+  const totalPaid = num(rawRow.total_paid ?? rawRow.totalPaid ?? 0);
+  const paymentStatus = deriveCollectionPaymentStatus({
+    outstandingAmount,
+    totalPaid,
+    explicitStatus: explicitPaymentStatus,
+  });
 
   return {
     labId: normalizeLabIdKey(m.labId),
     labName: m.labName,
-    assignedAgent: m.assignedAgent,
+    assignedAgent: cleanCollectionAgentName(m.assignedAgent),
     outstandingAmount,
-    totalPaid: num(rawRow.total_paid ?? rawRow.totalPaid ?? 0),
+    totalPaid,
     totalDelivered: num(rawRow.total_delivered ?? rawRow.totalDelivered ?? 0),
     overdueDays: num(m.daysOverdue),
     riskStatus: deriveCollectionRiskStatus(m),
@@ -374,7 +546,11 @@ export function mapCollectionsRowFromLabsCredit(rawRow) {
  * Maps `ar_credit_control` row to CollectionsPage shape (Apps Script AR_Credit_Control equivalent).
  * Optional `labsCreditRow` enriches lab name, agent, area from `v_labs_credit`.
  */
-export function mapCollectionsRowFromArCredit(arRow, labsCreditRow = null) {
+export function mapCollectionsRowFromArCredit(
+  arRow,
+  labsCreditRow = null,
+  paymentsForLab = []
+) {
   const m = labsCreditRow ? mapLabsCreditRow(labsCreditRow) : null;
   const labId = normalizeLabIdKey(arRow.lab_id ?? arRow.labId ?? arRow.Lab_ID ?? m?.labId);
 
@@ -385,9 +561,11 @@ export function mapCollectionsRowFromArCredit(arRow, labsCreditRow = null) {
       arRow.balance ??
       0
   );
-  const totalPaid = num(
+  const arTotalPaid = num(
     arRow.total_paid ?? arRow.totalPaid ?? arRow.amount_paid ?? arRow.amountPaid ?? 0
   );
+  const paymentsSum = sumPaymentsForLabRows(paymentsForLab);
+  const totalPaid = Math.max(arTotalPaid, paymentsSum);
   const totalDelivered = num(arRow.total_delivered ?? arRow.totalDelivered ?? 0);
   const creditLimit = num(arRow.credit_limit ?? arRow.creditLimit ?? m?.creditLimit ?? 0);
   const overdueDays = num(
@@ -396,8 +574,13 @@ export function mapCollectionsRowFromArCredit(arRow, labsCreditRow = null) {
   const creditHold = str(arRow.credit_hold ?? arRow.creditHold ?? m?.creditHold ?? "");
 
   const labName = str(arRow.lab_name ?? arRow.labName ?? m?.labName ?? labId);
-  const assignedAgent = str(
-    arRow.assigned_agent ?? arRow.assignedAgent ?? m?.assignedAgent ?? ""
+  const assignedAgent = cleanCollectionAgentName(
+    arRow.assigned_agent ??
+      arRow.assignedAgent ??
+      arRow.agent_name ??
+      arRow.agentName ??
+      m?.assignedAgent ??
+      ""
   );
   const area = str(arRow.area ?? m?.area ?? "");
 
@@ -408,12 +591,11 @@ export function mapCollectionsRowFromArCredit(arRow, labsCreditRow = null) {
     else riskStatus = "Low";
   }
 
-  let paymentStatus = str(arRow.payment_status ?? arRow.paymentStatus ?? "");
-  if (!paymentStatus) {
-    if (outstandingAmount <= 0) paymentStatus = "Paid";
-    else if (totalPaid > 0) paymentStatus = "Partially Paid";
-    else paymentStatus = "Pending";
-  }
+  const paymentStatus = deriveCollectionPaymentStatus({
+    outstandingAmount,
+    totalPaid,
+    explicitStatus: arRow.payment_status ?? arRow.paymentStatus ?? "",
+  });
 
   const lastFollowUp = str(
     arRow.last_follow_up ??
@@ -646,11 +828,16 @@ export async function getCollectionsRead() {
     if (arErr) {
       console.warn("[getCollectionsRead] ar_credit_control:", arErr.message);
     }
-    console.log("SUPABASE COLLECTIONS RAW AR", arRaw ?? []);
+    console.log("COLLECTION RAW AR", arRaw ?? []);
 
     const { data: payRaw, error: payErr } = await supabase.from("payments").select("*");
     if (payErr) {
       console.warn("[getCollectionsRead] payments:", payErr.message);
+    }
+    console.log("COLLECTION RAW PAYMENTS", payRaw ?? []);
+    const { byLab: paymentsByLab, casingVariants } = buildPaymentsByNormalizedLabId(payRaw);
+    if (casingVariants.length) {
+      console.warn("COLLECTION PAYMENT LAB_ID CASING VARIANTS", casingVariants.slice(0, 10));
     }
 
     const todayPaymentRows = (payRaw || []).filter((p) => {
@@ -674,16 +861,36 @@ export async function getCollectionsRead() {
     let collections = [];
     if (Array.isArray(arRaw) && arRaw.length) {
       collections = arRaw
-        .map((ar) =>
-          mapCollectionsRowFromArCredit(
+        .map((ar) => {
+          const labKey = normalizeLabIdKey(ar.lab_id ?? ar.labId ?? ar.Lab_ID);
+          return mapCollectionsRowFromArCredit(
             ar,
-            labsByLab.get(normalizeLabIdKey(ar.lab_id ?? ar.labId ?? ar.Lab_ID))
-          )
-        )
-        .filter((c) => c.labId);
+            labsByLab.get(labKey),
+            paymentsByLab.get(labKey) || []
+          );
+        })
+        .filter((c) => c.labId && hasCollectionArRelevance(c));
     } else if (Array.isArray(labsRaw) && labsRaw.length) {
-      collections = labsRaw.map(mapCollectionsRowFromLabsCredit).filter((c) => c.labId);
+      collections = labsRaw
+        .map((row) => {
+          const mapped = mapCollectionsRowFromLabsCredit(row);
+          const labKey = mapped.labId;
+          const pays = paymentsByLab.get(labKey) || [];
+          const paySum = sumPaymentsForLabRows(pays);
+          if (paySum > mapped.totalPaid) {
+            mapped.totalPaid = paySum;
+            mapped.paymentStatus = deriveCollectionPaymentStatus({
+              outstandingAmount: mapped.outstandingAmount,
+              totalPaid: mapped.totalPaid,
+              explicitStatus: mapped.paymentStatus,
+            });
+          }
+          return mapped;
+        })
+        .filter((c) => c.labId && hasCollectionArRelevance(c));
     }
+
+    auditCollectionDataInconsistencies(arRaw, payRaw, collections);
 
     const summary = buildCollectionsSummary(collections, todayCollections);
     console.log("SUPABASE COLLECTIONS SUMMARY", summary);
@@ -727,7 +934,7 @@ export function mapPaymentHistoryRow(row) {
 /**
  * Read-only payment history for a lab from `payments`.
  */
-export async function getCollectionHistoryRead(labId) {
+export async function getCollectionHistoryRead(labId, options = {}) {
   const labKey = normalizeLabIdKey(labId);
   traceSupabaseRead("Collections.getCollectionHistoryRead", { table: "payments", labId: labKey });
   if (!supabase || !labKey) {
@@ -735,19 +942,33 @@ export async function getCollectionHistoryRead(labId) {
   }
 
   try {
-    const { data, error } = await supabase
-      .from("payments")
-      .select("*")
-      .eq("lab_id", labKey)
-      .order("payment_date", { ascending: false });
-
-    if (error) {
-      console.warn("[getCollectionHistoryRead] payments:", error.message);
-      return { success: false, error: error.message, data: { history: [] } };
+    let payRaw = Array.isArray(options.paymentsRaw) ? options.paymentsRaw : null;
+    if (!payRaw) {
+      const { data, error } = await supabase.from("payments").select("*");
+      if (error) {
+        console.warn("[getCollectionHistoryRead] payments:", error.message);
+        return { success: false, error: error.message, data: { history: [] } };
+      }
+      payRaw = data || [];
     }
 
-    const history = (data || []).map(mapPaymentHistoryRow);
-    console.log("SUPABASE COLLECTION HISTORY", { labId: labKey, count: history.length });
+    const { byLab } = buildPaymentsByNormalizedLabId(payRaw);
+    const matchedRaw = byLab.get(labKey) || [];
+
+    const eqOnly = (payRaw || []).filter(
+      (p) => str(p.lab_id ?? p.labId) === labKey
+    );
+
+    console.log("COLLECTION HISTORY MATCH", {
+      requestedLabId: labId,
+      normalizedLabId: labKey,
+      matchedByNormalizedKey: matchedRaw.length,
+      matchedByStrictEq: eqOnly.length,
+      orderIdNullCount: matchedRaw.filter((p) => !str(p.order_id ?? p.orderId)).length,
+      latestPaymentDate: matchedRaw[0]?.payment_date ?? matchedRaw[0]?.created_at ?? null,
+    });
+
+    const history = matchedRaw.map(mapPaymentHistoryRow).filter((h) => h.amountCollected > 0);
     return { success: true, data: { history } };
   } catch (err) {
     console.warn("[getCollectionHistoryRead] failed:", err?.message || err);
