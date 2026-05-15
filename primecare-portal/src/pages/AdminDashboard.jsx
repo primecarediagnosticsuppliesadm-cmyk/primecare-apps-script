@@ -5,7 +5,12 @@ import {
   getAIInsights,
   getRecentVisits,
 } from "@/api/primecareApi";
-import { getStockDashboard, getLabsCredit, getReorderForecastRead } from "@/api/primecareSupabaseApi";
+import {
+  getStockDashboard,
+  getLabsCredit,
+  getReorderForecastRead,
+  getAdminDashboardRead,
+} from "@/api/primecareSupabaseApi";
 import {
   TrendingUp,
   AlertTriangle,
@@ -132,7 +137,12 @@ const EMPTY_STOCK_STATS = {
 };
 
 async function fetchSupabaseAdminSlice() {
-  const slice = { stock: null, labs: null, forecast: null };
+  const slice = { stock: null, labs: null, forecast: null, dashboardRead: null };
+  try {
+    slice.dashboardRead = await getAdminDashboardRead();
+  } catch (e) {
+    console.warn("[AdminDashboard] Supabase dashboard read skipped:", e?.message || e);
+  }
   try {
     slice.stock = await getStockDashboard();
   } catch (e) {
@@ -152,7 +162,10 @@ async function fetchSupabaseAdminSlice() {
 }
 
 function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) {
+  const dash = supabaseSlice.dashboardRead?.success ? supabaseSlice.dashboardRead.data : null;
+
   const stockStats =
+    dash?.summary?.stockStats ||
     (supabaseSlice.stock?.success && supabaseSlice.stock?.data?.stats) ||
     summaryIn?.stockStats ||
     EMPTY_STOCK_STATS;
@@ -162,13 +175,6 @@ function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) 
     supabaseSlice.forecast?.success && Array.isArray(supabaseSlice.forecast?.data?.forecast)
       ? supabaseSlice.forecast.data.forecast
       : [];
-
-  const summary = {
-    ...summaryIn,
-    stockStats,
-    recentVisits: summaryIn?.recentVisits ?? 0,
-    totalSoldValue: summaryIn?.totalSoldValue ?? 0,
-  };
 
   const labsCreditRiskCount = labs.filter((l) => {
     const s = String(l.creditStatus || "").toUpperCase();
@@ -193,24 +199,56 @@ function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) 
       revenue: Number(l.revenue || 0),
     }));
 
-  const executive = {
-    todaysRevenue: executiveIn?.todaysRevenue ?? executiveIn?.todays_revenue ?? 0,
-    outstandingReceivables:
-      executiveIn?.outstandingReceivables ?? executiveIn?.outstanding_receivables ?? 0,
-    labsAtCreditRisk:
-      executiveIn?.labsAtCreditRisk ??
-      executiveIn?.labs_at_credit_risk ??
-      labsCreditRiskCount,
-    productsNearStockout:
-      executiveIn?.productsNearStockout ??
-      executiveIn?.products_near_stockout ??
-      nearStockoutDerived,
-    topLabsByRevenue: Array.isArray(executiveIn?.topLabsByRevenue) && executiveIn.topLabsByRevenue.length
-      ? executiveIn.topLabsByRevenue
-      : topLabsDerived,
+  const summary = {
+    stockStats,
+    recentVisits: Number(
+      dash?.summary?.recentVisits ?? summaryIn?.recentVisits ?? 0
+    ),
+    totalSoldValue: Number(
+      dash?.summary?.totalSoldValue ?? summaryIn?.totalSoldValue ?? 0
+    ),
+    todayCollections: Number(dash?.summary?.todayCollections ?? 0),
   };
 
-  return { summary, executive };
+  const executive = {
+    todaysRevenue: Number(
+      dash?.executive?.todaysRevenue ??
+        executiveIn?.todaysRevenue ??
+        executiveIn?.todays_revenue ??
+        0
+    ),
+    outstandingReceivables: Number(
+      dash?.executive?.outstandingReceivables ??
+        executiveIn?.outstandingReceivables ??
+        executiveIn?.outstanding_receivables ??
+        0
+    ),
+    labsAtCreditRisk: Number(
+      dash?.executive?.labsAtCreditRisk ??
+        executiveIn?.labsAtCreditRisk ??
+        executiveIn?.labs_at_credit_risk ??
+        labsCreditRiskCount
+    ),
+    productsNearStockout: Number(
+      dash?.executive?.productsNearStockout ??
+        executiveIn?.productsNearStockout ??
+        executiveIn?.products_near_stockout ??
+        nearStockoutDerived
+    ),
+    topLabsByRevenue:
+      Array.isArray(dash?.executive?.topLabsByRevenue) && dash.executive.topLabsByRevenue.length
+        ? dash.executive.topLabsByRevenue
+        : Array.isArray(executiveIn?.topLabsByRevenue) && executiveIn.topLabsByRevenue.length
+          ? executiveIn.topLabsByRevenue
+          : topLabsDerived,
+  };
+
+  return {
+    summary,
+    executive,
+    visits: dash?.visits ?? null,
+    insights: dash?.insights ?? null,
+  };
 }
 
 export default function AdminDashboard({ currentUser, setActivePage }) {
@@ -284,6 +322,17 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     adminDashboardCache.dashboardLoadedAt = Date.now();
     adminDashboardCache.executiveLoadedAt = Date.now();
 
+    if (merged.visits) {
+      adminDashboardCache.visits = merged.visits;
+      adminDashboardCache.visitsLoadedAt = Date.now();
+      setRecentVisitsData(merged.visits);
+    }
+    if (merged.insights) {
+      adminDashboardCache.insights = merged.insights;
+      adminDashboardCache.insightsLoadedAt = Date.now();
+      setInsightsData(merged.insights);
+    }
+
     setSummaryData(merged.summary);
     setExecutiveData(merged.executive);
   };
@@ -299,9 +348,13 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
 
     if (!insightsFresh) {
       if (skipAppsScript) {
-        adminDashboardCache.insights = EMPTY_AI_INSIGHTS;
-        adminDashboardCache.insightsLoadedAt = Date.now();
-        setInsightsData(EMPTY_AI_INSIGHTS);
+        if (adminDashboardCache.insights) {
+          setInsightsData(adminDashboardCache.insights);
+        } else {
+          adminDashboardCache.insights = EMPTY_AI_INSIGHTS;
+          adminDashboardCache.insightsLoadedAt = Date.now();
+          setInsightsData(EMPTY_AI_INSIGHTS);
+        }
       } else {
         tasks.push(
           (async () => {
@@ -326,9 +379,13 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
 
     if (!visitsFresh) {
       if (skipAppsScript) {
-        adminDashboardCache.visits = EMPTY_VISITS_PAYLOAD;
-        adminDashboardCache.visitsLoadedAt = Date.now();
-        setRecentVisitsData(EMPTY_VISITS_PAYLOAD);
+        if (adminDashboardCache.visits) {
+          setRecentVisitsData(adminDashboardCache.visits);
+        } else {
+          adminDashboardCache.visits = EMPTY_VISITS_PAYLOAD;
+          adminDashboardCache.visitsLoadedAt = Date.now();
+          setRecentVisitsData(EMPTY_VISITS_PAYLOAD);
+        }
       } else {
         tasks.push(
           (async () => {

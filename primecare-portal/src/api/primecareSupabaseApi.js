@@ -692,6 +692,298 @@ export async function getCollectionsRead() {
   }
 }
 
+const EMPTY_ADMIN_DASHBOARD = {
+  executive: {
+    todaysRevenue: 0,
+    outstandingReceivables: 0,
+    labsAtCreditRisk: 0,
+    productsNearStockout: 0,
+    topLabsByRevenue: [],
+  },
+  summary: {
+    stockStats: {
+      totalSkus: 0,
+      criticalItems: 0,
+      reorderItems: 0,
+      healthyItems: 0,
+    },
+    recentVisits: 0,
+    totalSoldValue: 0,
+    todayCollections: 0,
+  },
+  visits: { visits: [] },
+  insights: { insights: [], recommendedActions: [] },
+};
+
+function buildStockStatsFromInventoryRows(rows) {
+  let criticalItems = 0;
+  let reorderItems = 0;
+  let healthyItems = 0;
+
+  for (const row of rows || []) {
+    const currentStock = num(row.current_stock ?? row.currentStock ?? 0);
+    const minStock = num(row.min_stock ?? row.minStock ?? 0);
+    if (currentStock <= 0) criticalItems += 1;
+    else if (minStock > 0 && currentStock < minStock) reorderItems += 1;
+    else healthyItems += 1;
+  }
+
+  return {
+    totalSkus: (rows || []).length,
+    criticalItems,
+    reorderItems,
+    healthyItems,
+  };
+}
+
+function isArCreditRiskRow(arRow) {
+  const hold = str(arRow.credit_hold ?? arRow.creditHold).toUpperCase();
+  const cs = str(arRow.credit_status ?? arRow.creditStatus).toUpperCase();
+  const risk = str(arRow.risk_status ?? arRow.credit_risk ?? arRow.creditRisk).toLowerCase();
+  if (hold === "HOLD" || hold === "YES") return true;
+  if (cs === "HOLD" || cs === "NEAR_LIMIT") return true;
+  if (risk.includes("high") || risk.includes("hold") || risk.includes("risk")) return true;
+  return false;
+}
+
+function mapAdminDashboardVisit(row, labNameById) {
+  const labId = normalizeLabIdKey(row.lab_id ?? row.labId ?? row.Lab_ID);
+  const visitDate = str(
+    row.visit_date ?? row.visitDate ?? row.date ?? row.created_at ?? ""
+  ).slice(0, 10);
+  return {
+    id: str(row.visit_id ?? row.id ?? ""),
+    date: visitDate,
+    agent: str(row.agent_id ?? row.agent_name ?? row.agent ?? row.Agent_Name ?? ""),
+    labId,
+    labName: labNameById.get(labId) || str(row.lab_name ?? row.labName ?? labId),
+    area: str(row.area ?? row.Area ?? ""),
+    visitType: str(row.visit_type ?? row.visitType ?? row.Visit_Type ?? ""),
+    soldValue: num(row.sold_value ?? row.soldValue ?? row.Sold_Value ?? 0),
+    labResponse: str(row.lab_response ?? row.labResponse ?? row.Lab_Response ?? ""),
+    createdAt: str(row.created_at ?? row.createdAt ?? ""),
+  };
+}
+
+function buildDashboardInsightsFromMetrics(metrics) {
+  const insights = [];
+  const recommendedActions = [];
+
+  if (metrics.labsAtCreditRisk > 0) {
+    insights.push({
+      type: "credit_risk",
+      severity: "high",
+      title: "Credit risk labs need attention",
+      message: `${metrics.labsAtCreditRisk} lab(s) are on hold or elevated credit risk.`,
+    });
+    recommendedActions.push(
+      "Prioritize collections follow-up for high-risk labs before extending more credit."
+    );
+  }
+
+  if (metrics.productsNearStockout > 0) {
+    insights.push({
+      type: "stockout",
+      severity: "medium",
+      title: "Stock pressure detected",
+      message: `${metrics.productsNearStockout} SKU(s) are critical or below minimum stock.`,
+    });
+    recommendedActions.push("Review reorder candidates and purchase orders for near-stockout items.");
+  }
+
+  if (metrics.outstandingReceivables > 0) {
+    insights.push({
+      type: "receivables",
+      severity: metrics.outstandingReceivables > 50000 ? "high" : "medium",
+      title: "Outstanding receivables",
+      message: `₹${Number(metrics.outstandingReceivables).toLocaleString()} outstanding across AR.`,
+    });
+  }
+
+  if (metrics.todaysRevenue > 0) {
+    insights.push({
+      type: "revenue",
+      severity: "low",
+      title: "Today's order revenue",
+      message: `₹${Number(metrics.todaysRevenue).toLocaleString()} recorded from orders today.`,
+    });
+  }
+
+  if (!recommendedActions.length) {
+    recommendedActions.push("Refresh dashboard data and review labs, stock, and field visits.");
+  }
+
+  return { insights, recommendedActions };
+}
+
+/**
+ * Admin dashboard aggregates from Supabase: orders, AR, inventory, visits, payments.
+ * Never throws.
+ */
+export async function getAdminDashboardRead() {
+  if (!supabase) {
+    return { success: true, data: { ...EMPTY_ADMIN_DASHBOARD } };
+  }
+
+  try {
+    const today = localDateYmd();
+
+    const [ordersRes, itemsRes, arRes, invRes, visitsRes, payRes, labsRes] = await Promise.all([
+      supabase.from("orders").select("*"),
+      supabase.from("order_items").select("*"),
+      supabase.from("ar_credit_control").select("*"),
+      supabase.from("inventory").select("*"),
+      supabase.from("agent_visits").select("*"),
+      supabase.from("payments").select("*"),
+      supabase.from("labs").select("*"),
+    ]);
+
+    const ordersRaw = ordersRes.error ? [] : ordersRes.data || [];
+    const orderItemsRaw = itemsRes.error ? [] : itemsRes.data || [];
+    const arRaw = arRes.error ? [] : arRes.data || [];
+    const invRaw = invRes.error ? [] : invRes.data || [];
+    const visitsRaw = visitsRes.error ? [] : visitsRes.data || [];
+    const payRaw = payRes.error ? [] : payRes.data || [];
+    const labsRaw = labsRes.error ? [] : labsRes.data || [];
+
+    if (ordersRes.error) console.warn("[getAdminDashboardRead] orders:", ordersRes.error.message);
+    if (itemsRes.error) console.warn("[getAdminDashboardRead] order_items:", itemsRes.error.message);
+
+    const lineTotalByOrderId = new Map();
+    for (const line of orderItemsRaw) {
+      const oid = str(line.order_id ?? line.orderId);
+      if (!oid) continue;
+      const lineTotal = num(
+        line.total_price ?? line.totalPrice ?? line.net_line_total ?? line.netLineTotal ?? 0
+      );
+      const qty = num(line.quantity);
+      const unit = num(line.unit_price ?? line.unitPrice ?? line.unit_selling_price ?? 0);
+      const add = lineTotal > 0 ? lineTotal : qty * unit;
+      lineTotalByOrderId.set(oid, (lineTotalByOrderId.get(oid) || 0) + add);
+    }
+    if (arRes.error) console.warn("[getAdminDashboardRead] ar_credit_control:", arRes.error.message);
+    if (invRes.error) console.warn("[getAdminDashboardRead] inventory:", invRes.error.message);
+    if (visitsRes.error) console.warn("[getAdminDashboardRead] agent_visits:", visitsRes.error.message);
+
+    console.log("SUPABASE DASHBOARD RAW ORDERS", ordersRaw);
+    console.log("SUPABASE DASHBOARD RAW AR", arRaw);
+    console.log("SUPABASE DASHBOARD RAW INVENTORY", invRaw);
+    console.log("SUPABASE DASHBOARD RAW VISITS", visitsRaw);
+
+    const labNameById = new Map();
+    for (const l of labsRaw) {
+      const id = normalizeLabIdKey(l.lab_id ?? l.labId ?? l.id);
+      const name = str(l.lab_name ?? l.labName ?? l.name);
+      if (id && name) labNameById.set(id, name);
+    }
+    for (const ar of arRaw) {
+      const id = normalizeLabIdKey(ar.lab_id ?? ar.labId);
+      const name = str(ar.lab_name ?? ar.labName);
+      if (id && name && !labNameById.has(id)) labNameById.set(id, name);
+    }
+
+    let todaysRevenue = 0;
+    let totalSoldValue = 0;
+    const revenueByLab = new Map();
+
+    for (const o of ordersRaw) {
+      const orderDate = str(o.order_date ?? o.orderDate ?? o.created_at ?? "").slice(0, 10);
+      const orderKey = str(o.order_id ?? o.orderId ?? o.id);
+      let amount = num(
+        o.total_amount ?? o.totalAmount ?? o.order_total ?? o.orderTotal ?? o.amount ?? 0
+      );
+      if (amount <= 0 && orderKey) {
+        amount = num(lineTotalByOrderId.get(orderKey));
+      }
+      const labId = normalizeLabIdKey(o.lab_id ?? o.labId);
+      totalSoldValue += amount;
+      if (orderDate === today) todaysRevenue += amount;
+      if (!labId) continue;
+      const prev = revenueByLab.get(labId) || { revenue: 0, labName: labNameById.get(labId) || labId };
+      prev.revenue += amount;
+      if (!prev.labName) prev.labName = labNameById.get(labId) || labId;
+      revenueByLab.set(labId, prev);
+    }
+
+    let outstandingReceivables = 0;
+    let labsAtCreditRisk = 0;
+    for (const ar of arRaw) {
+      const outstanding = num(
+        ar.outstanding ?? ar.outstanding_amount ?? ar.outstandingAmount ?? ar.balance ?? 0
+      );
+      outstandingReceivables += outstanding;
+      if (isArCreditRiskRow(ar)) labsAtCreditRisk += 1;
+    }
+
+    let stockStats = buildStockStatsFromInventoryRows(invRaw);
+    if (!invRaw.length) {
+      try {
+        const stockDash = await getStockDashboard();
+        if (stockDash?.data?.stats) stockStats = stockDash.data.stats;
+      } catch {
+        /* keep empty stats */
+      }
+    }
+    const productsNearStockout =
+      num(stockStats.criticalItems) + num(stockStats.reorderItems);
+
+    const todayCollections = sumTodayPayments(payRaw);
+
+    const visits = (visitsRaw || [])
+      .map((row) => mapAdminDashboardVisit(row, labNameById))
+      .filter((v) => v.id || v.labName || v.labId)
+      .sort((a, b) => {
+        const tb = new Date(b.createdAt || b.date || 0).getTime();
+        const ta = new Date(a.createdAt || a.date || 0).getTime();
+        return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+      })
+      .slice(0, 10);
+
+    const topLabsByRevenue = Array.from(revenueByLab.entries())
+      .map(([labId, v]) => ({
+        labId,
+        labName: v.labName || labNameById.get(labId) || labId,
+        revenue: num(v.revenue),
+      }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 5);
+
+    const executive = {
+      todaysRevenue,
+      outstandingReceivables,
+      labsAtCreditRisk,
+      productsNearStockout,
+      topLabsByRevenue,
+    };
+
+    const summary = {
+      stockStats,
+      recentVisits: visitsRaw.length,
+      totalSoldValue,
+      todayCollections,
+    };
+
+    const dashboardInsights = buildDashboardInsightsFromMetrics({
+      ...executive,
+      outstandingReceivables,
+    });
+
+    const payload = {
+      executive,
+      summary,
+      visits: { visits },
+      insights: dashboardInsights,
+    };
+
+    console.log("SUPABASE DASHBOARD SUMMARY", { executive, summary });
+
+    return { success: true, data: payload };
+  } catch (err) {
+    console.warn("[getAdminDashboardRead] failed:", err?.message || err);
+    return { success: true, data: { ...EMPTY_ADMIN_DASHBOARD } };
+  }
+}
+
 const EMPTY_AGENT_WORKSPACE = {
   summary: {
     todayVisits: 0,
