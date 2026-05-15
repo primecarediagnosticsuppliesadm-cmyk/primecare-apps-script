@@ -29,7 +29,7 @@ import {
   getOrderDetails,
   submitLabOrder,
 } from "@/api/primecareApi";
-import { createOrderWrite, getOrderDetailsRead } from "@/api/primecareSupabaseApi";
+import { createOrderWrite, getLabRecentOrdersRead, getOrderDetailsRead, mapOrderRow } from "@/api/primecareSupabaseApi";
 import { supabase } from "@/api/supabaseClient.js";
 
 function QuickStat({ title, value, icon: Icon }) {
@@ -181,9 +181,36 @@ export default function LabOrderingPage({ currentUser }) {
   async function loadRecentOrders() {
     try {
       setLoadingOrders(true);
-      const res = await getLabRecentOrders(labId);
-      const result = res?.data || res || {};
-      setRecentOrders(Array.isArray(result?.orders) ? result.orders : []);
+
+      let supabaseOrders = [];
+      if (supabase && labId) {
+        const sbRes = await getLabRecentOrdersRead(labId);
+        supabaseOrders = Array.isArray(sbRes?.data?.orders) ? sbRes.data.orders : [];
+      }
+
+      let scriptOrders = [];
+      try {
+        const res = await getLabRecentOrders(labId);
+        const result = res?.data || res || {};
+        scriptOrders = Array.isArray(result?.orders) ? result.orders : [];
+      } catch (e) {
+        console.warn("[LabOrderingPage] getLabRecentOrders:", e?.message || e);
+      }
+
+      const byId = new Map();
+      for (const o of [...supabaseOrders, ...scriptOrders]) {
+        const id = String(o?.orderId || o?.order_id || "").trim();
+        if (!id) continue;
+        if (!byId.has(id)) byId.set(id, o);
+      }
+
+      const merged = Array.from(byId.values()).sort((a, b) => {
+        const da = String(a.orderDate || a.order_date || a.date || "");
+        const db = String(b.orderDate || b.order_date || b.date || "");
+        return db.localeCompare(da);
+      });
+
+      setRecentOrders(merged);
     } catch (error) {
       console.error("Failed to load recent orders", error);
     } finally {
@@ -195,6 +222,16 @@ export default function LabOrderingPage({ currentUser }) {
     try {
       setLoadingOrderDetails(true);
       setErrorMessage("");
+
+      if (supabase) {
+        const sup = await getOrderDetailsRead(orderId);
+        if (sup?.data?.order) {
+          setSelectedOrderId(orderId);
+          setSelectedOrderDetails(sup.data);
+          return;
+        }
+      }
+
       const res = await getOrderDetails(orderId);
       const result = res?.data || res || {};
       setSelectedOrderId(orderId);
@@ -482,15 +519,19 @@ export default function LabOrderingPage({ currentUser }) {
               : "Order submitted successfully (Supabase)."
           );
 
+          if (sbRes?.data?.order) {
+            setRecentOrders((prev) => {
+              const mapped = mapOrderRow(sbRes.data.order, labName, 0);
+              const rest = prev.filter((o) => o.orderId !== mapped.orderId);
+              return [mapped, ...rest];
+            });
+          }
+
           await loadRecentOrders();
           await loadCatalog();
 
           if (orderId) {
-            const detail = await getOrderDetailsRead(orderId);
-            if (detail?.data?.order) {
-              setSelectedOrderId(orderId);
-              setSelectedOrderDetails(detail.data);
-            }
+            await openOrderDetails(orderId);
           }
           return;
         }

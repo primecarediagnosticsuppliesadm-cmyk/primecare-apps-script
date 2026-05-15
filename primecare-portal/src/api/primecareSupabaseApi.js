@@ -754,6 +754,7 @@ export async function createOrderWrite(payload = {}) {
 
     const savedOrder = Array.isArray(orderData) ? orderData[0] : orderData;
     console.log("SUPABASE ORDER SAVED", savedOrder);
+    await getLabRecentOrdersRead(lab_id);
 
     const itemsPayload = normalizedLines.map((line, idx) => ({
       order_item_id: `OIN-${order_id}-${idx}-${Date.now()}`,
@@ -897,6 +898,73 @@ async function fetchLabsNameMap() {
     /* ignore — orders list still works without lab names */
   }
   return map;
+}
+
+/**
+ * Recent orders for a single lab from `public.orders` (filtered by `lab_id`).
+ * Never throws. Logs raw DB rows as `SUPABASE LAB RECENT ORDERS`.
+ */
+export async function getLabRecentOrdersRead(labId) {
+  const empty = { success: true, data: { orders: [] } };
+  if (!supabase) return empty;
+
+  const lid = str(labId);
+  if (!lid) return empty;
+
+  try {
+    let rows = null;
+    let lastError = null;
+
+    const q1 = await supabase
+      .from("orders")
+      .select("*")
+      .eq("lab_id", lid)
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (!q1.error) {
+      rows = q1.data;
+    } else {
+      lastError = q1.error;
+      const q2 = await supabase
+        .from("orders")
+        .select("*")
+        .eq("lab_id", lid)
+        .order("order_date", { ascending: false })
+        .limit(50);
+      if (!q2.error) {
+        rows = q2.data;
+        lastError = null;
+      } else {
+        lastError = q2.error;
+      }
+    }
+
+    if (lastError) {
+      console.warn("[getLabRecentOrdersRead]", lastError.message);
+      return empty;
+    }
+
+    const rawList = Array.isArray(rows) ? rows : [];
+    console.log("SUPABASE LAB RECENT ORDERS:", rawList);
+
+    let labMap = new Map();
+    try {
+      labMap = await fetchLabsNameMap();
+    } catch {
+      labMap = new Map();
+    }
+
+    const orders = rawList.map((r, idx) => {
+      const rowLab = str(r.lab_id ?? r.labId ?? r.lab_uuid ?? r.labUUID ?? "");
+      return mapOrderRow(r, labMap.get(rowLab) || "", idx);
+    });
+
+    return { success: true, data: { orders } };
+  } catch (err) {
+    console.warn("[getLabRecentOrdersRead] failed:", err?.message || err);
+    return empty;
+  }
 }
 
 /**
