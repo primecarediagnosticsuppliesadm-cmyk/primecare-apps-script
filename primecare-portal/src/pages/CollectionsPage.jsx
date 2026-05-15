@@ -22,16 +22,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, IndianRupee, CheckCircle2, ClipboardCheck } from "lucide-react";
-
-function normalizeLabId(labId) {
-  return String(labId ?? "").trim().toUpperCase();
-}
+import { labIdKey } from "@/utils/labId.js";
 
 function findCollectionByLabId(list, labId) {
-  const target = normalizeLabId(labId);
+  const target = labIdKey(labId);
   if (!target) return null;
   for (const row of list) {
-    if (normalizeLabId(row?.labId) === target) return row;
+    if (labIdKey(row?.labId) === target) return row;
   }
   return null;
 }
@@ -159,7 +156,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
   }
 
   async function openCollection(labId, options = {}) {
-    console.log("COLLECTION OPEN CLICKED", { labId, normalized: normalizeLabId(labId) });
+    console.log("COLLECTION OPEN CLICKED", { labId, normalized: labIdKey(labId) });
 
     const listMatch = findCollectionByLabId(collections, labId);
     const canonicalLabId = listMatch?.labId ?? labId;
@@ -285,7 +282,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
 
       if (supabase && amt > 0) {
         const sbRes = await createPaymentWrite({
-          labId: normalizeLabId(selectedLabId),
+          labId: labIdKey(selectedLabId),
           tenantId: currentUser?.tenantId ?? currentUser?.tenant_id ?? null,
           orderId: null,
           amountReceived: amt,
@@ -482,7 +479,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
                   <div
                     key={item.labId}
                     className={`rounded-2xl border p-4 shadow-sm ${
-                      normalizeLabId(selectedLabId) === normalizeLabId(item.labId)
+                      labIdKey(selectedLabId) === labIdKey(item.labId)
                         ? "ring-2 ring-slate-200"
                         : ""
                     }`}

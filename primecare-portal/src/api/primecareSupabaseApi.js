@@ -8,6 +8,9 @@ import {
   logStaleFieldMapping,
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
+import { labIdKey, normalizeLabIdKey } from "@/utils/labId.js";
+
+export { labIdKey, normalizeLabIdKey };
 
 function traceSupabaseRead(feature, extra) {
   logSupabaseFeatureSource(feature, extra ?? {});
@@ -20,12 +23,6 @@ function num(v) {
 
 function str(v) {
   return String(v ?? "").trim();
-}
-
-/** Standard lab key for Supabase reads/writes (e.g. LAB_001). Trims and uppercases. */
-function normalizeLabIdKey(labId) {
-  const s = String(labId ?? "").trim();
-  return s ? s.toUpperCase() : "";
 }
 
 function cleanCollectionAgentName(agent) {
@@ -1451,7 +1448,7 @@ function mapVisitRowForAgentDashboard(row) {
     labResponse: str(row.lab_response ?? row.Lab_Response ?? row.labResponse ?? ""),
     agent,
     agentName: agent,
-    labId: str(row.lab_id ?? row.Lab_ID ?? row.labId ?? ""),
+    labId: labIdKey(row.lab_id ?? row.Lab_ID ?? row.labId ?? ""),
   };
 }
 
@@ -1561,7 +1558,7 @@ export async function createAgentVisitWrite(payload = {}) {
     }
 
     const tenant_id = str(payload.tenantId ?? payload.tenant_id) || null;
-    const lab_id = str(payload.labId ?? payload.lab_id);
+    const lab_id = labIdKey(payload.labId ?? payload.lab_id);
     const agent_id = str(
       payload.agentId ?? payload.agent_id ?? payload.userId ?? payload.agentName ?? ""
     );
@@ -1770,7 +1767,7 @@ export async function createOrderWrite(payload = {}) {
   }
 
   try {
-    const lab_id = str(payload.labId ?? payload.lab_id);
+    const lab_id = labIdKey(payload.labId ?? payload.lab_id);
     const tenant_id = str(payload.tenantId ?? payload.tenant_id) || null;
     const created_by =
       str(
@@ -1931,7 +1928,7 @@ export function mapOrderRow(row, labNameFallback = "", rowIndex = 0) {
   return {
     orderId,
     orderDate,
-    labId: str(row.lab_id ?? row.labId ?? row.lab_uuid ?? row.labUUID ?? ""),
+    labId: labIdKey(row.lab_id ?? row.labId ?? row.lab_uuid ?? row.labUUID ?? ""),
     labName: str(row.lab_name ?? row.labName ?? row.lab_title ?? labNameFallback),
     contactPerson: str(row.contact_person ?? row.contactPerson ?? row.contact_name ?? ""),
     invoiceId: str(row.invoice_id ?? row.invoiceId ?? row.invoice_number ?? ""),
