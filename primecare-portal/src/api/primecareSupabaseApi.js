@@ -667,6 +667,171 @@ export async function createAgentVisitWrite(payload = {}) {
 }
 
 /**
+ * Writable inventory table for stock updates. Portal reads use `v_stock_dashboard`
+ * (product_id, current_stock). Override with VITE_SUPABASE_INVENTORY_TABLE if stock lives elsewhere.
+ */
+function getInventoryTableName() {
+  const fromEnv =
+    typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_SUPABASE_INVENTORY_TABLE
+      ? str(import.meta.env.VITE_SUPABASE_INVENTORY_TABLE)
+      : "";
+  return fromEnv || "products";
+}
+
+/** Reads numeric on-hand quantity from a product / inventory row. */
+function readStockFromProductRow(row) {
+  return num(
+    row?.current_stock ??
+      row?.currentStock ??
+      row?.stock ??
+      row?.qty_on_hand ??
+      row?.quantity_on_hand ??
+      row?.qty ??
+      0
+  );
+}
+
+/** Picks the DB column name to update for stock (snake_case for PostgREST). */
+function pickStockColumnKey(row) {
+  if (!row || typeof row !== "object") return "current_stock";
+  if (Object.prototype.hasOwnProperty.call(row, "current_stock")) return "current_stock";
+  if (Object.prototype.hasOwnProperty.call(row, "stock")) return "stock";
+  if (Object.prototype.hasOwnProperty.call(row, "qty_on_hand")) return "qty_on_hand";
+  return "current_stock";
+}
+
+/**
+ * Inserts rows into `inventory_ledger` (e.g. ORDER_OUT lines after a lab order).
+ * @param {object[]} ledgerRows
+ * @returns {{ success: boolean, data?: object[], error?: string|null }}
+ */
+export async function createInventoryLedgerWrite(ledgerRows) {
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+  if (!Array.isArray(ledgerRows) || !ledgerRows.length) {
+    return { success: true, data: [], error: null };
+  }
+
+  try {
+    const { data, error } = await supabase.from("inventory_ledger").insert(ledgerRows).select();
+
+    if (error) {
+      console.warn("[createInventoryLedgerWrite]", error.message);
+      return { success: false, error: error.message || "Ledger insert failed", data: null };
+    }
+
+    console.log("SUPABASE INVENTORY LEDGER SAVED", data);
+    return { success: true, data: data ?? [], error: null };
+  } catch (err) {
+    console.warn("[createInventoryLedgerWrite] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: null };
+  }
+}
+
+/**
+ * After `order_items` insert: decrement stock on the inventory table and append ledger rows.
+ * Failures are logged only; the caller does not roll back the order.
+ */
+async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenant_id, created_by }) {
+  if (!supabase) return;
+  const table = getInventoryTableName();
+  const oid = str(order_id);
+  const lines = Array.isArray(savedLineItems) ? savedLineItems : [];
+  const ledgerBatch = [];
+
+  for (const line of lines) {
+    const product_id = str(line.product_id ?? line.productId ?? "");
+    const product_name_line =
+      str(line.product_name ?? line.productName ?? "") || null;
+    const qty = num(line.quantity);
+    if (!product_id || qty <= 0) continue;
+
+    const sel = await supabase.from(table).select("*").eq("product_id", product_id).limit(1);
+
+    if (sel.error) {
+      console.warn(
+        "[createOrderWrite] INVENTORY: product fetch failed — order is NOT rolled back:",
+        product_id,
+        sel.error.message
+      );
+      continue;
+    }
+
+    const row = Array.isArray(sel.data) && sel.data[0];
+    if (!row) {
+      console.warn(
+        "[createOrderWrite] INVENTORY: no stock row for product — order is NOT rolled back:",
+        product_id,
+        "table:",
+        table
+      );
+      continue;
+    }
+
+    const stock_before = readStockFromProductRow(row);
+    const stock_after = Math.max(0, stock_before - qty);
+    const stockKey = pickStockColumnKey(row);
+
+    console.log("INVENTORY BEFORE UPDATE", {
+      table,
+      product_id,
+      stock_column: stockKey,
+      stock_before,
+      quantity_out: qty,
+      stock_after,
+    });
+
+    const updatePatch = {
+      [stockKey]: stock_after,
+      updated_at: new Date().toISOString(),
+    };
+
+    const upd = await supabase.from(table).update(updatePatch).eq("product_id", product_id);
+
+    if (upd.error) {
+      console.warn(
+        "[createOrderWrite] INVENTORY UPDATE FAILED — order is NOT rolled back:",
+        product_id,
+        upd.error.message
+      );
+      console.log("INVENTORY AFTER UPDATE", {
+        product_id,
+        skipped: true,
+        reason: upd.error.message,
+      });
+      continue;
+    }
+
+    console.log("INVENTORY AFTER UPDATE", { product_id, stock_after });
+
+    ledgerBatch.push({
+      movement_type: "ORDER_OUT",
+      product_id,
+      product_name:
+        product_name_line || str(row.product_name ?? row.productName ?? "") || null,
+      order_id: oid,
+      quantity: qty,
+      stock_before,
+      stock_after,
+      tenant_id,
+      created_by,
+      created_at: new Date().toISOString(),
+    });
+  }
+
+  if (!ledgerBatch.length) return;
+
+  const led = await createInventoryLedgerWrite(ledgerBatch);
+  if (!led.success) {
+    console.warn(
+      "[createOrderWrite] INVENTORY LEDGER insert failed — stock may already be updated; order is NOT rolled back:",
+      led.error
+    );
+  }
+}
+
+/**
  * Inserts a lab order into `orders` and line rows into `order_items`.
  * Payload mirrors LabOrderingPage: { labId, labName?, notes?, items: [{ productId, productName?, quantity, unitSellingPrice }], tenantId?, createdBy?, orderId?, orderDate?, status? }
  * Apps Script `submitLabOrder` remains the fallback caller when this returns failure.
@@ -784,6 +949,20 @@ export async function createOrderWrite(payload = {}) {
     }
 
     console.log("SUPABASE ORDER ITEMS SAVED", itemsData);
+
+    try {
+      await applyLabOrderInventoryDeduction({
+        savedLineItems: itemsData,
+        order_id,
+        tenant_id,
+        created_by,
+      });
+    } catch (invErr) {
+      console.warn(
+        "[createOrderWrite] inventory deduction threw — order is NOT rolled back:",
+        invErr?.message || invErr
+      );
+    }
 
     return {
       success: true,
