@@ -14,6 +14,12 @@ function str(v) {
   return String(v ?? "").trim();
 }
 
+/** Standard lab key for Supabase writes (e.g. LAB_001). */
+function normalizeLabIdKey(labId) {
+  const s = String(labId ?? "").trim();
+  return s ? s.toUpperCase() : "";
+}
+
 /**
  * Maps a row from v_stock_dashboard (snake_case) to the camelCase shape
  * used by StockPage and the legacy Apps Script stock payload.
@@ -417,7 +423,7 @@ export async function createPaymentWrite(payload = {}) {
   }
 
   try {
-    const lab_id = str(payload.labId ?? payload.lab_id);
+    const lab_id = normalizeLabIdKey(payload.labId ?? payload.lab_id);
     const amount_received = num(
       payload.amountReceived ?? payload.amount_received ?? payload.amountCollected ?? 0
     );

@@ -234,7 +234,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
 
       if (supabase && amt > 0) {
         const sbRes = await createPaymentWrite({
-          labId: selectedLabId,
+          labId: normalizeLabId(selectedLabId),
           tenantId: currentUser?.tenantId ?? currentUser?.tenant_id ?? null,
           orderId: null,
           amountReceived: amt,
