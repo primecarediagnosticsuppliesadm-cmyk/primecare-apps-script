@@ -511,43 +511,9 @@ function mapVisitRowForAgentDashboard(row) {
   };
 }
 
-function mapAgentTaskRow(row) {
-  return {
-    taskId: str(row.task_id ?? row.id ?? ""),
-    labId: str(row.lab_id ?? row.labId ?? ""),
-    labName: str(row.lab_name ?? row.labName ?? ""),
-    taskType: str(row.task_type ?? row.taskType ?? row.type ?? "FOLLOW_UP").toUpperCase(),
-    taskDescription: str(
-      row.task_description ?? row.description ?? row.notes ?? row.body ?? ""
-    ),
-    priority: str(row.priority ?? "MEDIUM").toUpperCase(),
-    dueDate: str(row.due_date ?? row.dueDate ?? row.due_at ?? "").slice(0, 10),
-    nextAction: str(row.next_action ?? row.nextAction ?? ""),
-    status: str(row.status ?? row.task_status ?? "open"),
-    assignedAgent: str(
-      row.assigned_agent ?? row.assigned_to ?? row.agent_name ?? row.Agent_Name ?? ""
-    ),
-  };
-}
-
-function isOpenAgentTaskRow(row) {
-  const u = str(row.status ?? row.task_status ?? "open").toLowerCase();
-  if (["done", "completed", "cancelled", "closed"].includes(u)) return false;
-  return true;
-}
-
-function agentTaskRowAssignedToUser(row, currentUser) {
-  const name = str(currentUser?.name || currentUser?.agentName || "");
-  if (!name) return false;
-  const assignee = str(
-    row.assigned_agent ?? row.assigned_to ?? row.agent_name ?? row.Agent_Name ?? row.agent ?? ""
-  );
-  return assignee.toLowerCase() === name.toLowerCase();
-}
-
 /**
  * Read-only agent workspace: labs/credit (`v_labs_credit`), collections (`getCollectionsRead`),
- * visits (`agent_visits`), optional open tasks (`agent_tasks` only — empty if table missing).
+ * visits (`agent_visits`). Tasks list is empty until `agent_tasks` exists in Supabase.
  * Shapes match AgentDashboard expectations. Never throws.
  */
 export async function getAgentWorkspaceRead(currentUser) {
@@ -592,22 +558,8 @@ export async function getAgentWorkspaceRead(currentUser) {
       (v) => str(v.visitDate || "").slice(0, 10) === todayYmd
     ).length;
 
-    let taskRows = [];
-    const at = await supabase.from("agent_tasks").select("*");
-    if (at.error) {
-      console.warn("[getAgentWorkspaceRead] agent_tasks:", at.error.message);
-      taskRows = [];
-    } else if (Array.isArray(at.data)) {
-      taskRows = at.data;
-    }
-
-    const tasks = taskRows
-      .filter((r) => isOpenAgentTaskRow(r) && agentTaskRowAssignedToUser(r, currentUser))
-      .map(mapAgentTaskRow);
-
-    const highPriorityTasks = tasks.filter((t) =>
-      ["HIGH", "CRITICAL"].includes(str(t.priority || "").toUpperCase())
-    ).length;
+    const tasks = [];
+    const highPriorityTasks = 0;
 
     const totalOutstanding = assignedLabs.reduce(
       (s, l) => s + num(l.outstanding ?? l.outstandingAmount ?? 0),
