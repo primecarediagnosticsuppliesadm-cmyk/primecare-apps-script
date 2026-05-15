@@ -17,6 +17,18 @@ import {
   getCollections,
   getStock,
 } from "@/api/primecareApi";
+import {
+  getAdminDashboardRead,
+  getCollectionsRead,
+  getStockDashboard,
+} from "@/api/primecareSupabaseApi";
+import { supabase } from "@/api/supabaseClient.js";
+import {
+  logAppsScriptFallbackUsed,
+  logAppsScriptPrimarySource,
+  logPartialMigrationWarning,
+  logSupabaseFeatureSource,
+} from "@/utils/migrationTrace.js";
 
 function StatCard({ title, value, icon: Icon, subtitle }) {
   return (
@@ -68,6 +80,60 @@ export default function ExecutiveControlTower() {
         setLoading(true);
         setError("");
 
+        if (supabase) {
+          logSupabaseFeatureSource("ExecutiveControlTower.load", {
+            apis: ["getAdminDashboardRead", "getCollectionsRead", "getStockDashboard"],
+          });
+
+          const [dashRead, collRead, stockRead] = await Promise.all([
+            getAdminDashboardRead(),
+            getCollectionsRead(),
+            getStockDashboard(),
+          ]);
+
+          const ex = dashRead?.data?.executive || {};
+          const summary = dashRead?.data?.summary || {};
+          const visits = dashRead?.data?.visits?.visits || [];
+
+          setSnapshot({
+            todaysRevenue: ex.todaysRevenue,
+            outstandingReceivables: ex.outstandingReceivables,
+            labsAtCreditRisk: ex.labsAtCreditRisk,
+            productsNearStockout: ex.productsNearStockout,
+            topLabsByRevenue: ex.topLabsByRevenue || [],
+          });
+
+          setDashboard({
+            stockStats: summary.stockStats || {},
+            recentVisits: summary.recentVisits ?? visits.length,
+            totalSoldValue: summary.totalSoldValue ?? 0,
+          });
+
+          setRecentVisits(
+            visits.map((v) => ({
+              id: v.id,
+              date: v.date,
+              agent: v.agent,
+              labName: v.labName,
+              area: v.area,
+              visitType: v.visitType,
+              soldValue: v.soldValue,
+              labResponse: v.labResponse,
+            }))
+          );
+
+          setCollections(collRead?.data?.collections || []);
+          setStock((stockRead?.data?.inventory || []).map(normalizeStockItem));
+
+          logPartialMigrationWarning(
+            "ExecutiveControlTower",
+            "AI insights not loaded on this page; metrics from Supabase dashboard read."
+          );
+          return;
+        }
+
+        logAppsScriptPrimarySource("ExecutiveControlTower.load", "all endpoints");
+
         const [dashRes, snapRes, visitsRes, collectionsRes, stockRes] = await Promise.all([
           getDashboard(),
           getExecutiveSnapshot(),
@@ -88,6 +154,7 @@ export default function ExecutiveControlTower() {
         setCollections(collectionsRes.data?.collections || []);
         setStock((stockRes.data?.inventory || []).map(normalizeStockItem));
       } catch (err) {
+        logAppsScriptFallbackUsed("ExecutiveControlTower.load", err?.message);
         setError(err.message || "Failed to load executive dashboard");
       } finally {
         setLoading(false);

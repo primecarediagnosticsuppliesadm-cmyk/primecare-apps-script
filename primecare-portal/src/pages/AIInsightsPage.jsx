@@ -3,6 +3,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, Brain, ClipboardCheck, ShieldAlert } from "lucide-react";
 import { getAIInsights } from "@/api/primecareApi";
+import { getAdminDashboardRead } from "@/api/primecareSupabaseApi";
+import { supabase } from "@/api/supabaseClient.js";
+import {
+  logAppsScriptPrimarySource,
+  logPartialMigrationWarning,
+  logSupabaseFeatureSource,
+} from "@/utils/migrationTrace.js";
 
 function StatCard({ title, value, icon: Icon, subtitle }) {
   return (
@@ -37,6 +44,23 @@ export default function AIInsightsPage() {
   useEffect(() => {
     async function loadInsights() {
       try {
+        if (supabase && import.meta.env.DEV) {
+          logSupabaseFeatureSource("AIInsights.load", {
+            api: "getAdminDashboardRead",
+            note: "DEV derived insights from dashboard aggregates",
+          });
+          const dash = await getAdminDashboardRead();
+          if (dash?.data?.insights) {
+            setData(dash.data.insights);
+            logPartialMigrationWarning(
+              "AIInsights",
+              "Using rule-based insights from getAdminDashboardRead; Apps Script AI not called in this path."
+            );
+            return;
+          }
+        }
+
+        logAppsScriptPrimarySource("AIInsights.load", "getAIInsights");
         const res = await getAIInsights();
         if (!res.success) throw new Error(res.error || "Failed to load AI insights");
         setData(res.data || {});

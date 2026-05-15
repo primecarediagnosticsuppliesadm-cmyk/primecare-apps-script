@@ -21,6 +21,10 @@ import {
   getAgentWorkspaceRead,
 } from "@/api/primecareSupabaseApi";
 import { completeAgentTask } from "@/api/primecareApi";
+import {
+  logAppsScriptPrimarySource,
+  logPartialMigrationWarning,
+} from "@/utils/migrationTrace.js";
 
 const EMPTY_WORKSPACE = {
   summary: {
@@ -305,6 +309,11 @@ export default function AgentDashboard({ currentUser, setActivePage, authToken }
         setCompletingTaskId(task.taskId);
         setError("");
 
+        logPartialMigrationWarning(
+          "AgentDashboard.completeTask",
+          "Agent tasks table not in Supabase; completeAgentTask uses Apps Script."
+        );
+        logAppsScriptPrimarySource("AgentDashboard.completeTask", "completeAgentTask");
         const res = await completeAgentTask({
           taskId: task.taskId,
           completedBy: currentUser?.name || currentUser?.agentName || "System User",

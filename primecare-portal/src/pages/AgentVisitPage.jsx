@@ -28,6 +28,11 @@ import {
   getLabsCredit,
 } from "@/api/primecareSupabaseApi";
 import { supabase } from "@/api/supabaseClient.js";
+import {
+  logAppsScriptFallbackUsed,
+  logPartialMigrationWarning,
+  logSupabaseFeatureSource,
+} from "@/utils/migrationTrace.js";
 import { ROLES } from "@/config/roles";
 import { logClientError } from "@/utils/debugLogger";
 
@@ -208,6 +213,9 @@ export default function AgentVisitPage({ currentUser, authToken }) {
         let labList = [];
 
         if (supabase) {
+          logSupabaseFeatureSource("AgentVisit.load", {
+            apis: ["getAgentWorkspaceRead", "getLabsCredit"],
+          });
           const isAgent = String(currentUser?.role || "").toLowerCase() === ROLES.AGENT;
 
           if (isAgent) {
@@ -244,6 +252,10 @@ export default function AgentVisitPage({ currentUser, authToken }) {
         setLabs(labList);
         setLoading(false);
 
+        logPartialMigrationWarning(
+          "AgentVisit.background",
+          "Recent visits and collections sidebar still load via Apps Script getRecentVisits/getCollections."
+        );
         Promise.all([getRecentVisits(params), getCollections(params)])
           .then(async ([visitsRes, collectionsRes]) => {
             if (!mounted) return;
@@ -550,6 +562,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
 
       let res;
       if (supabase) {
+        logSupabaseFeatureSource("AgentVisit.save", { api: "createAgentVisitWrite" });
         const sbRes = await createAgentVisitWrite({
           tenantId: currentUser?.tenantId,
           agentId: currentUser?.id || currentUser?.userId,
@@ -570,10 +583,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
             "";
           res = { success: true, data: { visitId: vid } };
         } else {
-          console.warn(
-            "[AgentVisitPage] Supabase save failed, falling back to Apps Script:",
-            sbRes?.error || "unknown"
-          );
+          logAppsScriptFallbackUsed("AgentVisit.save", sbRes?.error || "unknown");
           res = await saveAgentVisit(payload);
         }
       } else {

@@ -7,6 +7,11 @@ import {
   bulkCreateDraftPurchaseOrders,
 } from "@/api/primecareApi";
 import { getReorderForecastRead } from "@/api/primecareSupabaseApi";
+import {
+  logAppsScriptPrimarySource,
+  logPartialMigrationWarning,
+  logSupabaseFeatureSource,
+} from "@/utils/migrationTrace.js";
 
 const emptyCreateForm = {
   productId: "",
@@ -149,6 +154,9 @@ export default function PurchaseOrdersPage() {
   const [bulkResult, setBulkResult] = useState(null);
 
   const loadPurchaseDashboard = async () => {
+    logSupabaseFeatureSource("PurchaseOrders.reorderCandidates", {
+      api: "getReorderForecastRead",
+    });
     const forecastRes = await getReorderForecastRead();
     if (!forecastRes?.success) {
       throw new Error(forecastRes?.error || "Failed to load reorder candidates from Supabase");
@@ -166,6 +174,13 @@ export default function PurchaseOrdersPage() {
     console.log("SUPABASE AUTO PURCHASE TRIGGERS:", triggerRows);
     setAutoTriggers(triggerRows);
     setAutoTriggerSummary(summarizePlaceholderTriggers(triggerRows));
+
+    logPartialMigrationWarning(
+      "PurchaseOrders",
+      "PO list, receive, create, and smart reorder still use Apps Script; auto-triggers are forecast placeholders."
+    );
+    logAppsScriptPrimarySource("PurchaseOrders.purchaseOrders", "getPurchaseOrders");
+    logAppsScriptPrimarySource("PurchaseOrders.smartReorder", "getSmartReorder");
 
     const [poResult, smartResult] = await Promise.allSettled([
       getPurchaseOrders(),

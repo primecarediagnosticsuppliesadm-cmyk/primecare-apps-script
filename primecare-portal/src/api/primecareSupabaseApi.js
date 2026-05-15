@@ -4,6 +4,14 @@ import {
   filterLabsForUser,
   filterVisitsForUser,
 } from "@/utils/accessFilters.js";
+import {
+  logStaleFieldMapping,
+  logSupabaseFeatureSource,
+} from "@/utils/migrationTrace.js";
+
+function traceSupabaseRead(feature, extra) {
+  logSupabaseFeatureSource(feature, extra ?? {});
+}
 
 function num(v) {
   const n = Number(v);
@@ -83,6 +91,7 @@ function buildStockStats(inventory) {
  * Read-only stock dashboard from Supabase view v_stock_dashboard.
  */
 export async function getStockDashboard() {
+  traceSupabaseRead("Inventory.getStockDashboard", { table: "v_stock_dashboard" });
   if (!supabase) {
     throw new Error(
       "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
@@ -169,6 +178,7 @@ export function mapLabsCreditRow(row) {
  * Read-only labs / credit directory from Supabase view v_labs_credit.
  */
 export async function getLabsCredit() {
+  traceSupabaseRead("Labs.getLabsCredit", { table: "v_labs_credit" });
   if (!supabase) {
     throw new Error(
       "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
@@ -269,6 +279,7 @@ function buildReorderSummaryFromForecast(forecast) {
  * Read-only reorder forecast from Supabase view v_reorder_candidates.
  */
 export async function getReorderForecastRead() {
+  traceSupabaseRead("PurchaseReorder.getReorderForecastRead", { table: "v_reorder_candidates" });
   if (!supabase) {
     throw new Error(
       "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
@@ -493,6 +504,7 @@ function buildCollectionsSummary(collections, todayCollections) {
  * Payload: { labId, amountReceived | amountCollected, paymentMode | mode, paymentDate?, orderId?, tenantId?, outstandingBefore?, collectedBy? }
  */
 export async function createPaymentWrite(payload = {}) {
+  traceSupabaseRead("Collections.createPaymentWrite", { tables: ["payments", "ar_credit_control"] });
   if (!supabase) {
     return { success: false, error: "Supabase is not configured", data: null };
   }
@@ -614,6 +626,9 @@ export async function createPaymentWrite(payload = {}) {
  * enriched from `v_labs_credit` when present. Never throws.
  */
 export async function getCollectionsRead() {
+  traceSupabaseRead("Collections.getCollectionsRead", {
+    tables: ["ar_credit_control", "payments", "v_labs_credit"],
+  });
   if (!supabase) {
     return {
       success: true,
@@ -689,6 +704,54 @@ export async function getCollectionsRead() {
         collections: [],
       },
     };
+  }
+}
+
+/** Maps `payments` row → CollectionsPage history card shape. */
+export function mapPaymentHistoryRow(row) {
+  return {
+    paymentId: str(row.payment_id ?? row.paymentId ?? row.Payment_ID ?? row.id ?? ""),
+    amountCollected: num(
+      row.amount_received ??
+        row.amountReceived ??
+        row.amount_collected ??
+        row.amountCollected ??
+        0
+    ),
+    paymentDate: str(row.payment_date ?? row.paymentDate ?? row.collected_at ?? "").slice(0, 10),
+    paymentMode: str(row.mode ?? row.payment_mode ?? row.paymentMode ?? "Cash"),
+    note: str(row.note ?? row.notes ?? row.collection_note ?? ""),
+  };
+}
+
+/**
+ * Read-only payment history for a lab from `payments`.
+ */
+export async function getCollectionHistoryRead(labId) {
+  const labKey = normalizeLabIdKey(labId);
+  traceSupabaseRead("Collections.getCollectionHistoryRead", { table: "payments", labId: labKey });
+  if (!supabase || !labKey) {
+    return { success: true, data: { history: [] } };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("payments")
+      .select("*")
+      .eq("lab_id", labKey)
+      .order("payment_date", { ascending: false });
+
+    if (error) {
+      console.warn("[getCollectionHistoryRead] payments:", error.message);
+      return { success: false, error: error.message, data: { history: [] } };
+    }
+
+    const history = (data || []).map(mapPaymentHistoryRow);
+    console.log("SUPABASE COLLECTION HISTORY", { labId: labKey, count: history.length });
+    return { success: true, data: { history } };
+  } catch (err) {
+    console.warn("[getCollectionHistoryRead] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: { history: [] } };
   }
 }
 
@@ -821,6 +884,9 @@ function buildDashboardInsightsFromMetrics(metrics) {
  * Never throws.
  */
 export async function getAdminDashboardRead() {
+  traceSupabaseRead("AdminDashboard.getAdminDashboardRead", {
+    tables: ["orders", "order_items", "ar_credit_control", "inventory", "agent_visits", "payments", "labs"],
+  });
   if (!supabase) {
     return { success: true, data: { ...EMPTY_ADMIN_DASHBOARD } };
   }
@@ -1024,6 +1090,9 @@ function mapVisitRowForAgentDashboard(row) {
  * Shapes match AgentDashboard expectations. Never throws.
  */
 export async function getAgentWorkspaceRead(currentUser) {
+  traceSupabaseRead("AgentDashboard.getAgentWorkspaceRead", {
+    tables: ["v_labs_credit", "agent_visits", "ar_credit_control"],
+  });
   if (!supabase) {
     return { success: true, data: { ...EMPTY_AGENT_WORKSPACE } };
   }
@@ -1109,6 +1178,7 @@ export async function getAgentWorkspaceRead(currentUser) {
  * @returns {{ success: boolean, data?: object, error?: string }}
  */
 export async function createAgentVisitWrite(payload = {}) {
+  traceSupabaseRead("Visits.createAgentVisitWrite", { table: "agent_visits" });
   if (!supabase) {
     return { success: false, error: "Supabase is not configured", data: null };
   }
@@ -1313,6 +1383,7 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
  * Apps Script `submitLabOrder` remains the fallback caller when this returns failure.
  */
 export async function createOrderWrite(payload = {}) {
+  traceSupabaseRead("LabOrdering.createOrderWrite", { tables: ["orders", "order_items", "inventory", "inventory_ledger"] });
   if (!supabase) {
     return { success: false, error: "Supabase is not configured", data: null };
   }
@@ -1463,6 +1534,7 @@ export async function createOrderWrite(payload = {}) {
 export function mapOrderRow(row, labNameFallback = "", rowIndex = 0) {
   let orderId = str(row.order_id ?? row.orderId ?? "");
   if (!orderId && row.id != null && String(row.id).trim() !== "") {
+    logStaleFieldMapping("Orders.mapOrderRow", "order_id", "id (uuid)", row.id);
     orderId = String(row.id).trim();
   }
   if (!orderId) {
@@ -1560,6 +1632,7 @@ async function fetchLabsNameMap() {
  * Never throws. Logs raw DB rows as `SUPABASE LAB RECENT ORDERS`.
  */
 export async function getLabRecentOrdersRead(labId) {
+  traceSupabaseRead("LabOrdering.getLabRecentOrdersRead", { table: "orders", labId });
   const empty = { success: true, data: { orders: [] } };
   if (!supabase) return empty;
 
@@ -1628,6 +1701,7 @@ export async function getLabRecentOrdersRead(labId) {
  */
 export async function getOrdersRead(_params = {}) {
   void _params;
+  traceSupabaseRead("Orders.getOrdersRead", { table: "orders" });
   console.log("SUPABASE URL:", import.meta.env.VITE_SUPABASE_URL);
 
   if (!supabase) {
@@ -1671,6 +1745,10 @@ export async function getOrdersRead(_params = {}) {
  * Never throws.
  */
 export async function getOrderDetailsRead(orderId) {
+  traceSupabaseRead("Orders.getOrderDetailsRead", {
+    tables: ["orders", "order_lines", "order_items", "labs"],
+    orderId,
+  });
   const empty = { success: true, data: { order: null, lines: [] } };
   if (!supabase) return empty;
 

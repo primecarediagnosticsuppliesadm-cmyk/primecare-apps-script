@@ -31,6 +31,12 @@ import {
 } from "@/api/primecareApi";
 import { createOrderWrite, getLabRecentOrdersRead, getOrderDetailsRead, mapOrderRow } from "@/api/primecareSupabaseApi";
 import { supabase } from "@/api/supabaseClient.js";
+import {
+  logAppsScriptFallbackUsed,
+  logAppsScriptPrimarySource,
+  logPartialMigrationWarning,
+  logSupabaseFeatureSource,
+} from "@/utils/migrationTrace.js";
 
 function QuickStat({ title, value, icon: Icon }) {
   return (
@@ -159,6 +165,7 @@ export default function LabOrderingPage({ currentUser }) {
       setLoadingCatalog(true);
       setErrorMessage("");
 
+      logAppsScriptPrimarySource("LabOrdering.catalog", "getLabCatalog");
       const res = await getLabCatalog(labId);
       const result = res?.data || res || {};
       const products = Array.isArray(result?.products) ? result.products : [];
@@ -184,12 +191,14 @@ export default function LabOrderingPage({ currentUser }) {
 
       let supabaseOrders = [];
       if (supabase && labId) {
+        logSupabaseFeatureSource("LabOrdering.recentOrders", { api: "getLabRecentOrdersRead" });
         const sbRes = await getLabRecentOrdersRead(labId);
         supabaseOrders = Array.isArray(sbRes?.data?.orders) ? sbRes.data.orders : [];
       }
 
       let scriptOrders = [];
       try {
+        logAppsScriptPrimarySource("LabOrdering.recentOrders", "getLabRecentOrders");
         const res = await getLabRecentOrders(labId);
         const result = res?.data || res || {};
         scriptOrders = Array.isArray(result?.orders) ? result.orders : [];
@@ -506,6 +515,7 @@ export default function LabOrderingPage({ currentUser }) {
       };
 
       if (supabase) {
+        logSupabaseFeatureSource("LabOrdering.submit", { api: "createOrderWrite" });
         const sbRes = await createOrderWrite(requestPayload);
         if (sbRes?.success) {
           const orderId =
@@ -535,12 +545,13 @@ export default function LabOrderingPage({ currentUser }) {
           }
           return;
         }
-        console.warn(
-          "[LabOrderingPage] Supabase order write failed, falling back to Apps Script:",
-          sbRes?.error
-        );
+        logAppsScriptFallbackUsed("LabOrdering.submit", sbRes?.error);
       }
 
+      logPartialMigrationWarning(
+        "LabOrdering.submit",
+        "Using submitLabOrder (Apps Script) — catalog/recent orders may still be Apps Script reads."
+      );
       const res = await submitLabOrder(requestPayload);
       const result = res?.data || res || {};
 

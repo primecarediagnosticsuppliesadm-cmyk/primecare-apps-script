@@ -12,6 +12,11 @@ import {
   getAdminDashboardRead,
 } from "@/api/primecareSupabaseApi";
 import {
+  logAppsScriptPrimarySource,
+  logPartialMigrationWarning,
+  logSupabaseFeatureSource,
+} from "@/utils/migrationTrace.js";
+import {
   TrendingUp,
   AlertTriangle,
   Package,
@@ -274,6 +279,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       return;
     }
 
+    logSupabaseFeatureSource("AdminDashboard.load", { apis: ["getAdminDashboardRead", "getStockDashboard", "getLabsCredit", "getReorderForecastRead"] });
     const supabaseSlice = await fetchSupabaseAdminSlice();
     const data = {
       stock: supabaseSlice.stock?.data ?? null,
@@ -289,6 +295,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     let executivePayload = {};
 
     if (!skipAppsScript) {
+      logAppsScriptPrimarySource("AdminDashboard.load", "getDashboard + getExecutiveSnapshot");
       const [dashboardRes, executiveRes] = await Promise.allSettled([
         getDashboard(),
         getExecutiveSnapshot(),
@@ -309,6 +316,11 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       if (executiveRes.status === "rejected") {
         console.warn("[AdminDashboard] getExecutiveSnapshot failed:", executiveRes.reason);
       }
+    } else {
+      logPartialMigrationWarning(
+        "AdminDashboard",
+        "Apps Script dashboard reads skipped (DEV Supabase-only or VITE_ADMIN_DASHBOARD_SUPABASE_ONLY)."
+      );
     }
 
     const merged = mergeAdminDashboardWithSupabase(

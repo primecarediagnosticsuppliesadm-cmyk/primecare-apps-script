@@ -5,8 +5,17 @@ import {
   updateCollection,
   completeAgentTask,
 } from "@/api/primecareApi";
-import { createPaymentWrite, getCollectionsRead } from "@/api/primecareSupabaseApi";
+import {
+  createPaymentWrite,
+  getCollectionHistoryRead,
+  getCollectionsRead,
+} from "@/api/primecareSupabaseApi";
 import { supabase } from "@/api/supabaseClient.js";
+import {
+  logAppsScriptFallbackUsed,
+  logPartialMigrationWarning,
+  logSupabaseFeatureSource,
+} from "@/utils/migrationTrace.js";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -71,6 +80,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
       setLoading(true);
       setError("");
 
+      logSupabaseFeatureSource("Collections.list", { api: "getCollectionsRead" });
       const res = await getCollectionsRead();
       const payload = res?.data || {};
 
@@ -145,13 +155,31 @@ export default function CollectionsPage({ currentUser, authToken }) {
 
       const params = authToken ? { sessionToken: authToken } : {};
 
-      const [detailsRes, historyRes] = await Promise.all([
-        getCollectionDetails(canonicalLabId, params),
-        getCollectionHistory(canonicalLabId, params),
-      ]);
+      let historyRows = [];
+      if (supabase) {
+        logSupabaseFeatureSource("Collections.history", { api: "getCollectionHistoryRead" });
+        const histRead = await getCollectionHistoryRead(canonicalLabId);
+        if (histRead?.success && Array.isArray(histRead?.data?.history)) {
+          historyRows = histRead.data.history;
+        }
+      }
+
+      logPartialMigrationWarning(
+        "Collections.details",
+        "getCollectionDetails still uses Apps Script for notes/follow-up enrichment."
+      );
+      const detailsRes = await getCollectionDetails(canonicalLabId, params);
+      if (!historyRows.length) {
+        logPartialMigrationWarning(
+          "Collections.history",
+          "Falling back to Apps Script getCollectionHistory."
+        );
+        const historyRes = await getCollectionHistory(canonicalLabId, params);
+        const historyPayload = historyRes?.data || historyRes || {};
+        historyRows = Array.isArray(historyPayload.history) ? historyPayload.history : [];
+      }
 
       const detailsPayload = detailsRes?.data || detailsRes || {};
-      const historyPayload = historyRes?.data || historyRes || {};
       const apiCollection = detailsPayload.collection || null;
 
       let collection = listMatch || null;
@@ -177,7 +205,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
       setSelectedCollection(collection);
       console.log("SELECTED COLLECTION SET", { selectedLabId: canonicalLabId, collection });
 
-      setHistory(Array.isArray(historyPayload.history) ? historyPayload.history : []);
+      setHistory(historyRows);
 
       setAmountCollected("");
       setPaymentMode("Cash");
@@ -243,6 +271,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
           collectedBy: currentUser?.name || "System User",
         });
 
+        logSupabaseFeatureSource("Collections.paymentWrite", { api: "createPaymentWrite" });
         if (sbRes.success) {
           setSuccessMessage(
             pendingTaskContext?.taskId
@@ -262,12 +291,13 @@ export default function CollectionsPage({ currentUser, authToken }) {
           throw new Error(sbRes.error || "Supabase payment write failed.");
         }
 
-        console.warn(
-          "[CollectionsPage] Supabase payment failed, falling back to Apps Script:",
-          sbRes.error
-        );
+        logAppsScriptFallbackUsed("Collections.paymentWrite", sbRes.error);
       }
 
+      logPartialMigrationWarning(
+        "Collections.paymentWrite",
+        "Using updateCollection (Apps Script) for notes/follow-up or after Supabase failure."
+      );
       const res = await updateCollection(basePayload);
       const responsePayload = res?.data || res || {};
 

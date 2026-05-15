@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { updateOrderStatus } from "@/api/primecareApi";
 import { getOrdersRead, getOrderDetailsRead } from "@/api/primecareSupabaseApi";
+import {
+  logAppsScriptPrimarySource,
+  logPartialMigrationWarning,
+} from "@/utils/migrationTrace.js";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -73,6 +77,11 @@ export default function OrdersPage() {
       setError("");
       setSuccessMessage("");
 
+      logPartialMigrationWarning(
+        "Orders.statusWrite",
+        "Order status updates still use Apps Script updateOrderStatus (inventory side-effects)."
+      );
+      logAppsScriptPrimarySource("Orders.statusWrite", "updateOrderStatus");
       const res = await updateOrderStatus({
         orderId: selectedOrder,
         orderStatus: nextStatus,
