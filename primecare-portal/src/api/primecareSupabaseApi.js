@@ -380,7 +380,14 @@ function sumTodayPayments(paymentRows) {
     const raw = str(p.payment_date ?? p.paymentDate ?? p.collected_at ?? p.collectedAt ?? "");
     const d = raw.slice(0, 10);
     if (d === today) {
-      sum += num(p.amount_collected ?? p.amountCollected ?? p.amount ?? p.payment_amount);
+      sum += num(
+        p.amount_collected ??
+          p.amountCollected ??
+          p.amount_received ??
+          p.amountReceived ??
+          p.amount ??
+          p.payment_amount
+      );
     }
   }
   return sum;
@@ -398,6 +405,127 @@ function buildCollectionsSummary(collections, todayCollections) {
     highRiskCount,
     todayCollections: num(todayCollections),
   };
+}
+
+/**
+ * Records a collection payment in `payments` and rolls `ar_credit_control` forward for the lab.
+ * Payload: { labId, amountReceived | amountCollected, paymentMode | mode, paymentDate?, orderId?, tenantId?, outstandingBefore?, collectedBy? }
+ */
+export async function createPaymentWrite(payload = {}) {
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+
+  try {
+    const lab_id = str(payload.labId ?? payload.lab_id);
+    const amount_received = num(
+      payload.amountReceived ?? payload.amount_received ?? payload.amountCollected ?? 0
+    );
+    const tenant_id = str(payload.tenantId ?? payload.tenant_id) || null;
+    const order_id = str(payload.orderId ?? payload.order_id ?? "") || null;
+    const mode = str(payload.paymentMode ?? payload.mode ?? "Cash");
+    const payment_date = str(
+      payload.paymentDate ?? payload.payment_date ?? localDateYmd(new Date())
+    ).slice(0, 10);
+    const outstanding_before_fallback = num(
+      payload.outstandingBefore ?? payload.outstanding_before ?? 0
+    );
+
+    let payment_id = str(payload.paymentId ?? payload.payment_id);
+    if (!payment_id) {
+      payment_id = `PAY-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    if (!lab_id) {
+      return { success: false, error: "lab_id is required", data: null };
+    }
+    if (amount_received <= 0) {
+      return { success: false, error: "amount_received must be > 0", data: null };
+    }
+
+    const arSel = await supabase.from("ar_credit_control").select("*").eq("lab_id", lab_id).limit(1);
+
+    if (arSel.error) {
+      console.warn("[createPaymentWrite] ar_credit_control select:", arSel.error.message);
+      return { success: false, error: arSel.error.message || "AR read failed", data: null };
+    }
+
+    const arRow = Array.isArray(arSel.data) && arSel.data[0];
+    const old_outstanding = arRow
+      ? num(
+          arRow.outstanding ??
+            arRow.outstanding_amount ??
+            arRow.outstandingAmount ??
+            arRow.balance ??
+            0
+        )
+      : outstanding_before_fallback;
+    const old_total_paid = arRow
+      ? num(arRow.total_paid ?? arRow.totalPaid ?? arRow.amount_paid ?? arRow.amountPaid ?? 0)
+      : 0;
+
+    const new_total_paid = old_total_paid + amount_received;
+    const new_outstanding = Math.max(0, old_outstanding - amount_received);
+
+    const created_at = new Date().toISOString();
+    const writePayload = {
+      payment_id,
+      tenant_id,
+      order_id,
+      lab_id,
+      amount_received,
+      payment_date,
+      mode,
+      outstanding_balance: new_outstanding,
+      created_at,
+    };
+
+    console.log("PAYMENT WRITE PAYLOAD", writePayload);
+    console.log("AR BEFORE PAYMENT", arRow || { lab_id, total_paid: old_total_paid, outstanding: old_outstanding });
+
+    const paymentRow = { ...writePayload };
+
+    const { data: payData, error: payErr } = await supabase.from("payments").insert([paymentRow]).select();
+
+    if (payErr) {
+      console.warn("[createPaymentWrite] payments insert:", payErr.message);
+      return { success: false, error: payErr.message || "Payment insert failed", data: null };
+    }
+
+    const savedPay = Array.isArray(payData) ? payData[0] : payData;
+    console.log("SUPABASE PAYMENT SAVED", savedPay);
+
+    const arPatch = {
+      total_paid: new_total_paid,
+      outstanding: new_outstanding,
+      updated_at: new Date().toISOString(),
+    };
+
+    const arUpd = await supabase.from("ar_credit_control").update(arPatch).eq("lab_id", lab_id);
+
+    if (arUpd.error) {
+      console.warn(
+        "[createPaymentWrite] ar_credit_control update FAILED — payment row kept; reconcile AR manually:",
+        arUpd.error.message
+      );
+      return {
+        success: false,
+        error: `Payment saved but AR update failed: ${arUpd.error.message}`,
+        data: { payment: savedPay, partial: true },
+      };
+    }
+
+    console.log("AR AFTER PAYMENT", { lab_id, ...arPatch });
+
+    return {
+      success: true,
+      data: { payment: savedPay, ar: { lab_id, ...arPatch } },
+      error: null,
+    };
+  } catch (err) {
+    console.warn("[createPaymentWrite] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: null };
+  }
 }
 
 /**

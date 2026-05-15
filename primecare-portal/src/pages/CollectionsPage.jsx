@@ -5,7 +5,8 @@ import {
   updateCollection,
   completeAgentTask,
 } from "@/api/primecareApi";
-import { getCollectionsRead } from "@/api/primecareSupabaseApi";
+import { createPaymentWrite, getCollectionsRead } from "@/api/primecareSupabaseApi";
+import { supabase } from "@/api/supabaseClient.js";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -162,7 +163,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
       setError("");
       setSuccessMessage("");
 
-      const payload = {
+      const basePayload = {
         labId: selectedLabId,
         amountCollected: Number(amountCollected || 0),
         paymentMode,
@@ -172,7 +173,45 @@ export default function CollectionsPage({ currentUser, authToken }) {
         nextAction,
       };
 
-      const res = await updateCollection(payload);
+      const amt = Number(amountCollected || 0);
+
+      if (supabase && amt > 0) {
+        const sbRes = await createPaymentWrite({
+          labId: selectedLabId,
+          tenantId: currentUser?.tenantId ?? currentUser?.tenant_id ?? null,
+          orderId: null,
+          amountReceived: amt,
+          paymentMode,
+          outstandingBefore: Number(selectedCollection?.outstandingAmount ?? 0),
+          collectedBy: currentUser?.name || "System User",
+        });
+
+        if (sbRes.success) {
+          setSuccessMessage(
+            pendingTaskContext?.taskId
+              ? "Collection updated successfully. You can now mark the linked task complete."
+              : "Collection updated successfully"
+          );
+
+          await loadCollections();
+          await openCollection(selectedLabId, {
+            fromTask: !!pendingTaskContext,
+            taskContext: pendingTaskContext,
+          });
+          return;
+        }
+
+        if (import.meta.env.DEV) {
+          throw new Error(sbRes.error || "Supabase payment write failed.");
+        }
+
+        console.warn(
+          "[CollectionsPage] Supabase payment failed, falling back to Apps Script:",
+          sbRes.error
+        );
+      }
+
+      const res = await updateCollection(basePayload);
       const responsePayload = res?.data || res || {};
 
       if (!responsePayload?.success) {
