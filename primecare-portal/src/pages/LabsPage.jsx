@@ -3,6 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Building2, Users, MapPin, ClipboardCheck, AlertTriangle, ShieldAlert } from "lucide-react";
 import { getLabsCredit } from "@/api/primecareSupabaseApi";
+import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
+import { summarizeLabsCreditPortfolio } from "@/metrics/computeRiskMetrics.js";
 
 function StatCard({ title, value, icon: Icon, subtitle }) {
   return (
@@ -25,20 +27,6 @@ function StatCard({ title, value, icon: Icon, subtitle }) {
 
 function formatCurrency(value) {
   return `₹${Number(value || 0).toLocaleString("en-IN")}`;
-}
-
-function getCreditStatus(lab) {
-  const explicit = String(lab.creditStatus || "").trim().toUpperCase();
-  if (explicit) return explicit;
-
-  const reason = String(lab.creditReason || "").trim().toUpperCase();
-  const hold = String(lab.creditHold || "").trim().toUpperCase();
-  const outstanding = Number(lab.outstanding || lab.outstandingAmount || 0);
-  const creditLimit = Number(lab.creditLimit || 0);
-
-  if (reason || hold === "YES" || hold === "HOLD") return "HOLD";
-  if (creditLimit > 0 && outstanding / creditLimit >= 0.8) return "NEAR_LIMIT";
-  return "OK";
 }
 
 function getCreditBadgeClasses(status) {
@@ -70,7 +58,7 @@ function normalizeLab(lab) {
   const allowedOverdueDays = Number(lab.allowedOverdueDays ?? 15);
   const creditWarnings = Array.isArray(lab.creditWarnings) ? lab.creditWarnings : [];
   const creditReason = lab.creditReason || "";
-  const creditStatus = getCreditStatus({
+  const creditStatus = deriveCreditTierFromLabRecord({
     ...lab,
     outstanding,
     creditLimit,
@@ -156,20 +144,7 @@ export default function LabsPage({ currentUser, authToken }) {
 
         setLabs(rows);
 
-        setSummary({
-          totalOutstanding: rows.reduce(
-            (sum, x) => sum + Number(x.outstandingAmount || 0),
-            0
-          ),
-          totalRevenue: rows.reduce(
-            (sum, x) => sum + Number(x.revenue || 0),
-            0
-          ),
-          labsWithOutstanding: rows.filter(
-            (x) => Number(x.outstandingAmount || 0) > 0
-          ).length,
-          labsOnCreditHold: rows.filter((x) => x.creditStatus === "HOLD").length,
-        });
+        setSummary(summarizeLabsCreditPortfolio(rows));
       } catch (err) {
         console.error("Failed to load labs", err);
         setError(err.message || "Failed to load labs");

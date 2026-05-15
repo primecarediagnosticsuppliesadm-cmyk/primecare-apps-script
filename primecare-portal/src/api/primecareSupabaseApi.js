@@ -9,6 +9,24 @@ import {
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { labIdKey, normalizeLabIdKey } from "@/utils/labId.js";
+import {
+  buildOrdersByLabDateIndex,
+  computeRevenueMetrics,
+  normalizedOrderRowStatus,
+  orderCountsTowardDashboardRevenue,
+  orderOperationalExcludedFromIndices,
+  resolveOrderAmount,
+} from "@/metrics/computeRevenueMetrics.js";
+import {
+  computeReceivableMetrics,
+  isArCreditRiskRow,
+  summarizeCollectionsList,
+} from "@/metrics/computeReceivableMetrics.js";
+import {
+  productsNearStockoutFromInventoryStats,
+  rollupInventoryTableRows,
+  rollupStockDashboardMappedItems,
+} from "@/metrics/computeInventoryMetrics.js";
 
 export { labIdKey, normalizeLabIdKey };
 
@@ -239,19 +257,6 @@ function sortInventoryLikeLegacy(inventory) {
   );
 }
 
-function buildStockStats(inventory) {
-  return {
-    totalSkus: inventory.length,
-    criticalItems: inventory.filter((x) => x.stockHealth === "Critical").length,
-    reorderItems: inventory.filter((x) => x.stockHealth === "Reorder").length,
-    healthyItems: inventory.filter((x) => x.stockHealth === "Healthy").length,
-    totalSuggestedOrderQty: inventory.reduce(
-      (sum, x) => sum + (x.stockHealth !== "Healthy" ? x.reorderQty : 0),
-      0
-    ),
-  };
-}
-
 /**
  * Read-only stock dashboard from Supabase view v_stock_dashboard.
  */
@@ -275,7 +280,7 @@ export async function getStockDashboard() {
     (rawRows || []).map(mapStockDashboardRow).filter((item) => item.productId)
   );
 
-  const stats = buildStockStats(inventory);
+  const stats = rollupStockDashboardMappedItems(inventory);
 
   return {
     success: true,
@@ -690,20 +695,6 @@ function sumTodayPayments(paymentRows) {
   return sum;
 }
 
-function buildCollectionsSummary(collections, todayCollections) {
-  const totalOutstanding = collections.reduce((s, c) => s + num(c.outstandingAmount), 0);
-  const overdueCount = collections.filter((c) => num(c.overdueDays) > 0).length;
-  const highRiskCount = collections.filter(
-    (c) => String(c.riskStatus || "").toLowerCase() === "high"
-  ).length;
-  return {
-    totalOutstanding,
-    overdueCount,
-    highRiskCount,
-    todayCollections: num(todayCollections),
-  };
-}
-
 function isMissingPaymentsOptionalColumnError(err) {
   const msg = String(err?.message ?? err ?? "").toLowerCase();
   return (
@@ -947,7 +938,7 @@ export async function getCollectionsRead() {
 
     auditCollectionDataInconsistencies(arRaw, payRaw, collections);
 
-    const summary = buildCollectionsSummary(collections, todayCollections);
+    const summary = summarizeCollectionsList(collections, todayCollections);
     console.log("SUPABASE COLLECTIONS SUMMARY", summary);
 
     return {
@@ -1221,98 +1212,6 @@ const EMPTY_ADMIN_DASHBOARD = {
   insights: { insights: [], recommendedActions: [] },
 };
 
-function buildStockStatsFromInventoryRows(rows) {
-  let criticalItems = 0;
-  let reorderItems = 0;
-  let healthyItems = 0;
-
-  for (const row of rows || []) {
-    const currentStock = num(row.current_stock ?? row.currentStock ?? 0);
-    const minStock = num(row.min_stock ?? row.minStock ?? 0);
-    if (currentStock <= 0) criticalItems += 1;
-    else if (minStock > 0 && currentStock < minStock) reorderItems += 1;
-    else healthyItems += 1;
-  }
-
-  return {
-    totalSkus: (rows || []).length,
-    criticalItems,
-    reorderItems,
-    healthyItems,
-  };
-}
-
-function isArCreditRiskRow(arRow) {
-  const hold = str(arRow.credit_hold ?? arRow.creditHold).toUpperCase();
-  const cs = str(arRow.credit_status ?? arRow.creditStatus).toUpperCase();
-  const risk = str(arRow.risk_status ?? arRow.credit_risk ?? arRow.creditRisk).toLowerCase();
-  if (hold === "HOLD" || hold === "YES") return true;
-  if (cs === "HOLD" || cs === "NEAR_LIMIT") return true;
-  if (risk.includes("high") || risk.includes("hold") || risk.includes("risk")) return true;
-  return false;
-}
-
-function resolveOrderAmount(orderRow, lineTotalByOrderId) {
-  const orderKey = str(orderRow.order_id ?? orderRow.orderId ?? orderRow.id);
-  let amount = num(
-    orderRow.total_amount ??
-      orderRow.totalAmount ??
-      orderRow.order_total ??
-      orderRow.orderTotal ??
-      orderRow.amount ??
-      0
-  );
-  if (amount <= 0 && orderKey) {
-    amount = num(lineTotalByOrderId.get(orderKey));
-  }
-  return amount;
-}
-
-function normalizedOrderRowStatus(orderRow) {
-  return str(
-    orderRow?.status ??
-      orderRow?.order_status ??
-      orderRow?.orderStatus ??
-      orderRow?.Order_Status ??
-      "Placed"
-  ).trim();
-}
-
-function orderOperationalExcludedFromIndices(orderRow) {
-  return normalizedOrderRowStatus(orderRow).toLowerCase() === "cancelled";
-}
-
-/** Dashboard / revenue numbers: fulfilled deliveries only (per business rule). */
-function orderCountsTowardDashboardRevenue(orderRow) {
-  return normalizedOrderRowStatus(orderRow).toLowerCase() === "fulfilled";
-}
-
-function buildOrdersByLabDateIndex(ordersRaw, lineTotalByOrderId) {
-  const index = new Map();
-  for (const o of ordersRaw || []) {
-    if (orderOperationalExcludedFromIndices(o)) continue;
-    const labId = normalizeLabIdKey(o.lab_id ?? o.labId);
-    const orderDate = str(o.order_date ?? o.orderDate ?? o.created_at ?? "").slice(0, 10);
-    const orderId = str(o.order_id ?? o.orderId ?? o.id);
-    const amount = resolveOrderAmount(o, lineTotalByOrderId);
-    if (!labId || !orderDate || amount <= 0) continue;
-    const key = `${labId}|${orderDate}`;
-    if (!index.has(key)) index.set(key, []);
-    index.get(key).push({
-      orderId,
-      amount,
-      createdAt: str(o.created_at ?? o.createdAt ?? ""),
-    });
-  }
-  for (const list of index.values()) {
-    list.sort((a, b) => {
-      const tb = new Date(b.createdAt || 0).getTime();
-      const ta = new Date(a.createdAt || 0).getTime();
-      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
-    });
-  }
-  return index;
-}
 
 function findBestLinkedOrderForVisit(visit, ordersByLabDate) {
   const labId = normalizeLabIdKey(visit.labId);
@@ -1728,18 +1627,6 @@ export async function getAdminDashboardRead() {
     if (ordersRes.error) console.warn("[getAdminDashboardRead] orders:", ordersRes.error.message);
     if (itemsRes.error) console.warn("[getAdminDashboardRead] order_items:", itemsRes.error.message);
 
-    const lineTotalByOrderId = new Map();
-    for (const line of orderItemsRaw) {
-      const oid = str(line.order_id ?? line.orderId);
-      if (!oid) continue;
-      const lineTotal = num(
-        line.total_price ?? line.totalPrice ?? line.net_line_total ?? line.netLineTotal ?? 0
-      );
-      const qty = num(line.quantity);
-      const unit = num(line.unit_price ?? line.unitPrice ?? line.unit_selling_price ?? 0);
-      const add = lineTotal > 0 ? lineTotal : qty * unit;
-      lineTotalByOrderId.set(oid, (lineTotalByOrderId.get(oid) || 0) + add);
-    }
     if (arRes.error) console.warn("[getAdminDashboardRead] ar_credit_control:", arRes.error.message);
     if (invRes.error) console.warn("[getAdminDashboardRead] inventory:", invRes.error.message);
     if (visitsRes.error) console.warn("[getAdminDashboardRead] agent_visits:", visitsRes.error.message);
@@ -1761,36 +1648,15 @@ export async function getAdminDashboardRead() {
       if (id && name && !labNameById.has(id)) labNameById.set(id, name);
     }
 
-    let todaysRevenue = 0;
-    let totalSoldValue = 0;
-    /** Non-cancelled order rows for summaries (excludes Cancelled pipeline noise). */
-    let activeOrdersCount = 0;
-    let fulfilledOrdersCount = 0;
-    const revenueByLab = new Map();
+    const revenue = computeRevenueMetrics({
+      ordersRaw,
+      orderItemsRaw,
+      todayYmd: today,
+      labNameById,
+    });
+    const lineTotalByOrderId = revenue.lineTotalByOrderId;
 
     const ordersByLabDate = buildOrdersByLabDateIndex(ordersRaw, lineTotalByOrderId);
-
-    for (const o of ordersRaw) {
-      const st = normalizedOrderRowStatus(o);
-      if (orderOperationalExcludedFromIndices(o)) continue;
-
-      activeOrdersCount += 1;
-      const orderDate = str(o.order_date ?? o.orderDate ?? o.created_at ?? "").slice(0, 10);
-      const amount = resolveOrderAmount(o, lineTotalByOrderId);
-      const labId = normalizeLabIdKey(o.lab_id ?? o.labId);
-
-      const revenueEligible = orderCountsTowardDashboardRevenue(o);
-      if (revenueEligible) {
-        fulfilledOrdersCount += 1;
-        totalSoldValue += amount;
-        if (orderDate === today) todaysRevenue += amount;
-        if (!labId) continue;
-        const prev = revenueByLab.get(labId) || { revenue: 0, labName: labNameById.get(labId) || labId };
-        prev.revenue += amount;
-        if (!prev.labName) prev.labName = labNameById.get(labId) || labId;
-        revenueByLab.set(labId, prev);
-      }
-    }
 
     console.log("DASHBOARD SOURCE RECALCULATED", {
       source: "Supabase",
@@ -1798,23 +1664,15 @@ export async function getAdminDashboardRead() {
         revenue: "sum non-Cancelled orders with status=Fulfilled (order_date for today)",
         receivables: "ar_credit_control.outstanding sums",
       },
-      todaysRevenue,
-      fulfilledTotalAllTimeApprox: totalSoldValue,
-      activeOrdersNonCancelled: activeOrdersCount,
-      fulfilledOrdersForRevenue: fulfilledOrdersCount,
+      todaysRevenue: revenue.todaysRevenue,
+      fulfilledTotalAllTimeApprox: revenue.totalSoldValue,
+      activeOrdersNonCancelled: revenue.activeOrdersCount,
+      fulfilledOrdersForRevenue: revenue.fulfilledOrdersCount,
     });
 
-    let outstandingReceivables = 0;
-    let labsAtCreditRisk = 0;
-    for (const ar of arRaw) {
-      const outstanding = num(
-        ar.outstanding ?? ar.outstanding_amount ?? ar.outstandingAmount ?? ar.balance ?? 0
-      );
-      outstandingReceivables += outstanding;
-      if (isArCreditRiskRow(ar)) labsAtCreditRisk += 1;
-    }
+    const { outstandingReceivables, labsAtCreditRisk } = computeReceivableMetrics(arRaw);
 
-    let stockStats = buildStockStatsFromInventoryRows(invRaw);
+    let stockStats = rollupInventoryTableRows(invRaw);
     if (!invRaw.length) {
       try {
         const stockDash = await getStockDashboard();
@@ -1823,8 +1681,7 @@ export async function getAdminDashboardRead() {
         /* keep empty stats */
       }
     }
-    const productsNearStockout =
-      num(stockStats.criticalItems) + num(stockStats.reorderItems);
+    const productsNearStockout = productsNearStockoutFromInventoryStats(stockStats);
 
     const todayCollections = sumTodayPayments(payRaw);
 
@@ -1843,27 +1700,18 @@ export async function getAdminDashboardRead() {
       })
       .slice(0, 10);
 
-    const topLabsByRevenue = Array.from(revenueByLab.entries())
-      .map(([labId, v]) => ({
-        labId,
-        labName: v.labName || labNameById.get(labId) || labId,
-        revenue: num(v.revenue),
-      }))
-      .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, 5);
-
     const executive = {
-      todaysRevenue,
+      todaysRevenue: revenue.todaysRevenue,
       outstandingReceivables,
       labsAtCreditRisk,
       productsNearStockout,
-      topLabsByRevenue,
+      topLabsByRevenue: revenue.topLabsByRevenue,
     };
 
     const summary = {
       stockStats,
       recentVisits: visitsRaw.length,
-      totalSoldValue,
+      totalSoldValue: revenue.totalSoldValue,
       todayCollections,
     };
 
@@ -1890,13 +1738,13 @@ export async function getAdminDashboardRead() {
       labsRawLength: labsRaw.length,
       payRawLength: payRaw.length,
       lineTotalByOrderId,
-      todaysRevenue,
-      totalSoldValue,
+      todaysRevenue: revenue.todaysRevenue,
+      totalSoldValue: revenue.totalSoldValue,
       outstandingReceivables,
       labsAtCreditRisk,
       productsNearStockout,
       stockStats,
-      topLabsByRevenue,
+      topLabsByRevenue: revenue.topLabsByRevenue,
       visitsMappedTop10Length: visits.length,
     });
 

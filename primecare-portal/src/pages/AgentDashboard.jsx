@@ -25,6 +25,8 @@ import {
   logAppsScriptPrimarySource,
   logPartialMigrationWarning,
 } from "@/utils/migrationTrace.js";
+import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
+import { summarizeAgentLabsCreditBuckets } from "@/metrics/computeRiskMetrics.js";
 
 const EMPTY_WORKSPACE = {
   summary: {
@@ -127,19 +129,7 @@ function taskContextLine(task) {
   return "Open this task and update the workflow.";
 }
 
-function getCreditStatus(item) {
-  const explicit = String(item?.creditStatus || "").trim().toUpperCase();
-  if (explicit) return explicit;
 
-  const reason = String(item?.creditReason || "").trim().toUpperCase();
-  const hold = String(item?.creditHold || "").trim().toUpperCase();
-  const outstanding = Number(item?.outstanding ?? item?.outstandingAmount ?? 0);
-  const creditLimit = Number(item?.creditLimit || 0);
-
-  if (reason || hold === "YES" || hold === "HOLD") return "HOLD";
-  if (creditLimit > 0 && outstanding / creditLimit >= 0.8) return "NEAR_LIMIT";
-  return "OK";
-}
 
 function getCreditBadgeClasses(status) {
   switch ((status || "").toUpperCase()) {
@@ -178,7 +168,7 @@ function normalizeLab(lab) {
   const creditLimit = Number(lab?.creditLimit || 0);
   const daysOverdue = Number(lab?.daysOverdue ?? lab?.overdueDays ?? 0);
   const allowedOverdueDays = Number(lab?.allowedOverdueDays || 15);
-  const creditStatus = getCreditStatus({
+  const creditStatus = deriveCreditTierFromLabRecord({
     ...lab,
     outstanding,
     creditLimit,
@@ -355,9 +345,9 @@ export default function AgentDashboard({ currentUser, setActivePage, authToken }
   const topCollections = useMemo(() => {
     return [...pendingCollections]
       .sort((a, b) => {
-        if (getCreditStatus(a) !== getCreditStatus(b)) {
+        if (deriveCreditTierFromLabRecord(a) !== deriveCreditTierFromLabRecord(b)) {
           const rank = { HOLD: 1, NEAR_LIMIT: 2, OK: 3 };
-          return (rank[getCreditStatus(a)] || 9) - (rank[getCreditStatus(b)] || 9);
+          return (rank[deriveCreditTierFromLabRecord(a)] || 9) - (rank[deriveCreditTierFromLabRecord(b)] || 9);
         }
         if (Number(b.daysOverdue || 0) !== Number(a.daysOverdue || 0)) {
           return Number(b.daysOverdue || 0) - Number(a.daysOverdue || 0);
@@ -367,15 +357,10 @@ export default function AgentDashboard({ currentUser, setActivePage, authToken }
       .slice(0, 4);
   }, [pendingCollections]);
 
-  const creditRiskSummary = useMemo(() => {
-    const labs = assignedLabs || [];
-    return {
-      hold: labs.filter((lab) => getCreditStatus(lab) === "HOLD").length,
-      nearLimit: labs.filter((lab) => getCreditStatus(lab) === "NEAR_LIMIT").length,
-      ok: labs.filter((lab) => getCreditStatus(lab) === "OK").length,
-      withOutstanding: labs.filter((lab) => Number(lab.outstanding || 0) > 0).length,
-    };
-  }, [assignedLabs]);
+  const creditRiskSummary = useMemo(
+    () => summarizeAgentLabsCreditBuckets(assignedLabs),
+    [assignedLabs]
+  );
 
   const todayFocus = useMemo(() => {
     const highPriority = tasks.filter(
@@ -647,7 +632,7 @@ export default function AgentDashboard({ currentUser, setActivePage, authToken }
                 <div className="text-sm text-slate-500">No pending collection tasks.</div>
               ) : (
                 topCollections.map((item, idx) => {
-                  const creditStatus = getCreditStatus(item);
+                  const creditStatus = deriveCreditTierFromLabRecord(item);
                   return (
                     <div key={`${item.labId}-${idx}`} className="rounded-2xl border p-4">
                       <div className="flex items-start justify-between gap-3">
@@ -720,7 +705,7 @@ export default function AgentDashboard({ currentUser, setActivePage, authToken }
                         {lab.city || lab.area || "-"} • {lab.phone || "-"}
                       </div>
                     </div>
-                    <CreditBadge status={getCreditStatus(lab)} />
+                    <CreditBadge status={deriveCreditTierFromLabRecord(lab)} />
                   </div>
 
                   <div className="mt-3 flex flex-wrap gap-2">

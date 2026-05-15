@@ -17,6 +17,11 @@ import {
   logPartialMigrationWarning,
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
+import { computeNearStockoutMergeDerived } from "@/metrics/computeInventoryMetrics.js";
+import {
+  countLabsCreditRiskFromCreditView,
+  deriveTopLabsByRevenueFromLabsCreditFallback,
+} from "@/metrics/computeRiskMetrics.js";
 import { ADMIN_DASHBOARD_INVALIDATE_EVENT } from "@/utils/dashboardInvalidate.js";
 import {
   TrendingUp,
@@ -355,28 +360,11 @@ function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) 
       ? supabaseSlice.forecast.data.forecast
       : [];
 
-  const labsCreditRiskCount = labs.filter((l) => {
-    const s = String(l.creditStatus || "").toUpperCase();
-    return s === "HOLD" || s === "NEAR_LIMIT";
-  }).length;
+  const labsCreditRiskCount = countLabsCreditRiskFromCreditView(labs);
 
-  const urgentForecastCount = forecast.filter((r) => {
-    const u = String(r.urgency || "").trim().toLowerCase();
-    return u === "critical" || u === "high";
-  }).length;
+  const nearStockoutDerived = computeNearStockoutMergeDerived({ forecastRows: forecast, stockStats });
 
-  const nearStockoutDerived = Math.max(
-    urgentForecastCount,
-    Number(stockStats.criticalItems || 0) + Number(stockStats.reorderItems || 0)
-  );
-
-  const topLabsDerived = [...labs]
-    .sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0))
-    .slice(0, 5)
-    .map((l) => ({
-      labName: l.labName || l.labId || "Lab",
-      revenue: Number(l.revenue || 0),
-    }));
+  const topLabsDerived = deriveTopLabsByRevenueFromLabsCreditFallback(labs);
 
   const summary = {
     stockStats,
