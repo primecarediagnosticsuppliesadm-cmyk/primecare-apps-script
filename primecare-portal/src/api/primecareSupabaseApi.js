@@ -667,18 +667,18 @@ export async function createAgentVisitWrite(payload = {}) {
 }
 
 /**
- * Writable inventory table for stock updates. Portal reads use `v_stock_dashboard`
- * (product_id, current_stock). Override with VITE_SUPABASE_INVENTORY_TABLE if stock lives elsewhere.
+ * Writable stock table for lab-order deduction. Schema: `public.inventory`
+ * (`product_id`, `current_stock`). Override with VITE_SUPABASE_INVENTORY_TABLE only if needed.
  */
 function getInventoryTableName() {
   const fromEnv =
     typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_SUPABASE_INVENTORY_TABLE
       ? str(import.meta.env.VITE_SUPABASE_INVENTORY_TABLE)
       : "";
-  return fromEnv || "products";
+  return fromEnv || "inventory";
 }
 
-/** Reads numeric on-hand quantity from a product / inventory row. */
+/** Reads numeric on-hand quantity from an `inventory` (or compatible) row. */
 function readStockFromProductRow(row) {
   return num(
     row?.current_stock ??
@@ -771,7 +771,7 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
 
     const stock_before = readStockFromProductRow(row);
     const stock_after = Math.max(0, stock_before - qty);
-    const stockKey = pickStockColumnKey(row);
+    const stockKey = str(table) === "inventory" ? "current_stock" : pickStockColumnKey(row);
 
     console.log("INVENTORY BEFORE UPDATE", {
       table,

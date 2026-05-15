@@ -3,7 +3,7 @@
 -- TEMP anon policies — replace with tenant-scoped RLS before production.
 --
 -- Stock reads in the portal use v_stock_dashboard → product_id, current_stock (see mapStockDashboardRow).
--- Writes target public.products by default (override in app: VITE_SUPABASE_INVENTORY_TABLE).
+-- Lab order deduction updates public.inventory.current_stock by product_id (override: VITE_SUPABASE_INVENTORY_TABLE).
 
 -- ---------------------------------------------------------------------------
 -- inventory_ledger
@@ -37,7 +37,7 @@ CREATE POLICY "temp_anon_inventory_ledger_insert"
   ON public.inventory_ledger FOR INSERT TO anon WITH CHECK (true);
 
 -- ---------------------------------------------------------------------------
--- products: ensure writable stock columns (only if table exists)
+-- inventory: ensure current_stock / updated_at (only if table exists)
 -- ---------------------------------------------------------------------------
 DO $$
 BEGIN
@@ -45,17 +45,17 @@ BEGIN
     SELECT 1
     FROM information_schema.tables
     WHERE table_schema = 'public'
-      AND table_name = 'products'
+      AND table_name = 'inventory'
   ) THEN
-    EXECUTE 'ALTER TABLE public.products ADD COLUMN IF NOT EXISTS current_stock numeric NOT NULL DEFAULT 0';
-    EXECUTE 'ALTER TABLE public.products ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now()';
+    EXECUTE 'ALTER TABLE public.inventory ADD COLUMN IF NOT EXISTS current_stock numeric NOT NULL DEFAULT 0';
+    EXECUTE 'ALTER TABLE public.inventory ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now()';
   END IF;
 END $$;
 
--- Optional (dev): allow anon to read/update products for portal stock deduction.
+-- Optional (dev): allow anon to read/update public.inventory for portal deduction.
 -- Uncomment if updates fail with RLS; tighten before production.
--- ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
--- DROP POLICY IF EXISTS "temp_anon_products_select" ON public.products;
--- DROP POLICY IF EXISTS "temp_anon_products_update" ON public.products;
--- CREATE POLICY "temp_anon_products_select" ON public.products FOR SELECT TO anon USING (true);
--- CREATE POLICY "temp_anon_products_update" ON public.products FOR UPDATE TO anon USING (true) WITH CHECK (true);
+-- ALTER TABLE public.inventory ENABLE ROW LEVEL SECURITY;
+-- DROP POLICY IF EXISTS "temp_anon_inventory_select" ON public.inventory;
+-- DROP POLICY IF EXISTS "temp_anon_inventory_update" ON public.inventory;
+-- CREATE POLICY "temp_anon_inventory_select" ON public.inventory FOR SELECT TO anon USING (true);
+-- CREATE POLICY "temp_anon_inventory_update" ON public.inventory FOR UPDATE TO anon USING (true) WITH CHECK (true);
