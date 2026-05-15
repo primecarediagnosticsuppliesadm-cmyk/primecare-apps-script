@@ -96,10 +96,17 @@ export function AuthProvider({ children }) {
     };
   }, [authToken]);
 
-  const devLoginLocalAdmin = useCallback(() => {
+  const applyDevLocalSession = useCallback((user) => {
     if (import.meta.env.DEV !== true) return;
 
-    const user = {
+    const token = encodeDevSessionUser(user);
+    localStorage.setItem(STORAGE_KEY, token);
+    setAuthToken(token);
+    setCurrentUser(user);
+  }, []);
+
+  const devLoginLocalAdmin = useCallback(() => {
+    applyDevLocalSession({
       userId: "admin001",
       id: "admin001",
       userName: "Admin User",
@@ -111,13 +118,56 @@ export function AuthProvider({ children }) {
       agentName: "",
       assignedArea: "",
       defaultPage: "dashboard",
-    };
+    });
+  }, [applyDevLocalSession]);
 
-    const token = encodeDevSessionUser(user);
-    localStorage.setItem(STORAGE_KEY, token);
-    setAuthToken(token);
-    setCurrentUser(user);
-  }, []);
+  const devLoginLocalAgent = useCallback(() => {
+    applyDevLocalSession({
+      userId: "agent001",
+      id: "agent001",
+      userName: "Kumar",
+      name: "Kumar",
+      role: "AGENT",
+      email: "agent@primecare.local",
+      tenantId: "6fe055e2-e05d-423b-8e39-26138f2045d6",
+      labId: "",
+      agentName: "Kumar",
+      assignedArea: "",
+      defaultPage: "dashboard",
+    });
+  }, [applyDevLocalSession]);
+
+  const devLoginLocalLab = useCallback(() => {
+    applyDevLocalSession({
+      userId: "lab001",
+      id: "lab001",
+      userName: "ABC Lab",
+      name: "ABC Lab",
+      role: "LAB",
+      email: "lab@primecare.local",
+      labId: "LAB_001",
+      tenantId: "6fe055e2-e05d-423b-8e39-26138f2045d6",
+      agentName: "",
+      assignedArea: "",
+      defaultPage: "labOrders",
+    });
+  }, [applyDevLocalSession]);
+
+  const devLoginLocalExecutive = useCallback(() => {
+    applyDevLocalSession({
+      userId: "exec001",
+      id: "exec001",
+      userName: "Exec User",
+      name: "Exec User",
+      role: "EXECUTIVE",
+      email: "executive@primecare.local",
+      tenantId: "6fe055e2-e05d-423b-8e39-26138f2045d6",
+      labId: "",
+      agentName: "",
+      assignedArea: "",
+      defaultPage: "dashboard",
+    });
+  }, [applyDevLocalSession]);
 
   const login = async ({ loginId, password }) => {
     console.log("🔐 LOGIN START", { loginId });
@@ -181,10 +231,21 @@ export function AuthProvider({ children }) {
       isAuthenticated: !!currentUser,
       login,
       devLoginLocalAdmin,
+      devLoginLocalAgent,
+      devLoginLocalLab,
+      devLoginLocalExecutive,
       signOut,
       logout: signOut,
     };
-  }, [authToken, currentUser, authLoading, devLoginLocalAdmin]);
+  }, [
+    authToken,
+    currentUser,
+    authLoading,
+    devLoginLocalAdmin,
+    devLoginLocalAgent,
+    devLoginLocalLab,
+    devLoginLocalExecutive,
+  ]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

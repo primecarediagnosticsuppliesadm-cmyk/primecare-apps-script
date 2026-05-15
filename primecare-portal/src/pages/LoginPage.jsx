@@ -3,7 +3,8 @@ import { useAuth } from "@/context/AuthContext";
 import { logClientError } from "@/utils/debugLogger";
 
 export default function LoginPage() {
-  const { login, devLoginLocalAdmin } = useAuth();
+  const { login, devLoginLocalAdmin, devLoginLocalAgent, devLoginLocalLab, devLoginLocalExecutive } =
+    useAuth();
   const [loginId, setLoginId] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -93,16 +94,48 @@ export default function LoginPage() {
             <p className="mb-3 text-xs font-medium uppercase tracking-wide text-amber-800">
               Local development only
             </p>
-            <button
-              type="button"
-              onClick={() => {
-                setErrorMessage("");
-                devLoginLocalAdmin();
-              }}
-              className="w-full rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-950 hover:bg-amber-100"
-            >
-              Dev Login as Admin (Local Only)
-            </button>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setErrorMessage("");
+                  devLoginLocalAdmin();
+                }}
+                className="w-full rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-950 hover:bg-amber-100"
+              >
+                Dev Login as Admin (Local Only)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setErrorMessage("");
+                  devLoginLocalAgent();
+                }}
+                className="w-full rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-950 hover:bg-amber-100"
+              >
+                Dev Login as Agent (Local Only)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setErrorMessage("");
+                  devLoginLocalLab();
+                }}
+                className="w-full rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-950 hover:bg-amber-100"
+              >
+                Dev Login as Lab (Local Only)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setErrorMessage("");
+                  devLoginLocalExecutive();
+                }}
+                className="w-full rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-950 hover:bg-amber-100"
+              >
+                Dev Login as Executive (Local Only)
+              </button>
+            </div>
           </div>
         ) : null}
       </div>
