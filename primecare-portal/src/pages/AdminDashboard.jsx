@@ -10,6 +10,7 @@ import {
   getLabsCredit,
   getReorderForecastRead,
   getAdminDashboardRead,
+  resolveAdminVisitRevenue,
 } from "@/api/primecareSupabaseApi";
 import {
   logAppsScriptPrimarySource,
@@ -122,15 +123,35 @@ function severityBadgeClass(severity) {
 }
 
 function normalizeVisit(visit) {
-  return {
-    id: visit?.id || visit?.Visit_ID || "",
-    date: visit?.date || visit?.Visit_Date || "",
-    agent: visit?.agent || visit?.Agent_Name || "",
+  const base = {
+    id: visit?.id || visit?.Visit_ID || visit?.visitId || "",
+    date: visit?.date || visit?.Visit_Date || visit?.visitDate || "",
+    agent: visit?.agent || visit?.Agent_Name || visit?.agentName || "",
     labName: visit?.labName || visit?.Lab_Name || "",
+    labId: visit?.labId || visit?.Lab_ID || "",
     area: visit?.area || visit?.Area || "",
     visitType: visit?.visitType || visit?.Visit_Type || "",
     soldValue: Number(visit?.soldValue || visit?.Sold_Value || 0),
     labResponse: visit?.labResponse || visit?.Lab_Response || "",
+  };
+
+  if (visit?.valueSource != null && visit?.showRevenue != null) {
+    return {
+      ...base,
+      soldValue: Number(visit.soldValue || 0),
+      showRevenue: Boolean(visit.showRevenue),
+      valueSource: visit.valueSource,
+      linkedOrderId: visit.linkedOrderId || null,
+    };
+  }
+
+  const revenue = resolveAdminVisitRevenue(base, new Map(), visit);
+  return {
+    ...base,
+    soldValue: revenue.soldValue,
+    showRevenue: revenue.showRevenue,
+    valueSource: revenue.valueSource,
+    linkedOrderId: revenue.linkedOrderId,
   };
 }
 
@@ -716,8 +737,10 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
                         </span>
                       </div>
                     </div>
-                    <div className="text-sm font-semibold text-slate-900">
-                      {currency(visit.soldValue || 0)}
+                    <div className="min-w-[4.5rem] text-right text-sm font-semibold text-slate-900">
+                      {visit.showRevenue && Number(visit.soldValue) > 0
+                        ? currency(visit.soldValue)
+                        : null}
                     </div>
                   </div>
                 </div>

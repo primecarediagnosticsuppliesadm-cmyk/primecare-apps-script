@@ -809,12 +809,151 @@ function isArCreditRiskRow(arRow) {
   return false;
 }
 
-function mapAdminDashboardVisit(row, labNameById) {
+function resolveOrderAmount(orderRow, lineTotalByOrderId) {
+  const orderKey = str(orderRow.order_id ?? orderRow.orderId ?? orderRow.id);
+  let amount = num(
+    orderRow.total_amount ??
+      orderRow.totalAmount ??
+      orderRow.order_total ??
+      orderRow.orderTotal ??
+      orderRow.amount ??
+      0
+  );
+  if (amount <= 0 && orderKey) {
+    amount = num(lineTotalByOrderId.get(orderKey));
+  }
+  return amount;
+}
+
+function buildOrdersByLabDateIndex(ordersRaw, lineTotalByOrderId) {
+  const index = new Map();
+  for (const o of ordersRaw || []) {
+    const labId = normalizeLabIdKey(o.lab_id ?? o.labId);
+    const orderDate = str(o.order_date ?? o.orderDate ?? o.created_at ?? "").slice(0, 10);
+    const orderId = str(o.order_id ?? o.orderId ?? o.id);
+    const amount = resolveOrderAmount(o, lineTotalByOrderId);
+    if (!labId || !orderDate || amount <= 0) continue;
+    const key = `${labId}|${orderDate}`;
+    if (!index.has(key)) index.set(key, []);
+    index.get(key).push({
+      orderId,
+      amount,
+      createdAt: str(o.created_at ?? o.createdAt ?? ""),
+    });
+  }
+  for (const list of index.values()) {
+    list.sort((a, b) => {
+      const tb = new Date(b.createdAt || 0).getTime();
+      const ta = new Date(a.createdAt || 0).getTime();
+      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+    });
+  }
+  return index;
+}
+
+function findBestLinkedOrderForVisit(visit, ordersByLabDate) {
+  const labId = normalizeLabIdKey(visit.labId);
+  const date = str(visit.date).slice(0, 10);
+  if (!labId || !date) return null;
+  const candidates = ordersByLabDate.get(`${labId}|${date}`) || [];
+  if (!candidates.length) return null;
+  return candidates.reduce((best, cur) =>
+    num(cur.amount) > num(best?.amount) ? cur : best
+  );
+}
+
+/** Visit types that should not show a ₹ badge unless clearly sales-linked. */
+function visitTypeHidesRevenueByDefault(visitType) {
+  const vt = str(visitType).toLowerCase();
+  return (
+    vt === "follow-up" ||
+    vt === "new lead" ||
+    vt === "collection" ||
+    vt === "support visit" ||
+    vt.includes("demo")
+  );
+}
+
+function visitIsSalesLinked(visit) {
+  const vt = str(visit.visitType).toLowerCase();
+  const lr = str(visit.labResponse).toLowerCase();
+  if (num(visit.soldValue) > 0) return true;
+  if (lr === "converted" || lr.includes("order confirmed")) return true;
+  if (vt === "closing") return true;
+  return false;
+}
+
+/**
+ * Resolves display revenue for admin Recent Field Activity cards.
+ * @returns {{ soldValue: number, showRevenue: boolean, valueSource: string, linkedOrderId: string|null }}
+ */
+export function resolveAdminVisitRevenue(visit, ordersByLabDate, rawRow = null) {
+  console.log("RECENT VISIT RAW", rawRow ?? visit);
+
+  const storedSold = num(
+    rawRow?.sold_value ??
+      rawRow?.soldValue ??
+      rawRow?.Sold_Value ??
+      visit?.soldValue ??
+      0
+  );
+
+  if (storedSold > 0) {
+    const out = {
+      soldValue: storedSold,
+      showRevenue: true,
+      valueSource: "sold_value",
+      linkedOrderId: null,
+    };
+    console.log("RECENT VISIT VALUE SOURCE", out);
+    return out;
+  }
+
+  const salesLinked = visitIsSalesLinked({ ...visit, soldValue: storedSold });
+  const hideByType = visitTypeHidesRevenueByDefault(visit.visitType) && !salesLinked;
+
+  if (hideByType) {
+    const out = {
+      soldValue: 0,
+      showRevenue: false,
+      valueSource: "hidden",
+      linkedOrderId: null,
+    };
+    console.log("RECENT VISIT VALUE SOURCE", out);
+    return out;
+  }
+
+  if (salesLinked) {
+    const linked = findBestLinkedOrderForVisit(visit, ordersByLabDate);
+    if (linked) {
+      console.log("RECENT VISIT LINKED ORDER", linked);
+      const out = {
+        soldValue: num(linked.amount),
+        showRevenue: true,
+        valueSource: "linked_order",
+        linkedOrderId: linked.orderId || null,
+      };
+      console.log("RECENT VISIT VALUE SOURCE", out);
+      return out;
+    }
+  }
+
+  const out = {
+    soldValue: 0,
+    showRevenue: false,
+    valueSource: "none",
+    linkedOrderId: null,
+  };
+  console.log("RECENT VISIT VALUE SOURCE", out);
+  return out;
+}
+
+function mapAdminDashboardVisit(row, labNameById, ordersByLabDate) {
   const labId = normalizeLabIdKey(row.lab_id ?? row.labId ?? row.Lab_ID);
   const visitDate = str(
     row.visit_date ?? row.visitDate ?? row.date ?? row.created_at ?? ""
   ).slice(0, 10);
-  return {
+  const base = {
     id: str(row.visit_id ?? row.id ?? ""),
     date: visitDate,
     agent: str(row.agent_id ?? row.agent_name ?? row.agent ?? row.Agent_Name ?? ""),
@@ -825,6 +964,14 @@ function mapAdminDashboardVisit(row, labNameById) {
     soldValue: num(row.sold_value ?? row.soldValue ?? row.Sold_Value ?? 0),
     labResponse: str(row.lab_response ?? row.labResponse ?? row.Lab_Response ?? ""),
     createdAt: str(row.created_at ?? row.createdAt ?? ""),
+  };
+  const revenue = resolveAdminVisitRevenue(base, ordersByLabDate, row);
+  return {
+    ...base,
+    soldValue: revenue.soldValue,
+    showRevenue: revenue.showRevenue,
+    valueSource: revenue.valueSource,
+    linkedOrderId: revenue.linkedOrderId,
   };
 }
 
@@ -952,15 +1099,11 @@ export async function getAdminDashboardRead() {
     let totalSoldValue = 0;
     const revenueByLab = new Map();
 
+    const ordersByLabDate = buildOrdersByLabDateIndex(ordersRaw, lineTotalByOrderId);
+
     for (const o of ordersRaw) {
       const orderDate = str(o.order_date ?? o.orderDate ?? o.created_at ?? "").slice(0, 10);
-      const orderKey = str(o.order_id ?? o.orderId ?? o.id);
-      let amount = num(
-        o.total_amount ?? o.totalAmount ?? o.order_total ?? o.orderTotal ?? o.amount ?? 0
-      );
-      if (amount <= 0 && orderKey) {
-        amount = num(lineTotalByOrderId.get(orderKey));
-      }
+      const amount = resolveOrderAmount(o, lineTotalByOrderId);
       const labId = normalizeLabIdKey(o.lab_id ?? o.labId);
       totalSoldValue += amount;
       if (orderDate === today) todaysRevenue += amount;
@@ -996,7 +1139,7 @@ export async function getAdminDashboardRead() {
     const todayCollections = sumTodayPayments(payRaw);
 
     const visits = (visitsRaw || [])
-      .map((row) => mapAdminDashboardVisit(row, labNameById))
+      .map((row) => mapAdminDashboardVisit(row, labNameById, ordersByLabDate))
       .filter((v) => v.id || v.labName || v.labId)
       .sort((a, b) => {
         const tb = new Date(b.createdAt || b.date || 0).getTime();
@@ -1215,6 +1358,11 @@ export async function createAgentVisitWrite(payload = {}) {
     const follow_up_required =
       Boolean(next_follow_up_date) || labResponse === "Need Follow-up";
 
+    const sold_value = num(payload.soldValue ?? payload.sold_value ?? 0);
+    const lab_name = str(payload.labName ?? payload.lab_name) || null;
+    const area = str(payload.area ?? payload.Area) || null;
+    const agent_name = str(payload.agentName ?? payload.agent_name ?? agent_id) || null;
+
     const insertRow = {
       tenant_id,
       visit_id,
@@ -1225,6 +1373,11 @@ export async function createAgentVisitWrite(payload = {}) {
       notes: notesRaw || null,
       follow_up_required,
       next_follow_up_date: next_follow_up_date || null,
+      lab_response: labResponse || null,
+      sold_value: sold_value > 0 ? sold_value : null,
+      lab_name,
+      area,
+      agent_name,
     };
 
     const { data, error } = await supabase.from("agent_visits").insert([insertRow]).select();
