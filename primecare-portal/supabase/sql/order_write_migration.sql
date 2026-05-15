@@ -22,6 +22,10 @@ CREATE TABLE IF NOT EXISTS public.order_items (
   UNIQUE (order_item_id)
 );
 
+ALTER TABLE public.order_items ADD COLUMN IF NOT EXISTS product_name text;
+ALTER TABLE public.order_items ADD COLUMN IF NOT EXISTS tenant_id text;
+ALTER TABLE public.order_items ADD COLUMN IF NOT EXISTS created_by text;
+
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON public.order_items (order_id);
 
 -- ---------------------------------------------------------------------------

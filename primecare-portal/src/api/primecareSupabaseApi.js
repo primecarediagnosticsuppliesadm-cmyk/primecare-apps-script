@@ -668,7 +668,7 @@ export async function createAgentVisitWrite(payload = {}) {
 
 /**
  * Inserts a lab order into `orders` and line rows into `order_items`.
- * Payload mirrors LabOrderingPage: { labId, labName?, notes?, items: [{ productId, quantity, unitSellingPrice }], tenantId?, createdBy?, orderId?, orderDate?, status? }
+ * Payload mirrors LabOrderingPage: { labId, labName?, notes?, items: [{ productId, productName?, quantity, unitSellingPrice }], tenantId?, createdBy?, orderId?, orderDate?, status? }
  * Apps Script `submitLabOrder` remains the fallback caller when this returns failure.
  */
 export async function createOrderWrite(payload = {}) {
@@ -679,9 +679,14 @@ export async function createOrderWrite(payload = {}) {
   try {
     const lab_id = str(payload.labId ?? payload.lab_id);
     const tenant_id = str(payload.tenantId ?? payload.tenant_id) || null;
-    const created_by = str(
-      payload.createdBy ?? payload.created_by ?? payload.labName ?? payload.lab_name ?? ""
-    );
+    const created_by =
+      str(
+        payload.createdBy ??
+          payload.created_by ??
+          payload.labName ??
+          payload.lab_name ??
+          ""
+      ) || null;
     const order_date = str(
       payload.orderDate ?? payload.order_date ?? new Date().toISOString().slice(0, 10)
     ).slice(0, 10);
@@ -702,10 +707,12 @@ export async function createOrderWrite(payload = {}) {
 
     const normalizedLines = items.map((it) => {
       const product_id = str(it.productId ?? it.product_id);
+      const product_name =
+        str(it.productName ?? it.product_name ?? it.name ?? "") || null;
       const quantity = num(it.quantity);
       const unit_price = num(it.unitSellingPrice ?? it.unitPrice ?? it.unit_price);
       const total_price = Math.round(quantity * unit_price * 100) / 100;
-      return { product_id, quantity, unit_price, total_price };
+      return { product_id, product_name, quantity, unit_price, total_price };
     });
 
     const total_amount = normalizedLines.reduce((s, l) => s + l.total_price, 0);
@@ -748,18 +755,22 @@ export async function createOrderWrite(payload = {}) {
     const savedOrder = Array.isArray(orderData) ? orderData[0] : orderData;
     console.log("SUPABASE ORDER SAVED", savedOrder);
 
-    const itemRows = normalizedLines.map((line, idx) => ({
+    const itemsPayload = normalizedLines.map((line, idx) => ({
       order_item_id: `OIN-${order_id}-${idx}-${Date.now()}`,
       order_id,
+      tenant_id,
       product_id: line.product_id,
+      product_name: line.product_name,
       quantity: line.quantity,
       unit_price: line.unit_price,
       total_price: line.total_price,
+      created_by,
     }));
+    console.log("SUPABASE ORDER ITEMS PAYLOAD", itemsPayload);
 
     const { data: itemsData, error: itemsError } = await supabase
       .from("order_items")
-      .insert(itemRows)
+      .insert(itemsPayload)
       .select();
 
     if (itemsError) {
