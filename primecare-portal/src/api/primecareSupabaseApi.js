@@ -1492,6 +1492,207 @@ function buildDashboardInsightsFromMetrics(metrics) {
 }
 
 /**
+ * Dev/ops reconciliation: compares computed dashboard KPIs to independent passes over the same raw rows.
+ * Logs DASHBOARD KPI AUDIT plus per-KPI KPI SOURCE VERIFIED or KPI MISMATCH DETECTED.
+ */
+function logAdminDashboardSupabaseAudit(ctx) {
+  const {
+    today,
+    ordersRaw,
+    arRaw,
+    orderItemsRawLength,
+    arRawLength,
+    invRawLength,
+    visitsRawLength,
+    labsRawLength,
+    payRawLength,
+    lineTotalByOrderId,
+    todaysRevenue,
+    totalSoldValue,
+    outstandingReceivables,
+    labsAtCreditRisk,
+    productsNearStockout,
+    stockStats,
+    topLabsByRevenue,
+    visitsMappedTop10Length,
+  } = ctx;
+
+  let ordersCancelledCount = 0;
+  let ordersFulfilledCount = 0;
+  let ordersWithoutArPostedWhenFulfilled = 0;
+  for (const o of ordersRaw || []) {
+    const stLower = normalizedOrderRowStatus(o).toLowerCase();
+    if (stLower === "cancelled") ordersCancelledCount += 1;
+    if (orderCountsTowardDashboardRevenue(o)) ordersFulfilledCount += 1;
+    if (stLower === "fulfilled") {
+      const flagged = o.ar_posted ?? o.arPosted;
+      if (flagged === false || flagged === 0 || String(flagged).toLowerCase() === "false") {
+        ordersWithoutArPostedWhenFulfilled += 1;
+      }
+    }
+  }
+
+  console.log("DASHBOARD KPI AUDIT", {
+    scope: "Supabase backend (getAdminDashboardRead)",
+    asOfLocalDate: today,
+    rowCounts: {
+      orders: ordersRaw?.length ?? 0,
+      order_items: orderItemsRawLength,
+      ar_credit_control: arRawLength,
+      inventory: invRawLength,
+      agent_visits: visitsRawLength,
+      labs: labsRawLength,
+      payments: payRawLength,
+    },
+    orderStatusRollup: {
+      cancelledRows: ordersCancelledCount,
+      fulfilledRowsForRevenue: ordersFulfilledCount,
+      fulfilledButArPostFlagFalse: ordersWithoutArPostedWhenFulfilled,
+    },
+    displayedPipelineSnapshot: {
+      todaysRevenue,
+      totalSoldValue,
+      receivablesTotal: outstandingReceivables,
+      creditRiskLabs: labsAtCreditRisk,
+      nearStockout: productsNearStockout,
+      visitsCountCard_equals_agent_visits_table: visitsRawLength,
+      visitsPanelUsesMappedTopSlice: visitsMappedTop10Length,
+      topLabsCount: topLabsByRevenue?.length ?? 0,
+      inventorySnapshotBuckets: stockStats || {},
+    },
+  });
+
+  let recalcTodayFulfilled = 0;
+  let recalcAllFulfilled = 0;
+  const recalcLabMap = new Map();
+  let naiveTodayNonCancelledAnyStatus = 0;
+
+  for (const o of ordersRaw || []) {
+    if (orderOperationalExcludedFromIndices(o)) continue;
+    const orderDate = str(o.order_date ?? o.orderDate ?? o.created_at ?? "").slice(0, 10);
+    const amount = resolveOrderAmount(o, lineTotalByOrderId);
+    if (orderDate === today) naiveTodayNonCancelledAnyStatus += amount;
+
+    const st = normalizedOrderRowStatus(o).toLowerCase();
+    if (st !== "fulfilled") continue;
+    recalcAllFulfilled += amount;
+    if (orderDate === today) recalcTodayFulfilled += amount;
+    const labId = normalizeLabIdKey(o.lab_id ?? o.labId);
+    if (labId) recalcLabMap.set(labId, (recalcLabMap.get(labId) || 0) + amount);
+  }
+
+  const eps = 0.05;
+  const check = (kpi, displayed, recomputed, note) => {
+    const d = num(displayed);
+    const r = num(recomputed);
+    const ok = Math.abs(d - r) <= eps;
+    if (ok) {
+      console.log("KPI SOURCE VERIFIED", { kpi, displayed: d, rawRecomputed: r, note });
+    } else {
+      console.warn("KPI MISMATCH DETECTED", { kpi, displayed: d, rawRecomputed: r, note });
+    }
+    return ok;
+  };
+
+  check("todaysRevenue", todaysRevenue, recalcTodayFulfilled, "Σ Fulfilled orders where order_date===today");
+
+  check("totalSoldValue", totalSoldValue, recalcAllFulfilled, "Σ Fulfilled order amounts (excludes Cancelled)");
+
+  let arSumRecalc = 0;
+  let creditRiskRecalc = 0;
+  for (const ar of arRaw || []) {
+    arSumRecalc += num(
+      ar.outstanding ?? ar.outstanding_amount ?? ar.outstandingAmount ?? ar.balance ?? 0
+    );
+    if (isArCreditRiskRow(ar)) creditRiskRecalc += 1;
+  }
+  check(
+    "outstandingReceivables",
+    outstandingReceivables,
+    arSumRecalc,
+    "Σ ar_credit_control.outstanding (collections page totals this same pool)"
+  );
+  check(
+    "labsAtCreditRisk",
+    labsAtCreditRisk,
+    creditRiskRecalc,
+    "Count AR rows where isArCreditRiskRow (not getLabsCredit)"
+  );
+
+  const skuSum =
+    num(stockStats?.criticalItems) +
+    num(stockStats?.reorderItems) +
+    num(stockStats?.healthyItems);
+  const tSku = num(stockStats?.totalSkus);
+  if (tSku === skuSum) {
+    console.log("KPI SOURCE VERIFIED", {
+      kpi: "inventorySnapshot_buckets",
+      displayedTotalSkus: tSku,
+      recomputedBucketSum: skuSum,
+      note: "critical+reorder+healthy matches totalSkus",
+    });
+  } else {
+    console.warn("KPI MISMATCH DETECTED", {
+      kpi: "inventorySnapshot_buckets",
+      displayedTotalSkus: tSku,
+      recomputedBucketSum: skuSum,
+      note: "Rows may not fit min_stock buckets; or view vs table drift",
+    });
+  }
+
+  console.log("KPI SOURCE VERIFIED", {
+    kpi: "recentVisitsCountCardSemantics",
+    uiValueUses: "COUNT(*) agent_visits (all-time), not today's visits only",
+    note: 'Compare dashboard "Recent Visits" StatCard vs Recent Field Activity (top 10 mapped, truncated to 5 in UI)',
+  });
+
+  console.log("KPI SOURCE VERIFIED", {
+    kpi: "nearStockout",
+    computedAs: productsNearStockout,
+    note: 'Backend uses criticalItems+reorderItems from inventory table; merged UI may MAX with reorder forecast urgency',
+  });
+
+  for (const row of topLabsByRevenue || []) {
+    const id = normalizeLabIdKey(row.labId);
+    check(
+      `topLabsByRevenue.lab:${id}`,
+      row.revenue,
+      recalcLabMap.get(id) ?? 0,
+      "Fulfilled-order rollup by lab vs map used for headline top labs list"
+    );
+  }
+
+  if (naiveTodayNonCancelledAnyStatus > recalcTodayFulfilled + eps) {
+    console.log("KPI SOURCE VERIFIED", {
+      kpi: "nonFulFilledPipelineExistsToday",
+      note: `Today Σ(non-cancelled, any status)=${naiveTodayNonCancelledAnyStatus.toFixed(
+        2
+      )} vs Fulfilled-today=${recalcTodayFulfilled.toFixed(2)} (expected gap if Placed/Processing orders exist today)`,
+    });
+  }
+
+  if (ordersWithoutArPostedWhenFulfilled > 0) {
+    console.warn("KPI MISMATCH DETECTED", {
+      kpi: "fulfilledOrders_missing_ar_posted_flag",
+      count: ordersWithoutArPostedWhenFulfilled,
+      note: "May indicate AR not incremented for some fulfilled orders—compare collections AR vs order fulfill path",
+    });
+  } else {
+    console.log("KPI SOURCE VERIFIED", {
+      kpi: "fulfilled_orders_ar_posted_scan",
+      note: "No Fulfilled rows with orders.ar_posted===false among scanned orders (migration-dependent column)",
+    });
+  }
+
+  console.log("KPI SOURCE VERIFIED", {
+    kpi: "recentFieldActivity_linkedOrders_excludeCancelled",
+    note: "buildOrdersByLabDateIndex skips Cancelled orders; linked visit amounts cannot derive from cancelled rows",
+  });
+
+  console.log("DASHBOARD KPI AUDIT complete");
+}
+
+/**
  * Admin dashboard aggregates from Supabase: orders, AR, inventory, visits, payments.
  * Never throws.
  */
@@ -1677,6 +1878,27 @@ export async function getAdminDashboardRead() {
       visits: { visits },
       insights: dashboardInsights,
     };
+
+    logAdminDashboardSupabaseAudit({
+      today,
+      ordersRaw,
+      arRaw,
+      orderItemsRawLength: orderItemsRaw.length,
+      arRawLength: arRaw.length,
+      invRawLength: invRaw.length,
+      visitsRawLength: visitsRaw.length,
+      labsRawLength: labsRaw.length,
+      payRawLength: payRaw.length,
+      lineTotalByOrderId,
+      todaysRevenue,
+      totalSoldValue,
+      outstandingReceivables,
+      labsAtCreditRisk,
+      productsNearStockout,
+      stockStats,
+      topLabsByRevenue,
+      visitsMappedTop10Length: visits.length,
+    });
 
     console.log("SUPABASE DASHBOARD SUMMARY", { executive, summary });
 

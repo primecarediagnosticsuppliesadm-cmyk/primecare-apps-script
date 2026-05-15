@@ -422,6 +422,72 @@ function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) 
           : topLabsDerived,
   };
 
+  const topLabsSource =
+    Array.isArray(dash?.executive?.topLabsByRevenue) && dash.executive.topLabsByRevenue.length
+      ? "Supabase_fulfilled_order_rollup"
+      : Array.isArray(executiveIn?.topLabsByRevenue) && executiveIn.topLabsByRevenue.length
+        ? "Apps_Script_executive_cache"
+        : "v_labs_credit_revenue_sort_fallback";
+
+  console.log("DASHBOARD KPI AUDIT", {
+    scope: "mergeAdminDashboardWithSupabase",
+    stockStatsSource:
+      dash?.summary?.stockStats != null && Object.keys(dash.summary.stockStats).length > 0
+        ? "Supabase_dashboard_summary"
+        : supabaseSlice.stock?.data?.stats
+          ? "getStockDashboard"
+          : summaryIn?.stockStats
+            ? "AppsScript_summary_cache"
+            : "EMPTY_STOCK_STATS",
+    summarySource_recentVisits:
+      dash?.summary?.recentVisits != null ? "Supabase (agent_visits count)" : "Apps Script / cache fallback",
+    summarySource_totalSold: dash?.summary?.totalSoldValue != null ? "Supabase fulfilled Σ" : "Apps Script fallback",
+    executiveSource_todaysRevenue:
+      dash?.executive?.todaysRevenue != null ? "Supabase" : executiveIn?.todaysRevenue != null ? "Apps Script" : "0_default",
+    executiveSource_receivables:
+      dash?.executive?.outstandingReceivables != null ? "Supabase AR Σ" : "Apps Script fallback",
+    topLabsSource,
+    nearStockout: {
+      supabaseExecutive: dash?.executive?.productsNearStockout ?? null,
+      mergeDerivedMax: nearStockoutDerived,
+      mergedForUI: executive.productsNearStockout,
+    },
+  });
+
+  if (
+    dash?.executive?.productsNearStockout != null &&
+    nearStockoutDerived > Number(dash.executive.productsNearStockout || 0)
+  ) {
+    console.warn("KPI MISMATCH DETECTED", {
+      kpi: "nearStockout_mergeVsSupabase",
+      supabaseBackend: dash.executive.productsNearStockout,
+      derivedMaxForecastPlusInventoryBuckets: nearStockoutDerived,
+      uiUses: executive.productsNearStockout,
+      note:
+        "UI prefers Supabase productsNearStockout from getAdminDashboardRead; merge layer computes MAX(forecast critical/high SKU count, critical+reorder from stock stats)—they can diverge.",
+    });
+  }
+
+  if (topLabsSource === "Supabase_fulfilled_order_rollup") {
+    console.log("KPI SOURCE VERIFIED", {
+      kpi: "merge_topLabsAlignedWithSupabaseFulfilledRollup",
+      topLabsSource,
+    });
+  } else if (topLabsSource === "Apps_Script_executive_cache") {
+    console.log("DASHBOARD KPI AUDIT", {
+      kpi: "merge_topLabsFromAppsScriptCache",
+      topLabsSource,
+      note:
+        "Not using Supabase fulfilled-order rollup path; reconcile manually if KPIs drift from Postgres.",
+    });
+  } else {
+    console.warn("KPI MISMATCH DETECTED", {
+      kpi: "merge_topLabsLabsCreditFallback",
+      topLabsSource,
+      note: "Using v_labs_credit revenue ordering; differs from headline fulfilled-order KPI definition.",
+    });
+  }
+
   return {
     summary,
     executive,
