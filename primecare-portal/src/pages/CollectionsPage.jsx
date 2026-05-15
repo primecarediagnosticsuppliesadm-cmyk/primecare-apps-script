@@ -77,14 +77,14 @@ export default function CollectionsPage({ currentUser, authToken }) {
       const rows = Array.isArray(payload.collections) ? payload.collections : [];
       console.log("SUPABASE COLLECTIONS:", rows);
 
-      setSummary(
-        payload.summary || {
-          totalOutstanding: 0,
-          overdueCount: 0,
-          highRiskCount: 0,
-          todayCollections: 0,
-        }
-      );
+      const summaryFromApi = payload.summary || {};
+      setSummary({
+        totalOutstanding: Number(summaryFromApi.totalOutstanding ?? 0),
+        overdueCount: Number(summaryFromApi.overdueCount ?? 0),
+        highRiskCount: Number(summaryFromApi.highRiskCount ?? 0),
+        todayCollections: Number(summaryFromApi.todayCollections ?? 0),
+      });
+      console.log("SUPABASE COLLECTIONS SUMMARY", summaryFromApi);
 
       setCollections(rows);
     } catch (err) {
@@ -442,6 +442,8 @@ export default function CollectionsPage({ currentUser, authToken }) {
                         </div>
                         <div className="mt-1 text-xs text-slate-500">
                           Agent: {item.assignedAgent || "-"}
+                          {" • "}
+                          Paid: ₹{Number(item.totalPaid || 0).toLocaleString()}
                         </div>
                       </div>
 
@@ -499,6 +501,10 @@ export default function CollectionsPage({ currentUser, authToken }) {
                   <div>
                     Outstanding: ₹
                     {Number(selectedCollection.outstandingAmount || 0).toLocaleString()}
+                  </div>
+                  <div>
+                    Total Paid: ₹
+                    {Number(selectedCollection.totalPaid || 0).toLocaleString()}
                   </div>
                   <div>Risk: {selectedCollection.riskStatus || "-"}</div>
                   <div>Status: {selectedCollection.paymentStatus || "-"}</div>
