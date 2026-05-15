@@ -22,8 +22,13 @@ import {
 } from "lucide-react";
 
 import { getLabs, getRecentVisits, saveAgentVisit, getCollections } from "@/api/primecareApi";
-import { createAgentVisitWrite } from "@/api/primecareSupabaseApi";
+import {
+  createAgentVisitWrite,
+  getAgentWorkspaceRead,
+  getLabsCredit,
+} from "@/api/primecareSupabaseApi";
 import { supabase } from "@/api/supabaseClient.js";
+import { ROLES } from "@/config/roles";
 import { logClientError } from "@/utils/debugLogger";
 
 function QuickStat({ title, value, icon: Icon }) {
@@ -92,7 +97,7 @@ function normalizeLab(lab) {
   return {
     labId: String(lab.labId ?? lab.Lab_ID ?? "").trim(),
     labName: String(lab.labName ?? lab.Lab_Name ?? lab.name ?? "").trim(),
-    area: lab.area || lab.Area || "",
+    area: String(lab.area ?? lab.Area ?? "").trim(),
     assignedAgent:
       lab.assignedAgent ||
       lab.agentName ||
@@ -162,6 +167,8 @@ function resolveLabByOptionValue(labs, value) {
 
 export default function AgentVisitPage({ currentUser, authToken }) {
   const [labs, setLabs] = useState([]);
+  /** Last agent workspace payload when loaded via getAgentWorkspaceRead (Supabase). */
+  const [agentWorkspace, setAgentWorkspace] = useState(null);
   const [recentVisits, setRecentVisits] = useState([]);
   const [collections, setCollections] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -197,11 +204,44 @@ export default function AgentVisitPage({ currentUser, authToken }) {
 
         const params = authToken ? { sessionToken: authToken } : {};
 
-        const labsRes = await getLabs(params);
-        if (!labsRes.success) throw new Error(labsRes.error || "Failed to load labs");
+        let workspace = null;
+        let labList = [];
+
+        if (supabase) {
+          const isAgent = String(currentUser?.role || "").toLowerCase() === ROLES.AGENT;
+
+          if (isAgent) {
+            const wsRes = await getAgentWorkspaceRead(currentUser);
+            if (wsRes?.success && wsRes.data) {
+              workspace = wsRes.data;
+            }
+            const assigned = Array.isArray(workspace?.assignedLabs)
+              ? workspace.assignedLabs
+              : [];
+            labList = assigned.map(normalizeLab).filter((l) => String(l.labId).trim() !== "");
+          }
+
+          if (labList.length === 0) {
+            try {
+              const cr = await getLabsCredit();
+              if (cr?.success && Array.isArray(cr.data)) {
+                labList = cr.data.map(normalizeLab).filter((l) => String(l.labId).trim() !== "");
+              } else {
+                console.warn("[AgentVisitPage] getLabsCredit:", cr?.error || "no data");
+              }
+            } catch (e) {
+              console.warn("[AgentVisitPage] getLabsCredit failed:", e?.message || e);
+            }
+          }
+        } else {
+          const labsRes = await getLabs(params);
+          if (!labsRes.success) throw new Error(labsRes.error || "Failed to load labs");
+          labList = (labsRes.data?.labs || []).map(normalizeLab).filter((l) => String(l.labId).trim() !== "");
+        }
 
         if (!mounted) return;
-        setLabs((labsRes.data?.labs || []).map(normalizeLab));
+        setAgentWorkspace(workspace);
+        setLabs(labList);
         setLoading(false);
 
         Promise.all([getRecentVisits(params), getCollections(params)])
@@ -247,6 +287,8 @@ export default function AgentVisitPage({ currentUser, authToken }) {
 
         setStatusMessage(err.message || "Failed to load agent visit page");
         setStatusType("error");
+        setLabs([]);
+        setAgentWorkspace(null);
         setLoading(false);
       }
     }
@@ -266,12 +308,20 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   }, [currentUser]);
 
   const visibleLabs = useMemo(() => labs, [labs]);
+  const labOptions = useMemo(
+    () => visibleLabs.filter((l) => String(l.labId ?? "").trim() !== ""),
+    [visibleLabs]
+  );
   const visibleVisits = useMemo(() => recentVisits, [recentVisits]);
   const visibleCollections = useMemo(() => collections, [collections]);
 
   useEffect(() => {
-    console.log("AGENT VISIT LAB OPTIONS:", visibleLabs);
-  }, [visibleLabs]);
+    console.log("AGENT VISIT WORKSPACE:", agentWorkspace);
+  }, [agentWorkspace]);
+
+  useEffect(() => {
+    console.log("AGENT VISIT LAB OPTIONS:", labOptions);
+  }, [labOptions]);
 
   useEffect(() => {
     function handleOpenVisitTask(event) {
@@ -656,14 +706,12 @@ export default function AgentVisitPage({ currentUser, authToken }) {
                   onChange={(e) => handleLabChange(e.target.value)}
                 >
                   <option value="">Select lab…</option>
-                  {visibleLabs
-                    .filter((lab) => String(lab.labId ?? "").trim() !== "")
-                    .map((lab) => (
-                      <option key={String(lab.labId)} value={String(lab.labId)}>
-                        {lab.labName}
-                        {lab.labId ? ` (${lab.labId})` : ""}
-                      </option>
-                    ))}
+                  {labOptions.map((lab) => (
+                    <option key={String(lab.labId)} value={String(lab.labId)}>
+                      {lab.labName}
+                      {lab.labId ? ` (${lab.labId})` : ""}
+                    </option>
+                  ))}
                 </select>
               </div>
 
