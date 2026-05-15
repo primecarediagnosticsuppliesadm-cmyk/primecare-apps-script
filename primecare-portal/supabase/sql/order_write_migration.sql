@@ -6,6 +6,8 @@
 
 -- Align optional columns used by the portal write path
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS notes text;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS status_notes text;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 
 -- ---------------------------------------------------------------------------
 -- order_items (line items; app joins on orders.order_id text)
@@ -37,6 +39,7 @@ ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
 -- Drop prior temp policies if re-running
 DROP POLICY IF EXISTS "temp_anon_orders_select" ON public.orders;
 DROP POLICY IF EXISTS "temp_anon_orders_insert" ON public.orders;
+DROP POLICY IF EXISTS "temp_anon_orders_update" ON public.orders;
 DROP POLICY IF EXISTS "temp_anon_order_items_select" ON public.order_items;
 DROP POLICY IF EXISTS "temp_anon_order_items_insert" ON public.order_items;
 
@@ -46,6 +49,9 @@ CREATE POLICY "temp_anon_orders_select"
 
 CREATE POLICY "temp_anon_orders_insert"
   ON public.orders FOR INSERT TO anon WITH CHECK (true);
+
+CREATE POLICY "temp_anon_orders_update"
+  ON public.orders FOR UPDATE TO anon USING (true) WITH CHECK (true);
 
 CREATE POLICY "temp_anon_order_items_select"
   ON public.order_items FOR SELECT TO anon USING (true);

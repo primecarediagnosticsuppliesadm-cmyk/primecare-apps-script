@@ -1,9 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { updateOrderStatus } from "@/api/primecareApi";
-import { getOrdersRead, getOrderDetailsRead } from "@/api/primecareSupabaseApi";
 import {
-  logAppsScriptPrimarySource,
+  getOrdersRead,
+  getOrderDetailsRead,
+  updateOrderStatusWrite,
+} from "@/api/primecareSupabaseApi";
+import { supabase } from "@/api/supabaseClient.js";
+import {
+  logAppsScriptFallbackUsed,
   logPartialMigrationWarning,
+  logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -77,11 +83,34 @@ export default function OrdersPage() {
       setError("");
       setSuccessMessage("");
 
+      const statusPayload = { note: statusNote, orderStatus: nextStatus };
+
+      if (supabase) {
+        logSupabaseFeatureSource("Orders.statusWrite", { api: "updateOrderStatusWrite" });
+        const sbRes = await updateOrderStatusWrite(selectedOrder, nextStatus, statusPayload);
+        if (sbRes.success) {
+          setSuccessMessage(
+            nextStatus === "Fulfilled"
+              ? "Order status updated to Fulfilled in Supabase"
+              : `Order status updated to ${nextStatus}`
+          );
+          setStatusNote("");
+          await loadOrders();
+          await openOrder(selectedOrder);
+          return;
+        }
+
+        if (import.meta.env.DEV) {
+          throw new Error(sbRes.error || "Supabase order status update failed.");
+        }
+
+        logAppsScriptFallbackUsed("Orders.statusWrite", sbRes.error);
+      }
+
       logPartialMigrationWarning(
         "Orders.statusWrite",
-        "Order status updates still use Apps Script updateOrderStatus (inventory side-effects)."
+        "Falling back to Apps Script updateOrderStatus (inventory side-effects on Fulfilled)."
       );
-      logAppsScriptPrimarySource("Orders.statusWrite", "updateOrderStatus");
       const res = await updateOrderStatus({
         orderId: selectedOrder,
         orderStatus: nextStatus,
@@ -94,10 +123,10 @@ export default function OrdersPage() {
       }
 
       setSuccessMessage(
-  nextStatus === "Fulfilled"
-    ? "Order fulfilled and inventory updated successfully"
-    : `Order status updated to ${nextStatus}`
-);
+        nextStatus === "Fulfilled"
+          ? "Order fulfilled and inventory updated successfully"
+          : `Order status updated to ${nextStatus}`
+      );
       setStatusNote("");
 
       await loadOrders();

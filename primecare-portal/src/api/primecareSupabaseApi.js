@@ -2423,3 +2423,164 @@ export async function getOrderDetailsRead(orderId) {
     return empty;
   }
 }
+
+const ORDER_STATUS_ALLOWED = ["Placed", "Processing", "Fulfilled", "Cancelled"];
+
+function isMissingOrdersColumnError(err, columnName) {
+  const msg = String(err?.message ?? err ?? "").toLowerCase();
+  const col = String(columnName ?? "").toLowerCase();
+  return (
+    (msg.includes("schema cache") ||
+      msg.includes("could not find") ||
+      msg.includes("does not exist")) &&
+    msg.includes(col)
+  );
+}
+
+function appendOrderStatusNote(existingNotes, nextStatus, noteText) {
+  const existing = str(existingNotes);
+  const note = str(noteText);
+  if (!note) return existing;
+  const timestamp = new Date().toISOString().slice(0, 19).replace("T", " ");
+  const line = `[${timestamp}] Status changed to ${nextStatus} - ${note}`;
+  return existing ? `${existing}\n${line}` : line;
+}
+
+/** Resolves order row and the eq() column for updates (order_id or id). */
+async function resolveOrderRowForUpdate(orderId) {
+  const oid = str(orderId);
+  if (!oid) return { orderRow: null, updateKey: null, updateValue: null };
+
+  const byBusinessId = await supabase.from("orders").select("*").eq("order_id", oid).limit(1);
+  if (!byBusinessId.error && Array.isArray(byBusinessId.data) && byBusinessId.data[0]) {
+    return {
+      orderRow: byBusinessId.data[0],
+      updateKey: "order_id",
+      updateValue: str(byBusinessId.data[0].order_id ?? oid),
+    };
+  }
+
+  const byPk = await supabase.from("orders").select("*").eq("id", oid).limit(1);
+  if (!byPk.error && Array.isArray(byPk.data) && byPk.data[0]) {
+    return {
+      orderRow: byPk.data[0],
+      updateKey: "id",
+      updateValue: byPk.data[0].id,
+    };
+  }
+
+  return { orderRow: null, updateKey: null, updateValue: null };
+}
+
+async function patchOrderRow(updateKey, updateValue, patch) {
+  const attempt = (p) => supabase.from("orders").update(p).eq(updateKey, updateValue).select();
+
+  let res = await attempt(patch);
+  if (!res.error) return res;
+
+  let slim = { ...patch };
+  if (slim.status_notes && isMissingOrdersColumnError(res.error, "status_notes")) {
+    delete slim.status_notes;
+    console.warn(
+      "[updateOrderStatusWrite] orders.status_notes missing — retrying without it. Run order_status_update_migration.sql"
+    );
+    res = await attempt(slim);
+  }
+  if (res.error && slim.updated_at && isMissingOrdersColumnError(res.error, "updated_at")) {
+    delete slim.updated_at;
+    res = await attempt(slim);
+  }
+  if (res.error && slim.notes && isMissingOrdersColumnError(res.error, "notes")) {
+    const { notes, status_notes, updated_at, ...statusOnly } = slim;
+    slim = { status: statusOnly.status, ...(updated_at ? { updated_at } : {}) };
+    res = await attempt(slim);
+  }
+  if (res.error && Object.keys(slim).length > 1) {
+    res = await attempt({ status: patch.status });
+  }
+  return res;
+}
+
+/**
+ * Updates `orders.status` (and optional notes / updated_at) for Orders Monitor.
+ * @param {string} orderId - business order_id or uuid id
+ * @param {string} status - Placed | Processing | Fulfilled | Cancelled
+ * @param {object} [payload] - { note?, orderStatus? }
+ */
+export async function updateOrderStatusWrite(orderId, status, payload = {}) {
+  traceSupabaseRead("Orders.updateOrderStatusWrite", { table: "orders", orderId });
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+
+  try {
+    const oid = str(orderId);
+    const nextStatus = str(status || payload.orderStatus || payload.status);
+    const note = str(payload.note ?? payload.statusNote ?? payload.status_notes);
+
+    if (!oid) {
+      return { success: false, error: "order_id is required", data: null };
+    }
+    if (!nextStatus) {
+      return { success: false, error: "status is required", data: null };
+    }
+    if (!ORDER_STATUS_ALLOWED.includes(nextStatus)) {
+      return { success: false, error: `Invalid order status: ${nextStatus}`, data: null };
+    }
+
+    const { orderRow, updateKey, updateValue } = await resolveOrderRowForUpdate(oid);
+    if (!orderRow || !updateKey || updateValue == null) {
+      return { success: false, error: `Order not found: ${oid}`, data: null };
+    }
+
+    const previousStatus = str(
+      orderRow.status ?? orderRow.order_status ?? orderRow.orderStatus ?? ""
+    );
+
+    const patch = {
+      status: nextStatus,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (note) {
+      const mergedNote = appendOrderStatusNote(
+        orderRow.notes ?? orderRow.status_notes ?? "",
+        nextStatus,
+        note
+      );
+      patch.notes = mergedNote;
+      patch.status_notes = mergedNote;
+    }
+
+    console.log("ORDER STATUS WRITE PAYLOAD", {
+      orderId: oid,
+      updateKey,
+      updateValue,
+      previousStatus,
+      patch,
+    });
+
+    const { data, error } = await patchOrderRow(updateKey, updateValue, patch);
+    if (error) {
+      console.warn("[updateOrderStatusWrite] orders update:", error.message);
+      return { success: false, error: error.message || "Order status update failed", data: null };
+    }
+
+    const saved = Array.isArray(data) ? data[0] : data;
+    console.log("SUPABASE ORDER STATUS UPDATED", saved);
+
+    return {
+      success: true,
+      data: {
+        order: saved,
+        orderId: oid,
+        previousStatus,
+        orderStatus: nextStatus,
+      },
+      error: null,
+    };
+  } catch (err) {
+    console.warn("[updateOrderStatusWrite] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: null };
+  }
+}
