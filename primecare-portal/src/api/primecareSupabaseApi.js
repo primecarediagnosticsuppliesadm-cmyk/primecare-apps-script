@@ -2693,8 +2693,8 @@ async function patchOrderRow(updateKey, updateValue, patch) {
     res = await attempt(slim);
   }
   if (res.error && slim.notes && isMissingOrdersColumnError(res.error, "notes")) {
-    const { notes, status_notes, updated_at, ...statusOnly } = slim;
-    slim = { status: statusOnly.status, ...(updated_at ? { updated_at } : {}) };
+    const updatedAt = slim.updated_at;
+    slim = { status: slim.status, ...(updatedAt ? { updated_at: updatedAt } : {}) };
     res = await attempt(slim);
   }
   for (const extraCol of ["fulfilled_at", "cancelled_at", "inventory_updated", "ar_posted"]) {
@@ -2749,6 +2749,13 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
     const prevNorm = normalizedOrderRowStatus(orderRow);
     const businessOrderId = str(orderRow.order_id ?? orderRow.orderId ?? oid);
     const labId = normalizeLabIdKey(orderRow.lab_id ?? orderRow.labId);
+
+    console.log("ORDERS STATUS SUPABASE AUTHORITATIVE", {
+      orderId: businessOrderId,
+      prevStatus: prevNorm,
+      nextStatus,
+      fallbackDisabledWhenSupabaseConfigured: true,
+    });
 
     console.log("ORDER STATUS BUSINESS RULE", {
       orderId: businessOrderId,

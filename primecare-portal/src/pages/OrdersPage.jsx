@@ -156,10 +156,14 @@ export default function OrdersPage() {
       setSuccessMessage("");
 
       const statusPayload = { note: statusNote, orderStatus: nextStatus };
-      let orderFallbackLogged = false;
 
       if (supabase) {
         logSupabaseFeatureSource("Orders.statusWrite", { api: "updateOrderStatusWrite" });
+        console.log("ORDERS STATUS SUPABASE AUTHORITATIVE", {
+          orderId: id,
+          nextStatus,
+          fallbackDisabled: true,
+        });
         const sbRes = await updateOrderStatusWrite(id, nextStatus, statusPayload);
         if (sbRes.success) {
           setSuccessMessage(orderStatusSuccessMessage(nextStatus));
@@ -179,33 +183,20 @@ export default function OrdersPage() {
           return;
         }
 
-        if (import.meta.env.DEV) {
-          throw new Error(sbRes.error || "Supabase order status update failed.");
-        }
-
-        logAppsScriptFallbackUsed("Orders.statusWrite", {
-          primarySourceExpected: "Supabase updateOrderStatusWrite",
-          fallbackSourceUsed: "Apps Script updateOrderStatus",
-          riskLevel: "DANGEROUS",
-          metricKeys: ["ordersBrowse", "todaysRevenue", "totalSoldValue"],
-          reason: sbRes.error,
-          nextStatus,
-        });
-        orderFallbackLogged = true;
+        throw new Error(
+          sbRes.error ||
+            "Supabase order status update failed. Apps Script fallback is disabled when Supabase is configured."
+        );
       }
 
-      if (!orderFallbackLogged) {
-        logAppsScriptFallbackUsed("Orders.statusWrite", {
-          primarySourceExpected: "Supabase order status + AR/inventory side-effect write",
-          fallbackSourceUsed: "Apps Script updateOrderStatus",
-          riskLevel: "DANGEROUS",
-          metricKeys: ["ordersBrowse", "todaysRevenue", "totalSoldValue"],
-          reason: supabase
-            ? "Falling back to Apps Script updateOrderStatus (inventory side-effects on Fulfilled)."
-            : "Supabase client unavailable; using Apps Script updateOrderStatus.",
-          nextStatus,
-        });
-      }
+      logAppsScriptFallbackUsed("Orders.statusWrite", {
+        primarySourceExpected: "Supabase order status + AR/inventory side-effect write",
+        fallbackSourceUsed: "Apps Script updateOrderStatus",
+        riskLevel: "DANGEROUS",
+        metricKeys: ["ordersBrowse", "todaysRevenue", "totalSoldValue"],
+        reason: "Supabase client unavailable; using Apps Script updateOrderStatus.",
+        nextStatus,
+      });
       const res = await updateOrderStatus({
         orderId: id,
         orderStatus: nextStatus,
