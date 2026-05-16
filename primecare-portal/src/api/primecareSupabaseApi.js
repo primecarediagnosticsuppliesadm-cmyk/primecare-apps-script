@@ -2132,6 +2132,285 @@ export async function createInventoryLedgerWrite(ledgerRows) {
   }
 }
 
+function generatePurchaseOrderId() {
+  return `PO-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+}
+
+function normalizePurchaseOrderStatus(status) {
+  const raw = str(status || "Draft");
+  const lower = raw.toLowerCase();
+  if (lower === "received" || lower === "fulfilled") return "Received";
+  if (lower === "partially received" || lower === "partial") return "Partially Received";
+  if (lower === "ordered" || lower === "processing") return "Ordered";
+  if (lower === "cancelled" || lower === "canceled") return "Cancelled";
+  return "Draft";
+}
+
+function mapPurchaseOrderRow(row, itemsByPo = new Map()) {
+  const poId = str(row.po_id ?? row.poId ?? row.id);
+  const lines = itemsByPo.get(poId) || row.purchase_order_items || row.items || [];
+  const first = Array.isArray(lines) && lines.length ? lines[0] : {};
+  const quantity = num(row.quantity ?? first.quantity);
+  const receivedQty = num(row.received_qty ?? row.receivedQty ?? first.received_qty ?? first.receivedQty);
+  const unitCost = num(row.unit_cost ?? row.unitCost ?? first.unit_cost ?? first.unitCost);
+  const productId = str(row.product_id ?? row.productId ?? first.product_id ?? first.productId);
+  const productName = str(row.product_name ?? row.productName ?? first.product_name ?? first.productName);
+
+  return {
+    poId,
+    poDate: str(row.po_date ?? row.poDate ?? row.created_at ?? "").slice(0, 10),
+    productId,
+    productName,
+    quantity,
+    receivedQty,
+    unitCost,
+    totalCost: num(row.total_cost ?? row.totalCost) || quantity * unitCost,
+    supplier: str(row.supplier ?? row.supplier_name ?? row.supplierName),
+    status: normalizePurchaseOrderStatus(row.status),
+    grnNotes: str(row.grn_notes ?? row.grnNotes ?? row.notes),
+    receivedAt: str(row.received_at ?? row.receivedAt),
+    items: Array.isArray(lines) ? lines : [],
+  };
+}
+
+/**
+ * Read purchase orders from Supabase purchase_orders + purchase_order_items.
+ */
+export async function getPurchaseOrdersRead() {
+  traceSupabaseRead("PurchaseOrders.getPurchaseOrdersRead", {
+    tables: ["purchase_orders", "purchase_order_items"],
+  });
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: { purchaseOrders: [] } };
+  }
+
+  try {
+    const po = await supabase
+      .from("purchase_orders")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (po.error) {
+      return { success: false, error: po.error.message, data: { purchaseOrders: [] } };
+    }
+
+    const items = await supabase.from("purchase_order_items").select("*");
+    if (items.error) {
+      return { success: false, error: items.error.message, data: { purchaseOrders: [] } };
+    }
+
+    const itemsByPo = new Map();
+    for (const item of items.data || []) {
+      const key = str(item.po_id ?? item.poId);
+      if (!key) continue;
+      if (!itemsByPo.has(key)) itemsByPo.set(key, []);
+      itemsByPo.get(key).push(item);
+    }
+
+    const purchaseOrders = (po.data || []).map((row) => mapPurchaseOrderRow(row, itemsByPo));
+    return { success: true, data: { purchaseOrders }, error: null };
+  } catch (err) {
+    console.warn("[getPurchaseOrdersRead] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: { purchaseOrders: [] } };
+  }
+}
+
+/**
+ * Create a purchase order and first line item in Supabase.
+ */
+export async function createPurchaseOrderWrite(payload = {}) {
+  traceSupabaseRead("PurchaseOrders.createPurchaseOrderWrite", {
+    tables: ["purchase_orders", "purchase_order_items"],
+  });
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+
+  try {
+    const productId = str(payload.productId ?? payload.product_id);
+    const productName = str(payload.productName ?? payload.product_name);
+    const quantity = num(payload.quantity);
+    const unitCost = num(payload.unitCost ?? payload.unit_cost);
+    const poId = str(payload.poId ?? payload.po_id) || generatePurchaseOrderId();
+    const supplier = str(payload.supplier ?? payload.supplierName ?? payload.supplier_name);
+    const status = normalizePurchaseOrderStatus(payload.status);
+    const totalCost = Math.round(quantity * unitCost * 100) / 100;
+    const poDate = str(payload.poDate ?? payload.po_date ?? new Date().toISOString().slice(0, 10)).slice(0, 10);
+
+    if (!productId) return { success: false, error: "productId is required", data: null };
+    if (quantity <= 0) return { success: false, error: "quantity must be greater than zero", data: null };
+
+    const poPayload = {
+      po_id: poId,
+      po_date: poDate,
+      product_id: productId,
+      product_name: productName || productId,
+      quantity,
+      received_qty: 0,
+      unit_cost: unitCost,
+      total_cost: totalCost,
+      supplier: supplier || null,
+      status,
+      notes: str(payload.notes) || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const itemPayload = {
+      po_id: poId,
+      product_id: productId,
+      product_name: productName || productId,
+      quantity,
+      received_qty: 0,
+      unit_cost: unitCost,
+      total_cost: totalCost,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    console.log("PURCHASE ORDER WRITE PAYLOAD", { po: poPayload, item: itemPayload });
+
+    const poIns = await supabase.from("purchase_orders").insert([poPayload]).select();
+    if (poIns.error) {
+      return { success: false, error: poIns.error.message || "Purchase order insert failed", data: null };
+    }
+
+    const itemIns = await supabase.from("purchase_order_items").insert([itemPayload]).select();
+    if (itemIns.error) {
+      return { success: false, error: itemIns.error.message || "Purchase order item insert failed", data: null };
+    }
+
+    const savedPo = Array.isArray(poIns.data) ? poIns.data[0] : poIns.data;
+    const savedItem = Array.isArray(itemIns.data) ? itemIns.data[0] : itemIns.data;
+    console.log("SUPABASE PURCHASE ORDER SAVED", { po: savedPo, item: savedItem });
+
+    return {
+      success: true,
+      data: { poId, purchaseOrder: mapPurchaseOrderRow(savedPo, new Map([[poId, [savedItem]]])) },
+      error: null,
+    };
+  } catch (err) {
+    console.warn("[createPurchaseOrderWrite] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: null };
+  }
+}
+
+/**
+ * Receive purchase stock: increments inventory.current_stock, appends PURCHASE_IN ledger, updates PO.
+ */
+export async function receivePurchaseOrderWrite(poId, payload = {}) {
+  traceSupabaseRead("PurchaseOrders.receivePurchaseOrderWrite", {
+    tables: ["purchase_orders", "purchase_order_items", "inventory", "inventory_ledger"],
+  });
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+
+  try {
+    const id = str(poId ?? payload.poId ?? payload.po_id);
+    const receivedQty = num(payload.receivedQty ?? payload.received_qty);
+    const grnNotes = str(payload.grnNotes ?? payload.grn_notes ?? payload.notes);
+    if (!id) return { success: false, error: "poId is required", data: null };
+    if (receivedQty <= 0) return { success: false, error: "receivedQty must be greater than zero", data: null };
+
+    const poSel = await supabase.from("purchase_orders").select("*").eq("po_id", id).limit(1);
+    if (poSel.error) return { success: false, error: poSel.error.message, data: null };
+    const poRow = Array.isArray(poSel.data) && poSel.data[0];
+    if (!poRow) return { success: false, error: `Purchase order not found: ${id}`, data: null };
+
+    const itemSel = await supabase.from("purchase_order_items").select("*").eq("po_id", id).limit(1);
+    if (itemSel.error) return { success: false, error: itemSel.error.message, data: null };
+    const itemRow = Array.isArray(itemSel.data) && itemSel.data[0];
+    if (!itemRow) return { success: false, error: `Purchase order item not found: ${id}`, data: null };
+
+    const productId = str(itemRow.product_id ?? poRow.product_id);
+    const productName = str(itemRow.product_name ?? poRow.product_name ?? productId);
+    if (!productId) return { success: false, error: "Purchase order item product_id is missing", data: null };
+
+    const invSel = await supabase.from("inventory").select("*").eq("product_id", productId).limit(1);
+    if (invSel.error) return { success: false, error: invSel.error.message, data: null };
+    const inventoryRow = Array.isArray(invSel.data) && invSel.data[0];
+    if (!inventoryRow) return { success: false, error: `Inventory row not found: ${productId}`, data: null };
+
+    const stockBefore = num(inventoryRow.current_stock ?? inventoryRow.currentStock);
+    const stockAfter = stockBefore + receivedQty;
+    const invUpd = await supabase
+      .from("inventory")
+      .update({ current_stock: stockAfter, updated_at: new Date().toISOString() })
+      .eq("product_id", productId);
+    if (invUpd.error) return { success: false, error: invUpd.error.message, data: null };
+
+    const ledgerRow = {
+      movement_type: "PURCHASE_IN",
+      product_id: productId,
+      product_name: productName,
+      order_id: id,
+      quantity: receivedQty,
+      stock_before: stockBefore,
+      stock_after: stockAfter,
+      tenant_id: str(payload.tenantId ?? payload.tenant_id) || null,
+      created_by: str(payload.receivedBy ?? payload.createdBy ?? payload.created_by) || null,
+      created_at: new Date().toISOString(),
+    };
+    const ledger = await createInventoryLedgerWrite([ledgerRow]);
+    if (!ledger.success) return { success: false, error: ledger.error || "Purchase ledger insert failed", data: null };
+    console.log("INVENTORY PURCHASE_IN LEDGER SAVED", ledger.data);
+
+    const orderedQty = num(itemRow.quantity ?? poRow.quantity);
+    const previousReceived = num(itemRow.received_qty ?? poRow.received_qty);
+    const nextReceived = previousReceived + receivedQty;
+    const nextStatus = nextReceived >= orderedQty ? "Received" : "Partially Received";
+    const updateTs = new Date().toISOString();
+
+    const itemUpdate = await supabase
+      .from("purchase_order_items")
+      .update({
+        received_qty: nextReceived,
+        updated_at: updateTs,
+      })
+      .eq("po_id", id);
+    if (itemUpdate.error) return { success: false, error: itemUpdate.error.message, data: null };
+
+    const poUpdatePatch = {
+      received_qty: nextReceived,
+      status: nextStatus,
+      received_at: nextStatus === "Received" ? updateTs : poRow.received_at ?? null,
+      grn_notes: grnNotes || poRow.grn_notes || null,
+      updated_at: updateTs,
+    };
+    const poUpdate = await supabase
+      .from("purchase_orders")
+      .update(poUpdatePatch)
+      .eq("po_id", id)
+      .select();
+    if (poUpdate.error) return { success: false, error: poUpdate.error.message, data: null };
+
+    const savedPo = Array.isArray(poUpdate.data) ? poUpdate.data[0] : poUpdate.data;
+    console.log("SUPABASE PURCHASE RECEIVED", {
+      poId: id,
+      productId,
+      receivedQty,
+      stockBefore,
+      stockAfter,
+      status: nextStatus,
+      po: savedPo,
+    });
+
+    return {
+      success: true,
+      data: {
+        poId: id,
+        receivedQty,
+        status: nextStatus,
+        purchaseOrder: mapPurchaseOrderRow(savedPo, new Map([[id, [{ ...itemRow, received_qty: nextReceived }]]])),
+      },
+      error: null,
+    };
+  } catch (err) {
+    console.warn("[receivePurchaseOrderWrite] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: null };
+  }
+}
+
 /**
  * After `order_items` insert: decrement stock on the inventory table and append ledger rows.
  * Failures are logged only; the caller does not roll back the order.

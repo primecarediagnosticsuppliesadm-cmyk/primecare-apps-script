@@ -6,8 +6,15 @@ import {
   receivePurchaseOrder,
   bulkCreateDraftPurchaseOrders,
 } from "@/api/primecareApi";
-import { getReorderForecastRead } from "@/api/primecareSupabaseApi";
 import {
+  createPurchaseOrderWrite,
+  getPurchaseOrdersRead,
+  getReorderForecastRead,
+  receivePurchaseOrderWrite,
+} from "@/api/primecareSupabaseApi";
+import { supabase } from "@/api/supabaseClient.js";
+import {
+  logAppsScriptFallbackUsed,
   logAppsScriptPrimarySource,
   logPartialMigrationWarning,
   logSupabaseFeatureSource,
@@ -151,63 +158,87 @@ export default function PurchaseOrdersPage() {
   const [poStatusFilter, setPoStatusFilter] = useState("");
   const [activeTab, setActiveTab] = useState("triggers");
   const [bulkCreating, setBulkCreating] = useState(false);
-  const [bulkResult, setBulkResult] = useState(null);
 
   const loadPurchaseDashboard = async () => {
-    logSupabaseFeatureSource("PurchaseOrders.reorderCandidates", {
-      api: "getReorderForecastRead",
-    });
-    const forecastRes = await getReorderForecastRead();
-    if (!forecastRes?.success) {
-      throw new Error(forecastRes?.error || "Failed to load reorder candidates from Supabase");
-    }
-
-    const forecast = forecastRes.data?.forecast || [];
-    const rows = forecast.map(mapForecastToPurchaseReorderCandidate);
-    console.log("SUPABASE PURCHASE REORDER:", rows);
-    setReorderCandidates(rows);
-
     setSupplierDashboard([]);
     setSupplierSummary(null);
 
-    const triggerRows = buildPlaceholderAutoTriggersFromForecast(forecast);
-    console.log("SUPABASE AUTO PURCHASE TRIGGERS:", triggerRows);
-    setAutoTriggers(triggerRows);
-    setAutoTriggerSummary(summarizePlaceholderTriggers(triggerRows));
+    if (supabase) {
+      logSupabaseFeatureSource("PurchaseOrders.reorderCandidates", {
+        api: "getReorderForecastRead",
+      });
+      const forecastRes = await getReorderForecastRead();
+      if (!forecastRes?.success) {
+        throw new Error(forecastRes?.error || "Failed to load reorder candidates from Supabase");
+      }
 
-    logPartialMigrationWarning(
-      "PurchaseOrders",
-      "PO list, receive, create, and smart reorder still use Apps Script; auto-triggers are forecast placeholders."
-    );
-    logAppsScriptPrimarySource("PurchaseOrders.purchaseOrders", "getPurchaseOrders");
-    logAppsScriptPrimarySource("PurchaseOrders.smartReorder", "getSmartReorder");
+      const forecast = forecastRes.data?.forecast || [];
+      const rows = forecast.map(mapForecastToPurchaseReorderCandidate);
+      console.log("SUPABASE PURCHASE REORDER:", rows);
+      setReorderCandidates(rows);
 
-    const [poResult, smartResult] = await Promise.allSettled([
-      getPurchaseOrders(),
-      getSmartReorder(),
-    ]);
+      const triggerRows = buildPlaceholderAutoTriggersFromForecast(forecast);
+      console.log("SUPABASE AUTO PURCHASE TRIGGERS:", triggerRows);
+      setAutoTriggers(triggerRows);
+      setAutoTriggerSummary(summarizePlaceholderTriggers(triggerRows));
 
-    if (poResult.status === "fulfilled" && poResult.value?.success) {
-      const d = poResult.value.data;
-      setPurchaseOrders(
-        Array.isArray(d) ? d : Array.isArray(d?.purchaseOrders) ? d.purchaseOrders : []
-      );
-    } else {
-      setPurchaseOrders([]);
-    }
-
-    if (smartResult.status === "fulfilled" && smartResult.value?.success) {
-      const d = smartResult.value.data;
-      const items = Array.isArray(d?.items)
-        ? d.items
-        : Array.isArray(d?.smartReorder?.items)
-        ? d.smartReorder.items
-        : [];
-      setSmartReorder(items);
-      setSmartReorderSummary(d?.summary || d?.smartReorder?.summary || null);
-    } else {
+      logSupabaseFeatureSource("PurchaseOrders.purchaseOrders", { api: "getPurchaseOrdersRead" });
+      const poResult = await getPurchaseOrdersRead();
+      if (poResult?.success) {
+        const d = poResult.data;
+        setPurchaseOrders(
+          Array.isArray(d) ? d : Array.isArray(d?.purchaseOrders) ? d.purchaseOrders : []
+        );
+      } else {
+        setPurchaseOrders([]);
+        console.warn("[PurchaseOrders] getPurchaseOrdersRead:", poResult?.error);
+      }
       setSmartReorder([]);
       setSmartReorderSummary(null);
+      logPartialMigrationWarning(
+        "PurchaseOrders.smartReorder",
+        "Smart reorder Apps Script read skipped while Supabase is configured; reorder forecast is the authoritative read path."
+      );
+    } else {
+      logAppsScriptFallbackUsed("PurchaseOrders.purchaseOrders", {
+        primarySourceExpected: "Supabase getPurchaseOrdersRead",
+        fallbackSourceUsed: "Apps Script getPurchaseOrders + getSmartReorder",
+        riskLevel: "WARNING",
+        reason: "Supabase client unavailable.",
+      });
+      setReorderCandidates([]);
+      setAutoTriggers([]);
+      setAutoTriggerSummary(null);
+      logAppsScriptPrimarySource("PurchaseOrders.purchaseOrders", "getPurchaseOrders");
+      logAppsScriptPrimarySource("PurchaseOrders.smartReorder", "getSmartReorder");
+
+      const [poResult, smartResult] = await Promise.allSettled([
+        getPurchaseOrders(),
+        getSmartReorder(),
+      ]);
+
+      if (poResult.status === "fulfilled" && poResult.value?.success) {
+        const d = poResult.value.data;
+        setPurchaseOrders(
+          Array.isArray(d) ? d : Array.isArray(d?.purchaseOrders) ? d.purchaseOrders : []
+        );
+      } else {
+        setPurchaseOrders([]);
+      }
+
+      if (smartResult.status === "fulfilled" && smartResult.value?.success) {
+        const d = smartResult.value.data;
+        const items = Array.isArray(d?.items)
+          ? d.items
+          : Array.isArray(d?.smartReorder?.items)
+          ? d.smartReorder.items
+          : [];
+        setSmartReorder(items);
+        setSmartReorderSummary(d?.summary || d?.smartReorder?.summary || null);
+      } else {
+        setSmartReorder([]);
+        setSmartReorderSummary(null);
+      }
     }
   };
 
@@ -301,14 +332,43 @@ export default function PurchaseOrdersPage() {
       setBulkCreating(true);
       setStatusMessage("");
       setErrorMessage("");
-      setBulkResult(null);
 
-      const res = await bulkCreateDraftPurchaseOrders({
-        onlyUrgency: "CRITICAL",
-      });
-
-      const result = res?.data || {};
-      setBulkResult(result);
+      let result = {};
+      if (supabase) {
+        const critical = autoTriggers.filter(
+          (item) => String(item.urgency || "").toUpperCase() === "CRITICAL" && item.canAutoCreate
+        );
+        const results = await Promise.allSettled(
+          critical.map((item) =>
+            createPurchaseOrderWrite({
+              productId: item.productId,
+              productName: item.productName,
+              quantity: item.suggestedOrderQty || item.suggestedQty || item.reorderQty || 0,
+              unitCost: item.unitCost || 0,
+              supplier: item.supplier || "",
+              status: "Draft",
+            })
+          )
+        );
+        result = {
+          summary: {
+            createdCount: results.filter((r) => r.status === "fulfilled" && r.value?.success).length,
+            skippedCount: Math.max(0, critical.length - results.length),
+            failedCount: results.filter((r) => r.status === "rejected" || !r.value?.success).length,
+          },
+        };
+      } else {
+        logAppsScriptFallbackUsed("PurchaseOrders.bulkCreate", {
+          primarySourceExpected: "Supabase createPurchaseOrderWrite loop",
+          fallbackSourceUsed: "Apps Script bulkCreateDraftPurchaseOrders",
+          riskLevel: "WARNING",
+          reason: "Supabase client unavailable.",
+        });
+        const res = await bulkCreateDraftPurchaseOrders({
+          onlyUrgency: "CRITICAL",
+        });
+        result = res?.data || {};
+      }
       setStatusMessage(
         `Bulk draft PO run complete: Created ${result?.summary?.createdCount || 0}, Skipped ${result?.summary?.skippedCount || 0}, Failed ${result?.summary?.failedCount || 0}`
       );
@@ -329,16 +389,32 @@ export default function PurchaseOrdersPage() {
       setStatusMessage("");
       setErrorMessage("");
 
-      const res = await createPurchaseOrder({
+      const payload = {
         productId: createForm.productId,
         productName: createForm.productName,
         quantity: Number(createForm.quantity || 0),
         unitCost: Number(createForm.unitCost || 0),
         supplier: createForm.supplier,
         status: createForm.status || "Draft",
-      });
+      };
+
+      let res;
+      if (supabase) {
+        res = await createPurchaseOrderWrite(payload);
+      } else {
+        logAppsScriptFallbackUsed("PurchaseOrders.create", {
+          primarySourceExpected: "Supabase createPurchaseOrderWrite",
+          fallbackSourceUsed: "Apps Script createPurchaseOrder",
+          riskLevel: "WARNING",
+          reason: "Supabase client unavailable.",
+        });
+        res = await createPurchaseOrder(payload);
+      }
 
       const result = res?.data || {};
+      if (!res?.success && !result?.success) {
+        throw new Error(res?.error || result?.message || "Failed to create purchase order");
+      }
       setStatusMessage(`Purchase order created successfully: ${result.poId || ""}`);
       setCreateForm(emptyCreateForm);
       setSelectedCandidate(null);
@@ -359,13 +435,29 @@ export default function PurchaseOrdersPage() {
       setStatusMessage("");
       setErrorMessage("");
 
-      const res = await receivePurchaseOrder({
+      const payload = {
         poId: receiveForm.poId,
         receivedQty: Number(receiveForm.receivedQty || 0),
         grnNotes: receiveForm.grnNotes,
-      });
+      };
+
+      let res;
+      if (supabase) {
+        res = await receivePurchaseOrderWrite(receiveForm.poId, payload);
+      } else {
+        logAppsScriptFallbackUsed("PurchaseOrders.receive", {
+          primarySourceExpected: "Supabase receivePurchaseOrderWrite",
+          fallbackSourceUsed: "Apps Script receivePurchaseOrder",
+          riskLevel: "WARNING",
+          reason: "Supabase client unavailable.",
+        });
+        res = await receivePurchaseOrder(payload);
+      }
 
       const result = res?.data || {};
+      if (!res?.success && !result?.success) {
+        throw new Error(res?.error || result?.message || "Failed to receive purchase order");
+      }
       setStatusMessage(`Purchase order received successfully: ${result.poId || ""}`);
       setReceiveForm(emptyReceiveForm);
 
@@ -389,16 +481,32 @@ export default function PurchaseOrdersPage() {
       setStatusMessage("");
       setErrorMessage("");
 
-      const res = await createPurchaseOrder({
+      const payload = {
         productId: item.productId,
         productName: item.productName,
         quantity: item.suggestedOrderQty,
         unitCost: item.unitCost || 0,
         supplier: item.supplier || "",
         status: "Draft",
-      });
+      };
+
+      let res;
+      if (supabase) {
+        res = await createPurchaseOrderWrite(payload);
+      } else {
+        logAppsScriptFallbackUsed("PurchaseOrders.createFromTrigger", {
+          primarySourceExpected: "Supabase createPurchaseOrderWrite",
+          fallbackSourceUsed: "Apps Script createPurchaseOrder",
+          riskLevel: "WARNING",
+          reason: "Supabase client unavailable.",
+        });
+        res = await createPurchaseOrder(payload);
+      }
 
       const result = res?.data || {};
+      if (!res?.success && !result?.success) {
+        throw new Error(res?.error || result?.message || "Failed to create draft purchase order");
+      }
       setStatusMessage(`Draft purchase order created: ${result.poId || ""}`);
 
       await refreshAll();
