@@ -257,6 +257,115 @@ function sortInventoryLikeLegacy(inventory) {
   );
 }
 
+function normalizeLabCatalogStockHealth(row, currentStock, minStock) {
+  const raw = str(row.stock_health ?? row.stockHealth ?? row.stock_status ?? row.stockStatus);
+  const value = raw.toLowerCase();
+  if (value === "out" || value.includes("out")) return "OUT";
+  if (value === "low" || value === "reorder" || value.includes("critical")) return "LOW";
+  if (raw) return raw.toUpperCase();
+  if (currentStock <= 0) return "OUT";
+  if (minStock > 0 && currentStock < minStock) return "LOW";
+  return "OK";
+}
+
+function coerceCatalogBool(value, fallback) {
+  if (value === true || value === 1) return true;
+  if (value === false || value === 0) return false;
+  const s = str(value).toLowerCase();
+  if (s === "true" || s === "yes" || s === "y" || s === "1") return true;
+  if (s === "false" || s === "no" || s === "n" || s === "0") return false;
+  return fallback;
+}
+
+export function mapLabCatalogRow(row) {
+  const productId = str(row.product_id ?? row.productId ?? row.Product_ID ?? row.id);
+  const productName = str(
+    row.product_name ?? row.productName ?? row.Product_Name ?? row.name ?? row.item_name
+  );
+  const currentStock = num(row.current_stock ?? row.currentStock ?? row.Current_Stock);
+  const minStock = num(row.min_stock ?? row.minStock ?? row.Min_Stock);
+  const reorderQty = num(row.reorder_qty ?? row.reorderQty ?? row.Reorder_Qty);
+  const stockHealth = normalizeLabCatalogStockHealth(row, currentStock, minStock);
+  const activeFlag = str(row.active_flag ?? row.activeFlag ?? row.Active_Flag ?? "Y") || "Y";
+  const active = !["N", "NO", "FALSE", "0", "INACTIVE"].includes(activeFlag.toUpperCase());
+  const canOrder = coerceCatalogBool(row.can_order ?? row.canOrder, active && currentStock > 0);
+
+  return {
+    productId,
+    productName,
+    category: str(row.category ?? row.Category),
+    brand: str(row.brand ?? row.Brand),
+    unitSellingPrice: num(
+      row.unit_selling_price ??
+        row.unitSellingPrice ??
+        row.selling_price ??
+        row.sellingPrice ??
+        row.price ??
+        row.unit_price ??
+        row.unitPrice
+    ),
+    unitCost: num(row.unit_cost ?? row.unitCost ?? row.cost_price ?? row.costPrice),
+    taxRate: num(row.tax_rate ?? row.taxRate ?? row.gst_rate ?? row.gstRate),
+    activeFlag,
+    currentStock,
+    minStock,
+    reorderQty,
+    reorderStatus: str(row.reorder_status ?? row.reorderStatus ?? row.Reorder_Status).toUpperCase(),
+    stockHealth,
+    canOrder: active && canOrder && stockHealth !== "OUT",
+    quickOrder: coerceCatalogBool(row.quick_order ?? row.quickOrder ?? row.is_quick_order, false),
+  };
+}
+
+/**
+ * Lab order catalog from Supabase. Prefers `v_lab_catalog` when present, otherwise
+ * reads `inventory` directly. Shape matches legacy getLabCatalog payload.
+ */
+export async function getLabCatalogRead() {
+  traceSupabaseRead("LabOrdering.getLabCatalogRead", {
+    tables: ["v_lab_catalog", "inventory"],
+  });
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: { products: [] } };
+  }
+
+  try {
+    let source = "v_lab_catalog";
+    let { data, error } = await supabase.from("v_lab_catalog").select("*");
+
+    if (error) {
+      console.warn("[getLabCatalogRead] v_lab_catalog unavailable; trying inventory:", error.message);
+      source = "inventory";
+      const inv = await supabase.from("inventory").select("*");
+      data = inv.data;
+      error = inv.error;
+    }
+
+    if (error) {
+      return { success: false, error: error.message || "Supabase lab catalog read failed", data: { products: [] } };
+    }
+
+    const products = (data || [])
+      .map(mapLabCatalogRow)
+      .filter((item) => item.productId && item.productName)
+      .sort((a, b) => {
+        if (a.canOrder !== b.canOrder) return a.canOrder ? -1 : 1;
+        return a.productName.localeCompare(b.productName);
+      });
+
+    console.log("SUPABASE LAB CATALOG", {
+      source,
+      count: products.length,
+      products,
+    });
+
+    return { success: true, data: { products, source }, error: null };
+  } catch (err) {
+    console.warn("[getLabCatalogRead] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: { products: [] } };
+  }
+}
+
 /**
  * Read-only stock dashboard from Supabase view v_stock_dashboard.
  */

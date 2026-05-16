@@ -29,7 +29,13 @@ import {
   getOrderDetails,
   submitLabOrder,
 } from "@/api/primecareApi";
-import { createOrderWrite, getLabRecentOrdersRead, getOrderDetailsRead, mapOrderRow } from "@/api/primecareSupabaseApi";
+import {
+  createOrderWrite,
+  getLabCatalogRead,
+  getLabRecentOrdersRead,
+  getOrderDetailsRead,
+  mapOrderRow,
+} from "@/api/primecareSupabaseApi";
 import { supabase } from "@/api/supabaseClient.js";
 import {
   logAppsScriptFallbackUsed,
@@ -165,6 +171,35 @@ export default function LabOrderingPage({ currentUser }) {
       setLoadingCatalog(true);
       setErrorMessage("");
 
+      if (supabase) {
+        logSupabaseFeatureSource("LabOrdering.catalog", { api: "getLabCatalogRead" });
+        const sbRes = await getLabCatalogRead();
+        if (!sbRes?.success) {
+          throw new Error(sbRes?.error || "Supabase lab catalog read failed.");
+        }
+
+        const products = Array.isArray(sbRes?.data?.products) ? sbRes.data.products : [];
+        console.log("SUPABASE LAB CATALOG", {
+          count: products.length,
+          source: sbRes?.data?.source || "supabase",
+        });
+
+        setCatalog(products);
+
+        const defaultQtyMap = {};
+        products.forEach((item) => {
+          defaultQtyMap[item.productId] = 1;
+        });
+        setProductQty(defaultQtyMap);
+        return;
+      }
+
+      console.warn("LAB CATALOG FALLBACK USED", {
+        feature: "LabOrdering.catalog",
+        primarySourceExpected: "Supabase getLabCatalogRead",
+        fallbackSourceUsed: "Apps Script getLabCatalog",
+        reason: "Supabase client unavailable.",
+      });
       logAppsScriptPrimarySource("LabOrdering.catalog", "getLabCatalog");
       const res = await getLabCatalog(labId);
       const result = res?.data || res || {};
