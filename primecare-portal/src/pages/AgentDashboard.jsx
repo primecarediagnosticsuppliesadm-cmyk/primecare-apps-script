@@ -22,8 +22,7 @@ import {
 } from "@/api/primecareSupabaseApi";
 import { completeAgentTask } from "@/api/primecareApi";
 import {
-  logAppsScriptPrimarySource,
-  logPartialMigrationWarning,
+  logAppsScriptFallbackUsed,
 } from "@/utils/migrationTrace.js";
 import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
 import { summarizeAgentLabsCreditBuckets } from "@/metrics/computeRiskMetrics.js";
@@ -299,11 +298,14 @@ export default function AgentDashboard({ currentUser, setActivePage, authToken }
         setCompletingTaskId(task.taskId);
         setError("");
 
-        logPartialMigrationWarning(
-          "AgentDashboard.completeTask",
-          "Agent tasks table not in Supabase; completeAgentTask uses Apps Script."
-        );
-        logAppsScriptPrimarySource("AgentDashboard.completeTask", "completeAgentTask");
+        logAppsScriptFallbackUsed("AgentDashboard.completeTask", {
+          primarySourceExpected: "Supabase agent_tasks table",
+          fallbackSourceUsed: "Apps Script completeAgentTask",
+          riskLevel: "DANGEROUS",
+          metricKey: "agentCreditBuckets",
+          reason: "Agent tasks table not in Supabase; completeAgentTask uses Apps Script.",
+          taskId: task.taskId,
+        });
         const res = await completeAgentTask({
           taskId: task.taskId,
           completedBy: currentUser?.name || currentUser?.agentName || "System User",

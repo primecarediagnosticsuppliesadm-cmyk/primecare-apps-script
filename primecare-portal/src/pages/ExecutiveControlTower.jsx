@@ -25,8 +25,8 @@ import {
 import { supabase } from "@/api/supabaseClient.js";
 import {
   logAppsScriptFallbackUsed,
+  logHybridSourceWarning,
   logAppsScriptPrimarySource,
-  logPartialMigrationWarning,
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 
@@ -125,13 +125,23 @@ export default function ExecutiveControlTower() {
           setCollections(collRead?.data?.collections || []);
           setStock((stockRead?.data?.inventory || []).map(normalizeStockItem));
 
-          logPartialMigrationWarning(
-            "ExecutiveControlTower",
-            "AI insights not loaded on this page; metrics from Supabase dashboard read."
-          );
+          logHybridSourceWarning("ExecutiveControlTower.load", {
+            primarySourceExpected: "Supabase getAdminDashboardRead plus metric dependency graph",
+            fallbackSourceUsed: "Supabase dashboard metrics without AI insights payload on this page",
+            riskLevel: "SAFE",
+            metricKeys: ["todaysRevenue", "outstandingReceivablesTotal", "inventoryBuckets"],
+            reason: "AI insights not loaded on this page; metrics from Supabase dashboard read.",
+          });
           return;
         }
 
+        logAppsScriptFallbackUsed("ExecutiveControlTower.load", {
+          primarySourceExpected: "Supabase executive dashboard APIs",
+          fallbackSourceUsed: "Apps Script dashboard/executive/visits/collections/stock endpoints",
+          riskLevel: "DANGEROUS",
+          metricKeys: ["todaysRevenue", "outstandingReceivablesTotal", "inventoryBuckets", "collectionsSummary"],
+          reason: "Supabase client unavailable.",
+        });
         logAppsScriptPrimarySource("ExecutiveControlTower.load", "all endpoints");
 
         const [dashRes, snapRes, visitsRes, collectionsRes, stockRes] = await Promise.all([
@@ -154,7 +164,13 @@ export default function ExecutiveControlTower() {
         setCollections(collectionsRes.data?.collections || []);
         setStock((stockRes.data?.inventory || []).map(normalizeStockItem));
       } catch (err) {
-        logAppsScriptFallbackUsed("ExecutiveControlTower.load", err?.message);
+        logAppsScriptFallbackUsed("ExecutiveControlTower.load", {
+          primarySourceExpected: "Supabase executive dashboard APIs",
+          fallbackSourceUsed: "Apps Script or failed hybrid load path",
+          riskLevel: "DANGEROUS",
+          metricKeys: ["todaysRevenue", "outstandingReceivablesTotal", "inventoryBuckets", "collectionsSummary"],
+          reason: err?.message,
+        });
         setError(err.message || "Failed to load executive dashboard");
       } finally {
         setLoading(false);

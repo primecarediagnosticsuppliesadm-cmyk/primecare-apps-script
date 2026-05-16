@@ -8,7 +8,6 @@ import {
 import { supabase } from "@/api/supabaseClient.js";
 import {
   logAppsScriptFallbackUsed,
-  logPartialMigrationWarning,
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { invalidateAdminDashboardCaches } from "@/utils/dashboardInvalidate.js";
@@ -157,6 +156,7 @@ export default function OrdersPage() {
       setSuccessMessage("");
 
       const statusPayload = { note: statusNote, orderStatus: nextStatus };
+      let orderFallbackLogged = false;
 
       if (supabase) {
         logSupabaseFeatureSource("Orders.statusWrite", { api: "updateOrderStatusWrite" });
@@ -183,13 +183,29 @@ export default function OrdersPage() {
           throw new Error(sbRes.error || "Supabase order status update failed.");
         }
 
-        logAppsScriptFallbackUsed("Orders.statusWrite", sbRes.error);
+        logAppsScriptFallbackUsed("Orders.statusWrite", {
+          primarySourceExpected: "Supabase updateOrderStatusWrite",
+          fallbackSourceUsed: "Apps Script updateOrderStatus",
+          riskLevel: "DANGEROUS",
+          metricKeys: ["ordersBrowse", "todaysRevenue", "totalSoldValue"],
+          reason: sbRes.error,
+          nextStatus,
+        });
+        orderFallbackLogged = true;
       }
 
-      logPartialMigrationWarning(
-        "Orders.statusWrite",
-        "Falling back to Apps Script updateOrderStatus (inventory side-effects on Fulfilled)."
-      );
+      if (!orderFallbackLogged) {
+        logAppsScriptFallbackUsed("Orders.statusWrite", {
+          primarySourceExpected: "Supabase order status + AR/inventory side-effect write",
+          fallbackSourceUsed: "Apps Script updateOrderStatus",
+          riskLevel: "DANGEROUS",
+          metricKeys: ["ordersBrowse", "todaysRevenue", "totalSoldValue"],
+          reason: supabase
+            ? "Falling back to Apps Script updateOrderStatus (inventory side-effects on Fulfilled)."
+            : "Supabase client unavailable; using Apps Script updateOrderStatus.",
+          nextStatus,
+        });
+      }
       const res = await updateOrderStatus({
         orderId: id,
         orderStatus: nextStatus,

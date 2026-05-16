@@ -13,8 +13,10 @@ import {
   resolveAdminVisitRevenue,
 } from "@/api/primecareSupabaseApi";
 import {
+  logHybridSourceWarning,
   logAppsScriptPrimarySource,
   logPartialMigrationWarning,
+  logStaleFieldMigration,
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { computeNearStockoutMergeDerived } from "@/metrics/computeInventoryMetrics.js";
@@ -417,6 +419,27 @@ function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) 
         ? "Apps_Script_executive_cache"
         : "v_labs_credit_revenue_sort_fallback";
 
+  const appsScriptMergeFields = [
+    !dash?.summary?.stockStats && summaryIn?.stockStats ? "summary.stockStats" : null,
+    dash?.summary?.recentVisits == null && summaryIn?.recentVisits != null ? "summary.recentVisits" : null,
+    dash?.summary?.totalSoldValue == null && summaryIn?.totalSoldValue != null ? "summary.totalSoldValue" : null,
+    dash?.executive?.todaysRevenue == null && executiveIn?.todaysRevenue != null ? "executive.todaysRevenue" : null,
+    dash?.executive?.outstandingReceivables == null && executiveIn?.outstandingReceivables != null
+      ? "executive.outstandingReceivables"
+      : null,
+    topLabsSource === "Apps_Script_executive_cache" ? "executive.topLabsByRevenue" : null,
+  ].filter(Boolean);
+
+  if (appsScriptMergeFields.length) {
+    logHybridSourceWarning("AdminDashboard.merge", {
+      primarySourceExpected: "Supabase getAdminDashboardRead + metric engines",
+      fallbackSourceUsed: "Apps Script dashboard/executive payload",
+      riskLevel: "DANGEROUS",
+      metricKeys: ["todaysRevenue", "totalSoldValue", "outstandingReceivablesTotal", "inventoryBuckets", "topLabsByRevenue"],
+      fields: appsScriptMergeFields,
+    });
+  }
+
   console.log("DASHBOARD KPI AUDIT", {
     scope: "mergeAdminDashboardWithSupabase",
     stockStatsSource:
@@ -446,8 +469,11 @@ function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) 
     dash?.executive?.productsNearStockout != null &&
     nearStockoutDerived > Number(dash.executive.productsNearStockout || 0)
   ) {
-    console.warn("KPI MISMATCH DETECTED", {
-      kpi: "nearStockout_mergeVsSupabase",
+    logHybridSourceWarning("AdminDashboard.merge", {
+      primarySourceExpected: "Supabase productsNearStockout from inventory metric engine",
+      fallbackSourceUsed: "Derived MAX(forecast urgency, inventory bucket sum)",
+      riskLevel: "WARNING",
+      metricKey: "productsNearStockout",
       supabaseBackend: dash.executive.productsNearStockout,
       derivedMaxForecastPlusInventoryBuckets: nearStockoutDerived,
       uiUses: executive.productsNearStockout,
@@ -462,15 +488,21 @@ function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) 
       topLabsSource,
     });
   } else if (topLabsSource === "Apps_Script_executive_cache") {
-    console.log("DASHBOARD KPI AUDIT", {
-      kpi: "merge_topLabsFromAppsScriptCache",
+    logHybridSourceWarning("AdminDashboard.merge", {
+      primarySourceExpected: "Supabase fulfilled-order lab revenue rollup",
+      fallbackSourceUsed: "Apps Script executive topLabsByRevenue cache",
+      riskLevel: "DANGEROUS",
+      metricKey: "topLabsByRevenue",
       topLabsSource,
       note:
         "Not using Supabase fulfilled-order rollup path; reconcile manually if KPIs drift from Postgres.",
     });
   } else {
-    console.warn("KPI MISMATCH DETECTED", {
-      kpi: "merge_topLabsLabsCreditFallback",
+    logHybridSourceWarning("AdminDashboard.merge", {
+      primarySourceExpected: "Supabase fulfilled-order lab revenue rollup",
+      fallbackSourceUsed: "v_labs_credit revenue ordering fallback",
+      riskLevel: "WARNING",
+      metricKey: "topLabsByRevenue",
       topLabsSource,
       note: "Using v_labs_credit revenue ordering; differs from headline fulfilled-order KPI definition.",
     });
@@ -523,6 +555,12 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     let executivePayload = {};
 
     if (!skipAppsScript) {
+      logHybridSourceWarning("AdminDashboard.load", {
+        primarySourceExpected: "Supabase dashboard aggregate APIs",
+        fallbackSourceUsed: "Apps Script getDashboard + getExecutiveSnapshot merge inputs",
+        riskLevel: "DANGEROUS",
+        metricKeys: ["todaysRevenue", "totalSoldValue", "outstandingReceivablesTotal", "topLabsByRevenue"],
+      });
       logAppsScriptPrimarySource("AdminDashboard.load", "getDashboard + getExecutiveSnapshot");
       const [dashboardRes, executiveRes] = await Promise.allSettled([
         getDashboard(),
@@ -630,6 +668,13 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
         tasks.push(
           (async () => {
             try {
+              logStaleFieldMigration("AdminDashboard.getRecentVisits", {
+                primarySourceExpected: "Supabase getAdminDashboardRead visits payload",
+                fallbackSourceUsed: "Apps Script getRecentVisits cache refresh",
+                riskLevel: "DANGEROUS",
+                metricKey: "recentFieldActivity",
+                note: "Recent Visits count can remain Supabase while activity list is refreshed from Apps Script.",
+              });
               const res = await getRecentVisits();
               const payload = res?.data || res || {};
               adminDashboardCache.visits = payload;

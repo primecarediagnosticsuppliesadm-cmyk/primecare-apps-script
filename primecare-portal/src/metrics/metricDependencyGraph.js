@@ -46,6 +46,12 @@ export const METRIC_DEPENDENCY_GRAPH = {
     engine: "rollupInventoryTableRows | rollupStockDashboardMappedItems",
     tables: ["inventory", "v_stock_dashboard"],
   },
+  recentFieldActivity: {
+    ui: ["AdminDashboard"],
+    api: ["getAdminDashboardRead", "getRecentVisits fallback"],
+    engine: "mapAdminDashboardVisit + resolveAdminVisitRevenue",
+    tables: ["agent_visits", "orders", "order_items"],
+  },
   productsNearStockout: {
     ui: ["AdminDashboard"],
     api: ["getAdminDashboardRead", "merge: computeNearStockoutMergeDerived"],

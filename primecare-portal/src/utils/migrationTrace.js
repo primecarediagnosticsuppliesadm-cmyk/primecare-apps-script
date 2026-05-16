@@ -2,13 +2,20 @@
  * PrimeCare Supabase migration tracing (console-only).
  * Use to audit which code paths still hit Apps Script vs Supabase.
  */
+import {
+  logAppsScriptFallbackUsed as logStructuredAppsScriptFallbackUsed,
+  logHybridSourceWarning,
+  logStaleFieldMigration,
+} from "./migrationObservability.js";
+
+export { logHybridSourceWarning, logStaleFieldMigration };
 
 export function logSupabaseFeatureSource(feature, detail = {}) {
   console.log("SUPABASE FEATURE SOURCE", feature, detail);
 }
 
 export function logAppsScriptFallbackUsed(feature, reason = "") {
-  console.warn("APPS_SCRIPT FALLBACK USED", feature, reason);
+  logStructuredAppsScriptFallbackUsed(feature, reason);
 }
 
 export function logPartialMigrationWarning(feature, message = "") {
@@ -16,11 +23,12 @@ export function logPartialMigrationWarning(feature, message = "") {
 }
 
 export function logStaleFieldMapping(feature, field, expected, actual) {
-  console.warn("STALE FIELD MAPPING", {
+  logStaleFieldMigration(feature, {
     feature,
     field,
-    expected,
-    actual,
+    primarySourceExpected: expected,
+    fallbackSourceUsed: actual,
+    riskLevel: "WARNING",
   });
 }
 

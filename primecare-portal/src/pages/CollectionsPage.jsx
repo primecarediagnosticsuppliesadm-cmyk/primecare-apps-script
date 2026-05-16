@@ -15,7 +15,6 @@ import {
 import { supabase } from "@/api/supabaseClient.js";
 import {
   logAppsScriptFallbackUsed,
-  logPartialMigrationWarning,
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -201,22 +200,26 @@ export default function CollectionsPage({ currentUser, authToken }) {
       const useAppsScriptHistory = !sbHistoryOk && !historyRows.length && !import.meta.env.DEV;
 
       if (useAppsScriptDetail) {
-        logPartialMigrationWarning(
-          "Collections.details",
-          "Falling back to Apps Script getCollectionDetails."
-        );
-        logAppsScriptFallbackUsed("Collections.details", "Supabase detail read failed");
+        logAppsScriptFallbackUsed("Collections.details", {
+          primarySourceExpected: "Supabase getCollectionDetailRead",
+          fallbackSourceUsed: "Apps Script getCollectionDetails",
+          riskLevel: "SAFE",
+          metricKey: "collectionsSummary",
+          reason: "Supabase detail read failed",
+        });
         const detailsRes = await getCollectionDetails(canonicalLabId, params);
         const detailsPayload = detailsRes?.data || detailsRes || {};
         apiCollection = detailsPayload.collection || apiCollection;
       }
 
       if (useAppsScriptHistory) {
-        logPartialMigrationWarning(
-          "Collections.history",
-          "Falling back to Apps Script getCollectionHistory."
-        );
-        logAppsScriptFallbackUsed("Collections.history", "Supabase history read failed");
+        logAppsScriptFallbackUsed("Collections.history", {
+          primarySourceExpected: "Supabase getCollectionHistoryRead",
+          fallbackSourceUsed: "Apps Script getCollectionHistory",
+          riskLevel: "SAFE",
+          metricKey: "collectionsSummary",
+          reason: "Supabase history read failed",
+        });
         const historyRes = await getCollectionHistory(canonicalLabId, params);
         const historyPayload = historyRes?.data || historyRes || {};
         historyRows = Array.isArray(historyPayload.history) ? historyPayload.history : [];
@@ -311,6 +314,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
         nextFollowUp,
         nextAction,
       };
+      let paymentFallbackLogged = false;
 
       const amt = Number(amountCollected || 0);
       const notesPayload = {
@@ -341,7 +345,13 @@ export default function CollectionsPage({ currentUser, authToken }) {
           throw new Error(notesRes.error || "Supabase collection notes write failed.");
         }
 
-        logAppsScriptFallbackUsed("Collections.notesWrite", notesRes.error);
+        logAppsScriptFallbackUsed("Collections.notesWrite", {
+          primarySourceExpected: "Supabase updateCollectionNotesWrite",
+          fallbackSourceUsed: "No Apps Script zero-amount equivalent",
+          riskLevel: "WARNING",
+          metricKey: "collectionsSummary",
+          reason: notesRes.error,
+        });
         throw new Error(
           notesRes.error || "Failed to save collection notes. Apps Script does not support zero-amount updates."
         );
@@ -383,17 +393,31 @@ export default function CollectionsPage({ currentUser, authToken }) {
           throw new Error(sbRes.error || "Supabase payment write failed.");
         }
 
-        logAppsScriptFallbackUsed("Collections.paymentWrite", sbRes.error);
+        logAppsScriptFallbackUsed("Collections.paymentWrite", {
+          primarySourceExpected: "Supabase createPaymentWrite",
+          fallbackSourceUsed: "Apps Script updateCollection",
+          riskLevel: "DANGEROUS",
+          metricKey: "collectionsSummary",
+          reason: sbRes.error,
+        });
+        paymentFallbackLogged = true;
       }
 
       if (amt <= 0) {
         throw new Error("Enter an amount collected or save notes via Supabase when configured.");
       }
 
-      logPartialMigrationWarning(
-        "Collections.paymentWrite",
-        "Using updateCollection (Apps Script) after Supabase payment failure."
-      );
+      if (!paymentFallbackLogged) {
+        logAppsScriptFallbackUsed("Collections.paymentWrite", {
+          primarySourceExpected: "Supabase payments + ar_credit_control write",
+          fallbackSourceUsed: "Apps Script updateCollection",
+          riskLevel: "DANGEROUS",
+          metricKey: "collectionsSummary",
+          reason: supabase
+            ? "Using updateCollection after Supabase payment failure."
+            : "Supabase client unavailable; using Apps Script updateCollection.",
+        });
+      }
       const res = await updateCollection(basePayload);
       const responsePayload = res?.data || res || {};
 
