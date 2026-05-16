@@ -38,6 +38,7 @@ const emptyReceiveForm = {
   productName: "",
   product_name: "",
   quantity: "",
+  remainingQty: "",
   receivedQty: "",
   grnNotes: "",
 };
@@ -366,7 +367,8 @@ export default function PurchaseOrdersPage() {
         productName,
         product_name: productName,
         quantity: String(quantity || remainingQty),
-        receivedQty: String(quantity || remainingQty),
+        remainingQty: String(remainingQty),
+        receivedQty: String(remainingQty),
         grnNotes: "",
       };
 
@@ -499,23 +501,28 @@ export default function PurchaseOrdersPage() {
         productName: receiveForm.productName,
         product_name: receiveForm.product_name || receiveForm.productName,
         quantity: Number(receiveForm.quantity || 0),
+        remainingQty: Number(receiveForm.remainingQty || 0),
         receivedQty: Number(receiveForm.receivedQty || 0),
         grnNotes: receiveForm.grnNotes,
       };
       const orderedQty = Number(receiveForm.quantity || 0);
+      const remainingQty = Number(receiveForm.remainingQty || receiveForm.quantity || 0);
       const receivedQty = Number(receiveForm.receivedQty || 0);
 
       if (!receiveForm.poId) {
         throw new Error("Select or enter a purchase order before receiving stock.");
       }
-      if (orderedQty > 0 && receivedQty > orderedQty) {
+      if (receivedQty <= 0) {
+        throw new Error("Received quantity must be greater than zero.");
+      }
+      if (remainingQty > 0 && receivedQty > remainingQty) {
         const confirmed =
           typeof window !== "undefined" &&
           window.confirm(
-            `Received quantity (${receivedQty}) exceeds ordered quantity (${orderedQty}). Continue with override?`
+            `Received quantity (${receivedQty}) exceeds remaining quantity (${remainingQty}) for ordered quantity ${orderedQty}. Continue with override?`
           );
         if (!confirmed) {
-          throw new Error("Receive cancelled. Received quantity cannot exceed ordered quantity without override confirmation.");
+          throw new Error("Receive cancelled. Received quantity cannot exceed remaining quantity without override confirmation.");
         }
       }
 
@@ -1035,6 +1042,11 @@ export default function PurchaseOrdersPage() {
             </div>
 
             <div>
+              <label className="mb-1 block text-sm font-medium">Remaining Qty</label>
+              <input type="number" min="0" value={receiveForm.remainingQty} onChange={(e) => handleReceiveFormChange("remainingQty", e.target.value)} className="w-full rounded-xl border px-3 py-3 text-sm outline-none focus:ring" readOnly={Boolean(selectedPurchaseOrder)} />
+            </div>
+
+            <div>
               <label className="mb-1 block text-sm font-medium">Received Qty</label>
               <input type="number" min="1" value={receiveForm.receivedQty} onChange={(e) => handleReceiveFormChange("receivedQty", e.target.value)} className="w-full rounded-xl border px-3 py-3 text-sm outline-none focus:ring" required />
             </div>
@@ -1045,7 +1057,7 @@ export default function PurchaseOrdersPage() {
             </div>
 
             <div className="lg:col-span-2 flex flex-col gap-3 sm:flex-row">
-              <button type="submit" disabled={receivingPo || !receiveForm.poId} className="rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50">
+              <button type="submit" disabled={receivingPo || !receiveForm.poId || Number(receiveForm.receivedQty || 0) <= 0} className="rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50">
                 {receivingPo ? "Receiving..." : "Receive Purchase Order"}
               </button>
 
