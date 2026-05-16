@@ -280,7 +280,7 @@ function coerceCatalogBool(value, fallback) {
 export function mapLabCatalogRow(row) {
   const productId = str(row.product_id ?? row.productId ?? row.Product_ID ?? row.id);
   const productName = str(
-    row.product_name ?? row.productName ?? row.Product_Name ?? row.name ?? row.item_name
+    row.product_name ?? row.productName ?? row.Product_Name ?? row.name ?? row.item_name ?? productId
   );
   const currentStock = num(row.current_stock ?? row.currentStock ?? row.Current_Stock);
   const minStock = num(row.min_stock ?? row.minStock ?? row.Min_Stock);
@@ -293,8 +293,8 @@ export function mapLabCatalogRow(row) {
   return {
     productId,
     productName,
-    category: str(row.category ?? row.Category),
-    brand: str(row.brand ?? row.Brand),
+    category: str(row.category ?? row.Category) || "Consumables",
+    brand: str(row.brand ?? row.Brand) || "PrimeCare",
     unitSellingPrice: num(
       row.unit_selling_price ??
         row.unitSellingPrice ??
@@ -313,8 +313,36 @@ export function mapLabCatalogRow(row) {
     reorderStatus: str(row.reorder_status ?? row.reorderStatus ?? row.Reorder_Status).toUpperCase(),
     stockHealth,
     canOrder: active && canOrder && stockHealth !== "OUT",
-    quickOrder: coerceCatalogBool(row.quick_order ?? row.quickOrder ?? row.is_quick_order, false),
+    quickOrder: coerceCatalogBool(row.quick_order ?? row.quickOrder ?? row.is_quick_order, true),
   };
+}
+
+async function readInventoryCatalogFallbackRows() {
+  const catalogProjection = [
+    "product_id",
+    "product_name",
+    "current_stock",
+    "min_stock",
+    "reorder_qty",
+    "reorder_status",
+    "unit_selling_price",
+    "unit_cost",
+    "category",
+    "brand",
+    "tax_rate",
+    "active_flag",
+  ].join(",");
+
+  let inv = await supabase.from("inventory").select(catalogProjection);
+  if (!inv.error) return inv;
+
+  console.warn(
+    "[getLabCatalogRead] inventory catalog projection failed; retrying core stock columns:",
+    inv.error.message
+  );
+  return supabase
+    .from("inventory")
+    .select("product_id,product_name,current_stock,min_stock,reorder_qty,reorder_status");
 }
 
 /**
@@ -335,10 +363,16 @@ export async function getLabCatalogRead() {
 
     if (error) {
       console.warn("[getLabCatalogRead] v_lab_catalog unavailable; trying inventory:", error.message);
+      console.warn("SUPABASE LAB CATALOG USING INVENTORY FALLBACK", {
+        reason: error.message,
+        expectedView: "v_lab_catalog",
+        fallbackTable: "inventory",
+      });
       source = "inventory";
-      const inv = await supabase.from("inventory").select("*");
+      const inv = await readInventoryCatalogFallbackRows();
       data = inv.data;
       error = inv.error;
+      console.log("SUPABASE LAB CATALOG RAW INVENTORY", data || []);
     }
 
     if (error) {
@@ -347,7 +381,7 @@ export async function getLabCatalogRead() {
 
     const products = (data || [])
       .map(mapLabCatalogRow)
-      .filter((item) => item.productId && item.productName)
+      .filter((item) => item.productId)
       .sort((a, b) => {
         if (a.canOrder !== b.canOrder) return a.canOrder ? -1 : 1;
         return a.productName.localeCompare(b.productName);
