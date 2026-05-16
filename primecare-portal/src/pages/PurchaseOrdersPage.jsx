@@ -31,6 +31,12 @@ const emptyCreateForm = {
 
 const emptyReceiveForm = {
   poId: "",
+  po_id: "",
+  productId: "",
+  product_id: "",
+  productName: "",
+  product_name: "",
+  quantity: "",
   receivedQty: "",
   grnNotes: "",
 };
@@ -148,6 +154,7 @@ export default function PurchaseOrdersPage() {
   const [creatingAutoPoId, setCreatingAutoPoId] = useState("");
 
   const [selectedCandidate, setSelectedCandidate] = useState(null);
+  const [selectedPurchaseOrder, setSelectedPurchaseOrder] = useState(null);
   const [createForm, setCreateForm] = useState(emptyCreateForm);
   const [receiveForm, setReceiveForm] = useState(emptyReceiveForm);
 
@@ -309,7 +316,7 @@ export default function PurchaseOrdersPage() {
       supplier: "",
       status: "Draft",
     });
-    setStatusMessage("");
+    setStatusMessage(`Create PO form prefilled for ${item?.productName || item?.productId || "candidate"}.`);
     setErrorMessage("");
   };
 
@@ -325,6 +332,54 @@ export default function PurchaseOrdersPage() {
       ...prev,
       [field]: value,
     }));
+  };
+
+  const handlePrefillReceiveForm = (po) => {
+    console.log("PREFILL RECEIVE CLICKED", po);
+    try {
+      setStatusMessage("");
+      setErrorMessage("");
+
+      const poId = String(po?.poId ?? po?.po_id ?? "").trim();
+      const productId = String(po?.productId ?? po?.product_id ?? "").trim();
+      const productName = String(po?.productName ?? po?.product_name ?? productId).trim();
+      const quantity = numberValue(po?.quantity);
+      const receivedQty = numberValue(po?.receivedQty ?? po?.received_qty);
+      const remainingQty = Math.max(0, quantity - receivedQty);
+
+      if (!poId) {
+        throw new Error("Cannot prefill receipt: purchase order id is missing.");
+      }
+      if (!productId && !productName) {
+        throw new Error(`Cannot prefill receipt for ${poId}: product is missing.`);
+      }
+      if (remainingQty <= 0) {
+        throw new Error(`Purchase order ${poId} is already fully received.`);
+      }
+
+      const nextForm = {
+        poId,
+        po_id: poId,
+        productId,
+        product_id: productId,
+        productName,
+        product_name: productName,
+        quantity: String(quantity || remainingQty),
+        receivedQty: String(remainingQty),
+        grnNotes: "",
+      };
+
+      setSelectedPurchaseOrder(po);
+      console.log("SELECTED PURCHASE ORDER", po);
+      setReceiveForm(nextForm);
+      console.log("RECEIVE FORM STATE UPDATED", nextForm);
+      setActiveTab("receive");
+      setStatusMessage(`Receive form prefilled for ${poId}.`);
+    } catch (err) {
+      console.error("Prefill receive failed", err);
+      setSelectedPurchaseOrder(null);
+      setErrorMessage(err?.message || "Failed to prefill receive form.");
+    }
   };
 
   const handleBulkCreateCriticalDraftPos = async () => {
@@ -437,6 +492,12 @@ export default function PurchaseOrdersPage() {
 
       const payload = {
         poId: receiveForm.poId,
+        po_id: receiveForm.po_id || receiveForm.poId,
+        productId: receiveForm.productId,
+        product_id: receiveForm.product_id || receiveForm.productId,
+        productName: receiveForm.productName,
+        product_name: receiveForm.product_name || receiveForm.productName,
+        quantity: Number(receiveForm.quantity || 0),
         receivedQty: Number(receiveForm.receivedQty || 0),
         grnNotes: receiveForm.grnNotes,
       };
@@ -460,6 +521,7 @@ export default function PurchaseOrdersPage() {
       }
       setStatusMessage(`Purchase order received successfully: ${result.poId || ""}`);
       setReceiveForm(emptyReceiveForm);
+      setSelectedPurchaseOrder(null);
 
       await refreshAll();
     } catch (err) {
@@ -824,6 +886,9 @@ export default function PurchaseOrdersPage() {
                           supplier: "",
                           status: "Draft",
                         });
+                        setSelectedCandidate(null);
+                        setStatusMessage(`Create PO form prefilled for ${item.productName || item.productId || "smart reorder item"}.`);
+                        setErrorMessage("");
                         setActiveTab("create");
                       }}
                       className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
@@ -898,6 +963,8 @@ export default function PurchaseOrdersPage() {
                 onClick={() => {
                   setCreateForm(emptyCreateForm);
                   setSelectedCandidate(null);
+                  setStatusMessage("Create purchase order form reset.");
+                  setErrorMessage("");
                 }}
                 className="rounded-xl border bg-white px-4 py-3 text-sm font-medium hover:bg-slate-50"
               >
@@ -914,10 +981,36 @@ export default function PurchaseOrdersPage() {
             <h2 className="text-lg font-semibold">Goods Receipt / Stock Inward</h2>
           </div>
 
+          {selectedPurchaseOrder ? (
+            <div className="mb-4 rounded-2xl border bg-slate-50 p-4 text-sm">
+              <div className="font-medium">Selected Purchase Order</div>
+              <div className="mt-1 text-slate-600">
+                {(selectedPurchaseOrder.productName || selectedPurchaseOrder.product_name || "-")} (
+                {selectedPurchaseOrder.productId || selectedPurchaseOrder.product_id || "-"}) — PO{" "}
+                {selectedPurchaseOrder.poId || selectedPurchaseOrder.po_id || "-"}
+              </div>
+            </div>
+          ) : null}
+
           <form onSubmit={handleReceivePurchaseOrder} className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <div>
               <label className="mb-1 block text-sm font-medium">PO ID</label>
               <input type="text" value={receiveForm.poId} onChange={(e) => handleReceiveFormChange("poId", e.target.value)} className="w-full rounded-xl border px-3 py-3 text-sm outline-none focus:ring" required />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-medium">Product ID</label>
+              <input type="text" value={receiveForm.productId} onChange={(e) => handleReceiveFormChange("productId", e.target.value)} className="w-full rounded-xl border px-3 py-3 text-sm outline-none focus:ring" readOnly={Boolean(selectedPurchaseOrder)} />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-medium">Product Name</label>
+              <input type="text" value={receiveForm.productName} onChange={(e) => handleReceiveFormChange("productName", e.target.value)} className="w-full rounded-xl border px-3 py-3 text-sm outline-none focus:ring" readOnly={Boolean(selectedPurchaseOrder)} />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-medium">Ordered Qty</label>
+              <input type="number" min="0" value={receiveForm.quantity} onChange={(e) => handleReceiveFormChange("quantity", e.target.value)} className="w-full rounded-xl border px-3 py-3 text-sm outline-none focus:ring" readOnly={Boolean(selectedPurchaseOrder)} />
             </div>
 
             <div>
@@ -935,7 +1028,16 @@ export default function PurchaseOrdersPage() {
                 {receivingPo ? "Receiving..." : "Receive Purchase Order"}
               </button>
 
-              <button type="button" onClick={() => setReceiveForm(emptyReceiveForm)} className="rounded-xl border bg-white px-4 py-3 text-sm font-medium hover:bg-slate-50">
+              <button
+                type="button"
+                onClick={() => {
+                  setReceiveForm(emptyReceiveForm);
+                  setSelectedPurchaseOrder(null);
+                  setStatusMessage("Receive stock form reset.");
+                  setErrorMessage("");
+                }}
+                className="rounded-xl border bg-white px-4 py-3 text-sm font-medium hover:bg-slate-50"
+              >
                 Reset
               </button>
             </div>
@@ -993,13 +1095,7 @@ export default function PurchaseOrdersPage() {
 
                     <button
                       type="button"
-                      onClick={() =>
-                        setReceiveForm({
-                          poId: po.poId || "",
-                          receivedQty: Math.max(0, Number(po.quantity || 0) - Number(po.receivedQty || 0)),
-                          grnNotes: "",
-                        })
-                      }
+                      onClick={() => handlePrefillReceiveForm(po)}
                       className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
                     >
                       Prefill Receive Form
