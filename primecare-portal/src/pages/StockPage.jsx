@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { getStockDashboard } from "../api/primecareSupabaseApi";
+import InventoryLedgerPage from "./InventoryLedgerPage";
 
 export default function StockPage() {
+  const [activeTab, setActiveTab] = useState("stock");
   const [data, setData] = useState({ stats: {}, inventory: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -51,7 +53,36 @@ export default function StockPage() {
 
   return (
     <div style={styles.page}>
-      <h1 style={styles.title}>Stock Dashboard</h1>
+      <div style={styles.header}>
+        <h1 style={styles.title}>Stock Dashboard</h1>
+        <div style={styles.tabs}>
+          <button
+            type="button"
+            onClick={() => setActiveTab("stock")}
+            style={{
+              ...styles.tabButton,
+              ...(activeTab === "stock" ? styles.activeTabButton : {}),
+            }}
+          >
+            Stock
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("ledger")}
+            style={{
+              ...styles.tabButton,
+              ...(activeTab === "ledger" ? styles.activeTabButton : {}),
+            }}
+          >
+            Movements
+          </button>
+        </div>
+      </div>
+
+      {activeTab === "ledger" ? (
+        <InventoryLedgerPage />
+      ) : (
+        <>
 
       <div style={styles.statsRow}>
         <div style={styles.statCard}>
@@ -114,6 +145,8 @@ export default function StockPage() {
           ))
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }
@@ -126,7 +159,31 @@ const styles = {
     minHeight: "100vh",
   },
   title: {
+    margin: 0,
+  },
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "12px",
     marginBottom: "20px",
+  },
+  tabs: {
+    display: "flex",
+    gap: "8px",
+  },
+  tabButton: {
+    border: "1px solid #cbd5e1",
+    background: "white",
+    borderRadius: "12px",
+    padding: "10px 14px",
+    fontSize: "14px",
+    cursor: "pointer",
+  },
+  activeTabButton: {
+    background: "#0f172a",
+    color: "white",
+    borderColor: "#0f172a",
   },
   statsRow: {
     display: "grid",

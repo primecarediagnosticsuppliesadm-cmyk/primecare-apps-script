@@ -2132,6 +2132,70 @@ export async function createInventoryLedgerWrite(ledgerRows) {
   }
 }
 
+function signedInventoryLedgerQuantity(row) {
+  const qty = num(row.quantity ?? row.qty ?? row.movement_qty ?? row.movementQty);
+  const movementType = str(row.movement_type ?? row.movementType ?? row.type).toUpperCase();
+  if (movementType === "ORDER_OUT" || movementType === "OUT") return -Math.abs(qty);
+  if (movementType === "PURCHASE_IN" || movementType === "IN") return Math.abs(qty);
+  return qty;
+}
+
+export function mapInventoryLedgerRow(row) {
+  const movementType = str(row.movement_type ?? row.movementType ?? row.type).toUpperCase();
+  return {
+    id: str(row.id ?? row.ledger_id ?? row.ledgerId),
+    createdAt: str(row.created_at ?? row.createdAt ?? row.date),
+    productId: str(row.product_id ?? row.productId),
+    productName: str(row.product_name ?? row.productName),
+    movementType,
+    quantity: num(row.quantity ?? row.qty ?? row.movement_qty ?? row.movementQty),
+    signedQuantity: signedInventoryLedgerQuantity(row),
+    orderId: str(row.order_id ?? row.orderId ?? row.source_transaction ?? row.sourceTransaction),
+    referenceType: str(row.reference_type ?? row.referenceType),
+    referenceId: str(row.reference_id ?? row.referenceId),
+    createdBy: str(row.created_by ?? row.createdBy),
+    stockBefore: num(row.stock_before ?? row.stockBefore),
+    stockAfter: num(row.stock_after ?? row.stockAfter),
+    raw: row,
+  };
+}
+
+/**
+ * Read-only inventory movement ledger from public.inventory_ledger.
+ */
+export async function getInventoryLedgerRead() {
+  traceSupabaseRead("InventoryLedger.getInventoryLedgerRead", { table: "inventory_ledger" });
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: { movements: [] } };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("inventory_ledger")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      return {
+        success: false,
+        error: error.message || "Inventory ledger read failed",
+        data: { movements: [] },
+      };
+    }
+
+    const movements = (data || []).map(mapInventoryLedgerRow);
+    console.log("SUPABASE INVENTORY LEDGER", {
+      count: movements.length,
+      movements,
+    });
+
+    return { success: true, data: { movements }, error: null };
+  } catch (err) {
+    console.warn("[getInventoryLedgerRead] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: { movements: [] } };
+  }
+}
+
 function generatePurchaseOrderId() {
   return `PO-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
 }

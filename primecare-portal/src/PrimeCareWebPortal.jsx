@@ -8,6 +8,7 @@ import CollectionsPage from "./pages/CollectionsPage";
 import ExecutiveControlTower from "./pages/ExecutiveControlTower";
 import LabOrderingPage from "./pages/LabOrderingPage";
 import LabsPage from "./pages/LabsPage";
+import InventoryLedgerPage from "./pages/InventoryLedgerPage";
 import OrdersPage from "./pages/OrdersPage";
 import ReorderForecastPage from "./pages/ReorderForecastPage";
 import StockPage from "./pages/StockPage";
@@ -125,6 +126,10 @@ export default function PrimeCareWebPortal({
       case "stock":
         return <StockPage currentUser={currentUser} />;
 
+      case "inventory-ledger":
+      case "inventory-movements":
+        return <InventoryLedgerPage currentUser={currentUser} />;
+
       case "reorder":
       case "reorder-forecast":
         return <ReorderForecastPage currentUser={currentUser} />;
@@ -181,6 +186,10 @@ export default function PrimeCareWebPortal({
       case "inventory":
       case "stock":
         return <StockPage currentUser={currentUser} />;
+
+      case "inventory-ledger":
+      case "inventory-movements":
+        return <InventoryLedgerPage currentUser={currentUser} />;
 
       case "reorder":
       case "reorder-forecast":
