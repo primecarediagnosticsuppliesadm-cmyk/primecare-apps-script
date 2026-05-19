@@ -48,6 +48,8 @@ export default function InventoryLedgerPage() {
   });
 
   useEffect(() => {
+    console.log("INVENTORY LEDGER MOUNTED");
+
     async function loadLedger() {
       try {
         setLoading(true);

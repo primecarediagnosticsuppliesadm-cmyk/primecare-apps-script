@@ -2196,6 +2196,171 @@ export async function getInventoryLedgerRead() {
   }
 }
 
+function inventoryHealthUrgency({ currentStock, minStock, projectedStockoutDays, leadTimeDays, safetyDays }) {
+  if (currentStock <= minStock) return "Critical";
+  if (
+    Number.isFinite(projectedStockoutDays) &&
+    projectedStockoutDays <= leadTimeDays + safetyDays
+  ) {
+    return "High";
+  }
+  if (Number.isFinite(projectedStockoutDays) && projectedStockoutDays <= 30) return "Medium";
+  return "Low";
+}
+
+function mapInventoryHealthRow(row) {
+  return {
+    productId: str(row.product_id ?? row.productId ?? row.Product_ID),
+    productName: str(row.product_name ?? row.productName ?? row.Product_Name ?? row.name),
+    category: str(row.category ?? row.Category),
+    currentStock: num(row.current_stock ?? row.currentStock ?? row.Current_Stock),
+    minStock: num(row.min_stock ?? row.minStock ?? row.Min_Stock),
+    reorderQty: num(row.reorder_qty ?? row.reorderQty ?? row.Reorder_Qty),
+    unitCost: num(row.unit_cost ?? row.unitCost ?? row.cost_price ?? row.costPrice),
+    leadTimeDays: num(row.lead_time_days ?? row.leadTimeDays ?? row.Lead_Time_Days),
+    safetyDays: num(row.safety_days ?? row.safetyDays ?? row.Safety_Days ?? 7),
+  };
+}
+
+/**
+ * Read-only inventory health intelligence from inventory + inventory_ledger.
+ */
+export async function getInventoryHealthRead() {
+  traceSupabaseRead("InventoryHealth.getInventoryHealthRead", {
+    tables: ["inventory", "inventory_ledger"],
+  });
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: { rows: [] } };
+  }
+
+  try {
+    const [inventoryRes, ledgerRes] = await Promise.all([
+      supabase.from("inventory").select("*"),
+      supabase.from("inventory_ledger").select("*"),
+    ]);
+
+    if (inventoryRes.error) {
+      return { success: false, error: inventoryRes.error.message, data: { rows: [] } };
+    }
+    if (ledgerRes.error) {
+      return { success: false, error: ledgerRes.error.message, data: { rows: [] } };
+    }
+
+    const inventoryRows = (inventoryRes.data || []).map(mapInventoryHealthRow).filter((r) => r.productId);
+    const ledgerRows = (ledgerRes.data || []).map(mapInventoryLedgerRow);
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000);
+
+    const orderOutBySku = new Map();
+    const orderOutMovementQtyBySku = new Map();
+    const lastOrderOutAtBySku = new Map();
+
+    for (const movement of ledgerRows) {
+      if (movement.movementType !== "ORDER_OUT" && movement.movementType !== "OUT") continue;
+      const productId = movement.productId;
+      if (!productId) continue;
+      const createdAtMs = new Date(movement.createdAt || 0).getTime();
+      if (Number.isFinite(createdAtMs)) {
+        const prev = lastOrderOutAtBySku.get(productId) || 0;
+        if (createdAtMs > prev) lastOrderOutAtBySku.set(productId, createdAtMs);
+      }
+      if (createdAtMs < thirtyDaysAgo.getTime()) continue;
+      const qty = Math.abs(num(movement.signedQuantity || movement.quantity));
+      orderOutBySku.set(productId, (orderOutBySku.get(productId) || 0) + qty);
+      if (!orderOutMovementQtyBySku.has(productId)) orderOutMovementQtyBySku.set(productId, []);
+      orderOutMovementQtyBySku.get(productId).push(qty);
+    }
+
+    const skuRows = inventoryRows.map((item) => {
+      const recentOrderOutQty = num(orderOutBySku.get(item.productId));
+      const avgDailyConsumption = Math.round((recentOrderOutQty / 30) * 100) / 100;
+      const projectedStockoutDays =
+        avgDailyConsumption > 0
+          ? Math.round((item.currentStock / avgDailyConsumption) * 10) / 10
+          : null;
+      const urgency = inventoryHealthUrgency({
+        currentStock: item.currentStock,
+        minStock: item.minStock,
+        projectedStockoutDays,
+        leadTimeDays: item.leadTimeDays,
+        safetyDays: item.safetyDays,
+      });
+      const movementQtys = orderOutMovementQtyBySku.get(item.productId) || [];
+      const avgMovementQty =
+        movementQtys.length > 0
+          ? movementQtys.reduce((sum, qty) => sum + qty, 0) / movementQtys.length
+          : 0;
+      const unusualMovements = ledgerRows
+        .filter((m) => m.productId === item.productId)
+        .filter((m) => {
+          const qty = Math.abs(num(m.signedQuantity || m.quantity));
+          return avgMovementQty > 0 && qty > avgMovementQty * 3;
+        });
+      const recommendedReorderQty = Math.max(
+        item.reorderQty,
+        Math.ceil(avgDailyConsumption * (item.leadTimeDays + item.safetyDays) - item.currentStock),
+        0
+      );
+      const lastOrderOutMs = lastOrderOutAtBySku.get(item.productId);
+      const hasRecentOrderOut = recentOrderOutQty > 0;
+      const warningNotes = [];
+      if (!hasRecentOrderOut) warningNotes.push("No ORDER_OUT movement in last 30 days");
+      if (unusualMovements.length) warningNotes.push("Unusual movement quantity detected");
+      if (urgency === "Critical") warningNotes.push("Current stock at or below minimum stock");
+
+      return {
+        ...item,
+        avgDailyConsumption,
+        projectedStockoutDays,
+        urgency,
+        recentOrderOutQty,
+        isFastMoving: recentOrderOutQty > 0,
+        isSlowOrDeadStock: !hasRecentOrderOut,
+        inventoryValue: Math.round(item.currentStock * item.unitCost * 100) / 100,
+        recommendedReorderQty,
+        lastOrderOutAt: lastOrderOutMs ? new Date(lastOrderOutMs).toISOString() : "",
+        unusualMovementCount: unusualMovements.length,
+        warningNotes,
+      };
+    });
+
+    const fastMoving = [...skuRows]
+      .filter((row) => row.recentOrderOutQty > 0)
+      .sort((a, b) => b.recentOrderOutQty - a.recentOrderOutQty)
+      .slice(0, 10)
+      .map((row) => row.productId);
+    const fastMovingSet = new Set(fastMoving);
+    const rows = skuRows
+      .map((row) => ({ ...row, isFastMoving: fastMovingSet.has(row.productId) }))
+      .sort((a, b) => {
+        const rank = { Critical: 1, High: 2, Medium: 3, Low: 4 };
+        return (rank[a.urgency] || 9) - (rank[b.urgency] || 9);
+      });
+
+    const summary = {
+      totalSkus: rows.length,
+      criticalCount: rows.filter((row) => row.urgency === "Critical").length,
+      highCount: rows.filter((row) => row.urgency === "High").length,
+      fastMovingCount: rows.filter((row) => row.isFastMoving).length,
+      slowOrDeadCount: rows.filter((row) => row.isSlowOrDeadStock).length,
+      totalInventoryValue: Math.round(rows.reduce((sum, row) => sum + row.inventoryValue, 0) * 100) / 100,
+      unusualMovementWarnings: rows.reduce((sum, row) => sum + row.unusualMovementCount, 0),
+    };
+
+    const payload = { summary, rows };
+    console.log("SUPABASE INVENTORY HEALTH", {
+      inventoryRows: inventoryRows.length,
+      ledgerRows: ledgerRows.length,
+    });
+    console.log("INVENTORY HEALTH CALCULATED", payload);
+
+    return { success: true, data: payload, error: null };
+  } catch (err) {
+    console.warn("[getInventoryHealthRead] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: { rows: [] } };
+  }
+}
+
 function generatePurchaseOrderId() {
   return `PO-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
 }
@@ -2299,12 +2464,14 @@ export async function createPurchaseOrderWrite(payload = {}) {
     const status = normalizePurchaseOrderStatus(payload.status);
     const totalCost = Math.round(quantity * unitCost * 100) / 100;
     const poDate = str(payload.poDate ?? payload.po_date ?? new Date().toISOString().slice(0, 10)).slice(0, 10);
+    const tenant_id = str(payload.tenantId ?? payload.tenant_id) || null;
 
     if (!productId) return { success: false, error: "productId is required", data: null };
     if (quantity <= 0) return { success: false, error: "quantity must be greater than zero", data: null };
 
     const poPayload = {
       po_id: poId,
+      tenant_id,
       po_date: poDate,
       product_id: productId,
       product_name: productName || productId,
@@ -2321,6 +2488,7 @@ export async function createPurchaseOrderWrite(payload = {}) {
 
     const itemPayload = {
       po_id: poId,
+      tenant_id,
       product_id: productId,
       product_name: productName || productId,
       quantity,

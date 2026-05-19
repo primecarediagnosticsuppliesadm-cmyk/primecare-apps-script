@@ -11,6 +11,7 @@ import {
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { invalidateAdminDashboardCaches } from "@/utils/dashboardInvalidate.js";
+import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -187,6 +188,10 @@ export default function OrdersPage() {
           sbRes.error ||
             "Supabase order status update failed. Apps Script fallback is disabled when Supabase is configured."
         );
+      }
+
+      if (!ALLOW_LEGACY_APPS_SCRIPT) {
+        throw new Error("Supabase order status update is required for pilot access.");
       }
 
       logAppsScriptFallbackUsed("Orders.statusWrite", {

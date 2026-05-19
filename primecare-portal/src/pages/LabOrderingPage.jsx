@@ -43,6 +43,7 @@ import {
   logPartialMigrationWarning,
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
+import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 
 function QuickStat({ title, value, icon: Icon }) {
   return (
@@ -194,6 +195,10 @@ export default function LabOrderingPage({ currentUser }) {
         return;
       }
 
+      if (!ALLOW_LEGACY_APPS_SCRIPT) {
+        throw new Error("Supabase catalog is required for pilot access.");
+      }
+
       console.warn("LAB CATALOG FALLBACK USED", {
         feature: "LabOrdering.catalog",
         primarySourceExpected: "Supabase getLabCatalogRead",
@@ -232,13 +237,15 @@ export default function LabOrderingPage({ currentUser }) {
       }
 
       let scriptOrders = [];
-      try {
-        logAppsScriptPrimarySource("LabOrdering.recentOrders", "getLabRecentOrders");
-        const res = await getLabRecentOrders(labId);
-        const result = res?.data || res || {};
-        scriptOrders = Array.isArray(result?.orders) ? result.orders : [];
-      } catch (e) {
-        console.warn("[LabOrderingPage] getLabRecentOrders:", e?.message || e);
+      if (ALLOW_LEGACY_APPS_SCRIPT) {
+        try {
+          logAppsScriptPrimarySource("LabOrdering.recentOrders", "getLabRecentOrders");
+          const res = await getLabRecentOrders(labId);
+          const result = res?.data || res || {};
+          scriptOrders = Array.isArray(result?.orders) ? result.orders : [];
+        } catch (e) {
+          console.warn("[LabOrderingPage] getLabRecentOrders:", e?.message || e);
+        }
       }
 
       const byId = new Map();
@@ -580,7 +587,14 @@ export default function LabOrderingPage({ currentUser }) {
           }
           return;
         }
+        if (!ALLOW_LEGACY_APPS_SCRIPT) {
+          throw new Error(sbRes?.error || "Supabase order submission failed.");
+        }
         logAppsScriptFallbackUsed("LabOrdering.submit", sbRes?.error);
+      }
+
+      if (!ALLOW_LEGACY_APPS_SCRIPT) {
+        throw new Error("Supabase order submission is required for pilot access.");
       }
 
       logPartialMigrationWarning(

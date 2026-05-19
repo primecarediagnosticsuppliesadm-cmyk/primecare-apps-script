@@ -1,4 +1,6 @@
 import { ROLES } from "./config/roles";
+import { PERMISSIONS } from "./config/permissions";
+import { isPageVisibleInCurrentEnvironment } from "./config/menuConfig";
 
 import AgentDashboard from "./pages/AgentDashboard";
 import AgentVisitPage from "./pages/AgentVisitPage";
@@ -23,6 +25,48 @@ function PlaceholderCard({ title, subtitle }) {
   );
 }
 
+function normalizePageKey(page) {
+  switch (page) {
+    case "stock":
+    case "inventory-ledger":
+    case "inventory-movements":
+      return "inventory";
+    case "purchase-orders":
+    case "procurement":
+    case "suppliers":
+      return "purchase";
+    case "reorder-forecast":
+      return "reorder";
+    case "ai-insights":
+      return "insights";
+    case "lab-orders":
+    case "lab-ordering":
+    case "ordering":
+      return "labOrders";
+    default:
+      return page;
+  }
+}
+
+function canAccessPage(role, activePage) {
+  const key = normalizePageKey(activePage);
+  return Boolean(
+    role &&
+      key &&
+      PERMISSIONS[key]?.includes(role) &&
+      isPageVisibleInCurrentEnvironment(key)
+  );
+}
+
+function UnauthorizedCard({ role, activePage }) {
+  return (
+    <PlaceholderCard
+      title="Unauthorized"
+      subtitle={`Your ${role || "current"} role cannot access ${activePage || "this page"}.`}
+    />
+  );
+}
+
 export default function PrimeCareWebPortal({
   role,
   activePage,
@@ -30,6 +74,10 @@ export default function PrimeCareWebPortal({
   setActivePage,
   authToken,
 }) {
+  if (!canAccessPage(role, activePage)) {
+    return <UnauthorizedCard role={role} activePage={activePage} />;
+  }
+
   if (role === ROLES.AGENT) {
     switch (activePage) {
       case "dashboard":

@@ -15,7 +15,27 @@ function normalizeRole(role) {
   if (value === "executive") return ROLES.EXECUTIVE;
   if (value === "lab") return ROLES.LAB;
 
-  return ROLES.EXECUTIVE;
+  return null;
+}
+
+function UnauthorizedScreen({ message, onLogout }) {
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="max-w-md rounded-2xl border bg-white p-6 shadow-sm text-center">
+        <h2 className="text-xl font-semibold text-red-700">Unauthorized</h2>
+        <p className="mt-2 text-gray-600">
+          {message || "Your account is not authorized for PrimeCare pilot access."}
+        </p>
+        <button
+          type="button"
+          onClick={onLogout}
+          className="mt-5 rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
+        >
+          Back to login
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function PortalLoadingScreen() {
@@ -30,7 +50,7 @@ function PortalLoadingScreen() {
 }
 
 export default function App() {
-  const { user, loading, isAuthenticated, signOut, authToken } = useAuth();
+  const { user, loading, isAuthenticated, signOut, authToken, authError } = useAuth();
 
   const [role, setRole] = useState(null);
   const [activePage, setActivePage] = useState(null);
@@ -45,13 +65,21 @@ export default function App() {
     }
 
     const normalizedRole = normalizeRole(user.role);
+    if (!normalizedRole) {
+      setRole(null);
+      setActivePage(null);
+      setCurrentUser(null);
+      return;
+    }
 
     const normalizedUser = {
-      id: user.id || user.userId || user.User_ID || "USER-001",
+      id: user.id || user.userId || user.User_ID || "",
       name: user.name || user.userName || user.User_Name || "User",
       role: normalizedRole,
       agentName: user.agentName || user.Agent_Name || user.name || user.User_Name || "",
       labId: user.labId || user.Lab_ID || "",
+      tenantId: user.tenantId || user.tenant_id || "",
+      agentId: user.agentId || user.agent_id || "",
       assignedArea: user.assignedArea || user.Area || "",
       email: user.email || user.Email || "",
       defaultPage: user.defaultPage || user.Default_Page || "",
@@ -94,20 +122,14 @@ export default function App() {
   }
 
   if (!isAuthenticated) {
+    if (authError) {
+      return <UnauthorizedScreen message={authError} onLogout={signOut} />;
+    }
     return <LoginPage />;
   }
 
   if (!role || !activePage || !currentUser) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="rounded-2xl border bg-white p-6 shadow-sm text-center">
-          <h2 className="text-xl font-semibold">Unable to load portal</h2>
-          <p className="mt-2 text-gray-500">
-            User role or navigation could not be initialized.
-          </p>
-        </div>
-      </div>
-    );
+    return <UnauthorizedScreen onLogout={signOut} />;
   }
 
   return (

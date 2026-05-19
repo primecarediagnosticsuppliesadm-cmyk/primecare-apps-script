@@ -35,6 +35,7 @@ import {
 } from "@/utils/migrationTrace.js";
 import { ROLES } from "@/config/roles";
 import { logClientError } from "@/utils/debugLogger";
+import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 
 function QuickStat({ title, value, icon: Icon }) {
   return (
@@ -242,6 +243,9 @@ export default function AgentVisitPage({ currentUser, authToken }) {
             }
           }
         } else {
+          if (!ALLOW_LEGACY_APPS_SCRIPT) {
+            throw new Error("Supabase visit data is required for pilot access.");
+          }
           const labsRes = await getLabs(params);
           if (!labsRes.success) throw new Error(labsRes.error || "Failed to load labs");
           labList = (labsRes.data?.labs || []).map(normalizeLab).filter((l) => String(l.labId).trim() !== "");
@@ -252,35 +256,37 @@ export default function AgentVisitPage({ currentUser, authToken }) {
         setLabs(labList);
         setLoading(false);
 
-        logPartialMigrationWarning(
-          "AgentVisit.background",
-          "Recent visits and collections sidebar still load via Apps Script getRecentVisits/getCollections."
-        );
-        Promise.all([getRecentVisits(params), getCollections(params)])
-          .then(async ([visitsRes, collectionsRes]) => {
-            if (!mounted) return;
+        if (ALLOW_LEGACY_APPS_SCRIPT) {
+          logPartialMigrationWarning(
+            "AgentVisit.background",
+            "Recent visits and collections sidebar still load via Apps Script getRecentVisits/getCollections."
+          );
+          Promise.all([getRecentVisits(params), getCollections(params)])
+            .then(async ([visitsRes, collectionsRes]) => {
+              if (!mounted) return;
 
-            if (visitsRes?.success) {
-              setRecentVisits((visitsRes.data?.visits || []).map(normalizeVisit));
-            }
+              if (visitsRes?.success) {
+                setRecentVisits((visitsRes.data?.visits || []).map(normalizeVisit));
+              }
 
-            if (collectionsRes?.success) {
-              setCollections((collectionsRes.data?.collections || []).map(normalizeCollection));
-            }
-          })
-          .catch(async (err) => {
-            console.error("Background load failed", err);
-            await logClientError({
-              authToken,
-              page: "AgentVisitPage",
-              component: "AgentVisitPage",
-              actionType: "BACKGROUND_LOAD_FAIL",
-              errorCode: "VISITS_BACKGROUND_LOAD_FAIL",
-              errorMessage: err?.message || "Background load failed",
-              stackTrace: err?.stack || "",
-              payload: {},
+              if (collectionsRes?.success) {
+                setCollections((collectionsRes.data?.collections || []).map(normalizeCollection));
+              }
+            })
+            .catch(async (err) => {
+              console.error("Background load failed", err);
+              await logClientError({
+                authToken,
+                page: "AgentVisitPage",
+                component: "AgentVisitPage",
+                actionType: "BACKGROUND_LOAD_FAIL",
+                errorCode: "VISITS_BACKGROUND_LOAD_FAIL",
+                errorMessage: err?.message || "Background load failed",
+                stackTrace: err?.stack || "",
+                payload: {},
+              });
             });
-          });
+        }
       } catch (err) {
         if (!mounted) return;
 
@@ -583,10 +589,16 @@ export default function AgentVisitPage({ currentUser, authToken }) {
             "";
           res = { success: true, data: { visitId: vid } };
         } else {
+          if (!ALLOW_LEGACY_APPS_SCRIPT) {
+            throw new Error(sbRes?.error || "Supabase visit write failed.");
+          }
           logAppsScriptFallbackUsed("AgentVisit.save", sbRes?.error || "unknown");
           res = await saveAgentVisit(payload);
         }
       } else {
+        if (!ALLOW_LEGACY_APPS_SCRIPT) {
+          throw new Error("Supabase visit write is required for pilot access.");
+        }
         res = await saveAgentVisit(payload);
       }
 

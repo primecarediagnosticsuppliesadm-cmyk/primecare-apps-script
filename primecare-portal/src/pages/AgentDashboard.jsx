@@ -26,6 +26,7 @@ import {
 } from "@/utils/migrationTrace.js";
 import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
 import { summarizeAgentLabsCreditBuckets } from "@/metrics/computeRiskMetrics.js";
+import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 
 const EMPTY_WORKSPACE = {
   summary: {
@@ -297,6 +298,10 @@ export default function AgentDashboard({ currentUser, setActivePage, authToken }
       try {
         setCompletingTaskId(task.taskId);
         setError("");
+
+        if (!ALLOW_LEGACY_APPS_SCRIPT) {
+          throw new Error("Supabase agent task completion is required for pilot access.");
+        }
 
         logAppsScriptFallbackUsed("AgentDashboard.completeTask", {
           primarySourceExpected: "Supabase agent_tasks table",

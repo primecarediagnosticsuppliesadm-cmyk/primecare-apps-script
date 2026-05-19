@@ -1,4 +1,5 @@
 import { PERMISSIONS } from "./permissions";
+import { ALLOW_EXPERIMENTAL_MODULES, IS_QA, IS_PROD } from "./environment";
 
 /**
  * Central Menu Configuration for PrimeCare Portal
@@ -34,12 +35,33 @@ export const MENU_ITEMS = [
    
 ];
 
+const PILOT_SAFE_PAGE_KEYS = new Set([
+  "dashboard",
+  "visits",
+  "collections",
+  "labs",
+  "inventory",
+  "orders",
+  "risk",
+  "labOrders",
+  "purchase",
+  "reorder",
+]);
+
+export function isPageVisibleInCurrentEnvironment(pageKey) {
+  if (ALLOW_EXPERIMENTAL_MODULES) return true;
+  if (!IS_QA && !IS_PROD) return true;
+  return PILOT_SAFE_PAGE_KEYS.has(pageKey);
+}
+
 /**
  * Returns menu filtered by role
  */
 export function getMenuForRole(role) {
   return MENU_ITEMS.filter(
-    (item) => PERMISSIONS[item.key]?.includes(role)
+    (item) =>
+      PERMISSIONS[item.key]?.includes(role) &&
+      isPageVisibleInCurrentEnvironment(item.key)
   );
 }
 
@@ -47,6 +69,7 @@ export function getMenuForRole(role) {
  * Default landing page per role
  */
 export function getDefaultPageForRole(role) {
+  if (role === "lab") return "labOrders";
   const menu = getMenuForRole(role);
   return menu.length ? menu[0].key : null;
 }

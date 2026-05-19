@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { logClientError } from "@/utils/debugLogger";
+import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 
 export default function LoginPage() {
   const { login, devLoginLocalAdmin, devLoginLocalAgent, devLoginLocalLab, devLoginLocalExecutive } =
@@ -89,7 +90,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {import.meta.env.DEV === true ? (
+        {import.meta.env.DEV === true && ALLOW_LEGACY_APPS_SCRIPT ? (
           <div className="mt-6 border-t border-amber-200 pt-6">
             <p className="mb-3 text-xs font-medium uppercase tracking-wide text-amber-800">
               Local development only

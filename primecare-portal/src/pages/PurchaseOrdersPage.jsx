@@ -20,6 +20,7 @@ import {
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { invalidateAdminDashboardCaches } from "@/utils/dashboardInvalidate.js";
+import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 
 const emptyCreateForm = {
   productId: "",
@@ -209,6 +210,9 @@ export default function PurchaseOrdersPage() {
         "Smart reorder Apps Script read skipped while Supabase is configured; reorder forecast is the authoritative read path."
       );
     } else {
+      if (!ALLOW_LEGACY_APPS_SCRIPT) {
+        throw new Error("Supabase purchase order reads are required for pilot access.");
+      }
       logAppsScriptFallbackUsed("PurchaseOrders.purchaseOrders", {
         primarySourceExpected: "Supabase getPurchaseOrdersRead",
         fallbackSourceUsed: "Apps Script getPurchaseOrders + getSmartReorder",
@@ -405,6 +409,7 @@ export default function PurchaseOrdersPage() {
               unitCost: item.unitCost || 0,
               supplier: item.supplier || "",
               status: "Draft",
+              tenantId: currentUser?.tenantId || currentUser?.tenant_id || null,
             })
           )
         );
@@ -416,6 +421,9 @@ export default function PurchaseOrdersPage() {
           },
         };
       } else {
+        if (!ALLOW_LEGACY_APPS_SCRIPT) {
+          throw new Error("Supabase bulk purchase order creation is required for pilot access.");
+        }
         logAppsScriptFallbackUsed("PurchaseOrders.bulkCreate", {
           primarySourceExpected: "Supabase createPurchaseOrderWrite loop",
           fallbackSourceUsed: "Apps Script bulkCreateDraftPurchaseOrders",
@@ -454,12 +462,16 @@ export default function PurchaseOrdersPage() {
         unitCost: Number(createForm.unitCost || 0),
         supplier: createForm.supplier,
         status: createForm.status || "Draft",
+        tenantId: currentUser?.tenantId || currentUser?.tenant_id || null,
       };
 
       let res;
       if (supabase) {
         res = await createPurchaseOrderWrite(payload);
       } else {
+        if (!ALLOW_LEGACY_APPS_SCRIPT) {
+          throw new Error("Supabase purchase order creation is required for pilot access.");
+        }
         logAppsScriptFallbackUsed("PurchaseOrders.create", {
           primarySourceExpected: "Supabase createPurchaseOrderWrite",
           fallbackSourceUsed: "Apps Script createPurchaseOrder",
@@ -504,6 +516,8 @@ export default function PurchaseOrdersPage() {
         remainingQty: Number(receiveForm.remainingQty || 0),
         receivedQty: Number(receiveForm.receivedQty || 0),
         grnNotes: receiveForm.grnNotes,
+        tenantId: currentUser?.tenantId || currentUser?.tenant_id || null,
+        receivedBy: currentUser?.email || currentUser?.name || currentUser?.id || null,
       };
       const orderedQty = Number(receiveForm.quantity || 0);
       const remainingQty = Number(receiveForm.remainingQty || receiveForm.quantity || 0);
@@ -530,6 +544,9 @@ export default function PurchaseOrdersPage() {
       if (supabase) {
         res = await receivePurchaseOrderWrite(receiveForm.poId, payload);
       } else {
+        if (!ALLOW_LEGACY_APPS_SCRIPT) {
+          throw new Error("Supabase purchase receipt is required for pilot access.");
+        }
         logAppsScriptFallbackUsed("PurchaseOrders.receive", {
           primarySourceExpected: "Supabase receivePurchaseOrderWrite",
           fallbackSourceUsed: "Apps Script receivePurchaseOrder",
@@ -575,12 +592,16 @@ export default function PurchaseOrdersPage() {
         unitCost: item.unitCost || 0,
         supplier: item.supplier || "",
         status: "Draft",
+        tenantId: currentUser?.tenantId || currentUser?.tenant_id || null,
       };
 
       let res;
       if (supabase) {
         res = await createPurchaseOrderWrite(payload);
       } else {
+        if (!ALLOW_LEGACY_APPS_SCRIPT) {
+          throw new Error("Supabase purchase order creation is required for pilot access.");
+        }
         logAppsScriptFallbackUsed("PurchaseOrders.createFromTrigger", {
           primarySourceExpected: "Supabase createPurchaseOrderWrite",
           fallbackSourceUsed: "Apps Script createPurchaseOrder",

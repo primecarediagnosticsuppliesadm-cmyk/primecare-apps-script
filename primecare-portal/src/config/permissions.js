@@ -3,14 +3,15 @@ import { ROLES } from "./roles";
 export const PERMISSIONS = {
   dashboard: [ROLES.AGENT, ROLES.ADMIN, ROLES.EXECUTIVE],
   visits: [ROLES.AGENT, ROLES.ADMIN],
-  collections: [ROLES.AGENT, ROLES.ADMIN],
+  collections: [ROLES.AGENT, ROLES.ADMIN, ROLES.LAB],
   labs: [ROLES.AGENT, ROLES.ADMIN, ROLES.EXECUTIVE],
   inventory: [ROLES.ADMIN, ROLES.EXECUTIVE],
-  orders: [ROLES.ADMIN, ROLES.EXECUTIVE],
+  orders: [ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.LAB],
   risk: [ROLES.ADMIN, ROLES.EXECUTIVE],
   performance: [ROLES.ADMIN, ROLES.EXECUTIVE],
-  insights: [ROLES.EXECUTIVE],
+  insights: [ROLES.ADMIN, ROLES.EXECUTIVE],
   labOrders: [ROLES.LAB],
-  purchase: [ROLES.ADMIN],
+  purchase: [ROLES.ADMIN, ROLES.EXECUTIVE],
+  reorder: [ROLES.ADMIN, ROLES.EXECUTIVE],
   
 };

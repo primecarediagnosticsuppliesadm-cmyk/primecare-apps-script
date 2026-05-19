@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, IndianRupee, CheckCircle2, ClipboardCheck } from "lucide-react";
 import { labIdKey } from "@/utils/labId.js";
+import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 
 function findCollectionByLabId(list, labId) {
   const target = labIdKey(labId);
@@ -389,7 +390,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
           return;
         }
 
-        if (import.meta.env.DEV) {
+        if (import.meta.env.DEV || !ALLOW_LEGACY_APPS_SCRIPT) {
           throw new Error(sbRes.error || "Supabase payment write failed.");
         }
 
@@ -417,6 +418,9 @@ export default function CollectionsPage({ currentUser, authToken }) {
             ? "Using updateCollection after Supabase payment failure."
             : "Supabase client unavailable; using Apps Script updateCollection.",
         });
+      }
+      if (!ALLOW_LEGACY_APPS_SCRIPT) {
+        throw new Error("Supabase collections write is required for pilot access.");
       }
       const res = await updateCollection(basePayload);
       const responsePayload = res?.data || res || {};
@@ -450,6 +454,10 @@ export default function CollectionsPage({ currentUser, authToken }) {
       setCompletingTask(true);
       setError("");
       setSuccessMessage("");
+
+      if (!ALLOW_LEGACY_APPS_SCRIPT) {
+        throw new Error("Supabase agent task completion is required for pilot access.");
+      }
 
       const res = await completeAgentTask({
         taskId: pendingTaskContext.taskId,

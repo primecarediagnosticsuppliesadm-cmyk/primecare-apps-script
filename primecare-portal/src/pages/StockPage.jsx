@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getStockDashboard } from "../api/primecareSupabaseApi";
 import InventoryLedgerPage from "./InventoryLedgerPage";
+import InventoryHealthPage from "./InventoryHealthPage";
 
 export default function StockPage() {
   const [activeTab, setActiveTab] = useState("stock");
@@ -43,13 +44,13 @@ export default function StockPage() {
     );
   });
 
-  if (loading) {
-    return <h2 style={{ padding: "20px" }}>Loading stock...</h2>;
-  }
-
-  if (error) {
-    return <h2 style={{ padding: "20px", color: "red" }}>{error}</h2>;
-  }
+  const switchTab = (nextTab) => {
+    console.log("INVENTORY PAGE TAB SWITCH", {
+      from: activeTab,
+      to: nextTab,
+    });
+    setActiveTab(nextTab);
+  };
 
   return (
     <div style={styles.page}>
@@ -58,7 +59,7 @@ export default function StockPage() {
         <div style={styles.tabs}>
           <button
             type="button"
-            onClick={() => setActiveTab("stock")}
+            onClick={() => switchTab("stock")}
             style={{
               ...styles.tabButton,
               ...(activeTab === "stock" ? styles.activeTabButton : {}),
@@ -68,7 +69,7 @@ export default function StockPage() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("ledger")}
+            onClick={() => switchTab("ledger")}
             style={{
               ...styles.tabButton,
               ...(activeTab === "ledger" ? styles.activeTabButton : {}),
@@ -76,11 +77,27 @@ export default function StockPage() {
           >
             Movements
           </button>
+          <button
+            type="button"
+            onClick={() => switchTab("health")}
+            style={{
+              ...styles.tabButton,
+              ...(activeTab === "health" ? styles.activeTabButton : {}),
+            }}
+          >
+            Health
+          </button>
         </div>
       </div>
 
-      {activeTab === "ledger" ? (
+      {activeTab === "health" ? (
+        <InventoryHealthPage />
+      ) : activeTab === "ledger" ? (
         <InventoryLedgerPage />
+      ) : loading ? (
+        <h2 style={{ padding: "20px" }}>Loading stock...</h2>
+      ) : error ? (
+        <h2 style={{ padding: "20px", color: "red" }}>{error}</h2>
       ) : (
         <>
 
