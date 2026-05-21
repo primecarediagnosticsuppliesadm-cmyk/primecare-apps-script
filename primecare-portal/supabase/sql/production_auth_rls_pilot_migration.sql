@@ -1,6 +1,7 @@
 -- PrimeCare Pilot Security: Supabase Auth profiles, helper functions, RLS policies, and audits.
--- Run after the existing schema/migration files. This replaces temporary open anon policies
--- on pilot-critical tables with authenticated, tenant/role scoped access.
+-- Compatible with imported schema where tenant_id is uuid on core ERP tables.
+-- Run after schema import. Idempotent — safe to re-run after partial failure.
+-- Replaces temporary open anon policies with authenticated, tenant/role scoped access.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
@@ -17,10 +18,11 @@ $$;
 
 -- ---------------------------------------------------------------------------
 -- Profiles: production identity bridge from Supabase Auth to PrimeCare roles.
+-- tenant_id is uuid to match labs/orders/... and public.tenants(id).
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.profiles (
   user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  tenant_id text NOT NULL,
+  tenant_id uuid NOT NULL,
   role text NOT NULL CHECK (lower(role) IN ('admin', 'executive', 'agent', 'lab')),
   lab_id text,
   agent_id text,
@@ -30,6 +32,30 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Repair partial runs that created profiles.tenant_id as text (empty table only).
+DO $$
+DECLARE
+  col_udt text;
+BEGIN
+  SELECT udt_name
+  INTO col_udt
+  FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND table_name = 'profiles'
+    AND column_name = 'tenant_id';
+
+  IF col_udt IN ('text', 'varchar') THEN
+    IF EXISTS (SELECT 1 FROM public.profiles LIMIT 1) THEN
+      RAISE EXCEPTION 'profiles.tenant_id is text with existing rows. Delete QA profile rows or convert tenant_id to uuid before re-run.';
+    END IF;
+    ALTER TABLE public.profiles DROP COLUMN tenant_id;
+    ALTER TABLE public.profiles ADD COLUMN tenant_id uuid NOT NULL;
+  ELSIF col_udt IS NULL THEN
+    ALTER TABLE public.profiles ADD COLUMN tenant_id uuid NOT NULL;
+  END IF;
+END $$;
+
+DROP INDEX IF EXISTS idx_profiles_tenant_role;
 CREATE INDEX IF NOT EXISTS idx_profiles_tenant_role ON public.profiles (tenant_id, lower(role));
 CREATE INDEX IF NOT EXISTS idx_profiles_lab_id ON public.profiles (public.primecare_normalize_lab_id(lab_id));
 CREATE INDEX IF NOT EXISTS idx_profiles_agent_id ON public.profiles (agent_id);
@@ -52,35 +78,58 @@ CREATE TRIGGER profiles_set_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION public.set_updated_at();
 
--- Common pilot security columns. Existing data should be backfilled before pilot.
-ALTER TABLE public.labs ADD COLUMN IF NOT EXISTS tenant_id text;
+-- Pilot columns (do not change existing tenant_id column types).
 ALTER TABLE public.labs ADD COLUMN IF NOT EXISTS agent_id text;
 ALTER TABLE public.labs ADD COLUMN IF NOT EXISTS agent_name text;
 ALTER TABLE public.labs ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true;
 
-ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS tenant_id text;
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS agent_id text;
 
-ALTER TABLE public.order_items ADD COLUMN IF NOT EXISTS tenant_id text;
 ALTER TABLE public.order_items ADD COLUMN IF NOT EXISTS lab_id text;
 
 ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS agent_id text;
 
-ALTER TABLE public.ar_credit_control ADD COLUMN IF NOT EXISTS tenant_id text;
 ALTER TABLE public.ar_credit_control ADD COLUMN IF NOT EXISTS agent_id text;
 
-ALTER TABLE public.agent_visits ADD COLUMN IF NOT EXISTS tenant_id text;
 ALTER TABLE public.agent_visits ADD COLUMN IF NOT EXISTS agent_id text;
+ALTER TABLE public.agent_visits ADD COLUMN IF NOT EXISTS agent_name text;
 
-ALTER TABLE public.inventory ADD COLUMN IF NOT EXISTS tenant_id text;
 ALTER TABLE public.inventory_ledger ADD COLUMN IF NOT EXISTS reference_type text;
 ALTER TABLE public.inventory_ledger ADD COLUMN IF NOT EXISTS reference_id text;
 
-ALTER TABLE public.purchase_orders ADD COLUMN IF NOT EXISTS tenant_id text;
-ALTER TABLE public.purchase_order_items ADD COLUMN IF NOT EXISTS tenant_id text;
+ALTER TABLE public.purchase_orders ADD COLUMN IF NOT EXISTS tenant_id uuid;
+ALTER TABLE public.purchase_order_items ADD COLUMN IF NOT EXISTS tenant_id uuid;
+
+-- Normalize order_items.tenant_id to uuid when it was created as text and is empty.
+DO $$
+DECLARE
+  col_udt text;
+BEGIN
+  SELECT udt_name
+  INTO col_udt
+  FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND table_name = 'order_items'
+    AND column_name = 'tenant_id';
+
+  IF col_udt IN ('text', 'varchar') THEN
+    IF EXISTS (
+      SELECT 1
+      FROM public.order_items
+      WHERE tenant_id IS NOT NULL AND btrim(tenant_id::text) <> ''
+    ) THEN
+      RAISE NOTICE 'order_items.tenant_id has text rows; leaving as text (RLS uses tenant_id_matches text overload).';
+    ELSE
+      ALTER TABLE public.order_items DROP COLUMN tenant_id;
+      ALTER TABLE public.order_items ADD COLUMN tenant_id uuid;
+    END IF;
+  ELSIF col_udt IS NULL THEN
+    ALTER TABLE public.order_items ADD COLUMN tenant_id uuid;
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_labs_tenant_lab ON public.labs (tenant_id, public.primecare_normalize_lab_id(lab_id));
-CREATE INDEX IF NOT EXISTS idx_labs_tenant_agent ON public.labs (tenant_id, agent_id);
+CREATE INDEX IF NOT EXISTS idx_labs_tenant_agent ON public.labs (tenant_id, COALESCE(agent_id, assigned_agent_id));
 CREATE INDEX IF NOT EXISTS idx_orders_tenant_lab ON public.orders (tenant_id, public.primecare_normalize_lab_id(lab_id));
 CREATE INDEX IF NOT EXISTS idx_order_items_tenant_order ON public.order_items (tenant_id, order_id);
 CREATE INDEX IF NOT EXISTS idx_payments_tenant_lab ON public.payments (tenant_id, public.primecare_normalize_lab_id(lab_id));
@@ -89,8 +138,18 @@ CREATE INDEX IF NOT EXISTS idx_agent_visits_tenant_lab ON public.agent_visits (t
 CREATE INDEX IF NOT EXISTS idx_agent_visits_tenant_agent ON public.agent_visits (tenant_id, agent_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_tenant_product ON public.inventory (tenant_id, product_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_ledger_tenant_product ON public.inventory_ledger (tenant_id, product_id);
+CREATE INDEX IF NOT EXISTS idx_products_tenant_product ON public.products (tenant_id, product_id);
+CREATE INDEX IF NOT EXISTS idx_order_lines_tenant_order ON public.order_lines (tenant_id, order_id);
 CREATE INDEX IF NOT EXISTS idx_purchase_orders_tenant_po ON public.purchase_orders (tenant_id, po_id);
 CREATE INDEX IF NOT EXISTS idx_purchase_order_items_tenant_po ON public.purchase_order_items (tenant_id, po_id);
+
+-- Drop legacy helper signatures (text tenant_id) before uuid replacements.
+DROP FUNCTION IF EXISTS public.lab_is_visible_to_current_user(text, text, text, text);
+DROP FUNCTION IF EXISTS public.lab_record_is_visible_to_current_user(text, text);
+DROP FUNCTION IF EXISTS public.can_write_ops_for_tenant(text);
+DROP FUNCTION IF EXISTS public.can_write_agent_work(text, text, text);
+DROP FUNCTION IF EXISTS public.tenant_id_matches(text);
+DROP FUNCTION IF EXISTS public.current_tenant_id();
 
 -- ---------------------------------------------------------------------------
 -- Helper functions required by RLS.
@@ -110,7 +169,7 @@ AS $$
 $$;
 
 CREATE OR REPLACE FUNCTION public.current_tenant_id()
-RETURNS text
+RETURNS uuid
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
@@ -169,7 +228,7 @@ AS $$
   SELECT lower(nullif(btrim((public.current_profile()).agent_name), ''));
 $$;
 
-CREATE OR REPLACE FUNCTION public.lab_is_visible_to_current_user(row_tenant_id text, row_lab_id text, row_agent_id text DEFAULT NULL, row_agent_name text DEFAULT NULL)
+CREATE OR REPLACE FUNCTION public.tenant_id_matches(row_tenant_id uuid)
 RETURNS boolean
 LANGUAGE sql
 STABLE
@@ -179,7 +238,38 @@ AS $$
   SELECT
     auth.uid() IS NOT NULL
     AND row_tenant_id IS NOT NULL
-    AND row_tenant_id = public.current_tenant_id()
+    AND public.current_tenant_id() IS NOT NULL
+    AND row_tenant_id = public.current_tenant_id();
+$$;
+
+CREATE OR REPLACE FUNCTION public.tenant_id_matches(row_tenant_id text)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT
+    CASE
+      WHEN row_tenant_id IS NULL OR btrim(row_tenant_id) = '' THEN false
+      ELSE public.tenant_id_matches(row_tenant_id::uuid)
+    END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.lab_is_visible_to_current_user(
+  row_tenant_id uuid,
+  row_lab_id text,
+  row_agent_id text DEFAULT NULL,
+  row_agent_name text DEFAULT NULL
+)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT
+    public.tenant_id_matches(row_tenant_id)
     AND (
       public.is_admin_or_executive()
       OR (
@@ -196,7 +286,10 @@ AS $$
     );
 $$;
 
-CREATE OR REPLACE FUNCTION public.lab_record_is_visible_to_current_user(row_tenant_id text, row_lab_id text)
+CREATE OR REPLACE FUNCTION public.lab_record_is_visible_to_current_user(
+  row_tenant_id uuid,
+  row_lab_id text
+)
 RETURNS boolean
 LANGUAGE sql
 STABLE
@@ -204,9 +297,7 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
   SELECT
-    auth.uid() IS NOT NULL
-    AND row_tenant_id IS NOT NULL
-    AND row_tenant_id = public.current_tenant_id()
+    public.tenant_id_matches(row_tenant_id)
     AND (
       public.is_admin_or_executive()
       OR (
@@ -221,12 +312,41 @@ AS $$
           WHERE l.tenant_id = row_tenant_id
             AND public.primecare_normalize_lab_id(l.lab_id) = public.primecare_normalize_lab_id(row_lab_id)
             AND (
-              nullif(btrim(l.agent_id), '') = public.current_profile_agent_id()
+              nullif(btrim(COALESCE(l.agent_id, l.assigned_agent_id)), '') = public.current_profile_agent_id()
               OR lower(nullif(btrim(l.agent_name), '')) = public.current_profile_agent_name()
             )
         )
       )
     );
+$$;
+
+CREATE OR REPLACE FUNCTION public.lab_record_is_visible_to_current_user(
+  row_tenant_id text,
+  row_lab_id text
+)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT
+    CASE
+      WHEN row_tenant_id IS NULL OR btrim(row_tenant_id) = '' THEN false
+      ELSE public.lab_record_is_visible_to_current_user(row_tenant_id::uuid, row_lab_id)
+    END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_write_ops_for_tenant(row_tenant_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT
+    public.tenant_id_matches(row_tenant_id)
+    AND public.current_user_role() IN ('admin', 'executive');
 $$;
 
 CREATE OR REPLACE FUNCTION public.can_write_ops_for_tenant(row_tenant_id text)
@@ -237,13 +357,17 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
   SELECT
-    auth.uid() IS NOT NULL
-    AND row_tenant_id IS NOT NULL
-    AND row_tenant_id = public.current_tenant_id()
-    AND public.current_user_role() IN ('admin', 'executive');
+    CASE
+      WHEN row_tenant_id IS NULL OR btrim(row_tenant_id) = '' THEN false
+      ELSE public.can_write_ops_for_tenant(row_tenant_id::uuid)
+    END;
 $$;
 
-CREATE OR REPLACE FUNCTION public.can_write_agent_work(row_tenant_id text, row_agent_id text DEFAULT NULL, row_agent_name text DEFAULT NULL)
+CREATE OR REPLACE FUNCTION public.can_write_agent_work(
+  row_tenant_id uuid,
+  row_agent_id text DEFAULT NULL,
+  row_agent_name text DEFAULT NULL
+)
 RETURNS boolean
 LANGUAGE sql
 STABLE
@@ -251,9 +375,7 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
   SELECT
-    auth.uid() IS NOT NULL
-    AND row_tenant_id IS NOT NULL
-    AND row_tenant_id = public.current_tenant_id()
+    public.tenant_id_matches(row_tenant_id)
     AND (
       public.is_admin_or_executive()
       OR (
@@ -272,33 +394,80 @@ GRANT EXECUTE ON FUNCTION public.current_user_role() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.is_admin_or_executive() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.current_profile_lab_id() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.current_profile_agent_id() TO authenticated;
-GRANT EXECUTE ON FUNCTION public.lab_is_visible_to_current_user(text, text, text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.tenant_id_matches(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.tenant_id_matches(text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.lab_is_visible_to_current_user(uuid, text, text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.lab_record_is_visible_to_current_user(uuid, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.lab_record_is_visible_to_current_user(text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.can_write_ops_for_tenant(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.can_write_ops_for_tenant(text) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.can_write_agent_work(text, text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.can_write_agent_work(uuid, text, text) TO authenticated;
 
 -- ---------------------------------------------------------------------------
--- Remove temporary open anon policies.
+-- Remove ALL unsafe anon policies on pilot-critical tables (known + imported names).
 -- ---------------------------------------------------------------------------
+DO $$
+DECLARE
+  pol record;
+BEGIN
+  FOR pol IN
+    SELECT schemaname, tablename, policyname
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND 'anon' = ANY (roles)
+      AND tablename IN (
+        'profiles',
+        'labs',
+        'orders',
+        'order_items',
+        'order_lines',
+        'payments',
+        'ar_credit_control',
+        'agent_visits',
+        'inventory',
+        'inventory_ledger',
+        'products',
+        'purchase_orders',
+        'purchase_order_items'
+      )
+  LOOP
+    EXECUTE format(
+      'DROP POLICY IF EXISTS %I ON %I.%I',
+      pol.policyname,
+      pol.schemaname,
+      pol.tablename
+    );
+  END LOOP;
+END $$;
+
+-- Explicit drops for policies that may exist outside the dynamic sweep.
 DROP POLICY IF EXISTS "temp_anon_orders_select" ON public.orders;
 DROP POLICY IF EXISTS "temp_anon_orders_insert" ON public.orders;
 DROP POLICY IF EXISTS "temp_anon_orders_update" ON public.orders;
+DROP POLICY IF EXISTS "allow anon read orders" ON public.orders;
 DROP POLICY IF EXISTS "temp_anon_order_items_select" ON public.order_items;
 DROP POLICY IF EXISTS "temp_anon_order_items_insert" ON public.order_items;
+DROP POLICY IF EXISTS "allow anon read order lines" ON public.order_lines;
 DROP POLICY IF EXISTS "temp_anon_payments_select" ON public.payments;
 DROP POLICY IF EXISTS "temp_anon_payments_insert" ON public.payments;
 DROP POLICY IF EXISTS "temp_anon_ar_credit_select" ON public.ar_credit_control;
 DROP POLICY IF EXISTS "temp_anon_ar_credit_update" ON public.ar_credit_control;
+DROP POLICY IF EXISTS "temp_anon_ar_select" ON public.ar_credit_control;
+DROP POLICY IF EXISTS "temp_anon_ar_update" ON public.ar_credit_control;
 DROP POLICY IF EXISTS "temp_anon_inventory_ledger_select" ON public.inventory_ledger;
 DROP POLICY IF EXISTS "temp_anon_inventory_ledger_insert" ON public.inventory_ledger;
 DROP POLICY IF EXISTS "temp_anon_inventory_select" ON public.inventory;
 DROP POLICY IF EXISTS "temp_anon_inventory_update" ON public.inventory;
+DROP POLICY IF EXISTS "temp_anon_products_select" ON public.products;
+DROP POLICY IF EXISTS "temp_anon_products_update" ON public.products;
 DROP POLICY IF EXISTS "temp_anon_purchase_orders_select" ON public.purchase_orders;
 DROP POLICY IF EXISTS "temp_anon_purchase_orders_insert" ON public.purchase_orders;
 DROP POLICY IF EXISTS "temp_anon_purchase_orders_update" ON public.purchase_orders;
 DROP POLICY IF EXISTS "temp_anon_purchase_order_items_select" ON public.purchase_order_items;
 DROP POLICY IF EXISTS "temp_anon_purchase_order_items_insert" ON public.purchase_order_items;
 DROP POLICY IF EXISTS "temp_anon_purchase_order_items_update" ON public.purchase_order_items;
+DROP POLICY IF EXISTS "allow anon read agent visits" ON public.agent_visits;
+DROP POLICY IF EXISTS "allow anon insert agent visits" ON public.agent_visits;
 
 -- ---------------------------------------------------------------------------
 -- Enable RLS on all pilot-critical tables.
@@ -306,11 +475,13 @@ DROP POLICY IF EXISTS "temp_anon_purchase_order_items_update" ON public.purchase
 ALTER TABLE public.labs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.order_lines ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ar_credit_control ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agent_visits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory_ledger ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.purchase_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.purchase_order_items ENABLE ROW LEVEL SECURITY;
 
@@ -331,7 +502,14 @@ DROP POLICY IF EXISTS "labs_select_by_role" ON public.labs;
 DROP POLICY IF EXISTS "labs_admin_write" ON public.labs;
 CREATE POLICY "labs_select_by_role"
   ON public.labs FOR SELECT TO authenticated
-  USING (public.lab_is_visible_to_current_user(tenant_id, lab_id, agent_id, agent_name));
+  USING (
+    public.lab_is_visible_to_current_user(
+      tenant_id,
+      lab_id,
+      COALESCE(agent_id, assigned_agent_id),
+      agent_name
+    )
+  );
 CREATE POLICY "labs_admin_write"
   ON public.labs FOR ALL TO authenticated
   USING (public.can_write_ops_for_tenant(tenant_id))
@@ -349,7 +527,7 @@ CREATE POLICY "orders_insert_by_role"
     public.can_write_ops_for_tenant(tenant_id)
     OR (
       public.current_user_role() = 'lab'
-      AND tenant_id = public.current_tenant_id()
+      AND public.tenant_id_matches(tenant_id)
       AND public.primecare_normalize_lab_id(lab_id) = public.current_profile_lab_id()
     )
   );
@@ -364,7 +542,11 @@ DROP POLICY IF EXISTS "order_items_update_by_role" ON public.order_items;
 CREATE POLICY "order_items_select_by_role"
   ON public.order_items FOR SELECT TO authenticated
   USING (
-    public.lab_record_is_visible_to_current_user(tenant_id, lab_id)
+    (
+      tenant_id IS NOT NULL
+      AND lab_id IS NOT NULL
+      AND public.lab_record_is_visible_to_current_user(tenant_id, lab_id)
+    )
     OR EXISTS (
       SELECT 1 FROM public.orders o
       WHERE o.order_id = order_items.order_id
@@ -378,13 +560,44 @@ CREATE POLICY "order_items_insert_by_role"
     OR EXISTS (
       SELECT 1 FROM public.orders o
       WHERE o.order_id = order_items.order_id
-        AND o.tenant_id = public.current_tenant_id()
+        AND public.tenant_id_matches(o.tenant_id)
         AND public.current_user_role() = 'lab'
         AND public.primecare_normalize_lab_id(o.lab_id) = public.current_profile_lab_id()
     )
   );
 CREATE POLICY "order_items_update_by_role"
   ON public.order_items FOR UPDATE TO authenticated
+  USING (public.can_write_ops_for_tenant(tenant_id))
+  WITH CHECK (public.can_write_ops_for_tenant(tenant_id));
+
+DROP POLICY IF EXISTS "order_lines_select_by_role" ON public.order_lines;
+DROP POLICY IF EXISTS "order_lines_insert_by_role" ON public.order_lines;
+DROP POLICY IF EXISTS "order_lines_update_by_role" ON public.order_lines;
+CREATE POLICY "order_lines_select_by_role"
+  ON public.order_lines FOR SELECT TO authenticated
+  USING (
+    public.tenant_id_matches(tenant_id)
+    AND EXISTS (
+      SELECT 1 FROM public.orders o
+      WHERE o.order_id = order_lines.order_id
+        AND o.tenant_id = order_lines.tenant_id
+        AND public.lab_record_is_visible_to_current_user(o.tenant_id, o.lab_id)
+    )
+  );
+CREATE POLICY "order_lines_insert_by_role"
+  ON public.order_lines FOR INSERT TO authenticated
+  WITH CHECK (
+    public.can_write_ops_for_tenant(tenant_id)
+    OR EXISTS (
+      SELECT 1 FROM public.orders o
+      WHERE o.order_id = order_lines.order_id
+        AND public.tenant_id_matches(o.tenant_id)
+        AND public.current_user_role() = 'lab'
+        AND public.primecare_normalize_lab_id(o.lab_id) = public.current_profile_lab_id()
+    )
+  );
+CREATE POLICY "order_lines_update_by_role"
+  ON public.order_lines FOR UPDATE TO authenticated
   USING (public.can_write_ops_for_tenant(tenant_id))
   WITH CHECK (public.can_write_ops_for_tenant(tenant_id));
 
@@ -447,11 +660,24 @@ DROP POLICY IF EXISTS "inventory_admin_write" ON public.inventory;
 CREATE POLICY "inventory_select_by_role"
   ON public.inventory FOR SELECT TO authenticated
   USING (
-    tenant_id = public.current_tenant_id()
+    public.tenant_id_matches(tenant_id)
     AND public.current_user_role() IN ('admin', 'executive', 'lab')
   );
 CREATE POLICY "inventory_admin_write"
   ON public.inventory FOR ALL TO authenticated
+  USING (public.can_write_ops_for_tenant(tenant_id))
+  WITH CHECK (public.can_write_ops_for_tenant(tenant_id));
+
+DROP POLICY IF EXISTS "products_select_by_role" ON public.products;
+DROP POLICY IF EXISTS "products_admin_write" ON public.products;
+CREATE POLICY "products_select_by_role"
+  ON public.products FOR SELECT TO authenticated
+  USING (
+    public.tenant_id_matches(tenant_id)
+    AND public.current_user_role() IN ('admin', 'executive', 'lab')
+  );
+CREATE POLICY "products_admin_write"
+  ON public.products FOR ALL TO authenticated
   USING (public.can_write_ops_for_tenant(tenant_id))
   WITH CHECK (public.can_write_ops_for_tenant(tenant_id));
 
@@ -460,7 +686,7 @@ DROP POLICY IF EXISTS "inventory_ledger_insert_by_role" ON public.inventory_ledg
 CREATE POLICY "inventory_ledger_select_by_role"
   ON public.inventory_ledger FOR SELECT TO authenticated
   USING (
-    tenant_id = public.current_tenant_id()
+    public.tenant_id_matches(tenant_id)
     AND public.current_user_role() IN ('admin', 'executive')
   );
 CREATE POLICY "inventory_ledger_insert_by_role"
@@ -472,7 +698,7 @@ DROP POLICY IF EXISTS "purchase_orders_admin_write" ON public.purchase_orders;
 CREATE POLICY "purchase_orders_select_by_role"
   ON public.purchase_orders FOR SELECT TO authenticated
   USING (
-    tenant_id = public.current_tenant_id()
+    public.tenant_id_matches(tenant_id)
     AND public.current_user_role() IN ('admin', 'executive')
   );
 CREATE POLICY "purchase_orders_admin_write"
@@ -485,7 +711,7 @@ DROP POLICY IF EXISTS "purchase_order_items_admin_write" ON public.purchase_orde
 CREATE POLICY "purchase_order_items_select_by_role"
   ON public.purchase_order_items FOR SELECT TO authenticated
   USING (
-    tenant_id = public.current_tenant_id()
+    public.tenant_id_matches(tenant_id)
     AND public.current_user_role() IN ('admin', 'executive')
   );
 CREATE POLICY "purchase_order_items_admin_write"
@@ -494,28 +720,38 @@ CREATE POLICY "purchase_order_items_admin_write"
   WITH CHECK (public.can_write_ops_for_tenant(tenant_id));
 
 -- ---------------------------------------------------------------------------
--- Policy audit queries for pilot validation.
+-- Policy audit queries for pilot validation (run manually in QA SQL editor).
 -- ---------------------------------------------------------------------------
--- 1) Policies still allowing anon:
+-- A) tenant_id column types on pilot tables:
+-- SELECT table_name, column_name, udt_name AS data_type
+-- FROM information_schema.columns
+-- WHERE table_schema = 'public'
+--   AND column_name = 'tenant_id'
+--   AND table_name IN (
+--     'profiles','labs','orders','order_items','order_lines','payments',
+--     'ar_credit_control','agent_visits','inventory','inventory_ledger',
+--     'products','purchase_orders','purchase_order_items'
+--   )
+-- ORDER BY table_name;
+
+-- B) Policies still allowing anon (expect zero rows):
 -- SELECT schemaname, tablename, policyname, cmd, roles, qual, with_check
 -- FROM pg_policies
 -- WHERE schemaname = 'public'
 --   AND 'anon' = ANY (roles)
+--   AND tablename IN (
+--     'profiles','labs','orders','order_items','order_lines','payments',
+--     'ar_credit_control','agent_visits','inventory','inventory_ledger',
+--     'products','purchase_orders','purchase_order_items'
+--   )
 -- ORDER BY tablename, policyname;
 
--- 2) Policies using literal true:
--- SELECT schemaname, tablename, policyname, cmd, roles, qual, with_check
--- FROM pg_policies
--- WHERE schemaname = 'public'
---   AND (qual ~* '(^|[^a-z_])true([^a-z_]|$)' OR with_check ~* '(^|[^a-z_])true([^a-z_]|$)')
--- ORDER BY tablename, policyname;
-
--- 3) Pilot-critical tables without RLS enabled:
+-- C) Pilot-critical tables without RLS enabled:
 -- WITH critical(table_name) AS (
 --   VALUES
---     ('profiles'), ('labs'), ('orders'), ('order_items'), ('payments'),
---     ('ar_credit_control'), ('agent_visits'), ('inventory'), ('inventory_ledger'),
---     ('purchase_orders'), ('purchase_order_items')
+--     ('profiles'), ('labs'), ('orders'), ('order_items'), ('order_lines'),
+--     ('payments'), ('ar_credit_control'), ('agent_visits'), ('inventory'),
+--     ('inventory_ledger'), ('products'), ('purchase_orders'), ('purchase_order_items')
 -- )
 -- SELECT c.table_name, COALESCE(cls.relrowsecurity, false) AS rls_enabled
 -- FROM critical c
@@ -524,13 +760,14 @@ CREATE POLICY "purchase_order_items_admin_write"
 -- WHERE COALESCE(cls.relrowsecurity, false) = false
 -- ORDER BY c.table_name;
 
--- 4) Active policies on pilot-critical tables:
--- SELECT schemaname, tablename, policyname, permissive, roles, cmd, qual, with_check
+-- D) Active authenticated policies on pilot-critical tables:
+-- SELECT schemaname, tablename, policyname, permissive, roles, cmd
 -- FROM pg_policies
 -- WHERE schemaname = 'public'
 --   AND tablename IN (
---     'profiles', 'labs', 'orders', 'order_items', 'payments', 'ar_credit_control',
---     'agent_visits', 'inventory', 'inventory_ledger', 'purchase_orders',
---     'purchase_order_items'
+--     'profiles','labs','orders','order_items','order_lines','payments',
+--     'ar_credit_control','agent_visits','inventory','inventory_ledger',
+--     'products','purchase_orders','purchase_order_items'
 --   )
+--   AND 'authenticated' = ANY (roles)
 -- ORDER BY tablename, policyname;
