@@ -21,16 +21,15 @@ import {
   Package,
 } from "lucide-react";
 
-import { getLabs, getRecentVisits, saveAgentVisit, getCollections } from "@/api/primecareApi";
+import { saveAgentVisit } from "@/api/primecareApi";
 import {
   createAgentVisitWrite,
-  getAgentWorkspaceRead,
+  getAgentVisitPageContextRead,
   getLabsCredit,
 } from "@/api/primecareSupabaseApi";
 import { supabase } from "@/api/supabaseClient.js";
 import {
   logAppsScriptFallbackUsed,
-  logPartialMigrationWarning,
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { ROLES } from "@/config/roles";
@@ -104,6 +103,7 @@ function normalizeLab(lab) {
     labId: String(lab.labId ?? lab.Lab_ID ?? "").trim(),
     labName: String(lab.labName ?? lab.Lab_Name ?? lab.name ?? "").trim(),
     area: String(lab.area ?? lab.Area ?? "").trim(),
+    assignedAgentId: lab.assignedAgentId || lab.assigned_agent_id || "",
     assignedAgent:
       lab.assignedAgent ||
       lab.agentName ||
@@ -139,14 +139,35 @@ function normalizeCollection(c) {
   return {
     labId: c.labId || c.Lab_ID || "",
     labName: c.labName || c.Lab_Name || "",
-    outstandingAmount: Number(c.outstandingAmount || c.Outstanding || 0),
-    overdueDays: Number(c.overdueDays || c.Days_Overdue || 0),
+    outstandingAmount: Number(
+      c.outstandingAmount ?? c.outstanding ?? c.Outstanding ?? 0
+    ),
+    overdueDays: Number(c.overdueDays ?? c.daysOverdue ?? c.Days_Overdue ?? 0),
     riskStatus: c.riskStatus || c.Risk_Status || "",
     creditHold: c.creditHold || c.Credit_Hold || "",
     nextAction: c.nextAction || c.Next_Action || "",
     paymentStatus: c.paymentStatus || c.Payment_Status || "",
     lastFollowUp: c.lastFollowUp || c.Last_Follow_Up_Date || "",
   };
+}
+
+function mapWorkspaceVisitToPageVisit(visit) {
+  return normalizeVisit({
+    id: visit.visitId || visit.id,
+    agent: visit.agentName || visit.agent,
+    agentName: visit.agentName || visit.agent,
+    agentId: visit.agentId,
+    date: visit.visitDate || visit.date,
+    labId: visit.labId,
+    labName: visit.labName,
+    area: visit.area,
+    visitType: visit.visitType,
+    labResponse: visit.labResponse,
+    soldValue: visit.soldValue,
+    nextAction: visit.nextAction,
+    nextFollowUpDate: visit.nextFollowUpDate,
+    nextFollowUpType: visit.nextFollowUpType,
+  });
 }
 
 function displayResponseLabel(value) {
@@ -212,22 +233,31 @@ export default function AgentVisitPage({ currentUser, authToken }) {
 
         let workspace = null;
         let labList = [];
+        let visitRows = [];
+        let collectionRows = [];
 
         if (supabase) {
           logSupabaseFeatureSource("AgentVisit.load", {
-            apis: ["getAgentWorkspaceRead", "getLabsCredit"],
+            apis: ["getAgentVisitPageContextRead", "getLabsCredit"],
           });
           const isAgent = String(currentUser?.role || "").toLowerCase() === ROLES.AGENT;
 
           if (isAgent) {
-            const wsRes = await getAgentWorkspaceRead(currentUser);
-            if (wsRes?.success && wsRes.data) {
-              workspace = wsRes.data;
+            const ctxRes = await getAgentVisitPageContextRead(currentUser);
+            if (!ctxRes?.success) {
+              throw new Error(ctxRes?.error || "Failed to load agent visit context");
             }
-            const assigned = Array.isArray(workspace?.assignedLabs)
-              ? workspace.assignedLabs
-              : [];
-            labList = assigned.map(normalizeLab).filter((l) => String(l.labId).trim() !== "");
+            const ctx = ctxRes.data || {};
+            workspace = {
+              assignedLabs: ctx.labs || [],
+              recentVisits: ctx.recentVisits || [],
+              pendingCollections: ctx.collections || [],
+            };
+            labList = (ctx.labs || [])
+              .map(normalizeLab)
+              .filter((l) => String(l.labId).trim() !== "");
+            visitRows = (ctx.recentVisits || []).map(mapWorkspaceVisitToPageVisit);
+            collectionRows = (ctx.collections || []).map(normalizeCollection);
           }
 
           if (labList.length === 0) {
@@ -246,47 +276,31 @@ export default function AgentVisitPage({ currentUser, authToken }) {
           if (!ALLOW_LEGACY_APPS_SCRIPT) {
             throw new Error("Supabase visit data is required for pilot access.");
           }
+          const { getLabs, getRecentVisits, getCollections } = await import(
+            "@/api/primecareApi"
+          );
           const labsRes = await getLabs(params);
           if (!labsRes.success) throw new Error(labsRes.error || "Failed to load labs");
           labList = (labsRes.data?.labs || []).map(normalizeLab).filter((l) => String(l.labId).trim() !== "");
+
+          const [visitsRes, collectionsRes] = await Promise.all([
+            getRecentVisits(params),
+            getCollections(params),
+          ]);
+          if (visitsRes?.success) {
+            visitRows = (visitsRes.data?.visits || []).map(normalizeVisit);
+          }
+          if (collectionsRes?.success) {
+            collectionRows = (collectionsRes.data?.collections || []).map(normalizeCollection);
+          }
         }
 
         if (!mounted) return;
         setAgentWorkspace(workspace);
         setLabs(labList);
+        setRecentVisits(visitRows);
+        setCollections(collectionRows);
         setLoading(false);
-
-        if (ALLOW_LEGACY_APPS_SCRIPT) {
-          logPartialMigrationWarning(
-            "AgentVisit.background",
-            "Recent visits and collections sidebar still load via Apps Script getRecentVisits/getCollections."
-          );
-          Promise.all([getRecentVisits(params), getCollections(params)])
-            .then(async ([visitsRes, collectionsRes]) => {
-              if (!mounted) return;
-
-              if (visitsRes?.success) {
-                setRecentVisits((visitsRes.data?.visits || []).map(normalizeVisit));
-              }
-
-              if (collectionsRes?.success) {
-                setCollections((collectionsRes.data?.collections || []).map(normalizeCollection));
-              }
-            })
-            .catch(async (err) => {
-              console.error("Background load failed", err);
-              await logClientError({
-                authToken,
-                page: "AgentVisitPage",
-                component: "AgentVisitPage",
-                actionType: "BACKGROUND_LOAD_FAIL",
-                errorCode: "VISITS_BACKGROUND_LOAD_FAIL",
-                errorMessage: err?.message || "Background load failed",
-                stackTrace: err?.stack || "",
-                payload: {},
-              });
-            });
-        }
       } catch (err) {
         if (!mounted) return;
 
@@ -332,14 +346,6 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   );
   const visibleVisits = useMemo(() => recentVisits, [recentVisits]);
   const visibleCollections = useMemo(() => collections, [collections]);
-
-  useEffect(() => {
-    console.log("AGENT VISIT WORKSPACE:", agentWorkspace);
-  }, [agentWorkspace]);
-
-  useEffect(() => {
-    console.log("AGENT VISIT LAB OPTIONS:", labOptions);
-  }, [labOptions]);
 
   useEffect(() => {
     function handleOpenVisitTask(event) {
@@ -410,10 +416,6 @@ export default function AgentVisitPage({ currentUser, authToken }) {
     return visibleLabs.find((lab) => String(lab.labId) === String(form.labId)) || null;
   }, [visibleLabs, form.labId]);
 
-  useEffect(() => {
-    console.log("AGENT VISIT SELECTED LAB:", selectedLab);
-  }, [selectedLab]);
-
   const selectedLabVisits = useMemo(() => {
     return visibleVisits
       .filter((visit) => String(visit.labId) === String(form.labId))
@@ -450,7 +452,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   useEffect(() => {
     if (!form.labId) return;
 
-    if (selectedLabCollection?.outstandingAmount > 0) {
+    if (Number(selectedLabCollection?.outstandingAmount || 0) > 0) {
       setForm((prev) => ({
         ...prev,
         nextAction: prev.nextAction || "Follow up for payment collection",
@@ -570,15 +572,22 @@ export default function AgentVisitPage({ currentUser, authToken }) {
       if (supabase) {
         logSupabaseFeatureSource("AgentVisit.save", { api: "createAgentVisitWrite" });
         const sbRes = await createAgentVisitWrite({
-          tenantId: currentUser?.tenantId,
-          agentId: currentUser?.id || currentUser?.userId,
+          tenantId: currentUser?.tenantId || currentUser?.tenant_id,
+          agentId: currentUser?.agentId || currentUser?.agent_id || "",
+          agentName:
+            currentUser?.agentName ||
+            currentUser?.name ||
+            form.agentName ||
+            "",
           visitDate: form.visitDate,
           visitType: form.visitType,
           labId: normalizedLabId,
+          labName: normalizedLabName,
+          area: form.area,
           notes: form.notes,
           nextFollowUpDate: form.nextFollowUpDate,
           labResponse: form.labResponse,
-          agentName: form.agentName,
+          soldValue: form.soldValue,
         });
 
         if (sbRes?.success && sbRes.data) {

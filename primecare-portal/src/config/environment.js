@@ -25,3 +25,6 @@ export const ALLOW_EXPERIMENTAL_MODULES = envFlag(
 );
 
 export const REQUIRE_SUPABASE_AUTH = IS_QA || IS_PROD;
+
+/** Agent task queue completion (Apps Script only until Supabase agent_tasks exists). */
+export const AGENT_TASK_COMPLETION_ENABLED = ALLOW_LEGACY_APPS_SCRIPT;

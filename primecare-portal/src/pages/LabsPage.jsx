@@ -3,8 +3,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Building2, Users, MapPin, ClipboardCheck, AlertTriangle, ShieldAlert } from "lucide-react";
 import { getLabsCredit } from "@/api/primecareSupabaseApi";
+import { ROLES } from "@/config/roles";
 import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
 import { summarizeLabsCreditPortfolio } from "@/metrics/computeRiskMetrics.js";
+import { filterLabsForUser } from "@/utils/accessFilters.js";
 
 function StatCard({ title, value, icon: Icon, subtitle }) {
   return (
@@ -73,6 +75,7 @@ function normalizeLab(lab) {
     ownerName: lab.ownerName || "",
     phone: lab.phone || "",
     area: lab.area || "",
+    assignedAgentId: lab.assignedAgentId || lab.assigned_agent_id || "",
     assignedAgent: lab.assignedAgent || "",
     status:
       lab.status ||
@@ -156,7 +159,12 @@ export default function LabsPage({ currentUser, authToken }) {
     loadLabs();
   }, [authToken, currentUser]);
 
-  const visibleLabs = useMemo(() => labs, [labs]);
+  const visibleLabs = useMemo(() => {
+    if (currentUser?.role === ROLES.AGENT) {
+      return filterLabsForUser(labs, currentUser);
+    }
+    return labs;
+  }, [labs, currentUser]);
 
   const filteredLabs = useMemo(() => {
     if (creditFilter === "ALL") return visibleLabs;

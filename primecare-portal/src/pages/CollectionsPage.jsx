@@ -24,7 +24,10 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, IndianRupee, CheckCircle2, ClipboardCheck } from "lucide-react";
 import { labIdKey } from "@/utils/labId.js";
-import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
+import {
+  AGENT_TASK_COMPLETION_ENABLED,
+  ALLOW_LEGACY_APPS_SCRIPT,
+} from "@/config/environment";
 
 function findCollectionByLabId(list, labId) {
   const target = labIdKey(labId);
@@ -430,7 +433,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
       }
 
       setSuccessMessage(
-        pendingTaskContext?.taskId
+        pendingTaskContext?.taskId && AGENT_TASK_COMPLETION_ENABLED
           ? "Collection updated successfully. You can now mark the linked task complete."
           : "Collection updated successfully"
       );
@@ -455,8 +458,8 @@ export default function CollectionsPage({ currentUser, authToken }) {
       setError("");
       setSuccessMessage("");
 
-      if (!ALLOW_LEGACY_APPS_SCRIPT) {
-        throw new Error("Supabase agent task completion is required for pilot access.");
+      if (!AGENT_TASK_COMPLETION_ENABLED) {
+        return;
       }
 
       const res = await completeAgentTask({
@@ -763,24 +766,30 @@ export default function CollectionsPage({ currentUser, authToken }) {
                   </Button>
 
                   {pendingTaskContext?.taskId ? (
-                    <Button
-                      variant="outline"
-                      className="h-11 w-full rounded-xl"
-                      onClick={handleCompleteLinkedTask}
-                      disabled={completingTask}
-                    >
-                      {completingTask ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Completing...
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="mr-2 h-4 w-4" />
-                          Mark Linked Task Complete
-                        </>
-                      )}
-                    </Button>
+                    AGENT_TASK_COMPLETION_ENABLED ? (
+                      <Button
+                        variant="outline"
+                        className="h-11 w-full rounded-xl"
+                        onClick={handleCompleteLinkedTask}
+                        disabled={completingTask}
+                      >
+                        {completingTask ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Completing...
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="mr-2 h-4 w-4" />
+                            Mark Linked Task Complete
+                          </>
+                        )}
+                      </Button>
+                    ) : (
+                      <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                        Task completion coming soon.
+                      </p>
+                    )
                   ) : null}
                 </div>
 

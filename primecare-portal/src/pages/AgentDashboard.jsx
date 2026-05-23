@@ -26,7 +26,7 @@ import {
 } from "@/utils/migrationTrace.js";
 import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
 import { summarizeAgentLabsCreditBuckets } from "@/metrics/computeRiskMetrics.js";
-import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
+import { AGENT_TASK_COMPLETION_ENABLED } from "@/config/environment";
 
 const EMPTY_WORKSPACE = {
   summary: {
@@ -299,8 +299,8 @@ export default function AgentDashboard({ currentUser, setActivePage, authToken }
         setCompletingTaskId(task.taskId);
         setError("");
 
-        if (!ALLOW_LEGACY_APPS_SCRIPT) {
-          throw new Error("Supabase agent task completion is required for pilot access.");
+        if (!AGENT_TASK_COMPLETION_ENABLED) {
+          return;
         }
 
         logAppsScriptFallbackUsed("AgentDashboard.completeTask", {
@@ -608,15 +608,29 @@ export default function AgentDashboard({ currentUser, setActivePage, authToken }
                           <ArrowRight className="ml-2 h-4 w-4" />
                         </Button>
 
-                        <Button
-                          variant="outline"
-                          className="rounded-xl"
-                          disabled={completingTaskId === task.taskId}
-                          onClick={() => handleCompleteTask(task)}
-                        >
-                          <CheckCircle2 className="mr-2 h-4 w-4" />
-                          {completingTaskId === task.taskId ? "Completing..." : "Mark Complete"}
-                        </Button>
+                        {AGENT_TASK_COMPLETION_ENABLED ? (
+                          <Button
+                            variant="outline"
+                            className="rounded-xl"
+                            disabled={completingTaskId === task.taskId}
+                            onClick={() => handleCompleteTask(task)}
+                          >
+                            <CheckCircle2 className="mr-2 h-4 w-4" />
+                            {completingTaskId === task.taskId
+                              ? "Completing..."
+                              : "Mark Complete"}
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            className="rounded-xl"
+                            disabled
+                            title="Task completion coming soon"
+                          >
+                            <CheckCircle2 className="mr-2 h-4 w-4" />
+                            Task completion coming soon
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </div>

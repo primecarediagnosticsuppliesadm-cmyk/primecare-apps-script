@@ -459,8 +459,19 @@ export function mapLabsCreditRow(row) {
     ownerName: str(row.owner_name ?? row.ownerName ?? row.Owner_Name),
     phone: str(row.phone ?? row.Phone ?? row.phone_number ?? row.phoneNumber),
     area: str(row.area ?? row.Area),
+    assignedAgentId: str(
+      row.assigned_agent_id ??
+        row.assignedAgentId ??
+        row.agent_id ??
+        row.agentId ??
+        ""
+    ),
     assignedAgent: str(
-      row.assigned_agent ?? row.assignedAgent ?? row.Assigned_Agent ?? row.agent_name
+      row.assigned_agent ??
+        row.assignedAgent ??
+        row.Assigned_Agent ??
+        row.agent_name ??
+        row.agentName
     ),
     status: str(row.status ?? row.Status),
     activeFlag: str(row.active_flag ?? row.activeFlag ?? row.Active_Flag ?? ""),
@@ -1920,6 +1931,7 @@ function mapVisitRowForAgentDashboard(row) {
     row.visit_date ?? row.visitDate ?? row.date ?? row.Visit_Date ?? ""
   ).slice(0, 10);
   const created = str(row.created_at ?? row.createdAt ?? "");
+  const agentId = str(row.agent_id ?? row.agentId ?? "");
   const agent = str(row.agent_name ?? row.Agent_Name ?? row.agent ?? row.agentName ?? "");
   return {
     visitId: str(row.visit_id ?? row.id ?? row.Visit_ID ?? ""),
@@ -1928,9 +1940,49 @@ function mapVisitRowForAgentDashboard(row) {
     area: str(row.area ?? row.Area ?? ""),
     visitType: str(row.visit_type ?? row.Visit_Type ?? row.visitType ?? ""),
     labResponse: str(row.lab_response ?? row.Lab_Response ?? row.labResponse ?? ""),
+    soldValue: num(row.sold_value ?? row.soldValue ?? row.Sold_Value ?? 0),
+    nextFollowUpDate: str(
+      row.next_follow_up_date ?? row.nextFollowUpDate ?? row.Next_Follow_Up_Date ?? ""
+    ).slice(0, 10),
+    nextAction: str(row.next_action ?? row.nextAction ?? ""),
+    agentId,
     agent,
     agentName: agent,
     labId: labIdKey(row.lab_id ?? row.Lab_ID ?? row.labId ?? ""),
+  };
+}
+
+/**
+ * Agent Visit page context: assigned labs, recent visits, collections (Supabase + RLS).
+ */
+export async function getAgentVisitPageContextRead(currentUser) {
+  traceSupabaseRead("AgentVisit.getAgentVisitPageContextRead", {
+    tables: ["v_labs_credit", "agent_visits", "ar_credit_control", "payments"],
+  });
+
+  const workspaceRes = await getAgentWorkspaceRead(currentUser);
+  if (!workspaceRes?.success) {
+    return {
+      success: false,
+      error: workspaceRes?.error || "Failed to load agent visit context",
+      data: { labs: [], recentVisits: [], collections: [] },
+    };
+  }
+
+  const workspace = workspaceRes.data || EMPTY_AGENT_WORKSPACE;
+  const collectionsRes = await getCollectionsRead();
+  const allCollections = Array.isArray(collectionsRes?.data?.collections)
+    ? collectionsRes.data.collections
+    : [];
+  const collections = filterCollectionsForUser(allCollections, currentUser);
+
+  return {
+    success: true,
+    data: {
+      labs: Array.isArray(workspace.assignedLabs) ? workspace.assignedLabs : [],
+      recentVisits: Array.isArray(workspace.recentVisits) ? workspace.recentVisits : [],
+      collections,
+    },
   };
 }
 
@@ -2041,9 +2093,7 @@ export async function createAgentVisitWrite(payload = {}) {
 
     const tenant_id = str(payload.tenantId ?? payload.tenant_id) || null;
     const lab_id = labIdKey(payload.labId ?? payload.lab_id);
-    const agent_id = str(
-      payload.agentId ?? payload.agent_id ?? payload.userId ?? payload.agentName ?? ""
-    );
+    const agent_id = str(payload.agentId ?? payload.agent_id ?? "");
     const visit_date = str(payload.visitDate ?? payload.visit_date).slice(0, 10);
     const visit_type = str(payload.visitType ?? payload.visit_type);
     const notesRaw = str(payload.notes);
@@ -2068,7 +2118,8 @@ export async function createAgentVisitWrite(payload = {}) {
     const sold_value = num(payload.soldValue ?? payload.sold_value ?? 0);
     const lab_name = str(payload.labName ?? payload.lab_name) || null;
     const area = str(payload.area ?? payload.Area) || null;
-    const agent_name = str(payload.agentName ?? payload.agent_name ?? agent_id) || null;
+    const agent_name =
+      str(payload.agentName ?? payload.agent_name ?? "") || null;
 
     const insertRow = {
       tenant_id,
