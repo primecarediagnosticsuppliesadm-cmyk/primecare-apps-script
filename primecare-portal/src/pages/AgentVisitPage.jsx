@@ -37,7 +37,12 @@ import {
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { logClientError } from "@/utils/debugLogger";
-import { filterLabsForUser, logAgentLabFilterDebug } from "@/utils/accessFilters";
+import { filterLabsForUser } from "@/utils/accessFilters";
+import {
+  buildLabSelectOptions,
+  extractLabsCreditRows,
+  normalizePortalLab,
+} from "@/utils/portalLabMapper";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 
 function QuickStat({ title, value, icon: Icon }) {
@@ -102,24 +107,9 @@ function SnapshotItem({ icon: Icon, label, value, tone = "default" }) {
   );
 }
 
+/** LabsPage-aligned lab row shape for dropdown and snapshots. */
 function normalizeLab(lab) {
-  return {
-    labId: String(lab.labId ?? lab.Lab_ID ?? "").trim(),
-    labName: String(lab.labName ?? lab.Lab_Name ?? lab.name ?? "").trim(),
-    area: String(lab.area ?? lab.Area ?? "").trim(),
-    assignedAgentId: lab.assignedAgentId || lab.assigned_agent_id || "",
-    assignedAgent:
-      lab.assignedAgent ||
-      lab.agentName ||
-      lab.Agent_Name ||
-      lab.Assigned_Agent_ID ||
-      lab.owner ||
-      "",
-    status: lab.status || lab.Status || "Active",
-    nextFollowUp: lab.nextFollowUp || lab.Next_Follow_Up || "-",
-    ownerName: lab.ownerName || lab.Owner_Name || "",
-    phone: lab.phone || lab.Phone || "",
-  };
+  return normalizePortalLab(lab);
 }
 
 function normalizeVisit(v) {
@@ -326,19 +316,14 @@ export default function AgentVisitPage({ currentUser, authToken }) {
             collectionRows = (ctx.collections || []).map(normalizeCollection);
 
             const cr = await getLabsCredit();
-            if (cr?.success && Array.isArray(cr.data)) {
-              const allLabs = cr.data.map(normalizeLab);
-              const filteredLabs = filterLabsForUser(allLabs, currentUser);
-              logAgentLabFilterDebug(currentUser, allLabs, filteredLabs);
-              labList = filteredLabs.filter((l) => String(l.labId ?? "").trim() !== "");
-            } else {
-              console.warn("[AgentVisitPage] getLabsCredit:", cr?.error || "no data");
-              const ctxLabs = (ctx.labs || []).map(normalizeLab);
-              labList = filterLabsForUser(ctxLabs, currentUser).filter(
-                (l) => String(l.labId ?? "").trim() !== ""
-              );
-              logAgentLabFilterDebug(currentUser, ctxLabs, labList);
+            const rawLabs = extractLabsCreditRows(cr);
+            console.log("RAW LABS", rawLabs);
+
+            labList = rawLabs.map(normalizePortalLab);
+            if (labList.length === 0 && Array.isArray(ctx.labs) && ctx.labs.length > 0) {
+              labList = ctx.labs.map(normalizePortalLab);
             }
+            console.log("FILTERED LABS (normalized rows, pre–useMemo filter)", labList);
           } else {
             try {
               const cr = await getLabsCredit();
@@ -927,16 +912,27 @@ export default function AgentVisitPage({ currentUser, authToken }) {
 
               <div className="md:col-span-2">
                 <FieldLabel helper="Select the lab to auto-load context">Select Lab</FieldLabel>
+                <p
+                  className="mb-1 text-xs text-slate-500"
+                  data-qa="visits-lab-dropdown-debug"
+                >
+                  visibleLabs={visibleLabs.length} | options={labSelectOptions.length}
+                  {visibleLabs[0]
+                    ? ` | first=${JSON.stringify({
+                        labId: visibleLabs[0].labId,
+                        labName: visibleLabs[0].labName,
+                      })}`
+                    : ""}
+                </p>
                 <select
                   className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-base text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-slate-300"
-                  value={form.labId ? String(form.labId) : ""}
+                  value={form.labId ? labIdKey(form.labId) : ""}
                   onChange={(e) => handleLabChange(e.target.value)}
                 >
                   <option value="">Select lab…</option>
-                  {labOptions.map((lab) => (
-                    <option key={String(lab.labId)} value={String(lab.labId)}>
-                      {lab.labName}
-                      {lab.labId ? ` (${lab.labId})` : ""}
+                  {labSelectOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
                     </option>
                   ))}
                 </select>
