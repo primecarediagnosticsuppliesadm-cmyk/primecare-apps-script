@@ -26,6 +26,8 @@ import {
   createAgentVisitWrite,
   getAgentVisitPageContextRead,
   getLabsCredit,
+  getLabQualificationRead,
+  upsertLabQualificationWrite,
 } from "@/api/primecareSupabaseApi";
 import { supabase } from "@/api/supabaseClient.js";
 import {
@@ -170,6 +172,38 @@ function mapWorkspaceVisitToPageVisit(visit) {
   });
 }
 
+const QUALIFICATION_DEFAULT = {
+  labSize: "",
+  monthlyConsumablesEstimate: "",
+  currentSupplier: "",
+  paymentTerms: "",
+  decisionMaker: "",
+  reagentRentalPotential: "",
+  labOsFit: "",
+  nextFollowUpDate: "",
+  founderReviewStatus: "pending",
+  notes: "",
+};
+
+function normalizeQualificationRow(row) {
+  if (!row) return { ...QUALIFICATION_DEFAULT };
+  return {
+    labSize: row.lab_size || "",
+    monthlyConsumablesEstimate:
+      row.monthly_consumables_estimate == null
+        ? ""
+        : String(row.monthly_consumables_estimate),
+    currentSupplier: row.current_supplier || "",
+    paymentTerms: row.payment_terms || "",
+    decisionMaker: row.decision_maker || "",
+    reagentRentalPotential: row.reagent_rental_potential || "",
+    labOsFit: row.lab_os_fit || "",
+    nextFollowUpDate: row.next_follow_up_date || "",
+    founderReviewStatus: row.founder_review_status || "pending",
+    notes: row.notes || "",
+  };
+}
+
 function displayResponseLabel(value) {
   const v = String(value || "").trim();
   if (v === "Interested") return "Interested";
@@ -202,6 +236,13 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   const [saving, setSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [statusType, setStatusType] = useState("success");
+  const [qualificationForm, setQualificationForm] = useState(QUALIFICATION_DEFAULT);
+  const [qualificationOpen, setQualificationOpen] = useState(true);
+  const [qualificationLoading, setQualificationLoading] = useState(false);
+  const [qualificationSaving, setQualificationSaving] = useState(false);
+  const [qualificationStatus, setQualificationStatus] = useState("");
+  const [qualificationStatusType, setQualificationStatusType] = useState("success");
+  const [qualificationLastUpdated, setQualificationLastUpdated] = useState("");
 
   const [form, setForm] = useState({
     agentName: currentUser?.agentName || currentUser?.name || "",
@@ -416,6 +457,49 @@ export default function AgentVisitPage({ currentUser, authToken }) {
     return visibleLabs.find((lab) => String(lab.labId) === String(form.labId)) || null;
   }, [visibleLabs, form.labId]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadQualification() {
+      const labId = String(form.labId || "").trim();
+      if (!labId) {
+        setQualificationForm({ ...QUALIFICATION_DEFAULT });
+        setQualificationStatus("");
+        setQualificationLastUpdated("");
+        return;
+      }
+
+      try {
+        setQualificationLoading(true);
+        setQualificationStatus("");
+        const res = await getLabQualificationRead({
+          tenantId: currentUser?.tenantId || currentUser?.tenant_id || "",
+          labId,
+        });
+
+        if (cancelled) return;
+        if (!res?.success) {
+          throw new Error(res?.error || "Failed to load qualification");
+        }
+
+        setQualificationForm(normalizeQualificationRow(res.data));
+        setQualificationLastUpdated(res?.data?.updated_at || "");
+      } catch (err) {
+        if (cancelled) return;
+        setQualificationForm({ ...QUALIFICATION_DEFAULT });
+        setQualificationStatus(err?.message || "Failed to load qualification");
+        setQualificationStatusType("error");
+      } finally {
+        if (!cancelled) setQualificationLoading(false);
+      }
+    }
+
+    loadQualification();
+    return () => {
+      cancelled = true;
+    };
+  }, [form.labId, currentUser]);
+
   const selectedLabVisits = useMemo(() => {
     return visibleVisits
       .filter((visit) => String(visit.labId) === String(form.labId))
@@ -501,6 +585,54 @@ export default function AgentVisitPage({ currentUser, authToken }) {
       nextFollowUpDate: "",
       nextFollowUpType: "Call",
     }));
+  }
+
+  async function handleSaveQualification() {
+    const labId = String(form.labId || "").trim();
+    if (!labId) {
+      setQualificationStatus("Select a lab before saving qualification.");
+      setQualificationStatusType("error");
+      return;
+    }
+
+    try {
+      setQualificationSaving(true);
+      setQualificationStatus("");
+
+      const payload = {
+        tenantId: currentUser?.tenantId || currentUser?.tenant_id || "",
+        labId,
+        labSize: qualificationForm.labSize,
+        monthlyConsumablesEstimate: qualificationForm.monthlyConsumablesEstimate,
+        currentSupplier: qualificationForm.currentSupplier,
+        paymentTerms: qualificationForm.paymentTerms,
+        decisionMaker: qualificationForm.decisionMaker,
+        reagentRentalPotential: qualificationForm.reagentRentalPotential,
+        labOsFit: qualificationForm.labOsFit,
+        nextFollowUpDate: qualificationForm.nextFollowUpDate,
+        founderReviewStatus: qualificationForm.founderReviewStatus || "pending",
+        notes: qualificationForm.notes,
+        agentId: currentUser?.agentId || currentUser?.agent_id || "",
+        agentName:
+          currentUser?.agentName || currentUser?.name || form.agentName || "",
+        updatedBy: currentUser?.id || currentUser?.userId || "",
+      };
+
+      const res = await upsertLabQualificationWrite(payload);
+      if (!res?.success) {
+        throw new Error(res?.error || "Failed to save qualification");
+      }
+
+      setQualificationForm(normalizeQualificationRow(res.data));
+      setQualificationLastUpdated(res?.data?.updated_at || "");
+      setQualificationStatus("Qualification saved.");
+      setQualificationStatusType("success");
+    } catch (err) {
+      setQualificationStatus(err?.message || "Failed to save qualification");
+      setQualificationStatusType("error");
+    } finally {
+      setQualificationSaving(false);
+    }
   }
 
   async function handleSaveVisit() {
@@ -825,6 +957,253 @@ export default function AgentVisitPage({ currentUser, authToken }) {
               </div>
             ) : null}
           </section>
+
+          {selectedLab &&
+          String(currentUser?.role || "").toLowerCase() === ROLES.AGENT ? (
+            <section className="space-y-4">
+              <div className="rounded-2xl border bg-white p-4 shadow-sm">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between text-left"
+                  onClick={() => setQualificationOpen((v) => !v)}
+                >
+                  <SectionTitle
+                    icon={ClipboardCheck}
+                    title="Qualification Capture"
+                    subtitle="Field qualification profile for this lab"
+                  />
+                  <span className="text-sm text-slate-500">
+                    {qualificationOpen ? "Hide" : "Show"}
+                  </span>
+                </button>
+
+                {qualificationOpen ? (
+                  <div className="mt-4 space-y-4">
+                    {qualificationLoading ? (
+                      <div className="text-sm text-slate-500">
+                        Loading qualification...
+                      </div>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                          <div>
+                            <FieldLabel helper="Approximate lab size tier">Lab Size</FieldLabel>
+                            <Select
+                              value={qualificationForm.labSize || ""}
+                              onValueChange={(value) =>
+                                setQualificationForm((prev) => ({ ...prev, labSize: value }))
+                              }
+                            >
+                              <SelectTrigger className="h-12 rounded-xl text-base">
+                                <SelectValue placeholder="Select lab size" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Small">Small</SelectItem>
+                                <SelectItem value="Medium">Medium</SelectItem>
+                                <SelectItem value="Large">Large</SelectItem>
+                                <SelectItem value="Enterprise">Enterprise</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div>
+                            <FieldLabel helper="Estimated monthly consumables in INR">
+                              Monthly Consumables Estimate
+                            </FieldLabel>
+                            <Input
+                              type="number"
+                              value={qualificationForm.monthlyConsumablesEstimate}
+                              onChange={(e) =>
+                                setQualificationForm((prev) => ({
+                                  ...prev,
+                                  monthlyConsumablesEstimate: e.target.value,
+                                }))
+                              }
+                              placeholder="e.g. 50000"
+                              className="h-12 rounded-xl text-base"
+                            />
+                          </div>
+
+                          <div>
+                            <FieldLabel helper="Primary existing supplier">
+                              Current Supplier
+                            </FieldLabel>
+                            <Input
+                              value={qualificationForm.currentSupplier}
+                              onChange={(e) =>
+                                setQualificationForm((prev) => ({
+                                  ...prev,
+                                  currentSupplier: e.target.value,
+                                }))
+                              }
+                              placeholder="Supplier name"
+                              className="h-12 rounded-xl text-base"
+                            />
+                          </div>
+
+                          <div>
+                            <FieldLabel helper="Observed payment terms">
+                              Payment Terms
+                            </FieldLabel>
+                            <Input
+                              value={qualificationForm.paymentTerms}
+                              onChange={(e) =>
+                                setQualificationForm((prev) => ({
+                                  ...prev,
+                                  paymentTerms: e.target.value,
+                                }))
+                              }
+                              placeholder="e.g. 30 days credit"
+                              className="h-12 rounded-xl text-base"
+                            />
+                          </div>
+
+                          <div>
+                            <FieldLabel helper="Purchase decision maker">
+                              Decision Maker
+                            </FieldLabel>
+                            <Input
+                              value={qualificationForm.decisionMaker}
+                              onChange={(e) =>
+                                setQualificationForm((prev) => ({
+                                  ...prev,
+                                  decisionMaker: e.target.value,
+                                }))
+                              }
+                              placeholder="Name or role"
+                              className="h-12 rounded-xl text-base"
+                            />
+                          </div>
+
+                          <div>
+                            <FieldLabel helper="Is reagent rental model viable?">
+                              Reagent Rental Potential
+                            </FieldLabel>
+                            <Select
+                              value={qualificationForm.reagentRentalPotential || ""}
+                              onValueChange={(value) =>
+                                setQualificationForm((prev) => ({
+                                  ...prev,
+                                  reagentRentalPotential: value,
+                                }))
+                              }
+                            >
+                              <SelectTrigger className="h-12 rounded-xl text-base">
+                                <SelectValue placeholder="Select potential" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Low">Low</SelectItem>
+                                <SelectItem value="Medium">Medium</SelectItem>
+                                <SelectItem value="High">High</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div>
+                            <FieldLabel helper="Field-assessed Lab OS fit">
+                              Lab OS Fit
+                            </FieldLabel>
+                            <Select
+                              value={qualificationForm.labOsFit || ""}
+                              onValueChange={(value) =>
+                                setQualificationForm((prev) => ({ ...prev, labOsFit: value }))
+                              }
+                            >
+                              <SelectTrigger className="h-12 rounded-xl text-base">
+                                <SelectValue placeholder="Select fit" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Low">Low</SelectItem>
+                                <SelectItem value="Medium">Medium</SelectItem>
+                                <SelectItem value="High">High</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div>
+                            <FieldLabel helper="Qualification follow-up target date">
+                              Next Follow-up Date
+                            </FieldLabel>
+                            <Input
+                              type="date"
+                              value={qualificationForm.nextFollowUpDate}
+                              onChange={(e) =>
+                                setQualificationForm((prev) => ({
+                                  ...prev,
+                                  nextFollowUpDate: e.target.value,
+                                }))
+                              }
+                              className="h-12 rounded-xl text-base"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <FieldLabel helper="Founder review status (read-only for agent)">
+                            Founder Review Status
+                          </FieldLabel>
+                          <Input
+                            value={qualificationForm.founderReviewStatus || "pending"}
+                            readOnly
+                            className="h-12 rounded-xl bg-slate-50 text-base"
+                          />
+                        </div>
+
+                        <div>
+                          <FieldLabel helper="Qualification-specific notes">
+                            Qualification Notes
+                          </FieldLabel>
+                          <Textarea
+                            value={qualificationForm.notes}
+                            onChange={(e) =>
+                              setQualificationForm((prev) => ({
+                                ...prev,
+                                notes: e.target.value,
+                              }))
+                            }
+                            placeholder="Qualification rationale, objections, buying cycle, etc."
+                            className="min-h-[100px] rounded-xl text-base"
+                          />
+                        </div>
+
+                        {qualificationStatus ? (
+                          <div
+                            className={`rounded-xl p-3 text-sm ${
+                              qualificationStatusType === "error"
+                                ? "bg-red-50 text-red-700"
+                                : "bg-green-50 text-green-700"
+                            }`}
+                          >
+                            {qualificationStatus}
+                          </div>
+                        ) : null}
+
+                        <div className="space-y-2">
+                          <Button
+                            type="button"
+                            onClick={handleSaveQualification}
+                            disabled={qualificationSaving || qualificationLoading}
+                            className="h-12 w-full rounded-xl text-base"
+                          >
+                            {qualificationSaving
+                              ? "Saving Qualification..."
+                              : "Save Qualification"}
+                          </Button>
+                          <div className="text-xs text-slate-500">
+                            {qualificationLastUpdated
+                              ? `Last updated: ${new Date(
+                                  qualificationLastUpdated
+                                ).toLocaleString()}`
+                              : "No qualification saved yet for this lab."}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
 
           <section className="space-y-4">
             <SectionTitle

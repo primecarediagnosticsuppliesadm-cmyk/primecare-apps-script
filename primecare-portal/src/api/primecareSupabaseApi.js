@@ -1987,6 +1987,113 @@ export async function getAgentVisitPageContextRead(currentUser) {
 }
 
 /**
+ * Read one qualification profile for a lab.
+ * Input can be:
+ * - getLabQualificationRead({ tenantId, labId })
+ * - getLabQualificationRead({ labId })  // RLS-scoped
+ * - getLabQualificationRead("LAB_001")
+ */
+export async function getLabQualificationRead(input = {}) {
+  const raw =
+    typeof input === "string"
+      ? { labId: input }
+      : (input || {});
+  const tenantId = str(raw.tenantId ?? raw.tenant_id) || "";
+  const labId = labIdKey(raw.labId ?? raw.lab_id);
+
+  traceSupabaseRead("Qualification.getLabQualificationRead", {
+    table: "lab_qualifications",
+    labId,
+  });
+
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+  if (!labId) {
+    return { success: false, error: "lab_id is required", data: null };
+  }
+
+  try {
+    let q = supabase
+      .from("lab_qualifications")
+      .select("*")
+      .eq("lab_id", labId)
+      .limit(1);
+
+    if (tenantId) {
+      q = q.eq("tenant_id", tenantId);
+    }
+
+    const { data, error } = await q.maybeSingle();
+    if (error) {
+      return { success: false, error: error.message || "Read failed", data: null };
+    }
+    return { success: true, data: data || null, error: null };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err), data: null };
+  }
+}
+
+/**
+ * Upsert one qualification profile for a lab (tenant+lab unique key).
+ * Uses current profile agent_id / agent_name metadata when available.
+ */
+export async function upsertLabQualificationWrite(payload = {}) {
+  traceSupabaseRead("Qualification.upsertLabQualificationWrite", {
+    table: "lab_qualifications",
+  });
+
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+
+  try {
+    const tenant_id = str(payload.tenantId ?? payload.tenant_id) || "";
+    const lab_id = labIdKey(payload.labId ?? payload.lab_id);
+    if (!tenant_id || !lab_id) {
+      return { success: false, error: "tenant_id and lab_id are required", data: null };
+    }
+
+    const monthly = payload.monthlyConsumablesEstimate ?? payload.monthly_consumables_estimate;
+    const monthly_consumables_estimate =
+      monthly === "" || monthly == null ? null : num(monthly);
+
+    const row = {
+      tenant_id,
+      lab_id,
+      lab_size: str(payload.labSize ?? payload.lab_size) || null,
+      monthly_consumables_estimate,
+      current_supplier: str(payload.currentSupplier ?? payload.current_supplier) || null,
+      payment_terms: str(payload.paymentTerms ?? payload.payment_terms) || null,
+      decision_maker: str(payload.decisionMaker ?? payload.decision_maker) || null,
+      reagent_rental_potential:
+        str(payload.reagentRentalPotential ?? payload.reagent_rental_potential) || null,
+      lab_os_fit: str(payload.labOsFit ?? payload.lab_os_fit) || null,
+      next_follow_up_date: str(payload.nextFollowUpDate ?? payload.next_follow_up_date).slice(0, 10) || null,
+      founder_review_status:
+        str(payload.founderReviewStatus ?? payload.founder_review_status) || "pending",
+      notes: str(payload.notes) || null,
+      agent_id: str(payload.agentId ?? payload.agent_id) || null,
+      agent_name: str(payload.agentName ?? payload.agent_name) || null,
+      updated_by: str(payload.updatedBy ?? payload.updated_by ?? payload.userId ?? payload.user_id) || null,
+    };
+
+    const { data, error } = await supabase
+      .from("lab_qualifications")
+      .upsert([row], { onConflict: "tenant_id,lab_id" })
+      .select()
+      .single();
+
+    if (error) {
+      return { success: false, error: error.message || "Upsert failed", data: null };
+    }
+    return { success: true, data: data || null, error: null };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err), data: null };
+  }
+}
+
+/**
  * Read-only agent workspace: labs/credit (`v_labs_credit`), collections (`getCollectionsRead`),
  * visits (`agent_visits`). Task queue is always `[]` here (no Supabase task query).
  * Shapes match AgentDashboard expectations. Never throws.
