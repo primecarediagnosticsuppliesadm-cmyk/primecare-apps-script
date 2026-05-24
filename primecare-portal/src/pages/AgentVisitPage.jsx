@@ -30,11 +30,12 @@ import {
   upsertLabQualificationWrite,
 } from "@/api/primecareSupabaseApi";
 import { supabase } from "@/api/supabaseClient.js";
+import { ROLES } from "@/config/roles";
+import { labIdKey } from "@/utils/labId";
 import {
   logAppsScriptFallbackUsed,
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
-import { ROLES } from "@/config/roles";
 import { logClientError } from "@/utils/debugLogger";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 
@@ -219,11 +220,16 @@ function resolveLabByOptionValue(labs, value) {
   if (value == null) return null;
   const raw = String(value).trim();
   if (!raw) return null;
-  let lab = labs.find((l) => String(l.labId ?? "").trim() === raw);
+  const rawKey = labIdKey(raw);
+  let lab = labs.find((l) => labIdKey(l.labId) === rawKey);
   if (!lab) {
     lab = labs.find((l) => String(l.labName ?? "").trim() === raw);
   }
   return lab || null;
+}
+
+function isAgentUser(user) {
+  return String(user?.role ?? "").trim().toLowerCase() === ROLES.AGENT;
 }
 
 export default function AgentVisitPage({ currentUser, authToken }) {
@@ -281,7 +287,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
           logSupabaseFeatureSource("AgentVisit.load", {
             apis: ["getAgentVisitPageContextRead", "getLabsCredit"],
           });
-          const isAgent = String(currentUser?.role || "").toLowerCase() === ROLES.AGENT;
+          const isAgent = isAgentUser(currentUser);
 
           if (isAgent) {
             const ctxRes = await getAgentVisitPageContextRead(currentUser);
@@ -454,14 +460,38 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   }, [visibleLabs]);
 
   const selectedLab = useMemo(() => {
-    return visibleLabs.find((lab) => String(lab.labId) === String(form.labId)) || null;
+    const labId = String(form.labId || "").trim();
+    if (!labId) return null;
+    return resolveLabByOptionValue(visibleLabs, labId);
   }, [visibleLabs, form.labId]);
+
+  const showQualificationCapture = useMemo(() => {
+    return isAgentUser(currentUser) && Boolean(String(form.labId || "").trim());
+  }, [currentUser, form.labId]);
+
+  useEffect(() => {
+    console.log("AGENT VISIT ROLE", {
+      role: currentUser?.role,
+      isAgent: isAgentUser(currentUser),
+    });
+  }, [currentUser]);
+
+  useEffect(() => {
+    console.log("SELECTED LAB", selectedLab, { formLabId: form.labId });
+  }, [selectedLab, form.labId]);
+
+  useEffect(() => {
+    console.log("QUALIFICATION SECTION RENDER", {
+      show: showQualificationCapture,
+      formLabId: form.labId,
+    });
+  }, [showQualificationCapture, form.labId]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadQualification() {
-      const labId = String(form.labId || "").trim();
+      const labId = labIdKey(form.labId);
       if (!labId) {
         setQualificationForm({ ...QUALIFICATION_DEFAULT });
         setQualificationStatus("");
@@ -470,6 +500,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
       }
 
       try {
+        console.log("QUALIFICATION LOAD START", { labId });
         setQualificationLoading(true);
         setQualificationStatus("");
         const res = await getLabQualificationRead({
@@ -570,7 +601,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
     }
 
     const selected = resolveLabByOptionValue(visibleLabs, raw);
-    const labId = selected ? String(selected.labId ?? "").trim() : raw;
+    const labId = selected ? labIdKey(selected.labId) : labIdKey(raw);
     const labName = selected ? String(selected.labName ?? "").trim() : "";
 
     setForm((prev) => ({
@@ -588,7 +619,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   }
 
   async function handleSaveQualification() {
-    const labId = String(form.labId || "").trim();
+    const labId = labIdKey(form.labId);
     if (!labId) {
       setQualificationStatus("Select a lab before saving qualification.");
       setQualificationStatusType("error");
@@ -958,8 +989,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
             ) : null}
           </section>
 
-          {selectedLab &&
-          String(currentUser?.role || "").toLowerCase() === ROLES.AGENT ? (
+          {showQualificationCapture ? (
             <section className="space-y-4">
               <div className="rounded-2xl border bg-white p-4 shadow-sm">
                 <button

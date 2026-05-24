@@ -2,7 +2,13 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import LoginPage from "./pages/LoginPage";
 import { useAuth } from "./context/AuthContext";
 import { ROLES } from "./config/roles";
+import { PERMISSIONS } from "./config/permissions";
 import { getDefaultPageForRole } from "./config/menuConfig";
+
+function canRoleAccessPage(role, pageKey) {
+  if (!role || !pageKey) return false;
+  return Array.isArray(PERMISSIONS[pageKey]) && PERMISSIONS[pageKey].includes(role);
+}
 
 const PortalLayout = lazy(() => import("./layout/PortalLayout"));
 const PrimeCareWebPortal = lazy(() => import("./PrimeCareWebPortal"));
@@ -87,9 +93,13 @@ export default function App() {
 
     setCurrentUser(normalizedUser);
     setRole(normalizedRole);
-    setActivePage(
-      normalizedUser.defaultPage || getDefaultPageForRole(normalizedRole)
-    );
+    setActivePage((prev) => {
+      const defaultPage =
+        normalizedUser.defaultPage || getDefaultPageForRole(normalizedRole);
+      if (!prev) return defaultPage;
+      if (canRoleAccessPage(normalizedRole, prev)) return prev;
+      return defaultPage;
+    });
   }, [isAuthenticated, user]);
 
   useEffect(() => {
