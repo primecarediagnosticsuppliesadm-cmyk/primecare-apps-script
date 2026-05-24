@@ -11,3 +11,11 @@ export function normalizeLabIdKey(labId) {
 export function labIdKey(labId) {
   return normalizeLabIdKey(labId);
 }
+
+/**
+ * Canonical agent identifier for assignment matching (RLS uses btrim; QA uses uppercase codes).
+ */
+export function normalizeAgentIdKey(agentId) {
+  const s = String(agentId ?? "").trim();
+  return s ? s.toUpperCase() : "";
+}

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,7 @@ import {
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { logClientError } from "@/utils/debugLogger";
+import { filterLabsForUser, logAgentLabFilterDebug } from "@/utils/accessFilters";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 
 function QuickStat({ title, value, icon: Icon }) {
@@ -250,6 +251,23 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   const [qualificationStatusType, setQualificationStatusType] = useState("success");
   const [qualificationLastUpdated, setQualificationLastUpdated] = useState("");
 
+  const hasLoadedDataRef = useRef(false);
+  const authTokenRef = useRef(authToken);
+  authTokenRef.current = authToken;
+
+  const loadUserKey = useMemo(
+    () =>
+      [
+        currentUser?.id,
+        currentUser?.role,
+        currentUser?.agentId,
+        currentUser?.tenantId,
+      ]
+        .map((v) => String(v ?? ""))
+        .join("|"),
+    [currentUser?.id, currentUser?.role, currentUser?.agentId, currentUser?.tenantId]
+  );
+
   const [form, setForm] = useState({
     agentName: currentUser?.agentName || currentUser?.name || "",
     visitDate: new Date().toISOString().slice(0, 10),
@@ -273,10 +291,14 @@ export default function AgentVisitPage({ currentUser, authToken }) {
     let mounted = true;
 
     async function loadData() {
+      const isInitialLoad = !hasLoadedDataRef.current;
       try {
-        setLoading(true);
+        if (isInitialLoad) {
+          setLoading(true);
+        }
 
-        const params = authToken ? { sessionToken: authToken } : {};
+        const token = authTokenRef.current;
+        const params = token ? { sessionToken: token } : {};
 
         let workspace = null;
         let labList = [];
@@ -300,20 +322,30 @@ export default function AgentVisitPage({ currentUser, authToken }) {
               recentVisits: ctx.recentVisits || [],
               pendingCollections: ctx.collections || [],
             };
-            labList = (ctx.labs || [])
-              .map(normalizeLab)
-              .filter((l) => String(l.labId).trim() !== "");
             visitRows = (ctx.recentVisits || []).map(mapWorkspaceVisitToPageVisit);
             collectionRows = (ctx.collections || []).map(normalizeCollection);
-          }
 
-          if (labList.length === 0) {
+            const cr = await getLabsCredit();
+            if (cr?.success && Array.isArray(cr.data)) {
+              const allLabs = cr.data.map(normalizeLab);
+              const filteredLabs = filterLabsForUser(allLabs, currentUser);
+              logAgentLabFilterDebug(currentUser, allLabs, filteredLabs);
+              labList = filteredLabs.filter((l) => String(l.labId ?? "").trim() !== "");
+            } else {
+              console.warn("[AgentVisitPage] getLabsCredit:", cr?.error || "no data");
+              const ctxLabs = (ctx.labs || []).map(normalizeLab);
+              labList = filterLabsForUser(ctxLabs, currentUser).filter(
+                (l) => String(l.labId ?? "").trim() !== ""
+              );
+              logAgentLabFilterDebug(currentUser, ctxLabs, labList);
+            }
+          } else {
             try {
               const cr = await getLabsCredit();
               if (cr?.success && Array.isArray(cr.data)) {
-                labList = cr.data.map(normalizeLab).filter((l) => String(l.labId).trim() !== "");
-              } else {
-                console.warn("[AgentVisitPage] getLabsCredit:", cr?.error || "no data");
+                labList = cr.data
+                  .map(normalizeLab)
+                  .filter((l) => String(l.labId).trim() !== "");
               }
             } catch (e) {
               console.warn("[AgentVisitPage] getLabsCredit failed:", e?.message || e);
@@ -347,6 +379,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
         setLabs(labList);
         setRecentVisits(visitRows);
         setCollections(collectionRows);
+        hasLoadedDataRef.current = true;
         setLoading(false);
       } catch (err) {
         if (!mounted) return;
@@ -377,14 +410,14 @@ export default function AgentVisitPage({ currentUser, authToken }) {
     return () => {
       mounted = false;
     };
-  }, [authToken, currentUser]);
+  }, [loadUserKey]);
 
   useEffect(() => {
     setForm((prev) => ({
       ...prev,
       agentName: currentUser?.agentName || currentUser?.name || prev.agentName,
     }));
-  }, [currentUser]);
+  }, [currentUser?.id, currentUser?.agentName, currentUser?.name]);
 
   const visibleLabs = useMemo(() => labs, [labs]);
   const labOptions = useMemo(

@@ -98,7 +98,21 @@ export function AuthProvider({ children }) {
 
     const user = buildUserFromProfile(session.user, profile);
     setAuthToken(session.access_token || "");
-    setCurrentUser(user);
+    setCurrentUser((prev) => {
+      if (!prev) return user;
+      if (
+        prev.id === user.id &&
+        prev.role === user.role &&
+        prev.tenantId === user.tenantId &&
+        prev.agentId === user.agentId &&
+        prev.agentName === user.agentName &&
+        prev.labId === user.labId &&
+        prev.email === user.email
+      ) {
+        return prev;
+      }
+      return user;
+    });
   }, []);
 
   const bootstrapUser = useCallback(async (token) => {
@@ -183,7 +197,14 @@ export function AuthProvider({ children }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "TOKEN_REFRESHED") {
+        if (session?.access_token) {
+          setAuthToken(session.access_token);
+        }
+        return;
+      }
+
       applySupabaseSession(session).catch(async (err) => {
         console.error("Supabase auth state rejected", err);
         setAuthError(err?.message || "Authentication failed.");

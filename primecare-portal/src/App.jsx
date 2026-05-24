@@ -91,7 +91,21 @@ export default function App() {
       defaultPage: user.defaultPage || user.Default_Page || "",
     };
 
-    setCurrentUser(normalizedUser);
+    setCurrentUser((prev) => {
+      if (
+        prev &&
+        prev.id === normalizedUser.id &&
+        prev.role === normalizedUser.role &&
+        prev.tenantId === normalizedUser.tenantId &&
+        prev.agentId === normalizedUser.agentId &&
+        prev.agentName === normalizedUser.agentName &&
+        prev.labId === normalizedUser.labId &&
+        prev.email === normalizedUser.email
+      ) {
+        return prev;
+      }
+      return normalizedUser;
+    });
     setRole(normalizedRole);
     setActivePage((prev) => {
       const defaultPage =

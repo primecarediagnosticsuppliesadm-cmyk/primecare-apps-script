@@ -1,7 +1,18 @@
 import { ROLES } from "@/config/roles";
+import { normalizeAgentIdKey } from "@/utils/labId";
 
 function normalize(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function profileAgentId(currentUser) {
+  return normalizeAgentIdKey(currentUser?.agentId || currentUser?.agent_id);
+}
+
+function profileAgentName(currentUser) {
+  return normalize(
+    currentUser?.agentName || currentUser?.name || currentUser?.userName
+  );
 }
 
 export function canSeeAllData(currentUser) {
@@ -17,20 +28,72 @@ export function canSeeAllData(currentUser) {
 export function agentRecordMatchesUser(recordAgentId, recordAgentName, currentUser) {
   if (!currentUser || currentUser.role !== ROLES.AGENT) return false;
 
-  const profileAgentId = normalize(currentUser.agentId || currentUser.agent_id);
-  const profileAgentName = normalize(
-    currentUser.agentName || currentUser.name || currentUser.userName
-  );
-  const rowAgentId = normalize(recordAgentId);
-  const rowAgentName = normalize(recordAgentName);
+  const profileId = profileAgentId(currentUser);
+  const profileName = profileAgentName(currentUser);
+  const rowId = normalizeAgentIdKey(recordAgentId);
+  const rowName = normalize(recordAgentName);
 
-  if (profileAgentId && rowAgentId && profileAgentId === rowAgentId) {
+  if (profileId && rowId && profileId === rowId) {
     return true;
   }
-  if (profileAgentName && rowAgentName && profileAgentName === rowAgentName) {
+  if (profileName && rowName && profileName === rowName) {
     return true;
   }
   return false;
+}
+
+/**
+ * Temporary QA diagnostics for agent lab assignment (B2).
+ */
+export function logAgentLabFilterDebug(currentUser, allLabs = [], filteredLabs = []) {
+  console.log("AGENT PROFILE", {
+    id: currentUser?.id,
+    role: currentUser?.role,
+    agentId: currentUser?.agentId || currentUser?.agent_id,
+    agentName: currentUser?.agentName || currentUser?.name,
+    tenantId: currentUser?.tenantId || currentUser?.tenant_id,
+  });
+
+  console.log("LAB FILTER RESULT", {
+    totalFromApi: allLabs.length,
+    visibleCount: filteredLabs.length,
+    visibleLabIds: filteredLabs.map((l) => l.labId || l.lab_id).filter(Boolean),
+  });
+
+  console.log("VISIBLE LABS", filteredLabs);
+
+  (allLabs || []).forEach((lab) => {
+    const assignedAgentId =
+      lab.assignedAgentId ||
+      lab.assigned_agent_id ||
+      lab.agentId ||
+      lab.agent_id ||
+      "";
+    const assignedAgent =
+      lab.assignedAgent ||
+      lab.agentName ||
+      lab.agent_name ||
+      lab.Agent_Name ||
+      lab.owner ||
+      "";
+    const matchesById = agentRecordMatchesUser(assignedAgentId, "", currentUser);
+    const matchesByName = agentRecordMatchesUser("", assignedAgent, currentUser);
+    const included = filteredLabs.some(
+      (row) =>
+        normalizeAgentIdKey(row.labId || row.lab_id) ===
+        normalizeAgentIdKey(lab.labId || lab.lab_id)
+    );
+
+    console.log("LAB ASSIGNMENT CHECK", {
+      labId: lab.labId || lab.lab_id,
+      assignedAgentId,
+      assignedAgent,
+      profileAgentId: profileAgentId(currentUser),
+      matchesById,
+      matchesByName,
+      included,
+    });
+  });
 }
 
 export function filterVisitsForUser(visits = [], currentUser) {
@@ -62,10 +125,12 @@ export function filterLabsForUser(labs = [], currentUser) {
         lab.assignedAgentId ||
         lab.assigned_agent_id ||
         lab.agentId ||
+        lab.agent_id ||
         "";
       const assignedAgent =
         lab.assignedAgent ||
         lab.agentName ||
+        lab.agent_name ||
         lab.Agent_Name ||
         lab.owner ||
         "";
