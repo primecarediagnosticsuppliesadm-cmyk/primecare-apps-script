@@ -27,6 +27,18 @@ import {
 import { ADMIN_DASHBOARD_INVALIDATE_EVENT } from "@/utils/dashboardInvalidate.js";
 import { perfLog, perfTime } from "@/utils/perfLog.js";
 import {
+  KpiCard,
+  KpiCardGrid,
+  KpiSkeleton,
+  PageSkeleton,
+  ListSkeleton,
+  EmptyState,
+  StatusBadge,
+} from "@/components/ux";
+import { insightSeverityToVariant, visitTypeToVariant } from "@/utils/statusTokens";
+import { typography } from "@/styles/designTokens";
+import { cn } from "@/lib/utils";
+import {
   TrendingUp,
   AlertTriangle,
   Package,
@@ -83,62 +95,24 @@ function currency(value) {
   return `₹${Number(value || 0).toLocaleString()}`;
 }
 
-function StatCardSkeleton() {
+function AdminDashboardLoading() {
   return (
-    <div className="animate-pulse rounded-2xl border bg-white p-4 shadow-sm">
-      <div className="h-3 w-20 rounded bg-slate-200" />
-      <div className="mt-2 h-7 w-24 rounded bg-slate-200" />
-      <div className="mt-2 h-3 w-28 rounded bg-slate-100" />
-    </div>
-  );
-}
-
-function AdminDashboardSkeleton() {
-  return (
-    <div className="space-y-6 p-4 sm:p-6">
-      <div className="animate-pulse space-y-2">
-        <div className="h-7 w-48 rounded bg-slate-200" />
-        <div className="h-4 w-72 max-w-full rounded bg-slate-100" />
-      </div>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <StatCardSkeleton key={i} />
-        ))}
-      </div>
-      <div className="grid gap-6 xl:grid-cols-2">
-        <div className="animate-pulse rounded-2xl border bg-white p-4 shadow-sm">
-          <div className="mb-4 h-5 w-40 rounded bg-slate-200" />
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+    <div className="space-y-5 p-4 sm:p-6">
+      <PageSkeleton kpiCount={6} kpiColumns={6} showList={false} />
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className="rounded-2xl border border-border bg-card p-4 shadow-[var(--pc-shadow-card)]">
+          <div className="mb-3 h-5 w-44 animate-pulse rounded-lg bg-muted" />
+          <KpiCardGrid columns={4}>
             {Array.from({ length: 4 }).map((_, i) => (
-              <StatCardSkeleton key={i} />
+              <KpiSkeleton key={i} />
             ))}
-          </div>
+          </KpiCardGrid>
         </div>
-        <div className="animate-pulse rounded-2xl border bg-white p-4 shadow-sm">
-          <div className="mb-4 h-5 w-32 rounded bg-slate-200" />
-          <div className="grid grid-cols-2 gap-3">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="h-12 rounded-xl bg-slate-100" />
-            ))}
-          </div>
-        </div>
+        <ListSkeleton rows={4} />
       </div>
-    </div>
-  );
-}
-
-function StatCard({ title, value, subtext, icon: Icon }) {
-  return (
-    <div className="rounded-2xl border bg-white p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-xs text-slate-500">{title}</div>
-          <div className="mt-1 text-2xl font-semibold text-slate-900">{value}</div>
-          {subtext ? <div className="mt-1 text-xs text-slate-500">{subtext}</div> : null}
-        </div>
-        <div className="rounded-xl bg-slate-50 p-2">
-          <Icon className="h-4 w-4 text-slate-700" />
-        </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <ListSkeleton rows={3} />
+        <ListSkeleton rows={3} />
       </div>
     </div>
   );
@@ -146,16 +120,16 @@ function StatCard({ title, value, subtext, icon: Icon }) {
 
 function SectionCard({ title, subtitle, children, rightAction = null }) {
   return (
-    <div className="rounded-2xl border bg-white p-4 shadow-sm">
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-          {subtitle ? <p className="mt-1 text-sm text-slate-500">{subtitle}</p> : null}
+    <section className="rounded-2xl border border-border bg-card p-4 shadow-[var(--pc-shadow-card)] sm:p-5">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className={typography.sectionTitle}>{title}</h2>
+          {subtitle ? <p className={cn(typography.sectionSubtitle, "mt-1")}>{subtitle}</p> : null}
         </div>
         {rightAction}
       </div>
       {children}
-    </div>
+    </section>
   );
 }
 
@@ -166,13 +140,6 @@ function normalizeInsight(insight) {
     title: insight?.title || "Insight",
     message: insight?.message || "",
   };
-}
-
-function severityBadgeClass(severity) {
-  const value = String(severity || "").toLowerCase();
-  if (value === "high") return "bg-red-100 text-red-700 border-red-200";
-  if (value === "medium") return "bg-yellow-100 text-yellow-700 border-yellow-200";
-  return "bg-green-100 text-green-700 border-green-200";
 }
 
 function visitRecencyTimestamp(visit) {
@@ -239,26 +206,6 @@ function formatRelativeVisitDate(visit) {
     month: "short",
     year: "numeric",
   });
-}
-
-function visitTypeBadgeClass(visitType) {
-  const vt = String(visitType || "").trim().toLowerCase();
-  if (vt === "follow-up" || vt === "follow up") {
-    return "bg-blue-50 text-blue-800 border-blue-200";
-  }
-  if (vt === "new lead") {
-    return "bg-green-50 text-green-800 border-green-200";
-  }
-  if (vt === "collection") {
-    return "bg-orange-50 text-orange-800 border-orange-200";
-  }
-  if (vt.includes("demo") || vt === "closing") {
-    return "bg-purple-50 text-purple-800 border-purple-200";
-  }
-  if (vt.includes("complaint") || vt === "support visit") {
-    return "bg-red-50 text-red-800 border-red-200";
-  }
-  return "bg-slate-50 text-slate-700 border-slate-200";
 }
 
 function formatLabResponseLabel(labResponse) {
@@ -330,7 +277,7 @@ function normalizeVisitForActivity(visit) {
     agent: cleanActivityText(normalized.agent),
     visitType,
     relativeDate: relativeDate === "-" ? "" : relativeDate,
-    visitTypeClass: visitTypeBadgeClass(visitType),
+    visitTypeVariant: visitTypeToVariant(visitType),
     metaDetail: buildVisitMetaDetail(normalized),
     sortTimestamp: visitRecencyTimestamp(normalized),
   };
@@ -800,17 +747,15 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   }, [executive]);
 
   if (loading) {
-    return <AdminDashboardSkeleton />;
+    return <AdminDashboardLoading />;
   }
 
   return (
-    <div className="space-y-6 p-4 sm:p-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Admin Dashboard
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
+    <div className="space-y-5 p-4 sm:p-6">
+      <header className="flex flex-col gap-3 sm:gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <h1 className={typography.pageTitle}>Admin Dashboard</h1>
+          <p className={cn(typography.pageSubtitle, "mt-1")}>
             Operational control across stock, revenue, receivables, risk, and field execution.
           </p>
         </div>
@@ -819,65 +764,68 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
           type="button"
           onClick={() => loadAll({ force: true })}
           disabled={refreshing}
-          className="inline-flex items-center justify-center rounded-xl border bg-white px-4 py-2 text-sm font-medium shadow-sm hover:bg-slate-50 disabled:opacity-50"
+          className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium shadow-[var(--pc-shadow-card)] hover:bg-muted/50 disabled:opacity-50"
         >
           <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
           {refreshing ? "Refreshing..." : "Refresh"}
         </button>
-      </div>
+      </header>
 
       {errorMessage ? (
-        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div
+          role="alert"
+          className="rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+        >
           {errorMessage}
         </div>
       ) : null}
 
       {backgroundLoading ? (
-        <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+        <div className="rounded-2xl border border-[var(--pc-info-border)] bg-[var(--pc-info-bg)] px-4 py-3 text-sm text-[var(--pc-info)]">
           Loading secondary dashboard panels in background...
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
-        <StatCard
+      <KpiCardGrid columns={6}>
+        <KpiCard
           title="Today's Revenue"
           value={currency(executive?.todaysRevenue || 0)}
-          subtext="Current day visible revenue"
+          subtitle="Current day visible revenue"
           icon={TrendingUp}
         />
-        <StatCard
+        <KpiCard
           title="Receivables"
           value={currency(executive?.outstandingReceivables || 0)}
-          subtext="Outstanding collections"
+          subtitle="Outstanding collections"
           icon={Wallet}
         />
-        <StatCard
+        <KpiCard
           title="Credit Risk Labs"
           value={executive?.labsAtCreditRisk || 0}
-          subtext="Labs needing attention"
+          subtitle="Labs needing attention"
           icon={ShieldAlert}
         />
-        <StatCard
+        <KpiCard
           title="Near Stockout"
           value={executive?.productsNearStockout || 0}
-          subtext="Critical + reorder items"
+          subtitle="Critical + reorder items"
           icon={Package}
         />
-        <StatCard
+        <KpiCard
           title="Recent Visits"
           value={summaryData?.recentVisits || 0}
-          subtext="Latest field activity"
+          subtitle="Latest field activity"
           icon={Activity}
         />
-        <StatCard
+        <KpiCard
           title="Total Sold Value"
           value={currency(summaryData?.totalSoldValue || 0)}
-          subtext="Tracked visit-linked sales"
+          subtitle="Tracked visit-linked sales"
           icon={Users}
         />
-      </div>
+      </KpiCardGrid>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-4 xl:grid-cols-2 xl:gap-6">
         <SectionCard
           title="Inventory Snapshot"
           subtitle="Fast view of current stock health"
@@ -885,78 +833,49 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
             <button
               type="button"
               onClick={() => setActivePage?.("inventory")}
-              className="rounded-xl border bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50"
+              className="min-h-10 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted/50"
             >
               Open Inventory
             </button>
           }
         >
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatCard
-              title="Total SKUs"
-              value={stockStats?.totalSkus || 0}
-              subtext=""
-              icon={Package}
-            />
-            <StatCard
+          <KpiCardGrid columns={4}>
+            <KpiCard title="Total SKUs" value={stockStats?.totalSkus || 0} icon={Package} />
+            <KpiCard
               title="Critical Items"
               value={stockStats?.criticalItems || 0}
-              subtext=""
               icon={AlertTriangle}
             />
-            <StatCard
-              title="Reorder Items"
-              value={stockStats?.reorderItems || 0}
-              subtext=""
-              icon={Package}
-            />
-            <StatCard
-              title="Healthy Items"
-              value={stockStats?.healthyItems || 0}
-              subtext=""
-              icon={Activity}
-            />
-          </div>
+            <KpiCard title="Reorder Items" value={stockStats?.reorderItems || 0} icon={Package} />
+            <KpiCard title="Healthy Items" value={stockStats?.healthyItems || 0} icon={Activity} />
+          </KpiCardGrid>
         </SectionCard>
 
         <SectionCard
           title="Quick Actions"
           subtitle="Jump into the most-used admin workflows"
         >
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => setActivePage?.("orders")}
-              className="rounded-xl border bg-white px-4 py-3 text-left text-sm font-medium hover:bg-slate-50"
-            >
-              Orders Monitor
-            </button>
-            <button
-              type="button"
-              onClick={() => setActivePage?.("collections")}
-              className="rounded-xl border bg-white px-4 py-3 text-left text-sm font-medium hover:bg-slate-50"
-            >
-              Collections
-            </button>
-            <button
-              type="button"
-              onClick={() => setActivePage?.("purchase")}
-              className="rounded-xl border bg-white px-4 py-3 text-left text-sm font-medium hover:bg-slate-50"
-            >
-              Purchase & Reorder
-            </button>
-            <button
-              type="button"
-              onClick={() => setActivePage?.("labs")}
-              className="rounded-xl border bg-white px-4 py-3 text-left text-sm font-medium hover:bg-slate-50"
-            >
-              Labs
-            </button>
+          <div className="grid grid-cols-2 gap-2 sm:gap-3">
+            {[
+              { label: "Orders Monitor", page: "orders" },
+              { label: "Collections", page: "collections" },
+              { label: "Purchase & Reorder", page: "purchase" },
+              { label: "Labs", page: "labs" },
+            ].map(({ label, page }) => (
+              <button
+                key={page}
+                type="button"
+                onClick={() => setActivePage?.(page)}
+                className="min-h-11 rounded-xl border border-border bg-card px-4 py-3 text-left text-sm font-medium hover:bg-muted/50"
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </SectionCard>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-4 xl:grid-cols-2 xl:gap-6">
         <SectionCard
           title="Top Labs by Revenue"
           subtitle="Highest visible revenue contributors"
@@ -964,27 +883,33 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
             <button
               type="button"
               onClick={() => setActivePage?.("orders")}
-              className="rounded-xl border bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50"
+              className="min-h-10 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted/50"
             >
               View Orders
             </button>
           }
         >
           {topLabs.length === 0 ? (
-            <div className="text-sm text-slate-500">No revenue data available yet.</div>
+            <EmptyState
+              title="No revenue data yet"
+              description="Top lab rankings appear once fulfilled orders are recorded."
+            />
           ) : (
             <div className="space-y-3">
               {topLabs.map((lab, idx) => (
-                <div key={`${lab.labName}-${idx}`} className="rounded-2xl border p-4">
+                <div
+                  key={`${lab.labName}-${idx}`}
+                  className="rounded-xl border border-border p-3 sm:p-4"
+                >
                   <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="font-semibold text-slate-900">{lab.labName || "-"}</div>
-                      <div className="mt-1 text-sm text-slate-500">Revenue contribution</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-base font-semibold text-slate-900">
-                        {currency(lab.revenue || 0)}
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold text-foreground">
+                        {lab.labName || "-"}
                       </div>
+                      <div className="mt-0.5 text-sm text-muted-foreground">Revenue contribution</div>
+                    </div>
+                    <div className="shrink-0 text-right text-base font-semibold text-foreground">
+                      {currency(lab.revenue || 0)}
                     </div>
                   </div>
                 </div>
@@ -1000,14 +925,17 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
             <button
               type="button"
               onClick={() => setActivePage?.("visits")}
-              className="rounded-xl border bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50"
+              className="min-h-10 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted/50"
             >
               Open Visits
             </button>
           }
         >
           {recentVisits.length === 0 ? (
-            <div className="text-sm text-slate-500">No recent visit data found.</div>
+            <EmptyState
+              title="No recent visits"
+              description="Field activity from agents will show here after visits are logged."
+            />
           ) : (
             <div className="space-y-3">
               {recentVisits.map((visit, idx) => {
@@ -1020,16 +948,14 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
                           <div className="font-semibold text-slate-900">{visit.labName}</div>
                         ) : null}
                         {visit.relativeDate ? (
-                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
+                          <StatusBadge variant="neutral" compact>
                             {visit.relativeDate}
-                          </span>
+                          </StatusBadge>
                         ) : null}
                         {visit.visitType ? (
-                          <span
-                            className={`rounded-full border px-2 py-0.5 text-xs font-medium ${visit.visitTypeClass}`}
-                          >
+                          <StatusBadge variant={visit.visitTypeVariant} compact>
                             {visit.visitType}
-                          </span>
+                          </StatusBadge>
                         ) : null}
                       </div>
                       {visit.agent || visit.metaDetail ? (
@@ -1052,7 +978,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
                       key={cardKey}
                       type="button"
                       onClick={() => openVisitFromActivity(visit, setActivePage)}
-                      className="w-full rounded-2xl border p-4 text-left transition-colors hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+                      className="w-full rounded-xl border border-border p-3 text-left transition-colors hover:border-border hover:bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:p-4"
                     >
                       {cardInner}
                     </button>
@@ -1060,7 +986,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
                 }
 
                 return (
-                  <div key={cardKey} className="rounded-2xl border p-4">
+                  <div key={cardKey} className="rounded-xl border border-border p-3 sm:p-4">
                     {cardInner}
                   </div>
                 );
@@ -1070,7 +996,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
         </SectionCard>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-4 xl:grid-cols-2 xl:gap-6">
         <SectionCard
           title="AI Insights"
           subtitle="Risk and growth signals generated from current data"
@@ -1078,30 +1004,32 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
             <button
               type="button"
               onClick={() => setActivePage?.("insights")}
-              className="rounded-xl border bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50"
+              className="min-h-10 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted/50"
             >
               Open Insights
             </button>
           }
         >
           {insights.length === 0 ? (
-            <div className="text-sm text-slate-500">No AI insights available yet.</div>
+            <EmptyState
+              title="No AI insights yet"
+              description="Insights appear when enough operational data is available to analyze."
+            />
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2 sm:space-y-3">
               {insights.slice(0, 4).map((item, idx) => (
-                <div key={`${item.type}-${idx}`} className="rounded-2xl border p-4">
+                <div
+                  key={`${item.type}-${idx}`}
+                  className="rounded-xl border border-border p-3 sm:p-4"
+                >
                   <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="font-semibold text-slate-900">{item.title}</div>
-                      <div className="mt-1 text-sm text-slate-600">{item.message}</div>
+                    <div className="min-w-0">
+                      <div className="font-semibold text-foreground">{item.title}</div>
+                      <div className="mt-1 text-sm text-muted-foreground">{item.message}</div>
                     </div>
-                    <span
-                      className={`rounded-full border px-2 py-0.5 text-xs font-medium ${severityBadgeClass(
-                        item.severity
-                      )}`}
-                    >
+                    <StatusBadge variant={insightSeverityToVariant(item.severity)} compact>
                       {item.severity}
-                    </span>
+                    </StatusBadge>
                   </div>
                 </div>
               ))}
@@ -1114,11 +1042,17 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
           subtitle="Practical next moves from the AI layer"
         >
           {recommendedActions.length === 0 ? (
-            <div className="text-sm text-slate-500">No recommended actions available yet.</div>
+            <EmptyState
+              title="No recommended actions"
+              description="Action suggestions will appear alongside AI insights when available."
+            />
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2 sm:space-y-3">
               {recommendedActions.slice(0, 5).map((action, idx) => (
-                <div key={idx} className="rounded-2xl border p-4 text-sm text-slate-700">
+                <div
+                  key={idx}
+                  className="rounded-xl border border-border p-3 text-sm text-foreground sm:p-4"
+                >
                   {action}
                 </div>
               ))}
