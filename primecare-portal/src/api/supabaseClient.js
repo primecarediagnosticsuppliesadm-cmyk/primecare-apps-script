@@ -19,11 +19,3 @@ export const supabase =
         },
       })
     : null;
-
-/** Stable metadata for QA auth diagnostics (single module-level client). */
-export const PRIMECARE_SUPABASE_CLIENT_META = {
-  modulePath: "src/api/supabaseClient.js",
-  importSpecifier: "./supabaseClient.js",
-  singleton: true,
-  instanceCount: 1,
-};

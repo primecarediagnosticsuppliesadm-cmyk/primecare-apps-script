@@ -603,29 +603,11 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
 
   const loadPrimaryData = async ({ force = false } = {}) => {
     if (shouldUseQaDirectDashboardRead()) {
-      console.log("[QA AdminDashboard] loadPrimaryData → getAdminDashboardRead({ force: true })");
       clearAdminDashboardModuleCache();
       invalidateAdminDashboardReadCache();
 
       const result = await getAdminDashboardRead({ force: true });
-      console.log("[QA AdminDashboard direct read]", result);
-
       const dashboard = mapDirectDashboardStateFromRead(result);
-      console.log("[QA AdminDashboard mapped state]", dashboard);
-
-      console.log(
-        "[QA RAW KPI PAYLOAD]",
-        JSON.stringify(
-          {
-            summary: result?.data?.summary,
-            executive: result?.data?.executive,
-            visits: result?.data?.visits?.length,
-            insights: result?.data?.insights?.length,
-          },
-          null,
-          2
-        )
-      );
 
       setSummaryData(dashboard.summary);
       setExecutiveData(dashboard.executive);
