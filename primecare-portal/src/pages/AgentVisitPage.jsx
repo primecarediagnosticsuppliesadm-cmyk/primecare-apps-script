@@ -404,11 +404,23 @@ export default function AgentVisitPage({ currentUser, authToken }) {
     }));
   }, [currentUser?.id, currentUser?.agentName, currentUser?.name]);
 
-  const visibleLabs = useMemo(() => labs, [labs]);
-  const labOptions = useMemo(
-    () => visibleLabs.filter((l) => String(l.labId ?? "").trim() !== ""),
+  const visibleLabs = useMemo(() => {
+    if (isAgentUser(currentUser)) {
+      return filterLabsForUser(labs, currentUser);
+    }
+    return labs;
+  }, [labs, currentUser]);
+
+  const labSelectOptions = useMemo(
+    () => buildLabSelectOptions(visibleLabs),
     [visibleLabs]
   );
+
+  useEffect(() => {
+    console.log("FILTERED LABS", visibleLabs);
+    console.log("DROPDOWN OPTIONS", labSelectOptions);
+  }, [visibleLabs, labSelectOptions]);
+
   const visibleVisits = useMemo(() => recentVisits, [recentVisits]);
   const visibleCollections = useMemo(() => collections, [collections]);
 
