@@ -4,8 +4,7 @@ import {
   updateQualificationFounderReviewWrite,
   updateQualificationPipelineWrite,
 } from "@/api/primecareSupabaseApi";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -17,29 +16,26 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Loader2,
-  ClipboardCheck,
-  RefreshCw,
-  ChevronDown,
-  ChevronUp,
-  Search,
-  CheckCircle2,
-  AlertCircle,
-  X,
-} from "lucide-react";
+  StatusBadge,
+  PageSkeleton,
+  ListSkeleton,
+  EmptyState,
+  usePortalToast,
+} from "@/components/ux";
 import {
-  formatQualificationBandLabel,
-  qualificationBandBadgeClass,
-} from "@/utils/computeQualificationScore";
+  qualificationBandToVariant,
+  pipelineStageToVariant,
+  founderReviewToVariant,
+  tierLevelToVariant,
+} from "@/utils/statusTokens";
+import { Loader2, ClipboardCheck, RefreshCw, ChevronDown, ChevronUp, Search } from "lucide-react";
+import { formatQualificationBandLabel } from "@/utils/computeQualificationScore";
 import { ROLES } from "@/config/roles";
 import {
   getPipelineStageLabel,
   getPipelineStageOrder,
   PIPELINE_STAGE_SELECT_OPTIONS,
-  pipelineStageBadgeClass,
 } from "@/utils/qualificationPipeline";
-
-const TOAST_DURATION_MS = 4500;
 
 function canEditPipeline(currentUser) {
   const role = String(currentUser?.role || "").toLowerCase();
@@ -94,14 +90,6 @@ const REVIEW_STATUS_OPTIONS = [
   { value: "needs_info", label: "Needs info" },
 ];
 
-function statusBadgeClass(status) {
-  const s = String(status || "").toLowerCase();
-  if (s === "approved") return "bg-green-100 text-green-800";
-  if (s === "rejected") return "bg-red-100 text-red-800";
-  if (s === "needs_info") return "bg-amber-100 text-amber-900";
-  return "bg-slate-100 text-slate-800";
-}
-
 function formatStatusLabel(status) {
   const s = String(status || "pending").toLowerCase();
   if (s === "needs_info") return "Needs info";
@@ -144,58 +132,12 @@ function rowKey(row) {
   return row.id || row.labId;
 }
 
-function usePageToast() {
-  const [toast, setToast] = useState(null);
-
-  const showToast = useCallback((type, message) => {
-    setToast({ type, message, id: Date.now() });
-  }, []);
-
-  useEffect(() => {
-    if (!toast) return undefined;
-    const t = setTimeout(() => setToast(null), TOAST_DURATION_MS);
-    return () => clearTimeout(t);
-  }, [toast]);
-
-  return { toast, showToast, clearToast: () => setToast(null) };
-}
-
-function PageToast({ toast, onDismiss }) {
-  if (!toast) return null;
-  const isError = toast.type === "error";
-  return (
-    <div
-      role="status"
-      className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm shadow-sm ${
-        isError
-          ? "border-red-200 bg-red-50 text-red-800"
-          : "border-green-200 bg-green-50 text-green-900"
-      }`}
-    >
-      {isError ? (
-        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-      ) : (
-        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-      )}
-      <span className="flex-1 font-medium">{toast.message}</span>
-      <button
-        type="button"
-        onClick={onDismiss}
-        className="rounded p-0.5 opacity-70 hover:opacity-100"
-        aria-label="Dismiss"
-      >
-        <X className="h-4 w-4" />
-      </button>
-    </div>
-  );
-}
-
-function PipelineStageBadge({ row }) {
+function PipelineStageBadge({ row, compact = false }) {
   const stage = row.pipelineStage || "new";
   return (
-    <Badge className={`text-[10px] px-1.5 py-0 ${pipelineStageBadgeClass(stage)}`}>
+    <StatusBadge variant={pipelineStageToVariant(stage)} compact={compact}>
       {row.pipelineStageLabel || getPipelineStageLabel(stage)}
-    </Badge>
+    </StatusBadge>
   );
 }
 
@@ -207,13 +149,9 @@ function ScoreBandBadge({ row, compact = false }) {
   return (
     <div className="flex flex-wrap items-center gap-1">
       {band ? (
-        <Badge
-          className={`${qualificationBandBadgeClass(band)} ${
-            compact ? "text-[10px] px-1.5 py-0" : ""
-          }`}
-        >
+        <StatusBadge variant={qualificationBandToVariant(band)} compact={compact}>
           {formatQualificationBandLabel(band)}
-        </Badge>
+        </StatusBadge>
       ) : null}
       {row.qualificationScore != null ? (
         <span className="text-[11px] font-semibold text-slate-600">
@@ -339,31 +277,45 @@ function StickyReviewFilters({
 
 function QualificationDetailsGrid({ row }) {
   const items = [
-    hasDisplayValue(row.labSize) && { label: "Lab size", value: row.labSize },
+    hasDisplayValue(row.labSize) && {
+      label: "Lab size",
+      value: row.labSize,
+      badge: null,
+    },
     hasDisplayValue(row.monthlyConsumablesEstimate) && {
       label: "Monthly estimate",
       value: formatMoney(row.monthlyConsumablesEstimate),
+      badge: null,
     },
     hasDisplayValue(row.currentSupplier) && {
       label: "Current supplier",
       value: row.currentSupplier,
+      badge: null,
     },
     hasDisplayValue(row.paymentTerms) && {
       label: "Payment terms",
       value: row.paymentTerms,
+      badge: null,
     },
     hasDisplayValue(row.decisionMaker) && {
       label: "Decision maker",
       value: row.decisionMaker,
+      badge: null,
     },
     hasDisplayValue(row.reagentRentalPotential) && {
       label: "Reagent rental",
       value: row.reagentRentalPotential,
+      badge: tierLevelToVariant(row.reagentRentalPotential),
     },
-    hasDisplayValue(row.labOsFit) && { label: "Lab OS fit", value: row.labOsFit },
+    hasDisplayValue(row.labOsFit) && {
+      label: "Lab OS fit",
+      value: row.labOsFit,
+      badge: tierLevelToVariant(row.labOsFit),
+    },
     hasDisplayValue(row.agentName || row.agentId) && {
       label: "Agent",
       value: row.agentName || row.agentId,
+      badge: null,
     },
   ].filter(Boolean);
 
@@ -386,7 +338,15 @@ function QualificationDetailsGrid({ row }) {
               <div className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
                 {item.label}
               </div>
-              <div className="text-sm text-slate-800">{item.value}</div>
+              {item.badge ? (
+                <div className="mt-0.5">
+                  <StatusBadge variant={item.badge} compact>
+                    {item.value}
+                  </StatusBadge>
+                </div>
+              ) : (
+                <div className="text-sm text-slate-800">{item.value}</div>
+              )}
             </div>
           ))}
         </div>
@@ -437,7 +397,7 @@ function NotesSection({ row }) {
 function SavedHint({ label, at }) {
   if (!at) return null;
   return (
-    <p className="text-[11px] text-green-700" role="status">
+    <p className="text-[11px] text-[var(--pc-success)]" role="status">
       {label} · saved {formatShortDateTime(at)}
     </p>
   );
@@ -508,7 +468,7 @@ function PipelineEditor({ row, currentUser, onSaved, onError, savedAt }) {
           <div>
             <span className="text-slate-500">Stage</span>
             <div className="mt-0.5">
-              <PipelineStageBadge row={row} />
+              <PipelineStageBadge row={row} compact />
             </div>
           </div>
           <div>
@@ -768,11 +728,7 @@ function ReviewExpandedPanel({
   );
 }
 
-function ReviewSummaryRow({
-  row,
-  expanded,
-  onToggleExpand,
-}) {
+function ReviewSummaryRow({ row, expanded, onToggleExpand }) {
   const followUp = row.nextFollowUpDate || "—";
   const prob =
     row.pipelineProbability != null ? `${row.pipelineProbability}%` : "—";
@@ -808,12 +764,20 @@ function ReviewSummaryRow({
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-1">
             <ScoreBandBadge row={row} compact />
-            <PipelineStageBadge row={row} />
-            <Badge
-              className={`text-[10px] px-1.5 py-0 ${statusBadgeClass(row.founderReviewStatus)}`}
-            >
+            <PipelineStageBadge row={row} compact />
+            <StatusBadge variant={founderReviewToVariant(row.founderReviewStatus)} compact>
               {formatStatusLabel(row.founderReviewStatus)}
-            </Badge>
+            </StatusBadge>
+            {hasDisplayValue(row.reagentRentalPotential) ? (
+              <StatusBadge variant={tierLevelToVariant(row.reagentRentalPotential)} compact>
+                Rental {row.reagentRentalPotential}
+              </StatusBadge>
+            ) : null}
+            {hasDisplayValue(row.labOsFit) ? (
+              <StatusBadge variant={tierLevelToVariant(row.labOsFit)} compact>
+                Lab OS {row.labOsFit}
+              </StatusBadge>
+            ) : null}
           </div>
         </div>
         <Button
@@ -953,6 +917,24 @@ function useFilteredQualificationRows(rows, filters) {
   ]);
 }
 
+function QualificationReviewLoading() {
+  return (
+    <div className="space-y-3 pb-6">
+      <PageSkeleton kpiCount={0} kpiColumns={4} showList={false} />
+      <div className="animate-pulse rounded-lg border border-slate-200 bg-white p-2 shadow-sm">
+        <div className="mb-2 h-4 w-24 rounded bg-muted" />
+        <div className="mb-2 h-9 w-full rounded-lg bg-muted" />
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-14 rounded-lg bg-muted/80" />
+          ))}
+        </div>
+      </div>
+      <ListSkeleton rows={8} />
+    </div>
+  );
+}
+
 export default function QualificationReviewPage({ currentUser }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -966,7 +948,7 @@ export default function QualificationReviewPage({ currentUser }) {
   const [sortBy, setSortBy] = useState("stage");
   const [expandedLabId, setExpandedLabId] = useState(null);
   const [saveMeta, setSaveMeta] = useState({});
-  const { toast, showToast, clearToast } = usePageToast();
+  const { showToast } = usePortalToast();
 
   const loadRows = useCallback(async () => {
     try {
@@ -1034,12 +1016,7 @@ export default function QualificationReviewPage({ currentUser }) {
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center gap-2 p-4 text-slate-600">
-        <Loader2 className="h-5 w-5 animate-spin" />
-        Loading qualification reviews…
-      </div>
-    );
+    return <QualificationReviewLoading />;
   }
 
   return (
@@ -1047,7 +1024,7 @@ export default function QualificationReviewPage({ currentUser }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <ClipboardCheck className="h-5 w-5 text-slate-700" />
+            <ClipboardCheck className="h-5 w-5 text-[var(--pc-brand-primary)]" />
             <h1 className="text-xl font-semibold tracking-tight">Qualification Review</h1>
           </div>
           <p className="mt-0.5 text-xs text-slate-500">
@@ -1065,8 +1042,6 @@ export default function QualificationReviewPage({ currentUser }) {
           Refresh
         </Button>
       </div>
-
-      <PageToast toast={toast} onDismiss={clearToast} />
 
       {error ? (
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -1103,14 +1078,14 @@ export default function QualificationReviewPage({ currentUser }) {
       />
 
       {filteredRows.length === 0 ? (
-        <div className="rounded-lg border bg-white p-6 text-center shadow-sm">
-          <p className="text-sm font-medium text-slate-900">No qualifications to review</p>
-          <p className="mt-1 text-xs text-slate-500">
-            {rows.length === 0
+        <EmptyState
+          title="No qualifications to review"
+          description={
+            rows.length === 0
               ? "Agents have not saved any lab qualification profiles yet."
-              : "Try a different search or filter."}
-          </p>
-        </div>
+              : "Try a different search or filter."
+          }
+        />
       ) : (
         <div className="space-y-2" role="list">
           {filteredRows.map((row) => {
