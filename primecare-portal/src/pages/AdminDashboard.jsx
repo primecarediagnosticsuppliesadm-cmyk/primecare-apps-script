@@ -30,6 +30,7 @@ import { IS_QA, REQUIRE_SUPABASE_AUTH } from "@/config/environment";
 import { isQaValidationLayerEnabled } from "@/config/qaValidation.js";
 import { recordPredatorTiming } from "@/predator/predatorTiming.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
+import { usePredatorRenderTrace } from "@/predator/renderTrace.js";
 import AdminDashboardQaValidationPanel from "@/components/qa/AdminDashboardQaValidationPanel.jsx";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
 import {
@@ -921,6 +922,11 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     qaValidationSnapshot,
     !loading && Boolean(summaryData) && Boolean(executiveData)
   );
+
+  usePredatorRenderTrace("Admin Dashboard", {
+    ready: !loading,
+    hasData: Boolean(summaryData) && Boolean(executiveData),
+  });
 
   if (loading) {
     return <AdminDashboardLoading />;

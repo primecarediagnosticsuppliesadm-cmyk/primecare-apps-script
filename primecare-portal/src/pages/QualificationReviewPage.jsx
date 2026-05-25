@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
+import { usePredatorRenderTrace } from "@/predator/renderTrace.js";
 import {
   getQualificationReviewRead,
   updateQualificationFounderReviewWrite,
@@ -978,6 +979,11 @@ export default function QualificationReviewPage({ currentUser }) {
     { rowCount: rows.length },
     !loading
   );
+
+  usePredatorRenderTrace("Qualification Review", {
+    ready: !loading,
+    hasData: rows.length > 0,
+  });
 
   const filteredRows = useFilteredQualificationRows(rows, {
     searchQuery,

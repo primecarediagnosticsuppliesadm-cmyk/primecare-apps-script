@@ -35,6 +35,11 @@ import {
   rollupStockDashboardMappedItems,
 } from "@/metrics/computeInventoryMetrics.js";
 import { IS_QA } from "@/config/environment";
+import { recordPredatorCacheEvent } from "@/predator/cacheDiagnostics.js";
+import {
+  estimatePayloadBytes,
+  recordPredatorApiExecution,
+} from "@/predator/apiExecutionTrace.js";
 import { recordPredatorTiming, predatorTrace } from "@/predator/predatorTiming.js";
 import { isPerfLogEnabled, perfLog, perfTime, shouldRunDashboardKpiAudit } from "@/utils/perfLog.js";
 
@@ -1749,6 +1754,7 @@ let adminDashboardReadCache = {
 export function invalidateAdminDashboardReadCache() {
   adminDashboardReadCache = { result: null, loadedAt: 0 };
   perfLog("getAdminDashboardRead.cacheCleared");
+  recordPredatorCacheEvent({ cacheKey: "adminDashboardRead", event: "invalidate" });
 }
 
 async function timedSupabaseQuery(label, queryFnOrPromise) {
@@ -1812,6 +1818,18 @@ export async function getAdminDashboardRead(options = {}) {
     perfLog("getAdminDashboardRead.cacheHit", {
       ageMs: Date.now() - adminDashboardReadCache.loadedAt,
     });
+    const ageMs = Date.now() - adminDashboardReadCache.loadedAt;
+    const cachedData = adminDashboardReadCache.result?.data;
+    recordPredatorCacheEvent({
+      cacheKey: "adminDashboardRead",
+      event: "hit",
+      ageMs,
+      summary: {
+        ordersCount: 0,
+        outstandingReceivables: cachedData?.executive?.outstandingReceivables ?? 0,
+        recentVisits: cachedData?.summary?.recentVisits ?? 0,
+      },
+    });
     recordPredatorTiming({
       module: "Admin Dashboard",
       step: "api.getAdminDashboardRead",
@@ -1820,6 +1838,8 @@ export async function getAdminDashboardRead(options = {}) {
     });
     return adminDashboardReadCache.result;
   }
+
+  recordPredatorCacheEvent({ cacheKey: "adminDashboardRead", event: "miss", ageMs: 0 });
 
   const endTotal = perfTime("getAdminDashboardRead.total");
 
@@ -2039,11 +2059,18 @@ export async function getAdminDashboardRead(options = {}) {
       durationMs: Math.round(performance.now() - dashboardReadT0),
       detail: { queryErrors },
     });
-    recordPredatorTiming({
+    recordPredatorApiExecution({
       module: "Admin Dashboard",
-      step: "kpi.compute",
-      durationMs: 0,
-      detail: { note: "included in getAdminDashboardRead.total" },
+      apiName: "getAdminDashboardRead",
+      durationMs: Math.round(performance.now() - dashboardReadT0),
+      rowsReturned: ordersRaw.length + arRaw.length + visitsTotalCount,
+      payloadBytes: estimatePayloadBytes(payload),
+      detail: {
+        orders: ordersRaw.length,
+        ar: arRaw.length,
+        visits: visitsTotalCount,
+        inventory: invRaw.length,
+      },
     });
     return result;
   } catch (err) {

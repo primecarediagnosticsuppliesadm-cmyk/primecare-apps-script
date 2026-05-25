@@ -7,6 +7,11 @@ import {
   checkRoleAccess,
 } from "@/predator/predatorChecks.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
+import {
+  buildQualificationMetricDiagnoses,
+  finalizeModuleDiagnosis,
+} from "@/predator/buildModuleDiagnosis.js";
+import { diagnoseProjectionColumns } from "@/predator/schemaAwareness.js";
 
 /**
  * @param {Object} params
@@ -110,10 +115,26 @@ export async function validateQualificationModule({ ctx, rendered = null }) {
       );
     }
 
+    await diagnoseProjectionColumns("lab_qualifications", ["pipeline_stage", "invalid_column_probe"]);
+
+    const layerSnap = {
+      dbCount,
+      apiCount: apiRows.length,
+      uiCount,
+    };
+    const metrics = buildQualificationMetricDiagnoses(layerSnap, ctx);
+    const { diagnosis, extraEntries } = finalizeModuleDiagnosis({
+      module: "Qualification Review",
+      ctx,
+      metrics,
+    });
+
+    const allEntries = [...entries, ...extraEntries];
     return {
       module: "Qualification Review",
-      summary: summarizePredatorEntries(entries),
-      entries,
+      summary: summarizePredatorEntries(allEntries),
+      entries: allEntries,
+      diagnosis,
     };
   });
 }

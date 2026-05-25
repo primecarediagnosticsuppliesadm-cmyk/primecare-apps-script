@@ -1,6 +1,11 @@
 import { runAdminDashboardValidation } from "@/validation/adminDashboardValidation.js";
 import { createPredatorEntry, summarizePredatorEntries } from "@/predator/predatorSchema.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
+import {
+  buildAdminDashboardMetricDiagnoses,
+  finalizeModuleDiagnosis,
+} from "@/predator/buildModuleDiagnosis.js";
+import { diagnoseProjectionColumns } from "@/predator/schemaAwareness.js";
 
 /**
  * @param {Object} params
@@ -36,7 +41,25 @@ export async function validateAdminDashboardModule({ ctx, rendered = null }) {
       })
     );
 
-    const summary = summarizePredatorEntries(entries);
-    return { module: "Admin Dashboard", summary, entries, legacyReport: report };
+    await diagnoseProjectionColumns("orders", ["order_status", "net_line_total"]);
+    await diagnoseProjectionColumns("order_lines", ["net_line_total"]);
+
+    const metrics = buildAdminDashboardMetricDiagnoses(report.layerSnapshot || {}, ctx);
+    const { diagnosis, extraEntries } = finalizeModuleDiagnosis({
+      module: "Admin Dashboard",
+      ctx,
+      metrics,
+    });
+
+    const allEntries = [...entries, ...extraEntries];
+    const summary = summarizePredatorEntries(allEntries);
+
+    return {
+      module: "Admin Dashboard",
+      summary,
+      entries: allEntries,
+      legacyReport: report,
+      diagnosis,
+    };
   });
 }

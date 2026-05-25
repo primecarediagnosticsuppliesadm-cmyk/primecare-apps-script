@@ -29,6 +29,7 @@ import {
   ALLOW_LEGACY_APPS_SCRIPT,
 } from "@/config/environment";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
+import { usePredatorRenderTrace } from "@/predator/renderTrace.js";
 
 function findCollectionByLabId(list, labId) {
   const target = labIdKey(labId);
@@ -102,6 +103,11 @@ export default function CollectionsPage({ currentUser, authToken }) {
     { summary, collections, collectionCount: collections.length },
     !loading
   );
+
+  usePredatorRenderTrace("Collections", {
+    ready: !loading,
+    hasData: collections.length > 0 || summary.totalOutstanding > 0,
+  });
 
   useEffect(() => {
     if (loading) return;

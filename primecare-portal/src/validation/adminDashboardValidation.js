@@ -220,6 +220,22 @@ export async function runAdminDashboardValidation(options = {}) {
     printQaValidationReport(report);
   }
 
+  report.layerSnapshot = {
+    ordersRowCount: browser.ordersRowCount,
+    arOutstanding: browser.arOutstanding,
+    visitsRowCount: browser.visitsRowCount,
+    inventorySkus: browser.inventorySkus,
+    totalSoldValue: browser.totalSoldValue,
+    apiOutstanding: numOrNull(apiExecutive.outstandingReceivables),
+    apiRecentVisits: numOrNull(apiSummary.recentVisits),
+    apiInventorySkus: numOrNull(apiStock.totalSkus),
+    apiTotalSold: numOrNull(apiSummary.totalSoldValue),
+    uiOutstanding: numOrNull(uiExecutive.outstandingReceivables),
+    uiRecentVisits: numOrNull(uiSummary.recentVisits),
+    uiInventorySkus: numOrNull(uiStock.totalSkus),
+    uiTotalSold: numOrNull(uiSummary.totalSoldValue),
+  };
+
   return report;
 }
 

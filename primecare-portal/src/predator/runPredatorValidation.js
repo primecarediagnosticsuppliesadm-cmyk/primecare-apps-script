@@ -63,6 +63,8 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
     const allEntries = modules.flatMap((m) => m.entries);
     const summary = summarizePredatorEntries(allEntries);
 
+    const diagnoses = predatorStore.getAllModuleDiagnosesForActiveTenant();
+
     const report = {
       status: summary.status,
       tenant: ctx,
@@ -70,6 +72,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
       modules,
       summary,
       entries: allEntries,
+      diagnoses,
     };
 
     if (summary.status !== "PASS") {
@@ -124,6 +127,9 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
 
   if (result) {
     predatorStore.setModuleReport(moduleName, result.entries, ctx);
+    if (result.diagnosis) {
+      predatorStore.setModuleDiagnosis(moduleName, result.diagnosis, ctx);
+    }
   }
   return result;
 }

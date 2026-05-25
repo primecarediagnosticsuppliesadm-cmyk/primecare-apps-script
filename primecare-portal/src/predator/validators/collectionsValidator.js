@@ -8,6 +8,10 @@ import {
   checkRoleAccess,
 } from "@/predator/predatorChecks.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
+import {
+  buildCollectionsMetricDiagnoses,
+  finalizeModuleDiagnosis,
+} from "@/predator/buildModuleDiagnosis.js";
 
 /**
  * @param {Object} params
@@ -114,6 +118,28 @@ export async function validateCollectionsModule({ ctx, rendered = null }) {
       );
     }
 
-    return { module: "Collections", summary: summarizePredatorEntries(entries), entries };
+    const layerSnap = {
+      dbArRows,
+      dbOutstanding: outstandingReceivables,
+      apiCollectionCount: apiCollections.length,
+      apiOutstanding,
+      uiCollectionCount: uiCollections,
+      uiOutstanding,
+    };
+
+    const metrics = buildCollectionsMetricDiagnoses(layerSnap, ctx);
+    const { diagnosis, extraEntries } = finalizeModuleDiagnosis({
+      module: "Collections",
+      ctx,
+      metrics,
+    });
+
+    const allEntries = [...entries, ...extraEntries];
+    return {
+      module: "Collections",
+      summary: summarizePredatorEntries(allEntries),
+      entries: allEntries,
+      diagnosis,
+    };
   });
 }

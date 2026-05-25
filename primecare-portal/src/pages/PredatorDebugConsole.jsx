@@ -3,6 +3,7 @@ import { predatorStore } from "@/predator/predatorStore.js";
 import { runAllPredatorValidations } from "@/predator/runPredatorValidation.js";
 import { isPredatorEnabled } from "@/predator/predatorGuards.js";
 import { PREDATOR_TIMING_THRESHOLDS_MS } from "@/predator/predatorSchema.js";
+import PredatorTimeline from "@/components/qa/PredatorTimeline.jsx";
 import { typography } from "@/styles/designTokens";
 import { cn } from "@/lib/utils";
 import { RefreshCw, ShieldAlert, Activity, Database } from "lucide-react";
@@ -36,6 +37,12 @@ export default function PredatorDebugConsole({ currentUser }) {
   const slowest = useMemo(() => predatorStore.getSlowestProcesses(12), [tick, lastReport]);
   const errors = useMemo(() => predatorStore.getErrors(), [tick, lastReport]);
   const failedChecks = useMemo(() => predatorStore.getFailedValidations(), [tick, lastReport]);
+  const diagnoses = useMemo(
+    () => lastReport?.diagnoses || predatorStore.getAllModuleDiagnosesForActiveTenant(),
+    [tick, lastReport]
+  );
+  const cacheEvents = useMemo(() => predatorStore.getCacheEvents(), [tick, lastReport]);
+  const selectedDiagnosis = diagnoses[0] || null;
 
   const rerun = useCallback(async () => {
     setRunning(true);
@@ -66,7 +73,7 @@ export default function PredatorDebugConsole({ currentUser }) {
         <div>
           <h1 className={typography.pageTitle}>Predator Debug Console</h1>
           <p className={cn(typography.pageSubtitle, "mt-1")}>
-            Multi-tenant QA observability — read-only, no auto-fix, no data mutation.
+            Phase 3 autonomous diagnosis — read-only, no auto-fix, no data mutation.
           </p>
         </div>
         <button
@@ -161,6 +168,94 @@ export default function PredatorDebugConsole({ currentUser }) {
             ))
           )}
         </div>
+      </section>
+
+      {selectedDiagnosis ? (
+        <section className="rounded-2xl border border-border bg-card p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold">
+              Autonomous diagnosis — {selectedDiagnosis.module}
+            </h2>
+            <StatusPill status={selectedDiagnosis.status} />
+          </div>
+          {selectedDiagnosis.regression?.message ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Regression: {selectedDiagnosis.regression.message}
+              {selectedDiagnosis.regression.previousSavedAt
+                ? ` (baseline ${selectedDiagnosis.regression.previousSavedAt})`
+                : ""}
+            </p>
+          ) : null}
+          <PredatorTimeline
+            title="Pipeline timeline"
+            steps={selectedDiagnosis.timeline || []}
+          />
+          <ul className="mt-4 space-y-3">
+            {(selectedDiagnosis.metrics || [])
+              .filter((m) => m.status !== "PASS")
+              .map((m) => (
+                <li
+                  key={m.metricId}
+                  className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusPill status={m.status} />
+                    <span className="font-medium">{m.metricLabel}</span>
+                    <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+                      {m.issueClass}
+                    </span>
+                  </div>
+                  <p className="mt-1">
+                    First divergence: <strong>{m.firstDivergenceLayer}</strong>
+                  </p>
+                  <p className="mt-1">{m.probableRootCause}</p>
+                  <ul className="mt-2 list-inside list-disc text-muted-foreground">
+                    {(m.suggestions || []).map((s) => (
+                      <li key={s}>{s}</li>
+                    ))}
+                  </ul>
+                  <pre className="mt-2 max-h-32 overflow-auto font-mono text-[10px] opacity-80">
+                    {JSON.stringify(
+                      m.layerTrace.map((l) => ({ layer: l.layerId, value: l.value })),
+                      null,
+                      2
+                    )}
+                  </pre>
+                </li>
+              ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {diagnoses.length > 1 ? (
+        <section className="grid gap-3 sm:grid-cols-3">
+          {diagnoses.map((d) => (
+            <div key={d.module} className="rounded-xl border border-border bg-card p-3 text-xs">
+              <div className="font-medium">{d.module}</div>
+              <StatusPill status={d.status} />
+              <p className="mt-1 text-muted-foreground">
+                {(d.metrics || []).filter((m) => m.status !== "PASS").length} open metric(s)
+              </p>
+            </div>
+          ))}
+        </section>
+      ) : null}
+
+      <section className="rounded-2xl border border-border bg-card p-4">
+        <h2 className="text-sm font-semibold">Cache diagnostics</h2>
+        <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-xs font-mono">
+          {cacheEvents.length === 0 ? (
+            <li className="text-muted-foreground">No cache events yet.</li>
+          ) : (
+            cacheEvents.map((c, i) => (
+              <li key={`${c.cacheKey}-${i}`} className={c.staleZeroRisk ? "text-red-700" : ""}>
+                {c.cacheKey} · {c.event}
+                {c.ageMs != null ? ` · age ${c.ageMs}ms` : ""}
+                {c.staleZeroRisk ? " · STALE ZERO RISK" : ""}
+              </li>
+            ))
+          )}
+        </ul>
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">

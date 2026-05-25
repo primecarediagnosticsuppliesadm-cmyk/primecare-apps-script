@@ -23,6 +23,7 @@
  * @property {string|null} [tenantId]
  * @property {string|null} [role]
  * @property {string|null} [userId]
+ * @property {string} [issueClass]
  */
 
 /** Slow-query / process thresholds (ms) — Phase 2 defaults. */
@@ -65,6 +66,7 @@ export function createPredatorEntry(partial) {
     tenantId: partial.tenantId ?? null,
     role: partial.role ?? null,
     userId: partial.userId ?? null,
+    issueClass: partial.issueClass,
   };
 }
 

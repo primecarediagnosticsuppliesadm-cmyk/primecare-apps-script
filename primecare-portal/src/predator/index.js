@@ -18,3 +18,12 @@ export {
   runAllPredatorValidations,
   runPredatorModuleValidation,
 } from "@/predator/runPredatorValidation.js";
+export { diagnoseMetricLayers } from "@/predator/rootCauseEngine.js";
+export { recordPredatorCacheEvent } from "@/predator/cacheDiagnostics.js";
+export { recordPredatorApiExecution } from "@/predator/apiExecutionTrace.js";
+export { usePredatorRenderTrace, recordPredatorRenderStep } from "@/predator/renderTrace.js";
+export { diagnoseProjectionColumns } from "@/predator/schemaAwareness.js";
+export {
+  buildDebugTimeline,
+  finalizeModuleDiagnosis,
+} from "@/predator/buildModuleDiagnosis.js";
