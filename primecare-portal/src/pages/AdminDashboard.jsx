@@ -10,6 +10,7 @@ import {
   getLabsCredit,
   getReorderForecastRead,
   getAdminDashboardRead,
+  invalidateAdminDashboardReadCache,
   resolveAdminVisitRevenue,
 } from "@/api/primecareSupabaseApi";
 import {
@@ -76,6 +77,72 @@ function adminDashboardSkipAppsScriptReads() {
 
 function adminDashboardClientCacheEnabled() {
   return !IS_QA;
+}
+
+function hasSupabaseDashboardConfigured() {
+  return (
+    String(import.meta.env.VITE_SUPABASE_URL || "").trim() !== "" &&
+    String(import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim() !== ""
+  );
+}
+
+/** QA: single-path Supabase read → React state (no merge, no Apps Script, no cache). */
+function shouldUseQaDirectDashboardRead() {
+  return IS_QA && hasSupabaseDashboardConfigured();
+}
+
+function clearAdminDashboardModuleCache() {
+  adminDashboardCache.dashboard = null;
+  adminDashboardCache.executive = null;
+  adminDashboardCache.insights = null;
+  adminDashboardCache.visits = null;
+  adminDashboardCache.dashboardLoadedAt = 0;
+  adminDashboardCache.executiveLoadedAt = 0;
+  adminDashboardCache.insightsLoadedAt = 0;
+  adminDashboardCache.visitsLoadedAt = 0;
+}
+
+function mapDirectDashboardStateFromRead(result) {
+  const data = result?.success ? result.data : null;
+  if (!data?.summary || !data?.executive) {
+    return {
+      summary: {
+        stockStats: EMPTY_STOCK_STATS,
+        recentVisits: 0,
+        totalSoldValue: 0,
+        todayCollections: 0,
+      },
+      executive: {
+        todaysRevenue: 0,
+        outstandingReceivables: 0,
+        labsAtCreditRisk: 0,
+        productsNearStockout: 0,
+        topLabsByRevenue: [],
+      },
+      visits: EMPTY_VISITS_PAYLOAD,
+      insights: EMPTY_AI_INSIGHTS,
+    };
+  }
+
+  return {
+    summary: {
+      stockStats: data.summary.stockStats || EMPTY_STOCK_STATS,
+      recentVisits: Number(data.summary.recentVisits ?? 0),
+      totalSoldValue: Number(data.summary.totalSoldValue ?? 0),
+      todayCollections: Number(data.summary.todayCollections ?? 0),
+    },
+    executive: {
+      todaysRevenue: Number(data.executive.todaysRevenue ?? 0),
+      outstandingReceivables: Number(data.executive.outstandingReceivables ?? 0),
+      labsAtCreditRisk: Number(data.executive.labsAtCreditRisk ?? 0),
+      productsNearStockout: Number(data.executive.productsNearStockout ?? 0),
+      topLabsByRevenue: Array.isArray(data.executive.topLabsByRevenue)
+        ? data.executive.topLabsByRevenue
+        : [],
+    },
+    visits: data.visits ?? EMPTY_VISITS_PAYLOAD,
+    insights: data.insights ?? EMPTY_AI_INSIGHTS,
+  };
 }
 
 const EMPTY_AI_INSIGHTS = { insights: [], recommendedActions: [] };
@@ -512,17 +579,47 @@ function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) 
 }
 
 export default function AdminDashboard({ currentUser, setActivePage }) {
-  const [summaryData, setSummaryData] = useState(adminDashboardCache.dashboard);
-  const [executiveData, setExecutiveData] = useState(adminDashboardCache.executive);
-  const [insightsData, setInsightsData] = useState(adminDashboardCache.insights);
-  const [recentVisitsData, setRecentVisitsData] = useState(adminDashboardCache.visits);
+  const [summaryData, setSummaryData] = useState(
+    shouldUseQaDirectDashboardRead() ? null : adminDashboardCache.dashboard
+  );
+  const [executiveData, setExecutiveData] = useState(
+    shouldUseQaDirectDashboardRead() ? null : adminDashboardCache.executive
+  );
+  const [insightsData, setInsightsData] = useState(
+    shouldUseQaDirectDashboardRead() ? EMPTY_AI_INSIGHTS : adminDashboardCache.insights
+  );
+  const [recentVisitsData, setRecentVisitsData] = useState(
+    shouldUseQaDirectDashboardRead() ? EMPTY_VISITS_PAYLOAD : adminDashboardCache.visits
+  );
 
-  const [loading, setLoading] = useState(!adminDashboardCache.dashboard && !adminDashboardCache.executive);
+  const [loading, setLoading] = useState(
+    shouldUseQaDirectDashboardRead()
+      ? true
+      : !adminDashboardCache.dashboard && !adminDashboardCache.executive
+  );
   const [refreshing, setRefreshing] = useState(false);
   const [backgroundLoading, setBackgroundLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
   const loadPrimaryData = async ({ force = false } = {}) => {
+    if (shouldUseQaDirectDashboardRead()) {
+      console.log("[QA AdminDashboard] loadPrimaryData → getAdminDashboardRead({ force: true })");
+      clearAdminDashboardModuleCache();
+      invalidateAdminDashboardReadCache();
+
+      const result = await getAdminDashboardRead({ force: true });
+      console.log("[QA AdminDashboard direct read]", result);
+
+      const dashboard = mapDirectDashboardStateFromRead(result);
+      console.log("[QA AdminDashboard mapped state]", dashboard);
+
+      setSummaryData(dashboard.summary);
+      setExecutiveData(dashboard.executive);
+      setRecentVisitsData(dashboard.visits);
+      setInsightsData(dashboard.insights);
+      return;
+    }
+
     const useClientCache = adminDashboardClientCacheEnabled();
     const dashboardFresh =
       useClientCache &&
@@ -719,13 +816,16 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     try {
       setErrorMessage("");
 
-      if (!summaryData && !executiveData) {
+      if (shouldUseQaDirectDashboardRead()) {
+        setLoading(true);
+        setRefreshing(false);
+      } else if (!summaryData && !executiveData) {
         setLoading(true);
       } else {
         setRefreshing(true);
       }
 
-      await loadPrimaryData({ force });
+      await loadPrimaryData({ force: shouldUseQaDirectDashboardRead() || force });
     } catch (err) {
       console.error(err);
       setErrorMessage(err?.message || "Failed to load admin dashboard");
@@ -735,9 +835,11 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       endLoadAll({ force });
     }
 
-    loadSecondaryData({ force }).catch((err) => {
-      console.warn("[AdminDashboard] secondary panels:", err?.message || err);
-    });
+    if (!shouldUseQaDirectDashboardRead()) {
+      loadSecondaryData({ force }).catch((err) => {
+        console.warn("[AdminDashboard] secondary panels:", err?.message || err);
+      });
+    }
   };
 
   const dashboardInvalidateRef = useRef(() => {});
