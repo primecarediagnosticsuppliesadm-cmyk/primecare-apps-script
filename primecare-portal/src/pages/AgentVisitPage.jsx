@@ -44,6 +44,11 @@ import {
   normalizePortalLab,
 } from "@/utils/portalLabMapper";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
+import {
+  computeQualificationScore,
+  formatQualificationBandLabel,
+  qualificationBandBadgeClass,
+} from "@/utils/computeQualificationScore";
 
 function QuickStat({ title, value, icon: Icon }) {
   return (
@@ -175,10 +180,14 @@ const QUALIFICATION_DEFAULT = {
   nextFollowUpDate: "",
   founderReviewStatus: "pending",
   notes: "",
+  qualificationScore: null,
+  qualificationBand: "",
+  qualificationReasons: [],
 };
 
 function normalizeQualificationRow(row) {
   if (!row) return { ...QUALIFICATION_DEFAULT };
+  const scoring = computeQualificationScore(row);
   return {
     labSize: row.lab_size || "",
     monthlyConsumablesEstimate:
@@ -193,6 +202,12 @@ function normalizeQualificationRow(row) {
     nextFollowUpDate: row.next_follow_up_date || "",
     founderReviewStatus: row.founder_review_status || "pending",
     notes: row.notes || "",
+    qualificationScore:
+      row.qualification_score != null
+        ? Number(row.qualification_score)
+        : scoring.qualification_score,
+    qualificationBand: row.qualification_band || scoring.qualification_band || "",
+    qualificationReasons: scoring.qualification_reasons || [],
   };
 }
 
@@ -1056,6 +1071,38 @@ export default function AgentVisitPage({ currentUser, authToken }) {
                       </div>
                     ) : (
                       <>
+                        {qualificationForm.qualificationBand ? (
+                          <div className="rounded-xl border bg-slate-50 p-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                                Qualification band
+                              </span>
+                              <Badge
+                                className={qualificationBandBadgeClass(
+                                  qualificationForm.qualificationBand
+                                )}
+                              >
+                                {formatQualificationBandLabel(
+                                  qualificationForm.qualificationBand
+                                )}
+                              </Badge>
+                              {qualificationForm.qualificationScore != null ? (
+                                <span className="text-sm text-slate-700">
+                                  Score: {qualificationForm.qualificationScore}
+                                </span>
+                              ) : null}
+                            </div>
+                            {qualificationForm.qualificationReasons?.length > 0 ? (
+                              <ul className="mt-2 list-inside list-disc text-xs text-slate-600">
+                                {qualificationForm.qualificationReasons
+                                  .slice(0, 6)
+                                  .map((reason) => (
+                                    <li key={reason}>{reason}</li>
+                                  ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        ) : null}
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                           <div>
                             <FieldLabel helper="Approximate lab size tier">Lab Size</FieldLabel>

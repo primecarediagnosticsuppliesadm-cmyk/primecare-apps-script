@@ -9,6 +9,7 @@ import {
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { labIdKey, normalizeLabIdKey } from "@/utils/labId.js";
+import { computeQualificationScore } from "@/utils/computeQualificationScore.js";
 import {
   buildOrdersByLabDateIndex,
   computeRevenueMetrics,
@@ -2078,6 +2079,10 @@ export async function upsertLabQualificationWrite(payload = {}) {
       updated_by: str(payload.updatedBy ?? payload.updated_by ?? payload.userId ?? payload.user_id) || null,
     };
 
+    const scoring = computeQualificationScore(row);
+    row.qualification_score = scoring.qualification_score;
+    row.qualification_band = scoring.qualification_band;
+
     const { data, error } = await supabase
       .from("lab_qualifications")
       .upsert([row], { onConflict: "tenant_id,lab_id" })
@@ -2127,6 +2132,10 @@ function mapQualificationReviewRow(row, labMeta = null) {
     updatedBy: str(row?.updated_by),
     updatedAt: row?.updated_at || "",
     notes: str(row?.notes),
+    qualificationScore:
+      row?.qualification_score == null ? null : num(row.qualification_score),
+    qualificationBand: str(row?.qualification_band).toLowerCase(),
+    qualificationReasons: computeQualificationScore(row).qualification_reasons,
   };
 }
 
@@ -2211,8 +2220,27 @@ export async function updateQualificationFounderReviewWrite(payload = {}) {
       };
     }
 
+    const { data: existing, error: readErr } = await supabase
+      .from("lab_qualifications")
+      .select("*")
+      .eq("tenant_id", tenant_id)
+      .eq("lab_id", lab_id)
+      .maybeSingle();
+
+    if (readErr) {
+      return { success: false, error: readErr.message || "Read failed", data: null };
+    }
+    if (!existing) {
+      return { success: false, error: "Qualification record not found", data: null };
+    }
+
+    const merged = { ...existing, founder_review_status: status };
+    const scoring = computeQualificationScore(merged);
+
     const patch = {
       founder_review_status: status,
+      qualification_score: scoring.qualification_score,
+      qualification_band: scoring.qualification_band,
       updated_by:
         str(payload.updatedBy ?? payload.updated_by ?? payload.userId ?? payload.user_id) ||
         null,

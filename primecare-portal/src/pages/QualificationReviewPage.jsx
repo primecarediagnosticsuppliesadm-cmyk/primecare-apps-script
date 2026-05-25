@@ -14,6 +14,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Loader2, ClipboardCheck, RefreshCw } from "lucide-react";
+import {
+  formatQualificationBandLabel,
+  qualificationBandBadgeClass,
+} from "@/utils/computeQualificationScore";
 
 const STATUS_OPTIONS = [
   { value: "ALL", label: "All statuses" },
@@ -35,6 +39,18 @@ const FIT_OPTIONS = [
   { value: "Low", label: "Low" },
   { value: "Medium", label: "Medium" },
   { value: "High", label: "High" },
+];
+
+const BAND_OPTIONS = [
+  { value: "ALL", label: "All bands" },
+  { value: "hot", label: "HOT" },
+  { value: "warm", label: "WARM" },
+  { value: "cold", label: "COLD" },
+];
+
+const SORT_OPTIONS = [
+  { value: "updated", label: "Recently updated" },
+  { value: "score", label: "Score (high → low)" },
 ];
 
 const REVIEW_STATUS_OPTIONS = [
@@ -69,6 +85,27 @@ function formatDateTime(value) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return String(value);
   return d.toLocaleString();
+}
+
+function ScoreBandBadge({ row }) {
+  const band = String(row.qualificationBand || "").toLowerCase();
+  if (!band && row.qualificationScore == null) {
+    return <span className="text-xs text-slate-400">—</span>;
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {band ? (
+        <Badge className={qualificationBandBadgeClass(band)}>
+          {formatQualificationBandLabel(band)}
+        </Badge>
+      ) : null}
+      {row.qualificationScore != null ? (
+        <span className="text-xs font-medium text-slate-600">
+          {row.qualificationScore}
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 function FilterSelect({ label, value, onValueChange, options }) {
@@ -129,9 +166,12 @@ function ReviewRowCard({ row, currentUser, onSaved }) {
             <CardTitle className="text-base">{row.labName}</CardTitle>
             <CardDescription>{row.labId}</CardDescription>
           </div>
-          <Badge className={statusBadgeClass(row.founderReviewStatus)}>
-            {formatStatusLabel(row.founderReviewStatus)}
-          </Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <ScoreBandBadge row={row} />
+            <Badge className={statusBadgeClass(row.founderReviewStatus)}>
+              {formatStatusLabel(row.founderReviewStatus)}
+            </Badge>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
@@ -212,6 +252,8 @@ export default function QualificationReviewPage({ currentUser }) {
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [rentalFilter, setRentalFilter] = useState("ALL");
   const [fitFilter, setFitFilter] = useState("ALL");
+  const [bandFilter, setBandFilter] = useState("ALL");
+  const [sortBy, setSortBy] = useState("updated");
   const loadRows = useCallback(async () => {
     try {
       setLoading(true);
@@ -234,7 +276,7 @@ export default function QualificationReviewPage({ currentUser }) {
   }, [loadRows]);
 
   const filteredRows = useMemo(() => {
-    return rows.filter((row) => {
+    const filtered = rows.filter((row) => {
       if (statusFilter !== "ALL" && row.founderReviewStatus !== statusFilter) {
         return false;
       }
@@ -247,9 +289,29 @@ export default function QualificationReviewPage({ currentUser }) {
       if (fitFilter !== "ALL" && String(row.labOsFit || "") !== fitFilter) {
         return false;
       }
+      if (
+        bandFilter !== "ALL" &&
+        String(row.qualificationBand || "").toLowerCase() !== bandFilter
+      ) {
+        return false;
+      }
       return true;
     });
-  }, [rows, statusFilter, rentalFilter, fitFilter]);
+
+    const sorted = [...filtered];
+    if (sortBy === "score") {
+      sorted.sort(
+        (a, b) =>
+          Number(b.qualificationScore ?? -1) - Number(a.qualificationScore ?? -1)
+      );
+    } else {
+      sorted.sort(
+        (a, b) =>
+          new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+      );
+    }
+    return sorted;
+  }, [rows, statusFilter, rentalFilter, fitFilter, bandFilter, sortBy]);
 
   function handleRowSaved(updated) {
     if (!updated?.labId) {
@@ -311,7 +373,19 @@ export default function QualificationReviewPage({ currentUser }) {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Filters</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <FilterSelect
+            label="Qualification band"
+            value={bandFilter}
+            onValueChange={setBandFilter}
+            options={BAND_OPTIONS}
+          />
+          <FilterSelect
+            label="Sort by"
+            value={sortBy}
+            onValueChange={setSortBy}
+            options={SORT_OPTIONS}
+          />
           <FilterSelect
             label="Review status"
             value={statusFilter}
@@ -365,6 +439,7 @@ export default function QualificationReviewPage({ currentUser }) {
               <thead className="border-b bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-3">Lab</th>
+                  <th className="px-4 py-3">Band / Score</th>
                   <th className="px-4 py-3">Monthly est.</th>
                   <th className="px-4 py-3">Supplier</th>
                   <th className="px-4 py-3">Terms</th>
@@ -430,6 +505,9 @@ function TableReviewRow({ row, currentUser, onSaved }) {
       <td className="px-4 py-3">
         <div className="font-medium text-slate-900">{row.labName}</div>
         <div className="text-xs text-slate-500">{row.labId}</div>
+      </td>
+      <td className="px-4 py-3">
+        <ScoreBandBadge row={row} />
       </td>
       <td className="px-4 py-3">{formatMoney(row.monthlyConsumablesEstimate)}</td>
       <td className="px-4 py-3">{row.currentSupplier || "—"}</td>
