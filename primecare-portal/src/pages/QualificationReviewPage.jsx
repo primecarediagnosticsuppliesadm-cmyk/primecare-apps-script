@@ -4,7 +4,7 @@ import {
   updateQualificationFounderReviewWrite,
   updateQualificationPipelineWrite,
 } from "@/api/primecareSupabaseApi";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, ClipboardCheck, RefreshCw } from "lucide-react";
+import {
+  Loader2,
+  ClipboardCheck,
+  RefreshCw,
+  ChevronDown,
+  ChevronUp,
+  Search,
+  CheckCircle2,
+  AlertCircle,
+  X,
+} from "lucide-react";
 import {
   formatQualificationBandLabel,
   qualificationBandBadgeClass,
@@ -28,6 +38,8 @@ import {
   PIPELINE_STAGE_SELECT_OPTIONS,
   pipelineStageBadgeClass,
 } from "@/utils/qualificationPipeline";
+
+const TOAST_DURATION_MS = 4500;
 
 function canEditPipeline(currentUser) {
   const role = String(currentUser?.role || "").toLowerCase();
@@ -109,43 +121,329 @@ function formatDateTime(value) {
   return d.toLocaleString();
 }
 
+function formatShortDateTime(value) {
+  if (!value) return "";
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function hasDisplayValue(value) {
+  if (value == null) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (typeof value === "number") return Number.isFinite(value);
+  return true;
+}
+
+function rowKey(row) {
+  return row.id || row.labId;
+}
+
+function usePageToast() {
+  const [toast, setToast] = useState(null);
+
+  const showToast = useCallback((type, message) => {
+    setToast({ type, message, id: Date.now() });
+  }, []);
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const t = setTimeout(() => setToast(null), TOAST_DURATION_MS);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  return { toast, showToast, clearToast: () => setToast(null) };
+}
+
+function PageToast({ toast, onDismiss }) {
+  if (!toast) return null;
+  const isError = toast.type === "error";
+  return (
+    <div
+      role="status"
+      className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm shadow-sm ${
+        isError
+          ? "border-red-200 bg-red-50 text-red-800"
+          : "border-green-200 bg-green-50 text-green-900"
+      }`}
+    >
+      {isError ? (
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+      ) : (
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+      )}
+      <span className="flex-1 font-medium">{toast.message}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="rounded p-0.5 opacity-70 hover:opacity-100"
+        aria-label="Dismiss"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
 function PipelineStageBadge({ row }) {
   const stage = row.pipelineStage || "new";
   return (
-    <Badge className={pipelineStageBadgeClass(stage)}>
+    <Badge className={`text-[10px] px-1.5 py-0 ${pipelineStageBadgeClass(stage)}`}>
       {row.pipelineStageLabel || getPipelineStageLabel(stage)}
     </Badge>
   );
 }
 
-function PipelineSavedSummary({ row }) {
+function ScoreBandBadge({ row, compact = false }) {
+  const band = String(row.qualificationBand || "").toLowerCase();
+  if (!band && row.qualificationScore == null) {
+    return <span className="text-[11px] text-slate-400">—</span>;
+  }
   return (
-    <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-100 bg-white p-2 text-xs sm:grid-cols-4">
-      <div>
-        <span className="text-slate-500">Probability</span>
-        <div className="font-medium">
-          {row.pipelineProbability != null ? `${row.pipelineProbability}%` : "—"}
+    <div className="flex flex-wrap items-center gap-1">
+      {band ? (
+        <Badge
+          className={`${qualificationBandBadgeClass(band)} ${
+            compact ? "text-[10px] px-1.5 py-0" : ""
+          }`}
+        >
+          {formatQualificationBandLabel(band)}
+        </Badge>
+      ) : null}
+      {row.qualificationScore != null ? (
+        <span className="text-[11px] font-semibold text-slate-600">
+          {row.qualificationScore}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function SummaryMetric({ label, children }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
+        {label}
+      </div>
+      <div className="truncate text-xs font-medium text-slate-800">{children}</div>
+    </div>
+  );
+}
+
+function FilterSelect({ label, value, onValueChange, options }) {
+  return (
+    <div className="min-w-0 space-y-0.5">
+      <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+        {label}
+      </div>
+      <Select value={value} onValueChange={onValueChange}>
+        <SelectTrigger className="h-9 w-full rounded-lg text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((opt) => (
+            <SelectItem key={opt.value} value={opt.value}>
+              {opt.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+function StickyReviewFilters({
+  searchQuery,
+  onSearchChange,
+  pipelineFilter,
+  setPipelineFilter,
+  bandFilter,
+  setBandFilter,
+  statusFilter,
+  setStatusFilter,
+  rentalFilter,
+  setRentalFilter,
+  fitFilter,
+  setFitFilter,
+  sortBy,
+  setSortBy,
+  resultCount,
+  totalCount,
+}) {
+  return (
+    <div className="sticky top-0 z-20 -mx-1 border-b border-slate-200 bg-slate-50/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-slate-50/90">
+      <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-xs font-semibold text-slate-700">Find labs</div>
+          <div className="text-[11px] text-slate-500">
+            {resultCount} of {totalCount} shown
+          </div>
+        </div>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <Input
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Search lab name or ID…"
+            className="h-9 rounded-lg pl-8 text-sm"
+            aria-label="Search by lab name or lab ID"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          <FilterSelect
+            label="Pipeline"
+            value={pipelineFilter}
+            onValueChange={setPipelineFilter}
+            options={PIPELINE_FILTER_OPTIONS}
+          />
+          <FilterSelect
+            label="Band"
+            value={bandFilter}
+            onValueChange={setBandFilter}
+            options={BAND_OPTIONS}
+          />
+          <FilterSelect
+            label="Review"
+            value={statusFilter}
+            onValueChange={setStatusFilter}
+            options={STATUS_OPTIONS}
+          />
+          <FilterSelect
+            label="Rental"
+            value={rentalFilter}
+            onValueChange={setRentalFilter}
+            options={RENTAL_OPTIONS}
+          />
+          <FilterSelect
+            label="Lab OS"
+            value={fitFilter}
+            onValueChange={setFitFilter}
+            options={FIT_OPTIONS}
+          />
+          <FilterSelect
+            label="Sort"
+            value={sortBy}
+            onValueChange={setSortBy}
+            options={SORT_OPTIONS}
+          />
         </div>
       </div>
-      <div>
-        <span className="text-slate-500">Expected value</span>
-        <div className="font-medium">{formatMoney(row.pipelineExpectedValue)}</div>
-      </div>
-      <div className="col-span-2 sm:col-span-1">
-        <span className="text-slate-500">Next action</span>
-        <div className="font-medium">{row.pipelineNextAction || "—"}</div>
-      </div>
-      {row.pipelineStage === "lost" ? (
-        <div className="col-span-2">
-          <span className="text-slate-500">Lost reason</span>
-          <div className="font-medium">{row.pipelineLostReason || "—"}</div>
+    </div>
+  );
+}
+
+function QualificationDetailsGrid({ row }) {
+  const items = [
+    hasDisplayValue(row.labSize) && { label: "Lab size", value: row.labSize },
+    hasDisplayValue(row.monthlyConsumablesEstimate) && {
+      label: "Monthly estimate",
+      value: formatMoney(row.monthlyConsumablesEstimate),
+    },
+    hasDisplayValue(row.currentSupplier) && {
+      label: "Current supplier",
+      value: row.currentSupplier,
+    },
+    hasDisplayValue(row.paymentTerms) && {
+      label: "Payment terms",
+      value: row.paymentTerms,
+    },
+    hasDisplayValue(row.decisionMaker) && {
+      label: "Decision maker",
+      value: row.decisionMaker,
+    },
+    hasDisplayValue(row.reagentRentalPotential) && {
+      label: "Reagent rental",
+      value: row.reagentRentalPotential,
+    },
+    hasDisplayValue(row.labOsFit) && { label: "Lab OS fit", value: row.labOsFit },
+    hasDisplayValue(row.agentName || row.agentId) && {
+      label: "Agent",
+      value: row.agentName || row.agentId,
+    },
+  ].filter(Boolean);
+
+  const reasons = Array.isArray(row.qualificationReasons)
+    ? row.qualificationReasons.filter(Boolean)
+    : [];
+
+  if (items.length === 0 && reasons.length === 0) {
+    return (
+      <p className="text-xs text-slate-500">No extra qualification details recorded.</p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {items.length > 0 ? (
+        <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3">
+          {items.map((item) => (
+            <div key={item.label}>
+              <div className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
+                {item.label}
+              </div>
+              <div className="text-sm text-slate-800">{item.value}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {reasons.length > 0 ? (
+        <div>
+          <div className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
+            Score reasons
+          </div>
+          <ul className="mt-1 list-inside list-disc text-xs text-slate-600">
+            {reasons.map((r) => (
+              <li key={r}>{r}</li>
+            ))}
+          </ul>
         </div>
       ) : null}
     </div>
   );
 }
 
-function PipelineEditor({ row, currentUser, onSaved }) {
+function NotesSection({ row }) {
+  const agentNotes = hasDisplayValue(row.notes) ? row.notes : null;
+  const pipelineNotes = hasDisplayValue(row.pipelineNotes) ? row.pipelineNotes : null;
+  if (!agentNotes && !pipelineNotes) return null;
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-2.5">
+      <div className="text-xs font-semibold text-slate-700">Notes</div>
+      {agentNotes ? (
+        <div>
+          <div className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
+            Agent notes
+          </div>
+          <p className="mt-0.5 whitespace-pre-wrap text-sm text-slate-700">{agentNotes}</p>
+        </div>
+      ) : null}
+      {pipelineNotes ? (
+        <div>
+          <div className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
+            Pipeline notes
+          </div>
+          <p className="mt-0.5 whitespace-pre-wrap text-sm text-slate-700">{pipelineNotes}</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SavedHint({ label, at }) {
+  if (!at) return null;
+  return (
+    <p className="text-[11px] text-green-700" role="status">
+      {label} · saved {formatShortDateTime(at)}
+    </p>
+  );
+}
+
+function PipelineEditor({ row, currentUser, onSaved, onError, savedAt }) {
   const editable = canEditPipeline(currentUser);
   const [stage, setStage] = useState(row.pipelineStage || "new");
   const [nextAction, setNextAction] = useState(row.pipelineNextAction || "");
@@ -194,7 +492,9 @@ function PipelineEditor({ row, currentUser, onSaved }) {
       }
       onSaved?.(res.data);
     } catch (err) {
-      setRowError(err?.message || "Pipeline update failed");
+      const msg = err?.message || "Pipeline update failed";
+      setRowError(msg);
+      onError?.(msg);
     } finally {
       setSaving(false);
     }
@@ -202,26 +502,47 @@ function PipelineEditor({ row, currentUser, onSaved }) {
 
   if (!editable) {
     return (
-      <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Pipeline (read-only)
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-sm">
+        <div className="text-xs font-semibold text-slate-600">Pipeline (read-only)</div>
+        <div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+          <div>
+            <span className="text-slate-500">Stage</span>
+            <div className="mt-0.5">
+              <PipelineStageBadge row={row} />
+            </div>
+          </div>
+          <div>
+            <span className="text-slate-500">Probability</span>
+            <div className="font-medium">
+              {row.pipelineProbability != null ? `${row.pipelineProbability}%` : "—"}
+            </div>
+          </div>
+          <div>
+            <span className="text-slate-500">Expected</span>
+            <div className="font-medium">{formatMoney(row.pipelineExpectedValue)}</div>
+          </div>
+          <div className="col-span-2 sm:col-span-1">
+            <span className="text-slate-500">Next action</span>
+            <div className="font-medium">{row.pipelineNextAction || "—"}</div>
+          </div>
         </div>
-        <PipelineSavedSummary row={row} />
       </div>
     );
   }
 
   return (
-    <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Pipeline
+    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-1">
+        <div className="text-xs font-semibold text-slate-700">Pipeline</div>
+        <SavedHint label="Pipeline updated successfully" at={savedAt} />
       </div>
-      <PipelineSavedSummary row={row} />
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div className="space-y-1">
-          <div className="text-xs text-slate-500">Stage</div>
+          <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            Stage
+          </label>
           <Select value={stage} onValueChange={setStage}>
-            <SelectTrigger className="h-10 rounded-xl">
+            <SelectTrigger className="h-10 rounded-lg">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -234,7 +555,9 @@ function PipelineEditor({ row, currentUser, onSaved }) {
           </Select>
         </div>
         <div className="space-y-1">
-          <div className="text-xs text-slate-500">Win probability (%)</div>
+          <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            Win probability (%)
+          </label>
           <Input
             type="number"
             min={0}
@@ -242,54 +565,62 @@ function PipelineEditor({ row, currentUser, onSaved }) {
             value={probability}
             onChange={(e) => setProbability(e.target.value)}
             placeholder="0–100"
-            className="h-10 rounded-xl"
+            className="h-10 rounded-lg"
           />
         </div>
         <div className="space-y-1">
-          <div className="text-xs text-slate-500">Expected value (₹)</div>
+          <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            Expected value (₹)
+          </label>
           <Input
             type="number"
             min={0}
             value={expectedValue}
             onChange={(e) => setExpectedValue(e.target.value)}
             placeholder="Deal value"
-            className="h-10 rounded-xl"
+            className="h-10 rounded-lg"
           />
         </div>
         <div className="space-y-1 sm:col-span-2">
-          <div className="text-xs text-slate-500">Next action</div>
+          <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            Next action
+          </label>
           <Input
             value={nextAction}
             onChange={(e) => setNextAction(e.target.value)}
             placeholder="Next step for this lab"
-            className="h-10 rounded-xl"
+            className="h-10 rounded-lg"
           />
         </div>
         {stage === "lost" ? (
           <div className="space-y-1 sm:col-span-2">
-            <div className="text-xs text-slate-500">Lost reason</div>
+            <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+              Lost reason
+            </label>
             <Textarea
               value={lostReason}
               onChange={(e) => setLostReason(e.target.value)}
               placeholder="Why was this lab marked lost?"
-              rows={3}
-              className="rounded-xl text-sm"
+              rows={2}
+              className="rounded-lg text-sm"
             />
           </div>
         ) : null}
         <div className="space-y-1 sm:col-span-2">
-          <div className="text-xs text-slate-500">Pipeline notes (optional)</div>
+          <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            Pipeline notes (optional)
+          </label>
           <Textarea
             value={pipelineNotes}
             onChange={(e) => setPipelineNotes(e.target.value)}
             rows={2}
-            className="rounded-xl text-sm"
+            className="rounded-lg text-sm"
           />
         </div>
       </div>
       <Button
         type="button"
-        className="h-11 w-full rounded-xl sm:w-auto"
+        className="h-11 w-full rounded-lg sm:w-auto"
         disabled={saving}
         onClick={handleSavePipeline}
       >
@@ -307,48 +638,7 @@ function PipelineEditor({ row, currentUser, onSaved }) {
   );
 }
 
-function ScoreBandBadge({ row }) {
-  const band = String(row.qualificationBand || "").toLowerCase();
-  if (!band && row.qualificationScore == null) {
-    return <span className="text-xs text-slate-400">—</span>;
-  }
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {band ? (
-        <Badge className={qualificationBandBadgeClass(band)}>
-          {formatQualificationBandLabel(band)}
-        </Badge>
-      ) : null}
-      {row.qualificationScore != null ? (
-        <span className="text-xs font-medium text-slate-600">
-          {row.qualificationScore}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-function FilterSelect({ label, value, onValueChange, options }) {
-  return (
-    <div className="space-y-1">
-      <div className="text-xs font-medium text-slate-500">{label}</div>
-      <Select value={value} onValueChange={onValueChange}>
-        <SelectTrigger className="h-10 w-full rounded-xl">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((opt) => (
-            <SelectItem key={opt.value} value={opt.value}>
-              {opt.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-}
-
-function ReviewRowCard({ row, currentUser, onSaved }) {
+function FounderReviewSection({ row, currentUser, onSaved, onError, savedAt }) {
   const [status, setStatus] = useState(row.founderReviewStatus || "pending");
   const [saving, setSaving] = useState(false);
   const [rowError, setRowError] = useState("");
@@ -372,135 +662,234 @@ function ReviewRowCard({ row, currentUser, onSaved }) {
       }
       onSaved?.(res.data);
     } catch (err) {
-      setRowError(err?.message || "Update failed");
+      const msg = err?.message || "Update failed";
+      setRowError(msg);
+      onError?.(msg);
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <Card className="rounded-2xl shadow-sm">
-      <CardHeader className="pb-2">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <CardTitle className="text-base">{row.labName}</CardTitle>
-            <CardDescription>{row.labId}</CardDescription>
+    <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-1">
+        <div className="text-xs font-semibold text-slate-700">Founder review</div>
+        <SavedHint label="Founder review updated" at={savedAt} />
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+        <div className="min-w-0 flex-1 space-y-1">
+          <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            Status
+          </label>
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger className="h-11 rounded-lg">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {REVIEW_STATUS_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button
+          type="button"
+          className="h-11 w-full shrink-0 rounded-lg sm:w-auto"
+          disabled={saving || status === row.founderReviewStatus}
+          onClick={handleSaveStatus}
+        >
+          {saving ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Saving status…
+            </>
+          ) : (
+            "Save status"
+          )}
+        </Button>
+      </div>
+      {rowError ? <p className="text-sm text-red-600">{rowError}</p> : null}
+    </div>
+  );
+}
+
+function ReviewExpandedPanel({
+  row,
+  currentUser,
+  onRowSaved,
+  onSaveError,
+  saveMeta,
+}) {
+  const key = row.labId;
+  const meta = saveMeta[key] || {};
+
+  function handlePipelineSaved(data) {
+    onRowSaved(data, "pipeline");
+  }
+
+  function handleStatusSaved(data) {
+    onRowSaved(data, "status");
+  }
+
+  return (
+    <div
+      id={`review-detail-${key}`}
+      className="border-t border-slate-200 bg-slate-50/80 px-2.5 py-3 sm:px-3"
+    >
+      <div className="space-y-3">
+        <section aria-labelledby={`qual-heading-${key}`}>
+          <h3
+            id={`qual-heading-${key}`}
+            className="mb-1.5 text-xs font-semibold text-slate-700"
+          >
+            Qualification details
+          </h3>
+          <QualificationDetailsGrid row={row} />
+        </section>
+        <PipelineEditor
+          row={row}
+          currentUser={currentUser}
+          onSaved={handlePipelineSaved}
+          onError={onSaveError}
+          savedAt={meta.pipelineAt}
+        />
+        <FounderReviewSection
+          row={row}
+          currentUser={currentUser}
+          onSaved={handleStatusSaved}
+          onError={onSaveError}
+          savedAt={meta.statusAt}
+        />
+        <NotesSection row={row} />
+      </div>
+    </div>
+  );
+}
+
+function ReviewSummaryRow({
+  row,
+  expanded,
+  onToggleExpand,
+}) {
+  const followUp = row.nextFollowUpDate || "—";
+  const prob =
+    row.pipelineProbability != null ? `${row.pipelineProbability}%` : "—";
+  const agent = row.agentName || row.agentId || "—";
+
+  return (
+    <div
+      className={`flex flex-col gap-2 p-2.5 sm:p-3 ${
+        expanded ? "bg-slate-50" : "bg-white"
+      }`}
+    >
+      <div className="flex items-start gap-2">
+        <button
+          type="button"
+          onClick={onToggleExpand}
+          className="mt-0.5 shrink-0 rounded-md p-1 text-slate-500 hover:bg-slate-100"
+          aria-expanded={expanded}
+          aria-controls={`review-detail-${row.labId}`}
+          aria-label={expanded ? "Collapse lab details" : "Expand lab details"}
+        >
+          {expanded ? (
+            <ChevronUp className="h-5 w-5" />
+          ) : (
+            <ChevronDown className="h-5 w-5" />
+          )}
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="truncate text-sm font-semibold text-slate-900">
+              {row.labName}
+            </span>
+            <span className="text-[11px] text-slate-400">{row.labId}</span>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            <ScoreBandBadge row={row} compact />
             <PipelineStageBadge row={row} />
-            <ScoreBandBadge row={row} />
-            <Badge className={statusBadgeClass(row.founderReviewStatus)}>
+            <Badge
+              className={`text-[10px] px-1.5 py-0 ${statusBadgeClass(row.founderReviewStatus)}`}
+            >
               {formatStatusLabel(row.founderReviewStatus)}
             </Badge>
           </div>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <div className="text-xs text-slate-500">Monthly estimate</div>
-            <div className="font-medium">{formatMoney(row.monthlyConsumablesEstimate)}</div>
-          </div>
-          <div>
-            <div className="text-xs text-slate-500">Current supplier</div>
-            <div className="font-medium">{row.currentSupplier || "—"}</div>
-          </div>
-          <div>
-            <div className="text-xs text-slate-500">Payment terms</div>
-            <div className="font-medium">{row.paymentTerms || "—"}</div>
-          </div>
-          <div>
-            <div className="text-xs text-slate-500">Reagent rental</div>
-            <div className="font-medium">{row.reagentRentalPotential || "—"}</div>
-          </div>
-          <div>
-            <div className="text-xs text-slate-500">Lab OS fit</div>
-            <div className="font-medium">{row.labOsFit || "—"}</div>
-          </div>
-          <div>
-            <div className="text-xs text-slate-500">Next follow-up</div>
-            <div className="font-medium">{row.nextFollowUpDate || "—"}</div>
-          </div>
-        </div>
-        <div className="text-xs text-slate-500">
-          Agent: {row.agentName || row.agentId || "—"} · Updated{" "}
-          {formatDateTime(row.updatedAt)}
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-          <div className="flex-1 space-y-1">
-            <div className="text-xs font-medium text-slate-500">Founder review status</div>
-            <Select value={status} onValueChange={setStatus}>
-              <SelectTrigger className="h-10 rounded-xl">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {REVIEW_STATUS_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <Button
-            type="button"
-            className="h-10 rounded-xl"
-            disabled={saving || status === row.founderReviewStatus}
-            onClick={handleSaveStatus}
-          >
-            {saving ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Saving…
-              </>
-            ) : (
-              "Save status"
-            )}
-          </Button>
-        </div>
-        {rowError ? (
-          <p className="text-sm text-red-600">{rowError}</p>
-        ) : null}
+        <Button
+          type="button"
+          variant={expanded ? "secondary" : "outline"}
+          size="sm"
+          className="h-10 shrink-0 rounded-lg px-3 text-xs font-semibold"
+          onClick={onToggleExpand}
+        >
+          {expanded ? "Close" : "View / Edit"}
+        </Button>
+      </div>
 
-        <PipelineEditor row={row} currentUser={currentUser} onSaved={onSaved} />
-      </CardContent>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-4 lg:grid-cols-8">
+        <SummaryMetric label="Expected">{formatMoney(row.pipelineExpectedValue)}</SummaryMetric>
+        <SummaryMetric label="Probability">{prob}</SummaryMetric>
+        <SummaryMetric label="Follow-up">{followUp}</SummaryMetric>
+        <SummaryMetric label="Agent">{agent}</SummaryMetric>
+        <div className="min-w-0 col-span-2 sm:col-span-2 lg:col-span-4">
+          <SummaryMetric label="Updated">
+            <span className="text-[11px]">{formatDateTime(row.updatedAt)}</span>
+          </SummaryMetric>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QualificationReviewListItem({
+  row,
+  expanded,
+  onToggleExpand,
+  currentUser,
+  onRowSaved,
+  onSaveError,
+  saveMeta,
+}) {
+  return (
+    <Card className="overflow-hidden rounded-lg border-slate-200 shadow-sm">
+      <ReviewSummaryRow
+        row={row}
+        expanded={expanded}
+        onToggleExpand={onToggleExpand}
+      />
+      {expanded ? (
+        <ReviewExpandedPanel
+          row={row}
+          currentUser={currentUser}
+          onRowSaved={onRowSaved}
+          onSaveError={onSaveError}
+          saveMeta={saveMeta}
+        />
+      ) : null}
     </Card>
   );
 }
 
-export default function QualificationReviewPage({ currentUser }) {
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [statusFilter, setStatusFilter] = useState("ALL");
-  const [rentalFilter, setRentalFilter] = useState("ALL");
-  const [fitFilter, setFitFilter] = useState("ALL");
-  const [bandFilter, setBandFilter] = useState("ALL");
-  const [pipelineFilter, setPipelineFilter] = useState("ALL");
-  const [sortBy, setSortBy] = useState("stage");
-  const loadRows = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError("");
-      const res = await getQualificationReviewRead();
-      if (!res?.success) {
-        throw new Error(res?.error || "Failed to load qualification reviews");
-      }
-      setRows(Array.isArray(res.data) ? res.data : []);
-    } catch (err) {
-      setError(err?.message || "Failed to load qualification reviews");
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+function useFilteredQualificationRows(rows, filters) {
+  const {
+    searchQuery,
+    statusFilter,
+    rentalFilter,
+    fitFilter,
+    bandFilter,
+    pipelineFilter,
+    sortBy,
+  } = filters;
 
-  useEffect(() => {
-    loadRows();
-  }, [loadRows]);
-
-  const filteredRows = useMemo(() => {
+  return useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
     const filtered = rows.filter((row) => {
+      if (q) {
+        const name = String(row.labName || "").toLowerCase();
+        const id = String(row.labId || "").toLowerCase();
+        if (!name.includes(q) && !id.includes(q)) return false;
+      }
       if (statusFilter !== "ALL" && row.founderReviewStatus !== statusFilter) {
         return false;
       }
@@ -552,21 +941,101 @@ export default function QualificationReviewPage({ currentUser }) {
       );
     }
     return sorted;
-  }, [rows, statusFilter, rentalFilter, fitFilter, bandFilter, pipelineFilter, sortBy]);
+  }, [
+    rows,
+    searchQuery,
+    statusFilter,
+    rentalFilter,
+    fitFilter,
+    bandFilter,
+    pipelineFilter,
+    sortBy,
+  ]);
+}
 
-  function handleRowSaved(updated) {
+export default function QualificationReviewPage({ currentUser }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [rentalFilter, setRentalFilter] = useState("ALL");
+  const [fitFilter, setFitFilter] = useState("ALL");
+  const [bandFilter, setBandFilter] = useState("ALL");
+  const [pipelineFilter, setPipelineFilter] = useState("ALL");
+  const [sortBy, setSortBy] = useState("stage");
+  const [expandedLabId, setExpandedLabId] = useState(null);
+  const [saveMeta, setSaveMeta] = useState({});
+  const { toast, showToast, clearToast } = usePageToast();
+
+  const loadRows = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
+      const res = await getQualificationReviewRead();
+      if (!res?.success) {
+        throw new Error(res?.error || "Failed to load qualification reviews");
+      }
+      setRows(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      setError(err?.message || "Failed to load qualification reviews");
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadRows();
+  }, [loadRows]);
+
+  const filteredRows = useFilteredQualificationRows(rows, {
+    searchQuery,
+    statusFilter,
+    rentalFilter,
+    fitFilter,
+    bandFilter,
+    pipelineFilter,
+    sortBy,
+  });
+
+  useEffect(() => {
+    if (expandedLabId && !filteredRows.some((r) => r.labId === expandedLabId)) {
+      setExpandedLabId(null);
+    }
+  }, [filteredRows, expandedLabId]);
+
+  function toggleExpand(labId) {
+    setExpandedLabId((prev) => (prev === labId ? null : labId));
+  }
+
+  function handleRowSaved(updated, saveType) {
     if (!updated?.labId) {
       loadRows();
       return;
     }
+    const now = new Date();
     setRows((prev) =>
       prev.map((r) => (r.labId === updated.labId ? { ...r, ...updated } : r))
     );
+    setSaveMeta((prev) => ({
+      ...prev,
+      [updated.labId]: {
+        ...prev[updated.labId],
+        ...(saveType === "pipeline" ? { pipelineAt: now } : {}),
+        ...(saveType === "status" ? { statusAt: now } : {}),
+      },
+    }));
+    if (saveType === "pipeline") {
+      showToast("success", "Pipeline updated successfully");
+    } else if (saveType === "status") {
+      showToast("success", "Founder review updated");
+    }
   }
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 p-6 text-slate-600">
+      <div className="flex items-center gap-2 p-4 text-slate-600">
         <Loader2 className="h-5 w-5 animate-spin" />
         Loading qualification reviews…
       </div>
@@ -574,21 +1043,22 @@ export default function QualificationReviewPage({ currentUser }) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-1">
+    <div className="space-y-3 pb-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
           <div className="flex items-center gap-2">
-            <ClipboardCheck className="h-6 w-6 text-slate-700" />
-            <h1 className="text-2xl font-semibold tracking-tight">Qualification Review</h1>
+            <ClipboardCheck className="h-5 w-5 text-slate-700" />
+            <h1 className="text-xl font-semibold tracking-tight">Qualification Review</h1>
           </div>
-          <p className="text-sm text-slate-500">
-            Founder and executive review of agent-captured lab qualifications.
+          <p className="mt-0.5 text-xs text-slate-500">
+            Review and update lab qualifications. Tap a row to expand one lab at a time.
           </p>
         </div>
         <Button
           type="button"
           variant="outline"
-          className="rounded-xl"
+          size="sm"
+          className="h-10 rounded-lg"
           onClick={loadRows}
         >
           <RefreshCw className="mr-2 h-4 w-4" />
@@ -596,13 +1066,16 @@ export default function QualificationReviewPage({ currentUser }) {
         </Button>
       </div>
 
+      <PageToast toast={toast} onDismiss={clearToast} />
+
       {error ? (
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {error}
           <Button
             type="button"
             variant="outline"
-            className="mt-3 rounded-xl"
+            size="sm"
+            className="mt-2 h-9 rounded-lg"
             onClick={loadRows}
           >
             Retry
@@ -610,77 +1083,54 @@ export default function QualificationReviewPage({ currentUser }) {
         </div>
       ) : null}
 
-      <Card className="rounded-2xl shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Filters</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          <FilterSelect
-            label="Pipeline stage"
-            value={pipelineFilter}
-            onValueChange={setPipelineFilter}
-            options={PIPELINE_FILTER_OPTIONS}
-          />
-          <FilterSelect
-            label="Qualification band"
-            value={bandFilter}
-            onValueChange={setBandFilter}
-            options={BAND_OPTIONS}
-          />
-          <FilterSelect
-            label="Sort by"
-            value={sortBy}
-            onValueChange={setSortBy}
-            options={SORT_OPTIONS}
-          />
-          <FilterSelect
-            label="Review status"
-            value={statusFilter}
-            onValueChange={setStatusFilter}
-            options={STATUS_OPTIONS}
-          />
-          <FilterSelect
-            label="Reagent rental potential"
-            value={rentalFilter}
-            onValueChange={setRentalFilter}
-            options={RENTAL_OPTIONS}
-          />
-          <FilterSelect
-            label="Lab OS fit"
-            value={fitFilter}
-            onValueChange={setFitFilter}
-            options={FIT_OPTIONS}
-          />
-        </CardContent>
-      </Card>
-
-      <div className="text-sm text-slate-500">
-        Showing {filteredRows.length} of {rows.length} qualification
-        {rows.length === 1 ? "" : "s"}
-      </div>
+      <StickyReviewFilters
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        pipelineFilter={pipelineFilter}
+        setPipelineFilter={setPipelineFilter}
+        bandFilter={bandFilter}
+        setBandFilter={setBandFilter}
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
+        rentalFilter={rentalFilter}
+        setRentalFilter={setRentalFilter}
+        fitFilter={fitFilter}
+        setFitFilter={setFitFilter}
+        sortBy={sortBy}
+        setSortBy={setSortBy}
+        resultCount={filteredRows.length}
+        totalCount={rows.length}
+      />
 
       {filteredRows.length === 0 ? (
-        <div className="rounded-2xl border bg-white p-8 text-center shadow-sm">
-          <p className="font-medium text-slate-900">No qualifications to review</p>
-          <p className="mt-2 text-sm text-slate-500">
+        <div className="rounded-lg border bg-white p-6 text-center shadow-sm">
+          <p className="text-sm font-medium text-slate-900">No qualifications to review</p>
+          <p className="mt-1 text-xs text-slate-500">
             {rows.length === 0
               ? "Agents have not saved any lab qualification profiles yet."
-              : "Try adjusting filters to see more labs."}
+              : "Try a different search or filter."}
           </p>
         </div>
       ) : (
-        <div className="grid gap-4">
-          {filteredRows.map((row) => (
-            <ReviewRowCard
-              key={row.id || row.labId}
-              row={row}
-              currentUser={currentUser}
-              onSaved={handleRowSaved}
-            />
-          ))}
+        <div className="space-y-2" role="list">
+          {filteredRows.map((row) => {
+            const key = rowKey(row);
+            const isExpanded = expandedLabId === row.labId;
+            return (
+              <QualificationReviewListItem
+                key={key}
+                row={row}
+                expanded={isExpanded}
+                onToggleExpand={() => toggleExpand(row.labId)}
+                currentUser={currentUser}
+                onRowSaved={handleRowSaved}
+                onSaveError={(msg) => showToast("error", msg)}
+                saveMeta={saveMeta}
+              />
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
-
