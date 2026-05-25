@@ -1754,12 +1754,70 @@ async function timedSupabaseQuery(label, queryPromise) {
   return res;
 }
 
+/** Static dashboard query definitions (no PostgREST filters in production code). */
+const QA_ADMIN_DASHBOARD_QUERY_SPECS = [
+  {
+    key: "orders",
+    table: "orders",
+    queryChain: 'supabase.from("orders").select("*")',
+    postgrestFilters: [],
+    clientSideAfterFetch: ["ordersRes.error ? [] : ordersRes.data || []"],
+  },
+  {
+    key: "ar_credit_control",
+    table: "ar_credit_control",
+    queryChain: 'supabase.from("ar_credit_control").select("*")',
+    postgrestFilters: [],
+    clientSideAfterFetch: ["arRes.error ? [] : arRes.data || []"],
+  },
+  {
+    key: "agent_visits",
+    table: "agent_visits",
+    queryChain: 'supabase.from("agent_visits").select("*")',
+    postgrestFilters: [],
+    clientSideAfterFetch: ["visitsRes.error ? [] : visitsRes.data || []"],
+  },
+  {
+    key: "inventory",
+    table: "inventory",
+    queryChain: 'supabase.from("inventory").select("*")',
+    postgrestFilters: [],
+    clientSideAfterFetch: ["invRes.error ? [] : invRes.data || []"],
+  },
+  {
+    key: "labs",
+    table: "labs",
+    queryChain: 'supabase.from("labs").select("*")',
+    postgrestFilters: [],
+    clientSideAfterFetch: ["labsRes.error ? [] : labsRes.data || []"],
+  },
+  {
+    key: "order_lines",
+    table: "order_lines",
+    queryChain: 'supabase.from("order_lines").select("*")',
+    postgrestFilters: [],
+    clientSideAfterFetch: ["orderLinesRes.error ? [] : orderLinesRes.data || []"],
+  },
+  {
+    key: "payments",
+    table: "payments",
+    queryChain: 'supabase.from("payments").select("*")',
+    postgrestFilters: [],
+    clientSideAfterFetch: ["payRes.error ? [] : payRes.data || []"],
+  },
+];
+
 /**
  * QA-only: prove whether dashboard queries run authenticated or anon.
  * Runs before dashboard table reads (probe is intentional).
+ * @returns {Promise<{ profileRole: string|null, profileTenantId: string|null, authUserId: string|null }|null>}
  */
 async function logQaSupabaseAuthSessionDiagnostic() {
-  if (!IS_QA || !supabase) return;
+  if (!IS_QA || !supabase) return null;
+
+  let profileRole = null;
+  let profileTenantId = null;
+  let authUserId = null;
 
   try {
     console.log("[QA Supabase client]", {
@@ -1821,9 +1879,8 @@ async function logQaSupabaseAuthSessionDiagnostic() {
     const probe = await supabase.from("orders").select("id").limit(1);
     console.log("[QA RLS probe]", probe);
 
-    let profileRole = null;
-    let profileTenantId = null;
     let profileError = null;
+    authUserId = getUserId;
     if (getUserId) {
       const { data: profile, error } = await supabase
         .from("profiles")
@@ -1850,11 +1907,144 @@ async function logQaSupabaseAuthSessionDiagnostic() {
             ? "authenticated (probe returned rows)"
             : "jwt present but probe returned 0 rows (RLS/tenant?)",
     });
+
+    return { profileRole, profileTenantId, authUserId };
   } catch (err) {
     console.log("[QA Supabase auth/session diagnostic]", {
       error: err?.message || String(err),
     });
+    return { profileRole, profileTenantId, authUserId };
   }
+}
+
+/** QA-only: audit PostgREST filters vs client-side zeroing; compare probe vs select("*"). */
+async function logQaDashboardQueryFilterAudit(profileContext, batchResults) {
+  if (!IS_QA || !supabase) return;
+
+  const {
+    ordersRes,
+    arRes,
+    visitsRes,
+    invRes,
+    labsRes,
+    orderLinesRes,
+    payRes,
+    ordersRaw,
+    arRaw,
+    visitsAllRaw,
+    invRaw,
+    labsRaw,
+    orderLinesRaw,
+    payRaw,
+  } = batchResults;
+
+  const resByKey = {
+    orders: ordersRes,
+    ar_credit_control: arRes,
+    agent_visits: visitsRes,
+    inventory: invRes,
+    labs: labsRes,
+    order_lines: orderLinesRes,
+    payments: payRes,
+  };
+
+  const assignedByKey = {
+    orders: ordersRaw,
+    ar_credit_control: arRaw,
+    agent_visits: visitsAllRaw,
+    inventory: invRaw,
+    labs: labsRaw,
+    order_lines: orderLinesRaw,
+    payments: payRaw,
+  };
+
+  console.log("[QA dashboard query filters] profile variables (not applied to batch queries)", {
+    authUserId: profileContext?.authUserId ?? null,
+    profileRole: profileContext?.profileRole ?? null,
+    profileTenantId: profileContext?.profileTenantId ?? null,
+    tenantIdUsedInEq: false,
+    tenantIdUsedInMatch: false,
+    tenantIdUsedInFilter: false,
+    note: "Dashboard batch has zero .eq/.match/.in/.filter calls — only RLS + select projection",
+  });
+
+  for (const spec of QA_ADMIN_DASHBOARD_QUERY_SPECS) {
+    const res = resByKey[spec.key];
+    const assigned = assignedByKey[spec.key] || [];
+    const dataLen = Array.isArray(res?.data) ? res.data.length : null;
+
+    console.log(`[QA dashboard query] ${spec.table}`, {
+      queryChain: spec.queryChain,
+      postgrestFilters: spec.postgrestFilters,
+      eq: [],
+      match: [],
+      in: [],
+      filter: [],
+      tenant_idComparison: null,
+      clientSideAfterFetch: spec.clientSideAfterFetch,
+      response: {
+        hasError: Boolean(res?.error),
+        errorMessage: res?.error?.message ?? null,
+        errorCode: res?.error?.code ?? null,
+        errorDetails: res?.error?.details ?? null,
+        errorHint: res?.error?.hint ?? null,
+        status: res?.status ?? null,
+        count: res?.count ?? null,
+        dataIsNull: res?.data === null,
+        dataIsArray: Array.isArray(res?.data),
+        dataLength: dataLen,
+        zeroedDueToErrorBranch: Boolean(res?.error),
+      },
+      assignedArrayLength: assigned.length,
+      lengthMismatch:
+        dataLen != null && assigned.length !== dataLen ? { dataLen, assignedLen: assigned.length } : null,
+    });
+  }
+
+  const workingProbe = await supabase.from("orders").select("id").limit(1);
+  const dashboardOrdersQuery = await supabase.from("orders").select("*");
+
+  console.log("[QA orders query compare] working vs dashboard", {
+    working: {
+      queryChain: 'supabase.from("orders").select("id").limit(1)',
+      postgrestFilters: ["limit(1)"],
+      dataLength: Array.isArray(workingProbe.data) ? workingProbe.data.length : null,
+      hasError: Boolean(workingProbe.error),
+      error: workingProbe.error ?? null,
+      status: workingProbe.status ?? null,
+    },
+    dashboard: {
+      queryChain: 'supabase.from("orders").select("*")',
+      postgrestFilters: [],
+      dataLength: Array.isArray(dashboardOrdersQuery.data) ? dashboardOrdersQuery.data.length : null,
+      hasError: Boolean(dashboardOrdersQuery.error),
+      error: dashboardOrdersQuery.error ?? null,
+      status: dashboardOrdersQuery.status ?? null,
+    },
+    parallelBatchOrders: {
+      queryChain: 'supabase.from("orders").select("*") via Promise.all + timedSupabaseQuery',
+      dataLength: Array.isArray(ordersRes?.data) ? ordersRes.data.length : null,
+      hasError: Boolean(ordersRes?.error),
+      error: ordersRes?.error ?? null,
+      assignedOrdersRawLength: ordersRaw.length,
+      zeroedDueToErrorBranch: Boolean(ordersRes?.error),
+    },
+    diagnosis:
+      !dashboardOrdersQuery.error &&
+      Array.isArray(dashboardOrdersQuery.data) &&
+      dashboardOrdersQuery.data.length > 0 &&
+      ordersRaw.length === 0
+        ? "batch assignment bug (data present but ordersRaw empty)"
+        : workingProbe.data?.length &&
+            !dashboardOrdersQuery.data?.length &&
+            !dashboardOrdersQuery.error
+          ? "select(*) returns fewer rows than select(id).limit(1) — check column grants / projection"
+          : dashboardOrdersQuery.error && !workingProbe.error
+            ? "select(*) errors while select(id) succeeds"
+            : ordersRes?.error
+              ? "parallel batch ordersRes.error zeroed ordersRaw"
+              : "see per-table response blocks above",
+  });
 }
 
 /** QA-only: row counts + PostgREST errors immediately after each table read. */
@@ -1950,8 +2140,9 @@ export async function getAdminDashboardRead(options = {}) {
     const today = localDateYmd();
     const endQuery = perfTime("getAdminDashboardRead.supabaseQueries");
 
+    let qaProfileContext = null;
     if (IS_QA) {
-      await logQaSupabaseAuthSessionDiagnostic();
+      qaProfileContext = await logQaSupabaseAuthSessionDiagnostic();
     }
 
     const queryErrors = [];
@@ -1993,6 +2184,25 @@ export async function getAdminDashboardRead(options = {}) {
       orderLinesRaw,
       paymentsRaw: payRaw,
     });
+
+    if (IS_QA) {
+      await logQaDashboardQueryFilterAudit(qaProfileContext, {
+        ordersRes,
+        arRes,
+        visitsRes,
+        invRes,
+        labsRes,
+        orderLinesRes,
+        payRes,
+        ordersRaw,
+        arRaw,
+        visitsAllRaw,
+        invRaw,
+        labsRaw,
+        orderLinesRaw,
+        payRaw,
+      });
+    }
 
     const orderItemsRaw = combineOrderLineItemsForMetrics([], orderLinesRaw);
     const visitsTotalCount = visitsAllRaw.length;
