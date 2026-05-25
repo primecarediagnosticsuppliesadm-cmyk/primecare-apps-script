@@ -1681,18 +1681,50 @@ function logAdminDashboardSupabaseAudit(ctx) {
 
 const ADMIN_DASHBOARD_READ_CACHE_TTL_MS = 60 * 1000;
 
+/** Projections aligned to public schema (primecare_public_schema.sql). Invalid columns fail the whole PostgREST select. */
 const ADMIN_DASHBOARD_ORDERS_SELECT =
-  "order_id,lab_id,order_date,created_at,status,order_status,total_amount,ar_posted";
-const ADMIN_DASHBOARD_ORDER_ITEMS_SELECT =
-  "order_id,total_price,quantity,unit_price,net_line_total";
+  "order_id,lab_id,order_date,created_at,status,total_amount,ar_posted";
+const ADMIN_DASHBOARD_ORDER_ITEMS_SELECT = "order_id,total_price,quantity,unit_price";
 const ADMIN_DASHBOARD_AR_SELECT =
-  "lab_id,lab_name,outstanding,outstanding_amount,balance,credit_hold,credit_status,risk_status,credit_risk";
-const ADMIN_DASHBOARD_INVENTORY_SELECT = "current_stock,min_stock";
+  "lab_id,lab_name,outstanding,credit_hold,total_paid,total_delivered,days_overdue";
+const ADMIN_DASHBOARD_INVENTORY_SELECT = "current_stock,min_stock,product_id";
 const ADMIN_DASHBOARD_VISITS_SELECT =
-  "visit_id,lab_id,visit_date,created_at,agent_id,visit_type,sold_value,lab_response,notes,next_action,area";
-const ADMIN_DASHBOARD_PAYMENTS_SELECT =
-  "payment_date,payment_amount,amount_collected,amount_received,amount,collected_at";
+  "visit_id,lab_id,visit_date,created_at,agent_id,visit_type,notes,next_follow_up_date";
+const ADMIN_DASHBOARD_PAYMENTS_SELECT = "payment_date,amount_received,order_id,lab_id";
 const ADMIN_DASHBOARD_LABS_SELECT = "lab_id,lab_name";
+
+function normalizeAdminDashboardPayload(data) {
+  const e = data?.executive || {};
+  const s = data?.summary || {};
+  const stock = s.stockStats || EMPTY_ADMIN_DASHBOARD.summary.stockStats;
+  return {
+    executive: {
+      todaysRevenue: num(e.todaysRevenue),
+      outstandingReceivables: num(e.outstandingReceivables),
+      labsAtCreditRisk: num(e.labsAtCreditRisk),
+      productsNearStockout: num(e.productsNearStockout),
+      topLabsByRevenue: Array.isArray(e.topLabsByRevenue) ? e.topLabsByRevenue : [],
+    },
+    summary: {
+      stockStats: {
+        totalSkus: num(stock.totalSkus),
+        criticalItems: num(stock.criticalItems),
+        reorderItems: num(stock.reorderItems),
+        healthyItems: num(stock.healthyItems),
+      },
+      recentVisits: num(s.recentVisits),
+      totalSoldValue: num(s.totalSoldValue),
+      todayCollections: num(s.todayCollections),
+    },
+    visits: data?.visits ?? { visits: [] },
+    insights: data?.insights ?? { insights: [], recommendedActions: [] },
+  };
+}
+
+function adminDashboardReadHasCoreData(ordersRaw, arRaw, queryErrors) {
+  if (queryErrors.length) return false;
+  return (ordersRaw?.length ?? 0) > 0 || (arRaw?.length ?? 0) > 0;
+}
 
 let adminDashboardReadCache = {
   result: null,
@@ -1712,34 +1744,65 @@ async function timedSupabaseQuery(label, queryPromise) {
   return res;
 }
 
-async function fetchAdminDashboardPaymentsForToday(today) {
-  const filtered = await timedSupabaseQuery("payments.today", () =>
-    supabase.from("payments").select(ADMIN_DASHBOARD_PAYMENTS_SELECT).eq("payment_date", today)
-  );
-  if (!filtered.error) return filtered;
+/**
+ * PostgREST rejects the entire select when any column is unknown — fall back to select("*").
+ */
+async function dashboardTableSelect(table, projection, label) {
+  let res = await timedSupabaseQuery(label, () => supabase.from(table).select(projection));
+  if (!res.error) return res;
 
-  return timedSupabaseQuery("payments.recentFallback", () =>
+  console.warn(
+    `[getAdminDashboardRead] ${table} projection failed (${res.error.message}); retrying select("*")`
+  );
+  return timedSupabaseQuery(`${label}.fallback`, () => supabase.from(table).select("*"));
+}
+
+async function fetchAdminDashboardPaymentsForToday(today) {
+  const dayStart = `${today}T00:00:00`;
+  const dayEnd = `${today}T23:59:59.999`;
+
+  let filtered = await timedSupabaseQuery("payments.today", () =>
     supabase
       .from("payments")
       .select(ADMIN_DASHBOARD_PAYMENTS_SELECT)
-      .order("payment_date", { ascending: false, nullsFirst: false })
-      .limit(400)
+      .gte("payment_date", dayStart)
+      .lte("payment_date", dayEnd)
+  );
+  if (!filtered.error) return filtered;
+
+  filtered = await dashboardTableSelect("payments", ADMIN_DASHBOARD_PAYMENTS_SELECT, "payments.todayRetry");
+  if (!filtered.error) return filtered;
+
+  return timedSupabaseQuery("payments.recentFallback", () =>
+    supabase.from("payments").select("*").order("payment_date", { ascending: false }).limit(400)
   );
 }
 
 async function fetchAdminDashboardVisitSlices() {
-  const [countRes, recentRes] = await Promise.all([
-    timedSupabaseQuery("agent_visits.count", () =>
-      supabase.from("agent_visits").select("visit_id", { count: "exact", head: true })
-    ),
-    timedSupabaseQuery("agent_visits.recent", () =>
+  const countRes = await timedSupabaseQuery("agent_visits.count", () =>
+    supabase.from("agent_visits").select("visit_id", { count: "exact", head: true })
+  );
+
+  let recentRes = await timedSupabaseQuery("agent_visits.recent", () =>
+    supabase
+      .from("agent_visits")
+      .select(ADMIN_DASHBOARD_VISITS_SELECT)
+      .order("created_at", { ascending: false, nullsFirst: false })
+      .limit(40)
+  );
+  if (recentRes.error) {
+    console.warn(
+      "[getAdminDashboardRead] agent_visits projection failed:",
+      recentRes.error.message
+    );
+    recentRes = await timedSupabaseQuery("agent_visits.recent.fallback", () =>
       supabase
         .from("agent_visits")
-        .select(ADMIN_DASHBOARD_VISITS_SELECT)
+        .select("*")
         .order("created_at", { ascending: false, nullsFirst: false })
         .limit(40)
-    ),
-  ]);
+    );
+  }
 
   const recentRows = recentRes.error ? [] : recentRes.data || [];
   const visitCount = countRes.error
@@ -1787,6 +1850,8 @@ export async function getAdminDashboardRead(options = {}) {
     const today = localDateYmd();
     const endQuery = perfTime("getAdminDashboardRead.supabaseQueries");
 
+    const queryErrors = [];
+
     const [
       ordersRes,
       itemsRes,
@@ -1796,20 +1861,12 @@ export async function getAdminDashboardRead(options = {}) {
       labsRes,
       visitSlices,
     ] = await Promise.all([
-      timedSupabaseQuery("orders", () =>
-        supabase.from("orders").select(ADMIN_DASHBOARD_ORDERS_SELECT)
-      ),
-      timedSupabaseQuery("order_items", () =>
-        supabase.from("order_items").select(ADMIN_DASHBOARD_ORDER_ITEMS_SELECT)
-      ),
-      timedSupabaseQuery("ar_credit_control", () =>
-        supabase.from("ar_credit_control").select(ADMIN_DASHBOARD_AR_SELECT)
-      ),
-      timedSupabaseQuery("inventory", () =>
-        supabase.from("inventory").select(ADMIN_DASHBOARD_INVENTORY_SELECT)
-      ),
+      dashboardTableSelect("orders", ADMIN_DASHBOARD_ORDERS_SELECT, "orders"),
+      dashboardTableSelect("order_items", ADMIN_DASHBOARD_ORDER_ITEMS_SELECT, "order_items"),
+      dashboardTableSelect("ar_credit_control", ADMIN_DASHBOARD_AR_SELECT, "ar_credit_control"),
+      dashboardTableSelect("inventory", ADMIN_DASHBOARD_INVENTORY_SELECT, "inventory"),
       fetchAdminDashboardPaymentsForToday(today),
-      timedSupabaseQuery("labs", () => supabase.from("labs").select(ADMIN_DASHBOARD_LABS_SELECT)),
+      dashboardTableSelect("labs", ADMIN_DASHBOARD_LABS_SELECT, "labs"),
       fetchAdminDashboardVisitSlices(),
     ]);
 
@@ -1822,12 +1879,26 @@ export async function getAdminDashboardRead(options = {}) {
     const payRaw = payRes.error ? [] : payRes.data || [];
     const labsRaw = labsRes.error ? [] : labsRes.data || [];
 
-    if (ordersRes.error) console.warn("[getAdminDashboardRead] orders:", ordersRes.error.message);
-    if (itemsRes.error) console.warn("[getAdminDashboardRead] order_items:", itemsRes.error.message);
-
-    if (arRes.error) console.warn("[getAdminDashboardRead] ar_credit_control:", arRes.error.message);
-    if (invRes.error) console.warn("[getAdminDashboardRead] inventory:", invRes.error.message);
-    if (payRes.error) console.warn("[getAdminDashboardRead] payments:", payRes.error.message);
+    if (ordersRes.error) {
+      queryErrors.push("orders");
+      console.warn("[getAdminDashboardRead] orders:", ordersRes.error.message);
+    }
+    if (itemsRes.error) {
+      queryErrors.push("order_items");
+      console.warn("[getAdminDashboardRead] order_items:", itemsRes.error.message);
+    }
+    if (arRes.error) {
+      queryErrors.push("ar_credit_control");
+      console.warn("[getAdminDashboardRead] ar_credit_control:", arRes.error.message);
+    }
+    if (invRes.error) {
+      queryErrors.push("inventory");
+      console.warn("[getAdminDashboardRead] inventory:", invRes.error.message);
+    }
+    if (payRes.error) {
+      queryErrors.push("payments");
+      console.warn("[getAdminDashboardRead] payments:", payRes.error.message);
+    }
 
     endQuery({
       orders: ordersRaw.length,
@@ -1911,12 +1982,12 @@ export async function getAdminDashboardRead(options = {}) {
       outstandingReceivables,
     });
 
-    const payload = {
+    const payload = normalizeAdminDashboardPayload({
       executive,
       summary,
       visits: { visits },
       insights: dashboardInsights,
-    };
+    });
 
     logAdminDashboardSupabaseAudit({
       today,
@@ -1940,8 +2011,13 @@ export async function getAdminDashboardRead(options = {}) {
     });
 
     const result = { success: true, data: payload };
-    adminDashboardReadCache = { result, loadedAt: Date.now() };
-    endTotal({ cached: true });
+    if (adminDashboardReadHasCoreData(ordersRaw, arRaw, queryErrors)) {
+      adminDashboardReadCache = { result, loadedAt: Date.now() };
+      endTotal({ cached: true });
+    } else {
+      perfLog("getAdminDashboardRead.skipCache", { queryErrors, orders: ordersRaw.length, ar: arRaw.length });
+      endTotal({ cached: false, queryErrors });
+    }
     return result;
   } catch (err) {
     console.warn("[getAdminDashboardRead] failed:", err?.message || err);
