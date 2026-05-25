@@ -1746,11 +1746,13 @@ export function invalidateAdminDashboardReadCache() {
   perfLog("getAdminDashboardRead.cacheCleared");
 }
 
-async function timedSupabaseQuery(label, queryPromise) {
+async function timedSupabaseQuery(label, queryFnOrPromise) {
   const end = perfTime(`supabase.${label}`);
-  const res = await queryPromise;
-  const rows = res.error ? 0 : res.count ?? res.data?.length ?? 0;
-  end({ rows, error: res.error?.message || null });
+  const promise =
+    typeof queryFnOrPromise === "function" ? queryFnOrPromise() : queryFnOrPromise;
+  const res = await promise;
+  const rows = res?.error ? 0 : res?.count ?? res?.data?.length ?? 0;
+  end({ rows, error: res?.error?.message || null });
   return res;
 }
 
