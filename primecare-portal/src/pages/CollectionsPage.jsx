@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   getCollectionDetails,
   getCollectionHistory,
@@ -17,19 +17,47 @@ import {
   logAppsScriptFallbackUsed,
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, IndianRupee, CheckCircle2, ClipboardCheck } from "lucide-react";
+import {
+  StatusBadge,
+  KpiCard,
+  KpiCardGrid,
+  PageSkeleton,
+  ListSkeleton,
+  EmptyState,
+  usePortalToast,
+} from "@/components/ux";
+import { typography } from "@/styles/designTokens";
+import {
+  collectionRiskToVariant,
+  paymentStatusToVariant,
+} from "@/utils/statusTokens";
+import { cn } from "@/lib/utils";
 import { labIdKey } from "@/utils/labId.js";
 import {
   AGENT_TASK_COMPLETION_ENABLED,
   ALLOW_LEGACY_APPS_SCRIPT,
 } from "@/config/environment";
+import { ROLES } from "@/config/roles";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { usePredatorRenderTrace } from "@/predator/renderTrace.js";
+import { predatorTrace } from "@/predator/predatorTiming.js";
+import {
+  Loader2,
+  IndianRupee,
+  CheckCircle2,
+  ClipboardCheck,
+  RefreshCw,
+  ChevronDown,
+  ChevronUp,
+  Search,
+  AlertTriangle,
+  ShieldAlert,
+  Wallet,
+} from "lucide-react";
 
 function findCollectionByLabId(list, labId) {
   const target = labIdKey(labId);
@@ -59,11 +87,409 @@ function shouldShowPaidLabel(item) {
   return Number(item?.totalPaid || 0) > 0;
 }
 
-function formatMetaSegment(parts) {
-  return parts.filter(Boolean).join(" • ");
+function formatMoney(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return `₹${n.toLocaleString("en-IN")}`;
+}
+
+function formatShortDate(value) {
+  if (!value) return "—";
+  const s = String(value).slice(0, 10);
+  const d = new Date(`${s}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return s;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function collectionsScopeHint(role) {
+  const r = String(role || "").toLowerCase();
+  if (r === ROLES.AGENT) return "Labs assigned to you only.";
+  if (r === ROLES.LAB) return "Your lab account and collection history.";
+  return "Tenant-wide receivables, follow-ups, and payments.";
+}
+
+function SummaryMetric({ label, children }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
+        {label}
+      </div>
+      <div className="truncate text-sm font-medium text-slate-800">{children}</div>
+    </div>
+  );
+}
+
+function CollectionsLoading() {
+  return (
+    <div className="space-y-3 pb-6">
+      <PageSkeleton kpiCount={4} kpiColumns={4} showList={false} />
+      <div className="animate-pulse rounded-lg border border-border bg-card p-3 shadow-sm">
+        <div className="mb-2 h-9 w-full rounded-lg bg-muted" />
+        <ListSkeleton rows={6} />
+      </div>
+    </div>
+  );
+}
+
+function CollectionSummaryRow({ item, expanded, onToggleExpand }) {
+  const outstanding = Number(item.outstandingAmount || 0);
+  const overdueDays = Number(item.overdueDays || 0);
+  const agent = displayAgentName(item.assignedAgent);
+  const paymentLabel = displayPaymentStatus(item);
+  const lastFollowUp = item.lastFollowUp || item.nextFollowUp;
+
+  return (
+    <div
+      className={cn(
+        "flex flex-col gap-2 p-2.5 sm:p-3",
+        expanded ? "bg-slate-50" : "bg-white"
+      )}
+    >
+      <div className="flex items-start gap-2">
+        <button
+          type="button"
+          onClick={onToggleExpand}
+          className="mt-0.5 shrink-0 rounded-md p-1 text-slate-500 hover:bg-slate-100"
+          aria-expanded={expanded}
+          aria-controls={`collection-detail-${labIdKey(item.labId)}`}
+          aria-label={expanded ? "Collapse collection details" : "Expand collection details"}
+        >
+          {expanded ? (
+            <ChevronUp className="h-5 w-5" />
+          ) : (
+            <ChevronDown className="h-5 w-5" />
+          )}
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span className="truncate text-sm font-semibold text-slate-900">
+              {item.labName || item.labId}
+            </span>
+            {item.area ? (
+              <span className="text-[11px] text-slate-400">{item.area}</span>
+            ) : null}
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            <StatusBadge variant={collectionRiskToVariant(item.riskStatus)} compact>
+              {item.riskStatus || "Low"}
+            </StatusBadge>
+            <StatusBadge variant={paymentStatusToVariant(paymentLabel)} compact>
+              {paymentLabel}
+            </StatusBadge>
+            {item.creditHold ? (
+              <StatusBadge variant="danger" compact>
+                {String(item.creditHold).toUpperCase() === "HOLD" ? "Credit hold" : item.creditHold}
+              </StatusBadge>
+            ) : null}
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
+            Outstanding
+          </div>
+          <div className="text-base font-semibold tabular-nums text-slate-900">
+            {formatMoney(outstanding)}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-4">
+        <SummaryMetric label="Overdue days">
+          {overdueDays > 0 ? (
+            <span className="text-[var(--pc-danger)]">{overdueDays}d</span>
+          ) : (
+            "—"
+          )}
+        </SummaryMetric>
+        <SummaryMetric label="Last follow-up">{formatShortDate(lastFollowUp)}</SummaryMetric>
+        <SummaryMetric label="Next follow-up">
+          {formatShortDate(item.nextFollowUp)}
+        </SummaryMetric>
+        <SummaryMetric label="Agent">{agent || "—"}</SummaryMetric>
+        {shouldShowPaidLabel(item) ? (
+          <SummaryMetric label="Total paid">{formatMoney(item.totalPaid)}</SummaryMetric>
+        ) : null}
+      </div>
+
+      <div className="flex justify-end sm:hidden">
+        <Button
+          type="button"
+          variant={expanded ? "secondary" : "outline"}
+          size="sm"
+          className="h-10 w-full rounded-lg"
+          onClick={onToggleExpand}
+        >
+          {expanded ? "Close details" : "Record payment / notes"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function CollectionExpandedPanel({
+  collection,
+  history,
+  detailsLoading,
+  amountCollected,
+  setAmountCollected,
+  paymentMode,
+  setPaymentMode,
+  note,
+  setNote,
+  nextFollowUp,
+  setNextFollowUp,
+  nextAction,
+  setNextAction,
+  saving,
+  completingTask,
+  pendingTaskContext,
+  onSave,
+  onCompleteTask,
+}) {
+  if (detailsLoading) {
+    return (
+      <div className="border-t border-slate-200 bg-slate-50/80 px-3 py-6">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading collection details…
+        </div>
+      </div>
+    );
+  }
+
+  if (!collection) {
+    return (
+      <div className="border-t border-slate-200 bg-slate-50/80 px-3 py-6">
+        <p className="text-sm text-muted-foreground">No collection details found.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      id={`collection-detail-${labIdKey(collection.labId)}`}
+      className="border-t border-slate-200 bg-slate-50/80 px-2.5 py-3 sm:px-3"
+    >
+      <div className="space-y-4">
+        <section className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+          <div>
+            <div className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
+              Outstanding
+            </div>
+            <div className="font-semibold">{formatMoney(collection.outstandingAmount)}</div>
+          </div>
+          {shouldShowPaidLabel(collection) ? (
+            <div>
+              <div className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
+                Total paid
+              </div>
+              <div className="font-semibold">{formatMoney(collection.totalPaid)}</div>
+            </div>
+          ) : null}
+          <div>
+            <div className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
+              Risk
+            </div>
+            <StatusBadge variant={collectionRiskToVariant(collection.riskStatus)} compact>
+              {collection.riskStatus || "Low"}
+            </StatusBadge>
+          </div>
+          <div>
+            <div className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
+              Status
+            </div>
+            <StatusBadge
+              variant={paymentStatusToVariant(displayPaymentStatus(collection))}
+              compact
+            >
+              {displayPaymentStatus(collection)}
+            </StatusBadge>
+          </div>
+        </section>
+
+        <section className="space-y-3 rounded-lg border border-border bg-card p-3">
+          <h3 className="text-xs font-semibold text-slate-700">Record payment & follow-up</h3>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+              Amount collected
+            </label>
+            <Input
+              type="number"
+              value={amountCollected}
+              onChange={(e) => setAmountCollected(e.target.value)}
+              placeholder="Enter collected amount"
+              className="h-11 rounded-lg"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+              Payment mode
+            </label>
+            <select
+              className="h-11 w-full rounded-lg border border-input bg-background px-3 text-sm"
+              value={paymentMode}
+              onChange={(e) => setPaymentMode(e.target.value)}
+            >
+              <option value="Cash">Cash</option>
+              <option value="UPI">UPI</option>
+              <option value="Bank Transfer">Bank Transfer</option>
+              <option value="Cheque">Cheque</option>
+            </select>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                Next follow-up date
+              </label>
+              <Input
+                type="date"
+                value={nextFollowUp}
+                onChange={(e) => setNextFollowUp(e.target.value)}
+                className="h-11 rounded-lg"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                Next action
+              </label>
+              <Input
+                value={nextAction}
+                onChange={(e) => setNextAction(e.target.value)}
+                placeholder="Call, revisit, send reminder…"
+                className="h-11 rounded-lg"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+              Note
+            </label>
+            <Textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Collection note…"
+              className="min-h-[88px] rounded-lg"
+            />
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button
+              type="button"
+              className="h-11 flex-1 rounded-lg"
+              onClick={onSave}
+              disabled={saving}
+            >
+              {saving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                <>
+                  <IndianRupee className="mr-2 h-4 w-4" />
+                  Save collection update
+                </>
+              )}
+            </Button>
+
+            {pendingTaskContext?.taskId ? (
+              AGENT_TASK_COMPLETION_ENABLED ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 flex-1 rounded-lg"
+                  onClick={onCompleteTask}
+                  disabled={completingTask}
+                >
+                  {completingTask ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Completing…
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                      Mark linked task complete
+                    </>
+                  )}
+                </Button>
+              ) : (
+                <p className="rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground sm:flex-1">
+                  Task completion coming soon.
+                </p>
+              )
+            ) : null}
+          </div>
+        </section>
+
+        <section className="space-y-2">
+          <h3 className="text-xs font-semibold text-slate-700">Collection history</h3>
+          {history.length ? (
+            <ul className="space-y-2">
+              {history.map((item) => (
+                <li
+                  key={item.paymentId || `${item.paymentDate}-${item.amountCollected}`}
+                  className="rounded-lg border border-border bg-card p-3 text-sm"
+                >
+                  <div className="font-medium tabular-nums">
+                    {formatMoney(item.amountCollected)}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {item.paymentDate || "—"} · {item.paymentMode || "—"}
+                  </div>
+                  <p className="mt-1 text-slate-600">{item.note || "No note"}</p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-muted-foreground">No payment history found.</p>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function CollectionListItem({
+  item,
+  expanded,
+  onToggleExpand,
+  selectedCollection,
+  history,
+  detailsLoading,
+  formProps,
+  pendingTaskContext,
+  onSave,
+  onCompleteTask,
+}) {
+  return (
+    <Card className="overflow-hidden rounded-lg border-border shadow-sm">
+      <CollectionSummaryRow
+        item={item}
+        expanded={expanded}
+        onToggleExpand={onToggleExpand}
+      />
+      {expanded ? (
+        <CollectionExpandedPanel
+          collection={selectedCollection}
+          history={history}
+          detailsLoading={detailsLoading}
+          pendingTaskContext={pendingTaskContext}
+          onSave={onSave}
+          onCompleteTask={onCompleteTask}
+          {...formProps}
+        />
+      ) : null}
+    </Card>
+  );
 }
 
 export default function CollectionsPage({ currentUser, authToken }) {
+  const { showToast } = usePortalToast();
   const [summary, setSummary] = useState({
     totalOutstanding: 0,
     overdueCount: 0,
@@ -72,7 +498,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
   });
 
   const [collections, setCollections] = useState([]);
-  const [selectedLabId, setSelectedLabId] = useState("");
+  const [expandedLabId, setExpandedLabId] = useState("");
   const [selectedCollection, setSelectedCollection] = useState(null);
   const [history, setHistory] = useState([]);
 
@@ -82,8 +508,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
   const [saving, setSaving] = useState(false);
   const [completingTask, setCompletingTask] = useState(false);
 
-  const [error, setError] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
+  const [loadError, setLoadError] = useState("");
 
   const [amountCollected, setAmountCollected] = useState("");
   const [paymentMode, setPaymentMode] = useState("Cash");
@@ -93,100 +518,81 @@ export default function CollectionsPage({ currentUser, authToken }) {
 
   const [pendingTaskContext, setPendingTaskContext] = useState(null);
 
-  useEffect(() => {
-    loadCollections();
-  }, [authToken]);
-
-  usePredatorModuleValidation(
-    "Collections",
-    currentUser,
-    { summary, collections, collectionCount: collections.length },
-    !loading
+  const predatorSnapshot = useMemo(
+    () => ({
+      summary,
+      collections,
+      collectionCount: collections.length,
+    }),
+    [summary, collections]
   );
+
+  usePredatorModuleValidation("Collections", currentUser, predatorSnapshot, !loading);
 
   usePredatorRenderTrace("Collections", {
     ready: !loading,
     hasData: collections.length > 0 || summary.totalOutstanding > 0,
   });
 
+  const loadCollections = useCallback(async () => {
+    return predatorTrace("Collections", "page.load", async () => {
+      try {
+        setLoading(true);
+        setLoadError("");
+
+        logSupabaseFeatureSource("Collections.list", { api: "getCollectionsRead" });
+        const res = await getCollectionsRead();
+        const payload = res?.data || {};
+
+        const rows = Array.isArray(payload.collections) ? payload.collections : [];
+
+        const summaryFromApi = payload.summary || {};
+        setSummary({
+          totalOutstanding: Number(summaryFromApi.totalOutstanding ?? 0),
+          overdueCount: Number(summaryFromApi.overdueCount ?? 0),
+          highRiskCount: Number(summaryFromApi.highRiskCount ?? 0),
+          todayCollections: Number(summaryFromApi.todayCollections ?? 0),
+        });
+
+        setCollections(rows);
+      } catch (err) {
+        console.warn("CollectionsPage loadCollections:", err);
+        setLoadError(err?.message || "Failed to load collections");
+        setSummary({
+          totalOutstanding: 0,
+          overdueCount: 0,
+          highRiskCount: 0,
+          todayCollections: 0,
+        });
+        setCollections([]);
+      } finally {
+        setLoading(false);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    loadCollections();
+  }, [loadCollections, authToken]);
+
   useEffect(() => {
     if (loading) return;
     hydratePendingCollectionTask();
   }, [loading, collections]);
 
-  async function loadCollections() {
-    try {
-      setLoading(true);
-      setError("");
-
-      logSupabaseFeatureSource("Collections.list", { api: "getCollectionsRead" });
-      const res = await getCollectionsRead();
-      const payload = res?.data || {};
-
-      const rows = Array.isArray(payload.collections) ? payload.collections : [];
-
-      const summaryFromApi = payload.summary || {};
-      setSummary({
-        totalOutstanding: Number(summaryFromApi.totalOutstanding ?? 0),
-        overdueCount: Number(summaryFromApi.overdueCount ?? 0),
-        highRiskCount: Number(summaryFromApi.highRiskCount ?? 0),
-        todayCollections: Number(summaryFromApi.todayCollections ?? 0),
-      });
-      console.log("SUPABASE COLLECTIONS SUMMARY", summaryFromApi);
-
-      setCollections(rows);
-    } catch (err) {
-      console.warn("CollectionsPage loadCollections:", err);
-      setSummary({
-        totalOutstanding: 0,
-        overdueCount: 0,
-        highRiskCount: 0,
-        todayCollections: 0,
-      });
-      setCollections([]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function hydratePendingCollectionTask() {
-    const raw = sessionStorage.getItem("primecare_pending_collection_task");
-    if (!raw) return;
-
-    try {
-      const parsed = JSON.parse(raw);
-      if (!parsed?.labId) {
-        sessionStorage.removeItem("primecare_pending_collection_task");
-        return;
-      }
-
-      setPendingTaskContext(parsed);
-      openCollection(parsed.labId, {
-        fromTask: true,
-        taskContext: parsed,
-      });
-
-      sessionStorage.removeItem("primecare_pending_collection_task");
-    } catch (err) {
-      console.error("Failed to parse pending collection task", err);
-      sessionStorage.removeItem("primecare_pending_collection_task");
-    }
-  }
-
   async function openCollection(labId, options = {}) {
     const listMatch = findCollectionByLabId(collections, labId);
     const canonicalLabId = listMatch?.labId ?? labId;
+    const canonicalKey = labIdKey(canonicalLabId);
 
     try {
       setDetailsLoading(true);
-      setError("");
-      setSuccessMessage("");
 
       if (listMatch) {
-        setSelectedLabId(canonicalLabId);
+        setExpandedLabId(canonicalKey);
         setSelectedCollection(listMatch);
       } else {
-        setSelectedLabId(canonicalLabId);
+        setExpandedLabId(canonicalKey);
       }
 
       const params = authToken ? { sessionToken: authToken } : {};
@@ -258,9 +664,8 @@ export default function CollectionsPage({ currentUser, authToken }) {
         };
       }
 
-      setSelectedLabId(canonicalLabId);
+      setExpandedLabId(canonicalKey);
       setSelectedCollection(collection);
-
       setHistory(historyRows);
 
       setAmountCollected("");
@@ -268,558 +673,435 @@ export default function CollectionsPage({ currentUser, authToken }) {
       setNote(collection?.collectionsNotes || collection?.note || "");
       setNextFollowUp(collection?.nextFollowUp || "");
       setNextAction(
-        options?.taskContext?.nextAction ||
-          collection?.nextAction ||
-          ""
+        options?.taskContext?.nextAction || collection?.nextAction || ""
       );
 
       if (options?.fromTask && options?.taskContext) {
-        setSuccessMessage(
+        showToast(
+          "info",
           `Collection task loaded for ${options.taskContext.labName || collection?.labName || canonicalLabId}.`
         );
       }
     } catch (err) {
       if (listMatch) {
-        setSelectedLabId(canonicalLabId);
+        setExpandedLabId(canonicalKey);
         setSelectedCollection(listMatch);
         setHistory([]);
       } else {
-        setError(err.message || "Failed to load collection details");
+        showToast("error", err.message || "Failed to load collection details");
+        setExpandedLabId("");
+        setSelectedCollection(null);
       }
     } finally {
       setDetailsLoading(false);
     }
   }
 
-  async function handleSaveCollection() {
-    if (!selectedLabId) return;
+  function hydratePendingCollectionTask() {
+    const raw = sessionStorage.getItem("primecare_pending_collection_task");
+    if (!raw) return;
 
     try {
-      setSaving(true);
-      setError("");
-      setSuccessMessage("");
-
-      const basePayload = {
-        labId: selectedLabId,
-        amountCollected: Number(amountCollected || 0),
-        paymentMode,
-        collectedBy: currentUser?.name || "System User",
-        note,
-        nextFollowUp,
-        nextAction,
-      };
-      let paymentFallbackLogged = false;
-
-      const amt = Number(amountCollected || 0);
-      const notesPayload = {
-        labId: labIdKey(selectedLabId),
-        note,
-        nextFollowUp,
-        nextAction,
-      };
-
-      if (supabase && amt <= 0) {
-        logSupabaseFeatureSource("Collections.notesWrite", { api: "updateCollectionNotesWrite" });
-        const notesRes = await updateCollectionNotesWrite(notesPayload);
-        if (notesRes.success) {
-          setSuccessMessage(
-            pendingTaskContext?.taskId
-              ? "Collection updated successfully. You can now mark the linked task complete."
-              : "Collection updated successfully"
-          );
-          await loadCollections();
-          await openCollection(selectedLabId, {
-            fromTask: !!pendingTaskContext,
-            taskContext: pendingTaskContext,
-          });
-          return;
-        }
-
-        if (import.meta.env.DEV) {
-          throw new Error(notesRes.error || "Supabase collection notes write failed.");
-        }
-
-        logAppsScriptFallbackUsed("Collections.notesWrite", {
-          primarySourceExpected: "Supabase updateCollectionNotesWrite",
-          fallbackSourceUsed: "No Apps Script zero-amount equivalent",
-          riskLevel: "WARNING",
-          metricKey: "collectionsSummary",
-          reason: notesRes.error,
-        });
-        throw new Error(
-          notesRes.error || "Failed to save collection notes. Apps Script does not support zero-amount updates."
-        );
+      const parsed = JSON.parse(raw);
+      if (!parsed?.labId) {
+        sessionStorage.removeItem("primecare_pending_collection_task");
+        return;
       }
 
-      if (supabase && amt > 0) {
-        const sbRes = await createPaymentWrite({
-          labId: labIdKey(selectedLabId),
-          tenantId: currentUser?.tenantId ?? currentUser?.tenant_id ?? null,
-          orderId: null,
-          amountReceived: amt,
+      setPendingTaskContext(parsed);
+      openCollection(parsed.labId, {
+        fromTask: true,
+        taskContext: parsed,
+      });
+
+      sessionStorage.removeItem("primecare_pending_collection_task");
+    } catch (err) {
+      console.error("Failed to parse pending collection task", err);
+      sessionStorage.removeItem("primecare_pending_collection_task");
+    }
+  }
+
+  async function handleSaveCollection() {
+    const selectedLabId = expandedLabId;
+    if (!selectedLabId) return;
+
+    return predatorTrace("Collections", "page.save", async () => {
+      try {
+        setSaving(true);
+
+        const basePayload = {
+          labId: selectedLabId,
+          amountCollected: Number(amountCollected || 0),
           paymentMode,
-          outstandingBefore: Number(selectedCollection?.outstandingAmount ?? 0),
           collectedBy: currentUser?.name || "System User",
           note,
-        });
+          nextFollowUp,
+          nextAction,
+        };
+        let paymentFallbackLogged = false;
 
-        logSupabaseFeatureSource("Collections.paymentWrite", { api: "createPaymentWrite" });
-        if (sbRes.success) {
-          if (note || nextFollowUp || nextAction) {
-            await updateCollectionNotesWrite(notesPayload);
+        const amt = Number(amountCollected || 0);
+        const notesPayload = {
+          labId: labIdKey(selectedLabId),
+          note,
+          nextFollowUp,
+          nextAction,
+        };
+
+        if (supabase && amt <= 0) {
+          logSupabaseFeatureSource("Collections.notesWrite", {
+            api: "updateCollectionNotesWrite",
+          });
+          const notesRes = await updateCollectionNotesWrite(notesPayload);
+          if (notesRes.success) {
+            showToast(
+              "success",
+              pendingTaskContext?.taskId
+                ? "Collection updated. You can mark the linked task complete."
+                : "Collection updated successfully"
+            );
+            await loadCollections();
+            await openCollection(selectedLabId, {
+              fromTask: !!pendingTaskContext,
+              taskContext: pendingTaskContext,
+            });
+            return;
           }
 
-          setSuccessMessage(
-            pendingTaskContext?.taskId
-              ? "Collection updated successfully. You can now mark the linked task complete."
-              : "Collection updated successfully"
-          );
+          if (import.meta.env.DEV) {
+            throw new Error(notesRes.error || "Supabase collection notes write failed.");
+          }
 
-          await loadCollections();
-          await openCollection(selectedLabId, {
-            fromTask: !!pendingTaskContext,
-            taskContext: pendingTaskContext,
+          logAppsScriptFallbackUsed("Collections.notesWrite", {
+            primarySourceExpected: "Supabase updateCollectionNotesWrite",
+            fallbackSourceUsed: "No Apps Script zero-amount equivalent",
+            riskLevel: "WARNING",
+            metricKey: "collectionsSummary",
+            reason: notesRes.error,
           });
-          return;
+          throw new Error(
+            notesRes.error ||
+              "Failed to save collection notes. Apps Script does not support zero-amount updates."
+          );
         }
 
-        if (import.meta.env.DEV || !ALLOW_LEGACY_APPS_SCRIPT) {
-          throw new Error(sbRes.error || "Supabase payment write failed.");
+        if (supabase && amt > 0) {
+          const sbRes = await createPaymentWrite({
+            labId: labIdKey(selectedLabId),
+            tenantId: currentUser?.tenantId ?? currentUser?.tenant_id ?? null,
+            orderId: null,
+            amountReceived: amt,
+            paymentMode,
+            outstandingBefore: Number(selectedCollection?.outstandingAmount ?? 0),
+            collectedBy: currentUser?.name || "System User",
+            note,
+          });
+
+          logSupabaseFeatureSource("Collections.paymentWrite", { api: "createPaymentWrite" });
+          if (sbRes.success) {
+            if (note || nextFollowUp || nextAction) {
+              await updateCollectionNotesWrite(notesPayload);
+            }
+
+            showToast(
+              "success",
+              pendingTaskContext?.taskId
+                ? "Payment recorded. You can mark the linked task complete."
+                : "Payment recorded successfully"
+            );
+
+            await loadCollections();
+            await openCollection(selectedLabId, {
+              fromTask: !!pendingTaskContext,
+              taskContext: pendingTaskContext,
+            });
+            return;
+          }
+
+          if (import.meta.env.DEV || !ALLOW_LEGACY_APPS_SCRIPT) {
+            throw new Error(sbRes.error || "Supabase payment write failed.");
+          }
+
+          logAppsScriptFallbackUsed("Collections.paymentWrite", {
+            primarySourceExpected: "Supabase createPaymentWrite",
+            fallbackSourceUsed: "Apps Script updateCollection",
+            riskLevel: "DANGEROUS",
+            metricKey: "collectionsSummary",
+            reason: sbRes.error,
+          });
+          paymentFallbackLogged = true;
         }
 
-        logAppsScriptFallbackUsed("Collections.paymentWrite", {
-          primarySourceExpected: "Supabase createPaymentWrite",
-          fallbackSourceUsed: "Apps Script updateCollection",
-          riskLevel: "DANGEROUS",
-          metricKey: "collectionsSummary",
-          reason: sbRes.error,
+        if (amt <= 0) {
+          throw new Error(
+            "Enter an amount collected or save notes via Supabase when configured."
+          );
+        }
+
+        if (!paymentFallbackLogged) {
+          logAppsScriptFallbackUsed("Collections.paymentWrite", {
+            primarySourceExpected: "Supabase payments + ar_credit_control write",
+            fallbackSourceUsed: "Apps Script updateCollection",
+            riskLevel: "DANGEROUS",
+            metricKey: "collectionsSummary",
+            reason: supabase
+              ? "Using updateCollection after Supabase payment failure."
+              : "Supabase client unavailable; using Apps Script updateCollection.",
+          });
+        }
+        if (!ALLOW_LEGACY_APPS_SCRIPT) {
+          throw new Error("Supabase collections write is required for pilot access.");
+        }
+        const res = await updateCollection(basePayload);
+        const responsePayload = res?.data || res || {};
+
+        if (!responsePayload?.success) {
+          throw new Error(responsePayload?.message || "Failed to update collection");
+        }
+
+        showToast(
+          "success",
+          pendingTaskContext?.taskId && AGENT_TASK_COMPLETION_ENABLED
+            ? "Collection updated. You can mark the linked task complete."
+            : "Collection updated successfully"
+        );
+
+        await loadCollections();
+        await openCollection(selectedLabId, {
+          fromTask: !!pendingTaskContext,
+          taskContext: pendingTaskContext,
         });
-        paymentFallbackLogged = true;
+      } catch (err) {
+        showToast("error", err.message || "Failed to save collection update");
+      } finally {
+        setSaving(false);
       }
-
-      if (amt <= 0) {
-        throw new Error("Enter an amount collected or save notes via Supabase when configured.");
-      }
-
-      if (!paymentFallbackLogged) {
-        logAppsScriptFallbackUsed("Collections.paymentWrite", {
-          primarySourceExpected: "Supabase payments + ar_credit_control write",
-          fallbackSourceUsed: "Apps Script updateCollection",
-          riskLevel: "DANGEROUS",
-          metricKey: "collectionsSummary",
-          reason: supabase
-            ? "Using updateCollection after Supabase payment failure."
-            : "Supabase client unavailable; using Apps Script updateCollection.",
-        });
-      }
-      if (!ALLOW_LEGACY_APPS_SCRIPT) {
-        throw new Error("Supabase collections write is required for pilot access.");
-      }
-      const res = await updateCollection(basePayload);
-      const responsePayload = res?.data || res || {};
-
-      if (!responsePayload?.success) {
-        throw new Error(responsePayload?.message || "Failed to update collection");
-      }
-
-      setSuccessMessage(
-        pendingTaskContext?.taskId && AGENT_TASK_COMPLETION_ENABLED
-          ? "Collection updated successfully. You can now mark the linked task complete."
-          : "Collection updated successfully"
-      );
-
-      await loadCollections();
-      await openCollection(selectedLabId, {
-        fromTask: !!pendingTaskContext,
-        taskContext: pendingTaskContext,
-      });
-    } catch (err) {
-      setError(err.message || "Failed to save collection update");
-    } finally {
-      setSaving(false);
-    }
+    });
   }
 
   async function handleCompleteLinkedTask() {
     if (!pendingTaskContext?.taskId) return;
 
-    try {
-      setCompletingTask(true);
-      setError("");
-      setSuccessMessage("");
+    return predatorTrace("Collections", "page.completeTask", async () => {
+      try {
+        setCompletingTask(true);
 
-      if (!AGENT_TASK_COMPLETION_ENABLED) {
-        return;
+        if (!AGENT_TASK_COMPLETION_ENABLED) {
+          return;
+        }
+
+        const res = await completeAgentTask({
+          taskId: pendingTaskContext.taskId,
+          completedBy: currentUser?.name || currentUser?.agentName || "System User",
+        });
+
+        const payload = res?.data || res || {};
+        if (!payload?.success) {
+          throw new Error(payload?.message || "Failed to complete linked task");
+        }
+
+        showToast("success", "Collection updated and linked task marked complete.");
+        setPendingTaskContext(null);
+      } catch (err) {
+        showToast("error", err.message || "Failed to complete linked task");
+      } finally {
+        setCompletingTask(false);
       }
-
-      const res = await completeAgentTask({
-        taskId: pendingTaskContext.taskId,
-        completedBy: currentUser?.name || currentUser?.agentName || "System User",
-      });
-
-      const payload = res?.data || res || {};
-      if (!payload?.success) {
-        throw new Error(payload?.message || "Failed to complete linked task");
-      }
-
-      setSuccessMessage("Collection updated and linked task marked complete.");
-      setPendingTaskContext(null);
-    } catch (err) {
-      setError(err.message || "Failed to complete linked task");
-    } finally {
-      setCompletingTask(false);
-    }
+    });
   }
 
   const filteredCollections = useMemo(() => {
-    return collections.filter((item) =>
+    const q = search.trim().toLowerCase();
+    const filtered = collections.filter((item) =>
       `${item.labId} ${item.labName} ${item.assignedAgent} ${item.area}`
         .toLowerCase()
-        .includes(search.toLowerCase())
+        .includes(q)
+    );
+    return [...filtered].sort(
+      (a, b) => Number(b.outstandingAmount || 0) - Number(a.outstandingAmount || 0)
     );
   }, [collections, search]);
+
+  useEffect(() => {
+    if (
+      expandedLabId &&
+      !filteredCollections.some((c) => labIdKey(c.labId) === expandedLabId)
+    ) {
+      setExpandedLabId("");
+      setSelectedCollection(null);
+      setHistory([]);
+    }
+  }, [filteredCollections, expandedLabId]);
+
+  async function toggleExpand(labId) {
+    const key = labIdKey(labId);
+    if (expandedLabId === key) {
+      setExpandedLabId("");
+      setSelectedCollection(null);
+      setHistory([]);
+      return;
+    }
+    await openCollection(labId);
+  }
+
+  const formProps = {
+    amountCollected,
+    setAmountCollected,
+    paymentMode,
+    setPaymentMode,
+    note,
+    setNote,
+    nextFollowUp,
+    setNextFollowUp,
+    nextAction,
+    setNextAction,
+    saving,
+    completingTask,
+  };
+
+  if (loading) {
+    return <CollectionsLoading />;
+  }
+
   return (
-    <div className="space-y-5">
-      <div className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Collections</h1>
-        <p className="text-sm text-slate-500">
-          Track receivables, update collections, and manage follow-ups.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Card className="rounded-2xl shadow-sm">
-          <CardContent className="p-4">
-            <div className="text-xs text-slate-500">Total Outstanding</div>
-            <div className="mt-1 text-xl font-semibold text-slate-900">
-              ₹{Number(summary.totalOutstanding || 0).toLocaleString()}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl shadow-sm">
-          <CardContent className="p-4">
-            <div className="text-xs text-slate-500">Overdue Labs</div>
-            <div className="mt-1 text-xl font-semibold text-slate-900">
-              {Number(summary.overdueCount || 0)}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl shadow-sm">
-          <CardContent className="p-4">
-            <div className="text-xs text-slate-500">High Risk</div>
-            <div className="mt-1 text-xl font-semibold text-slate-900">
-              {Number(summary.highRiskCount || 0)}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl shadow-sm">
-          <CardContent className="p-4">
-            <div className="text-xs text-slate-500">Today's Collections</div>
-            <div className="mt-1 text-xl font-semibold text-slate-900">
-              ₹{Number(summary.todayCollections || 0).toLocaleString()}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+    <div className="space-y-3 pb-6">
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <Wallet className="h-5 w-5 text-[var(--pc-brand-primary)]" />
+            <h1 className={typography.pageTitle}>Collections</h1>
+          </div>
+          <p className={cn(typography.pageSubtitle, "mt-0.5")}>
+            {collectionsScopeHint(currentUser?.role)} Tap a lab to record payments and
+            follow-ups.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-10 rounded-lg"
+          onClick={() => loadCollections()}
+        >
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Refresh
+        </Button>
+      </header>
 
       {pendingTaskContext ? (
-        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
           <div className="flex items-start gap-2">
-            <ClipboardCheck className="mt-0.5 h-4 w-4" />
+            <ClipboardCheck className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
-              <div className="font-medium">Linked collection task loaded</div>
+              <div className="font-medium">Linked collection task</div>
               <div>
                 Lab: <strong>{pendingTaskContext.labName || pendingTaskContext.labId}</strong>
               </div>
               {pendingTaskContext.nextAction ? (
-                <div>Suggested action: {pendingTaskContext.nextAction}</div>
+                <div className="mt-0.5">Suggested: {pendingTaskContext.nextAction}</div>
               ) : null}
             </div>
           </div>
         </div>
       ) : null}
 
-      {error ? (
-        <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">
-          {error}
+      {loadError ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {loadError}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-2 h-9 rounded-lg"
+            onClick={() => loadCollections()}
+          >
+            Retry
+          </Button>
         </div>
       ) : null}
 
-      {successMessage ? (
-        <div className="rounded-xl bg-green-50 p-3 text-sm text-green-700">
-          {successMessage}
-        </div>
-      ) : null}
+      <KpiCardGrid columns={4}>
+        <KpiCard
+          title="Total outstanding"
+          value={formatMoney(summary.totalOutstanding)}
+          icon={IndianRupee}
+        />
+        <KpiCard
+          title="Overdue labs"
+          value={Number(summary.overdueCount || 0).toLocaleString("en-IN")}
+          icon={AlertTriangle}
+        />
+        <KpiCard
+          title="High risk"
+          value={Number(summary.highRiskCount || 0).toLocaleString("en-IN")}
+          icon={ShieldAlert}
+        />
+        <KpiCard
+          title="Today's collections"
+          value={formatMoney(summary.todayCollections)}
+          icon={Wallet}
+        />
+      </KpiCardGrid>
 
-      <div className="grid gap-5 xl:grid-cols-[1.25fr_1fr]">
-        <Card className="rounded-2xl shadow-sm">
-          <CardHeader>
-            <CardTitle>Lab Collections</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+      <div className="sticky top-0 z-20 -mx-1 border-b border-border bg-background/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/90">
+        <div className="space-y-2 rounded-lg border border-border bg-card p-2 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs font-semibold text-slate-700">Lab collections</div>
+            <div className="text-[11px] text-muted-foreground">
+              {filteredCollections.length} of {collections.length} shown
+            </div>
+          </div>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <Input
-              placeholder="Search by lab, agent, area..."
+              placeholder="Search lab, agent, area…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="h-11 rounded-xl"
+              className="h-9 rounded-lg pl-8 text-sm"
+              aria-label="Search collections"
             />
-
-            {loading ? (
-              <div className="flex items-center gap-2 text-sm text-slate-500">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading collections...
-              </div>
-            ) : filteredCollections.length === 0 ? (
-              <div className="text-sm text-slate-500">No collection records found.</div>
-            ) : (
-              <div className="space-y-3">
-                {filteredCollections.map((item) => (
-                  <div
-                    key={item.labId}
-                    className={`rounded-2xl border p-4 shadow-sm ${
-                      labIdKey(selectedLabId) === labIdKey(item.labId)
-                        ? "ring-2 ring-slate-200"
-                        : ""
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="font-semibold">{item.labName}</div>
-                        <div className="text-sm text-slate-500">
-                          {formatMetaSegment([item.labId, item.area || null])}
-                        </div>
-                        {displayAgentName(item.assignedAgent) || shouldShowPaidLabel(item) ? (
-                          <div className="mt-1 text-xs text-slate-500">
-                            {formatMetaSegment([
-                              displayAgentName(item.assignedAgent)
-                                ? `Agent: ${displayAgentName(item.assignedAgent)}`
-                                : null,
-                              shouldShowPaidLabel(item)
-                                ? `Paid: ₹${Number(item.totalPaid).toLocaleString()}`
-                                : null,
-                            ])}
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        <Badge variant="secondary">{item.riskStatus || "Low"}</Badge>
-                        <Badge variant="outline">{displayPaymentStatus(item)}</Badge>
-                        <Badge>
-                          ₹{Number(item.outstandingAmount || 0).toLocaleString()}
-                        </Badge>
-                      </div>
-                    </div>
-
-                    <div className="mt-3">
-                      <Button
-                        variant="outline"
-                        className="rounded-xl"
-                        onClick={() => openCollection(item.labId)}
-                      >
-                        Open
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl shadow-sm">
-          <CardHeader>
-            <CardTitle>Collection Details</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {!selectedLabId ? (
-              <div className="text-sm text-slate-500">
-                Select a lab to update collections.
-              </div>
-            ) : detailsLoading ? (
-              <div className="flex items-center gap-2 text-sm text-slate-500">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading collection details...
-              </div>
-            ) : selectedCollection ? (
-              <div className="space-y-4">
-                <div>
-                  <div className="font-semibold">{selectedCollection.labName}</div>
-                  <div className="text-sm text-slate-500">
-                    {selectedCollection.labId}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-2 text-sm text-slate-700">
-                  <div>
-                    Outstanding: ₹
-                    {Number(selectedCollection.outstandingAmount || 0).toLocaleString()}
-                  </div>
-                  {shouldShowPaidLabel(selectedCollection) ? (
-                    <div>
-                      Total Paid: ₹
-                      {Number(selectedCollection.totalPaid || 0).toLocaleString()}
-                    </div>
-                  ) : null}
-                  <div>Risk: {selectedCollection.riskStatus || "Low"}</div>
-                  <div>Status: {displayPaymentStatus(selectedCollection)}</div>
-                  {Number(selectedCollection.overdueDays || 0) > 0 ? (
-                    <div>Overdue Days: {selectedCollection.overdueDays}</div>
-                  ) : null}
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">
-                    Amount Collected
-                  </label>
-                  <Input
-                    type="number"
-                    value={amountCollected}
-                    onChange={(e) => setAmountCollected(e.target.value)}
-                    placeholder="Enter collected amount"
-                    className="h-11 rounded-xl"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">
-                    Payment Mode
-                  </label>
-                  <select
-                    className="h-11 w-full rounded-xl border bg-white px-3 text-sm"
-                    value={paymentMode}
-                    onChange={(e) => setPaymentMode(e.target.value)}
-                  >
-                    <option value="Cash">Cash</option>
-                    <option value="UPI">UPI</option>
-                    <option value="Bank Transfer">Bank Transfer</option>
-                    <option value="Cheque">Cheque</option>
-                  </select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">
-                    Next Follow-up Date
-                  </label>
-                  <Input
-                    type="date"
-                    value={nextFollowUp}
-                    onChange={(e) => setNextFollowUp(e.target.value)}
-                    className="h-11 rounded-xl"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">
-                    Next Action
-                  </label>
-                  <Input
-                    value={nextAction}
-                    onChange={(e) => setNextAction(e.target.value)}
-                    placeholder="Call, revisit, send reminder..."
-                    className="h-11 rounded-xl"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">
-                    Note
-                  </label>
-                  <Textarea
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                    placeholder="Collection note..."
-                    className="min-h-[90px] rounded-xl"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Button
-                    className="h-11 w-full rounded-xl"
-                    onClick={handleSaveCollection}
-                    disabled={saving}
-                  >
-                    {saving ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Saving...
-                      </>
-                    ) : (
-                      <>
-                        <IndianRupee className="mr-2 h-4 w-4" />
-                        Save Collection Update
-                      </>
-                    )}
-                  </Button>
-
-                  {pendingTaskContext?.taskId ? (
-                    AGENT_TASK_COMPLETION_ENABLED ? (
-                      <Button
-                        variant="outline"
-                        className="h-11 w-full rounded-xl"
-                        onClick={handleCompleteLinkedTask}
-                        disabled={completingTask}
-                      >
-                        {completingTask ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Completing...
-                          </>
-                        ) : (
-                          <>
-                            <CheckCircle2 className="mr-2 h-4 w-4" />
-                            Mark Linked Task Complete
-                          </>
-                        )}
-                      </Button>
-                    ) : (
-                      <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                        Task completion coming soon.
-                      </p>
-                    )
-                  ) : null}
-                </div>
-
-                <div className="space-y-2 pt-2">
-                  <div className="text-sm font-medium text-slate-900">
-                    Collection History
-                  </div>
-
-                  {history.length ? (
-                    history.map((item) => (
-                      <div
-                        key={item.paymentId}
-                        className="rounded-xl border p-3 text-sm"
-                      >
-                        <div className="font-medium">
-                          ₹{Number(item.amountCollected || 0).toLocaleString()}
-                        </div>
-                        <div className="text-slate-500">
-                          {item.paymentDate || "-"} • {item.paymentMode || "-"}
-                        </div>
-                        <div className="mt-1 text-slate-600">
-                          {item.note || "No note"}
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-sm text-slate-500">
-                      No payment history found.
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="text-sm text-slate-500">
-                No collection details found.
-              </div>
-            )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
+
+      {filteredCollections.length === 0 ? (
+        <EmptyState
+          title="No collection records"
+          description={
+            collections.length === 0
+              ? "Receivables will appear here when labs have outstanding balances."
+              : "Try a different search term."
+          }
+        />
+      ) : (
+        <div className="space-y-2" role="list">
+          {filteredCollections.map((item) => {
+            const key = labIdKey(item.labId);
+            const isExpanded = expandedLabId === key;
+            return (
+              <CollectionListItem
+                key={key}
+                item={item}
+                expanded={isExpanded}
+                onToggleExpand={() => toggleExpand(item.labId)}
+                selectedCollection={
+                  isExpanded && labIdKey(selectedCollection?.labId) === key
+                    ? selectedCollection
+                    : isExpanded
+                      ? item
+                      : null
+                }
+                history={isExpanded ? history : []}
+                detailsLoading={isExpanded && detailsLoading}
+                formProps={formProps}
+                pendingTaskContext={pendingTaskContext}
+                onSave={handleSaveCollection}
+                onCompleteTask={handleCompleteLinkedTask}
+              />
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
