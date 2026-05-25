@@ -25,7 +25,7 @@ import {
   deriveTopLabsByRevenueFromLabsCreditFallback,
 } from "@/metrics/computeRiskMetrics.js";
 import { ADMIN_DASHBOARD_INVALIDATE_EVENT } from "@/utils/dashboardInvalidate.js";
-import { IS_QA } from "@/config/environment";
+import { IS_QA, REQUIRE_SUPABASE_AUTH } from "@/config/environment";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
 import {
   KpiCard,
@@ -71,7 +71,11 @@ function adminDashboardSkipAppsScriptReads() {
   const hasSupabase =
     String(import.meta.env.VITE_SUPABASE_URL || "").trim() !== "" &&
     String(import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim() !== "";
-  return Boolean(import.meta.env.DEV && hasSupabase);
+  return Boolean((REQUIRE_SUPABASE_AUTH || import.meta.env.DEV) && hasSupabase);
+}
+
+function adminDashboardClientCacheEnabled() {
+  return !IS_QA;
 }
 
 const EMPTY_AI_INSIGHTS = { insights: [], recommendedActions: [] };
@@ -318,7 +322,7 @@ async function fetchSupabaseAdminSlice({ force = false } = {}) {
   const slice = { stock: null, labs: null, forecast: null, dashboardRead: null };
   const endPrimary = perfTime("AdminDashboard.getAdminDashboardRead");
   try {
-    slice.dashboardRead = await getAdminDashboardRead({ force });
+    slice.dashboardRead = await getAdminDashboardRead({ force: IS_QA || force });
     endPrimary({ success: slice.dashboardRead?.success, force });
   } catch (e) {
     console.warn("[AdminDashboard] Supabase dashboard read skipped:", e?.message || e);
@@ -350,10 +354,28 @@ async function fetchSupabaseAdminSlice({ force = false } = {}) {
 
 function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) {
   const dash = supabaseSlice.dashboardRead?.success ? supabaseSlice.dashboardRead.data : null;
-  const dashMeta = dash?._readMeta;
-  const preferSupabaseKpis = Boolean(
-    dashMeta && (dashMeta.ordersCount > 0 || dashMeta.arCount > 0 || dashMeta.visitsCount > 0)
-  );
+
+  if (dash?.summary && dash?.executive) {
+    return {
+      summary: {
+        stockStats: dash.summary.stockStats || EMPTY_STOCK_STATS,
+        recentVisits: Number(dash.summary.recentVisits ?? 0),
+        totalSoldValue: Number(dash.summary.totalSoldValue ?? 0),
+        todayCollections: Number(dash.summary.todayCollections ?? 0),
+      },
+      executive: {
+        todaysRevenue: Number(dash.executive.todaysRevenue ?? 0),
+        outstandingReceivables: Number(dash.executive.outstandingReceivables ?? 0),
+        labsAtCreditRisk: Number(dash.executive.labsAtCreditRisk ?? 0),
+        productsNearStockout: Number(dash.executive.productsNearStockout ?? 0),
+        topLabsByRevenue: Array.isArray(dash.executive.topLabsByRevenue)
+          ? dash.executive.topLabsByRevenue
+          : [],
+      },
+      visits: dash.visits ?? null,
+      insights: dash.insights ?? null,
+    };
+  }
 
   const stockStats =
     dash?.summary?.stockStats ||
@@ -375,55 +397,32 @@ function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) 
 
   const summary = {
     stockStats,
-    recentVisits: Number(
-      preferSupabaseKpis
-        ? (dash?.summary?.recentVisits ?? 0)
-        : (dash?.summary?.recentVisits ?? summaryIn?.recentVisits ?? 0)
-    ),
-    totalSoldValue: Number(
-      preferSupabaseKpis
-        ? (dash?.summary?.totalSoldValue ?? 0)
-        : (dash?.summary?.totalSoldValue ?? summaryIn?.totalSoldValue ?? 0)
-    ),
-    todayCollections: Number(
-      preferSupabaseKpis
-        ? (dash?.summary?.todayCollections ?? 0)
-        : (dash?.summary?.todayCollections ?? summaryIn?.todayCollections ?? 0)
-    ),
+    recentVisits: Number(dash?.summary?.recentVisits ?? summaryIn?.recentVisits ?? 0),
+    totalSoldValue: Number(dash?.summary?.totalSoldValue ?? summaryIn?.totalSoldValue ?? 0),
+    todayCollections: Number(dash?.summary?.todayCollections ?? summaryIn?.todayCollections ?? 0),
   };
 
   const executive = {
     todaysRevenue: Number(
-      preferSupabaseKpis
-        ? (dash?.executive?.todaysRevenue ?? 0)
-        : (dash?.executive?.todaysRevenue ??
-            executiveIn?.todaysRevenue ??
-            executiveIn?.todays_revenue ??
-            0)
+      dash?.executive?.todaysRevenue ?? executiveIn?.todaysRevenue ?? executiveIn?.todays_revenue ?? 0
     ),
     outstandingReceivables: Number(
-      preferSupabaseKpis
-        ? (dash?.executive?.outstandingReceivables ?? 0)
-        : (dash?.executive?.outstandingReceivables ??
-            executiveIn?.outstandingReceivables ??
-            executiveIn?.outstanding_receivables ??
-            0)
+      dash?.executive?.outstandingReceivables ??
+        executiveIn?.outstandingReceivables ??
+        executiveIn?.outstanding_receivables ??
+        0
     ),
     labsAtCreditRisk: Number(
-      preferSupabaseKpis
-        ? (dash?.executive?.labsAtCreditRisk ?? 0)
-        : (dash?.executive?.labsAtCreditRisk ??
-            executiveIn?.labsAtCreditRisk ??
-            executiveIn?.labs_at_credit_risk ??
-            labsCreditRiskCount)
+      dash?.executive?.labsAtCreditRisk ??
+        executiveIn?.labsAtCreditRisk ??
+        executiveIn?.labs_at_credit_risk ??
+        labsCreditRiskCount
     ),
     productsNearStockout: Number(
-      preferSupabaseKpis
-        ? (dash?.executive?.productsNearStockout ?? 0)
-        : (dash?.executive?.productsNearStockout ??
-            executiveIn?.productsNearStockout ??
-            executiveIn?.products_near_stockout ??
-            nearStockoutDerived)
+      dash?.executive?.productsNearStockout ??
+        executiveIn?.productsNearStockout ??
+        executiveIn?.products_near_stockout ??
+        nearStockoutDerived
     ),
     topLabsByRevenue:
       Array.isArray(dash?.executive?.topLabsByRevenue) && dash.executive.topLabsByRevenue.length
@@ -524,10 +523,17 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   const [errorMessage, setErrorMessage] = useState("");
 
   const loadPrimaryData = async ({ force = false } = {}) => {
+    const useClientCache = adminDashboardClientCacheEnabled();
     const dashboardFresh =
-      !force && adminDashboardCache.dashboard && isFresh(adminDashboardCache.dashboardLoadedAt);
+      useClientCache &&
+      !force &&
+      adminDashboardCache.dashboard &&
+      isFresh(adminDashboardCache.dashboardLoadedAt);
     const executiveFresh =
-      !force && adminDashboardCache.executive && isFresh(adminDashboardCache.executiveLoadedAt);
+      useClientCache &&
+      !force &&
+      adminDashboardCache.executive &&
+      isFresh(adminDashboardCache.executiveLoadedAt);
 
     if (dashboardFresh && executiveFresh) {
       setSummaryData(adminDashboardCache.dashboard);
@@ -593,13 +599,13 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       Number(merged.summary?.recentVisits) > 0 ||
       Number(merged.executive?.todaysRevenue) > 0;
 
-    if (hasVisibleKpis || force) {
+    if (adminDashboardClientCacheEnabled() && (hasVisibleKpis || force)) {
       adminDashboardCache.dashboard = merged.summary;
       adminDashboardCache.executive = merged.executive;
       adminDashboardCache.dashboardLoadedAt = Date.now();
       adminDashboardCache.executiveLoadedAt = Date.now();
-    } else {
-      perfLog("AdminDashboard.skipClientCacheBlankKpis", { force });
+    } else if (IS_QA) {
+      perfLog("AdminDashboard.qaClientCacheBypass", { force, hasVisibleKpis });
     }
 
     if (merged.visits) {

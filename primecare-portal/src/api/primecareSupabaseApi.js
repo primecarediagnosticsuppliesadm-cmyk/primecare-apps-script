@@ -34,6 +34,7 @@ import {
   rollupInventoryTableRows,
   rollupStockDashboardMappedItems,
 } from "@/metrics/computeInventoryMetrics.js";
+import { IS_QA } from "@/config/environment";
 import { isPerfLogEnabled, perfLog, perfTime, shouldRunDashboardKpiAudit } from "@/utils/perfLog.js";
 
 export { labIdKey, normalizeLabIdKey };
@@ -1681,17 +1682,9 @@ function logAdminDashboardSupabaseAudit(ctx) {
 
 const ADMIN_DASHBOARD_READ_CACHE_TTL_MS = 60 * 1000;
 
-/** Projections aligned to public schema (primecare_public_schema.sql). Invalid columns fail the whole PostgREST select. */
-const ADMIN_DASHBOARD_ORDERS_SELECT =
-  "order_id,lab_id,order_date,created_at,status,total_amount,ar_posted";
-const ADMIN_DASHBOARD_ORDER_ITEMS_SELECT = "order_id,total_price,quantity,unit_price";
-const ADMIN_DASHBOARD_AR_SELECT =
-  "lab_id,lab_name,outstanding,credit_hold,total_paid,total_delivered,days_overdue";
-const ADMIN_DASHBOARD_INVENTORY_SELECT = "current_stock,min_stock,product_id";
-const ADMIN_DASHBOARD_VISITS_SELECT =
-  "visit_id,lab_id,visit_date,created_at,agent_id,visit_type,notes,next_follow_up_date";
-const ADMIN_DASHBOARD_PAYMENTS_SELECT = "payment_date,amount_received,order_id,lab_id";
-const ADMIN_DASHBOARD_LABS_SELECT = "lab_id,lab_name";
+function adminDashboardServerCacheEnabled() {
+  return !IS_QA;
+}
 
 function normalizeAdminDashboardPayload(data) {
   const e = data?.executive || {};
@@ -1738,95 +1731,9 @@ function combineOrderLineItemsForMetrics(orderItemsRaw, orderLinesRaw) {
   return combined;
 }
 
-function adminDashboardPayloadHasVisibleKpis(payload) {
-  const e = payload?.executive || {};
-  const s = payload?.summary || {};
-  return (
-    num(e.todaysRevenue) > 0 ||
-    num(e.outstandingReceivables) > 0 ||
-    num(e.labsAtCreditRisk) > 0 ||
-    num(e.productsNearStockout) > 0 ||
-    num(s.recentVisits) > 0 ||
-    num(s.totalSoldValue) > 0 ||
-    (Array.isArray(e.topLabsByRevenue) && e.topLabsByRevenue.length > 0)
-  );
-}
-
-function shouldCacheAdminDashboardReadResult(payload, ordersRaw, arRaw, visitsTotalCount, queryErrors) {
-  if (queryErrors.length) return false;
-  const orderCount = ordersRaw?.length ?? 0;
-  const arCount = arRaw?.length ?? 0;
-  if (orderCount === 0 && arCount === 0 && visitsTotalCount === 0) return false;
-  if (!adminDashboardPayloadHasVisibleKpis(payload)) {
-    perfLog("getAdminDashboardRead.skipCacheBlankKpis", {
-      orderCount,
-      arCount,
-      visitsTotalCount,
-      queryErrors,
-    });
-    return false;
-  }
-  return true;
-}
-
-function logAdminDashboardReadDebug(ctx) {
+function logAdminDashboardKpiDebug(rowCounts, kpis, queryErrors) {
   if (!isPerfLogEnabled()) return;
-
-  const {
-    queryErrors,
-    ordersRaw,
-    arRaw,
-    orderItemsRaw,
-    orderLinesRaw,
-    visitsTotalCount,
-    payload,
-    revenue,
-  } = ctx;
-
-  console.info("[perf] getAdminDashboardRead.rowCounts", {
-    orders: ordersRaw?.length ?? 0,
-    order_items: orderItemsRaw?.length ?? 0,
-    order_lines: orderLinesRaw?.length ?? 0,
-    ar_credit_control: arRaw?.length ?? 0,
-    agent_visits_count: visitsTotalCount,
-    queryErrors,
-  });
-
-  if (ordersRaw?.length) {
-    console.table(
-      (ordersRaw || []).slice(0, 10).map((o) => ({
-        order_id: o.order_id,
-        status: o.status ?? o.order_status,
-        total_amount: o.total_amount,
-        lab_id: o.lab_id,
-        order_date: String(o.order_date ?? o.created_at ?? "").slice(0, 10),
-      }))
-    );
-  }
-
-  if (arRaw?.length) {
-    console.table(
-      (arRaw || []).slice(0, 10).map((ar) => ({
-        lab_id: ar.lab_id,
-        outstanding: ar.outstanding,
-        credit_hold: ar.credit_hold,
-      }))
-    );
-  }
-
-  console.table([
-    {
-      todaysRevenue: payload?.executive?.todaysRevenue,
-      outstandingReceivables: payload?.executive?.outstandingReceivables,
-      labsAtCreditRisk: payload?.executive?.labsAtCreditRisk,
-      productsNearStockout: payload?.executive?.productsNearStockout,
-      recentVisits: payload?.summary?.recentVisits,
-      totalSoldValue: payload?.summary?.totalSoldValue,
-      todayCollections: payload?.summary?.todayCollections,
-      topLabsCount: payload?.executive?.topLabsByRevenue?.length ?? 0,
-      fulfilledOrders: revenue?.fulfilledOrdersCount,
-    },
-  ]);
+  console.log("[AdminDashboard KPI debug]", { rowCounts, kpis, queryErrors });
 }
 
 let adminDashboardReadCache = {
@@ -1848,94 +1755,33 @@ async function timedSupabaseQuery(label, queryPromise) {
 }
 
 /**
- * PostgREST rejects the entire select when any column is unknown — fall back to select("*").
- */
-async function dashboardTableSelect(table, projection, label) {
-  let res = await timedSupabaseQuery(label, () => supabase.from(table).select(projection));
-  if (!res.error) return res;
-
-  console.warn(
-    `[getAdminDashboardRead] ${table} projection failed (${res.error.message}); retrying select("*")`
-  );
-  return timedSupabaseQuery(`${label}.fallback`, () => supabase.from(table).select("*"));
-}
-
-async function fetchAdminDashboardPaymentsForToday(today) {
-  const dayStart = `${today}T00:00:00`;
-  const dayEnd = `${today}T23:59:59.999`;
-
-  let filtered = await timedSupabaseQuery("payments.today", () =>
-    supabase
-      .from("payments")
-      .select(ADMIN_DASHBOARD_PAYMENTS_SELECT)
-      .gte("payment_date", dayStart)
-      .lte("payment_date", dayEnd)
-  );
-  if (!filtered.error) return filtered;
-
-  filtered = await dashboardTableSelect("payments", ADMIN_DASHBOARD_PAYMENTS_SELECT, "payments.todayRetry");
-  if (!filtered.error) return filtered;
-
-  return timedSupabaseQuery("payments.recentFallback", () =>
-    supabase.from("payments").select("*").order("payment_date", { ascending: false }).limit(400)
-  );
-}
-
-async function fetchAdminDashboardVisitSlices() {
-  const countRes = await timedSupabaseQuery("agent_visits.count", () =>
-    supabase.from("agent_visits").select("*", { count: "exact", head: true })
-  );
-
-  let recentRes = await timedSupabaseQuery("agent_visits.recent", () =>
-    supabase
-      .from("agent_visits")
-      .select("*")
-      .order("created_at", { ascending: false, nullsFirst: false })
-      .limit(40)
-  );
-
-  const recentRows = recentRes.error ? [] : recentRes.data || [];
-  let visitCount = countRes.error
-    ? recentRows.length
-    : Number(countRes.count ?? recentRows.length ?? 0);
-
-  if (visitCount === 0 && recentRows.length > 0) {
-    visitCount = recentRows.length;
-  }
-  if (visitCount === 0 && !countRes.error) {
-    const countRowsRes = await timedSupabaseQuery("agent_visits.countRows", () =>
-      supabase.from("agent_visits").select("visit_id")
-    );
-    if (!countRowsRes.error) {
-      visitCount = (countRowsRes.data || []).length;
-    }
-  }
-
-  if (countRes.error) {
-    console.warn("[getAdminDashboardRead] agent_visits count:", countRes.error.message);
-  }
-  if (recentRes.error) {
-    console.warn("[getAdminDashboardRead] agent_visits recent:", recentRes.error.message);
-  }
-
-  return { visitCount, recentRows };
-}
-
-/**
- * Admin dashboard aggregates from Supabase: orders, AR, inventory, visits, payments.
+ * Admin dashboard aggregates from Supabase (full select * — correctness over performance).
  * Never throws.
  * @param {{ force?: boolean }} [options]
  */
 export async function getAdminDashboardRead(options = {}) {
   const force = options.force === true;
   traceSupabaseRead("AdminDashboard.getAdminDashboardRead", {
-    tables: ["orders", "order_items", "ar_credit_control", "inventory", "agent_visits", "payments", "labs"],
+    tables: [
+      "orders",
+      "ar_credit_control",
+      "agent_visits",
+      "inventory",
+      "labs",
+      "order_lines",
+      "payments",
+    ],
   });
   if (!supabase) {
     return { success: true, data: { ...EMPTY_ADMIN_DASHBOARD } };
   }
 
+  if (!adminDashboardServerCacheEnabled()) {
+    adminDashboardReadCache = { result: null, loadedAt: 0 };
+  }
+
   if (
+    adminDashboardServerCacheEnabled() &&
     !force &&
     adminDashboardReadCache.result &&
     Date.now() - adminDashboardReadCache.loadedAt < ADMIN_DASHBOARD_READ_CACHE_TTL_MS
@@ -1954,56 +1800,60 @@ export async function getAdminDashboardRead(options = {}) {
 
     const queryErrors = [];
 
-    const [
-      ordersRes,
-      itemsRes,
-      orderLinesRes,
-      arRes,
-      invRes,
-      payRes,
-      labsRes,
-      visitSlices,
-    ] = await Promise.all([
-      timedSupabaseQuery("orders", () => supabase.from("orders").select("*")),
-      dashboardTableSelect("order_items", ADMIN_DASHBOARD_ORDER_ITEMS_SELECT, "order_items"),
-      timedSupabaseQuery("order_lines", () => supabase.from("order_lines").select("*")),
-      timedSupabaseQuery("ar_credit_control", () => supabase.from("ar_credit_control").select("*")),
-      dashboardTableSelect("inventory", ADMIN_DASHBOARD_INVENTORY_SELECT, "inventory"),
-      fetchAdminDashboardPaymentsForToday(today),
-      dashboardTableSelect("labs", ADMIN_DASHBOARD_LABS_SELECT, "labs"),
-      fetchAdminDashboardVisitSlices(),
-    ]);
+    const [ordersRes, arRes, visitsRes, invRes, labsRes, orderLinesRes, payRes] =
+      await Promise.all([
+        timedSupabaseQuery("orders", () => supabase.from("orders").select("*")),
+        timedSupabaseQuery("ar_credit_control", () =>
+          supabase.from("ar_credit_control").select("*")
+        ),
+        timedSupabaseQuery("agent_visits", () => supabase.from("agent_visits").select("*")),
+        timedSupabaseQuery("inventory", () => supabase.from("inventory").select("*")),
+        timedSupabaseQuery("labs", () => supabase.from("labs").select("*")),
+        timedSupabaseQuery("order_lines", () => supabase.from("order_lines").select("*")),
+        timedSupabaseQuery("payments", () => supabase.from("payments").select("*")),
+      ]);
 
     const ordersRaw = ordersRes.error ? [] : ordersRes.data || [];
-    const orderItemsRaw = combineOrderLineItemsForMetrics(
-      itemsRes.error ? [] : itemsRes.data || [],
-      orderLinesRes.error ? [] : orderLinesRes.data || []
-    );
     const arRaw = arRes.error ? [] : arRes.data || [];
+    const visitsAllRaw = visitsRes.error ? [] : visitsRes.data || [];
     const invRaw = invRes.error ? [] : invRes.data || [];
-    const visitsRaw = visitSlices.recentRows;
-    const visitsTotalCount = visitSlices.visitCount;
-    const payRaw = payRes.error ? [] : payRes.data || [];
     const labsRaw = labsRes.error ? [] : labsRes.data || [];
+    const orderLinesRaw = orderLinesRes.error ? [] : orderLinesRes.data || [];
+    const payRaw = payRes.error ? [] : payRes.data || [];
+
+    const orderItemsRaw = combineOrderLineItemsForMetrics([], orderLinesRaw);
+    const visitsTotalCount = visitsAllRaw.length;
+    const visitsRaw = [...visitsAllRaw]
+      .sort((a, b) => {
+        const tb = new Date(b.created_at || 0).getTime();
+        const ta = new Date(a.created_at || 0).getTime();
+        return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+      })
+      .slice(0, 40);
 
     if (ordersRes.error) {
       queryErrors.push("orders");
       console.warn("[getAdminDashboardRead] orders:", ordersRes.error.message);
     }
-    if (itemsRes.error) {
-      queryErrors.push("order_items");
-      console.warn("[getAdminDashboardRead] order_items:", itemsRes.error.message);
-    }
-    if (orderLinesRes.error) {
-      console.warn("[getAdminDashboardRead] order_lines:", orderLinesRes.error.message);
-    }
     if (arRes.error) {
       queryErrors.push("ar_credit_control");
       console.warn("[getAdminDashboardRead] ar_credit_control:", arRes.error.message);
     }
+    if (visitsRes.error) {
+      queryErrors.push("agent_visits");
+      console.warn("[getAdminDashboardRead] agent_visits:", visitsRes.error.message);
+    }
     if (invRes.error) {
       queryErrors.push("inventory");
       console.warn("[getAdminDashboardRead] inventory:", invRes.error.message);
+    }
+    if (labsRes.error) {
+      queryErrors.push("labs");
+      console.warn("[getAdminDashboardRead] labs:", labsRes.error.message);
+    }
+    if (orderLinesRes.error) {
+      queryErrors.push("order_lines");
+      console.warn("[getAdminDashboardRead] order_lines:", orderLinesRes.error.message);
     }
     if (payRes.error) {
       queryErrors.push("payments");
@@ -2012,12 +1862,12 @@ export async function getAdminDashboardRead(options = {}) {
 
     endQuery({
       orders: ordersRaw.length,
-      orderItems: orderItemsRaw.length,
+      order_lines: orderLinesRaw.length,
       ar: arRaw.length,
       inventory: invRaw.length,
-      visitsRecent: visitsRaw.length,
-      visitsTotalCount,
+      agent_visits: visitsTotalCount,
       payments: payRaw.length,
+      labs: labsRaw.length,
     });
 
     const labNameById = new Map();
@@ -2044,15 +1894,7 @@ export async function getAdminDashboardRead(options = {}) {
 
     const { outstandingReceivables, labsAtCreditRisk } = computeReceivableMetrics(arRaw);
 
-    let stockStats = rollupInventoryTableRows(invRaw);
-    if (!invRaw.length) {
-      try {
-        const stockDash = await getStockDashboard();
-        if (stockDash?.data?.stats) stockStats = stockDash.data.stats;
-      } catch {
-        /* keep empty stats */
-      }
-    }
+    const stockStats = rollupInventoryTableRows(invRaw);
     const productsNearStockout = productsNearStockoutFromInventoryStats(stockStats);
 
     const todayCollections = sumTodayPayments(payRaw);
@@ -2098,23 +1940,30 @@ export async function getAdminDashboardRead(options = {}) {
       visits: { visits },
       insights: dashboardInsights,
     });
-    payload._readMeta = {
-      ordersCount: ordersRaw.length,
-      arCount: arRaw.length,
-      visitsCount: visitsTotalCount,
-      queryErrors,
-    };
 
-    logAdminDashboardReadDebug({
-      queryErrors,
-      ordersRaw,
-      arRaw,
-      orderItemsRaw: itemsRes.error ? [] : itemsRes.data || [],
-      orderLinesRaw: orderLinesRes.error ? [] : orderLinesRes.data || [],
-      visitsTotalCount,
-      payload,
-      revenue,
-    });
+    logAdminDashboardKpiDebug(
+      {
+        orders: ordersRaw.length,
+        ar_credit_control: arRaw.length,
+        agent_visits: visitsTotalCount,
+        inventory: invRaw.length,
+        labs: labsRaw.length,
+        order_lines: orderLinesRaw.length,
+        payments: payRaw.length,
+      },
+      {
+        todaysRevenue: payload.executive.todaysRevenue,
+        outstandingReceivables: payload.executive.outstandingReceivables,
+        labsAtCreditRisk: payload.executive.labsAtCreditRisk,
+        productsNearStockout: payload.executive.productsNearStockout,
+        recentVisits: payload.summary.recentVisits,
+        totalSoldValue: payload.summary.totalSoldValue,
+        todayCollections: payload.summary.todayCollections,
+        inventoryTotalSkus: payload.summary.stockStats.totalSkus,
+        topLabsByRevenue: payload.executive.topLabsByRevenue,
+      },
+      queryErrors
+    );
 
     logAdminDashboardSupabaseAudit({
       today,
@@ -2138,7 +1987,11 @@ export async function getAdminDashboardRead(options = {}) {
     });
 
     const result = { success: true, data: payload };
-    if (shouldCacheAdminDashboardReadResult(payload, ordersRaw, arRaw, visitsTotalCount, queryErrors)) {
+    const mayCache =
+      adminDashboardServerCacheEnabled() &&
+      !queryErrors.length &&
+      (ordersRaw.length > 0 || arRaw.length > 0 || visitsTotalCount > 0);
+    if (mayCache) {
       adminDashboardReadCache = { result, loadedAt: Date.now() };
       endTotal({ cached: true });
     } else {
@@ -2147,6 +2000,7 @@ export async function getAdminDashboardRead(options = {}) {
         orders: ordersRaw.length,
         ar: arRaw.length,
         visitsTotalCount,
+        isQa: IS_QA,
       });
       endTotal({ cached: false, queryErrors });
     }
