@@ -4,6 +4,7 @@ import { useAuth } from "./context/AuthContext";
 import { ROLES } from "./config/roles";
 import { PERMISSIONS } from "./config/permissions";
 import { getDefaultPageForRole } from "./config/menuConfig";
+import { PortalToastProvider } from "@/context/PortalToastContext";
 
 function canRoleAccessPage(role, pageKey) {
   if (!role || !pageKey) return false;
@@ -157,37 +158,39 @@ export default function App() {
   }
 
   return (
-    <Suspense fallback={<PortalLoadingScreen />}>
-      <PortalLayout
-        role={role}
-        activePage={activePage}
-        setActivePage={setActivePage}
-      >
-        <div className="mb-4 flex items-center justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-semibold">{pageTitle}</h1>
-            <p className="text-sm text-gray-500">
-              Logged in as <span className="font-medium">{currentUser.role}</span>
-            </p>
+    <PortalToastProvider>
+      <Suspense fallback={<PortalLoadingScreen />}>
+        <PortalLayout
+          role={role}
+          activePage={activePage}
+          setActivePage={setActivePage}
+        >
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <div>
+              <h1 className="text-xl font-semibold">{pageTitle}</h1>
+              <p className="text-sm text-gray-500">
+                Logged in as <span className="font-medium">{currentUser.role}</span>
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={signOut}
+              className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
+            >
+              Logout
+            </button>
           </div>
 
-          <button
-            type="button"
-            onClick={signOut}
-            className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
-          >
-            Logout
-          </button>
-        </div>
-
-       <PrimeCareWebPortal
-  role={role}
-  activePage={activePage}
-  currentUser={currentUser}
-  setActivePage={setActivePage}
-  authToken={authToken}
-/>
-      </PortalLayout>
-    </Suspense>
+          <PrimeCareWebPortal
+            role={role}
+            activePage={activePage}
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+            authToken={authToken}
+          />
+        </PortalLayout>
+      </Suspense>
+    </PortalToastProvider>
   );
 }
