@@ -1,4 +1,4 @@
-import { supabase } from "./supabaseClient.js";
+import { supabase, PRIMECARE_SUPABASE_CLIENT_META } from "./supabaseClient.js";
 import {
   filterCollectionsForUser,
   filterLabsForUser,
@@ -1754,23 +1754,81 @@ async function timedSupabaseQuery(label, queryPromise) {
   return res;
 }
 
-/** QA-only: log browser session identity before dashboard table reads (RLS debugging). */
-async function logQaGetAdminDashboardBrowserContext() {
+/**
+ * QA-only: prove whether dashboard queries run authenticated or anon.
+ * Runs before dashboard table reads (probe is intentional).
+ */
+async function logQaSupabaseAuthSessionDiagnostic() {
   if (!IS_QA || !supabase) return;
 
   try {
+    console.log("[QA Supabase client]", {
+      ...PRIMECARE_SUPABASE_CLIENT_META,
+      clientPresent: Boolean(supabase),
+      clientReference: supabase === null ? "null" : "module singleton",
+      supabaseUrlConfigured: Boolean(String(import.meta.env.VITE_SUPABASE_URL || "").trim()),
+      anonKeyConfigured: Boolean(String(import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim()),
+      createClientCallSites: "src/api/supabaseClient.js only",
+    });
+
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    console.log("[QA Supabase session]", {
+      accessToken: !!sessionData?.session?.access_token,
+      userId: sessionData?.session?.user?.id,
+      expiresAt: sessionData?.session?.expires_at,
+      role: sessionData?.session?.user?.role,
+      sessionError: sessionError?.message ?? null,
+    });
+
     const { data: userData, error: userError } = await supabase.auth.getUser();
-    const authUserId = userData?.user?.id ?? null;
+    const sessionUserId = sessionData?.session?.user?.id ?? null;
+    const getUserId = userData?.user?.id ?? null;
+    const expiresAt = sessionData?.session?.expires_at;
+    const isExpired =
+      expiresAt != null ? Date.now() / 1000 > Number(expiresAt) : null;
+
+    console.log("[QA Supabase auth hydration]", {
+      documentReadyState: typeof document !== "undefined" ? document.readyState : null,
+      getSessionHasUser: Boolean(sessionUserId),
+      getUserHasUser: Boolean(getUserId),
+      getSessionMatchesGetUser: sessionUserId === getUserId,
+      getUserError: userError?.message ?? null,
+      likelyAnonAtQueryTime: !sessionData?.session?.access_token,
+      likelyBeforeSessionHydration:
+        Boolean(getUserId) && !sessionData?.session?.access_token,
+    });
+
+    console.log("[QA Supabase Authorization at query time]", {
+      hasAccessToken: !!sessionData?.session?.access_token,
+      tokenLength: sessionData?.session?.access_token?.length ?? 0,
+      expiresAt: expiresAt ?? null,
+      isExpired,
+      authenticatedRequestExpected:
+        !!sessionData?.session?.access_token && isExpired !== true,
+    });
+
+    let storageAuthKeys = [];
+    if (typeof localStorage !== "undefined") {
+      storageAuthKeys = Object.keys(localStorage).filter(
+        (k) => k.startsWith("sb-") && k.includes("auth")
+      );
+    }
+    console.log("[QA Supabase persisted auth keys]", {
+      keys: storageAuthKeys,
+      keyCount: storageAuthKeys.length,
+    });
+
+    const probe = await supabase.from("orders").select("id").limit(1);
+    console.log("[QA RLS probe]", probe);
 
     let profileRole = null;
     let profileTenantId = null;
     let profileError = null;
-
-    if (authUserId) {
+    if (getUserId) {
       const { data: profile, error } = await supabase
         .from("profiles")
         .select("role, tenant_id")
-        .eq("user_id", authUserId)
+        .eq("user_id", getUserId)
         .maybeSingle();
       profileRole = profile?.role ?? null;
       profileTenantId = profile?.tenant_id ?? null;
@@ -1778,14 +1836,22 @@ async function logQaGetAdminDashboardBrowserContext() {
     }
 
     console.log("[QA getAdminDashboardRead] browser auth/profile", {
-      authUserId,
+      authUserId: getUserId,
       authUserError: userError?.message ?? null,
       profileRole,
       profileTenantId,
       profileError,
+      probeRowCount: Array.isArray(probe.data) ? probe.data.length : 0,
+      probeError: probe.error?.message ?? null,
+      inferredAuthMode:
+        !sessionData?.session?.access_token
+          ? "anon (no JWT on client at query time)"
+          : probe.data?.length
+            ? "authenticated (probe returned rows)"
+            : "jwt present but probe returned 0 rows (RLS/tenant?)",
     });
   } catch (err) {
-    console.log("[QA getAdminDashboardRead] browser auth/profile", {
+    console.log("[QA Supabase auth/session diagnostic]", {
       error: err?.message || String(err),
     });
   }
@@ -1885,7 +1951,7 @@ export async function getAdminDashboardRead(options = {}) {
     const endQuery = perfTime("getAdminDashboardRead.supabaseQueries");
 
     if (IS_QA) {
-      await logQaGetAdminDashboardBrowserContext();
+      await logQaSupabaseAuthSessionDiagnostic();
     }
 
     const queryErrors = [];
