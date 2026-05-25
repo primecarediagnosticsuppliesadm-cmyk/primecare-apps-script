@@ -27,6 +27,10 @@ import {
 } from "@/metrics/computeRiskMetrics.js";
 import { ADMIN_DASHBOARD_INVALIDATE_EVENT } from "@/utils/dashboardInvalidate.js";
 import { IS_QA, REQUIRE_SUPABASE_AUTH } from "@/config/environment";
+import { isQaValidationLayerEnabled } from "@/config/qaValidation.js";
+import { recordPredatorTiming } from "@/predator/predatorTiming.js";
+import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
+import AdminDashboardQaValidationPanel from "@/components/qa/AdminDashboardQaValidationPanel.jsx";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
 import {
   KpiCard,
@@ -867,6 +871,12 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     if (loading) return;
     const id = requestAnimationFrame(() => {
       perfMark("AdminDashboard.renderReady");
+      recordPredatorTiming({
+        module: "Admin Dashboard",
+        step: "ui.renderReady",
+        durationMs: 0,
+        detail: { note: "mark at first paint after load" },
+      });
     });
     return () => cancelAnimationFrame(id);
   }, [loading]);
@@ -891,6 +901,26 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       ? executive.topLabsByRevenue.slice(0, 5)
       : [];
   }, [executive]);
+
+  const qaValidationSnapshot = useMemo(
+    () => ({
+      executive,
+      summary: {
+        ...summaryData,
+        stockStats,
+      },
+    }),
+    [executive, summaryData, stockStats]
+  );
+
+  const showQaValidationPanel = isQaValidationLayerEnabled();
+
+  usePredatorModuleValidation(
+    "Admin Dashboard",
+    currentUser,
+    qaValidationSnapshot,
+    !loading && Boolean(summaryData) && Boolean(executiveData)
+  );
 
   if (loading) {
     return <AdminDashboardLoading />;
@@ -924,6 +954,10 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
         >
           {errorMessage}
         </div>
+      ) : null}
+
+      {showQaValidationPanel ? (
+        <AdminDashboardQaValidationPanel renderedSnapshot={qaValidationSnapshot} autoRun />
       ) : null}
 
       {backgroundLoading ? (

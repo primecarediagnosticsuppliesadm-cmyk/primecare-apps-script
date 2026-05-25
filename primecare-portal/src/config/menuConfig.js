@@ -1,5 +1,6 @@
 import { PERMISSIONS } from "./permissions";
 import { ALLOW_EXPERIMENTAL_MODULES, IS_QA, IS_PROD } from "./environment";
+import { isPredatorEnabled } from "@/predator/predatorGuards.js";
 
 /**
  * Central Menu Configuration for PrimeCare Portal
@@ -36,8 +37,7 @@ export const MENU_ITEMS = [
   // Lab Portal
   { key: "labOrders", label: "Lab Ordering", icon: "ClipboardCheck" },
   { key: "purchase", label: "Purchase / Reorder", icon: "PackagePlus" },
-
-   
+  { key: "predatorDebug", label: "Predator Debug", icon: "Brain" },
 ];
 
 const PILOT_SAFE_PAGE_KEYS = new Set([
@@ -52,6 +52,7 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "labOrders",
   "purchase",
   "reorder",
+  "predatorDebug",
 ]);
 
 export function isPageVisibleInCurrentEnvironment(pageKey) {
@@ -64,11 +65,12 @@ export function isPageVisibleInCurrentEnvironment(pageKey) {
  * Returns menu filtered by role
  */
 export function getMenuForRole(role) {
-  return MENU_ITEMS.filter(
-    (item) =>
-      PERMISSIONS[item.key]?.includes(role) &&
-      isPageVisibleInCurrentEnvironment(item.key)
-  );
+  return MENU_ITEMS.filter((item) => {
+    if (item.key === "predatorDebug" && !isPredatorEnabled()) return false;
+    return (
+      PERMISSIONS[item.key]?.includes(role) && isPageVisibleInCurrentEnvironment(item.key)
+    );
+  });
 }
 
 /**

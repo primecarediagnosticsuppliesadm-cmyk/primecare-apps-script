@@ -35,6 +35,7 @@ import {
   rollupStockDashboardMappedItems,
 } from "@/metrics/computeInventoryMetrics.js";
 import { IS_QA } from "@/config/environment";
+import { recordPredatorTiming, predatorTrace } from "@/predator/predatorTiming.js";
 import { isPerfLogEnabled, perfLog, perfTime, shouldRunDashboardKpiAudit } from "@/utils/perfLog.js";
 
 export { labIdKey, normalizeLabIdKey };
@@ -884,6 +885,7 @@ async function insertPaymentsRow(paymentRow) {
  * Payload: { labId, amountReceived | amountCollected, paymentMode | mode, paymentDate?, orderId?, tenantId?, outstandingBefore?, collectedBy? }
  */
 export async function createPaymentWrite(payload = {}) {
+  return predatorTrace("Collections", "save.payment", async () => {
   traceSupabaseRead("Collections.createPaymentWrite", { tables: ["payments", "ar_credit_control"] });
   if (!supabase) {
     return { success: false, error: "Supabase is not configured", data: null };
@@ -997,6 +999,7 @@ export async function createPaymentWrite(payload = {}) {
     console.warn("[createPaymentWrite] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: null };
   }
+  });
 }
 
 /**
@@ -1004,6 +1007,7 @@ export async function createPaymentWrite(payload = {}) {
  * enriched from `v_labs_credit` when present. Never throws.
  */
 export async function getCollectionsRead() {
+  return predatorTrace("Collections", "api.getCollectionsRead", async () => {
   traceSupabaseRead("Collections.getCollectionsRead", {
     tables: ["ar_credit_control", "payments", "v_labs_credit"],
   });
@@ -1094,6 +1098,7 @@ export async function getCollectionsRead() {
       },
     };
   }
+  });
 }
 
 /** Maps `payments` row → CollectionsPage history card shape. */
@@ -1748,11 +1753,19 @@ export function invalidateAdminDashboardReadCache() {
 
 async function timedSupabaseQuery(label, queryFnOrPromise) {
   const end = perfTime(`supabase.${label}`);
+  const t0 = performance.now();
   const promise =
     typeof queryFnOrPromise === "function" ? queryFnOrPromise() : queryFnOrPromise;
   const res = await promise;
   const rows = res?.error ? 0 : res?.count ?? res?.data?.length ?? 0;
+  const durationMs = Math.round(performance.now() - t0);
   end({ rows, error: res?.error?.message || null });
+  recordPredatorTiming({
+    module: "Supabase",
+    step: `read.${label}`,
+    durationMs,
+    detail: { rows, hasError: Boolean(res?.error) },
+  });
   return res;
 }
 
@@ -1762,7 +1775,9 @@ async function timedSupabaseQuery(label, queryFnOrPromise) {
  * @param {{ force?: boolean }} [options]
  */
 export async function getAdminDashboardRead(options = {}) {
+  return predatorTrace("Admin Dashboard", "api.getAdminDashboardRead", async () => {
   const force = options.force === true;
+  const dashboardReadT0 = performance.now();
   traceSupabaseRead("AdminDashboard.getAdminDashboardRead", {
     tables: [
       "orders",
@@ -1775,6 +1790,12 @@ export async function getAdminDashboardRead(options = {}) {
     ],
   });
   if (!supabase) {
+    recordPredatorTiming({
+      module: "Admin Dashboard",
+      step: "api.getAdminDashboardRead",
+      durationMs: Math.round(performance.now() - dashboardReadT0),
+      detail: { skipped: "no_client" },
+    });
     return { success: true, data: { ...EMPTY_ADMIN_DASHBOARD } };
   }
 
@@ -1790,6 +1811,12 @@ export async function getAdminDashboardRead(options = {}) {
   ) {
     perfLog("getAdminDashboardRead.cacheHit", {
       ageMs: Date.now() - adminDashboardReadCache.loadedAt,
+    });
+    recordPredatorTiming({
+      module: "Admin Dashboard",
+      step: "api.getAdminDashboardRead",
+      durationMs: Math.round(performance.now() - dashboardReadT0),
+      detail: { cacheHit: true },
     });
     return adminDashboardReadCache.result;
   }
@@ -2006,12 +2033,31 @@ export async function getAdminDashboardRead(options = {}) {
       });
       endTotal({ cached: false, queryErrors });
     }
+    recordPredatorTiming({
+      module: "Admin Dashboard",
+      step: "api.getAdminDashboardRead",
+      durationMs: Math.round(performance.now() - dashboardReadT0),
+      detail: { queryErrors },
+    });
+    recordPredatorTiming({
+      module: "Admin Dashboard",
+      step: "kpi.compute",
+      durationMs: 0,
+      detail: { note: "included in getAdminDashboardRead.total" },
+    });
     return result;
   } catch (err) {
     console.warn("[getAdminDashboardRead] failed:", err?.message || err);
     endTotal({ error: err?.message || String(err) });
+    recordPredatorTiming({
+      module: "Admin Dashboard",
+      step: "api.getAdminDashboardRead",
+      durationMs: Math.round(performance.now() - dashboardReadT0),
+      detail: { error: err?.message },
+    });
     return { success: true, data: { ...EMPTY_ADMIN_DASHBOARD } };
   }
+  });
 }
 
 const EMPTY_AGENT_WORKSPACE = {
@@ -2318,6 +2364,7 @@ function mapQualificationReviewRow(row, labMeta = null) {
  * RLS scopes rows; no service role or Apps Script.
  */
 export async function getQualificationReviewRead() {
+  return predatorTrace("Qualification Review", "api.getQualificationReviewRead", async () => {
   traceSupabaseRead("Qualification.getQualificationReviewRead", {
     tables: ["lab_qualifications", "v_labs_credit"],
   });
@@ -2362,6 +2409,7 @@ export async function getQualificationReviewRead() {
   } catch (err) {
     return { success: false, error: err?.message || String(err), data: [] };
   }
+  });
 }
 
 /**

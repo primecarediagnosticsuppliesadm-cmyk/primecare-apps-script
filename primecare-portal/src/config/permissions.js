@@ -14,4 +14,5 @@ export const PERMISSIONS = {
   purchase: [ROLES.ADMIN, ROLES.EXECUTIVE],
   reorder: [ROLES.ADMIN, ROLES.EXECUTIVE],
   qualificationReview: [ROLES.ADMIN, ROLES.EXECUTIVE],
+  predatorDebug: [ROLES.ADMIN, ROLES.EXECUTIVE],
 };

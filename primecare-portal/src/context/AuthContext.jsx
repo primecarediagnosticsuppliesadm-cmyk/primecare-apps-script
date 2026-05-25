@@ -3,6 +3,9 @@ import { getCurrentUser, loginUser, logoutUser } from "@/api/primecareApi";
 import { supabase } from "@/api/supabaseClient";
 import { ALLOW_LEGACY_APPS_SCRIPT, REQUIRE_SUPABASE_AUTH } from "@/config/environment";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
+import { predatorStore } from "@/predator/predatorStore.js";
+import { tenantContextFromUser } from "@/predator/predatorContext.js";
+import { recordPredatorTiming, predatorTrace } from "@/predator/predatorTiming.js";
 
 const AuthContext = createContext(null);
 
@@ -84,22 +87,34 @@ export function AuthProvider({ children }) {
     if (!session?.user) {
       setAuthToken("");
       setCurrentUser(null);
+      predatorStore.setActiveTenantContext(null);
       return;
     }
 
-    const endProfile = perfTime("auth.profile.fetch");
-    const { data: profile, error } = await supabase
-      .from("profiles")
-      .select("user_id, tenant_id, role, lab_id, agent_id, agent_name, active")
-      .eq("user_id", session.user.id)
-      .maybeSingle();
-    endProfile({ hasProfile: Boolean(profile) });
+    const user = await predatorTrace("Auth", "login.bootstrap.profile", async () => {
+      const endProfile = perfTime("auth.profile.fetch");
+      const t0 = performance.now();
+      const { data: profile, error } = await supabase
+        .from("profiles")
+        .select("user_id, tenant_id, role, lab_id, agent_id, agent_name, active")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+      recordPredatorTiming({
+        module: "Auth",
+        step: "login.profile_fetch",
+        durationMs: Math.round(performance.now() - t0),
+        detail: { hasProfile: Boolean(profile), hasError: Boolean(error) },
+      });
+      endProfile({ hasProfile: Boolean(profile) });
 
-    if (error) {
-      throw new Error(error.message || "Failed to load PrimeCare profile.");
-    }
+      if (error) {
+        throw new Error(error.message || "Failed to load PrimeCare profile.");
+      }
 
-    const user = buildUserFromProfile(session.user, profile);
+      return buildUserFromProfile(session.user, profile);
+    });
+
+    predatorStore.setActiveTenantContext(tenantContextFromUser(user));
     setAuthToken(session.access_token || "");
     setCurrentUser((prev) => {
       if (!prev) return user;
@@ -155,6 +170,7 @@ export function AuthProvider({ children }) {
     let mounted = true;
 
     const run = async () => {
+      const bootstrapT0 = performance.now();
       const endBootstrap = perfTime("auth.bootstrap.total");
       try {
         perfMark("auth.bootstrap.start");
@@ -194,6 +210,11 @@ export function AuthProvider({ children }) {
           setAuthLoading(false);
         }
         endBootstrap();
+        recordPredatorTiming({
+          module: "Auth",
+          step: "login.bootstrap",
+          durationMs: Math.round(performance.now() - bootstrapT0),
+        });
       }
     };
 

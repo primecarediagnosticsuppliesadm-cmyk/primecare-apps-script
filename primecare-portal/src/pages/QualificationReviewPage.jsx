@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import {
   getQualificationReviewRead,
   updateQualificationFounderReviewWrite,
@@ -970,6 +971,13 @@ export default function QualificationReviewPage({ currentUser }) {
   useEffect(() => {
     loadRows();
   }, [loadRows]);
+
+  usePredatorModuleValidation(
+    "Qualification Review",
+    currentUser,
+    { rowCount: rows.length },
+    !loading
+  );
 
   const filteredRows = useFilteredQualificationRows(rows, {
     searchQuery,

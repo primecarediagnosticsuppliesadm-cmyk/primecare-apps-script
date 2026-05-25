@@ -11,6 +11,7 @@ import {
   BarChart3,
   Brain,
   Package,
+  Bug,
 } from "lucide-react";
 
 const ICONS = {
@@ -25,6 +26,7 @@ const ICONS = {
   performance: BarChart3,
   insights: Brain,
   labOrders: Package,
+  predatorDebug: Bug,
 };
 
 function titleCase(value) {

@@ -28,6 +28,7 @@ import {
   AGENT_TASK_COMPLETION_ENABLED,
   ALLOW_LEGACY_APPS_SCRIPT,
 } from "@/config/environment";
+import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 
 function findCollectionByLabId(list, labId) {
   const target = labIdKey(labId);
@@ -94,6 +95,13 @@ export default function CollectionsPage({ currentUser, authToken }) {
   useEffect(() => {
     loadCollections();
   }, [authToken]);
+
+  usePredatorModuleValidation(
+    "Collections",
+    currentUser,
+    { summary, collections, collectionCount: collections.length },
+    !loading
+  );
 
   useEffect(() => {
     if (loading) return;

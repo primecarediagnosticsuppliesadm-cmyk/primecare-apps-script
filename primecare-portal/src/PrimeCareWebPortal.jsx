@@ -16,6 +16,7 @@ import ReorderForecastPage from "./pages/ReorderForecastPage";
 import StockPage from "./pages/StockPage";
 import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
 import QualificationReviewPage from "./pages/QualificationReviewPage";
+import PredatorDebugConsole from "./pages/PredatorDebugConsole";
 
 function PlaceholderCard({ title, subtitle }) {
   return (
@@ -43,6 +44,9 @@ function normalizePageKey(page) {
     case "qualification-review":
     case "qualifications":
       return "qualificationReview";
+    case "predator-debug":
+    case "predatorDebug":
+      return "predatorDebug";
     case "lab-orders":
     case "lab-ordering":
     case "ordering":
@@ -201,6 +205,10 @@ export default function PrimeCareWebPortal({
       case "qualification-review":
         return <QualificationReviewPage currentUser={currentUser} />;
 
+      case "predatorDebug":
+      case "predator-debug":
+        return <PredatorDebugConsole currentUser={currentUser} />;
+
       case "performance":
         return (
           <PlaceholderCard
@@ -265,6 +273,10 @@ export default function PrimeCareWebPortal({
       case "qualificationReview":
       case "qualification-review":
         return <QualificationReviewPage currentUser={currentUser} />;
+
+      case "predatorDebug":
+      case "predator-debug":
+        return <PredatorDebugConsole currentUser={currentUser} />;
 
       case "performance":
         return (

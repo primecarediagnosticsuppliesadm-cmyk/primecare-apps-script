@@ -27,6 +27,7 @@ import {
 import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
 import { summarizeAgentLabsCreditBuckets } from "@/metrics/computeRiskMetrics.js";
 import { AGENT_TASK_COMPLETION_ENABLED } from "@/config/environment";
+import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 
 const EMPTY_WORKSPACE = {
   summary: {
@@ -236,6 +237,16 @@ export default function AgentDashboard({ currentUser, setActivePage, authToken }
   useEffect(() => {
     loadWorkspace(false);
   }, [loadWorkspace]);
+
+  usePredatorModuleValidation(
+    "Agent Visits",
+    currentUser,
+    {
+      recentVisitsCount: (workspace.recentVisits || []).length,
+      todayVisits: Number(workspace.summary?.todayVisits ?? 0),
+    },
+    !loading
+  );
 
   const handleTaskAction = useCallback(
     (task) => {
