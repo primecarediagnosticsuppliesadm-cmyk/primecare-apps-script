@@ -34,7 +34,7 @@ import {
   rollupInventoryTableRows,
   rollupStockDashboardMappedItems,
 } from "@/metrics/computeInventoryMetrics.js";
-import { perfTime, shouldRunDashboardKpiAudit } from "@/utils/perfLog.js";
+import { perfLog, perfTime, shouldRunDashboardKpiAudit } from "@/utils/perfLog.js";
 
 export { labIdKey, normalizeLabIdKey };
 
@@ -1679,11 +1679,90 @@ function logAdminDashboardSupabaseAudit(ctx) {
   console.log("DASHBOARD KPI AUDIT complete");
 }
 
+const ADMIN_DASHBOARD_READ_CACHE_TTL_MS = 60 * 1000;
+
+const ADMIN_DASHBOARD_ORDERS_SELECT =
+  "order_id,lab_id,order_date,created_at,status,order_status,total_amount,ar_posted";
+const ADMIN_DASHBOARD_ORDER_ITEMS_SELECT =
+  "order_id,total_price,quantity,unit_price,net_line_total";
+const ADMIN_DASHBOARD_AR_SELECT =
+  "lab_id,lab_name,outstanding,outstanding_amount,balance,credit_hold,credit_status,risk_status,credit_risk";
+const ADMIN_DASHBOARD_INVENTORY_SELECT = "current_stock,min_stock";
+const ADMIN_DASHBOARD_VISITS_SELECT =
+  "visit_id,lab_id,visit_date,created_at,agent_id,visit_type,sold_value,lab_response,notes,next_action,area";
+const ADMIN_DASHBOARD_PAYMENTS_SELECT =
+  "payment_date,payment_amount,amount_collected,amount_received,amount,collected_at";
+const ADMIN_DASHBOARD_LABS_SELECT = "lab_id,lab_name";
+
+let adminDashboardReadCache = {
+  result: null,
+  loadedAt: 0,
+};
+
+export function invalidateAdminDashboardReadCache() {
+  adminDashboardReadCache = { result: null, loadedAt: 0 };
+  perfLog("getAdminDashboardRead.cacheCleared");
+}
+
+async function timedSupabaseQuery(label, queryPromise) {
+  const end = perfTime(`supabase.${label}`);
+  const res = await queryPromise;
+  const rows = res.error ? 0 : res.count ?? res.data?.length ?? 0;
+  end({ rows, error: res.error?.message || null });
+  return res;
+}
+
+async function fetchAdminDashboardPaymentsForToday(today) {
+  const filtered = await timedSupabaseQuery("payments.today", () =>
+    supabase.from("payments").select(ADMIN_DASHBOARD_PAYMENTS_SELECT).eq("payment_date", today)
+  );
+  if (!filtered.error) return filtered;
+
+  return timedSupabaseQuery("payments.recentFallback", () =>
+    supabase
+      .from("payments")
+      .select(ADMIN_DASHBOARD_PAYMENTS_SELECT)
+      .order("payment_date", { ascending: false, nullsFirst: false })
+      .limit(400)
+  );
+}
+
+async function fetchAdminDashboardVisitSlices() {
+  const [countRes, recentRes] = await Promise.all([
+    timedSupabaseQuery("agent_visits.count", () =>
+      supabase.from("agent_visits").select("visit_id", { count: "exact", head: true })
+    ),
+    timedSupabaseQuery("agent_visits.recent", () =>
+      supabase
+        .from("agent_visits")
+        .select(ADMIN_DASHBOARD_VISITS_SELECT)
+        .order("created_at", { ascending: false, nullsFirst: false })
+        .limit(40)
+    ),
+  ]);
+
+  const recentRows = recentRes.error ? [] : recentRes.data || [];
+  const visitCount = countRes.error
+    ? recentRows.length
+    : Number(countRes.count ?? recentRows.length ?? 0);
+
+  if (countRes.error) {
+    console.warn("[getAdminDashboardRead] agent_visits count:", countRes.error.message);
+  }
+  if (recentRes.error) {
+    console.warn("[getAdminDashboardRead] agent_visits recent:", recentRes.error.message);
+  }
+
+  return { visitCount, recentRows };
+}
+
 /**
  * Admin dashboard aggregates from Supabase: orders, AR, inventory, visits, payments.
  * Never throws.
+ * @param {{ force?: boolean }} [options]
  */
-export async function getAdminDashboardRead() {
+export async function getAdminDashboardRead(options = {}) {
+  const force = options.force === true;
   traceSupabaseRead("AdminDashboard.getAdminDashboardRead", {
     tables: ["orders", "order_items", "ar_credit_control", "inventory", "agent_visits", "payments", "labs"],
   });
@@ -1691,25 +1770,55 @@ export async function getAdminDashboardRead() {
     return { success: true, data: { ...EMPTY_ADMIN_DASHBOARD } };
   }
 
+  if (
+    !force &&
+    adminDashboardReadCache.result &&
+    Date.now() - adminDashboardReadCache.loadedAt < ADMIN_DASHBOARD_READ_CACHE_TTL_MS
+  ) {
+    perfLog("getAdminDashboardRead.cacheHit", {
+      ageMs: Date.now() - adminDashboardReadCache.loadedAt,
+    });
+    return adminDashboardReadCache.result;
+  }
+
+  const endTotal = perfTime("getAdminDashboardRead.total");
+
   try {
     const today = localDateYmd();
     const endQuery = perfTime("getAdminDashboardRead.supabaseQueries");
 
-    const [ordersRes, itemsRes, arRes, invRes, visitsRes, payRes, labsRes] = await Promise.all([
-      supabase.from("orders").select("*"),
-      supabase.from("order_items").select("*"),
-      supabase.from("ar_credit_control").select("*"),
-      supabase.from("inventory").select("*"),
-      supabase.from("agent_visits").select("*"),
-      supabase.from("payments").select("*"),
-      supabase.from("labs").select("*"),
+    const [
+      ordersRes,
+      itemsRes,
+      arRes,
+      invRes,
+      payRes,
+      labsRes,
+      visitSlices,
+    ] = await Promise.all([
+      timedSupabaseQuery("orders", () =>
+        supabase.from("orders").select(ADMIN_DASHBOARD_ORDERS_SELECT)
+      ),
+      timedSupabaseQuery("order_items", () =>
+        supabase.from("order_items").select(ADMIN_DASHBOARD_ORDER_ITEMS_SELECT)
+      ),
+      timedSupabaseQuery("ar_credit_control", () =>
+        supabase.from("ar_credit_control").select(ADMIN_DASHBOARD_AR_SELECT)
+      ),
+      timedSupabaseQuery("inventory", () =>
+        supabase.from("inventory").select(ADMIN_DASHBOARD_INVENTORY_SELECT)
+      ),
+      fetchAdminDashboardPaymentsForToday(today),
+      timedSupabaseQuery("labs", () => supabase.from("labs").select(ADMIN_DASHBOARD_LABS_SELECT)),
+      fetchAdminDashboardVisitSlices(),
     ]);
 
     const ordersRaw = ordersRes.error ? [] : ordersRes.data || [];
     const orderItemsRaw = itemsRes.error ? [] : itemsRes.data || [];
     const arRaw = arRes.error ? [] : arRes.data || [];
     const invRaw = invRes.error ? [] : invRes.data || [];
-    const visitsRaw = visitsRes.error ? [] : visitsRes.data || [];
+    const visitsRaw = visitSlices.recentRows;
+    const visitsTotalCount = visitSlices.visitCount;
     const payRaw = payRes.error ? [] : payRes.data || [];
     const labsRaw = labsRes.error ? [] : labsRes.data || [];
 
@@ -1718,14 +1827,16 @@ export async function getAdminDashboardRead() {
 
     if (arRes.error) console.warn("[getAdminDashboardRead] ar_credit_control:", arRes.error.message);
     if (invRes.error) console.warn("[getAdminDashboardRead] inventory:", invRes.error.message);
-    if (visitsRes.error) console.warn("[getAdminDashboardRead] agent_visits:", visitsRes.error.message);
+    if (payRes.error) console.warn("[getAdminDashboardRead] payments:", payRes.error.message);
 
     endQuery({
       orders: ordersRaw.length,
       orderItems: orderItemsRaw.length,
       ar: arRaw.length,
       inventory: invRaw.length,
-      visits: visitsRaw.length,
+      visitsRecent: visitsRaw.length,
+      visitsTotalCount,
+      payments: payRaw.length,
     });
 
     const labNameById = new Map();
@@ -1790,7 +1901,7 @@ export async function getAdminDashboardRead() {
 
     const summary = {
       stockStats,
-      recentVisits: visitsRaw.length,
+      recentVisits: visitsTotalCount,
       totalSoldValue: revenue.totalSoldValue,
       todayCollections,
     };
@@ -1814,7 +1925,7 @@ export async function getAdminDashboardRead() {
       orderItemsRawLength: orderItemsRaw.length,
       arRawLength: arRaw.length,
       invRawLength: invRaw.length,
-      visitsRawLength: visitsRaw.length,
+      visitsRawLength: visitsTotalCount,
       labsRawLength: labsRaw.length,
       payRawLength: payRaw.length,
       lineTotalByOrderId,
@@ -1828,9 +1939,13 @@ export async function getAdminDashboardRead() {
       visitsMappedTop10Length: visits.length,
     });
 
-    return { success: true, data: payload };
+    const result = { success: true, data: payload };
+    adminDashboardReadCache = { result, loadedAt: Date.now() };
+    endTotal({ cached: true });
+    return result;
   } catch (err) {
     console.warn("[getAdminDashboardRead] failed:", err?.message || err);
+    endTotal({ error: err?.message || String(err) });
     return { success: true, data: { ...EMPTY_ADMIN_DASHBOARD } };
   }
 }

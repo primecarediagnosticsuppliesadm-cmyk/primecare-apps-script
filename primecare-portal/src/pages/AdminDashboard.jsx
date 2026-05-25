@@ -25,7 +25,7 @@ import {
   deriveTopLabsByRevenueFromLabsCreditFallback,
 } from "@/metrics/computeRiskMetrics.js";
 import { ADMIN_DASHBOARD_INVALIDATE_EVENT } from "@/utils/dashboardInvalidate.js";
-import { perfLog, perfTime } from "@/utils/perfLog.js";
+import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
 import {
   KpiCard,
   KpiCardGrid,
@@ -313,12 +313,12 @@ const EMPTY_STOCK_STATS = {
   healthyItems: 0,
 };
 
-async function fetchSupabaseAdminSlice() {
+async function fetchSupabaseAdminSlice({ force = false } = {}) {
   const slice = { stock: null, labs: null, forecast: null, dashboardRead: null };
   const endPrimary = perfTime("AdminDashboard.getAdminDashboardRead");
   try {
-    slice.dashboardRead = await getAdminDashboardRead();
-    endPrimary({ success: slice.dashboardRead?.success });
+    slice.dashboardRead = await getAdminDashboardRead({ force });
+    endPrimary({ success: slice.dashboardRead?.success, force });
   } catch (e) {
     console.warn("[AdminDashboard] Supabase dashboard read skipped:", e?.message || e);
     endPrimary({ error: e?.message || String(e) });
@@ -518,8 +518,8 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       apis: ["getAdminDashboardRead", "getStockDashboard?", "getLabsCredit?", "getReorderForecastRead?"],
     });
     const endLoad = perfTime("AdminDashboard.loadPrimaryData");
-    const supabaseSlice = await fetchSupabaseAdminSlice();
-    endLoad();
+    const supabaseSlice = await fetchSupabaseAdminSlice({ force });
+    endLoad({ force });
 
     const skipAppsScript = adminDashboardSkipAppsScriptReads();
     let dashboardPayload = {};
@@ -678,6 +678,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   };
 
   const loadAll = async ({ force = false } = {}) => {
+    const endLoadAll = perfTime("AdminDashboard.loadAll");
     try {
       setErrorMessage("");
 
@@ -694,6 +695,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     } finally {
       setLoading(false);
       setRefreshing(false);
+      endLoadAll({ force });
     }
 
     loadSecondaryData({ force }).catch((err) => {
@@ -711,6 +713,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   }, []);
 
   useEffect(() => {
+    perfMark("AdminDashboard.route.mount");
     let mounted = true;
 
     async function init() {
@@ -724,6 +727,14 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    const id = requestAnimationFrame(() => {
+      perfMark("AdminDashboard.renderReady");
+    });
+    return () => cancelAnimationFrame(id);
+  }, [loading]);
 
   const stockStats = summaryData?.stockStats || {};
   const executive = executiveData || {};

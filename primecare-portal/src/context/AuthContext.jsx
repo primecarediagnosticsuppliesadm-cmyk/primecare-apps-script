@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { getCurrentUser, loginUser, logoutUser } from "@/api/primecareApi";
 import { supabase } from "@/api/supabaseClient";
 import { ALLOW_LEGACY_APPS_SCRIPT, REQUIRE_SUPABASE_AUTH } from "@/config/environment";
+import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
 
 const AuthContext = createContext(null);
 
@@ -86,11 +87,13 @@ export function AuthProvider({ children }) {
       return;
     }
 
+    const endProfile = perfTime("auth.profile.fetch");
     const { data: profile, error } = await supabase
       .from("profiles")
       .select("user_id, tenant_id, role, lab_id, agent_id, agent_name, active")
       .eq("user_id", session.user.id)
       .maybeSingle();
+    endProfile({ hasProfile: Boolean(profile) });
 
     if (error) {
       throw new Error(error.message || "Failed to load PrimeCare profile.");
@@ -152,15 +155,22 @@ export function AuthProvider({ children }) {
     let mounted = true;
 
     const run = async () => {
+      const endBootstrap = perfTime("auth.bootstrap.total");
       try {
+        perfMark("auth.bootstrap.start");
         setAuthLoading(true);
         setAuthError("");
 
         if (useSupabaseAuth) {
           localStorage.removeItem(STORAGE_KEY);
+          const endSession = perfTime("auth.getSession");
           const { data, error } = await supabase.auth.getSession();
+          endSession({ hasSession: Boolean(data?.session) });
           if (error) throw new Error(error.message || "Failed to restore Supabase session.");
+          const endApply = perfTime("auth.applySupabaseSession");
           await applySupabaseSession(data?.session || null);
+          endApply();
+          perfMark("auth.bootstrap.end");
           return;
         }
 
@@ -173,6 +183,7 @@ export function AuthProvider({ children }) {
         }
 
         await bootstrapUser(authToken);
+        perfMark("auth.bootstrap.end");
       } catch (err) {
         console.error("Auth bootstrap failed", err);
         setAuthError(err?.message || "Authentication failed.");
@@ -182,6 +193,7 @@ export function AuthProvider({ children }) {
         if (mounted) {
           setAuthLoading(false);
         }
+        endBootstrap();
       }
     };
 
@@ -295,16 +307,22 @@ export function AuthProvider({ children }) {
     setAuthError("");
 
     if (useSupabaseAuth) {
+      perfMark("auth.login.start");
+      const endSignIn = perfTime("auth.signInWithPassword");
       const { data, error } = await supabase.auth.signInWithPassword({
         email: loginId,
         password,
       });
+      endSignIn();
 
       if (error) {
         throw new Error(error.message || "Login failed");
       }
 
+      const endApply = perfTime("auth.applySupabaseSession.afterLogin");
       await applySupabaseSession(data?.session || null);
+      endApply();
+      perfMark("auth.login.end");
       return { success: true };
     }
 

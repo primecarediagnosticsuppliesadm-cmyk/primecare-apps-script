@@ -1,11 +1,12 @@
 /**
- * Dev-only performance timing (enable with VITE_PERF_LOG=true).
+ * Performance timing (enable with VITE_PERF_LOG=true in any environment).
  */
+export function isPerfLogEnabled() {
+  return String(import.meta.env.VITE_PERF_LOG || "").trim().toLowerCase() === "true";
+}
+
 export function perfLog(label, detail) {
-  if (!import.meta.env.DEV) return;
-  if (String(import.meta.env.VITE_PERF_LOG || "").trim().toLowerCase() !== "true") {
-    return;
-  }
+  if (!isPerfLogEnabled()) return;
   if (detail !== undefined) {
     console.info(`[perf] ${label}`, detail);
   } else {
@@ -14,15 +15,18 @@ export function perfLog(label, detail) {
 }
 
 export function perfTime(label) {
-  if (!import.meta.env.DEV) return () => {};
-  if (String(import.meta.env.VITE_PERF_LOG || "").trim().toLowerCase() !== "true") {
-    return () => {};
-  }
+  if (!isPerfLogEnabled()) return () => {};
   const t0 = performance.now();
   return (extra) => {
     const ms = Math.round(performance.now() - t0);
     perfLog(`${label} ${ms}ms`, extra);
   };
+}
+
+/** Monotonic mark for cross-step timelines (login → dashboard ready). */
+export function perfMark(label) {
+  if (!isPerfLogEnabled()) return;
+  perfLog(label, { t: Math.round(performance.now()) });
 }
 
 export function shouldRunDashboardKpiAudit() {
