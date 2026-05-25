@@ -1754,6 +1754,92 @@ async function timedSupabaseQuery(label, queryPromise) {
   return res;
 }
 
+/** QA-only: log browser session identity before dashboard table reads (RLS debugging). */
+async function logQaGetAdminDashboardBrowserContext() {
+  if (!IS_QA || !supabase) return;
+
+  try {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    const authUserId = userData?.user?.id ?? null;
+
+    let profileRole = null;
+    let profileTenantId = null;
+    let profileError = null;
+
+    if (authUserId) {
+      const { data: profile, error } = await supabase
+        .from("profiles")
+        .select("role, tenant_id")
+        .eq("user_id", authUserId)
+        .maybeSingle();
+      profileRole = profile?.role ?? null;
+      profileTenantId = profile?.tenant_id ?? null;
+      profileError = error?.message ?? null;
+    }
+
+    console.log("[QA getAdminDashboardRead] browser auth/profile", {
+      authUserId,
+      authUserError: userError?.message ?? null,
+      profileRole,
+      profileTenantId,
+      profileError,
+    });
+  } catch (err) {
+    console.log("[QA getAdminDashboardRead] browser auth/profile", {
+      error: err?.message || String(err),
+    });
+  }
+}
+
+/** QA-only: row counts + PostgREST errors immediately after each table read. */
+function logQaGetAdminDashboardTableReads({
+  ordersRes,
+  arRes,
+  visitsRes,
+  invRes,
+  labsRes,
+  orderLinesRes,
+  payRes,
+  ordersRaw,
+  arRaw,
+  visitsRaw,
+  inventoryRaw,
+  labsRaw,
+  orderLinesRaw,
+  paymentsRaw,
+}) {
+  if (!IS_QA) return;
+
+  console.log("[QA getAdminDashboardRead] ordersRaw", {
+    length: ordersRaw.length,
+    error: ordersRes.error?.message ?? null,
+  });
+  console.log("[QA getAdminDashboardRead] arRaw", {
+    length: arRaw.length,
+    error: arRes.error?.message ?? null,
+  });
+  console.log("[QA getAdminDashboardRead] visitsRaw", {
+    length: visitsRaw.length,
+    error: visitsRes.error?.message ?? null,
+  });
+  console.log("[QA getAdminDashboardRead] inventoryRaw", {
+    length: inventoryRaw.length,
+    error: invRes.error?.message ?? null,
+  });
+  console.log("[QA getAdminDashboardRead] labsRaw", {
+    length: labsRaw.length,
+    error: labsRes.error?.message ?? null,
+  });
+  console.log("[QA getAdminDashboardRead] orderLinesRaw", {
+    length: orderLinesRaw.length,
+    error: orderLinesRes.error?.message ?? null,
+  });
+  console.log("[QA getAdminDashboardRead] paymentsRaw", {
+    length: paymentsRaw.length,
+    error: payRes.error?.message ?? null,
+  });
+}
+
 /**
  * Admin dashboard aggregates from Supabase (full select * — correctness over performance).
  * Never throws.
@@ -1798,6 +1884,10 @@ export async function getAdminDashboardRead(options = {}) {
     const today = localDateYmd();
     const endQuery = perfTime("getAdminDashboardRead.supabaseQueries");
 
+    if (IS_QA) {
+      await logQaGetAdminDashboardBrowserContext();
+    }
+
     const queryErrors = [];
 
     const [ordersRes, arRes, visitsRes, invRes, labsRes, orderLinesRes, payRes] =
@@ -1820,6 +1910,23 @@ export async function getAdminDashboardRead(options = {}) {
     const labsRaw = labsRes.error ? [] : labsRes.data || [];
     const orderLinesRaw = orderLinesRes.error ? [] : orderLinesRes.data || [];
     const payRaw = payRes.error ? [] : payRes.data || [];
+
+    logQaGetAdminDashboardTableReads({
+      ordersRes,
+      arRes,
+      visitsRes,
+      invRes,
+      labsRes,
+      orderLinesRes,
+      payRes,
+      ordersRaw,
+      arRaw,
+      visitsRaw: visitsAllRaw,
+      inventoryRaw: invRaw,
+      labsRaw,
+      orderLinesRaw,
+      paymentsRaw: payRaw,
+    });
 
     const orderItemsRaw = combineOrderLineItemsForMetrics([], orderLinesRaw);
     const visitsTotalCount = visitsAllRaw.length;
