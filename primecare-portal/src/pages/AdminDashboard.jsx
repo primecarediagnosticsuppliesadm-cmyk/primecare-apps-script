@@ -25,6 +25,7 @@ import {
   deriveTopLabsByRevenueFromLabsCreditFallback,
 } from "@/metrics/computeRiskMetrics.js";
 import { ADMIN_DASHBOARD_INVALIDATE_EVENT } from "@/utils/dashboardInvalidate.js";
+import { IS_QA } from "@/config/environment";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
 import {
   KpiCard,
@@ -349,6 +350,10 @@ async function fetchSupabaseAdminSlice({ force = false } = {}) {
 
 function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) {
   const dash = supabaseSlice.dashboardRead?.success ? supabaseSlice.dashboardRead.data : null;
+  const dashMeta = dash?._readMeta;
+  const preferSupabaseKpis = Boolean(
+    dashMeta && (dashMeta.ordersCount > 0 || dashMeta.arCount > 0 || dashMeta.visitsCount > 0)
+  );
 
   const stockStats =
     dash?.summary?.stockStats ||
@@ -371,38 +376,54 @@ function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) 
   const summary = {
     stockStats,
     recentVisits: Number(
-      dash?.summary?.recentVisits ?? summaryIn?.recentVisits ?? 0
+      preferSupabaseKpis
+        ? (dash?.summary?.recentVisits ?? 0)
+        : (dash?.summary?.recentVisits ?? summaryIn?.recentVisits ?? 0)
     ),
     totalSoldValue: Number(
-      dash?.summary?.totalSoldValue ?? summaryIn?.totalSoldValue ?? 0
+      preferSupabaseKpis
+        ? (dash?.summary?.totalSoldValue ?? 0)
+        : (dash?.summary?.totalSoldValue ?? summaryIn?.totalSoldValue ?? 0)
     ),
-    todayCollections: Number(dash?.summary?.todayCollections ?? 0),
+    todayCollections: Number(
+      preferSupabaseKpis
+        ? (dash?.summary?.todayCollections ?? 0)
+        : (dash?.summary?.todayCollections ?? summaryIn?.todayCollections ?? 0)
+    ),
   };
 
   const executive = {
     todaysRevenue: Number(
-      dash?.executive?.todaysRevenue ??
-        executiveIn?.todaysRevenue ??
-        executiveIn?.todays_revenue ??
-        0
+      preferSupabaseKpis
+        ? (dash?.executive?.todaysRevenue ?? 0)
+        : (dash?.executive?.todaysRevenue ??
+            executiveIn?.todaysRevenue ??
+            executiveIn?.todays_revenue ??
+            0)
     ),
     outstandingReceivables: Number(
-      dash?.executive?.outstandingReceivables ??
-        executiveIn?.outstandingReceivables ??
-        executiveIn?.outstanding_receivables ??
-        0
+      preferSupabaseKpis
+        ? (dash?.executive?.outstandingReceivables ?? 0)
+        : (dash?.executive?.outstandingReceivables ??
+            executiveIn?.outstandingReceivables ??
+            executiveIn?.outstanding_receivables ??
+            0)
     ),
     labsAtCreditRisk: Number(
-      dash?.executive?.labsAtCreditRisk ??
-        executiveIn?.labsAtCreditRisk ??
-        executiveIn?.labs_at_credit_risk ??
-        labsCreditRiskCount
+      preferSupabaseKpis
+        ? (dash?.executive?.labsAtCreditRisk ?? 0)
+        : (dash?.executive?.labsAtCreditRisk ??
+            executiveIn?.labsAtCreditRisk ??
+            executiveIn?.labs_at_credit_risk ??
+            labsCreditRiskCount)
     ),
     productsNearStockout: Number(
-      dash?.executive?.productsNearStockout ??
-        executiveIn?.productsNearStockout ??
-        executiveIn?.products_near_stockout ??
-        nearStockoutDerived
+      preferSupabaseKpis
+        ? (dash?.executive?.productsNearStockout ?? 0)
+        : (dash?.executive?.productsNearStockout ??
+            executiveIn?.productsNearStockout ??
+            executiveIn?.products_near_stockout ??
+            nearStockoutDerived)
     ),
     topLabsByRevenue:
       Array.isArray(dash?.executive?.topLabsByRevenue) && dash.executive.topLabsByRevenue.length
@@ -566,10 +587,20 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       executivePayload
     );
 
-    adminDashboardCache.dashboard = merged.summary;
-    adminDashboardCache.executive = merged.executive;
-    adminDashboardCache.dashboardLoadedAt = Date.now();
-    adminDashboardCache.executiveLoadedAt = Date.now();
+    const hasVisibleKpis =
+      Number(merged.executive?.outstandingReceivables) > 0 ||
+      Number(merged.summary?.totalSoldValue) > 0 ||
+      Number(merged.summary?.recentVisits) > 0 ||
+      Number(merged.executive?.todaysRevenue) > 0;
+
+    if (hasVisibleKpis || force) {
+      adminDashboardCache.dashboard = merged.summary;
+      adminDashboardCache.executive = merged.executive;
+      adminDashboardCache.dashboardLoadedAt = Date.now();
+      adminDashboardCache.executiveLoadedAt = Date.now();
+    } else {
+      perfLog("AdminDashboard.skipClientCacheBlankKpis", { force });
+    }
 
     if (merged.visits) {
       adminDashboardCache.visits = merged.visits;

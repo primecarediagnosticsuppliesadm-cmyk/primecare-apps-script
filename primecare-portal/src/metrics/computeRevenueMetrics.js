@@ -40,16 +40,21 @@ export function normalizedOrderRowStatus(orderRow) {
       orderRow?.orderStatus ??
       orderRow?.Order_Status ??
       "Placed"
-  );
+  ).toLowerCase();
+}
+
+/** Match dashboard revenue rule: fulfilled deliveries only (Placed/Fulfilled/case variants). */
+export function isFulfilledOrderStatus(statusNormalized) {
+  return str(statusNormalized).toLowerCase() === "fulfilled";
 }
 
 export function orderOperationalExcludedFromIndices(orderRow) {
-  return normalizedOrderRowStatus(orderRow).toLowerCase() === "cancelled";
+  return normalizedOrderRowStatus(orderRow) === "cancelled";
 }
 
 /** Dashboard revenue: fulfilled deliveries only. */
 export function orderCountsTowardDashboardRevenue(orderRow) {
-  return normalizedOrderRowStatus(orderRow).toLowerCase() === "fulfilled";
+  return isFulfilledOrderStatus(normalizedOrderRowStatus(orderRow));
 }
 
 /**
