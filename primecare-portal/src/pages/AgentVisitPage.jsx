@@ -49,6 +49,11 @@ import {
   formatQualificationBandLabel,
   qualificationBandBadgeClass,
 } from "@/utils/computeQualificationScore";
+import {
+  getPipelineStageLabel,
+  mapPipelineFieldsFromRow,
+  pipelineStageBadgeClass,
+} from "@/utils/qualificationPipeline";
 
 function QuickStat({ title, value, icon: Icon }) {
   return (
@@ -183,11 +188,15 @@ const QUALIFICATION_DEFAULT = {
   qualificationScore: null,
   qualificationBand: "",
   qualificationReasons: [],
+  pipelineStage: "new",
+  pipelineStageLabel: "New",
+  pipelineNextAction: "",
 };
 
 function normalizeQualificationRow(row) {
   if (!row) return { ...QUALIFICATION_DEFAULT };
   const scoring = computeQualificationScore(row);
+  const pipeline = mapPipelineFieldsFromRow(row);
   return {
     labSize: row.lab_size || "",
     monthlyConsumablesEstimate:
@@ -208,6 +217,9 @@ function normalizeQualificationRow(row) {
         : scoring.qualification_score,
     qualificationBand: row.qualification_band || scoring.qualification_band || "",
     qualificationReasons: scoring.qualification_reasons || [],
+    pipelineStage: pipeline.pipelineStage,
+    pipelineStageLabel: pipeline.pipelineStageLabel,
+    pipelineNextAction: pipeline.pipelineNextAction,
   };
 }
 
@@ -692,6 +704,8 @@ export default function AgentVisitPage({ currentUser, authToken }) {
         agentName:
           currentUser?.agentName || currentUser?.name || form.agentName || "",
         updatedBy: currentUser?.id || currentUser?.userId || "",
+        writerRole: currentUser?.role || "agent",
+        pipelineNextAction: qualificationForm.pipelineNextAction,
       };
 
       const res = await upsertLabQualificationWrite(payload);
@@ -1071,21 +1085,33 @@ export default function AgentVisitPage({ currentUser, authToken }) {
                       </div>
                     ) : (
                       <>
-                        {qualificationForm.qualificationBand ? (
+                        {qualificationForm.qualificationBand ||
+                        qualificationForm.pipelineStage ? (
                           <div className="rounded-xl border bg-slate-50 p-3">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                                Qualification band
+                                Pipeline
                               </span>
                               <Badge
-                                className={qualificationBandBadgeClass(
-                                  qualificationForm.qualificationBand
+                                className={pipelineStageBadgeClass(
+                                  qualificationForm.pipelineStage
                                 )}
                               >
-                                {formatQualificationBandLabel(
-                                  qualificationForm.qualificationBand
-                                )}
+                                {qualificationForm.pipelineStageLabel ||
+                                  getPipelineStageLabel(qualificationForm.pipelineStage)}
                               </Badge>
+                              <span className="text-xs text-slate-500">(read-only)</span>
+                              {qualificationForm.qualificationBand ? (
+                                <Badge
+                                  className={qualificationBandBadgeClass(
+                                    qualificationForm.qualificationBand
+                                  )}
+                                >
+                                  {formatQualificationBandLabel(
+                                    qualificationForm.qualificationBand
+                                  )}
+                                </Badge>
+                              ) : null}
                               {qualificationForm.qualificationScore != null ? (
                                 <span className="text-sm text-slate-700">
                                   Score: {qualificationForm.qualificationScore}
@@ -1103,6 +1129,23 @@ export default function AgentVisitPage({ currentUser, authToken }) {
                             ) : null}
                           </div>
                         ) : null}
+                        <div>
+                          <FieldLabel helper="Your next step for this lab in the pipeline">
+                            Pipeline next action
+                          </FieldLabel>
+                          <Input
+                            value={qualificationForm.pipelineNextAction}
+                            onChange={(e) =>
+                              setQualificationForm((prev) => ({
+                                ...prev,
+                                pipelineNextAction: e.target.value,
+                              }))
+                            }
+                            placeholder="e.g. Send sample kit, schedule demo call"
+                            className="h-12 rounded-xl text-base"
+                          />
+                        </div>
+
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                           <div>
                             <FieldLabel helper="Approximate lab size tier">Lab Size</FieldLabel>

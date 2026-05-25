@@ -2,10 +2,13 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   getQualificationReviewRead,
   updateQualificationFounderReviewWrite,
+  updateQualificationPipelineWrite,
 } from "@/api/primecareSupabaseApi";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -18,6 +21,12 @@ import {
   formatQualificationBandLabel,
   qualificationBandBadgeClass,
 } from "@/utils/computeQualificationScore";
+import {
+  getPipelineStageLabel,
+  getPipelineStageOrder,
+  PIPELINE_STAGE_SELECT_OPTIONS,
+  pipelineStageBadgeClass,
+} from "@/utils/qualificationPipeline";
 
 const STATUS_OPTIONS = [
   { value: "ALL", label: "All statuses" },
@@ -48,9 +57,16 @@ const BAND_OPTIONS = [
   { value: "cold", label: "COLD" },
 ];
 
+const PIPELINE_FILTER_OPTIONS = [
+  { value: "ALL", label: "All pipeline stages" },
+  ...PIPELINE_STAGE_SELECT_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+];
+
 const SORT_OPTIONS = [
   { value: "updated", label: "Recently updated" },
   { value: "score", label: "Score (high → low)" },
+  { value: "stage", label: "Pipeline stage (funnel order)" },
+  { value: "expected_value", label: "Expected value (high → low)" },
 ];
 
 const REVIEW_STATUS_OPTIONS = [
@@ -85,6 +101,188 @@ function formatDateTime(value) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return String(value);
   return d.toLocaleString();
+}
+
+function PipelineStageBadge({ row }) {
+  const stage = row.pipelineStage || "new";
+  return (
+    <Badge className={pipelineStageBadgeClass(stage)}>
+      {row.pipelineStageLabel || getPipelineStageLabel(stage)}
+    </Badge>
+  );
+}
+
+function PipelineEditor({ row, currentUser, onSaved, compact = false }) {
+  const [stage, setStage] = useState(row.pipelineStage || "new");
+  const [nextAction, setNextAction] = useState(row.pipelineNextAction || "");
+  const [lostReason, setLostReason] = useState(row.pipelineLostReason || "");
+  const [expectedValue, setExpectedValue] = useState(
+    row.pipelineExpectedValue != null ? String(row.pipelineExpectedValue) : ""
+  );
+  const [probability, setProbability] = useState(
+    row.pipelineProbability != null ? String(row.pipelineProbability) : ""
+  );
+  const [pipelineNotes, setPipelineNotes] = useState(row.pipelineNotes || "");
+  const [saving, setSaving] = useState(false);
+  const [rowError, setRowError] = useState("");
+
+  useEffect(() => {
+    setStage(row.pipelineStage || "new");
+    setNextAction(row.pipelineNextAction || "");
+    setLostReason(row.pipelineLostReason || "");
+    setExpectedValue(
+      row.pipelineExpectedValue != null ? String(row.pipelineExpectedValue) : ""
+    );
+    setProbability(
+      row.pipelineProbability != null ? String(row.pipelineProbability) : ""
+    );
+    setPipelineNotes(row.pipelineNotes || "");
+  }, [row]);
+
+  async function handleSavePipeline() {
+    setRowError("");
+    setSaving(true);
+    try {
+      const res = await updateQualificationPipelineWrite({
+        tenantId: row.tenantId || currentUser?.tenantId,
+        labId: row.labId,
+        writerRole: currentUser?.role || "admin",
+        pipelineStage: stage,
+        pipelineNextAction: nextAction,
+        pipelineLostReason: lostReason,
+        pipelineExpectedValue: expectedValue,
+        pipelineProbability: probability,
+        pipelineNotes,
+        updatedBy: currentUser?.id || currentUser?.userId,
+      });
+      if (!res?.success) {
+        throw new Error(res?.error || "Failed to update pipeline");
+      }
+      onSaved?.(res.data);
+    } catch (err) {
+      setRowError(err?.message || "Pipeline update failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (compact) {
+    return (
+      <div className="space-y-2">
+        <Select value={stage} onValueChange={setStage}>
+          <SelectTrigger className="h-9 rounded-lg text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PIPELINE_STAGE_SELECT_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          type="button"
+          size="sm"
+          className="h-8 w-full rounded-lg text-xs"
+          disabled={saving}
+          onClick={handleSavePipeline}
+        >
+          {saving ? "Saving…" : "Save pipeline"}
+        </Button>
+        {rowError ? <span className="text-xs text-red-600">{rowError}</span> : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        Pipeline
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="space-y-1">
+          <div className="text-xs text-slate-500">Stage</div>
+          <Select value={stage} onValueChange={setStage}>
+            <SelectTrigger className="h-10 rounded-xl">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PIPELINE_STAGE_SELECT_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <div className="text-xs text-slate-500">Win probability (%)</div>
+          <Input
+            type="number"
+            min={0}
+            max={100}
+            value={probability}
+            onChange={(e) => setProbability(e.target.value)}
+            className="h-10 rounded-xl"
+          />
+        </div>
+        <div className="space-y-1">
+          <div className="text-xs text-slate-500">Expected value (₹)</div>
+          <Input
+            type="number"
+            min={0}
+            value={expectedValue}
+            onChange={(e) => setExpectedValue(e.target.value)}
+            className="h-10 rounded-xl"
+          />
+        </div>
+        <div className="space-y-1">
+          <div className="text-xs text-slate-500">Next action</div>
+          <Input
+            value={nextAction}
+            onChange={(e) => setNextAction(e.target.value)}
+            className="h-10 rounded-xl"
+          />
+        </div>
+        {stage === "lost" ? (
+          <div className="space-y-1 sm:col-span-2">
+            <div className="text-xs text-slate-500">Lost reason</div>
+            <Input
+              value={lostReason}
+              onChange={(e) => setLostReason(e.target.value)}
+              className="h-10 rounded-xl"
+            />
+          </div>
+        ) : null}
+        <div className="space-y-1 sm:col-span-2">
+          <div className="text-xs text-slate-500">Pipeline notes</div>
+          <Textarea
+            value={pipelineNotes}
+            onChange={(e) => setPipelineNotes(e.target.value)}
+            rows={2}
+            className="rounded-xl text-sm"
+          />
+        </div>
+      </div>
+      <Button
+        type="button"
+        className="h-10 rounded-xl"
+        disabled={saving}
+        onClick={handleSavePipeline}
+      >
+        {saving ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Saving pipeline…
+          </>
+        ) : (
+          "Save pipeline"
+        )}
+      </Button>
+      {rowError ? <p className="text-sm text-red-600">{rowError}</p> : null}
+    </div>
+  );
 }
 
 function ScoreBandBadge({ row }) {
@@ -167,6 +365,7 @@ function ReviewRowCard({ row, currentUser, onSaved }) {
             <CardDescription>{row.labId}</CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <PipelineStageBadge row={row} />
             <ScoreBandBadge row={row} />
             <Badge className={statusBadgeClass(row.founderReviewStatus)}>
               {formatStatusLabel(row.founderReviewStatus)}
@@ -240,6 +439,8 @@ function ReviewRowCard({ row, currentUser, onSaved }) {
         {rowError ? (
           <p className="text-sm text-red-600">{rowError}</p>
         ) : null}
+
+        <PipelineEditor row={row} currentUser={currentUser} onSaved={onSaved} />
       </CardContent>
     </Card>
   );
@@ -253,7 +454,8 @@ export default function QualificationReviewPage({ currentUser }) {
   const [rentalFilter, setRentalFilter] = useState("ALL");
   const [fitFilter, setFitFilter] = useState("ALL");
   const [bandFilter, setBandFilter] = useState("ALL");
-  const [sortBy, setSortBy] = useState("updated");
+  const [pipelineFilter, setPipelineFilter] = useState("ALL");
+  const [sortBy, setSortBy] = useState("stage");
   const loadRows = useCallback(async () => {
     try {
       setLoading(true);
@@ -295,6 +497,12 @@ export default function QualificationReviewPage({ currentUser }) {
       ) {
         return false;
       }
+      if (
+        pipelineFilter !== "ALL" &&
+        String(row.pipelineStage || "").toLowerCase() !== pipelineFilter
+      ) {
+        return false;
+      }
       return true;
     });
 
@@ -304,6 +512,17 @@ export default function QualificationReviewPage({ currentUser }) {
         (a, b) =>
           Number(b.qualificationScore ?? -1) - Number(a.qualificationScore ?? -1)
       );
+    } else if (sortBy === "stage") {
+      sorted.sort(
+        (a, b) =>
+          getPipelineStageOrder(a.pipelineStage) - getPipelineStageOrder(b.pipelineStage)
+      );
+    } else if (sortBy === "expected_value") {
+      sorted.sort(
+        (a, b) =>
+          Number(b.pipelineExpectedValue ?? -1) -
+          Number(a.pipelineExpectedValue ?? -1)
+      );
     } else {
       sorted.sort(
         (a, b) =>
@@ -311,7 +530,7 @@ export default function QualificationReviewPage({ currentUser }) {
       );
     }
     return sorted;
-  }, [rows, statusFilter, rentalFilter, fitFilter, bandFilter, sortBy]);
+  }, [rows, statusFilter, rentalFilter, fitFilter, bandFilter, pipelineFilter, sortBy]);
 
   function handleRowSaved(updated) {
     if (!updated?.labId) {
@@ -373,7 +592,13 @@ export default function QualificationReviewPage({ currentUser }) {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Filters</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <FilterSelect
+            label="Pipeline stage"
+            value={pipelineFilter}
+            onValueChange={setPipelineFilter}
+            options={PIPELINE_FILTER_OPTIONS}
+          />
           <FilterSelect
             label="Qualification band"
             value={bandFilter}
@@ -439,7 +664,9 @@ export default function QualificationReviewPage({ currentUser }) {
               <thead className="border-b bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-3">Lab</th>
+                  <th className="px-4 py-3">Pipeline</th>
                   <th className="px-4 py-3">Band / Score</th>
+                  <th className="px-4 py-3">Expected</th>
                   <th className="px-4 py-3">Monthly est.</th>
                   <th className="px-4 py-3">Supplier</th>
                   <th className="px-4 py-3">Terms</th>
@@ -506,9 +733,18 @@ function TableReviewRow({ row, currentUser, onSaved }) {
         <div className="font-medium text-slate-900">{row.labName}</div>
         <div className="text-xs text-slate-500">{row.labId}</div>
       </td>
+      <td className="px-4 py-3 align-top">
+        <PipelineEditor
+          row={row}
+          currentUser={currentUser}
+          onSaved={onSaved}
+          compact
+        />
+      </td>
       <td className="px-4 py-3">
         <ScoreBandBadge row={row} />
       </td>
+      <td className="px-4 py-3">{formatMoney(row.pipelineExpectedValue)}</td>
       <td className="px-4 py-3">{formatMoney(row.monthlyConsumablesEstimate)}</td>
       <td className="px-4 py-3">{row.currentSupplier || "—"}</td>
       <td className="px-4 py-3">{row.paymentTerms || "—"}</td>

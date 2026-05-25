@@ -11,6 +11,12 @@ import {
 import { labIdKey, normalizeLabIdKey } from "@/utils/labId.js";
 import { computeQualificationScore } from "@/utils/computeQualificationScore.js";
 import {
+  deriveDefaultPipelineStage,
+  isAgentAllowedPipelineStage,
+  mapPipelineFieldsFromRow,
+  normalizeQualificationPipelineStage,
+} from "@/utils/qualificationPipeline.js";
+import {
   buildOrdersByLabDateIndex,
   computeRevenueMetrics,
   normalizedOrderRowStatus,
@@ -2035,9 +2041,76 @@ export async function getLabQualificationRead(input = {}) {
   }
 }
 
+async function readLabQualificationRow(tenant_id, lab_id) {
+  const { data, error } = await supabase
+    .from("lab_qualifications")
+    .select("*")
+    .eq("tenant_id", tenant_id)
+    .eq("lab_id", lab_id)
+    .maybeSingle();
+  if (error) throw new Error(error.message || "Failed to read qualification");
+  return data || null;
+}
+
+function mergePipelineForQualificationUpsert(row, existing, payload) {
+  const writerRole = str(payload.writerRole ?? payload.writer_role).toLowerCase();
+  const isAgent = writerRole === "agent";
+  const updatedBy =
+    str(payload.updatedBy ?? payload.updated_by ?? payload.userId ?? payload.user_id) ||
+    null;
+
+  const explicitStage = normalizeQualificationPipelineStage(
+    payload.pipelineStage ?? payload.pipeline_stage
+  );
+  const nextAction = str(
+    payload.pipelineNextAction ?? payload.pipeline_next_action
+  );
+
+  if (existing) {
+    row.pipeline_stage = existing.pipeline_stage || deriveDefaultPipelineStage(row);
+    row.pipeline_stage_updated_at = existing.pipeline_stage_updated_at;
+    row.pipeline_stage_updated_by = existing.pipeline_stage_updated_by;
+    row.pipeline_lost_reason = existing.pipeline_lost_reason;
+    row.pipeline_expected_value = existing.pipeline_expected_value;
+    row.pipeline_probability = existing.pipeline_probability;
+    row.pipeline_notes = existing.pipeline_notes;
+    row.pipeline_next_action = existing.pipeline_next_action;
+
+    if (nextAction) {
+      row.pipeline_next_action = nextAction;
+    }
+
+    if (explicitStage) {
+      if (!isAgent || isAgentAllowedPipelineStage(explicitStage)) {
+        if (row.pipeline_stage !== explicitStage) {
+          row.pipeline_stage = explicitStage;
+          row.pipeline_stage_updated_at = new Date().toISOString();
+          row.pipeline_stage_updated_by = updatedBy;
+        }
+      }
+    }
+    return;
+  }
+
+  const stage =
+    explicitStage && (!isAgent || isAgentAllowedPipelineStage(explicitStage))
+      ? explicitStage
+      : deriveDefaultPipelineStage(row);
+
+  row.pipeline_stage = stage;
+  row.pipeline_stage_updated_at = new Date().toISOString();
+  row.pipeline_stage_updated_by = updatedBy;
+  row.pipeline_next_action = nextAction || null;
+  row.pipeline_lost_reason = null;
+  row.pipeline_expected_value = null;
+  row.pipeline_probability = null;
+  row.pipeline_notes = null;
+}
+
 /**
  * Upsert one qualification profile for a lab (tenant+lab unique key).
  * Uses current profile agent_id / agent_name metadata when available.
+ * Preserves pipeline fields on update unless explicitly provided (pass writerRole: "agent").
  */
 export async function upsertLabQualificationWrite(payload = {}) {
   traceSupabaseRead("Qualification.upsertLabQualificationWrite", {
@@ -2054,6 +2127,8 @@ export async function upsertLabQualificationWrite(payload = {}) {
     if (!tenant_id || !lab_id) {
       return { success: false, error: "tenant_id and lab_id are required", data: null };
     }
+
+    const existing = await readLabQualificationRow(tenant_id, lab_id);
 
     const monthly = payload.monthlyConsumablesEstimate ?? payload.monthly_consumables_estimate;
     const monthly_consumables_estimate =
@@ -2082,6 +2157,8 @@ export async function upsertLabQualificationWrite(payload = {}) {
     const scoring = computeQualificationScore(row);
     row.qualification_score = scoring.qualification_score;
     row.qualification_band = scoring.qualification_band;
+
+    mergePipelineForQualificationUpsert(row, existing, payload);
 
     const { data, error } = await supabase
       .from("lab_qualifications")
@@ -2136,6 +2213,7 @@ function mapQualificationReviewRow(row, labMeta = null) {
       row?.qualification_score == null ? null : num(row.qualification_score),
     qualificationBand: str(row?.qualification_band).toLowerCase(),
     qualificationReasons: computeQualificationScore(row).qualification_reasons,
+    ...mapPipelineFieldsFromRow(row),
   };
 }
 
@@ -2220,16 +2298,7 @@ export async function updateQualificationFounderReviewWrite(payload = {}) {
       };
     }
 
-    const { data: existing, error: readErr } = await supabase
-      .from("lab_qualifications")
-      .select("*")
-      .eq("tenant_id", tenant_id)
-      .eq("lab_id", lab_id)
-      .maybeSingle();
-
-    if (readErr) {
-      return { success: false, error: readErr.message || "Read failed", data: null };
-    }
+    const existing = await readLabQualificationRow(tenant_id, lab_id);
     if (!existing) {
       return { success: false, error: "Qualification record not found", data: null };
     }
@@ -2261,6 +2330,157 @@ export async function updateQualificationFounderReviewWrite(payload = {}) {
     return {
       success: true,
       data: mapQualificationReviewRow(data),
+      error: null,
+    };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err), data: null };
+  }
+}
+
+/**
+ * Update pipeline funnel fields. Admin/executive: full pipeline edit.
+ * Agent: only pipeline_next_action, next_follow_up_date (via notes merge), notes — not won/lost.
+ */
+export async function updateQualificationPipelineWrite(payload = {}) {
+  traceSupabaseRead("Qualification.updateQualificationPipelineWrite", {
+    table: "lab_qualifications",
+  });
+
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+
+  try {
+    const tenant_id = str(payload.tenantId ?? payload.tenant_id);
+    const lab_id = labIdKey(payload.labId ?? payload.lab_id);
+    const writerRole = str(payload.writerRole ?? payload.writer_role).toLowerCase();
+    const isAgent = writerRole === "agent";
+    const updatedBy =
+      str(payload.updatedBy ?? payload.updated_by ?? payload.userId ?? payload.user_id) ||
+      null;
+
+    if (!tenant_id || !lab_id) {
+      return { success: false, error: "tenant_id and lab_id are required", data: null };
+    }
+
+    const existing = await readLabQualificationRow(tenant_id, lab_id);
+    if (!existing) {
+      return { success: false, error: "Qualification record not found", data: null };
+    }
+
+    const patch = {};
+
+    if (isAgent) {
+      const nextAction = str(
+        payload.pipelineNextAction ?? payload.pipeline_next_action
+      );
+      if (nextAction) patch.pipeline_next_action = nextAction;
+
+      const followUp = str(payload.nextFollowUpDate ?? payload.next_follow_up_date).slice(
+        0,
+        10
+      );
+      if (followUp) patch.next_follow_up_date = followUp;
+
+      const notes = str(payload.notes);
+      if (notes) patch.notes = notes;
+
+      if (Object.keys(patch).length === 0) {
+        return { success: false, error: "No agent pipeline fields to update", data: null };
+      }
+      patch.updated_by = updatedBy;
+    } else {
+      const stage = normalizeQualificationPipelineStage(
+        payload.pipelineStage ?? payload.pipeline_stage
+      );
+      if (!stage) {
+        return { success: false, error: "pipeline_stage is required", data: null };
+      }
+
+      if (stage !== existing.pipeline_stage) {
+        patch.pipeline_stage = stage;
+        patch.pipeline_stage_updated_at = new Date().toISOString();
+        patch.pipeline_stage_updated_by = updatedBy;
+      }
+
+      if (payload.pipelineNextAction !== undefined || payload.pipeline_next_action !== undefined) {
+        patch.pipeline_next_action =
+          str(payload.pipelineNextAction ?? payload.pipeline_next_action) || null;
+      }
+      if (payload.pipelineLostReason !== undefined || payload.pipeline_lost_reason !== undefined) {
+        patch.pipeline_lost_reason =
+          str(payload.pipelineLostReason ?? payload.pipeline_lost_reason) || null;
+      }
+      if (
+        payload.pipelineExpectedValue !== undefined ||
+        payload.pipeline_expected_value !== undefined
+      ) {
+        const ev = payload.pipelineExpectedValue ?? payload.pipeline_expected_value;
+        patch.pipeline_expected_value = ev === "" || ev == null ? null : num(ev);
+      }
+      if (
+        payload.pipelineProbability !== undefined ||
+        payload.pipeline_probability !== undefined
+      ) {
+        const prob = payload.pipelineProbability ?? payload.pipeline_probability;
+        if (prob === "" || prob == null) {
+          patch.pipeline_probability = null;
+        } else {
+          const p = num(prob);
+          if (p < 0 || p > 100) {
+            return {
+              success: false,
+              error: "pipeline_probability must be between 0 and 100",
+              data: null,
+            };
+          }
+          patch.pipeline_probability = p;
+        }
+      }
+      if (payload.pipelineNotes !== undefined || payload.pipeline_notes !== undefined) {
+        patch.pipeline_notes =
+          str(payload.pipelineNotes ?? payload.pipeline_notes) || null;
+      }
+      if (payload.nextFollowUpDate !== undefined || payload.next_follow_up_date !== undefined) {
+        patch.next_follow_up_date =
+          str(payload.nextFollowUpDate ?? payload.next_follow_up_date).slice(0, 10) || null;
+      }
+      patch.updated_by = updatedBy;
+    }
+
+    const { data, error } = await supabase
+      .from("lab_qualifications")
+      .update(patch)
+      .eq("tenant_id", tenant_id)
+      .eq("lab_id", lab_id)
+      .select()
+      .single();
+
+    if (error) {
+      return { success: false, error: error.message || "Pipeline update failed", data: null };
+    }
+
+    const merged = { ...data };
+    const scoring = computeQualificationScore(merged);
+    if (
+      scoring.qualification_score !== num(data.qualification_score) ||
+      scoring.qualification_band !== str(data.qualification_band).toLowerCase()
+    ) {
+      await supabase
+        .from("lab_qualifications")
+        .update({
+          qualification_score: scoring.qualification_score,
+          qualification_band: scoring.qualification_band,
+        })
+        .eq("tenant_id", tenant_id)
+        .eq("lab_id", lab_id);
+      merged.qualification_score = scoring.qualification_score;
+      merged.qualification_band = scoring.qualification_band;
+    }
+
+    return {
+      success: true,
+      data: mapQualificationReviewRow(merged),
       error: null,
     };
   } catch (err) {
