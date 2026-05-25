@@ -21,12 +21,18 @@ import {
   formatQualificationBandLabel,
   qualificationBandBadgeClass,
 } from "@/utils/computeQualificationScore";
+import { ROLES } from "@/config/roles";
 import {
   getPipelineStageLabel,
   getPipelineStageOrder,
   PIPELINE_STAGE_SELECT_OPTIONS,
   pipelineStageBadgeClass,
 } from "@/utils/qualificationPipeline";
+
+function canEditPipeline(currentUser) {
+  const role = String(currentUser?.role || "").toLowerCase();
+  return role === ROLES.ADMIN || role === ROLES.EXECUTIVE;
+}
 
 const STATUS_OPTIONS = [
   { value: "ALL", label: "All statuses" },
@@ -112,7 +118,35 @@ function PipelineStageBadge({ row }) {
   );
 }
 
-function PipelineEditor({ row, currentUser, onSaved, compact = false }) {
+function PipelineSavedSummary({ row }) {
+  return (
+    <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-100 bg-white p-2 text-xs sm:grid-cols-4">
+      <div>
+        <span className="text-slate-500">Probability</span>
+        <div className="font-medium">
+          {row.pipelineProbability != null ? `${row.pipelineProbability}%` : "—"}
+        </div>
+      </div>
+      <div>
+        <span className="text-slate-500">Expected value</span>
+        <div className="font-medium">{formatMoney(row.pipelineExpectedValue)}</div>
+      </div>
+      <div className="col-span-2 sm:col-span-1">
+        <span className="text-slate-500">Next action</span>
+        <div className="font-medium">{row.pipelineNextAction || "—"}</div>
+      </div>
+      {row.pipelineStage === "lost" ? (
+        <div className="col-span-2">
+          <span className="text-slate-500">Lost reason</span>
+          <div className="font-medium">{row.pipelineLostReason || "—"}</div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PipelineEditor({ row, currentUser, onSaved }) {
+  const editable = canEditPipeline(currentUser);
   const [stage, setStage] = useState(row.pipelineStage || "new");
   const [nextAction, setNextAction] = useState(row.pipelineNextAction || "");
   const [lostReason, setLostReason] = useState(row.pipelineLostReason || "");
@@ -166,31 +200,13 @@ function PipelineEditor({ row, currentUser, onSaved, compact = false }) {
     }
   }
 
-  if (compact) {
+  if (!editable) {
     return (
-      <div className="space-y-2">
-        <Select value={stage} onValueChange={setStage}>
-          <SelectTrigger className="h-9 rounded-lg text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PIPELINE_STAGE_SELECT_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button
-          type="button"
-          size="sm"
-          className="h-8 w-full rounded-lg text-xs"
-          disabled={saving}
-          onClick={handleSavePipeline}
-        >
-          {saving ? "Saving…" : "Save pipeline"}
-        </Button>
-        {rowError ? <span className="text-xs text-red-600">{rowError}</span> : null}
+      <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Pipeline (read-only)
+        </div>
+        <PipelineSavedSummary row={row} />
       </div>
     );
   }
@@ -200,6 +216,7 @@ function PipelineEditor({ row, currentUser, onSaved, compact = false }) {
       <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
         Pipeline
       </div>
+      <PipelineSavedSummary row={row} />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1">
           <div className="text-xs text-slate-500">Stage</div>
@@ -224,6 +241,7 @@ function PipelineEditor({ row, currentUser, onSaved, compact = false }) {
             max={100}
             value={probability}
             onChange={(e) => setProbability(e.target.value)}
+            placeholder="0–100"
             className="h-10 rounded-xl"
           />
         </div>
@@ -234,29 +252,33 @@ function PipelineEditor({ row, currentUser, onSaved, compact = false }) {
             min={0}
             value={expectedValue}
             onChange={(e) => setExpectedValue(e.target.value)}
+            placeholder="Deal value"
             className="h-10 rounded-xl"
           />
         </div>
-        <div className="space-y-1">
+        <div className="space-y-1 sm:col-span-2">
           <div className="text-xs text-slate-500">Next action</div>
           <Input
             value={nextAction}
             onChange={(e) => setNextAction(e.target.value)}
+            placeholder="Next step for this lab"
             className="h-10 rounded-xl"
           />
         </div>
         {stage === "lost" ? (
           <div className="space-y-1 sm:col-span-2">
             <div className="text-xs text-slate-500">Lost reason</div>
-            <Input
+            <Textarea
               value={lostReason}
               onChange={(e) => setLostReason(e.target.value)}
-              className="h-10 rounded-xl"
+              placeholder="Why was this lab marked lost?"
+              rows={3}
+              className="rounded-xl text-sm"
             />
           </div>
         ) : null}
         <div className="space-y-1 sm:col-span-2">
-          <div className="text-xs text-slate-500">Pipeline notes</div>
+          <div className="text-xs text-slate-500">Pipeline notes (optional)</div>
           <Textarea
             value={pipelineNotes}
             onChange={(e) => setPipelineNotes(e.target.value)}
@@ -267,7 +289,7 @@ function PipelineEditor({ row, currentUser, onSaved, compact = false }) {
       </div>
       <Button
         type="button"
-        className="h-10 rounded-xl"
+        className="h-11 w-full rounded-xl sm:w-auto"
         disabled={saving}
         onClick={handleSavePipeline}
       >
@@ -647,145 +669,18 @@ export default function QualificationReviewPage({ currentUser }) {
           </p>
         </div>
       ) : (
-        <>
-          <div className="grid gap-4 md:hidden">
-            {filteredRows.map((row) => (
-              <ReviewRowCard
-                key={row.id || row.labId}
-                row={row}
-                currentUser={currentUser}
-                onSaved={handleRowSaved}
-              />
-            ))}
-          </div>
-
-          <div className="hidden overflow-x-auto rounded-2xl border bg-white shadow-sm md:block">
-            <table className="min-w-full text-left text-sm">
-              <thead className="border-b bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">Lab</th>
-                  <th className="px-4 py-3">Pipeline</th>
-                  <th className="px-4 py-3">Band / Score</th>
-                  <th className="px-4 py-3">Expected</th>
-                  <th className="px-4 py-3">Monthly est.</th>
-                  <th className="px-4 py-3">Supplier</th>
-                  <th className="px-4 py-3">Terms</th>
-                  <th className="px-4 py-3">Rental</th>
-                  <th className="px-4 py-3">Lab OS</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Follow-up</th>
-                  <th className="px-4 py-3">Agent</th>
-                  <th className="px-4 py-3">Updated</th>
-                  <th className="px-4 py-3">Review</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRows.map((row) => (
-                  <TableReviewRow
-                    key={row.id || row.labId}
-                    row={row}
-                    currentUser={currentUser}
-                    onSaved={handleRowSaved}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
+        <div className="grid gap-4">
+          {filteredRows.map((row) => (
+            <ReviewRowCard
+              key={row.id || row.labId}
+              row={row}
+              currentUser={currentUser}
+              onSaved={handleRowSaved}
+            />
+          ))}
+        </div>
       )}
     </div>
   );
 }
 
-function TableReviewRow({ row, currentUser, onSaved }) {
-  const [status, setStatus] = useState(row.founderReviewStatus || "pending");
-  const [saving, setSaving] = useState(false);
-  const [rowError, setRowError] = useState("");
-
-  useEffect(() => {
-    setStatus(row.founderReviewStatus || "pending");
-  }, [row.founderReviewStatus, row.labId]);
-
-  async function handleSaveStatus() {
-    setRowError("");
-    setSaving(true);
-    try {
-      const res = await updateQualificationFounderReviewWrite({
-        tenantId: row.tenantId || currentUser?.tenantId,
-        labId: row.labId,
-        founderReviewStatus: status,
-        updatedBy: currentUser?.id || currentUser?.userId,
-      });
-      if (!res?.success) {
-        throw new Error(res?.error || "Failed to update review status");
-      }
-      onSaved?.(res.data);
-    } catch (err) {
-      setRowError(err?.message || "Update failed");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <tr className="border-b last:border-0">
-      <td className="px-4 py-3">
-        <div className="font-medium text-slate-900">{row.labName}</div>
-        <div className="text-xs text-slate-500">{row.labId}</div>
-      </td>
-      <td className="px-4 py-3 align-top">
-        <PipelineEditor
-          row={row}
-          currentUser={currentUser}
-          onSaved={onSaved}
-          compact
-        />
-      </td>
-      <td className="px-4 py-3">
-        <ScoreBandBadge row={row} />
-      </td>
-      <td className="px-4 py-3">{formatMoney(row.pipelineExpectedValue)}</td>
-      <td className="px-4 py-3">{formatMoney(row.monthlyConsumablesEstimate)}</td>
-      <td className="px-4 py-3">{row.currentSupplier || "—"}</td>
-      <td className="px-4 py-3">{row.paymentTerms || "—"}</td>
-      <td className="px-4 py-3">{row.reagentRentalPotential || "—"}</td>
-      <td className="px-4 py-3">{row.labOsFit || "—"}</td>
-      <td className="px-4 py-3">
-        <Badge className={statusBadgeClass(row.founderReviewStatus)}>
-          {formatStatusLabel(row.founderReviewStatus)}
-        </Badge>
-      </td>
-      <td className="px-4 py-3">{row.nextFollowUpDate || "—"}</td>
-      <td className="px-4 py-3">{row.agentName || row.agentId || "—"}</td>
-      <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-500">
-        {formatDateTime(row.updatedAt)}
-      </td>
-      <td className="px-4 py-3">
-        <div className="flex min-w-[200px] flex-col gap-1">
-          <Select value={status} onValueChange={setStatus}>
-            <SelectTrigger className="h-9 rounded-lg text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {REVIEW_STATUS_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            type="button"
-            size="sm"
-            className="h-8 rounded-lg text-xs"
-            disabled={saving || status === row.founderReviewStatus}
-            onClick={handleSaveStatus}
-          >
-            {saving ? "Saving…" : "Save"}
-          </Button>
-          {rowError ? <span className="text-xs text-red-600">{rowError}</span> : null}
-        </div>
-      </td>
-    </tr>
-  );
-}
