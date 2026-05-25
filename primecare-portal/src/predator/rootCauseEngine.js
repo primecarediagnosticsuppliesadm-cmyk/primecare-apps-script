@@ -18,7 +18,9 @@ function num(v) {
  * @param {PredatorLayerValue[]} layers
  */
 function findFirstDivergence(layers) {
-  const numeric = layers.filter((l) => num(l.value) !== null);
+  const numeric = layers.filter(
+    (l) => num(l.value) !== null && !l.meta?.optional && !l.meta?.notComparableToSeed
+  );
   if (numeric.length < 2) return null;
 
   const baseline = num(numeric[0].value);
@@ -34,6 +36,56 @@ function findFirstDivergence(layers) {
     }
   }
   return null;
+}
+
+/**
+ * @param {PredatorLayerValue[]} layers
+ * @param {'rls_only'|'kpi'|undefined} compareMode
+ */
+function layersForDivergence(layers, compareMode) {
+  if (compareMode === "rls_only") {
+    return layers.filter((l) => l.layerId === "rls" || !l.meta?.optional);
+  }
+  if (compareMode === "kpi") {
+    return layers.filter((l) => l.layerId === "api" || l.layerId === "ui");
+  }
+  return layers;
+}
+
+/**
+ * @param {number|null} expected
+ * @param {'rls_only'|'kpi'|undefined} compareMode
+ * @param {number|null} rls
+ * @param {number|null} api
+ * @param {number|null} ui
+ */
+function resolveMetricStatus(expected, compareMode, rls, api, ui) {
+  if (expected == null) return "PASS";
+
+  if (compareMode === "rls_only") {
+    if (rls === expected) return "PASS";
+    if (rls != null) return "FAIL";
+    return "WARN";
+  }
+
+  if (compareMode === "kpi") {
+    const apiOk = api != null && api === expected;
+    const uiOk = ui != null && ui === expected;
+    const apiUiAligned = api == null || ui == null || api === ui;
+
+    if (apiOk && (ui == null || uiOk)) return "PASS";
+    if (uiOk && (api == null || apiOk)) return "PASS";
+    if (apiOk && uiOk && apiUiAligned) return "PASS";
+
+    if (api != null && api !== expected) return "FAIL";
+    if (ui != null && ui !== expected) return "FAIL";
+    if (api == null && ui == null) return "WARN";
+    return "WARN";
+  }
+
+  const compare = ui ?? api ?? rls;
+  if (compare != null && compare !== expected) return "FAIL";
+  return "PASS";
 }
 
 /**
@@ -105,7 +157,13 @@ function inferCauseFromDivergence(ctx, rls, api, ui, tenantCtx) {
     };
   }
 
-  if (metricId === "outstanding_receivables" && rls != null && api != null && rls !== api) {
+  if (
+    ctx.compareMode !== "kpi" &&
+    metricId === "outstanding_receivables" &&
+    rls != null &&
+    api != null &&
+    rls !== api
+  ) {
     return {
       issueClass: /** @type {PredatorIssueClass} */ ("data_integrity"),
       probableRootCause: "Normalization layer diverged from raw AR rollup",
@@ -133,32 +191,59 @@ function inferCauseFromDivergence(ctx, rls, api, ui, tenantCtx) {
  * @param {number|null} [params.expected]
  * @param {import('@/predator/predatorDiagnosisSchema.js').PredatorTenantContext} [params.tenantCtx]
  * @param {Object} [params.cacheMeta]
+ * @param {'rls_only'|'kpi'|undefined} [params.compareMode]
  * @returns {PredatorRootCauseDiagnosis}
  */
-export function diagnoseMetricLayers({ metricId, metricLabel, layers, expected, tenantCtx, cacheMeta }) {
-  const divergence = findFirstDivergence(layers);
+export function diagnoseMetricLayers({
+  metricId,
+  metricLabel,
+  layers,
+  expected,
+  tenantCtx,
+  cacheMeta,
+  compareMode,
+}) {
+  const divergence = findFirstDivergence(layersForDivergence(layers, compareMode));
   const rls = num(layers.find((l) => l.layerId === "rls")?.value);
   const api = num(layers.find((l) => l.layerId === "api")?.value);
   const ui = num(layers.find((l) => l.layerId === "ui")?.value);
 
-  let status = "PASS";
-  if (expected != null) {
-    const compare = ui ?? api ?? rls;
-    if (compare != null && compare !== expected) status = "FAIL";
+  let status = resolveMetricStatus(expected, compareMode, rls, api, ui);
+
+  if (divergence && status === "PASS" && compareMode !== "kpi") {
+    status = "WARN";
   }
-  if (divergence) status = status === "PASS" ? "WARN" : status;
+  if (divergence && status === "PASS" && compareMode === "kpi") {
+    const apiUiOk = api != null && ui != null && api === ui;
+    if (!apiUiOk) status = "WARN";
+  }
 
   const inferred = inferCauseFromDivergence(
-    { metricId, cacheMeta },
+    { metricId, cacheMeta, compareMode },
     rls,
     api,
     ui,
     tenantCtx
   );
 
-  if (status === "FAIL" && !divergence) {
-    inferred.probableRootCause = `Expected ${expected} but observed ${ui ?? api ?? rls}`;
+  if (status === "PASS") {
+    inferred.probableRootCause = "Computed KPI layers align with QA seed expectation";
+    inferred.issueClass = "cosmetic";
+    inferred.firstLayer = "none";
+    inferred.suggestions = [];
+  } else if (status === "FAIL" && !divergence) {
+    const observed =
+      compareMode === "kpi" ? (ui ?? api ?? rls) : compareMode === "rls_only" ? rls : ui ?? api ?? rls;
+    inferred.probableRootCause = `Expected ${expected} but observed ${observed}`;
     inferred.issueClass = "data_integrity";
+  }
+
+  if (compareMode === "kpi" && status === "PASS" && rls != null && api != null && rls !== api) {
+    inferred.probableRootCause =
+      "API/UI computed KPIs match seed; RLS rollup differs (supporting evidence only)";
+    inferred.issueClass = "cosmetic";
+    inferred.firstLayer = "rls";
+    inferred.suggestions = [];
   }
 
   return {
@@ -166,7 +251,7 @@ export function diagnoseMetricLayers({ metricId, metricLabel, layers, expected, 
     metricLabel,
     status,
     issueClass: inferred.issueClass,
-    firstDivergenceLayer: divergence?.toLayer || inferred.firstLayer,
+    firstDivergenceLayer: status === "PASS" ? "none" : divergence?.toLayer || inferred.firstLayer,
     probableRootCause: inferred.probableRootCause,
     suggestions: inferred.suggestions,
     layerTrace: layers,

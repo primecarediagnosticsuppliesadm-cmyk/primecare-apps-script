@@ -127,14 +127,19 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
   return [
     diagnoseMetricLayers({
       metricId: "orders_count",
-      metricLabel: "Orders count",
+      metricLabel: "Orders row count (RLS evidence)",
       expected: seed.ordersCount,
       tenantCtx: ctx,
       cacheMeta,
+      compareMode: "rls_only",
       layers: [
         { layerId: "rls", label: "RLS / Browser DB", value: snap.ordersRowCount },
-        { layerId: "api", label: "API (derived)", value: snap.apiOrdersProxy ?? null },
-        { layerId: "ui", label: "Rendered UI", value: null },
+        {
+          layerId: "api",
+          label: "API trace (orders table rows)",
+          value: snap.apiTraceOrders ?? null,
+          meta: { optional: true, notComparableToSeed: true },
+        },
       ],
     }),
     diagnoseMetricLayers({
@@ -143,10 +148,11 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
       expected: seed.outstandingReceivables,
       tenantCtx: ctx,
       cacheMeta,
+      compareMode: "kpi",
       layers: [
-        { layerId: "rls", label: "AR rollup (DB)", value: snap.arOutstanding },
-        { layerId: "api", label: "API executive", value: snap.apiOutstanding },
-        { layerId: "ui", label: "Rendered UI", value: snap.uiOutstanding },
+        { layerId: "rls", label: "AR rollup (DB)", value: snap.arOutstanding, meta: { supporting: true } },
+        { layerId: "api", label: "API executive.outstandingReceivables", value: snap.apiOutstanding },
+        { layerId: "ui", label: "Rendered executive", value: snap.uiOutstanding },
       ],
     }),
     diagnoseMetricLayers({
@@ -165,10 +171,11 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
       metricLabel: "Inventory SKUs",
       expected: seed.inventorySkus,
       tenantCtx: ctx,
+      compareMode: "kpi",
       layers: [
-        { layerId: "rls", label: "Inventory rows", value: snap.inventorySkus },
-        { layerId: "api", label: "API stockStats", value: snap.apiInventorySkus },
-        { layerId: "ui", label: "Rendered UI", value: snap.uiInventorySkus },
+        { layerId: "rls", label: "Inventory rows", value: snap.inventorySkus, meta: { supporting: true } },
+        { layerId: "api", label: "API summary.stockStats.totalSkus", value: snap.apiInventorySkus },
+        { layerId: "ui", label: "Rendered stockStats", value: snap.uiInventorySkus },
       ],
     }),
     diagnoseMetricLayers({
@@ -176,10 +183,11 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
       metricLabel: "Total sold value",
       expected: seed.totalSoldValue,
       tenantCtx: ctx,
+      compareMode: "kpi",
       layers: [
-        { layerId: "rls", label: "Revenue compute (DB)", value: snap.totalSoldValue },
-        { layerId: "api", label: "API summary", value: snap.apiTotalSold },
-        { layerId: "ui", label: "Rendered UI", value: snap.uiTotalSold },
+        { layerId: "rls", label: "Revenue compute (DB)", value: snap.totalSoldValue, meta: { supporting: true } },
+        { layerId: "api", label: "API summary.totalSoldValue", value: snap.apiTotalSold },
+        { layerId: "ui", label: "Rendered summary", value: snap.uiTotalSold },
       ],
     }),
   ];

@@ -6,6 +6,7 @@ import {
   finalizeModuleDiagnosis,
 } from "@/predator/buildModuleDiagnosis.js";
 import { diagnoseProjectionColumns } from "@/predator/schemaAwareness.js";
+import { buildAdminDashboardPredatorSnapshot } from "@/predator/validators/adminDashboardPredatorMapping.js";
 
 /**
  * @param {Object} params
@@ -44,7 +45,11 @@ export async function validateAdminDashboardModule({ ctx, rendered = null }) {
     await diagnoseProjectionColumns("orders", ["order_status", "net_line_total"]);
     await diagnoseProjectionColumns("order_lines", ["net_line_total"]);
 
-    const metrics = buildAdminDashboardMetricDiagnoses(report.layerSnapshot || {}, ctx);
+    const predatorSnapshot = buildAdminDashboardPredatorSnapshot({
+      legacyReport: report,
+      rendered,
+    });
+    const metrics = buildAdminDashboardMetricDiagnoses(predatorSnapshot, ctx);
     const { diagnosis, extraEntries } = finalizeModuleDiagnosis({
       module: "Admin Dashboard",
       ctx,
