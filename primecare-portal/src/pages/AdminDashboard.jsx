@@ -613,6 +613,20 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       const dashboard = mapDirectDashboardStateFromRead(result);
       console.log("[QA AdminDashboard mapped state]", dashboard);
 
+      console.log(
+        "[QA RAW KPI PAYLOAD]",
+        JSON.stringify(
+          {
+            summary: result?.data?.summary,
+            executive: result?.data?.executive,
+            visits: result?.data?.visits?.length,
+            insights: result?.data?.insights?.length,
+          },
+          null,
+          2
+        )
+      );
+
       setSummaryData(dashboard.summary);
       setExecutiveData(dashboard.executive);
       setRecentVisitsData(dashboard.visits);
