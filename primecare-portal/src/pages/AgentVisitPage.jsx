@@ -342,15 +342,12 @@ export default function AgentVisitPage({ currentUser, authToken }) {
             visitRows = (ctx.recentVisits || []).map(mapWorkspaceVisitToPageVisit);
             collectionRows = (ctx.collections || []).map(normalizeCollection);
 
-            const cr = await getLabsCredit();
-            const rawLabs = extractLabsCreditRows(cr);
-            console.log("RAW LABS", rawLabs);
-
-            labList = rawLabs.map(normalizePortalLab);
-            if (labList.length === 0 && Array.isArray(ctx.labs) && ctx.labs.length > 0) {
-              labList = ctx.labs.map(normalizePortalLab);
+            labList = (ctx.labs || []).map(normalizePortalLab);
+            if (labList.length === 0) {
+              const cr = await getLabsCredit();
+              const rawLabs = extractLabsCreditRows(cr);
+              labList = rawLabs.map(normalizePortalLab);
             }
-            console.log("FILTERED LABS (normalized rows, pre–useMemo filter)", labList);
           } else {
             try {
               const cr = await getLabsCredit();
@@ -527,24 +524,6 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   }, [currentUser, form.labId]);
 
   useEffect(() => {
-    console.log("AGENT VISIT ROLE", {
-      role: currentUser?.role,
-      isAgent: isAgentUser(currentUser),
-    });
-  }, [currentUser]);
-
-  useEffect(() => {
-    console.log("SELECTED LAB", selectedLab, { formLabId: form.labId });
-  }, [selectedLab, form.labId]);
-
-  useEffect(() => {
-    console.log("QUALIFICATION SECTION RENDER", {
-      show: showQualificationCapture,
-      formLabId: form.labId,
-    });
-  }, [showQualificationCapture, form.labId]);
-
-  useEffect(() => {
     let cancelled = false;
 
     async function loadQualification() {
@@ -557,7 +536,6 @@ export default function AgentVisitPage({ currentUser, authToken }) {
       }
 
       try {
-        console.log("QUALIFICATION LOAD START", { labId });
         setQualificationLoading(true);
         setQualificationStatus("");
         const res = await getLabQualificationRead({
@@ -787,8 +765,6 @@ export default function AgentVisitPage({ currentUser, authToken }) {
         nextFollowUpType: form.nextFollowUpType,
         notes: form.notes,
       };
-
-      console.log("AGENT VISIT SAVE PAYLOAD:", payload);
 
       let res;
       if (supabase) {

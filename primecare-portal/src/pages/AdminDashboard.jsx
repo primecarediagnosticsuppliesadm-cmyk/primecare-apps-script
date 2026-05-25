@@ -25,6 +25,7 @@ import {
   deriveTopLabsByRevenueFromLabsCreditFallback,
 } from "@/metrics/computeRiskMetrics.js";
 import { ADMIN_DASHBOARD_INVALIDATE_EVENT } from "@/utils/dashboardInvalidate.js";
+import { perfLog, perfTime } from "@/utils/perfLog.js";
 import {
   TrendingUp,
   AlertTriangle,
@@ -80,6 +81,50 @@ function isFresh(ts) {
 
 function currency(value) {
   return `₹${Number(value || 0).toLocaleString()}`;
+}
+
+function StatCardSkeleton() {
+  return (
+    <div className="animate-pulse rounded-2xl border bg-white p-4 shadow-sm">
+      <div className="h-3 w-20 rounded bg-slate-200" />
+      <div className="mt-2 h-7 w-24 rounded bg-slate-200" />
+      <div className="mt-2 h-3 w-28 rounded bg-slate-100" />
+    </div>
+  );
+}
+
+function AdminDashboardSkeleton() {
+  return (
+    <div className="space-y-6 p-4 sm:p-6">
+      <div className="animate-pulse space-y-2">
+        <div className="h-7 w-48 rounded bg-slate-200" />
+        <div className="h-4 w-72 max-w-full rounded bg-slate-100" />
+      </div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <StatCardSkeleton key={i} />
+        ))}
+      </div>
+      <div className="grid gap-6 xl:grid-cols-2">
+        <div className="animate-pulse rounded-2xl border bg-white p-4 shadow-sm">
+          <div className="mb-4 h-5 w-40 rounded bg-slate-200" />
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <StatCardSkeleton key={i} />
+            ))}
+          </div>
+        </div>
+        <div className="animate-pulse rounded-2xl border bg-white p-4 shadow-sm">
+          <div className="mb-4 h-5 w-32 rounded bg-slate-200" />
+          <div className="grid grid-cols-2 gap-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-12 rounded-xl bg-slate-100" />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function StatCard({ title, value, subtext, icon: Icon }) {
@@ -289,7 +334,6 @@ function normalizeVisitForActivity(visit) {
     metaDetail: buildVisitMetaDetail(normalized),
     sortTimestamp: visitRecencyTimestamp(normalized),
   };
-  console.log("RECENT FIELD ACTIVITY NORMALIZED", enriched);
   return enriched;
 }
 
@@ -324,26 +368,35 @@ const EMPTY_STOCK_STATS = {
 
 async function fetchSupabaseAdminSlice() {
   const slice = { stock: null, labs: null, forecast: null, dashboardRead: null };
+  const endPrimary = perfTime("AdminDashboard.getAdminDashboardRead");
   try {
     slice.dashboardRead = await getAdminDashboardRead();
+    endPrimary({ success: slice.dashboardRead?.success });
   } catch (e) {
     console.warn("[AdminDashboard] Supabase dashboard read skipped:", e?.message || e);
+    endPrimary({ error: e?.message || String(e) });
   }
-  try {
-    slice.stock = await getStockDashboard();
-  } catch (e) {
-    console.warn("[AdminDashboard] Supabase stock skipped:", e?.message || e);
+
+  if (slice.dashboardRead?.success && slice.dashboardRead?.data) {
+    perfLog("AdminDashboard.skipRedundantSliceFetches", {
+      reason: "getAdminDashboardRead already includes stock, AR, visits, and KPIs",
+    });
+    return slice;
   }
-  try {
-    slice.labs = await getLabsCredit();
-  } catch (e) {
-    console.warn("[AdminDashboard] Supabase labs skipped:", e?.message || e);
-  }
-  try {
-    slice.forecast = await getReorderForecastRead();
-  } catch (e) {
-    console.warn("[AdminDashboard] Supabase reorder forecast skipped:", e?.message || e);
-  }
+
+  const endFallback = perfTime("AdminDashboard.fallbackSliceFetches");
+  const [stockSettled, labsSettled, forecastSettled] = await Promise.allSettled([
+    getStockDashboard(),
+    getLabsCredit(),
+    getReorderForecastRead(),
+  ]);
+  if (stockSettled.status === "fulfilled") slice.stock = stockSettled.value;
+  else console.warn("[AdminDashboard] Supabase stock skipped:", stockSettled.reason);
+  if (labsSettled.status === "fulfilled") slice.labs = labsSettled.value;
+  else console.warn("[AdminDashboard] Supabase labs skipped:", labsSettled.reason);
+  if (forecastSettled.status === "fulfilled") slice.forecast = forecastSettled.value;
+  else console.warn("[AdminDashboard] Supabase reorder forecast skipped:", forecastSettled.reason);
+  endFallback();
   return slice;
 }
 
@@ -440,31 +493,6 @@ function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) 
     });
   }
 
-  console.log("DASHBOARD KPI AUDIT", {
-    scope: "mergeAdminDashboardWithSupabase",
-    stockStatsSource:
-      dash?.summary?.stockStats != null && Object.keys(dash.summary.stockStats).length > 0
-        ? "Supabase_dashboard_summary"
-        : supabaseSlice.stock?.data?.stats
-          ? "getStockDashboard"
-          : summaryIn?.stockStats
-            ? "AppsScript_summary_cache"
-            : "EMPTY_STOCK_STATS",
-    summarySource_recentVisits:
-      dash?.summary?.recentVisits != null ? "Supabase (agent_visits count)" : "Apps Script / cache fallback",
-    summarySource_totalSold: dash?.summary?.totalSoldValue != null ? "Supabase fulfilled Σ" : "Apps Script fallback",
-    executiveSource_todaysRevenue:
-      dash?.executive?.todaysRevenue != null ? "Supabase" : executiveIn?.todaysRevenue != null ? "Apps Script" : "0_default",
-    executiveSource_receivables:
-      dash?.executive?.outstandingReceivables != null ? "Supabase AR Σ" : "Apps Script fallback",
-    topLabsSource,
-    nearStockout: {
-      supabaseExecutive: dash?.executive?.productsNearStockout ?? null,
-      mergeDerivedMax: nearStockoutDerived,
-      mergedForUI: executive.productsNearStockout,
-    },
-  });
-
   if (
     dash?.executive?.productsNearStockout != null &&
     nearStockoutDerived > Number(dash.executive.productsNearStockout || 0)
@@ -539,16 +567,12 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       return;
     }
 
-    logSupabaseFeatureSource("AdminDashboard.load", { apis: ["getAdminDashboardRead", "getStockDashboard", "getLabsCredit", "getReorderForecastRead"] });
+    logSupabaseFeatureSource("AdminDashboard.load", {
+      apis: ["getAdminDashboardRead", "getStockDashboard?", "getLabsCredit?", "getReorderForecastRead?"],
+    });
+    const endLoad = perfTime("AdminDashboard.loadPrimaryData");
     const supabaseSlice = await fetchSupabaseAdminSlice();
-    const data = {
-      stock: supabaseSlice.stock?.data ?? null,
-      labs: Array.isArray(supabaseSlice.labs?.data)
-        ? { rowCount: supabaseSlice.labs.data.length }
-        : supabaseSlice.labs?.data ?? null,
-      forecast: supabaseSlice.forecast?.data ?? null,
-    };
-    console.log("SUPABASE ADMIN DASHBOARD:", data);
+    endLoad();
 
     const skipAppsScript = adminDashboardSkipAppsScriptReads();
     let dashboardPayload = {};
@@ -623,9 +647,15 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
 
     const tasks = [];
     const skipAppsScript = adminDashboardSkipAppsScriptReads();
+    const hasSupabaseInsights =
+      Array.isArray(adminDashboardCache.insights?.insights) &&
+      adminDashboardCache.insights.insights.length > 0;
+    const hasSupabaseVisits =
+      Array.isArray(adminDashboardCache.visits?.visits) &&
+      adminDashboardCache.visits.visits.length > 0;
 
     if (!insightsFresh) {
-      if (skipAppsScript) {
+      if (skipAppsScript || hasSupabaseInsights) {
         if (adminDashboardCache.insights) {
           setInsightsData(adminDashboardCache.insights);
         } else {
@@ -656,7 +686,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     }
 
     if (!visitsFresh) {
-      if (skipAppsScript) {
+      if (skipAppsScript || hasSupabaseVisits) {
         if (adminDashboardCache.visits) {
           setRecentVisitsData(adminDashboardCache.visits);
         } else {
@@ -711,15 +741,17 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       }
 
       await loadPrimaryData({ force });
-      await loadSecondaryData({ force });
     } catch (err) {
       console.error(err);
       setErrorMessage(err?.message || "Failed to load admin dashboard");
     } finally {
       setLoading(false);
       setRefreshing(false);
-      setBackgroundLoading(false);
     }
+
+    loadSecondaryData({ force }).catch((err) => {
+      console.warn("[AdminDashboard] secondary panels:", err?.message || err);
+    });
   };
 
   const dashboardInvalidateRef = useRef(() => {});
@@ -768,13 +800,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   }, [executive]);
 
   if (loading) {
-    return (
-      <div className="p-4 sm:p-6">
-        <div className="rounded-2xl border border-dashed bg-white p-8 text-sm text-slate-500 shadow-sm">
-          Loading admin dashboard...
-        </div>
-      </div>
-    );
+    return <AdminDashboardSkeleton />;
   }
 
   return (

@@ -34,6 +34,7 @@ import {
   rollupInventoryTableRows,
   rollupStockDashboardMappedItems,
 } from "@/metrics/computeInventoryMetrics.js";
+import { perfTime, shouldRunDashboardKpiAudit } from "@/utils/perfLog.js";
 
 export { labIdKey, normalizeLabIdKey };
 
@@ -139,13 +140,6 @@ export function deriveCollectionPaymentStatus({
       derived = "Current";
     }
   }
-
-  console.log("COLLECTION STATUS DERIVED", {
-    outstanding,
-    totalPaid: paid,
-    explicitStatus: explicit || null,
-    derived,
-  });
 
   return derived;
 }
@@ -958,9 +952,6 @@ export async function createPaymentWrite(payload = {}) {
       created_at,
     };
 
-    console.log("PAYMENT WRITE PAYLOAD", writePayload);
-    console.log("AR BEFORE PAYMENT", arRow || { lab_id, total_paid: old_total_paid, outstanding: old_outstanding });
-
     const paymentRow = { ...writePayload };
     const note = str(payload.note);
     const collected_by = str(payload.collectedBy ?? payload.collected_by);
@@ -975,7 +966,6 @@ export async function createPaymentWrite(payload = {}) {
     }
 
     const savedPay = Array.isArray(payData) ? payData[0] : payData;
-    console.log("SUPABASE PAYMENT SAVED", savedPay);
 
     const arPatch = {
       total_paid: new_total_paid,
@@ -996,8 +986,6 @@ export async function createPaymentWrite(payload = {}) {
         data: { payment: savedPay, partial: true },
       };
     }
-
-    console.log("AR AFTER PAYMENT", { lab_id, ...arPatch });
 
     return {
       success: true,
@@ -1035,29 +1023,16 @@ export async function getCollectionsRead() {
     if (arErr) {
       console.warn("[getCollectionsRead] ar_credit_control:", arErr.message);
     }
-    console.log("COLLECTION RAW AR", arRaw ?? []);
-
     const { data: payRaw, error: payErr } = await supabase.from("payments").select("*");
     if (payErr) {
       console.warn("[getCollectionsRead] payments:", payErr.message);
     }
-    console.log("COLLECTION RAW PAYMENTS", payRaw ?? []);
     const { byLab: paymentsByLab, casingVariants } = buildPaymentsByNormalizedLabId(payRaw);
     if (casingVariants.length) {
       console.warn("COLLECTION PAYMENT LAB_ID CASING VARIANTS", casingVariants.slice(0, 10));
     }
 
-    const todayPaymentRows = (payRaw || []).filter((p) => {
-      const d = str(p.payment_date ?? p.paymentDate ?? p.collected_at ?? "").slice(0, 10);
-      return d === today;
-    });
     const todayCollections = sumTodayPayments(payRaw);
-    console.log("SUPABASE PAYMENTS TODAY", {
-      today,
-      count: todayPaymentRows.length,
-      rows: todayPaymentRows,
-      total: todayCollections,
-    });
 
     const { data: labsRaw, error: labsErr } = await supabase.from("v_labs_credit").select("*");
     if (labsErr) {
@@ -1100,7 +1075,6 @@ export async function getCollectionsRead() {
     auditCollectionDataInconsistencies(arRaw, payRaw, collections);
 
     const summary = summarizeCollectionsList(collections, todayCollections);
-    console.log("SUPABASE COLLECTIONS SUMMARY", summary);
 
     return {
       success: true,
@@ -1162,25 +1136,7 @@ export async function getCollectionHistoryRead(labId, options = {}) {
     const { byLab } = buildPaymentsByNormalizedLabId(payRaw);
     const matchedRaw = byLab.get(labKey) || [];
 
-    const eqOnly = (payRaw || []).filter(
-      (p) => str(p.lab_id ?? p.labId) === labKey
-    );
-
-    console.log("COLLECTION HISTORY MATCH", {
-      requestedLabId: labId,
-      normalizedLabId: labKey,
-      matchedByNormalizedKey: matchedRaw.length,
-      matchedByStrictEq: eqOnly.length,
-      orderIdNullCount: matchedRaw.filter((p) => !str(p.order_id ?? p.orderId)).length,
-      latestPaymentDate: matchedRaw[0]?.payment_date ?? matchedRaw[0]?.created_at ?? null,
-    });
-
     const history = matchedRaw.map(mapPaymentHistoryRow).filter((h) => h.amountCollected > 0);
-    console.log("COLLECTION HISTORY SUPABASE", {
-      labId: labKey,
-      count: history.length,
-      history,
-    });
     return { success: true, data: { history } };
   } catch (err) {
     console.warn("[getCollectionHistoryRead] failed:", err?.message || err);
@@ -1237,23 +1193,12 @@ export async function getCollectionDetailRead(labId, options = {}) {
           collectionsNotes: "",
           note: "",
         };
-        console.log("COLLECTION DETAIL SUPABASE", {
-          labId: labKey,
-          source: "v_labs_credit_only",
-          collection,
-        });
         return { success: true, data: { collection } };
       }
-      console.log("COLLECTION DETAIL SUPABASE", { labId: labKey, source: "none", collection: null });
       return { success: true, data: { collection: null } };
     }
 
     const collection = buildCollectionDetailFromSources(arRow, labsCreditRow, paymentsForLab || []);
-    console.log("COLLECTION DETAIL SUPABASE", {
-      labId: labKey,
-      source: "ar_credit_control",
-      collection,
-    });
     return { success: true, data: { collection } };
   } catch (err) {
     console.warn("[getCollectionDetailRead] failed:", err?.message || err);
@@ -1317,14 +1262,6 @@ export async function updateCollectionNotesWrite(payload = {}) {
       patch.last_follow_up_date = localDateYmd(new Date());
     }
 
-    console.log("COLLECTION NOTES WRITE PAYLOAD", {
-      lab_id,
-      note,
-      next_follow_up_date: next_follow_up_date || null,
-      next_action: next_action || null,
-      patch,
-    });
-
     const arUpd = await supabase
       .from("ar_credit_control")
       .update(patch)
@@ -1337,7 +1274,6 @@ export async function updateCollectionNotesWrite(payload = {}) {
     }
 
     const saved = Array.isArray(arUpd.data) ? arUpd.data[0] : arUpd.data;
-    console.log("SUPABASE COLLECTION NOTES SAVED", saved);
 
     return {
       success: true,
@@ -1411,8 +1347,6 @@ function visitIsSalesLinked(visit) {
  * @returns {{ soldValue: number, showRevenue: boolean, valueSource: string, linkedOrderId: string|null }}
  */
 export function resolveAdminVisitRevenue(visit, ordersByLabDate, rawRow = null) {
-  console.log("RECENT VISIT RAW", rawRow ?? visit);
-
   const storedSold = num(
     rawRow?.sold_value ??
       rawRow?.soldValue ??
@@ -1422,53 +1356,44 @@ export function resolveAdminVisitRevenue(visit, ordersByLabDate, rawRow = null) 
   );
 
   if (storedSold > 0) {
-    const out = {
+    return {
       soldValue: storedSold,
       showRevenue: true,
       valueSource: "sold_value",
       linkedOrderId: null,
     };
-    console.log("RECENT VISIT VALUE SOURCE", out);
-    return out;
   }
 
   const salesLinked = visitIsSalesLinked({ ...visit, soldValue: storedSold });
   const hideByType = visitTypeHidesRevenueByDefault(visit.visitType) && !salesLinked;
 
   if (hideByType) {
-    const out = {
+    return {
       soldValue: 0,
       showRevenue: false,
       valueSource: "hidden",
       linkedOrderId: null,
     };
-    console.log("RECENT VISIT VALUE SOURCE", out);
-    return out;
   }
 
   if (salesLinked) {
     const linked = findBestLinkedOrderForVisit(visit, ordersByLabDate);
     if (linked) {
-      console.log("RECENT VISIT LINKED ORDER", linked);
-      const out = {
+      return {
         soldValue: num(linked.amount),
         showRevenue: true,
         valueSource: "linked_order",
         linkedOrderId: linked.orderId || null,
       };
-      console.log("RECENT VISIT VALUE SOURCE", out);
-      return out;
     }
   }
 
-  const out = {
+  return {
     soldValue: 0,
     showRevenue: false,
     valueSource: "none",
     linkedOrderId: null,
   };
-  console.log("RECENT VISIT VALUE SOURCE", out);
-  return out;
 }
 
 function mapAdminDashboardVisit(row, labNameById, ordersByLabDate) {
@@ -1556,6 +1481,8 @@ function buildDashboardInsightsFromMetrics(metrics) {
  * Logs DASHBOARD KPI AUDIT plus per-KPI KPI SOURCE VERIFIED or KPI MISMATCH DETECTED.
  */
 function logAdminDashboardSupabaseAudit(ctx) {
+  if (!shouldRunDashboardKpiAudit()) return;
+
   const {
     today,
     ordersRaw,
@@ -1766,6 +1693,7 @@ export async function getAdminDashboardRead() {
 
   try {
     const today = localDateYmd();
+    const endQuery = perfTime("getAdminDashboardRead.supabaseQueries");
 
     const [ordersRes, itemsRes, arRes, invRes, visitsRes, payRes, labsRes] = await Promise.all([
       supabase.from("orders").select("*"),
@@ -1792,10 +1720,13 @@ export async function getAdminDashboardRead() {
     if (invRes.error) console.warn("[getAdminDashboardRead] inventory:", invRes.error.message);
     if (visitsRes.error) console.warn("[getAdminDashboardRead] agent_visits:", visitsRes.error.message);
 
-    console.log("SUPABASE DASHBOARD RAW ORDERS", ordersRaw);
-    console.log("SUPABASE DASHBOARD RAW AR", arRaw);
-    console.log("SUPABASE DASHBOARD RAW INVENTORY", invRaw);
-    console.log("SUPABASE DASHBOARD RAW VISITS", visitsRaw);
+    endQuery({
+      orders: ordersRaw.length,
+      orderItems: orderItemsRaw.length,
+      ar: arRaw.length,
+      inventory: invRaw.length,
+      visits: visitsRaw.length,
+    });
 
     const labNameById = new Map();
     for (const l of labsRaw) {
@@ -1818,18 +1749,6 @@ export async function getAdminDashboardRead() {
     const lineTotalByOrderId = revenue.lineTotalByOrderId;
 
     const ordersByLabDate = buildOrdersByLabDateIndex(ordersRaw, lineTotalByOrderId);
-
-    console.log("DASHBOARD SOURCE RECALCULATED", {
-      source: "Supabase",
-      definitions: {
-        revenue: "sum non-Cancelled orders with status=Fulfilled (order_date for today)",
-        receivables: "ar_credit_control.outstanding sums",
-      },
-      todaysRevenue: revenue.todaysRevenue,
-      fulfilledTotalAllTimeApprox: revenue.totalSoldValue,
-      activeOrdersNonCancelled: revenue.activeOrdersCount,
-      fulfilledOrdersForRevenue: revenue.fulfilledOrdersCount,
-    });
 
     const { outstandingReceivables, labsAtCreditRisk } = computeReceivableMetrics(arRaw);
 
@@ -1908,8 +1827,6 @@ export async function getAdminDashboardRead() {
       topLabsByRevenue: revenue.topLabsByRevenue,
       visitsMappedTop10Length: visits.length,
     });
-
-    console.log("SUPABASE DASHBOARD SUMMARY", { executive, summary });
 
     return { success: true, data: payload };
   } catch (err) {

@@ -11,7 +11,8 @@ import {
 export { logHybridSourceWarning, logStaleFieldMigration };
 
 export function logSupabaseFeatureSource(feature, detail = {}) {
-  console.log("SUPABASE FEATURE SOURCE", feature, detail);
+  if (!import.meta.env.DEV) return;
+  console.info("SUPABASE FEATURE SOURCE", feature, detail);
 }
 
 export function logAppsScriptFallbackUsed(feature, reason = "") {

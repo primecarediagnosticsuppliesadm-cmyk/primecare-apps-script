@@ -42,59 +42,8 @@ export function agentRecordMatchesUser(recordAgentId, recordAgentName, currentUs
   return false;
 }
 
-/**
- * Temporary QA diagnostics for agent lab assignment (B2).
- */
-export function logAgentLabFilterDebug(currentUser, allLabs = [], filteredLabs = []) {
-  console.log("AGENT PROFILE", {
-    id: currentUser?.id,
-    role: currentUser?.role,
-    agentId: currentUser?.agentId || currentUser?.agent_id,
-    agentName: currentUser?.agentName || currentUser?.name,
-    tenantId: currentUser?.tenantId || currentUser?.tenant_id,
-  });
-
-  console.log("LAB FILTER RESULT", {
-    totalFromApi: allLabs.length,
-    visibleCount: filteredLabs.length,
-    visibleLabIds: filteredLabs.map((l) => l.labId || l.lab_id).filter(Boolean),
-  });
-
-  console.log("VISIBLE LABS", filteredLabs);
-
-  (allLabs || []).forEach((lab) => {
-    const assignedAgentId =
-      lab.assignedAgentId ||
-      lab.assigned_agent_id ||
-      lab.agentId ||
-      lab.agent_id ||
-      "";
-    const assignedAgent =
-      lab.assignedAgent ||
-      lab.agentName ||
-      lab.agent_name ||
-      lab.Agent_Name ||
-      lab.owner ||
-      "";
-    const matchesById = agentRecordMatchesUser(assignedAgentId, "", currentUser);
-    const matchesByName = agentRecordMatchesUser("", assignedAgent, currentUser);
-    const included = filteredLabs.some(
-      (row) =>
-        normalizeAgentIdKey(row.labId || row.lab_id) ===
-        normalizeAgentIdKey(lab.labId || lab.lab_id)
-    );
-
-    console.log("LAB ASSIGNMENT CHECK", {
-      labId: lab.labId || lab.lab_id,
-      assignedAgentId,
-      assignedAgent,
-      profileAgentId: profileAgentId(currentUser),
-      matchesById,
-      matchesByName,
-      included,
-    });
-  });
-}
+/** No-op: lab filter diagnostics removed after B2 QA. */
+export function logAgentLabFilterDebug() {}
 
 export function filterVisitsForUser(visits = [], currentUser) {
   if (!currentUser) return [];
