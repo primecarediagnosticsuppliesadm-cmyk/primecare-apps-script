@@ -15,6 +15,7 @@ import OrdersPage from "./pages/OrdersPage";
 import ReorderForecastPage from "./pages/ReorderForecastPage";
 import StockPage from "./pages/StockPage";
 import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
+import QualificationReviewPage from "./pages/QualificationReviewPage";
 
 function PlaceholderCard({ title, subtitle }) {
   return (
@@ -39,6 +40,9 @@ function normalizePageKey(page) {
       return "reorder";
     case "ai-insights":
       return "insights";
+    case "qualification-review":
+    case "qualifications":
+      return "qualificationReview";
     case "lab-orders":
     case "lab-ordering":
     case "ordering":
@@ -193,6 +197,10 @@ export default function PrimeCareWebPortal({
           />
         );
 
+      case "qualificationReview":
+      case "qualification-review":
+        return <QualificationReviewPage currentUser={currentUser} />;
+
       case "performance":
         return (
           <PlaceholderCard
@@ -253,6 +261,10 @@ export default function PrimeCareWebPortal({
             authToken={authToken}
           />
         );
+
+      case "qualificationReview":
+      case "qualification-review":
+        return <QualificationReviewPage currentUser={currentUser} />;
 
       case "performance":
         return (

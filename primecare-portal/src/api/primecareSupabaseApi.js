@@ -2093,6 +2093,153 @@ export async function upsertLabQualificationWrite(payload = {}) {
   }
 }
 
+const FOUNDER_REVIEW_STATUSES = new Set([
+  "pending",
+  "approved",
+  "rejected",
+  "needs_info",
+]);
+
+function mapQualificationReviewRow(row, labMeta = null) {
+  const labId = labIdKey(row?.lab_id ?? row?.labId);
+  const labName = str(
+    labMeta?.lab_name ?? labMeta?.labName ?? row?.lab_name ?? row?.labName
+  );
+  return {
+    id: row?.id || "",
+    tenantId: row?.tenant_id || row?.tenantId || "",
+    labId,
+    labName: labName || labId,
+    labSize: str(row?.lab_size),
+    monthlyConsumablesEstimate:
+      row?.monthly_consumables_estimate == null
+        ? null
+        : num(row.monthly_consumables_estimate),
+    currentSupplier: str(row?.current_supplier),
+    paymentTerms: str(row?.payment_terms),
+    decisionMaker: str(row?.decision_maker),
+    reagentRentalPotential: str(row?.reagent_rental_potential),
+    labOsFit: str(row?.lab_os_fit),
+    founderReviewStatus: str(row?.founder_review_status || "pending").toLowerCase(),
+    nextFollowUpDate: str(row?.next_follow_up_date).slice(0, 10) || "",
+    agentId: str(row?.agent_id),
+    agentName: str(row?.agent_name),
+    updatedBy: str(row?.updated_by),
+    updatedAt: row?.updated_at || "",
+    notes: str(row?.notes),
+  };
+}
+
+/**
+ * Admin/executive review list: lab_qualifications enriched with lab names from v_labs_credit.
+ * RLS scopes rows; no service role or Apps Script.
+ */
+export async function getQualificationReviewRead() {
+  traceSupabaseRead("Qualification.getQualificationReviewRead", {
+    tables: ["lab_qualifications", "v_labs_credit"],
+  });
+
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: [] };
+  }
+
+  try {
+    const { data: qualRows, error: qualErr } = await supabase
+      .from("lab_qualifications")
+      .select("*")
+      .order("updated_at", { ascending: false });
+
+    if (qualErr) {
+      return {
+        success: false,
+        error: qualErr.message || "Failed to load qualifications",
+        data: [],
+      };
+    }
+
+    const { data: labsRaw, error: labsErr } = await supabase
+      .from("v_labs_credit")
+      .select("lab_id, lab_name, area");
+
+    if (labsErr) {
+      console.warn("[getQualificationReviewRead] v_labs_credit:", labsErr.message);
+    }
+
+    const labById = new Map();
+    for (const lab of labsRaw || []) {
+      const key = labIdKey(lab.lab_id ?? lab.labId);
+      if (key) labById.set(key, lab);
+    }
+
+    const rows = (qualRows || []).map((row) =>
+      mapQualificationReviewRow(row, labById.get(labIdKey(row.lab_id)) || null)
+    );
+
+    return { success: true, data: rows, error: null };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err), data: [] };
+  }
+}
+
+/**
+ * Founder/admin review status update (ADMIN/EXECUTIVE via RLS can_write_ops_for_tenant).
+ */
+export async function updateQualificationFounderReviewWrite(payload = {}) {
+  traceSupabaseRead("Qualification.updateQualificationFounderReviewWrite", {
+    table: "lab_qualifications",
+  });
+
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+
+  try {
+    const tenant_id = str(payload.tenantId ?? payload.tenant_id);
+    const lab_id = labIdKey(payload.labId ?? payload.lab_id);
+    const status = str(
+      payload.founderReviewStatus ?? payload.founder_review_status
+    ).toLowerCase();
+
+    if (!tenant_id || !lab_id) {
+      return { success: false, error: "tenant_id and lab_id are required", data: null };
+    }
+    if (!FOUNDER_REVIEW_STATUSES.has(status)) {
+      return {
+        success: false,
+        error: "founder_review_status must be pending, approved, rejected, or needs_info",
+        data: null,
+      };
+    }
+
+    const patch = {
+      founder_review_status: status,
+      updated_by:
+        str(payload.updatedBy ?? payload.updated_by ?? payload.userId ?? payload.user_id) ||
+        null,
+    };
+
+    const { data, error } = await supabase
+      .from("lab_qualifications")
+      .update(patch)
+      .eq("tenant_id", tenant_id)
+      .eq("lab_id", lab_id)
+      .select()
+      .single();
+
+    if (error) {
+      return { success: false, error: error.message || "Update failed", data: null };
+    }
+
+    return {
+      success: true,
+      data: mapQualificationReviewRow(data),
+      error: null,
+    };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err), data: null };
+  }
+}
+
 /**
  * Read-only agent workspace: labs/credit (`v_labs_credit`), collections (`getCollectionsRead`),
  * visits (`agent_visits`). Task queue is always `[]` here (no Supabase task query).

@@ -21,6 +21,7 @@ const ICONS = {
   inventory: Boxes,
   orders: ShoppingCart,
   risk: AlertTriangle,
+  qualificationReview: ClipboardList,
   performance: BarChart3,
   insights: Brain,
   labOrders: Package,

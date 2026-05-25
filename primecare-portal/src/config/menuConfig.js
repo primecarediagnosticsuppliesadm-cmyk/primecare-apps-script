@@ -23,6 +23,11 @@ export const MENU_ITEMS = [
 
   // Finance / Risk
   { key: "risk", label: "Credit & Risk", icon: "AlertTriangle" },
+  {
+    key: "qualificationReview",
+    label: "Qualification Review",
+    icon: "ClipboardCheck",
+  },
 
   // Performance / AI
   { key: "performance", label: "Performance", icon: "BarChart3" },
@@ -43,6 +48,7 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "inventory",
   "orders",
   "risk",
+  "qualificationReview",
   "labOrders",
   "purchase",
   "reorder",

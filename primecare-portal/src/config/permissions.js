@@ -13,5 +13,5 @@ export const PERMISSIONS = {
   labOrders: [ROLES.LAB],
   purchase: [ROLES.ADMIN, ROLES.EXECUTIVE],
   reorder: [ROLES.ADMIN, ROLES.EXECUTIVE],
-  
+  qualificationReview: [ROLES.ADMIN, ROLES.EXECUTIVE],
 };
