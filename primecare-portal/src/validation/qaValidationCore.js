@@ -128,6 +128,68 @@ export function checkMetricAcrossLayers({ id, label, expected, layers, tolerance
 }
 
 /**
+ * Mutable QA metric: baseline from browser RLS / DB compute; fail only on layer disagreement.
+ * @param {Object} params
+ * @param {string} params.id
+ * @param {string} params.label
+ * @param {Record<string, number|null|undefined>} params.layers
+ * @param {number} [params.seedBaseline] — informational seed reference only
+ * @param {number} [params.tolerance]
+ * @returns {QaValidationCheck}
+ */
+export function checkMutableMetricAcrossLayers({
+  id,
+  label,
+  layers,
+  seedBaseline,
+  tolerance = 0,
+}) {
+  const actual = { ...layers, mutable: true, seedBaseline: seedBaseline ?? null };
+  const browser = numOrNull(layers.browserRls);
+  const db = numOrNull(layers.dbComputed);
+  const runtimeBaseline = browser ?? db ?? null;
+
+  const comparableValues = Object.values(layers)
+    .map((value) => numOrNull(value))
+    .filter((value) => value !== null);
+
+  let status = /** @type {QaCheckStatus} */ (
+    comparableValues.length === 0 ? "warn" : "pass"
+  );
+  const mismatches = [];
+
+  if (comparableValues.length === 0) {
+    mismatches.push("no comparable layers provided");
+  }
+
+  if (comparableValues.length >= 2) {
+    const first = comparableValues[0];
+    for (let i = 1; i < comparableValues.length; i += 1) {
+      if (!numbersMatch(first, comparableValues[i], tolerance)) {
+        status = worstStatus(status, "fail");
+        mismatches.push(`cross-layer drift (${comparableValues.join(" vs ")})`);
+        break;
+      }
+    }
+  }
+
+  const expected = runtimeBaseline ?? seedBaseline ?? null;
+  const baselineNote =
+    runtimeBaseline != null
+      ? `runtime baseline ${runtimeBaseline}`
+      : seedBaseline != null
+        ? `seed baseline ${seedBaseline}`
+        : "no baseline";
+
+  const message =
+    mismatches.length === 0
+      ? `All layers agree at ${comparableValues[0] ?? expected} (${baselineNote}; mutable field)`
+      : mismatches.join("; ");
+
+  return { id, label, status, expected, actual, message };
+}
+
+/**
  * @param {string} scope
  * @param {QaValidationCheck[]} checks
  * @returns {QaValidationReport}

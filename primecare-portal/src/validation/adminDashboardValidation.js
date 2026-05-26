@@ -8,6 +8,7 @@ import { QA_ADMIN_DASHBOARD_SEED } from "@/validation/qaSeedExpectations.js";
 import {
   buildValidationReport,
   checkMetricAcrossLayers,
+  checkMutableMetricAcrossLayers,
   numOrNull,
   printQaValidationReport,
 } from "@/validation/qaValidationCore.js";
@@ -127,17 +128,10 @@ export async function runAdminDashboardValidation(options = {}) {
   const uiSummary = rendered?.summary || {};
   const uiStock = uiSummary.stockStats || {};
 
-  // Receivables is mutable in QA (payments/notes change over time).
-  // Validate cross-layer agreement rather than a fixed seed number.
-  const expectedOutstandingReceivables =
-    typeof browser.arOutstanding === "number"
-      ? browser.arOutstanding
-      : expected.outstandingReceivables;
-
   const checks = [
     checkMetricAcrossLayers({
       id: "orders_count",
-      label: "Orders row count",
+      label: "Orders row count (immutable seed)",
       expected: expected.ordersCount,
       layers: {
         browserRls: browser.ordersRowCount,
@@ -146,10 +140,10 @@ export async function runAdminDashboardValidation(options = {}) {
         uiRendered: null,
       },
     }),
-    checkMetricAcrossLayers({
+    checkMutableMetricAcrossLayers({
       id: "outstanding_receivables",
-      label: "Outstanding receivables (₹)",
-      expected: expectedOutstandingReceivables,
+      label: "Outstanding receivables (₹, mutable)",
+      seedBaseline: expected.outstandingReceivables,
       layers: {
         browserRls: browser.arOutstanding,
         dbComputed: browser.arOutstanding,
@@ -157,10 +151,10 @@ export async function runAdminDashboardValidation(options = {}) {
         uiRendered: numOrNull(uiExecutive.outstandingReceivables),
       },
     }),
-    checkMetricAcrossLayers({
+    checkMutableMetricAcrossLayers({
       id: "recent_visits",
-      label: "Recent visits count",
-      expected: expected.recentVisits,
+      label: "Recent visits count (mutable)",
+      seedBaseline: expected.recentVisits,
       layers: {
         browserRls: browser.visitsRowCount,
         dbComputed: browser.visitsRowCount,
@@ -170,7 +164,7 @@ export async function runAdminDashboardValidation(options = {}) {
     }),
     checkMetricAcrossLayers({
       id: "inventory_skus",
-      label: "Inventory SKU count",
+      label: "Inventory SKU count (immutable seed)",
       expected: expected.inventorySkus,
       layers: {
         browserRls: browser.inventorySkus,
@@ -179,10 +173,10 @@ export async function runAdminDashboardValidation(options = {}) {
         uiRendered: numOrNull(uiStock.totalSkus),
       },
     }),
-    checkMetricAcrossLayers({
+    checkMutableMetricAcrossLayers({
       id: "total_sold_value",
-      label: "Total sold value (₹, fulfilled)",
-      expected: expected.totalSoldValue,
+      label: "Total sold value (₹, mutable)",
+      seedBaseline: expected.totalSoldValue,
       layers: {
         browserRls: browser.totalSoldValue,
         dbComputed: browser.totalSoldValue,

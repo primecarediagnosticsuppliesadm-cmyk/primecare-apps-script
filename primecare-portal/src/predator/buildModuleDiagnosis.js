@@ -144,8 +144,8 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
     }),
     diagnoseMetricLayers({
       metricId: "outstanding_receivables",
-      metricLabel: "Receivables",
-      expected: seed.outstandingReceivables,
+      metricLabel: "Receivables (mutable)",
+      expected: snap.arOutstanding ?? seed.outstandingReceivables,
       tenantCtx: ctx,
       cacheMeta,
       compareMode: "kpi",
@@ -157,11 +157,12 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
     }),
     diagnoseMetricLayers({
       metricId: "recent_visits",
-      metricLabel: "Recent visits",
-      expected: seed.recentVisits,
+      metricLabel: "Recent visits (mutable)",
+      expected: snap.visitsRowCount ?? seed.recentVisits,
       tenantCtx: ctx,
+      compareMode: "kpi",
       layers: [
-        { layerId: "rls", label: "Visits rows", value: snap.visitsRowCount },
+        { layerId: "rls", label: "Visits rows", value: snap.visitsRowCount, meta: { supporting: true } },
         { layerId: "api", label: "API summary", value: snap.apiRecentVisits },
         { layerId: "ui", label: "Rendered UI", value: snap.uiRecentVisits },
       ],
@@ -180,8 +181,8 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
     }),
     diagnoseMetricLayers({
       metricId: "total_sold_value",
-      metricLabel: "Total sold value",
-      expected: seed.totalSoldValue,
+      metricLabel: "Total sold value (mutable)",
+      expected: snap.totalSoldValue ?? seed.totalSoldValue,
       tenantCtx: ctx,
       compareMode: "kpi",
       layers: [

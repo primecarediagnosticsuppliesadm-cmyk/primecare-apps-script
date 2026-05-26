@@ -34,12 +34,16 @@ import {
   CalendarDays,
   PhoneCall,
   IndianRupee,
-  MessageSquare,
   Clock3,
   Package,
   Loader2,
   ChevronLeft,
   ChevronRight,
+  Check,
+  CheckCircle2,
+  Building2,
+  Pencil,
+  Sparkles,
 } from "lucide-react";
 
 import { saveAgentVisit } from "@/api/primecareApi";
@@ -85,15 +89,22 @@ function AgentVisitLoading() {
   );
 }
 
-function SectionTitle({ icon: Icon, title, subtitle }) {
+function SectionTitle({ icon: Icon, title, subtitle, accent = false }) {
   return (
     <div className="flex items-start gap-3">
-      <div className="rounded-2xl bg-slate-100 p-2">
-        <Icon className="h-5 w-5 text-slate-700" />
+      <div
+        className={cn(
+          "rounded-2xl p-2.5 shadow-sm",
+          accent
+            ? "bg-[var(--pc-brand-primary)]/15 text-[var(--pc-brand-primary)]"
+            : "bg-white text-slate-700 ring-1 ring-border/60"
+        )}
+      >
+        <Icon className="h-5 w-5" />
       </div>
       <div>
-        <div className="text-base font-semibold text-slate-900">{title}</div>
-        {subtitle ? <div className="text-sm text-slate-500">{subtitle}</div> : null}
+        <div className="text-lg font-semibold tracking-tight text-slate-900">{title}</div>
+        {subtitle ? <div className="text-sm text-slate-600">{subtitle}</div> : null}
       </div>
     </div>
   );
@@ -102,36 +113,168 @@ function SectionTitle({ icon: Icon, title, subtitle }) {
 function FieldLabel({ children, helper }) {
   return (
     <div className="mb-2">
-      <label className="block text-sm font-medium text-slate-700">{children}</label>
+      <label className="block text-sm font-semibold text-slate-800">{children}</label>
       {helper ? <p className="mt-1 text-xs text-slate-500">{helper}</p> : null}
     </div>
   );
 }
 
-function SnapshotItem({ icon: Icon, label, value, tone = "default" }) {
-  const toneClass =
-    tone === "danger"
-      ? "border-red-200 bg-red-50"
-      : tone === "warn"
-      ? "border-amber-200 bg-amber-50"
-      : "border-slate-200 bg-slate-50";
+const STEP_PANEL_CLASS =
+  "space-y-5 rounded-2xl border border-border/70 bg-gradient-to-b from-card via-card to-[var(--pc-brand-primary)]/[0.04] p-4 shadow-[var(--pc-shadow-card)] md:max-w-3xl md:p-5";
+
+const FIELD_INPUT_CLASS = "h-12 w-full rounded-xl border-input text-base md:max-w-xl";
+
+function LabHeroCard({ lab, collection, latestVisit, form }) {
+  if (!lab) return null;
+  const outstanding = Number(collection?.outstandingAmount || 0);
+  const creditHold = String(collection?.creditHold || "").toUpperCase() === "HOLD";
+  const riskLabel = creditHold
+    ? "Credit hold"
+    : String(collection?.riskStatus || "").trim() || "OK";
+  const riskVariant = creditHold ? "danger" : outstanding > 0 ? "warning" : "success";
 
   return (
-    <div className={`rounded-2xl border p-3 ${toneClass}`}>
+    <div className="overflow-hidden rounded-2xl border border-[var(--pc-brand-primary)]/25 bg-gradient-to-br from-[var(--pc-brand-primary)]/10 via-card to-amber-50/40 p-4 shadow-md">
       <div className="flex items-start gap-3">
-        <div className="rounded-xl bg-white p-2">
-          <Icon className="h-4 w-4 text-slate-700" />
+        <div className="rounded-xl bg-white/90 p-2.5 shadow-sm">
+          <Building2 className="h-5 w-5 text-[var(--pc-brand-primary)]" />
         </div>
-        <div>
-          <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
-          <div className="mt-1 text-sm font-semibold text-slate-900">{value || "-"}</div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-lg font-bold text-slate-900">{lab.labName}</p>
+          <p className="text-xs text-muted-foreground">
+            {lab.area || form.area || "—"} · ID {lab.labId}
+          </p>
+        </div>
+        <StatusBadge variant={riskVariant} compact>
+          {riskLabel}
+        </StatusBadge>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="rounded-xl bg-white/80 p-2.5 ring-1 ring-border/50">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Outstanding
+          </p>
+          <p className="mt-0.5 text-sm font-bold text-slate-900">
+            ₹{outstanding.toLocaleString("en-IN")}
+          </p>
+        </div>
+        <div className="rounded-xl bg-white/80 p-2.5 ring-1 ring-border/50">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Last visit
+          </p>
+          <p className="mt-0.5 text-sm font-bold text-slate-900">
+            {latestVisit?.date || "None"}
+          </p>
+        </div>
+        <div className="rounded-xl bg-white/80 p-2.5 ring-1 ring-border/50">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Last response
+          </p>
+          <p className="mt-0.5 text-xs font-semibold text-slate-900">
+            {displayResponseLabel(latestVisit?.labResponse || "")}
+          </p>
+        </div>
+        <div className="rounded-xl bg-white/80 p-2.5 ring-1 ring-border/50">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Next follow-up
+          </p>
+          <p className="mt-0.5 text-xs font-semibold text-slate-900">
+            {latestVisit?.nextFollowUpDate
+              ? `${latestVisit.nextFollowUpType || "Call"} · ${latestVisit.nextFollowUpDate}`
+              : "Not set"}
+          </p>
         </div>
       </div>
     </div>
   );
 }
 
-/** LabsPage-aligned lab row shape for dropdown and snapshots. */
+function WizardMotivationStrip({ currentIndex, total, canSaveVisit, missingItems }) {
+  const completed = currentIndex;
+  const isReview = currentIndex === total - 1;
+  let headline = "You're doing great — one step at a time";
+  let detail = `${completed} of ${total} steps completed`;
+
+  if (isReview) {
+    headline = canSaveVisit ? "Ready to save" : "Almost done";
+    detail = canSaveVisit
+      ? "All required visit details are filled"
+      : `Fix ${missingItems.length} required item${missingItems.length === 1 ? "" : "s"} below`;
+  } else if (currentIndex >= total - 2) {
+    headline = "Almost done";
+    detail = "Review your answers on the next step";
+  }
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-[var(--pc-brand-primary)]/20 bg-[var(--pc-brand-primary)]/5 px-3 py-2.5">
+      <Sparkles className="h-5 w-5 shrink-0 text-[var(--pc-brand-primary)]" />
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-slate-900">{headline}</p>
+        <p className="text-xs text-muted-foreground">{detail}</p>
+      </div>
+    </div>
+  );
+}
+
+function ReviewSummaryCard({ title, icon: Icon, onEdit, missing = [], children }) {
+  return (
+    <div className="rounded-xl border border-border/70 bg-card p-3 shadow-sm">
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 text-[var(--pc-brand-primary)]" />
+          <span className="text-sm font-semibold text-slate-900">{title}</span>
+        </div>
+        <Button type="button" variant="ghost" size="sm" className="h-8 shrink-0 px-2" onClick={onEdit}>
+          <Pencil className="mr-1 h-3.5 w-3.5" />
+          Edit
+        </Button>
+      </div>
+      {missing.length > 0 ? (
+        <ul className="mb-2 list-inside list-disc text-xs font-medium text-red-600">
+          {missing.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="text-sm text-slate-700">{children}</div>
+    </div>
+  );
+}
+
+function RecentVisitTimelineCard({ visit }) {
+  const sold = Number(visit.soldValue || 0);
+  return (
+    <div className="relative flex gap-3 pl-4" role="listitem">
+      <div className="absolute bottom-0 left-[7px] top-3 w-0.5 bg-border" aria-hidden />
+      <div className="relative z-[1] mt-1 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-[var(--pc-brand-primary)] bg-card" />
+      <div className="min-w-0 flex-1 rounded-xl border border-border/60 bg-card p-3 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p className="font-semibold text-slate-900">{visit.labName || "—"}</p>
+            <p className="text-xs text-muted-foreground">{visit.date || "—"}</p>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            <StatusBadge variant={visitTypeToVariant(visit.visitType)} compact>
+              {visit.visitType || "—"}
+            </StatusBadge>
+            <StatusBadge variant="info" compact>
+              {displayResponseLabel(visit.labResponse)}
+            </StatusBadge>
+          </div>
+        </div>
+        {sold > 0 ? (
+          <p className="mt-2 text-xs font-medium text-emerald-700">
+            Sold ₹{sold.toLocaleString("en-IN")}
+          </p>
+        ) : null}
+        {visit.nextAction ? (
+          <p className="mt-1 text-xs text-muted-foreground">Next: {visit.nextAction}</p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function normalizeLab(lab) {
   return normalizePortalLab(lab);
 }
@@ -188,14 +331,16 @@ function mapWorkspaceVisitToPageVisit(visit) {
   });
 }
 
+const WIZARD_STEP_COUNT = 6;
+
 /** Wizard steps for Agent Visit page (includes mandatory qualification step). */
 export const AGENT_VISIT_SECTION_STEPS = [
-  { key: "basics", title: "Select Lab", shortTitle: "Lab" },
-  { key: "outcome", title: "Visit Outcome", shortTitle: "Outcome" },
-  { key: "stock", title: "Stock Feedback", shortTitle: "Stock" },
-  { key: "followup", title: "Follow-up", shortTitle: "Follow-up" },
-  { key: "qualification", title: "Qualification", shortTitle: "Qualify" },
-  { key: "review", title: "Review & Save", shortTitle: "Review" },
+  { key: "basics", title: "Select Lab", shortTitle: "Lab", icon: Users },
+  { key: "outcome", title: "Visit Outcome", shortTitle: "Outcome", icon: MapPin },
+  { key: "stock", title: "Stock Feedback", shortTitle: "Stock", icon: Package },
+  { key: "followup", title: "Follow-up", shortTitle: "Follow-up", icon: CalendarDays },
+  { key: "qualification", title: "Qualification", shortTitle: "Qualify", icon: ClipboardCheck },
+  { key: "review", title: "Review & Save", shortTitle: "Review", icon: CheckCircle2 },
 ];
 
 function assertAgentVisitSectionSteps() {
@@ -204,6 +349,11 @@ function assertAgentVisitSectionSteps() {
   const hasQualification = sectionSteps.some((s) => s.key === "qualification");
   if (!hasQualification) {
     throw new Error("[AgentVisit] sectionSteps must include qualification step");
+  }
+  if (sectionSteps.length !== WIZARD_STEP_COUNT) {
+    throw new Error(
+      `[AgentVisit] sectionSteps must have ${WIZARD_STEP_COUNT} steps, got ${sectionSteps.length}`
+    );
   }
 }
 
@@ -310,22 +460,23 @@ function WizardProgressBar({ currentIndex, total, title }) {
   const progressPct = Math.round(((currentIndex + 1) / total) * 100);
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-slate-900">
-          Step {currentIndex + 1} of {total}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-bold text-slate-900">
+          Step {currentIndex + 1} of {total}{" "}
+          <span className="font-semibold text-[var(--pc-brand-primary)]">({progressPct}%)</span>
         </p>
-        <p className="truncate text-sm text-muted-foreground">{title}</p>
+        <p className="truncate text-sm font-medium text-[var(--pc-brand-primary)]">{title}</p>
       </div>
       <div
-        className="h-2 w-full overflow-hidden rounded-full bg-muted"
+        className="h-2.5 w-full overflow-hidden rounded-full bg-muted"
         role="progressbar"
         aria-valuenow={currentIndex + 1}
         aria-valuemin={1}
         aria-valuemax={total}
-        aria-label={`Step ${currentIndex + 1} of ${total}`}
+        aria-label={`Step ${currentIndex + 1} of ${total}, ${progressPct} percent`}
       >
         <div
-          className="h-full rounded-full bg-[var(--pc-brand-primary)] transition-all duration-300"
+          className="h-full rounded-full bg-gradient-to-r from-[var(--pc-brand-primary)] to-emerald-500 transition-all duration-300"
           style={{ width: `${progressPct}%` }}
         />
       </div>
@@ -337,9 +488,10 @@ function VisitWizardStepper({ steps, currentIndex, labSelected, onGoToStep }) {
   const qualificationIndex = steps.findIndex((s) => s.key === "qualification");
 
   return (
-    <nav aria-label="Visit wizard progress" className="overflow-x-auto pb-1">
-      <ol className="flex min-w-max gap-2">
+    <nav aria-label="Visit wizard progress" className="-mx-1 overflow-x-auto pb-2">
+      <ol className="flex min-w-max gap-2 px-1">
         {steps.map((step, index) => {
+          const StepIcon = step.icon || ClipboardCheck;
           const isActive = index === currentIndex;
           const isComplete = index < currentIndex;
           const needsLab = index > 0 && !labSelected;
@@ -353,29 +505,42 @@ function VisitWizardStepper({ steps, currentIndex, labSelected, onGoToStep }) {
                   if (!needsLab) onGoToStep(index);
                 }}
                 className={cn(
-                  "flex min-w-[4.5rem] flex-col items-center rounded-xl px-2 py-2 text-center transition-colors",
+                  "flex min-w-[5.25rem] flex-col items-center rounded-2xl px-2.5 py-2.5 text-center transition-all",
                   isActive &&
-                    "bg-[var(--pc-brand-primary)]/10 ring-2 ring-[var(--pc-brand-primary)]",
+                    "scale-[1.02] bg-[var(--pc-brand-primary)] text-white shadow-lg shadow-[var(--pc-brand-primary)]/25 ring-2 ring-[var(--pc-brand-primary)]",
+                  isComplete &&
+                    !isActive &&
+                    "bg-emerald-50 ring-1 ring-emerald-200",
                   isQualification &&
                     labSelected &&
                     !isActive &&
-                    "ring-1 ring-[var(--pc-brand-primary)]/40",
-                  needsLab && "cursor-not-allowed opacity-50"
+                    !isComplete &&
+                    "ring-2 ring-[var(--pc-brand-primary)]/30",
+                  needsLab && "cursor-not-allowed opacity-45"
                 )}
               >
                 <span
                   className={cn(
-                    "flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold",
+                    "flex h-9 w-9 items-center justify-center rounded-full",
                     isActive
-                      ? "bg-[var(--pc-brand-primary)] text-white"
+                      ? "bg-white/20 text-white"
                       : isComplete
-                        ? "bg-emerald-100 text-emerald-800"
+                        ? "bg-emerald-500 text-white"
                         : "bg-muted text-muted-foreground"
                   )}
                 >
-                  {index + 1}
+                  {isComplete && !isActive ? (
+                    <Check className="h-5 w-5" strokeWidth={3} />
+                  ) : (
+                    <StepIcon className="h-4 w-4" />
+                  )}
                 </span>
-                <span className="mt-1 text-[10px] font-medium leading-tight sm:text-xs">
+                <span
+                  className={cn(
+                    "mt-1.5 text-[10px] font-semibold leading-tight sm:text-xs",
+                    isActive ? "text-white" : "text-slate-700"
+                  )}
+                >
                   {step.shortTitle}
                 </span>
               </button>
@@ -387,9 +552,9 @@ function VisitWizardStepper({ steps, currentIndex, labSelected, onGoToStep }) {
   );
 }
 
-function WizardNavButtons({ currentIndex, maxIndex, onBack, onNext, nextDisabled }) {
+function WizardNavButtons({ currentIndex, maxIndex, onBack, onNext, nextDisabled, nextLabel = "Continue" }) {
   return (
-    <div className="mt-4 flex gap-3 border-t border-border pt-4">
+    <div className="mt-4 hidden gap-3 border-t border-border/70 pt-4 md:flex">
       <Button
         type="button"
         variant="outline"
@@ -405,12 +570,42 @@ function WizardNavButtons({ currentIndex, maxIndex, onBack, onNext, nextDisabled
           type="button"
           onClick={onNext}
           disabled={nextDisabled}
-          className="h-12 min-h-12 flex-1 rounded-xl text-base"
+          className="h-12 min-h-12 flex-1 rounded-xl bg-[var(--pc-brand-primary)] text-base font-semibold text-white hover:opacity-95"
         >
-          Next
+          {nextLabel}
           <ChevronRight className="ml-1 h-5 w-5" />
         </Button>
       ) : null}
+    </div>
+  );
+}
+
+function WizardMobileNavBar({ currentIndex, maxIndex, onBack, onNext, nextDisabled, nextLabel = "Continue" }) {
+  return (
+    <div className="fixed inset-x-0 bottom-0 z-50 md:hidden">
+      <div className="mx-auto flex max-w-5xl gap-3 border-t border-border bg-background/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] shadow-[0_-4px_20px_rgba(15,23,42,0.14)] backdrop-blur supports-[backdrop-filter]:bg-background/90">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onBack}
+          disabled={currentIndex === 0}
+          className="h-12 min-h-12 flex-1 rounded-xl text-base"
+        >
+          <ChevronLeft className="mr-1 h-5 w-5" />
+          Back
+        </Button>
+        {currentIndex < maxIndex ? (
+          <Button
+            type="button"
+            onClick={onNext}
+            disabled={nextDisabled}
+            className="h-12 min-h-12 flex-1 rounded-xl bg-[var(--pc-brand-primary)] text-base font-semibold"
+          >
+            {nextLabel}
+            <ChevronRight className="ml-1 h-5 w-5" />
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -436,7 +631,7 @@ function WizardReviewFooter({ onBack, onSave, saving, saveDisabled }) {
         />
       </div>
       <div className="fixed inset-x-0 bottom-0 z-50 md:hidden">
-        <div className="flex gap-3 border-t border-border bg-background/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] shadow-[0_-4px_16px_rgba(15,23,42,0.12)] backdrop-blur supports-[backdrop-filter]:bg-background/90">
+        <div className="mx-auto flex max-w-5xl gap-3 border-t border-border bg-background/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] shadow-[0_-4px_20px_rgba(15,23,42,0.14)] backdrop-blur supports-[backdrop-filter]:bg-background/90">
           <Button
             type="button"
             variant="outline"
@@ -456,6 +651,24 @@ function WizardReviewFooter({ onBack, onSave, saving, saveDisabled }) {
       </div>
     </>
   );
+}
+
+function getMissingVisitRequirements(form) {
+  const missing = [];
+  if (!String(form.agentName || "").trim()) missing.push("Agent name");
+  if (!String(form.visitDate || "").trim()) missing.push("Visit date");
+  if (!String(form.labId || "").trim()) missing.push("Lab selection");
+  if (!String(form.visitType || "").trim()) missing.push("Visit type");
+  if (form.labResponse === "Converted" && !Number(form.soldValue || 0)) {
+    missing.push("Order value (required for Order Confirmed)");
+  }
+  if (
+    (form.labResponse === "Need Follow-up" || form.nextFollowUpDate) &&
+    !form.nextFollowUpType
+  ) {
+    missing.push("Follow-up type");
+  }
+  return missing;
 }
 
 function SaveVisitButton({ saving, onClick, className, disabled = false }) {
@@ -806,6 +1019,28 @@ export default function AgentVisitPage({ currentUser, authToken }) {
         })
       );
     }
+
+    if (AGENT_VISIT_SECTION_STEPS.length !== WIZARD_STEP_COUNT) {
+      predatorStore.recordError(
+        createPredatorEntry({
+          status: "WARN",
+          module: "Agent Visits",
+          step: "ui.wizard_step_count_drift",
+          expected: WIZARD_STEP_COUNT,
+          actual: AGENT_VISIT_SECTION_STEPS.length,
+          rootCauseGuess: "Agent visit wizard step list length changed",
+          suggestedFix: `Keep exactly ${WIZARD_STEP_COUNT} steps in AGENT_VISIT_SECTION_STEPS`,
+          severity: "medium",
+          issueClass: "render",
+        })
+      );
+    }
+
+    recordPredatorRenderStep("Agent Visits", "ui.wizard_steps.config", {
+      stepCount: AGENT_VISIT_SECTION_STEPS.length,
+      hasQualificationStep: hasQualStep,
+      stepKeys: AGENT_VISIT_SECTION_STEPS.map((s) => s.key),
+    });
 
     if (isAgentUser(currentUser) && labSelected) {
       recordPredatorRenderStep("Agent Visits", "ui.qualification_step.eligible", {
@@ -1248,6 +1483,8 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   }
 
   const isReviewStep = currentStepIndex === AGENT_VISIT_SECTION_STEPS.length - 1;
+  const missingRequired = useMemo(() => getMissingVisitRequirements(form), [form]);
+  const showMobileNav = !isReviewStep;
 
   if (loading) {
     return <AgentVisitLoading />;
@@ -1256,8 +1493,8 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   return (
     <div
       className={cn(
-        "space-y-3",
-        isReviewStep
+        "mx-auto max-w-5xl space-y-4",
+        showMobileNav || isReviewStep
           ? "pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-6"
           : "pb-6"
       )}
@@ -1268,7 +1505,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
           <h1 className={typography.pageTitle}>Agent Visits</h1>
         </div>
         <p className={cn(typography.pageSubtitle, "mt-0.5")}>
-          Log field visits with the step-by-step wizard. Select a lab, then move through each step to save.
+          Quick guided visit log — tap through each step, then save on review.
         </p>
       </header>
 
@@ -1300,12 +1537,12 @@ export default function AgentVisitPage({ currentUser, authToken }) {
         </div>
       ) : null}
 
-      <Card className="rounded-lg border-border shadow-sm">
-        <CardHeader className="space-y-3 pb-2">
+      <Card className="overflow-hidden rounded-2xl border-border/80 shadow-[var(--pc-shadow-card)]">
+        <CardHeader className="space-y-3 border-b border-border/50 bg-muted/20 pb-4">
           <div>
-            <CardTitle className="text-base">Log field visit</CardTitle>
-            <CardDescription className="text-xs">
-              Complete each step — save only on review.
+            <CardTitle className="text-lg">Log field visit</CardTitle>
+            <CardDescription className="text-sm">
+              Guided workflow — save only when you reach review.
             </CardDescription>
           </div>
           <WizardProgressBar
@@ -1315,7 +1552,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
           />
         </CardHeader>
 
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 pt-4">
           <VisitWizardStepper
             steps={AGENT_VISIT_SECTION_STEPS}
             currentIndex={currentStepIndex}
@@ -1323,40 +1560,50 @@ export default function AgentVisitPage({ currentUser, authToken }) {
             onGoToStep={handleWizardGoToStep}
           />
 
-          <div>
+          <WizardMotivationStrip
+            currentIndex={currentStepIndex}
+            total={AGENT_VISIT_SECTION_STEPS.length}
+            canSaveVisit={canSaveVisit}
+            missingItems={missingRequired}
+          />
+
+          <div className="md:mx-auto md:max-w-3xl">
           {currentStepIndex === 0 ? (
-          <section className="space-y-4 rounded-xl border border-border bg-card p-3">
+          <section className={STEP_PANEL_CLASS}>
             <SectionTitle
               icon={Users}
               title={currentStep.title}
-              subtitle="Choose lab and confirm visit date"
+              subtitle="Pick the lab you visited today"
+              accent
             />
 
             <div className="grid grid-cols-1 gap-4">
               <div>
-                <FieldLabel helper="Auto-filled from logged-in user">Agent Name</FieldLabel>
+                <FieldLabel helper="Filled from your login">Your name</FieldLabel>
                 <Input
                   value={form.agentName}
                   onChange={(e) => setForm({ ...form, agentName: e.target.value })}
-                  className="h-12 rounded-xl text-base"
+                  className={FIELD_INPUT_CLASS}
                   disabled={String(currentUser?.role || "").toLowerCase() === "agent"}
                 />
               </div>
 
               <div>
-                <FieldLabel helper="Date of this field visit">Visit Date</FieldLabel>
+                <FieldLabel helper="When did you visit?">Visit date</FieldLabel>
                 <Input
                   type="date"
                   value={form.visitDate}
                   onChange={(e) => setForm({ ...form, visitDate: e.target.value })}
-                  className="h-12 rounded-xl text-base"
+                  className={FIELD_INPUT_CLASS}
                 />
               </div>
 
               <div>
-                <FieldLabel helper="Select the lab to auto-load context">Select lab</FieldLabel>
+                <FieldLabel helper="Start typing or pick from your assigned labs">
+                  Which lab are you visiting today?
+                </FieldLabel>
                 <select
-                  className="h-12 w-full rounded-xl border border-input bg-background px-3 text-base text-foreground shadow-sm outline-none focus:ring-2 focus:ring-ring"
+                  className={cn(FIELD_INPUT_CLASS, "border border-input bg-background px-3 shadow-sm")}
                   value={form.labId ? labIdKey(form.labId) : ""}
                   onChange={(e) => handleLabChange(e.target.value)}
                 >
@@ -1370,45 +1617,27 @@ export default function AgentVisitPage({ currentUser, authToken }) {
               </div>
             </div>
 
-            {selectedLab ? (
-              <div className="rounded-xl border bg-slate-50 p-3">
-                <p className="text-sm font-semibold text-slate-900">
-                  {selectedLab.labName}{" "}
-                  <span className="font-normal text-muted-foreground">({selectedLab.labId})</span>
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {selectedLab.area || form.area || "—"} · Last visit:{" "}
-                  {latestLabVisit?.date || "None"}
-                </p>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <SnapshotItem
-                    icon={MessageSquare}
-                    label="Last response"
-                    value={displayResponseLabel(latestLabVisit?.labResponse || "")}
-                  />
-                  <SnapshotItem
-                    icon={IndianRupee}
-                    label="Outstanding"
-                    value={`₹${Number(selectedLabCollection?.outstandingAmount || 0).toLocaleString()}`}
-                    tone={selectedLabCollection?.outstandingAmount > 0 ? "warn" : "default"}
-                  />
-                </div>
-              </div>
-            ) : null}
+            <LabHeroCard
+              lab={selectedLab}
+              collection={selectedLabCollection}
+              latestVisit={latestLabVisit}
+              form={form}
+            />
           </section>
           ) : null}
 
           {currentStepIndex === 1 ? (
-          <section className="space-y-4 rounded-lg border border-border bg-card p-3">
+          <section className={STEP_PANEL_CLASS}>
             <SectionTitle
               icon={MapPin}
               title={currentStep.title}
-              subtitle="Visit type, lab response, demo, and order value"
+              subtitle="How did the visit go?"
+              accent
             />
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div>
-                <FieldLabel helper="Why did you visit this lab today?">Visit type</FieldLabel>
+              <div className="md:max-w-xl">
+                <FieldLabel helper="Why were you at this lab?">What type of visit was this?</FieldLabel>
                 <Select value={form.visitType} onValueChange={(value) => setForm({ ...form, visitType: value })}>
                   <SelectTrigger className="h-12 rounded-xl text-base">
                     <SelectValue placeholder="Visit type" />
@@ -1423,8 +1652,8 @@ export default function AgentVisitPage({ currentUser, authToken }) {
                 </Select>
               </div>
 
-              <div>
-                <FieldLabel helper="How interested is the lab after this visit?">Lab Response</FieldLabel>
+              <div className="md:max-w-xl">
+                <FieldLabel helper="Pick the closest match">How did the lab respond?</FieldLabel>
                 <Select value={form.labResponse} onValueChange={(value) => setForm({ ...form, labResponse: value })}>
                   <SelectTrigger className="h-12 rounded-xl text-base">
                     <SelectValue placeholder="Lead / lab response" />
@@ -1487,16 +1716,17 @@ export default function AgentVisitPage({ currentUser, authToken }) {
           ) : null}
 
           {currentStepIndex === 2 ? (
-          <section className="space-y-4 rounded-lg border border-border bg-card p-3">
+          <section className={STEP_PANEL_CLASS}>
             <SectionTitle
               icon={Package}
               title={currentStep.title}
-              subtitle="Capture stock availability at the lab"
+              subtitle="Quick stock check at the lab"
+              accent
             />
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div>
-                <FieldLabel helper="Was required stock available for this lab?">Stock Available</FieldLabel>
+              <div className="md:max-w-xl">
+                <FieldLabel helper="Was stock on hand?">Was stock available?</FieldLabel>
                 <Select
                   value={form.stockAvailable}
                   onValueChange={(value) => setForm({ ...form, stockAvailable: value })}
@@ -1512,8 +1742,8 @@ export default function AgentVisitPage({ currentUser, authToken }) {
                 </Select>
               </div>
 
-              <div>
-                <FieldLabel helper="Did the lab request fresh stock or replenishment?">Needs New Stock</FieldLabel>
+              <div className="md:max-w-xl">
+                <FieldLabel helper="Replenishment request">Do they need fresh stock?</FieldLabel>
                 <Select
                   value={form.needsNewStock}
                   onValueChange={(value) => setForm({ ...form, needsNewStock: value })}
@@ -1538,21 +1768,22 @@ export default function AgentVisitPage({ currentUser, authToken }) {
           ) : null}
 
           {currentStepIndex === 3 ? (
-          <section className="space-y-4 rounded-lg border border-border bg-card p-3">
+          <section className={STEP_PANEL_CLASS}>
             <SectionTitle
               icon={CalendarDays}
               title={currentStep.title}
-              subtitle="Define the next step after this visit"
+              subtitle="Plan the next touchpoint"
+              accent
             />
 
             <div className="grid grid-cols-1 gap-4">
               <div>
-                <FieldLabel helper="What should happen next after this visit?">Next Action</FieldLabel>
+                <FieldLabel helper="Be specific so the team can follow up">What should happen next?</FieldLabel>
                 <Input
                   value={form.nextAction}
                   onChange={(e) => setForm({ ...form, nextAction: e.target.value })}
-                  placeholder="e.g. Call manager Friday, send pricing, revisit next week"
-                  className="h-12 rounded-xl text-base"
+                  placeholder="e.g. Call manager Friday, send pricing"
+                  className={FIELD_INPUT_CLASS}
                 />
               </div>
 
@@ -1612,13 +1843,14 @@ export default function AgentVisitPage({ currentUser, authToken }) {
 
           {currentStepIndex === qualificationStepIndex ? (
             <section
-              className="space-y-4 rounded-lg border border-border bg-card p-3"
+              className={cn(STEP_PANEL_CLASS, "md:max-w-none")}
               data-wizard-step="qualification"
             >
               <SectionTitle
                 icon={ClipboardCheck}
                 title={currentStep.title}
-                subtitle="Optional — update lab qualification and pipeline"
+                subtitle="Optional — helps prioritize this lab"
+                accent
               />
 
               {!labSelected ? (
@@ -1923,50 +2155,108 @@ export default function AgentVisitPage({ currentUser, authToken }) {
           ) : null}
 
           {currentStepIndex === AGENT_VISIT_SECTION_STEPS.length - 1 ? (
-            <section className="space-y-4 rounded-lg border border-border bg-card p-3">
+            <section className={cn(STEP_PANEL_CLASS, "md:max-w-none")}>
               <SectionTitle
-                icon={ClipboardCheck}
+                icon={CheckCircle2}
                 title={currentStep.title}
-                subtitle="Confirm details before saving"
+                subtitle="Check everything, then save your visit"
+                accent
               />
 
-              <div className="space-y-2 rounded-lg border bg-muted/20 p-3 text-sm">
-                <div className="flex justify-between gap-2">
-                  <span className="text-muted-foreground">Lab</span>
-                  <span className="font-medium text-right">
-                    {form.labName || selectedLab?.labName || "—"}
-                  </span>
+              {missingRequired.length > 0 ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                  <p className="font-semibold">Required before save:</p>
+                  <ul className="mt-1 list-inside list-disc">
+                    {missingRequired.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
                 </div>
-                <div className="flex justify-between gap-2">
-                  <span className="text-muted-foreground">Visit date</span>
-                  <span className="font-medium">{form.visitDate || "—"}</span>
+              ) : (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
+                  All required fields look good — you can save this visit.
                 </div>
-                <div className="flex justify-between gap-2">
-                  <span className="text-muted-foreground">Type / response</span>
-                  <span className="font-medium text-right">
+              )}
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <ReviewSummaryCard
+                  title="Lab"
+                  icon={Building2}
+                  onEdit={() => handleWizardGoToStep(0)}
+                  missing={
+                    !form.labId
+                      ? ["Lab not selected"]
+                      : !form.visitDate
+                        ? ["Visit date missing"]
+                        : []
+                  }
+                >
+                  <p className="font-medium">{form.labName || selectedLab?.labName || "—"}</p>
+                  <p className="text-xs text-muted-foreground">{form.visitDate || "—"}</p>
+                </ReviewSummaryCard>
+
+                <ReviewSummaryCard
+                  title="Visit outcome"
+                  icon={MapPin}
+                  onEdit={() => handleWizardGoToStep(1)}
+                  missing={
+                    !form.visitType
+                      ? ["Visit type missing"]
+                      : form.labResponse === "Converted" && !Number(form.soldValue || 0)
+                        ? ["Order value required"]
+                        : []
+                  }
+                >
+                  <p>
                     {form.visitType || "—"} · {displayResponseLabel(form.labResponse)}
-                  </span>
-                </div>
-                <div className="flex justify-between gap-2">
-                  <span className="text-muted-foreground">Sold value</span>
-                  <span className="font-medium">
-                    ₹{Number(form.soldValue || 0).toLocaleString("en-IN")}
-                  </span>
-                </div>
-                <div className="flex justify-between gap-2">
-                  <span className="text-muted-foreground">Next action</span>
-                  <span className="font-medium text-right">{form.nextAction || "—"}</span>
-                </div>
-                {hasQualificationData ? (
-                  <div className="flex justify-between gap-2 border-t border-border pt-2">
-                    <span className="text-muted-foreground">Qualification</span>
-                    <span className="font-medium text-right">
+                  </p>
+                  <p className="mt-1 text-xs">
+                    Sold ₹{Number(form.soldValue || 0).toLocaleString("en-IN")}
+                    {form.samplesGiven ? ` · Samples: ${form.samplesGiven}` : ""}
+                  </p>
+                </ReviewSummaryCard>
+
+                <ReviewSummaryCard title="Stock feedback" icon={Package} onEdit={() => handleWizardGoToStep(2)}>
+                  <p>
+                    Stock: {form.stockAvailable || "—"} · Needs new stock: {form.needsNewStock || "—"}
+                  </p>
+                </ReviewSummaryCard>
+
+                <ReviewSummaryCard
+                  title="Follow-up"
+                  icon={CalendarDays}
+                  onEdit={() => handleWizardGoToStep(3)}
+                  missing={
+                    (form.labResponse === "Need Follow-up" || form.nextFollowUpDate) &&
+                    !form.nextFollowUpType
+                      ? ["Follow-up type missing"]
+                      : []
+                  }
+                >
+                  <p>{form.nextAction || "No next action set"}</p>
+                  {form.nextFollowUpDate ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {form.nextFollowUpType || "Call"} · {form.nextFollowUpDate}
+                    </p>
+                  ) : null}
+                </ReviewSummaryCard>
+
+                <ReviewSummaryCard
+                  title="Qualification"
+                  icon={ClipboardCheck}
+                  onEdit={() => handleWizardGoToStep(qualificationStepIndex)}
+                  missing={[]}
+                >
+                  {hasQualificationData ? (
+                    <p>
                       {qualificationForm.qualificationBand
                         ? formatQualificationBandLabel(qualificationForm.qualificationBand)
-                        : qualificationForm.pipelineStageLabel || "Captured"}
-                    </span>
-                  </div>
-                ) : null}
+                        : qualificationForm.pipelineStageLabel || "On file"}
+                    </p>
+                  ) : (
+                    <p className="text-muted-foreground">Not captured (optional)</p>
+                  )}
+                </ReviewSummaryCard>
               </div>
             </section>
           ) : null}
@@ -1980,64 +2270,43 @@ export default function AgentVisitPage({ currentUser, authToken }) {
               saveDisabled={!canSaveVisit}
             />
           ) : (
-            <WizardNavButtons
-              currentIndex={currentStepIndex}
-              maxIndex={AGENT_VISIT_SECTION_STEPS.length - 1}
-              onBack={handleWizardBack}
-              onNext={handleWizardNext}
-              nextDisabled={currentStepIndex === 0 && !labSelected}
-            />
+            <>
+              <WizardNavButtons
+                currentIndex={currentStepIndex}
+                maxIndex={AGENT_VISIT_SECTION_STEPS.length - 1}
+                onBack={handleWizardBack}
+                onNext={handleWizardNext}
+                nextDisabled={currentStepIndex === 0 && !labSelected}
+                nextLabel="Continue"
+              />
+              <WizardMobileNavBar
+                currentIndex={currentStepIndex}
+                maxIndex={AGENT_VISIT_SECTION_STEPS.length - 1}
+                onBack={handleWizardBack}
+                onNext={handleWizardNext}
+                nextDisabled={currentStepIndex === 0 && !labSelected}
+                nextLabel="Continue"
+              />
+            </>
           )}
         </CardContent>
       </Card>
 
-      <section className="space-y-2">
-        <SectionTitle
-          icon={Clock3}
-          title="Recent visits"
-          subtitle="Latest records visible to you"
-        />
+      <section className="space-y-3">
+        <SectionTitle icon={Clock3} title="Recent visits" subtitle="Your latest field activity" />
 
         {visibleVisits.length === 0 ? (
           <EmptyState
             title="No recent visits"
-            description="Saved visits will appear here for quick reference."
+            description="Saved visits will appear here as a timeline."
           />
         ) : (
-          <div className="space-y-2" role="list">
+          <div className="space-y-0" role="list">
             {visibleVisits.slice(0, 6).map((visit, idx) => (
-              <Card
+              <RecentVisitTimelineCard
                 key={`${visit.id || visit.labName}-${idx}`}
-                className="rounded-lg border-border p-3 shadow-sm"
-              >
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <div className="font-semibold text-slate-900">{visit.labName || "—"}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {visit.area || "—"} · {visit.date || "—"}
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    <StatusBadge variant={visitTypeToVariant(visit.visitType)} compact>
-                      {visit.visitType || "—"}
-                    </StatusBadge>
-                    <StatusBadge variant="neutral" compact>
-                      {displayResponseLabel(visit.labResponse)}
-                    </StatusBadge>
-                  </div>
-                </div>
-                <div className="mt-2 text-sm text-slate-600">
-                  Sold: ₹{Number(visit.soldValue || 0).toLocaleString("en-IN")}
-                </div>
-                {visit.nextFollowUpDate ? (
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    Follow-up: {visit.nextFollowUpType || "Call"} · {visit.nextFollowUpDate}
-                  </div>
-                ) : null}
-                {visit.nextAction ? (
-                  <div className="text-xs text-muted-foreground">Next: {visit.nextAction}</div>
-                ) : null}
-              </Card>
+                visit={visit}
+              />
             ))}
           </div>
         )}
