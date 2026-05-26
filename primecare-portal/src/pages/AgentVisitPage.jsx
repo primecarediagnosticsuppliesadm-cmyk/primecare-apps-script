@@ -21,8 +21,11 @@ import {
   visitTypeToVariant,
 } from "@/utils/statusTokens";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
-import { usePredatorRenderTrace } from "@/predator/renderTrace.js";
+import { usePredatorRenderTrace, recordPredatorRenderStep } from "@/predator/renderTrace.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
+import { isPredatorEnabled } from "@/predator/predatorGuards.js";
+import { createPredatorEntry } from "@/predator/predatorSchema.js";
+import { predatorStore } from "@/predator/predatorStore.js";
 import {
   ClipboardCheck,
   MapPin,
@@ -32,11 +35,11 @@ import {
   PhoneCall,
   IndianRupee,
   MessageSquare,
-  Building2,
   Clock3,
-  AlertTriangle,
   Package,
   Loader2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 import { saveAgentVisit } from "@/api/primecareApi";
@@ -61,7 +64,7 @@ import {
   extractLabsCreditRows,
   normalizePortalLab,
 } from "@/utils/portalLabMapper";
-import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
+import { ALLOW_LEGACY_APPS_SCRIPT, IS_DEV, IS_QA } from "@/config/environment";
 import {
   computeQualificationScore,
   formatQualificationBandLabel,
@@ -185,6 +188,27 @@ function mapWorkspaceVisitToPageVisit(visit) {
   });
 }
 
+/** Wizard steps for Agent Visit page (includes mandatory qualification step). */
+export const AGENT_VISIT_SECTION_STEPS = [
+  { key: "basics", title: "Select Lab", shortTitle: "Lab" },
+  { key: "outcome", title: "Visit Outcome", shortTitle: "Outcome" },
+  { key: "stock", title: "Stock Feedback", shortTitle: "Stock" },
+  { key: "followup", title: "Follow-up", shortTitle: "Follow-up" },
+  { key: "qualification", title: "Qualification", shortTitle: "Qualify" },
+  { key: "review", title: "Review & Save", shortTitle: "Review" },
+];
+
+function assertAgentVisitSectionSteps() {
+  if (!(IS_DEV || IS_QA)) return;
+  const sectionSteps = AGENT_VISIT_SECTION_STEPS;
+  const hasQualification = sectionSteps.some((s) => s.key === "qualification");
+  if (!hasQualification) {
+    throw new Error("[AgentVisit] sectionSteps must include qualification step");
+  }
+}
+
+assertAgentVisitSectionSteps();
+
 const QUALIFICATION_DEFAULT = {
   labSize: "",
   monthlyConsumablesEstimate: "",
@@ -261,13 +285,186 @@ function isAgentUser(user) {
   return String(user?.role ?? "").trim().toLowerCase() === ROLES.AGENT;
 }
 
-function SaveVisitButton({ saving, onClick, className }) {
+function hasPersistedQualificationData(form, lastUpdated) {
+  if (lastUpdated) return true;
+  if (!form) return false;
+  return Boolean(
+    form.qualificationBand ||
+      form.qualificationScore != null ||
+      (Array.isArray(form.qualificationReasons) && form.qualificationReasons.length > 0) ||
+      (form.pipelineStage && form.pipelineStage !== "new") ||
+      String(form.labSize || "").trim() ||
+      String(form.monthlyConsumablesEstimate || "").trim() ||
+      String(form.currentSupplier || "").trim() ||
+      String(form.paymentTerms || "").trim() ||
+      String(form.decisionMaker || "").trim() ||
+      String(form.reagentRentalPotential || "").trim() ||
+      String(form.labOsFit || "").trim() ||
+      String(form.nextFollowUpDate || "").trim() ||
+      String(form.notes || "").trim() ||
+      String(form.pipelineNextAction || "").trim()
+  );
+}
+
+function WizardProgressBar({ currentIndex, total, title }) {
+  const progressPct = Math.round(((currentIndex + 1) / total) * 100);
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-slate-900">
+          Step {currentIndex + 1} of {total}
+        </p>
+        <p className="truncate text-sm text-muted-foreground">{title}</p>
+      </div>
+      <div
+        className="h-2 w-full overflow-hidden rounded-full bg-muted"
+        role="progressbar"
+        aria-valuenow={currentIndex + 1}
+        aria-valuemin={1}
+        aria-valuemax={total}
+        aria-label={`Step ${currentIndex + 1} of ${total}`}
+      >
+        <div
+          className="h-full rounded-full bg-[var(--pc-brand-primary)] transition-all duration-300"
+          style={{ width: `${progressPct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function VisitWizardStepper({ steps, currentIndex, labSelected, onGoToStep }) {
+  const qualificationIndex = steps.findIndex((s) => s.key === "qualification");
+
+  return (
+    <nav aria-label="Visit wizard progress" className="overflow-x-auto pb-1">
+      <ol className="flex min-w-max gap-2">
+        {steps.map((step, index) => {
+          const isActive = index === currentIndex;
+          const isComplete = index < currentIndex;
+          const needsLab = index > 0 && !labSelected;
+          const isQualification = index === qualificationIndex;
+          return (
+            <li key={step.key}>
+              <button
+                type="button"
+                disabled={needsLab}
+                onClick={() => {
+                  if (!needsLab) onGoToStep(index);
+                }}
+                className={cn(
+                  "flex min-w-[4.5rem] flex-col items-center rounded-xl px-2 py-2 text-center transition-colors",
+                  isActive &&
+                    "bg-[var(--pc-brand-primary)]/10 ring-2 ring-[var(--pc-brand-primary)]",
+                  isQualification &&
+                    labSelected &&
+                    !isActive &&
+                    "ring-1 ring-[var(--pc-brand-primary)]/40",
+                  needsLab && "cursor-not-allowed opacity-50"
+                )}
+              >
+                <span
+                  className={cn(
+                    "flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold",
+                    isActive
+                      ? "bg-[var(--pc-brand-primary)] text-white"
+                      : isComplete
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-muted text-muted-foreground"
+                  )}
+                >
+                  {index + 1}
+                </span>
+                <span className="mt-1 text-[10px] font-medium leading-tight sm:text-xs">
+                  {step.shortTitle}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
+  );
+}
+
+function WizardNavButtons({ currentIndex, maxIndex, onBack, onNext, nextDisabled }) {
+  return (
+    <div className="mt-4 flex gap-3 border-t border-border pt-4">
+      <Button
+        type="button"
+        variant="outline"
+        onClick={onBack}
+        disabled={currentIndex === 0}
+        className="h-12 min-h-12 flex-1 rounded-xl text-base"
+      >
+        <ChevronLeft className="mr-1 h-5 w-5" />
+        Back
+      </Button>
+      {currentIndex < maxIndex ? (
+        <Button
+          type="button"
+          onClick={onNext}
+          disabled={nextDisabled}
+          className="h-12 min-h-12 flex-1 rounded-xl text-base"
+        >
+          Next
+          <ChevronRight className="ml-1 h-5 w-5" />
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function WizardReviewFooter({ onBack, onSave, saving, saveDisabled }) {
+  return (
+    <>
+      <div className="mt-4 hidden gap-3 border-t border-border pt-4 md:flex">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onBack}
+          className="h-12 min-h-12 flex-1 rounded-xl text-base"
+        >
+          <ChevronLeft className="mr-1 h-5 w-5" />
+          Back
+        </Button>
+        <SaveVisitButton
+          saving={saving}
+          onClick={onSave}
+          disabled={saveDisabled}
+          className="flex-1"
+        />
+      </div>
+      <div className="fixed inset-x-0 bottom-0 z-50 md:hidden">
+        <div className="flex gap-3 border-t border-border bg-background/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] shadow-[0_-4px_16px_rgba(15,23,42,0.12)] backdrop-blur supports-[backdrop-filter]:bg-background/90">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onBack}
+            className="h-12 min-h-12 flex-1 rounded-xl text-base"
+          >
+            <ChevronLeft className="mr-1 h-5 w-5" />
+            Back
+          </Button>
+          <SaveVisitButton
+            saving={saving}
+            onClick={onSave}
+            disabled={saveDisabled}
+            className="flex-1"
+          />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function SaveVisitButton({ saving, onClick, className, disabled = false }) {
   return (
     <Button
       type="button"
       onClick={onClick}
-      disabled={saving}
-      className={cn("h-12 w-full rounded-lg text-base", className)}
+      disabled={saving || disabled}
+      className={cn("h-12 min-h-12 w-full rounded-xl text-base font-semibold", className)}
     >
       {saving ? (
         <>
@@ -294,8 +491,9 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [qualificationForm, setQualificationForm] = useState(QUALIFICATION_DEFAULT);
-  const [qualificationOpen, setQualificationOpen] = useState(false);
+  const [qualificationEditing, setQualificationEditing] = useState(false);
   const [qualificationLoading, setQualificationLoading] = useState(false);
   const [qualificationSaving, setQualificationSaving] = useState(false);
   const [qualificationLastUpdated, setQualificationLastUpdated] = useState("");
@@ -478,6 +676,10 @@ export default function AgentVisitPage({ currentUser, authToken }) {
     {
       recentVisitsCount: visibleVisits.length,
       todayVisits,
+      wizardStepCount: AGENT_VISIT_SECTION_STEPS.length,
+      hasQualificationStep: AGENT_VISIT_SECTION_STEPS.some((s) => s.key === "qualification"),
+      labSelected: Boolean(String(form.labId || "").trim()),
+      currentWizardStep: AGENT_VISIT_SECTION_STEPS[currentStepIndex]?.key ?? null,
     },
     !loading
   );
@@ -559,9 +761,92 @@ export default function AgentVisitPage({ currentUser, authToken }) {
     return resolveLabByOptionValue(visibleLabs, labId);
   }, [visibleLabs, form.labId]);
 
-  const showQualificationCapture = useMemo(() => {
-    return isAgentUser(currentUser) && Boolean(String(form.labId || "").trim());
-  }, [currentUser, form.labId]);
+  const hasQualificationData = useMemo(
+    () => hasPersistedQualificationData(qualificationForm, qualificationLastUpdated),
+    [qualificationForm, qualificationLastUpdated]
+  );
+
+  const labSelected = Boolean(String(form.labId || "").trim());
+
+  const canSaveVisit = useMemo(() => {
+    return Boolean(
+      String(form.agentName || "").trim() &&
+        String(form.visitDate || "").trim() &&
+        String(form.visitType || "").trim() &&
+        labSelected
+    );
+  }, [form.agentName, form.visitDate, form.visitType, labSelected]);
+
+  const currentStep = AGENT_VISIT_SECTION_STEPS[currentStepIndex] ?? AGENT_VISIT_SECTION_STEPS[0];
+  const qualificationStepIndex = AGENT_VISIT_SECTION_STEPS.findIndex(
+    (s) => s.key === "qualification"
+  );
+
+  useEffect(() => {
+    if (!labSelected || qualificationLoading) return;
+    setQualificationEditing(!hasQualificationData);
+  }, [labSelected, qualificationLoading, hasQualificationData, form.labId]);
+
+  useEffect(() => {
+    if (!isPredatorEnabled() || loading) return;
+
+    const hasQualStep = AGENT_VISIT_SECTION_STEPS.some((s) => s.key === "qualification");
+    if (!hasQualStep) {
+      predatorStore.recordError(
+        createPredatorEntry({
+          status: "FAIL",
+          module: "Agent Visits",
+          step: "ui.qualification_step.missing",
+          expected: "qualification step in AGENT_VISIT_SECTION_STEPS",
+          actual: AGENT_VISIT_SECTION_STEPS.map((s) => s.key),
+          rootCauseGuess: "Wizard sectionSteps drift removed qualification step",
+          suggestedFix: "Restore qualification step in AGENT_VISIT_SECTION_STEPS",
+          severity: "high",
+          issueClass: "render",
+        })
+      );
+    }
+
+    if (isAgentUser(currentUser) && labSelected) {
+      recordPredatorRenderStep("Agent Visits", "ui.qualification_step.eligible", {
+        labId: form.labId,
+        currentStep: currentStep.key,
+        qualificationStepIndex,
+      });
+    }
+  }, [
+    loading,
+    currentUser,
+    labSelected,
+    form.labId,
+    currentStep.key,
+    qualificationStepIndex,
+  ]);
+
+  useEffect(() => {
+    if (
+      loading ||
+      !isAgentUser(currentUser) ||
+      !labSelected ||
+      currentStepIndex !== qualificationStepIndex
+    ) {
+      return;
+    }
+    recordPredatorRenderStep("Agent Visits", "ui.qualification_step.render", {
+      labId: form.labId,
+      hasQualificationData,
+      qualificationEditing,
+    });
+  }, [
+    loading,
+    currentUser,
+    labSelected,
+    form.labId,
+    currentStepIndex,
+    qualificationStepIndex,
+    hasQualificationData,
+    qualificationEditing,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -615,10 +900,6 @@ export default function AgentVisitPage({ currentUser, authToken }) {
     return visibleCollections.find((c) => String(c.labId) === String(form.labId)) || null;
   }, [visibleCollections, form.labId]);
 
-  const selectedLabTotalSales = useMemo(() => {
-    return selectedLabVisits.reduce((sum, visit) => sum + Number(visit.soldValue || 0), 0);
-  }, [selectedLabVisits]);
-
   const pendingFollowUps = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     return visibleVisits.filter((v) => {
@@ -655,7 +936,8 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   function handleLabChange(value) {
     const raw = String(value ?? "").trim();
     if (!raw) {
-      setQualificationOpen(false);
+      setQualificationEditing(false);
+      setCurrentStepIndex(0);
       setForm((prev) => ({
         ...prev,
         labId: "",
@@ -672,7 +954,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
     const labId = selected ? labIdKey(selected.labId) : labIdKey(raw);
     const labName = selected ? String(selected.labName ?? "").trim() : "";
 
-    setQualificationOpen(false);
+    setQualificationEditing(false);
     setForm((prev) => ({
       ...prev,
       labId,
@@ -685,6 +967,68 @@ export default function AgentVisitPage({ currentUser, authToken }) {
       nextFollowUpDate: "",
       nextFollowUpType: "Call",
     }));
+  }
+
+  function validateStepBeforeNext(stepIndex) {
+    switch (stepIndex) {
+      case 0:
+        if (!String(form.agentName || "").trim() || !String(form.visitDate || "").trim()) {
+          showToast("error", "Fill agent name and visit date.");
+          return false;
+        }
+        if (!labSelected) {
+          showToast("error", "Select a lab to continue.");
+          return false;
+        }
+        return true;
+      case 1:
+        if (form.labResponse === "Converted" && !Number(form.soldValue || 0)) {
+          showToast("error", "Enter order value when the visit outcome is Order Confirmed.");
+          return false;
+        }
+        return true;
+      case 3:
+        if (
+          (form.labResponse === "Need Follow-up" || form.nextFollowUpDate) &&
+          !form.nextFollowUpType
+        ) {
+          showToast("error", "Please choose a follow-up type.");
+          return false;
+        }
+        return true;
+      case 4:
+        if (!labSelected) {
+          showToast("error", "Select a lab before qualification capture.");
+          return false;
+        }
+        return true;
+      default:
+        return true;
+    }
+  }
+
+  function handleWizardBack() {
+    setCurrentStepIndex((idx) => Math.max(0, idx - 1));
+  }
+
+  function handleWizardNext() {
+    if (!validateStepBeforeNext(currentStepIndex)) return;
+    setCurrentStepIndex((idx) =>
+      Math.min(idx + 1, AGENT_VISIT_SECTION_STEPS.length - 1)
+    );
+  }
+
+  function handleWizardGoToStep(index) {
+    if (index > 0 && !labSelected) {
+      showToast("error", "Select a lab in step 1 first.");
+      return;
+    }
+    if (index > currentStepIndex) {
+      for (let step = currentStepIndex; step < index; step += 1) {
+        if (!validateStepBeforeNext(step)) return;
+      }
+    }
+    setCurrentStepIndex(index);
   }
 
   async function handleSaveQualification() {
@@ -726,6 +1070,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
 
       setQualificationForm(normalizeQualificationRow(res.data));
       setQualificationLastUpdated(res?.data?.updated_at || "");
+      setQualificationEditing(false);
       showToast("success", "Qualification saved");
     } catch (err) {
       showToast("error", err?.message || "Failed to save qualification");
@@ -879,6 +1224,8 @@ export default function AgentVisitPage({ currentUser, authToken }) {
         nextFollowUpType: "Call",
         notes: "",
       }));
+      setCurrentStepIndex(0);
+      setQualificationEditing(false);
     } catch (err) {
       await logClientError({
         authToken,
@@ -900,32 +1247,43 @@ export default function AgentVisitPage({ currentUser, authToken }) {
     });
   }
 
+  const isReviewStep = currentStepIndex === AGENT_VISIT_SECTION_STEPS.length - 1;
+
   if (loading) {
     return <AgentVisitLoading />;
   }
 
   return (
-    <div className="space-y-3 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-6">
+    <div
+      className={cn(
+        "space-y-3",
+        isReviewStep
+          ? "pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-6"
+          : "pb-6"
+      )}
+    >
       <header>
         <div className="flex items-center gap-2">
           <ClipboardCheck className="h-5 w-5 text-[var(--pc-brand-primary)]" />
           <h1 className={typography.pageTitle}>Agent Visits</h1>
         </div>
         <p className={cn(typography.pageSubtitle, "mt-0.5")}>
-          Log field visits step by step. Select a lab, capture the outcome, then save.
+          Log field visits with the step-by-step wizard. Select a lab, then move through each step to save.
         </p>
       </header>
 
-      <KpiCardGrid columns={4}>
-        <KpiCard title="My labs" value={visibleLabs.length} icon={Users} />
-        <KpiCard title="Today visits" value={todayVisits} icon={ClipboardCheck} />
-        <KpiCard title="Follow-ups" value={pendingFollowUps} icon={PhoneCall} />
-        <KpiCard
-          title="Sales logged"
-          value={`₹${totalSalesLogged.toLocaleString("en-IN")}`}
-          icon={IndianRupee}
-        />
-      </KpiCardGrid>
+      <div className="hidden md:block">
+        <KpiCardGrid columns={4}>
+          <KpiCard title="My labs" value={visibleLabs.length} icon={Users} />
+          <KpiCard title="Today visits" value={todayVisits} icon={ClipboardCheck} />
+          <KpiCard title="Follow-ups" value={pendingFollowUps} icon={PhoneCall} />
+          <KpiCard
+            title="Sales logged"
+            value={`₹${totalSalesLogged.toLocaleString("en-IN")}`}
+            icon={IndianRupee}
+          />
+        </KpiCardGrid>
+      </div>
 
       {loadError ? (
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -943,22 +1301,38 @@ export default function AgentVisitPage({ currentUser, authToken }) {
       ) : null}
 
       <Card className="rounded-lg border-border shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Log field visit</CardTitle>
-          <CardDescription className="text-xs">
-            Sections 1–4 are required for every visit. Qualification is optional.
-          </CardDescription>
+        <CardHeader className="space-y-3 pb-2">
+          <div>
+            <CardTitle className="text-base">Log field visit</CardTitle>
+            <CardDescription className="text-xs">
+              Complete each step — save only on review.
+            </CardDescription>
+          </div>
+          <WizardProgressBar
+            currentIndex={currentStepIndex}
+            total={AGENT_VISIT_SECTION_STEPS.length}
+            title={currentStep.title}
+          />
         </CardHeader>
 
-        <CardContent className="space-y-6">
-          <section className="space-y-4 rounded-lg border border-border bg-card p-3">
+        <CardContent className="space-y-4">
+          <VisitWizardStepper
+            steps={AGENT_VISIT_SECTION_STEPS}
+            currentIndex={currentStepIndex}
+            labSelected={labSelected}
+            onGoToStep={handleWizardGoToStep}
+          />
+
+          <div>
+          {currentStepIndex === 0 ? (
+          <section className="space-y-4 rounded-xl border border-border bg-card p-3">
             <SectionTitle
               icon={Users}
-              title="1. Lab & visit basics"
-              subtitle="Who visited, which lab, and when"
+              title={currentStep.title}
+              subtitle="Choose lab and confirm visit date"
             />
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4">
               <div>
                 <FieldLabel helper="Auto-filled from logged-in user">Agent Name</FieldLabel>
                 <Input
@@ -979,10 +1353,10 @@ export default function AgentVisitPage({ currentUser, authToken }) {
                 />
               </div>
 
-              <div className="md:col-span-2">
+              <div>
                 <FieldLabel helper="Select the lab to auto-load context">Select lab</FieldLabel>
                 <select
-                  className="h-11 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground shadow-sm outline-none focus:ring-2 focus:ring-ring"
+                  className="h-12 w-full rounded-xl border border-input bg-background px-3 text-base text-foreground shadow-sm outline-none focus:ring-2 focus:ring-ring"
                   value={form.labId ? labIdKey(form.labId) : ""}
                   onChange={(e) => handleLabChange(e.target.value)}
                 >
@@ -994,60 +1368,23 @@ export default function AgentVisitPage({ currentUser, authToken }) {
                   ))}
                 </select>
               </div>
-
-              <div>
-                <FieldLabel helper="Auto-filled from selected lab">Lab Name</FieldLabel>
-                <Input
-                  value={form.labName}
-                  onChange={(e) => setForm({ ...form, labName: e.target.value })}
-                  placeholder="Lab name"
-                  className="h-12 rounded-xl text-base"
-                />
-              </div>
-
-              <div>
-                <FieldLabel helper="Area or locality of the lab">Area / Locality</FieldLabel>
-                <Input
-                  value={form.area}
-                  onChange={(e) => setForm({ ...form, area: e.target.value })}
-                  placeholder="Area / locality"
-                  className="h-12 rounded-xl text-base"
-                />
-              </div>
             </div>
 
             {selectedLab ? (
-              <div className="rounded-2xl border bg-slate-50 p-4">
-                <div className="mb-3 flex items-center gap-2">
-                  <Building2 className="h-4 w-4 text-slate-700" />
-                  <div className="text-sm font-semibold text-slate-900">Selected Lab Snapshot</div>
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <SnapshotItem
-                    icon={Building2}
-                    label="Lab"
-                    value={`${selectedLab.labName} (${selectedLab.labId})`}
-                  />
-                  <SnapshotItem
-                    icon={MapPin}
-                    label="Area"
-                    value={selectedLab.area || "-"}
-                  />
-                  <SnapshotItem
-                    icon={Clock3}
-                    label="Last Visit"
-                    value={latestLabVisit?.date || "No previous visit"}
-                  />
+              <div className="rounded-xl border bg-slate-50 p-3">
+                <p className="text-sm font-semibold text-slate-900">
+                  {selectedLab.labName}{" "}
+                  <span className="font-normal text-muted-foreground">({selectedLab.labId})</span>
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {selectedLab.area || form.area || "—"} · Last visit:{" "}
+                  {latestLabVisit?.date || "None"}
+                </p>
+                <div className="mt-3 grid grid-cols-2 gap-2">
                   <SnapshotItem
                     icon={MessageSquare}
-                    label="Last Response"
+                    label="Last response"
                     value={displayResponseLabel(latestLabVisit?.labResponse || "")}
-                  />
-                  <SnapshotItem
-                    icon={IndianRupee}
-                    label="Total Sales"
-                    value={`₹${Number(selectedLabTotalSales || 0).toLocaleString()}`}
                   />
                   <SnapshotItem
                     icon={IndianRupee}
@@ -1055,30 +1392,17 @@ export default function AgentVisitPage({ currentUser, authToken }) {
                     value={`₹${Number(selectedLabCollection?.outstandingAmount || 0).toLocaleString()}`}
                     tone={selectedLabCollection?.outstandingAmount > 0 ? "warn" : "default"}
                   />
-                  <SnapshotItem
-                    icon={AlertTriangle}
-                    label="Credit Hold"
-                    value={selectedLabCollection?.creditHold || "OK"}
-                    tone={String(selectedLabCollection?.creditHold || "").toUpperCase() === "HOLD" ? "danger" : "default"}
-                  />
-                  <SnapshotItem
-                    icon={CalendarDays}
-                    label="Next Follow-up"
-                    value={
-                      latestLabVisit?.nextFollowUpDate
-                        ? `${latestLabVisit.nextFollowUpType || "Follow-up"} • ${latestLabVisit.nextFollowUpDate}`
-                        : "Not scheduled"
-                    }
-                  />
                 </div>
               </div>
             ) : null}
           </section>
+          ) : null}
 
+          {currentStepIndex === 1 ? (
           <section className="space-y-4 rounded-lg border border-border bg-card p-3">
             <SectionTitle
               icon={MapPin}
-              title="2. Visit outcome & sales"
+              title={currentStep.title}
               subtitle="Visit type, lab response, demo, and order value"
             />
 
@@ -1160,11 +1484,13 @@ export default function AgentVisitPage({ currentUser, authToken }) {
               </div>
             </div>
           </section>
+          ) : null}
 
+          {currentStepIndex === 2 ? (
           <section className="space-y-4 rounded-lg border border-border bg-card p-3">
             <SectionTitle
               icon={Package}
-              title="3. Stock feedback"
+              title={currentStep.title}
               subtitle="Capture stock availability at the lab"
             />
 
@@ -1209,11 +1535,13 @@ export default function AgentVisitPage({ currentUser, authToken }) {
               </div>
             ) : null}
           </section>
+          ) : null}
 
+          {currentStepIndex === 3 ? (
           <section className="space-y-4 rounded-lg border border-border bg-card p-3">
             <SectionTitle
               icon={CalendarDays}
-              title="4. Next action & follow-up"
+              title={currentStep.title}
               subtitle="Define the next step after this visit"
             />
 
@@ -1280,290 +1608,393 @@ export default function AgentVisitPage({ currentUser, authToken }) {
               </div>
             </div>
           </section>
+          ) : null}
 
-          <div className="hidden border-t border-border pt-4 md:block">
-            <SaveVisitButton
-              saving={saving}
-              onClick={handleSaveVisit}
-              className="max-w-md"
-            />
-          </div>
+          {currentStepIndex === qualificationStepIndex ? (
+            <section
+              className="space-y-4 rounded-lg border border-border bg-card p-3"
+              data-wizard-step="qualification"
+            >
+              <SectionTitle
+                icon={ClipboardCheck}
+                title={currentStep.title}
+                subtitle="Optional — update lab qualification and pipeline"
+              />
 
-          {showQualificationCapture ? (
-            <section className="rounded-lg border border-border bg-card">
-              <button
-                type="button"
-                className="flex w-full items-center justify-between gap-2 p-3 text-left"
-                onClick={() => setQualificationOpen((v) => !v)}
-                aria-expanded={qualificationOpen}
-              >
-                <SectionTitle
-                  icon={ClipboardCheck}
-                  title="5. Qualification capture (optional)"
-                  subtitle="Collapsed by default — expand when needed"
-                />
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {qualificationOpen ? "Hide" : "Expand"}
-                </span>
-              </button>
-
-              {qualificationOpen ? (
-                <div className="space-y-4 border-t border-border px-3 pb-3 pt-3">
-                  {qualificationLoading ? (
-                    <ListSkeleton rows={3} />
-                  ) : (
-                    <>
-                      {qualificationForm.qualificationBand ||
-                      qualificationForm.pipelineStage ? (
-                        <div className="rounded-lg border bg-muted/30 p-3">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <StatusBadge
-                              variant={pipelineStageToVariant(qualificationForm.pipelineStage)}
-                              compact
-                            >
-                              {qualificationForm.pipelineStageLabel ||
-                                getPipelineStageLabel(qualificationForm.pipelineStage)}
-                            </StatusBadge>
-                            <span className="text-[10px] text-muted-foreground">read-only</span>
-                            {qualificationForm.qualificationBand ? (
-                              <StatusBadge
-                                variant={qualificationBandToVariant(
-                                  qualificationForm.qualificationBand
-                                )}
-                                compact
-                              >
-                                {formatQualificationBandLabel(qualificationForm.qualificationBand)}
-                              </StatusBadge>
-                            ) : null}
-                            {qualificationForm.qualificationScore != null ? (
-                              <span className="text-sm text-slate-700">
-                                Score: {qualificationForm.qualificationScore}
-                              </span>
-                            ) : null}
-                          </div>
-                          {qualificationForm.qualificationReasons?.length > 0 ? (
-                            <ul className="mt-2 list-inside list-disc text-xs text-muted-foreground">
-                              {qualificationForm.qualificationReasons.slice(0, 6).map((reason) => (
-                                <li key={reason}>{reason}</li>
-                              ))}
-                            </ul>
-                          ) : null}
-                        </div>
+              {!labSelected ? (
+                <p className="text-sm text-muted-foreground">
+                  Select a lab in step 1 to capture or review qualification.
+                </p>
+              ) : qualificationLoading ? (
+                <ListSkeleton rows={3} />
+              ) : hasQualificationData && !qualificationEditing ? (
+                <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge
+                      variant={pipelineStageToVariant(qualificationForm.pipelineStage)}
+                      compact
+                    >
+                      {qualificationForm.pipelineStageLabel ||
+                        getPipelineStageLabel(qualificationForm.pipelineStage)}
+                    </StatusBadge>
+                    {qualificationForm.qualificationBand ? (
+                      <StatusBadge
+                        variant={qualificationBandToVariant(qualificationForm.qualificationBand)}
+                        compact
+                      >
+                        {formatQualificationBandLabel(qualificationForm.qualificationBand)}
+                      </StatusBadge>
+                    ) : null}
+                    {qualificationForm.qualificationScore != null ? (
+                      <span className="text-sm text-slate-700">
+                        Score: {qualificationForm.qualificationScore}
+                      </span>
+                    ) : null}
+                  </div>
+                  {qualificationForm.qualificationReasons?.length > 0 ? (
+                    <ul className="list-inside list-disc text-xs text-muted-foreground">
+                      {qualificationForm.qualificationReasons.slice(0, 4).map((reason) => (
+                        <li key={reason}>{reason}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {qualificationForm.pipelineNextAction ? (
+                    <p className="text-xs text-muted-foreground">
+                      Next action: {qualificationForm.pipelineNextAction}
+                    </p>
+                  ) : null}
+                  <p className="text-xs text-muted-foreground">
+                    {qualificationLastUpdated
+                      ? `Last updated: ${new Date(qualificationLastUpdated).toLocaleString()}`
+                      : "Qualification on file for this lab."}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-10 rounded-lg"
+                    onClick={() => setQualificationEditing(true)}
+                  >
+                    Edit Qualification
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {qualificationForm.qualificationBand || qualificationForm.pipelineStage ? (
+                    <div className="rounded-lg border bg-muted/30 p-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusBadge
+                          variant={pipelineStageToVariant(qualificationForm.pipelineStage)}
+                          compact
+                        >
+                          {qualificationForm.pipelineStageLabel ||
+                            getPipelineStageLabel(qualificationForm.pipelineStage)}
+                        </StatusBadge>
+                        <span className="text-[10px] text-muted-foreground">read-only</span>
+                        {qualificationForm.qualificationBand ? (
+                          <StatusBadge
+                            variant={qualificationBandToVariant(
+                              qualificationForm.qualificationBand
+                            )}
+                            compact
+                          >
+                            {formatQualificationBandLabel(qualificationForm.qualificationBand)}
+                          </StatusBadge>
+                        ) : null}
+                        {qualificationForm.qualificationScore != null ? (
+                          <span className="text-sm text-slate-700">
+                            Score: {qualificationForm.qualificationScore}
+                          </span>
+                        ) : null}
+                      </div>
+                      {qualificationForm.qualificationReasons?.length > 0 ? (
+                        <ul className="mt-2 list-inside list-disc text-xs text-muted-foreground">
+                          {qualificationForm.qualificationReasons.slice(0, 6).map((reason) => (
+                            <li key={reason}>{reason}</li>
+                          ))}
+                        </ul>
                       ) : null}
+                    </div>
+                  ) : null}
 
-                      <div>
-                        <FieldLabel helper="Your next step for this lab in the pipeline">
-                          Pipeline next action
-                        </FieldLabel>
-                        <Input
-                          value={qualificationForm.pipelineNextAction}
-                          onChange={(e) =>
-                            setQualificationForm((prev) => ({
-                              ...prev,
-                              pipelineNextAction: e.target.value,
-                            }))
-                          }
-                          placeholder="e.g. Send sample kit, schedule demo call"
-                          className="h-11 rounded-lg text-sm"
-                        />
-                      </div>
+                  <div>
+                    <FieldLabel helper="Your next step for this lab in the pipeline">
+                      Pipeline next action
+                    </FieldLabel>
+                    <Input
+                      value={qualificationForm.pipelineNextAction}
+                      onChange={(e) =>
+                        setQualificationForm((prev) => ({
+                          ...prev,
+                          pipelineNextAction: e.target.value,
+                        }))
+                      }
+                      placeholder="e.g. Send sample kit, schedule demo call"
+                      className="h-11 rounded-lg text-sm"
+                    />
+                  </div>
 
-                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                        <div>
-                          <FieldLabel>Lab size</FieldLabel>
-                          <Select
-                            value={qualificationForm.labSize || ""}
-                            onValueChange={(value) =>
-                              setQualificationForm((prev) => ({ ...prev, labSize: value }))
-                            }
-                          >
-                            <SelectTrigger className="h-11 rounded-lg text-sm">
-                              <SelectValue placeholder="Select lab size" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Small">Small</SelectItem>
-                              <SelectItem value="Medium">Medium</SelectItem>
-                              <SelectItem value="Large">Large</SelectItem>
-                              <SelectItem value="Enterprise">Enterprise</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div>
+                      <FieldLabel>Lab size</FieldLabel>
+                      <Select
+                        value={qualificationForm.labSize || ""}
+                        onValueChange={(value) =>
+                          setQualificationForm((prev) => ({ ...prev, labSize: value }))
+                        }
+                      >
+                        <SelectTrigger className="h-11 rounded-lg text-sm">
+                          <SelectValue placeholder="Select lab size" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Small">Small</SelectItem>
+                          <SelectItem value="Medium">Medium</SelectItem>
+                          <SelectItem value="Large">Large</SelectItem>
+                          <SelectItem value="Enterprise">Enterprise</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
 
-                        <div>
-                          <FieldLabel>Monthly consumables (₹)</FieldLabel>
-                          <Input
-                            type="number"
-                            value={qualificationForm.monthlyConsumablesEstimate}
-                            onChange={(e) =>
-                              setQualificationForm((prev) => ({
-                                ...prev,
-                                monthlyConsumablesEstimate: e.target.value,
-                              }))
-                            }
-                            placeholder="e.g. 50000"
-                            className="h-11 rounded-lg text-sm"
-                          />
-                        </div>
+                    <div>
+                      <FieldLabel>Monthly consumables (₹)</FieldLabel>
+                      <Input
+                        type="number"
+                        value={qualificationForm.monthlyConsumablesEstimate}
+                        onChange={(e) =>
+                          setQualificationForm((prev) => ({
+                            ...prev,
+                            monthlyConsumablesEstimate: e.target.value,
+                          }))
+                        }
+                        placeholder="e.g. 50000"
+                        className="h-11 rounded-lg text-sm"
+                      />
+                    </div>
 
-                        <div>
-                          <FieldLabel>Current supplier</FieldLabel>
-                          <Input
-                            value={qualificationForm.currentSupplier}
-                            onChange={(e) =>
-                              setQualificationForm((prev) => ({
-                                ...prev,
-                                currentSupplier: e.target.value,
-                              }))
-                            }
-                            className="h-11 rounded-lg text-sm"
-                          />
-                        </div>
+                    <div>
+                      <FieldLabel>Current supplier</FieldLabel>
+                      <Input
+                        value={qualificationForm.currentSupplier}
+                        onChange={(e) =>
+                          setQualificationForm((prev) => ({
+                            ...prev,
+                            currentSupplier: e.target.value,
+                          }))
+                        }
+                        className="h-11 rounded-lg text-sm"
+                      />
+                    </div>
 
-                        <div>
-                          <FieldLabel>Payment terms</FieldLabel>
-                          <Input
-                            value={qualificationForm.paymentTerms}
-                            onChange={(e) =>
-                              setQualificationForm((prev) => ({
-                                ...prev,
-                                paymentTerms: e.target.value,
-                              }))
-                            }
-                            className="h-11 rounded-lg text-sm"
-                          />
-                        </div>
+                    <div>
+                      <FieldLabel>Payment terms</FieldLabel>
+                      <Input
+                        value={qualificationForm.paymentTerms}
+                        onChange={(e) =>
+                          setQualificationForm((prev) => ({
+                            ...prev,
+                            paymentTerms: e.target.value,
+                          }))
+                        }
+                        className="h-11 rounded-lg text-sm"
+                      />
+                    </div>
 
-                        <div>
-                          <FieldLabel>Decision maker</FieldLabel>
-                          <Input
-                            value={qualificationForm.decisionMaker}
-                            onChange={(e) =>
-                              setQualificationForm((prev) => ({
-                                ...prev,
-                                decisionMaker: e.target.value,
-                              }))
-                            }
-                            className="h-11 rounded-lg text-sm"
-                          />
-                        </div>
+                    <div>
+                      <FieldLabel>Decision maker</FieldLabel>
+                      <Input
+                        value={qualificationForm.decisionMaker}
+                        onChange={(e) =>
+                          setQualificationForm((prev) => ({
+                            ...prev,
+                            decisionMaker: e.target.value,
+                          }))
+                        }
+                        className="h-11 rounded-lg text-sm"
+                      />
+                    </div>
 
-                        <div>
-                          <FieldLabel>Reagent rental potential</FieldLabel>
-                          <Select
-                            value={qualificationForm.reagentRentalPotential || ""}
-                            onValueChange={(value) =>
-                              setQualificationForm((prev) => ({
-                                ...prev,
-                                reagentRentalPotential: value,
-                              }))
-                            }
-                          >
-                            <SelectTrigger className="h-11 rounded-lg text-sm">
-                              <SelectValue placeholder="Select potential" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Low">Low</SelectItem>
-                              <SelectItem value="Medium">Medium</SelectItem>
-                              <SelectItem value="High">High</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
+                    <div>
+                      <FieldLabel>Reagent rental potential</FieldLabel>
+                      <Select
+                        value={qualificationForm.reagentRentalPotential || ""}
+                        onValueChange={(value) =>
+                          setQualificationForm((prev) => ({
+                            ...prev,
+                            reagentRentalPotential: value,
+                          }))
+                        }
+                      >
+                        <SelectTrigger className="h-11 rounded-lg text-sm">
+                          <SelectValue placeholder="Select potential" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Low">Low</SelectItem>
+                          <SelectItem value="Medium">Medium</SelectItem>
+                          <SelectItem value="High">High</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
 
-                        <div>
-                          <FieldLabel>Lab OS fit</FieldLabel>
-                          <Select
-                            value={qualificationForm.labOsFit || ""}
-                            onValueChange={(value) =>
-                              setQualificationForm((prev) => ({ ...prev, labOsFit: value }))
-                            }
-                          >
-                            <SelectTrigger className="h-11 rounded-lg text-sm">
-                              <SelectValue placeholder="Select fit" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Low">Low</SelectItem>
-                              <SelectItem value="Medium">Medium</SelectItem>
-                              <SelectItem value="High">High</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
+                    <div>
+                      <FieldLabel>Lab OS fit</FieldLabel>
+                      <Select
+                        value={qualificationForm.labOsFit || ""}
+                        onValueChange={(value) =>
+                          setQualificationForm((prev) => ({ ...prev, labOsFit: value }))
+                        }
+                      >
+                        <SelectTrigger className="h-11 rounded-lg text-sm">
+                          <SelectValue placeholder="Select fit" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Low">Low</SelectItem>
+                          <SelectItem value="Medium">Medium</SelectItem>
+                          <SelectItem value="High">High</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
 
-                        <div>
-                          <FieldLabel>Qualification follow-up date</FieldLabel>
-                          <Input
-                            type="date"
-                            value={qualificationForm.nextFollowUpDate}
-                            onChange={(e) =>
-                              setQualificationForm((prev) => ({
-                                ...prev,
-                                nextFollowUpDate: e.target.value,
-                              }))
-                            }
-                            className="h-11 rounded-lg text-sm"
-                          />
-                        </div>
-                      </div>
+                    <div>
+                      <FieldLabel>Qualification follow-up date</FieldLabel>
+                      <Input
+                        type="date"
+                        value={qualificationForm.nextFollowUpDate}
+                        onChange={(e) =>
+                          setQualificationForm((prev) => ({
+                            ...prev,
+                            nextFollowUpDate: e.target.value,
+                          }))
+                        }
+                        className="h-11 rounded-lg text-sm"
+                      />
+                    </div>
+                  </div>
 
-                      <div>
-                        <FieldLabel>Founder review (read-only)</FieldLabel>
-                        <Input
-                          value={qualificationForm.founderReviewStatus || "pending"}
-                          readOnly
-                          className="h-11 rounded-lg bg-muted/40 text-sm"
-                        />
-                      </div>
+                  <div>
+                    <FieldLabel>Founder review (read-only)</FieldLabel>
+                    <Input
+                      value={qualificationForm.founderReviewStatus || "pending"}
+                      readOnly
+                      className="h-11 rounded-lg bg-muted/40 text-sm"
+                    />
+                  </div>
 
-                      <div>
-                        <FieldLabel>Qualification notes</FieldLabel>
-                        <Textarea
-                          value={qualificationForm.notes}
-                          onChange={(e) =>
-                            setQualificationForm((prev) => ({ ...prev, notes: e.target.value }))
-                          }
-                          placeholder="Objections, buying cycle, competitor notes…"
-                          className="min-h-[88px] rounded-lg text-sm"
-                        />
-                      </div>
+                  <div>
+                    <FieldLabel>Qualification notes</FieldLabel>
+                    <Textarea
+                      value={qualificationForm.notes}
+                      onChange={(e) =>
+                        setQualificationForm((prev) => ({ ...prev, notes: e.target.value }))
+                      }
+                      placeholder="Objections, buying cycle, competitor notes…"
+                      className="min-h-[88px] rounded-lg text-sm"
+                    />
+                  </div>
 
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      onClick={handleSaveQualification}
+                      disabled={qualificationSaving || qualificationLoading}
+                      className="h-11 rounded-lg"
+                    >
+                      {qualificationSaving ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Saving qualification…
+                        </>
+                      ) : (
+                        "Save qualification"
+                      )}
+                    </Button>
+                    {hasQualificationData ? (
                       <Button
                         type="button"
-                        onClick={handleSaveQualification}
-                        disabled={qualificationSaving || qualificationLoading}
-                        className="h-11 w-full rounded-lg sm:w-auto"
+                        variant="ghost"
+                        className="h-11 rounded-lg"
+                        onClick={() => setQualificationEditing(false)}
                       >
-                        {qualificationSaving ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Saving qualification…
-                          </>
-                        ) : (
-                          "Save qualification"
-                        )}
+                        Cancel edit
                       </Button>
-                      <p className="text-xs text-muted-foreground">
-                        {qualificationLastUpdated
-                          ? `Last updated: ${new Date(qualificationLastUpdated).toLocaleString()}`
-                          : "No qualification saved yet for this lab."}
-                      </p>
-                    </>
-                  )}
+                    ) : null}
+                  </div>
                 </div>
-              ) : null}
+              )}
             </section>
           ) : null}
+
+          {currentStepIndex === AGENT_VISIT_SECTION_STEPS.length - 1 ? (
+            <section className="space-y-4 rounded-lg border border-border bg-card p-3">
+              <SectionTitle
+                icon={ClipboardCheck}
+                title={currentStep.title}
+                subtitle="Confirm details before saving"
+              />
+
+              <div className="space-y-2 rounded-lg border bg-muted/20 p-3 text-sm">
+                <div className="flex justify-between gap-2">
+                  <span className="text-muted-foreground">Lab</span>
+                  <span className="font-medium text-right">
+                    {form.labName || selectedLab?.labName || "—"}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-muted-foreground">Visit date</span>
+                  <span className="font-medium">{form.visitDate || "—"}</span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-muted-foreground">Type / response</span>
+                  <span className="font-medium text-right">
+                    {form.visitType || "—"} · {displayResponseLabel(form.labResponse)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-muted-foreground">Sold value</span>
+                  <span className="font-medium">
+                    ₹{Number(form.soldValue || 0).toLocaleString("en-IN")}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-muted-foreground">Next action</span>
+                  <span className="font-medium text-right">{form.nextAction || "—"}</span>
+                </div>
+                {hasQualificationData ? (
+                  <div className="flex justify-between gap-2 border-t border-border pt-2">
+                    <span className="text-muted-foreground">Qualification</span>
+                    <span className="font-medium text-right">
+                      {qualificationForm.qualificationBand
+                        ? formatQualificationBandLabel(qualificationForm.qualificationBand)
+                        : qualificationForm.pipelineStageLabel || "Captured"}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+          </div>
+
+          {isReviewStep ? (
+            <WizardReviewFooter
+              onBack={handleWizardBack}
+              onSave={handleSaveVisit}
+              saving={saving}
+              saveDisabled={!canSaveVisit}
+            />
+          ) : (
+            <WizardNavButtons
+              currentIndex={currentStepIndex}
+              maxIndex={AGENT_VISIT_SECTION_STEPS.length - 1}
+              onBack={handleWizardBack}
+              onNext={handleWizardNext}
+              nextDisabled={currentStepIndex === 0 && !labSelected}
+            />
+          )}
         </CardContent>
       </Card>
-
-      <div className="fixed inset-x-0 bottom-0 z-50 md:hidden">
-        <div className="border-t border-border bg-background/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] shadow-[0_-4px_16px_rgba(15,23,42,0.12)] backdrop-blur supports-[backdrop-filter]:bg-background/90">
-          <SaveVisitButton saving={saving} onClick={handleSaveVisit} />
-        </div>
-      </div>
 
       <section className="space-y-2">
         <SectionTitle
           icon={Clock3}
-          title="6. Recent visits"
+          title="Recent visits"
           subtitle="Latest records visible to you"
         />
 

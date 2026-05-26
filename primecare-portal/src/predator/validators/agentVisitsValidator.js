@@ -94,6 +94,47 @@ export async function validateAgentVisitsModule({ ctx, currentUser = null, rende
       );
     }
 
+    if (rendered?.hasQualificationStep === false) {
+      entries.push(
+        createPredatorEntry({
+          status: "FAIL",
+          module: "Agent Visits",
+          step: "ui.qualification_step.config",
+          expected: "hasQualificationStep true in wizard sectionSteps",
+          actual: rendered,
+          rootCauseGuess: "Agent visit wizard sectionSteps missing qualification step",
+          suggestedFix: "Include qualification key in AGENT_VISIT_SECTION_STEPS",
+          severity: "high",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
+
+    if (
+      ctx.role === "agent" &&
+      rendered?.labSelected &&
+      rendered?.currentWizardStep === "qualification" &&
+      rendered?.hasQualificationStep !== true
+    ) {
+      entries.push(
+        createPredatorEntry({
+          status: "FAIL",
+          module: "Agent Visits",
+          step: "ui.qualification_step.agent_lab_select",
+          expected: "Qualification wizard step available after lab select",
+          actual: rendered,
+          rootCauseGuess: "Wizard guard blocked qualification step for agent with lab selected",
+          suggestedFix: "Ensure step 5 renders when lab is selected",
+          severity: "high",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
+
     if (visitsRes.error) {
       entries.push(
         createPredatorEntry({
