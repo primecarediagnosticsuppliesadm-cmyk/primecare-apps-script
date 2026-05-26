@@ -41,6 +41,10 @@ import {
   recordPredatorApiExecution,
 } from "@/predator/apiExecutionTrace.js";
 import { recordPredatorTiming, predatorTrace } from "@/predator/predatorTiming.js";
+import {
+  AGENT_VISITS_INSERT_COLUMNS,
+  sanitizeRowToKnownColumns,
+} from "@/predator/schemaAwareness.js";
 import { isPerfLogEnabled, perfLog, perfTime, shouldRunDashboardKpiAudit } from "@/utils/perfLog.js";
 
 export { labIdKey, normalizeLabIdKey };
@@ -2747,9 +2751,98 @@ export async function getAgentWorkspaceRead(currentUser) {
 }
 
 /**
+ * Fold visit fields that are not agent_visits columns into notes (schema-safe remap).
+ * @param {string} baseNotes
+ * @param {Object} meta
+ */
+function appendAgentVisitNoteMetadata(baseNotes, meta) {
+  const parts = [];
+  if (meta.labResponse) parts.push(`Response: ${meta.labResponse}`);
+  const sold = num(meta.soldValue);
+  if (sold > 0) parts.push(`Sold: ₹${sold}`);
+  if (meta.area) parts.push(`Area: ${meta.area}`);
+  if (meta.labName) parts.push(`Lab: ${meta.labName}`);
+  if (!parts.length) return str(baseNotes) || null;
+  const tag = `[Visit] ${parts.join(" · ")}`;
+  const base = str(baseNotes);
+  return base ? `${base}\n${tag}` : tag;
+}
+
+/**
+ * Build insert row for agent_visits using only columns that exist in pilot schema.
+ * Non-column payload fields are remapped into notes; unknown keys are dropped with Predator drift warning.
+ * @returns {{ row: Record<string, unknown>, dropped: string[], error?: string }}
+ */
+export function buildAgentVisitInsertRow(payload = {}) {
+  let visit_id = str(payload.visitId ?? payload.visit_id);
+  if (!visit_id) {
+    visit_id = `VIS-${Date.now()}`;
+  }
+
+  const tenant_id = str(payload.tenantId ?? payload.tenant_id) || null;
+  const lab_id = labIdKey(payload.labId ?? payload.lab_id);
+  const agent_id = str(payload.agentId ?? payload.agent_id ?? "");
+  const visit_date = str(payload.visitDate ?? payload.visit_date).slice(0, 10);
+  const visit_type = str(payload.visitType ?? payload.visit_type);
+  const notesRaw = str(payload.notes);
+  const next_follow_up_date = str(
+    payload.nextFollowUpDate ?? payload.next_follow_up_date ?? ""
+  ).slice(0, 10);
+  const labResponse = str(payload.labResponse ?? payload.lab_response);
+  const sold_value = num(payload.soldValue ?? payload.sold_value ?? 0);
+  const lab_name = str(payload.labName ?? payload.lab_name) || null;
+  const area = str(payload.area ?? payload.Area) || null;
+  const agent_name = str(payload.agentName ?? payload.agent_name ?? "") || null;
+
+  if (!lab_id) {
+    return { row: {}, dropped: [], error: "lab_id is required" };
+  }
+  if (!visit_date) {
+    return { row: {}, dropped: [], error: "visit_date is required" };
+  }
+  if (!visit_type) {
+    return { row: {}, dropped: [], error: "visit_type is required" };
+  }
+
+  const follow_up_required =
+    Boolean(next_follow_up_date) || labResponse === "Need Follow-up";
+
+  const notes = appendAgentVisitNoteMetadata(notesRaw, {
+    labResponse,
+    soldValue: sold_value,
+    area,
+    labName: lab_name,
+  });
+
+  const candidate = {
+    tenant_id,
+    visit_id,
+    lab_id,
+    agent_id: agent_id || null,
+    agent_name,
+    visit_date,
+    visit_type,
+    notes,
+    follow_up_required,
+    next_follow_up_date: next_follow_up_date || null,
+    lab_response: labResponse || null,
+    sold_value: sold_value > 0 ? sold_value : null,
+    lab_name,
+    area,
+  };
+
+  const { row, dropped } = sanitizeRowToKnownColumns(
+    "agent_visits",
+    candidate,
+    AGENT_VISITS_INSERT_COLUMNS
+  );
+
+  return { row, dropped };
+}
+
+/**
  * Inserts one row into `agent_visits` (PrimeCare agent visit log).
- * Maps frontend payload to: tenant_id, visit_id, lab_id, agent_id, visit_date, visit_type,
- * notes, follow_up_required, next_follow_up_date.
+ * Maps frontend payload to schema-safe columns only.
  * @returns {{ success: boolean, data?: object, error?: string }}
  */
 export async function createAgentVisitWrite(payload = {}) {
@@ -2759,57 +2852,10 @@ export async function createAgentVisitWrite(payload = {}) {
   }
 
   try {
-    let visit_id = str(payload.visitId ?? payload.visit_id);
-    if (!visit_id) {
-      visit_id = `VIS-${Date.now()}`;
+    const { row: insertRow, error: buildError } = buildAgentVisitInsertRow(payload);
+    if (buildError) {
+      return { success: false, error: buildError, data: null };
     }
-
-    const tenant_id = str(payload.tenantId ?? payload.tenant_id) || null;
-    const lab_id = labIdKey(payload.labId ?? payload.lab_id);
-    const agent_id = str(payload.agentId ?? payload.agent_id ?? "");
-    const visit_date = str(payload.visitDate ?? payload.visit_date).slice(0, 10);
-    const visit_type = str(payload.visitType ?? payload.visit_type);
-    const notesRaw = str(payload.notes);
-    const next_follow_up_date = str(
-      payload.nextFollowUpDate ?? payload.next_follow_up_date ?? ""
-    ).slice(0, 10);
-    const labResponse = str(payload.labResponse ?? payload.lab_response);
-
-    if (!lab_id) {
-      return { success: false, error: "lab_id is required", data: null };
-    }
-    if (!visit_date) {
-      return { success: false, error: "visit_date is required", data: null };
-    }
-    if (!visit_type) {
-      return { success: false, error: "visit_type is required", data: null };
-    }
-
-    const follow_up_required =
-      Boolean(next_follow_up_date) || labResponse === "Need Follow-up";
-
-    const sold_value = num(payload.soldValue ?? payload.sold_value ?? 0);
-    const lab_name = str(payload.labName ?? payload.lab_name) || null;
-    const area = str(payload.area ?? payload.Area) || null;
-    const agent_name =
-      str(payload.agentName ?? payload.agent_name ?? "") || null;
-
-    const insertRow = {
-      tenant_id,
-      visit_id,
-      lab_id,
-      agent_id: agent_id || null,
-      visit_date,
-      visit_type,
-      notes: notesRaw || null,
-      follow_up_required,
-      next_follow_up_date: next_follow_up_date || null,
-      lab_response: labResponse || null,
-      sold_value: sold_value > 0 ? sold_value : null,
-      lab_name,
-      area,
-      agent_name,
-    };
 
     const { data, error } = await supabase.from("agent_visits").insert([insertRow]).select();
 
@@ -2819,7 +2865,9 @@ export async function createAgentVisitWrite(payload = {}) {
     }
 
     const saved = Array.isArray(data) ? data[0] : data;
-    console.log("SUPABASE AGENT VISIT SAVED:", saved);
+    if (isPerfLogEnabled()) {
+      perfLog("createAgentVisitWrite.success", { visit_id: insertRow.visit_id });
+    }
     return { success: true, data: saved ?? null, error: null };
   } catch (err) {
     console.warn("[createAgentVisitWrite] failed:", err?.message || err);

@@ -1,7 +1,22 @@
 import { supabase } from "@/api/supabaseClient.js";
+import { IS_DEV, IS_QA } from "@/config/environment.js";
 import { isPredatorEnabled } from "@/predator/predatorGuards.js";
 import { createPredatorEntry } from "@/predator/predatorSchema.js";
 import { predatorStore } from "@/predator/predatorStore.js";
+
+/** Insert-safe columns for public.agent_visits (pilot schema + auth migration). */
+export const AGENT_VISITS_INSERT_COLUMNS = [
+  "tenant_id",
+  "visit_id",
+  "lab_id",
+  "agent_id",
+  "agent_name",
+  "visit_date",
+  "visit_type",
+  "notes",
+  "follow_up_required",
+  "next_follow_up_date",
+];
 
 /**
  * Known public columns for pilot tables (diagnosis-only manifest).
@@ -26,7 +41,7 @@ export const PREDATOR_KNOWN_TABLE_COLUMNS = {
     "total_paid",
     "lab_name",
   ],
-  agent_visits: ["visit_id", "tenant_id", "lab_id", "agent_id", "visit_date", "created_at"],
+  agent_visits: [...AGENT_VISITS_INSERT_COLUMNS, "id", "created_at"],
   inventory: ["product_id", "tenant_id", "current_stock", "min_stock"],
   lab_qualifications: ["tenant_id", "lab_id", "qualification_score", "updated_at"],
   order_lines: ["order_id", "tenant_id", "net_line_total", "quantity"],
@@ -118,4 +133,75 @@ export async function diagnoseProjectionColumns(tableName, requestedColumns) {
   }
 
   return { ok: true, safeProjection: requestedColumns.join(","), missing: [], source };
+}
+
+/**
+ * Report and log when a write payload includes columns outside the known schema.
+ * @param {string} tableName
+ * @param {string[]} droppedKeys
+ * @param {Record<string, unknown>} [originalRow]
+ * @param {string[]} [knownColumns]
+ */
+export function reportSchemaPayloadDrift(
+  tableName,
+  droppedKeys,
+  originalRow = {},
+  knownColumns = []
+) {
+  if (!droppedKeys?.length) return;
+
+  const expected =
+    knownColumns.length > 0
+      ? knownColumns
+      : PREDATOR_KNOWN_TABLE_COLUMNS[tableName] || [];
+
+  if (isPredatorEnabled()) {
+    predatorStore.recordError(
+      createPredatorEntry({
+        status: "WARN",
+        module: "Schema",
+        step: `${tableName}.schema_payload_drift`,
+        expected,
+        actual: { dropped: droppedKeys, sample: originalRow },
+        rootCauseGuess:
+          "Insert/update payload included columns not present on Supabase table — fields were dropped before write",
+        suggestedFix: "Update schema manifest or remap dropped fields into allowed columns (e.g. notes)",
+        severity: "medium",
+        issueClass: "data_integrity",
+      })
+    );
+  }
+
+  if (IS_DEV || IS_QA) {
+    console.warn(
+      `[Schema] Dropping unknown ${tableName} payload fields before write:`,
+      droppedKeys
+    );
+  }
+}
+
+/**
+ * Keep only known columns for a Supabase insert/update row.
+ * @param {string} tableName
+ * @param {Record<string, unknown>} row
+ * @param {string[]} knownColumns
+ */
+export function sanitizeRowToKnownColumns(tableName, row, knownColumns) {
+  const allowed = new Set(knownColumns);
+  const safe = /** @type {Record<string, unknown>} */ ({});
+  const dropped = [];
+
+  for (const [key, value] of Object.entries(row || {})) {
+    if (allowed.has(key)) {
+      safe[key] = value;
+    } else {
+      dropped.push(key);
+    }
+  }
+
+  if (dropped.length) {
+    reportSchemaPayloadDrift(tableName, dropped, row, knownColumns);
+  }
+
+  return { row: safe, dropped };
 }

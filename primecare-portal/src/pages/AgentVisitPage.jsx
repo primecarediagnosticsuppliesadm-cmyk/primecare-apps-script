@@ -261,6 +261,29 @@ function isAgentUser(user) {
   return String(user?.role ?? "").trim().toLowerCase() === ROLES.AGENT;
 }
 
+function SaveVisitButton({ saving, onClick, className }) {
+  return (
+    <Button
+      type="button"
+      onClick={onClick}
+      disabled={saving}
+      className={cn("h-12 w-full rounded-lg text-base", className)}
+    >
+      {saving ? (
+        <>
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          Saving visit…
+        </>
+      ) : (
+        <>
+          <PlusCircle className="mr-2 h-4 w-4" />
+          Save visit
+        </>
+      )}
+    </Button>
+  );
+}
+
 export default function AgentVisitPage({ currentUser, authToken }) {
   const { showToast } = usePortalToast();
   const [labs, setLabs] = useState([]);
@@ -882,7 +905,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   }
 
   return (
-    <div className="space-y-3 pb-28">
+    <div className="space-y-3 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-6">
       <header>
         <div className="flex items-center gap-2">
           <ClipboardCheck className="h-5 w-5 text-[var(--pc-brand-primary)]" />
@@ -1258,6 +1281,14 @@ export default function AgentVisitPage({ currentUser, authToken }) {
             </div>
           </section>
 
+          <div className="hidden border-t border-border pt-4 md:block">
+            <SaveVisitButton
+              saving={saving}
+              onClick={handleSaveVisit}
+              className="max-w-md"
+            />
+          </div>
+
           {showQualificationCapture ? (
             <section className="rounded-lg border border-border bg-card">
               <button
@@ -1523,25 +1554,10 @@ export default function AgentVisitPage({ currentUser, authToken }) {
         </CardContent>
       </Card>
 
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background/95 p-3 backdrop-blur supports-[backdrop-filter]:bg-background/90 sm:static sm:border-0 sm:bg-transparent sm:p-0">
-        <Button
-          type="button"
-          onClick={handleSaveVisit}
-          disabled={saving}
-          className="h-12 w-full rounded-lg text-base sm:max-w-md"
-        >
-          {saving ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Saving visit…
-            </>
-          ) : (
-            <>
-              <PlusCircle className="mr-2 h-4 w-4" />
-              Save visit
-            </>
-          )}
-        </Button>
+      <div className="fixed inset-x-0 bottom-0 z-50 md:hidden">
+        <div className="border-t border-border bg-background/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] shadow-[0_-4px_16px_rgba(15,23,42,0.12)] backdrop-blur supports-[backdrop-filter]:bg-background/90">
+          <SaveVisitButton saving={saving} onClick={handleSaveVisit} />
+        </div>
       </div>
 
       <section className="space-y-2">
