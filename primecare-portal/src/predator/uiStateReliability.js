@@ -279,6 +279,14 @@ export function buildUiSyncWarnings(module, metrics) {
   if (!isPredatorEnabled()) return [];
 
   const warnings = [];
+  const uiSnapshotUnobserved = metrics.every((m) => {
+    const uiLayer = m.layerTrace?.find((l) => l.layerId === "ui");
+    return uiLayer?.meta?.unobserved === true;
+  });
+  if (uiSnapshotUnobserved && metrics.length > 0) {
+    return warnings;
+  }
+
   for (const m of metrics) {
     if (m.status === "PASS") continue;
     const api = num(m.layerTrace.find((l) => l.layerId === "api")?.value);

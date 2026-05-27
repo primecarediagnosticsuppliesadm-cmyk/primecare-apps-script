@@ -42,6 +42,12 @@ const moduleDiagnosisByTenant = new Map();
 /** @type {Map<string, Object>} */
 const moduleReliabilityByTenant = new Map();
 
+/** @type {Map<string, { snapshot: object, source: string, capturedAt: number, kpiModel?: object|null }>} */
+const moduleRenderedSnapshotsByTenant = new Map();
+
+/** @type {Map<string, number>} */
+const moduleApiValidationAtByTenant = new Map();
+
 function tenantBucketKey(ctx) {
   const tid = ctx?.tenantId || "_no_tenant";
   const uid = ctx?.userId || "_no_user";
@@ -195,6 +201,57 @@ export const predatorStore = {
     return (
       uiStateTraces.find((t) => t.module === module && t.metricId === metricId) || null
     );
+  },
+
+  /**
+   * @param {string} module
+   * @param {{ snapshot: object, source: string, capturedAt: number, kpiModel?: object|null }} payload
+   * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} [ctx]
+   */
+  setModuleRenderedSnapshot(module, payload, ctx = activeTenantContext) {
+    const key = `${tenantBucketKey(ctx)}::${module}`;
+    moduleRenderedSnapshotsByTenant.set(key, {
+      snapshot: payload.snapshot,
+      source: payload.source,
+      capturedAt: payload.capturedAt,
+      kpiModel: payload.kpiModel ?? null,
+    });
+  },
+
+  /**
+   * @param {string} module
+   * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} [ctx]
+   */
+  getModuleRenderedSnapshot(module, ctx = activeTenantContext) {
+    const key = `${tenantBucketKey(ctx)}::${module}`;
+    const row = moduleRenderedSnapshotsByTenant.get(key);
+    return row ? { ...row } : null;
+  },
+
+  /**
+   * @param {string} module
+   * @param {number} validatedAtMs
+   * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} [ctx]
+   */
+  setModuleApiValidationAt(module, validatedAtMs, ctx = activeTenantContext) {
+    const key = `${tenantBucketKey(ctx)}::${module}`;
+    moduleApiValidationAtByTenant.set(key, validatedAtMs);
+  },
+
+  /**
+   * Drop UI traces that only record state/render zero (stale before fresh page render).
+   * @param {string} module
+   */
+  clearStaleZeroUiStateTraces(module) {
+    for (let i = uiStateTraces.length - 1; i >= 0; i -= 1) {
+      const t = uiStateTraces[i];
+      if (t.module !== module) continue;
+      const state = Number(t.state);
+      const render = Number(t.render);
+      if ((Number.isFinite(state) && state === 0) || (Number.isFinite(render) && render === 0)) {
+        uiStateTraces.splice(i, 1);
+      }
+    }
   },
 
   recordStateTransition(transition) {

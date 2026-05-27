@@ -33,6 +33,7 @@ import { recordPredatorTiming } from "@/predator/predatorTiming.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { usePredatorRenderTrace } from "@/predator/renderTrace.js";
 import { usePredatorUiSyncTrace } from "@/predator/usePredatorUiSyncTrace.js";
+import { recordAdminDashboardRenderedSnapshot } from "@/predator/adminDashboardUiSnapshot.js";
 import { adminDashboardModelFromMerge } from "@/pages/adminDashboardState.js";
 import AdminDashboardQaValidationPanel from "@/components/qa/AdminDashboardQaValidationPanel.jsx";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
@@ -1208,22 +1209,12 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   });
 
   useEffect(() => {
-    if (loading) return;
-    const kpiCards = displayKpis
-      ? {
-          outstandingReceivables: displayKpis.outstandingReceivables,
-          recentVisits: displayKpis.recentVisits,
-          inventorySkus: displayKpis.inventorySkus,
-          totalSoldValue: displayKpis.totalSoldValue,
-        }
-      : null;
-    console.log("[AdminDashboard] proof", {
-      rawGetAdminDashboardRead: lastRawReadRef.current,
-      normalizedKpiModel: kpiModel,
-      kpiCardValuesRendered: kpiCards,
-      predatorUiSyncTraceInput: uiSyncMetrics,
+    if (loading || !qaValidationSnapshot) return;
+    recordAdminDashboardRenderedSnapshot(qaValidationSnapshot, {
+      source: "AdminDashboard.render",
+      kpiModel: displayKpis,
     });
-  }, [loading, kpiModel, displayKpis, uiSyncMetrics]);
+  }, [loading, qaValidationSnapshot, displayKpis]);
 
   if (loading) {
     return <AdminDashboardLoading />;

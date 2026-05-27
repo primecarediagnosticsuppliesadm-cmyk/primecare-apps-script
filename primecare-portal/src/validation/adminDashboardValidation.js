@@ -12,6 +12,7 @@ import {
   numOrNull,
   printQaValidationReport,
 } from "@/validation/qaValidationCore.js";
+import { resolveAdminDashboardUiSnapshot } from "@/predator/adminDashboardUiSnapshot.js";
 
 function localDateYmd(d = new Date()) {
   const y = d.getFullYear();
@@ -118,15 +119,31 @@ export async function runAdminDashboardValidation(options = {}) {
 
   const browser = await fetchBrowserDashboardDbSnapshot();
   const apiResult = await getAdminDashboardRead({ force: true });
+  const apiValidatedAt = Date.now();
   const api = apiResult?.success ? apiResult.data : null;
+
+  const uiSnapshot = resolveAdminDashboardUiSnapshot({
+    explicitRendered: rendered,
+    apiValidatedAt,
+  });
 
   const apiExecutive = api?.executive || {};
   const apiSummary = api?.summary || {};
   const apiStock = apiSummary.stockStats || {};
 
-  const uiExecutive = rendered?.executive || {};
-  const uiSummary = rendered?.summary || {};
+  const uiRendered = uiSnapshot.fresh ? uiSnapshot.rendered : null;
+  const uiExecutive = uiRendered?.executive || {};
+  const uiSummary = uiRendered?.summary || {};
   const uiStock = uiSummary.stockStats || {};
+
+  const uiOutstanding = uiSnapshot.fresh
+    ? numOrNull(uiExecutive.outstandingReceivables)
+    : null;
+  const uiRecentVisits = uiSnapshot.fresh ? numOrNull(uiSummary.recentVisits) : null;
+  const uiInventorySkus = uiSnapshot.fresh
+    ? numOrNull(uiStock.totalSkus ?? uiSummary.inventorySkus)
+    : null;
+  const uiTotalSold = uiSnapshot.fresh ? numOrNull(uiSummary.totalSoldValue) : null;
 
   const checks = [
     checkMetricAcrossLayers({
@@ -148,7 +165,7 @@ export async function runAdminDashboardValidation(options = {}) {
         browserRls: browser.arOutstanding,
         dbComputed: browser.arOutstanding,
         apiPayload: numOrNull(apiExecutive.outstandingReceivables),
-        uiRendered: numOrNull(uiExecutive.outstandingReceivables),
+        uiRendered: uiOutstanding,
       },
     }),
     checkMutableMetricAcrossLayers({
@@ -159,7 +176,7 @@ export async function runAdminDashboardValidation(options = {}) {
         browserRls: browser.visitsRowCount,
         dbComputed: browser.visitsRowCount,
         apiPayload: numOrNull(apiSummary.recentVisits),
-        uiRendered: numOrNull(uiSummary.recentVisits),
+        uiRendered: uiRecentVisits,
       },
     }),
     checkMetricAcrossLayers({
@@ -170,7 +187,7 @@ export async function runAdminDashboardValidation(options = {}) {
         browserRls: browser.inventorySkus,
         dbComputed: browser.inventorySkus,
         apiPayload: numOrNull(apiStock.totalSkus),
-        uiRendered: numOrNull(uiStock.totalSkus),
+        uiRendered: uiInventorySkus,
       },
     }),
     checkMutableMetricAcrossLayers({
@@ -181,10 +198,27 @@ export async function runAdminDashboardValidation(options = {}) {
         browserRls: browser.totalSoldValue,
         dbComputed: browser.totalSoldValue,
         apiPayload: numOrNull(apiSummary.totalSoldValue),
-        uiRendered: numOrNull(uiSummary.totalSoldValue),
+        uiRendered: uiTotalSold,
       },
     }),
   ];
+
+  if (!uiSnapshot.fresh) {
+    checks.push({
+      id: "ui_snapshot_freshness",
+      label: "Admin Dashboard rendered KPI snapshot",
+      status: "warn",
+      expected: "fresh rendered snapshot from Admin Dashboard page",
+      actual: {
+        reason: uiSnapshot.reason,
+        source: uiSnapshot.source,
+        ageMs: uiSnapshot.ageMs,
+        capturedAt: uiSnapshot.capturedAt,
+        apiValidatedAt: uiSnapshot.apiValidatedAt,
+      },
+      message: uiSnapshot.message || "UI snapshot not available for comparison",
+    });
+  }
 
   if (Object.keys(browser.errors || {}).length > 0) {
     checks.push({
@@ -215,6 +249,7 @@ export async function runAdminDashboardValidation(options = {}) {
     browserQuery: browser.queryChains,
     browserFilters: browser.postgrestFilters,
     apiSuccess: Boolean(apiResult?.success),
+    uiSnapshot,
   };
 
   if (printReport) {

@@ -7,6 +7,11 @@ import {
 } from "@/predator/buildModuleDiagnosis.js";
 import { diagnoseProjectionColumns } from "@/predator/schemaAwareness.js";
 import { buildAdminDashboardPredatorSnapshot } from "@/predator/validators/adminDashboardPredatorMapping.js";
+import { predatorStore } from "@/predator/predatorStore.js";
+import {
+  ADMIN_DASHBOARD_MODULE,
+  resolveAdminDashboardUiSnapshot,
+} from "@/predator/adminDashboardUiSnapshot.js";
 
 /**
  * @param {Object} params
@@ -15,10 +20,16 @@ import { buildAdminDashboardPredatorSnapshot } from "@/predator/validators/admin
  */
 export async function validateAdminDashboardModule({ ctx, rendered = null }) {
   return predatorTrace("Admin Dashboard", "validation.full", async () => {
+    const stored = predatorStore.getModuleRenderedSnapshot(ADMIN_DASHBOARD_MODULE, ctx);
+    const renderedInput = rendered ?? stored?.snapshot ?? null;
+
     const report = await runAdminDashboardValidation({
-      rendered,
+      rendered: renderedInput,
       printReport: false,
     });
+
+    const uiSnapshot = report.meta?.uiSnapshot;
+    const uiSnapshotFresh = Boolean(uiSnapshot?.fresh);
 
     const entries = (report.checks || []).map((check) =>
       createPredatorEntry({
@@ -30,11 +41,15 @@ export async function validateAdminDashboardModule({ ctx, rendered = null }) {
         rootCauseGuess:
           check.status === "pass"
             ? ""
-            : check.actual?.uiRendered === 0 && check.actual?.apiPayload > 0
-              ? "Backend healthy, UI synchronization unhealthy"
-              : check.actual?.apiPayload === 0 && check.actual?.browserRls > 0
-                ? "Backend/API layer divergence detected"
-                : "Layer mismatch between browser RLS reads, getAdminDashboardRead, and UI state",
+            : check.id === "ui_snapshot_freshness"
+              ? check.message || "Admin Dashboard UI snapshot not fresh"
+              : !uiSnapshotFresh && check.actual?.apiPayload > 0
+                ? "No fresh rendered snapshot — open Admin Dashboard before full Predator run"
+                : check.actual?.uiRendered === 0 && check.actual?.apiPayload > 0
+                  ? "Backend healthy, UI synchronization unhealthy"
+                  : check.actual?.apiPayload === 0 && check.actual?.browserRls > 0
+                    ? "Backend/API layer divergence detected"
+                    : "Layer mismatch between browser RLS reads, getAdminDashboardRead, and UI state",
         suggestedFix:
           check.status === "pass"
             ? ""
@@ -51,9 +66,11 @@ export async function validateAdminDashboardModule({ ctx, rendered = null }) {
 
     const predatorSnapshot = buildAdminDashboardPredatorSnapshot({
       legacyReport: report,
-      rendered,
+      rendered: uiSnapshotFresh ? uiSnapshot.rendered : null,
     });
-    const metrics = buildAdminDashboardMetricDiagnoses(predatorSnapshot, ctx);
+    const metrics = buildAdminDashboardMetricDiagnoses(predatorSnapshot, ctx, {
+      uiSnapshotFresh,
+    });
     const { diagnosis, extraEntries } = finalizeModuleDiagnosis({
       module: "Admin Dashboard",
       ctx,

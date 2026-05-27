@@ -154,14 +154,19 @@ export function finalizeModuleDiagnosis({ module, ctx, metrics }) {
   return { diagnosis, extraEntries };
 }
 
-function stateLayer(metricId, module, snapValue, uiValue) {
-  const traced = getLatestUiStateValue(module, metricId);
-  const value = snapValue ?? uiValue ?? traced ?? null;
+function stateLayer(metricId, module, snapValue, uiValue, uiSnapshotFresh = true) {
+  const traced = uiSnapshotFresh ? getLatestUiStateValue(module, metricId) : null;
+  const value = uiSnapshotFresh
+    ? snapValue ?? uiValue ?? traced ?? null
+    : snapValue ?? uiValue ?? null;
   return {
     layerId: "state",
     label: "React state",
     value,
-    meta: traced != null && uiValue != null && traced !== uiValue ? { drift: true } : undefined,
+    meta: {
+      ...(traced != null && uiValue != null && traced !== uiValue ? { drift: true } : {}),
+      ...(!uiSnapshotFresh ? { unobserved: true, optional: true } : {}),
+    },
   };
 }
 
@@ -170,10 +175,18 @@ function stateLayer(metricId, module, snapValue, uiValue) {
  * @param {Object} snap
  * @param {import('@/predator/predatorDiagnosisSchema.js').PredatorTenantContext} ctx
  */
-export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
+export function buildAdminDashboardMetricDiagnoses(snap, ctx, options = {}) {
+  const uiSnapshotFresh = options.uiSnapshotFresh !== false;
   const seed = QA_ADMIN_DASHBOARD_SEED;
   const cacheEvents = predatorStore.getCacheEvents().filter((c) => c.cacheKey?.includes("admin"));
-  const cacheMeta = { staleZeroRisk: cacheEvents.some((c) => c.staleZeroRisk) };
+  const cacheMeta = { staleZeroRisk: cacheEvents.some((c) => c.staleZeroRisk), uiSnapshotFresh };
+
+  const uiLayer = (value) => ({
+    layerId: "ui",
+    label: "Rendered UI",
+    value: uiSnapshotFresh ? value : null,
+    meta: uiSnapshotFresh ? undefined : { unobserved: true, optional: true },
+  });
 
   return [
     diagnoseMetricLayers({
@@ -207,9 +220,10 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
           "outstanding_receivables",
           "Admin Dashboard",
           snap.stateOutstanding,
-          snap.uiOutstanding
+          snap.uiOutstanding,
+          uiSnapshotFresh
         ),
-        { layerId: "ui", label: "Rendered executive", value: snap.uiOutstanding },
+        uiLayer(snap.uiOutstanding),
       ],
     }),
     diagnoseMetricLayers({
@@ -221,8 +235,14 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
       layers: [
         { layerId: "rls", label: "Visits rows", value: snap.visitsRowCount, meta: { supporting: true } },
         { layerId: "api", label: "API summary", value: snap.apiRecentVisits },
-        stateLayer("recent_visits", "Admin Dashboard", snap.stateRecentVisits, snap.uiRecentVisits),
-        { layerId: "ui", label: "Rendered UI", value: snap.uiRecentVisits },
+        stateLayer(
+          "recent_visits",
+          "Admin Dashboard",
+          snap.stateRecentVisits,
+          snap.uiRecentVisits,
+          uiSnapshotFresh
+        ),
+        uiLayer(snap.uiRecentVisits),
       ],
     }),
     diagnoseMetricLayers({
@@ -234,8 +254,14 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
       layers: [
         { layerId: "rls", label: "Inventory rows", value: snap.inventorySkus, meta: { supporting: true } },
         { layerId: "api", label: "API summary.stockStats.totalSkus", value: snap.apiInventorySkus },
-        stateLayer("inventory_skus", "Admin Dashboard", snap.stateInventorySkus, snap.uiInventorySkus),
-        { layerId: "ui", label: "Rendered stockStats", value: snap.uiInventorySkus },
+        stateLayer(
+          "inventory_skus",
+          "Admin Dashboard",
+          snap.stateInventorySkus,
+          snap.uiInventorySkus,
+          uiSnapshotFresh
+        ),
+        uiLayer(snap.uiInventorySkus),
       ],
     }),
     diagnoseMetricLayers({
@@ -247,8 +273,14 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
       layers: [
         { layerId: "rls", label: "Revenue compute (DB)", value: snap.totalSoldValue, meta: { supporting: true } },
         { layerId: "api", label: "API summary.totalSoldValue", value: snap.apiTotalSold },
-        stateLayer("total_sold_value", "Admin Dashboard", snap.stateTotalSold, snap.uiTotalSold),
-        { layerId: "ui", label: "Rendered summary", value: snap.uiTotalSold },
+        stateLayer(
+          "total_sold_value",
+          "Admin Dashboard",
+          snap.stateTotalSold,
+          snap.uiTotalSold,
+          uiSnapshotFresh
+        ),
+        uiLayer(snap.uiTotalSold),
       ],
     }),
   ];

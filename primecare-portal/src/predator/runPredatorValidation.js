@@ -8,6 +8,7 @@ import { validateQualificationModule } from "@/predator/validators/qualification
 import { validateAgentVisitsModule } from "@/predator/validators/agentVisitsValidator.js";
 import { validateTenantRoleIsolationModule } from "@/predator/validators/tenantRoleIsolationValidator.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
+import { ADMIN_DASHBOARD_MODULE } from "@/predator/adminDashboardUiSnapshot.js";
 
 /**
  * @typedef {Object} PredatorRenderedSnapshots
@@ -33,9 +34,10 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
 
     const modules = [];
 
+    const storedAdminRendered = predatorStore.getModuleRenderedSnapshot(ADMIN_DASHBOARD_MODULE, ctx);
     const admin = await validateAdminDashboardModule({
       ctx,
-      rendered: snapshots.adminDashboard ?? null,
+      rendered: snapshots.adminDashboard ?? storedAdminRendered?.snapshot ?? null,
     });
     predatorStore.setModuleReport("Admin Dashboard", admin.entries, ctx);
     modules.push(admin);

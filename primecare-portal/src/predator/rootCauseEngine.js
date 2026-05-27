@@ -117,7 +117,14 @@ function inferCauseFromDivergence(ctx, rls, api, ui, tenantCtx) {
     };
   }
 
-  if (rls != null && rls > 0 && api != null && api > 0 && ui === 0) {
+  if (
+    ctx.uiSnapshotFresh !== false &&
+    rls != null &&
+    rls > 0 &&
+    api != null &&
+    api > 0 &&
+    ui === 0
+  ) {
     return {
       issueClass: /** @type {PredatorIssueClass} */ ("ui_sync"),
       probableRootCause:
@@ -134,7 +141,7 @@ function inferCauseFromDivergence(ctx, rls, api, ui, tenantCtx) {
   }
 
   const state = num(ctx.state);
-  if (api != null && api > 0 && state === 0) {
+  if (ctx.uiSnapshotFresh !== false && api != null && api > 0 && state === 0) {
     return {
       issueClass: /** @type {PredatorIssueClass} */ ("ui_sync"),
       probableRootCause:
@@ -148,7 +155,7 @@ function inferCauseFromDivergence(ctx, rls, api, ui, tenantCtx) {
     };
   }
 
-  if (api != null && api > 0 && state != null && state > 0 && ui === 0) {
+  if (ctx.uiSnapshotFresh !== false && api != null && api > 0 && state != null && state > 0 && ui === 0) {
     return {
       issueClass: /** @type {PredatorIssueClass} */ ("ui_sync"),
       probableRootCause:
@@ -252,12 +259,19 @@ export function diagnoseMetricLayers({
     if (!apiUiOk || !stateUiOk) status = "WARN";
   }
 
-  if (compareMode === "kpi" && api != null && api > 0 && ui === 0) {
+  const uiObserved = layers.some((l) => l.layerId === "ui" && !l.meta?.unobserved);
+  if (compareMode === "kpi" && uiObserved && api != null && api > 0 && ui === 0) {
     status = status === "PASS" ? "FAIL" : status;
   }
 
   const inferred = inferCauseFromDivergence(
-    { metricId, cacheMeta, compareMode, state },
+    {
+      metricId,
+      cacheMeta,
+      compareMode,
+      state,
+      uiSnapshotFresh: cacheMeta?.uiSnapshotFresh !== false && uiObserved,
+    },
     rls,
     api,
     ui,
