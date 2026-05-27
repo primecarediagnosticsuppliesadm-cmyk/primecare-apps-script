@@ -47,6 +47,7 @@ import {
   sanitizeRowToKnownColumns,
 } from "@/predator/schemaAwareness.js";
 import { isPerfLogEnabled, perfLog, perfTime, shouldRunDashboardKpiAudit } from "@/utils/perfLog.js";
+import { createNotificationEvent } from "@/notifications/createNotificationEvent.js";
 
 export { labIdKey, normalizeLabIdKey };
 
@@ -999,6 +1000,24 @@ export async function createPaymentWrite(payload = {}) {
         data: { payment: savedPay, partial: true },
       };
     }
+
+    void createNotificationEvent({
+      eventType: "payment_received",
+      sourceModule: "collections",
+      sourceId: payment_id,
+      tenantId: tenant_id,
+      targetLabId: lab_id,
+      targetRole: "admin",
+      severity: "info",
+      payload: {
+        paymentId: payment_id,
+        labId: lab_id,
+        amountReceived: amount_received,
+        mode,
+      },
+    }).catch((notifyErr) => {
+      console.warn("[createPaymentWrite] notification event:", notifyErr?.message || notifyErr);
+    });
 
     return {
       success: true,
@@ -3744,6 +3763,25 @@ export async function createOrderWrite(payload = {}) {
         console.warn("[createOrderWrite] Fulfillment flags update:", uf.error.message);
       }
     }
+
+    void createNotificationEvent({
+      eventType: "order_created",
+      sourceModule: "orders",
+      sourceId: order_id,
+      tenantId: tenant_id,
+      targetLabId: lab_id,
+      targetRole: "admin",
+      severity: "info",
+      payload: {
+        orderId: order_id,
+        labId: lab_id,
+        totalAmount: total_amount,
+        status,
+        lineCount: normalizedLines.length,
+      },
+    }).catch((notifyErr) => {
+      console.warn("[createOrderWrite] notification event:", notifyErr?.message || notifyErr);
+    });
 
     return {
       success: true,

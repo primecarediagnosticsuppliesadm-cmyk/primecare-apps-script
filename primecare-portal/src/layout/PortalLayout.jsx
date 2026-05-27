@@ -12,6 +12,7 @@ import {
   Brain,
   Package,
   Bug,
+  Bell,
 } from "lucide-react";
 
 const ICONS = {
@@ -27,6 +28,7 @@ const ICONS = {
   insights: Brain,
   labOrders: Package,
   predatorDebug: Bug,
+  notifications: Bell,
 };
 
 function titleCase(value) {

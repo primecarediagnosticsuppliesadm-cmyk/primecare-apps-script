@@ -7,6 +7,7 @@ import { validateCollectionsModule } from "@/predator/validators/collectionsVali
 import { validateQualificationModule } from "@/predator/validators/qualificationValidator.js";
 import { validateAgentVisitsModule } from "@/predator/validators/agentVisitsValidator.js";
 import { validateTenantRoleIsolationModule } from "@/predator/validators/tenantRoleIsolationValidator.js";
+import { validateNotificationsFoundationModule } from "@/predator/validators/notificationsFoundationValidator.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
 import { ADMIN_DASHBOARD_MODULE } from "@/predator/adminDashboardUiSnapshot.js";
 import {
@@ -84,6 +85,10 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
     predatorStore.setModuleReport("Tenant + Role Isolation", isolation.entries, ctx);
     modules.push(isolation);
 
+    const notifications = await validateNotificationsFoundationModule({ ctx });
+    predatorStore.setModuleReport("Notifications", notifications.entries, ctx);
+    modules.push(notifications);
+
     const allEntries = modules.flatMap((m) => m.entries);
     const summary = summarizePredatorEntries(allEntries);
 
@@ -141,6 +146,9 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
           ? snapshot
           : { layerSnapshots: buildIsolationLayerSnapshots(snapshot) },
       });
+      break;
+    case "Notifications":
+      result = await validateNotificationsFoundationModule({ ctx });
       break;
     default:
       result = {

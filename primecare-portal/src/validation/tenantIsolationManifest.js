@@ -132,6 +132,26 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     scope: "tenant_wide",
     optional: true,
   },
+  {
+    id: "notification_events",
+    table: "notification_events",
+    label: "Notification events",
+    tenantColumn: "tenant_id",
+    selectColumns: ["tenant_id", "event_type", "target_lab_id"],
+    allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE],
+    scope: "tenant_wide",
+    optional: true,
+  },
+  {
+    id: "notification_delivery_log",
+    table: "notification_delivery_log",
+    label: "Notification delivery log",
+    tenantColumn: "tenant_id",
+    selectColumns: ["tenant_id", "channel", "status"],
+    allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE],
+    scope: "tenant_wide",
+    optional: true,
+  },
 ];
 
 /**

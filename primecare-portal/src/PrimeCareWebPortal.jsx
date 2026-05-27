@@ -17,6 +17,7 @@ import StockPage from "./pages/StockPage";
 import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
 import QualificationReviewPage from "./pages/QualificationReviewPage";
 import PredatorDebugConsole from "./pages/PredatorDebugConsole";
+import NotificationCenterPage from "./pages/NotificationCenterPage";
 
 function PlaceholderCard({ title, subtitle }) {
   return (
@@ -205,6 +206,10 @@ export default function PrimeCareWebPortal({
       case "qualification-review":
         return <QualificationReviewPage currentUser={currentUser} />;
 
+      case "notifications":
+      case "notification-center":
+        return <NotificationCenterPage currentUser={currentUser} />;
+
       case "predatorDebug":
       case "predator-debug":
         return <PredatorDebugConsole currentUser={currentUser} />;
@@ -273,6 +278,10 @@ export default function PrimeCareWebPortal({
       case "qualificationReview":
       case "qualification-review":
         return <QualificationReviewPage currentUser={currentUser} />;
+
+      case "notifications":
+      case "notification-center":
+        return <NotificationCenterPage currentUser={currentUser} />;
 
       case "predatorDebug":
       case "predator-debug":

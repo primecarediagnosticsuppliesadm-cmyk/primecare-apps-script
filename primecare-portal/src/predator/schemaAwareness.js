@@ -65,6 +65,41 @@ export const PREDATOR_KNOWN_TABLE_COLUMNS = {
   purchase_order_items: ["tenant_id", "purchase_order_id", "created_at", "updated_at"],
   profiles: ["tenant_id", "user_id", "role", "created_at", "updated_at"],
   v_labs_credit: ["tenant_id", "lab_id", "created_at", "updated_at"],
+  notification_events: [
+    "event_id",
+    "tenant_id",
+    "event_type",
+    "source_module",
+    "source_id",
+    "severity",
+    "status",
+    "created_at",
+  ],
+  notification_templates: [
+    "template_id",
+    "tenant_id",
+    "event_type",
+    "channel",
+    "active",
+    "created_at",
+  ],
+  notification_preferences: [
+    "preference_id",
+    "tenant_id",
+    "user_id",
+    "event_type",
+    "channel",
+    "enabled",
+    "created_at",
+  ],
+  notification_delivery_log: [
+    "delivery_id",
+    "tenant_id",
+    "event_id",
+    "channel",
+    "status",
+    "attempted_at",
+  ],
 };
 
 const schemaColumnCache = new Map();

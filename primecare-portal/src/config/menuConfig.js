@@ -29,6 +29,7 @@ export const MENU_ITEMS = [
     label: "Qualification Review",
     icon: "ClipboardCheck",
   },
+  { key: "notifications", label: "Notifications", icon: "Bell" },
 
   // Performance / AI
   { key: "performance", label: "Performance", icon: "BarChart3" },
@@ -49,6 +50,7 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "orders",
   "risk",
   "qualificationReview",
+  "notifications",
   "labOrders",
   "purchase",
   "reorder",
