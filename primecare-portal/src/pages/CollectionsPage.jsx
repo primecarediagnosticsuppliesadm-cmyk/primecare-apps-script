@@ -144,83 +144,281 @@ function CompactAccountKpi({ title, value, icon: Icon }) {
   );
 }
 
-function LabAccountTimeline({ item, history, detailsLoading, copy }) {
+function financialStatusSummary(item) {
+  const risk = String(item?.riskStatus || "").toLowerCase();
+  const overdueDays = Number(item?.overdueDays || 0);
+  const outstanding = Number(item?.outstandingAmount || 0);
+  if (overdueDays > 0) return { label: "Overdue", tone: "text-red-700 bg-red-50 border-red-200" };
+  if (risk.includes("high")) return { label: "Medium Risk", tone: "text-amber-700 bg-amber-50 border-amber-200" };
+  if (outstanding <= 0) return { label: "Good Standing", tone: "text-emerald-700 bg-emerald-50 border-emerald-200" };
+  return { label: "Partially Paid", tone: "text-blue-700 bg-blue-50 border-blue-200" };
+}
+
+function buildInvoiceRows(item, history) {
+  const rows = [];
+  const seen = new Set();
+  const pushRow = (row) => {
+    const key = `${row.invoiceId}|${row.orderId}|${row.amount}|${row.dueDate}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    rows.push(row);
+  };
+
+  const primaryInvoice = String(item?.invoiceId || item?.invoice_id || "").trim();
+  const primaryOrder = String(item?.orderId || item?.order_id || "").trim();
+  const outstanding = Number(item?.outstandingAmount || 0);
+  if (primaryInvoice || primaryOrder || outstanding > 0) {
+    pushRow({
+      invoiceId: primaryInvoice || "Pending invoice",
+      orderId: primaryOrder || "—",
+      amount: outstanding > 0 ? outstanding : Number(item?.lastInvoiceAmount || 0),
+      dueDate: item?.nextFollowUp || item?.dueDate || "",
+      status: outstanding > 0 ? "Pending" : "Paid",
+      overdueDays: Number(item?.overdueDays || 0),
+    });
+  }
+
+  for (const entry of history || []) {
+    const invoiceId = String(entry.invoiceId || entry.invoice_id || "").trim();
+    const orderId = String(entry.orderId || entry.order_id || "").trim();
+    const amount = Number(
+      entry.invoiceAmount || entry.amountDue || entry.amountCollected || entry.amount || 0
+    );
+    if (!invoiceId && !orderId && !(amount > 0)) continue;
+    const outstandingAfter = Number(entry.outstandingAfter || entry.outstanding_after || NaN);
+    pushRow({
+      invoiceId: invoiceId || "Invoice update",
+      orderId: orderId || "—",
+      amount: amount > 0 ? amount : Number.isFinite(outstandingAfter) ? outstandingAfter : 0,
+      dueDate: entry.dueDate || entry.paymentDate || "",
+      status:
+        Number.isFinite(outstandingAfter) && outstandingAfter > 0
+          ? "Pending"
+          : entry.status || "Updated",
+      overdueDays: Number(entry.overdueDays || 0),
+    });
+  }
+
+  return rows.slice(0, 8);
+}
+
+function buildFinancialTimeline(item, history) {
+  const outstandingNow = Number(item?.outstandingAmount || 0);
+  return (history || []).map((entry) => {
+    const amount = Number(entry.amountCollected || entry.amount || 0);
+    const invoiceId = String(entry.invoiceId || entry.invoice_id || "").trim();
+    const paymentDate = entry.paymentDate || entry.updatedAt || "";
+    const mode = entry.paymentMode || entry.mode || "";
+    const outstandingAfter = Number(entry.outstandingAfter || entry.outstanding_after || NaN);
+    const reducedTo = Number.isFinite(outstandingAfter) ? outstandingAfter : outstandingNow;
+    return {
+      id: entry.paymentId || `${paymentDate}-${amount}-${invoiceId}`,
+      title: amount > 0 ? `${formatMoney(amount)} payment received` : "Account update",
+      subline: `Applied to ${invoiceId || "latest invoice"}${mode ? ` · ${mode}` : ""}`,
+      trailing: `Outstanding ${formatMoney(reducedTo)}`,
+      date: paymentDate,
+      kind: amount > 0 ? "payment" : "update",
+    };
+  });
+}
+
+function LabAccountTimeline({ item, history, detailsLoading, copy, collectionDetails }) {
   const outstanding = Number(item.outstandingAmount || 0);
+  const totalPaid = Number(item.totalPaid || 0);
   const overdueDays = Number(item.overdueDays || 0);
   const paymentLabel = displayPaymentStatus(item);
+  const riskLabel = item.riskStatus || "Low";
+  const health = financialStatusSummary(item);
+  const dueDate = item.nextFollowUp || item.dueDate || "";
+  const creditLimit = Number(
+    item.creditLimit || item.credit_limit || item.creditApproved || item.credit_limit_amount || 0
+  );
+  const creditUsed = Math.max(0, outstanding);
+  const utilizationPct = creditLimit > 0 ? Math.min(100, Math.round((creditUsed / creditLimit) * 100)) : null;
+  const invoices = useMemo(
+    () => buildInvoiceRows(collectionDetails || item, history),
+    [collectionDetails, item, history]
+  );
+  const financialTimeline = useMemo(
+    () => buildFinancialTimeline(collectionDetails || item, history),
+    [collectionDetails, item, history]
+  );
 
   return (
-    <div className="space-y-3">
-      <div className="rounded-lg border border-border bg-card p-3 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-2">
+    <div className="space-y-2.5">
+      <section className="rounded-lg border border-border bg-card p-2.5 shadow-sm">
+        <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Account Health
+        </h3>
+        <div className="flex flex-wrap items-start justify-between gap-2.5">
           <div>
-            <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
               Outstanding balance
             </p>
-            <p className="text-xl font-bold tabular-nums text-foreground">{formatMoney(outstanding)}</p>
+            <p className="text-lg font-bold tabular-nums text-foreground">{formatMoney(outstanding)}</p>
+            <p className="text-[11px] text-muted-foreground">
+              Total paid {formatMoney(totalPaid)} · {paymentLabel}
+            </p>
           </div>
-          <div className="flex flex-wrap gap-1">
-            <StatusBadge variant={collectionRiskToVariant(item.riskStatus)} compact>
-              {item.riskStatus || "Low"}
-            </StatusBadge>
-            <StatusBadge variant={paymentStatusToVariant(paymentLabel)} compact>
-              {paymentLabel}
-            </StatusBadge>
+          <div className="flex flex-col items-start gap-1">
+            <span className={cn("rounded border px-1.5 py-0.5 text-[10px] font-medium", health.tone)}>
+              {health.label}
+            </span>
+            <span className="text-[10px] text-muted-foreground">Risk: {riskLabel}</span>
           </div>
         </div>
-        <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+        <div className="mt-2 grid gap-1.5 rounded-md border border-border/70 bg-muted/20 p-2 text-[11px] sm:grid-cols-2">
+          <div>
+            <span className="text-slate-500">Payment behavior: </span>
+            <span className="font-medium text-slate-800">
+              {overdueDays > 0 ? `Delayed by ${overdueDays}d` : "On track"}
+            </span>
+          </div>
+          <div>
+            <span className="text-slate-500">Next expected payment: </span>
+            <span className="font-medium text-slate-800">{formatShortDate(dueDate)}</span>
+          </div>
+        </div>
+        {utilizationPct != null ? (
+          <div className="mt-2">
+            <div className="mb-1 flex items-center justify-between text-[10px] text-slate-600">
+              <span>Credit utilization</span>
+              <span className="tabular-nums">
+                {formatMoney(creditUsed)} / {formatMoney(creditLimit)}
+              </span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+              <div
+                className={cn(
+                  "h-full rounded-full",
+                  utilizationPct >= 85
+                    ? "bg-red-500"
+                    : utilizationPct >= 65
+                      ? "bg-amber-500"
+                      : "bg-emerald-500"
+                )}
+                style={{ width: `${utilizationPct}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
+        <p className="mt-2 text-[10px] text-muted-foreground">Online payments coming soon.</p>
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-2.5 shadow-sm">
+        <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Outstanding Invoices
+        </h3>
+        {invoices.length ? (
+          <div className="space-y-1.5">
+            {invoices.map((invoice, idx) => (
+              <div
+                key={`${invoice.invoiceId}-${invoice.orderId}-${idx}`}
+                className="rounded-md border border-border/70 px-2 py-1.5"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-[11px] font-semibold text-slate-900">{invoice.invoiceId}</p>
+                    <p className="text-[10px] text-slate-500">Order {invoice.orderId || "—"}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[11px] font-semibold tabular-nums">{formatMoney(invoice.amount)}</p>
+                    <p className="text-[10px] text-slate-500">{invoice.status}</p>
+                  </div>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-slate-600">
+                  <span>Due {formatShortDate(invoice.dueDate)}</span>
+                  {Number(invoice.overdueDays || 0) > 0 ? (
+                    <span className="rounded bg-red-50 px-1 py-0.5 text-red-700">
+                      Overdue {Number(invoice.overdueDays)}d
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-md border border-dashed px-2 py-2 text-[11px] text-muted-foreground">
+            No outstanding invoices right now.
+          </p>
+        )}
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-2.5 shadow-sm">
+        <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {copy?.viewHistory || "Payment Timeline"}
+        </h3>
+        {detailsLoading ? (
+          <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading activity…
+          </div>
+        ) : financialTimeline.length ? (
+          <ul className="relative space-y-0 pl-2.5">
+            <div className="absolute bottom-1 left-[4px] top-1 w-px bg-border" aria-hidden />
+            {financialTimeline.map((entry) => (
+              <li key={entry.id} className="relative border-b border-border/50 py-1.5 pl-3 last:border-b-0">
+                <span
+                  className={cn(
+                    "absolute left-0 top-2.5 h-1.5 w-1.5 rounded-full border border-background",
+                    entry.kind === "payment" ? "bg-emerald-500" : "bg-blue-500"
+                  )}
+                  aria-hidden
+                />
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-medium text-slate-900">{entry.title}</p>
+                    <p className="text-[10px] text-slate-500">{entry.subline}</p>
+                    <p className="text-[10px] text-slate-600">{entry.trailing}</p>
+                  </div>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {formatShortDate(entry.date)}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : history.length ? (
+          <ul className="relative space-y-0 pl-2.5">
+            <div className="absolute bottom-1 left-[4px] top-1 w-px bg-border" aria-hidden />
+            {history.map((entry) => (
+              <li
+                key={entry.paymentId || `${entry.paymentDate}-${entry.amountCollected}`}
+                className="relative border-b border-border/50 py-1.5 pl-3 last:border-b-0"
+              >
+                <span
+                  className="absolute left-0 top-2.5 h-1.5 w-1.5 rounded-full border border-background bg-emerald-500"
+                  aria-hidden
+                />
+                <p className="text-[11px] font-medium tabular-nums">{formatMoney(entry.amountCollected)}</p>
+                <p className="text-[10px] text-muted-foreground">
+                  {entry.paymentDate || "—"} · {entry.paymentMode || "—"}
+                </p>
+                <p className="text-[10px] text-slate-600">{entry.note || "No note"}</p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="rounded-md border border-dashed px-2 py-2 text-[11px] text-muted-foreground">
+            No payment activity recorded yet.
+          </p>
+        )}
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-2.5 shadow-sm">
+        <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Financial KPI Strip
+        </h3>
+        <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
           {overdueDays > 0 ? (
             <span className="text-[var(--pc-danger)]">Overdue {overdueDays}d</span>
           ) : null}
           {shouldShowPaidLabel(item) ? (
             <span>Paid {formatMoney(item.totalPaid)}</span>
           ) : null}
+          <span>Outstanding {formatMoney(outstanding)}</span>
+          <span>Status {paymentLabel}</span>
         </div>
-        <Button type="button" size="sm" variant="outline" disabled className="mt-2 h-8 rounded-md text-xs">
-          Pay Now (coming soon)
-        </Button>
-      </div>
-
-      <section>
-        <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          {copy?.viewHistory || "Payment activity"}
-        </h3>
-        {detailsLoading ? (
-          <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading activity…
-          </div>
-        ) : history.length ? (
-          <ul className="relative space-y-0 pl-3">
-            <div className="absolute bottom-1 left-[5px] top-1 w-px bg-border" aria-hidden />
-            {history.map((entry) => (
-              <li
-                key={entry.paymentId || `${entry.paymentDate}-${entry.amountCollected}`}
-                className="relative border-b border-border/60 py-2 pl-4 last:border-b-0"
-              >
-                <span
-                  className="absolute left-0 top-3 h-2 w-2 rounded-full border-2 border-background bg-emerald-500"
-                  aria-hidden
-                />
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-sm font-semibold tabular-nums">
-                    {formatMoney(entry.amountCollected)}
-                  </span>
-                  <span className="text-[10px] text-muted-foreground">
-                    {formatShortDate(entry.paymentDate)}
-                  </span>
-                </div>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">
-                  {[entry.paymentMode, entry.note].filter(Boolean).join(" · ") || "Payment recorded"}
-                </p>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
-            No payments recorded yet.
-          </p>
-        )}
       </section>
     </div>
   );
@@ -670,10 +868,12 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
       outstandingReceivables: Number(summary.totalOutstanding ?? 0),
       isLabAccountView: isLabAccount,
       labScopedCollectionCount: isLabAccount ? collections.length : null,
+      invoiceVisibilityCount: isLabAccount ? Number(history.length || 0) : null,
+      selectedLabId: selectedCollection?.labId || null,
       labId: currentUser?.labId,
       userName: currentUser?.name,
     }),
-    [summary, collections, isLabAccount, currentUser?.labId, currentUser?.name]
+    [summary, collections, isLabAccount, history.length, selectedCollection?.labId, currentUser?.labId, currentUser?.name]
   );
 
   usePredatorModuleValidation("Collections", currentUser, predatorSnapshot, !loading);
@@ -1184,7 +1384,7 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
           </div>
           <p className={cn(typography.pageSubtitle, "mt-0.5")}>
             {isLabAccount
-              ? "Track your outstanding balance, risk status, and recent payments."
+              ? "Operational financial workspace for your lab: account health, invoices, and payment activity."
               : "Tenant-wide receivables, follow-ups, and payments. Tap a lab to record payments and follow-ups."}
           </p>
         </div>
@@ -1329,6 +1529,11 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
                   history={isExpanded ? history : []}
                   detailsLoading={isExpanded && detailsLoading}
                   copy={accountLabels}
+                  collectionDetails={
+                    isExpanded && labIdKey(selectedCollection?.labId) === key
+                      ? selectedCollection
+                      : item
+                  }
                 />
               );
             }
