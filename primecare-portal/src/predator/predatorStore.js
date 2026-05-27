@@ -6,6 +6,8 @@ const MAX_MODULE_REPORTS = 40;
 const MAX_CACHE_EVENTS = 50;
 const MAX_API_TRACES = 80;
 const MAX_RENDER_STEPS = 100;
+const MAX_UI_STATE_TRACES = 40;
+const MAX_STATE_TRANSITIONS = 60;
 
 /** @type {import('@/predator/predatorSchema.js').PredatorTenantContext|null} */
 let activeTenantContext = null;
@@ -28,8 +30,17 @@ const apiExecutions = [];
 /** @type {Object[]} */
 const renderSteps = [];
 
+/** @type {Object[]} */
+const uiStateTraces = [];
+
+/** @type {Object[]} */
+const stateTransitions = [];
+
 /** @type {Map<string, import('@/predator/predatorDiagnosisSchema.js').PredatorModuleDiagnosis>} */
 const moduleDiagnosisByTenant = new Map();
+
+/** @type {Map<string, Object>} */
+const moduleReliabilityByTenant = new Map();
 
 function tenantBucketKey(ctx) {
   const tid = ctx?.tenantId || "_no_tenant";
@@ -169,6 +180,54 @@ export const predatorStore = {
 
   getRenderStepsForModule(module) {
     return renderSteps.filter((s) => s.module === module);
+  },
+
+  recordUiStateTrace(trace) {
+    uiStateTraces.unshift(stampContext(trace));
+    if (uiStateTraces.length > MAX_UI_STATE_TRACES) uiStateTraces.length = MAX_UI_STATE_TRACES;
+  },
+
+  getUiStateTracesForModule(module) {
+    return uiStateTraces.filter((t) => t.module === module);
+  },
+
+  getLatestUiStateTrace(module, metricId) {
+    return (
+      uiStateTraces.find((t) => t.module === module && t.metricId === metricId) || null
+    );
+  },
+
+  recordStateTransition(transition) {
+    stateTransitions.unshift(stampContext(transition));
+    if (stateTransitions.length > MAX_STATE_TRANSITIONS) {
+      stateTransitions.length = MAX_STATE_TRANSITIONS;
+    }
+  },
+
+  getStateTransitionsForModule(module) {
+    return stateTransitions.filter((t) => t.module === module);
+  },
+
+  /**
+   * @param {string} module
+   * @param {Object} score
+   * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} [ctx]
+   */
+  setModuleReliability(module, score, ctx = activeTenantContext) {
+    const key = `${tenantBucketKey(ctx)}::${module}`;
+    moduleReliabilityByTenant.set(key, { ...score, module });
+  },
+
+  getModuleReliability(module) {
+    const key = `${tenantBucketKey(activeTenantContext)}::${module}`;
+    return moduleReliabilityByTenant.get(key) || null;
+  },
+
+  getAllModuleReliabilityForActiveTenant() {
+    const prefix = `${tenantBucketKey(activeTenantContext)}::`;
+    return [...moduleReliabilityByTenant.entries()]
+      .filter(([k]) => k.startsWith(prefix))
+      .map(([, v]) => v);
   },
 
   /**

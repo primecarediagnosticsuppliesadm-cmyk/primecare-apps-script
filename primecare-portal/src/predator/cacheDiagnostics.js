@@ -10,16 +10,37 @@ import { predatorStore } from "@/predator/predatorStore.js";
  * @param {number} [params.ageMs]
  * @param {number} [params.payloadAgeMs]
  * @param {Record<string, unknown>} [params.summary]
+ * @param {string} [params.source]
+ * @param {'hydrate'|'overwrite'|'invalidate'} [params.hydrationPhase]
  */
-export function recordPredatorCacheEvent({ cacheKey, event, ageMs, payloadAgeMs, summary }) {
+export function recordPredatorCacheEvent({
+  cacheKey,
+  event,
+  ageMs,
+  payloadAgeMs,
+  summary,
+  source,
+  hydrationPhase,
+}) {
   if (!isPredatorEnabled()) return;
 
   const staleZeroRisk =
-    event === "hit" &&
+    (event === "hit" || event === "stale_reuse") &&
     summary &&
-    (summary.ordersCount === 0 || summary.outstandingReceivables === 0) &&
+    (summary.ordersCount === 0 ||
+      summary.outstandingReceivables === 0 ||
+      summary.recentVisits === 0 ||
+      summary.totalSkus === 0) &&
     ageMs != null &&
     ageMs > 0;
+
+  const derivedBeforeHydration =
+    hydrationPhase === "hydrate" &&
+    event === "hit" &&
+    summary &&
+    summary.outstandingReceivables === 0 &&
+    ageMs != null &&
+    ageMs > 5000;
 
   predatorStore.recordCacheEvent({
     cacheKey,
@@ -27,8 +48,11 @@ export function recordPredatorCacheEvent({ cacheKey, event, ageMs, payloadAgeMs,
     ageMs: ageMs ?? null,
     payloadAgeMs: payloadAgeMs ?? null,
     summary: summary ?? null,
+    source: source ?? null,
+    hydrationPhase: hydrationPhase ?? null,
     timestamp: new Date().toISOString(),
     staleZeroRisk,
+    derivedBeforeHydration,
   });
 
   if (staleZeroRisk) {
@@ -37,11 +61,41 @@ export function recordPredatorCacheEvent({ cacheKey, event, ageMs, payloadAgeMs,
         status: "WARN",
         module: "Cache",
         step: `${cacheKey}.stale_zero_snapshot`,
-        actual: { cacheKey, event, ageMs, summary },
-        rootCauseGuess: "Cache hit may be serving stale zero KPI snapshot",
+        actual: { cacheKey, event, ageMs, summary, source },
+        rootCauseGuess: "UI hydrated from stale zero snapshot",
         suggestedFix: "Invalidate cache and force fresh Supabase read (force: true)",
         severity: "high",
-        issueClass: "data_integrity",
+        issueClass: "ui_sync",
+      })
+    );
+  }
+
+  if (event === "hit" && hydrationPhase === "overwrite" && source) {
+    predatorStore.recordError(
+      createPredatorEntry({
+        status: "WARN",
+        module: "Cache",
+        step: `${cacheKey}.cache_overwrite`,
+        actual: { cacheKey, source, ageMs },
+        rootCauseGuess: "Fallback state overwrote loaded data",
+        suggestedFix: "Trace cache write order — ensure API payload wins over module defaults",
+        severity: "medium",
+        issueClass: "ui_sync",
+      })
+    );
+  }
+
+  if (derivedBeforeHydration) {
+    predatorStore.recordError(
+      createPredatorEntry({
+        status: "WARN",
+        module: "Cache",
+        step: `${cacheKey}.derived_before_hydration`,
+        actual: { cacheKey, ageMs, summary },
+        rootCauseGuess: "Derived memo computed before API hydration",
+        suggestedFix: "Defer KPI compute until getAdminDashboardRead completes",
+        severity: "medium",
+        issueClass: "ui_sync",
       })
     );
   }

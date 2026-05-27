@@ -14,7 +14,7 @@ export const PREDATOR_PIPELINE_LAYERS = [
 ];
 
 /**
- * @typedef {'cosmetic' | 'functional' | 'data_integrity' | 'security' | 'tenant_isolation' | 'performance'} PredatorIssueClass
+ * @typedef {'cosmetic' | 'functional' | 'data_integrity' | 'security' | 'tenant_isolation' | 'performance' | 'ui_sync' | 'render_timing'} PredatorIssueClass
  */
 
 /**
@@ -48,4 +48,18 @@ export const PREDATOR_PIPELINE_LAYERS = [
  * @property {Object[]} timeline
  * @property {Object|null} regression
  * @property {string} ranAt
+ * @property {Object} [reliability]
+ * @property {string} [healthHeadline]
+ */
+
+/**
+ * @typedef {Object} PredatorModuleReliabilityScore
+ * @property {string} module
+ * @property {number} dataReliability
+ * @property {number} renderStability
+ * @property {number} cacheHealth
+ * @property {number} stateSynchronization
+ * @property {number} rerenderStability
+ * @property {'PASS' | 'WARN' | 'FAIL'} summary
+ * @property {string} computedAt
  */

@@ -30,11 +30,15 @@ export async function validateAdminDashboardModule({ ctx, rendered = null }) {
         rootCauseGuess:
           check.status === "pass"
             ? ""
-            : "Layer mismatch between browser RLS reads, getAdminDashboardRead, and UI state",
+            : check.actual?.uiRendered === 0 && check.actual?.apiPayload > 0
+              ? "Backend healthy, UI synchronization unhealthy"
+              : check.actual?.apiPayload === 0 && check.actual?.browserRls > 0
+                ? "Backend/API layer divergence detected"
+                : "Layer mismatch between browser RLS reads, getAdminDashboardRead, and UI state",
         suggestedFix:
           check.status === "pass"
             ? ""
-            : "See check.message and compare DB row counts vs API payload vs rendered KPIs",
+            : "See Predator UI Reliability tab for state/cache/render trace and first divergence layer",
         severity: check.status === "fail" ? "high" : check.status === "warn" ? "medium" : "low",
         tenantId: ctx.tenantId,
         role: ctx.role,

@@ -22,6 +22,7 @@ import {
   Layers3,
   Building2,
   ListFilter,
+  Monitor,
 } from "lucide-react";
 
 const STATUS_CLASS = {
@@ -165,11 +166,27 @@ export default function PredatorDebugConsole({ currentUser }) {
       diagnoses: lastReport?.diagnoses || predatorStore.getAllModuleDiagnosesForActiveTenant(),
       cacheEvents: predatorStore.getCacheEvents(),
       tenantOps: predatorStore.getTenantOperationalSummaries(),
+      moduleReliability: predatorStore.getAllModuleReliabilityForActiveTenant(),
     };
   }, [tick, lastReport]);
-  const { tenant, moduleReports, slowest, errors, failedChecks, diagnoses, cacheEvents, tenantOps } = snapshot;
+  const {
+    tenant,
+    moduleReports,
+    slowest,
+    errors,
+    failedChecks,
+    diagnoses,
+    cacheEvents,
+    tenantOps,
+    moduleReliability,
+  } = snapshot;
   const selectedDiagnosis = diagnoses[0] || null;
+  const adminDiagnosis =
+    diagnoses.find((d) => d.module === "Admin Dashboard") || null;
   const isolationDiagnosis = diagnoses.find((d) => d.module === "Tenant + Role Isolation") || null;
+  const uiSyncFailures = failedChecks.filter(
+    (e) => e.issueClass === "ui_sync" || String(e.step || "").startsWith("ui_sync.")
+  );
   const failCount = failedChecks.filter((c) => c.status === "FAIL").length;
   const warnCount = failedChecks.filter((c) => c.status === "WARN").length;
   const avgValidationMs =
@@ -223,11 +240,12 @@ export default function PredatorDebugConsole({ currentUser }) {
         </button>
       </header>
 
-      <KpiCardGrid columns={6}>
+      <KpiCardGrid columns={4}>
         <KpiCard title="System Health" value={systemHealth} icon={systemHealth === "Healthy" ? CircleCheckBig : TriangleAlert} subtitle={`${failCount} fail · ${warnCount} warn`} />
         <KpiCard title="Tenant Isolation" value={isolationDiagnosis?.status || "PENDING"} icon={ShieldAlert} subtitle={isolationDiagnosis ? formatRelativeTime(isolationDiagnosis.ranAt) : "Run validations"} />
         <KpiCard title="Critical Errors" value={errors.length} icon={TriangleAlert} subtitle={errors.length ? "Investigate immediately" : "No active errors"} />
         <KpiCard title="Slow Modules" value={slowest.filter((s) => Number(s.durationMs) > 2000).length} icon={Gauge} subtitle={slowest[0] ? `${slowest[0].module} ${slowest[0].durationMs}ms` : "No timings"} />
+        <KpiCard title="UI Sync" value={uiSyncFailures.length} icon={Monitor} subtitle={uiSyncFailures.length ? "state/render divergence" : "layers aligned"} />
         <KpiCard title="Cache Drift" value={cacheEvents.filter((c) => c.staleZeroRisk).length} icon={Layers3} subtitle="stale-zero risk events" />
         <KpiCard title="Avg Validation Time" value={avgValidationMs != null ? `${avgValidationMs}ms` : "—"} icon={Clock3} subtitle="from slowest process set" />
       </KpiCardGrid>
@@ -250,6 +268,7 @@ export default function PredatorDebugConsole({ currentUser }) {
           <TabsTrigger value="isolation">Isolation</TabsTrigger>
           <TabsTrigger value="performance">Performance</TabsTrigger>
           <TabsTrigger value="errors">Errors</TabsTrigger>
+          <TabsTrigger value="ui">UI Reliability</TabsTrigger>
           <TabsTrigger value="modules">Modules</TabsTrigger>
           <TabsTrigger value="tenants">Tenants</TabsTrigger>
           <TabsTrigger value="timeline">Timeline</TabsTrigger>
@@ -346,6 +365,102 @@ export default function PredatorDebugConsole({ currentUser }) {
                 )}
               </ul>
             </section>
+          ) : null}
+        </TabsContent>
+
+        <TabsContent value="ui" className="space-y-3 pt-2">
+          {activeTab === "ui" ? (
+            <>
+              <section className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-3">
+                <h3 className="text-sm font-semibold">UI synchronization diagnostics</h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Auth → DB/RLS → API → Normalize → Compute → Cache → React State → UI Render.
+                  Lightweight capped traces only (QA/dev).
+                </p>
+                {adminDiagnosis?.healthHeadline ? (
+                  <p className="mt-2 text-sm font-medium">{adminDiagnosis.healthHeadline}</p>
+                ) : null}
+              </section>
+
+              <section className="rounded-xl border border-border bg-card p-3">
+                <h3 className="text-sm font-semibold">Module reliability scores</h3>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  {moduleReliability.length === 0 ? (
+                    <p className="text-xs text-muted-foreground col-span-full">
+                      Run validations on Admin Dashboard, Collections, or Qualification Review to populate scores.
+                    </p>
+                  ) : (
+                    moduleReliability.map((r) => (
+                      <div key={r.module} className="rounded-lg border border-border/70 bg-muted/20 p-2 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium">{r.module}</span>
+                          <StatusPill status={r.summary} />
+                        </div>
+                        <ul className="mt-2 space-y-0.5 text-muted-foreground">
+                          <li>Data: {r.dataReliability}%</li>
+                          <li>State sync: {r.stateSynchronization}%</li>
+                          <li>Cache: {r.cacheHealth}%</li>
+                          <li>Render: {r.renderStability}%</li>
+                        </ul>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </section>
+
+              <SeveritySection
+                title="UI sync failures / warnings"
+                entries={uiSyncFailures.slice(0, 12)}
+                emptyLabel="No UI synchronization issues detected."
+              />
+
+              {adminDiagnosis ? (
+                <section className="rounded-xl border border-border bg-card p-3">
+                  <h3 className="text-sm font-semibold">Admin Dashboard — first divergence</h3>
+                  <ul className="mt-2 space-y-2 text-xs">
+                    {(adminDiagnosis.metrics || [])
+                      .filter((m) => m.status !== "PASS")
+                      .map((m) => (
+                        <li key={m.metricId} className="rounded border border-border/70 bg-muted/20 p-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <StatusPill status={m.status} />
+                            <span className="font-medium">{m.metricLabel}</span>
+                            <span className="text-muted-foreground">→ {m.firstDivergenceLayer}</span>
+                          </div>
+                          <p className="mt-1">{m.probableRootCause}</p>
+                          <div className="mt-1 flex flex-wrap gap-2 font-mono text-[10px] text-muted-foreground">
+                            {(m.layerTrace || []).map((l) => (
+                              <span key={l.layerId}>
+                                {l.layerId}={String(l.value ?? "—")}
+                              </span>
+                            ))}
+                          </div>
+                        </li>
+                      ))}
+                  </ul>
+                  <PredatorTimeline title="Admin Dashboard pipeline" steps={adminDiagnosis.timeline || []} />
+                </section>
+              ) : null}
+
+              <section className="rounded-xl border border-border bg-card p-3">
+                <h3 className="text-sm font-semibold">State transitions (capped)</h3>
+                <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto text-xs">
+                  {predatorStore
+                    .getStateTransitionsForModule("Admin Dashboard")
+                    .concat(predatorStore.getStateTransitionsForModule("Collections"))
+                    .slice(0, 20)
+                    .map((t, i) => (
+                      <li key={`${t.kind}-${i}`} className="rounded border border-border/60 px-2 py-1">
+                        <span className="font-medium">{t.module}</span> · {t.metricId} · {t.kind}
+                        <span className="text-muted-foreground">
+                          {" "}
+                          {String(t.from)} → {String(t.to)}
+                        </span>
+                      </li>
+                    ))}
+                </ul>
+              </section>
+            </>
           ) : null}
         </TabsContent>
 

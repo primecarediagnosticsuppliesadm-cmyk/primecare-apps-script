@@ -6,6 +6,12 @@ import {
 } from "@/predator/regressionSnapshots.js";
 import { predatorStore } from "@/predator/predatorStore.js";
 import { QA_ADMIN_DASHBOARD_SEED } from "@/validation/qaSeedExpectations.js";
+import { getLatestUiStateValue } from "@/predator/uiStateReliability.js";
+import {
+  buildModuleReliabilityScore,
+  buildUiSyncWarnings,
+  formatModuleHealthHeadline,
+} from "@/predator/uiStateReliability.js";
 
 /**
  * Build Auth → DB → API → Compute → UI timeline from store + module metrics.
@@ -63,12 +69,39 @@ export function buildDebugTimeline(module) {
     });
   }
 
+  const stateTransitions = predatorStore.getStateTransitionsForModule(module).slice(0, 8);
+  for (const t of stateTransitions) {
+    steps.push({
+      phase: "State",
+      label: t.kind,
+      status: "WARN",
+      durationMs: null,
+      detail: { metricId: t.metricId, from: t.from, to: t.to, ...t.detail },
+      timestamp: t.timestamp,
+    });
+  }
+
+  const cacheEvents = predatorStore
+    .getCacheEvents()
+    .filter((c) => c.cacheKey?.toLowerCase().includes(module.split(" ")[0]?.toLowerCase() || ""))
+    .slice(0, 6);
+  for (const c of cacheEvents) {
+    steps.push({
+      phase: "Cache",
+      label: `${c.cacheKey}.${c.event}`,
+      status: c.staleZeroRisk ? "WARN" : "PASS",
+      durationMs: c.ageMs,
+      detail: c.summary,
+      timestamp: c.timestamp,
+    });
+  }
+
   for (const r of renderSteps) {
     steps.push({
       phase: "UI",
       label: r.step,
-      status: "PASS",
-      durationMs: null,
+      status: r.step.includes("before_hydration") || r.step.includes("rerender_loop") ? "WARN" : "PASS",
+      durationMs: r.detail?.hydrationDelayMs ?? r.detail?.msSinceMount ?? null,
       detail: r.detail,
       timestamp: r.timestamp,
     });
@@ -100,18 +133,36 @@ export function finalizeModuleDiagnosis({ module, ctx, metrics }) {
     saveRegressionSnapshot(ctx, module, { status, metrics, summary: { pass: metrics.length } });
   }
 
+  const reliability = buildModuleReliabilityScore(module, metrics);
+  const uiSyncEntries = buildUiSyncWarnings(module, metrics);
+
   const diagnosis = {
     module,
     status,
     metrics,
     timeline: buildDebugTimeline(module),
     regression,
+    reliability,
+    healthHeadline: "",
     ranAt: new Date().toISOString(),
   };
 
+  diagnosis.healthHeadline = formatModuleHealthHeadline(diagnosis);
+
   predatorStore.setModuleDiagnosis(module, diagnosis, ctx);
-  const extraEntries = metricsToPredatorEntries(module, metrics, ctx);
+  const extraEntries = [...metricsToPredatorEntries(module, metrics, ctx), ...uiSyncEntries];
   return { diagnosis, extraEntries };
+}
+
+function stateLayer(metricId, module, snapValue) {
+  const traced = getLatestUiStateValue(module, metricId);
+  const value = snapValue ?? traced ?? null;
+  return {
+    layerId: "state",
+    label: "React state",
+    value,
+    meta: traced != null && snapValue != null && traced !== snapValue ? { drift: true } : undefined,
+  };
 }
 
 /**
@@ -152,6 +203,7 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
       layers: [
         { layerId: "rls", label: "AR rollup (DB)", value: snap.arOutstanding, meta: { supporting: true } },
         { layerId: "api", label: "API executive.outstandingReceivables", value: snap.apiOutstanding },
+        stateLayer("outstanding_receivables", "Admin Dashboard", snap.stateOutstanding ?? snap.uiOutstanding),
         { layerId: "ui", label: "Rendered executive", value: snap.uiOutstanding },
       ],
     }),
@@ -164,6 +216,7 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
       layers: [
         { layerId: "rls", label: "Visits rows", value: snap.visitsRowCount, meta: { supporting: true } },
         { layerId: "api", label: "API summary", value: snap.apiRecentVisits },
+        stateLayer("recent_visits", "Admin Dashboard", snap.stateRecentVisits ?? snap.uiRecentVisits),
         { layerId: "ui", label: "Rendered UI", value: snap.uiRecentVisits },
       ],
     }),
@@ -176,6 +229,7 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
       layers: [
         { layerId: "rls", label: "Inventory rows", value: snap.inventorySkus, meta: { supporting: true } },
         { layerId: "api", label: "API summary.stockStats.totalSkus", value: snap.apiInventorySkus },
+        stateLayer("inventory_skus", "Admin Dashboard", snap.stateInventorySkus ?? snap.uiInventorySkus),
         { layerId: "ui", label: "Rendered stockStats", value: snap.uiInventorySkus },
       ],
     }),
@@ -188,6 +242,7 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
       layers: [
         { layerId: "rls", label: "Revenue compute (DB)", value: snap.totalSoldValue, meta: { supporting: true } },
         { layerId: "api", label: "API summary.totalSoldValue", value: snap.apiTotalSold },
+        stateLayer("total_sold_value", "Admin Dashboard", snap.stateTotalSold ?? snap.uiTotalSold),
         { layerId: "ui", label: "Rendered summary", value: snap.uiTotalSold },
       ],
     }),
@@ -199,14 +254,17 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
  * @param {import('@/predator/predatorDiagnosisSchema.js').PredatorTenantContext} ctx
  */
 export function buildCollectionsMetricDiagnoses(snap, ctx) {
+  const module = "Collections";
   return [
     diagnoseMetricLayers({
       metricId: "collections_list",
       metricLabel: "Collections list count",
       tenantCtx: ctx,
+      compareMode: "kpi",
       layers: [
         { layerId: "rls", label: "AR rows", value: snap.dbArRows },
         { layerId: "api", label: "API collections", value: snap.apiCollectionCount },
+        stateLayer("collections_list", module, snap.uiCollectionCount),
         { layerId: "ui", label: "Rendered list", value: snap.uiCollectionCount },
       ],
     }),
@@ -214,9 +272,11 @@ export function buildCollectionsMetricDiagnoses(snap, ctx) {
       metricId: "outstanding_receivables",
       metricLabel: "Total outstanding",
       tenantCtx: ctx,
+      compareMode: "kpi",
       layers: [
         { layerId: "rls", label: "AR rollup", value: snap.dbOutstanding },
         { layerId: "api", label: "API summary", value: snap.apiOutstanding },
+        stateLayer("outstanding_receivables", module, snap.uiOutstanding),
         { layerId: "ui", label: "Rendered summary", value: snap.uiOutstanding },
       ],
     }),
@@ -228,14 +288,17 @@ export function buildCollectionsMetricDiagnoses(snap, ctx) {
  * @param {import('@/predator/predatorDiagnosisSchema.js').PredatorTenantContext} ctx
  */
 export function buildQualificationMetricDiagnoses(snap, ctx) {
+  const module = "Qualification Review";
   return [
     diagnoseMetricLayers({
       metricId: "qualification_rows",
       metricLabel: "Qualification rows",
       tenantCtx: ctx,
+      compareMode: "kpi",
       layers: [
         { layerId: "rls", label: "lab_qualifications", value: snap.dbCount },
         { layerId: "api", label: "API rows", value: snap.apiCount },
+        stateLayer("qualification_rows", module, snap.uiCount),
         { layerId: "ui", label: "Rendered table", value: snap.uiCount },
       ],
     }),

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { usePredatorRenderTrace } from "@/predator/renderTrace.js";
+import { usePredatorUiSyncTrace } from "@/predator/usePredatorUiSyncTrace.js";
 import {
   getQualificationReviewRead,
   updateQualificationFounderReviewWrite,
@@ -983,6 +984,17 @@ export default function QualificationReviewPage({ currentUser }) {
   usePredatorRenderTrace("Qualification Review", {
     ready: !loading,
     hasData: rows.length > 0,
+  });
+
+  usePredatorUiSyncTrace("Qualification Review", {
+    loading,
+    apiReady: !loading,
+    metrics: {
+      qualification_rows: {
+        state: rows.length,
+        render: rows.length,
+      },
+    },
   });
 
   const filteredRows = useFilteredQualificationRows(rows, {

@@ -47,7 +47,9 @@ function layersForDivergence(layers, compareMode) {
     return layers.filter((l) => l.layerId === "rls" || !l.meta?.optional);
   }
   if (compareMode === "kpi") {
-    return layers.filter((l) => l.layerId === "api" || l.layerId === "ui");
+    return layers.filter(
+      (l) => l.layerId === "api" || l.layerId === "state" || l.layerId === "ui"
+    );
   }
   return layers;
 }
@@ -96,7 +98,7 @@ function resolveMetricStatus(expected, compareMode, rls, api, ui) {
  * @param {import('@/predator/predatorDiagnosisSchema.js').PredatorTenantContext} [tenantCtx]
  */
 function inferCauseFromDivergence(ctx, rls, api, ui, tenantCtx) {
-  const { metricId, cacheMeta } = ctx;
+  const { metricId, cacheMeta, state: stateVal } = ctx;
 
   if (rls != null && rls > 0 && api === 0) {
     return {
@@ -117,14 +119,44 @@ function inferCauseFromDivergence(ctx, rls, api, ui, tenantCtx) {
 
   if (rls != null && rls > 0 && api != null && api > 0 && ui === 0) {
     return {
-      issueClass: /** @type {PredatorIssueClass} */ ("functional"),
+      issueClass: /** @type {PredatorIssueClass} */ ("ui_sync"),
       probableRootCause:
-        "First divergence at UI layer: API has data but React state or render shows zero",
+        "Backend healthy, UI synchronization unhealthy — API has data but render shows zero",
       suggestions: [
         "UI rendered before async state completion",
         "Merge layer overwrote Supabase payload with Apps Script zeros",
         "QA direct read path not wired to KPI cards",
         "Stale module-level adminDashboardCache hydrated initial useState",
+        "Check cache hit serving stale-zero snapshot",
+      ],
+      firstLayer: "ui",
+    };
+  }
+
+  const state = num(ctx.state);
+  if (api != null && api > 0 && state === 0) {
+    return {
+      issueClass: /** @type {PredatorIssueClass} */ ("ui_sync"),
+      probableRootCause:
+        "First divergence at React state layer: API payload present but state is zero",
+      suggestions: [
+        "setState not called after getAdminDashboardRead success",
+        "mapDirectDashboardStateFromRead returns empty defaults",
+        "Module cache hydrate overwrote API values before setState",
+      ],
+      firstLayer: "state",
+    };
+  }
+
+  if (api != null && api > 0 && state != null && state > 0 && ui === 0) {
+    return {
+      issueClass: /** @type {PredatorIssueClass} */ ("ui_sync"),
+      probableRootCause:
+        "React state has values but rendered KPI is zero (memo or conditional render skip)",
+      suggestions: [
+        "Verify KPI card reads executive/summary state paths",
+        "Check useMemo snapshot vs visible props",
+        "Stale derived memo — dependency array missing API fields",
       ],
       firstLayer: "ui",
     };
@@ -206,6 +238,7 @@ export function diagnoseMetricLayers({
   const divergence = findFirstDivergence(layersForDivergence(layers, compareMode));
   const rls = num(layers.find((l) => l.layerId === "rls")?.value);
   const api = num(layers.find((l) => l.layerId === "api")?.value);
+  const state = num(layers.find((l) => l.layerId === "state")?.value);
   const ui = num(layers.find((l) => l.layerId === "ui")?.value);
 
   let status = resolveMetricStatus(expected, compareMode, rls, api, ui);
@@ -215,11 +248,16 @@ export function diagnoseMetricLayers({
   }
   if (divergence && status === "PASS" && compareMode === "kpi") {
     const apiUiOk = api != null && ui != null && api === ui;
-    if (!apiUiOk) status = "WARN";
+    const stateUiOk = state == null || ui == null || state === ui;
+    if (!apiUiOk || !stateUiOk) status = "WARN";
+  }
+
+  if (compareMode === "kpi" && api != null && api > 0 && ui === 0) {
+    status = status === "PASS" ? "FAIL" : status;
   }
 
   const inferred = inferCauseFromDivergence(
-    { metricId, cacheMeta, compareMode },
+    { metricId, cacheMeta, compareMode, state },
     rls,
     api,
     ui,

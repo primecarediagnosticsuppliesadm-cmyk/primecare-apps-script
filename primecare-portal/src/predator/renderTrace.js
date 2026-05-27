@@ -46,21 +46,45 @@ export function usePredatorRenderTrace(moduleName, { ready = false, hasData = fa
   useEffect(() => {
     if (!isPredatorEnabled() || !ready || firstVisibleAt.current != null) return;
     firstVisibleAt.current = performance.now();
+
+    const msSinceMount = Math.round(firstVisibleAt.current - mountAt.current);
+    const hydrationDelayMs = dataReceivedAt.current
+      ? Math.round(firstVisibleAt.current - dataReceivedAt.current)
+      : null;
+
+    if (hasData === false && ready) {
+      recordPredatorRenderStep(moduleName, "ui.render_before_hydration", {
+        msSinceMount,
+        rootCauseGuess: "Visible render before data flag — possible stale-zero KPI display",
+      });
+    }
+
     recordPredatorRenderStep(moduleName, "ui.first_visible_render", {
-      msSinceMount: Math.round(firstVisibleAt.current - mountAt.current),
-      hydrationDelayMs: dataReceivedAt.current
-        ? Math.round(firstVisibleAt.current - dataReceivedAt.current)
-        : null,
+      msSinceMount,
+      hydrationDelayMs,
+      renderCount: renderCount.current,
     });
-  }, [moduleName, ready]);
+  }, [moduleName, ready, hasData]);
 
   useEffect(() => {
     if (!isPredatorEnabled()) return;
     renderCount.current += 1;
-    if (renderCount.current > 8) {
+    if (renderCount.current === 1) {
+      recordPredatorRenderStep(moduleName, "ui.render", {
+        renderCount: 1,
+        renderSource: "mount",
+      });
+      return;
+    }
+    if (renderCount.current > 12) {
       recordPredatorRenderStep(moduleName, "ui.rerender_loop", {
         renderCount: renderCount.current,
         rootCauseGuess: "Excessive rerenders may indicate unstable deps or state churn",
+      });
+    } else if (renderCount.current > 4) {
+      recordPredatorRenderStep(moduleName, "ui.rerender", {
+        renderCount: renderCount.current,
+        renderSource: "update",
       });
     }
   });

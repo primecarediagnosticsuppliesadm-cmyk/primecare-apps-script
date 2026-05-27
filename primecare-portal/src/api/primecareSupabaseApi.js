@@ -40,6 +40,7 @@ import {
   estimatePayloadBytes,
   recordPredatorApiExecution,
 } from "@/predator/apiExecutionTrace.js";
+import { recordAdminDashboardApiUiSnapshots } from "@/predator/uiStateReliability.js";
 import { recordPredatorTiming, predatorTrace } from "@/predator/predatorTiming.js";
 import {
   AGENT_VISITS_INSERT_COLUMNS,
@@ -1828,12 +1829,15 @@ export async function getAdminDashboardRead(options = {}) {
       cacheKey: "adminDashboardRead",
       event: "hit",
       ageMs,
+      hydrationPhase: "hydrate",
       summary: {
         ordersCount: 0,
         outstandingReceivables: cachedData?.executive?.outstandingReceivables ?? 0,
         recentVisits: cachedData?.summary?.recentVisits ?? 0,
+        totalSkus: cachedData?.summary?.stockStats?.totalSkus ?? 0,
       },
     });
+    recordAdminDashboardApiUiSnapshots(cachedData, "getAdminDashboardRead.cacheHit");
     recordPredatorTiming({
       module: "Admin Dashboard",
       step: "api.getAdminDashboardRead",
@@ -2076,6 +2080,7 @@ export async function getAdminDashboardRead(options = {}) {
         inventory: invRaw.length,
       },
     });
+    recordAdminDashboardApiUiSnapshots(payload, "getAdminDashboardRead.fresh");
     return result;
   } catch (err) {
     console.warn("[getAdminDashboardRead] failed:", err?.message || err);

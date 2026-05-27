@@ -44,6 +44,7 @@ import {
 import { ROLES } from "@/config/roles";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { usePredatorRenderTrace } from "@/predator/renderTrace.js";
+import { usePredatorUiSyncTrace } from "@/predator/usePredatorUiSyncTrace.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
 import {
   Loader2,
@@ -532,6 +533,21 @@ export default function CollectionsPage({ currentUser, authToken }) {
   usePredatorRenderTrace("Collections", {
     ready: !loading,
     hasData: collections.length > 0 || summary.totalOutstanding > 0,
+  });
+
+  usePredatorUiSyncTrace("Collections", {
+    loading,
+    apiReady: !loading,
+    metrics: {
+      collections_list: {
+        state: collections.length,
+        render: collections.length,
+      },
+      outstanding_receivables: {
+        state: Number(summary.totalOutstanding ?? 0),
+        render: Number(summary.totalOutstanding ?? 0),
+      },
+    },
   });
 
   const loadCollections = useCallback(async () => {

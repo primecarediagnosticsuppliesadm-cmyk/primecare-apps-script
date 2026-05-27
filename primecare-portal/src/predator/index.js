@@ -22,6 +22,18 @@ export { diagnoseMetricLayers } from "@/predator/rootCauseEngine.js";
 export { recordPredatorCacheEvent } from "@/predator/cacheDiagnostics.js";
 export { recordPredatorApiExecution } from "@/predator/apiExecutionTrace.js";
 export { usePredatorRenderTrace, recordPredatorRenderStep } from "@/predator/renderTrace.js";
+export { usePredatorUiSyncTrace } from "@/predator/usePredatorUiSyncTrace.js";
+export {
+  recordPredatorUiMetricSnapshot,
+  recordPredatorStateTransition,
+  buildModuleReliabilityScore,
+  buildUiSyncWarnings,
+  formatModuleHealthHeadline,
+  recordAdminDashboardApiUiSnapshots,
+  getLatestUiMetricApi,
+  getLatestUiStateValue,
+  inferUiDivergenceCause,
+} from "@/predator/uiStateReliability.js";
 export { diagnoseProjectionColumns } from "@/predator/schemaAwareness.js";
 export {
   buildDebugTimeline,

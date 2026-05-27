@@ -31,6 +31,8 @@ import { isQaValidationLayerEnabled } from "@/config/qaValidation.js";
 import { recordPredatorTiming } from "@/predator/predatorTiming.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { usePredatorRenderTrace } from "@/predator/renderTrace.js";
+import { usePredatorUiSyncTrace } from "@/predator/usePredatorUiSyncTrace.js";
+import { getLatestUiMetricApi } from "@/predator/uiStateReliability.js";
 import AdminDashboardQaValidationPanel from "@/components/qa/AdminDashboardQaValidationPanel.jsx";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
 import {
@@ -926,6 +928,38 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   usePredatorRenderTrace("Admin Dashboard", {
     ready: !loading,
     hasData: Boolean(summaryData) && Boolean(executiveData),
+  });
+
+  const uiSyncMetrics = useMemo(() => {
+    const stock = summaryData?.stockStats || stockStats;
+    return {
+      outstanding_receivables: {
+        api: getLatestUiMetricApi("Admin Dashboard", "outstanding_receivables"),
+        state: Number(executive?.outstandingReceivables ?? 0),
+        render: Number(executive?.outstandingReceivables ?? 0),
+      },
+      recent_visits: {
+        api: getLatestUiMetricApi("Admin Dashboard", "recent_visits"),
+        state: Number(summaryData?.recentVisits ?? 0),
+        render: Number(summaryData?.recentVisits ?? 0),
+      },
+      inventory_skus: {
+        api: getLatestUiMetricApi("Admin Dashboard", "inventory_skus"),
+        state: Number(stock?.totalSkus ?? 0),
+        render: Number(stock?.totalSkus ?? 0),
+      },
+      total_sold_value: {
+        api: getLatestUiMetricApi("Admin Dashboard", "total_sold_value"),
+        state: Number(summaryData?.totalSoldValue ?? 0),
+        render: Number(summaryData?.totalSoldValue ?? 0),
+      },
+    };
+  }, [executive, summaryData, stockStats]);
+
+  usePredatorUiSyncTrace("Admin Dashboard", {
+    loading,
+    apiReady: Boolean(summaryData) && Boolean(executiveData),
+    metrics: uiSyncMetrics,
   });
 
   if (loading) {
