@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   isTenantRoleIsolationValidationEnabled,
   runTenantRoleIsolationValidation,
@@ -6,6 +6,8 @@ import {
 import PredatorTimeline from "@/components/qa/PredatorTimeline.jsx";
 import { predatorStore } from "@/predator/predatorStore.js";
 import { cn } from "@/lib/utils";
+
+const EMPTY_LAYER_SNAPSHOTS = Object.freeze({});
 
 const STATUS_STYLES = {
   pass: "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200",
@@ -78,7 +80,7 @@ function IsolationCardGroup({ title, checks, defaultOpen = true }) {
  */
 export default function TenantRoleIsolationQaPanel({
   currentUser,
-  layerSnapshots = {},
+  layerSnapshots = EMPTY_LAYER_SNAPSHOTS,
   autoRun = true,
 }) {
   const [report, setReport] = useState(null);
@@ -86,6 +88,19 @@ export default function TenantRoleIsolationQaPanel({
   const [expanded, setExpanded] = useState(true);
 
   const enabled = isTenantRoleIsolationValidationEnabled();
+
+  // Avoid dependency loops: treat snapshots as an input ref, not a hook dependency.
+  const layerSnapshotsRef = useRef(layerSnapshots);
+  useEffect(() => {
+    layerSnapshotsRef.current = layerSnapshots || EMPTY_LAYER_SNAPSHOTS;
+  }, [layerSnapshots]);
+
+  // StrictMode-safe: auto-run once per user session unless manually re-run.
+  const autoRanRef = useRef(false);
+  const autoRunUserKey = String(currentUser?.id ?? "");
+  useEffect(() => {
+    autoRanRef.current = false;
+  }, [autoRunUserKey]);
 
   const runValidation = useCallback(async () => {
     if (!enabled) return;
@@ -99,7 +114,7 @@ export default function TenantRoleIsolationQaPanel({
       const next = await runTenantRoleIsolationValidation({
         currentUser,
         ctx,
-        layerSnapshots,
+        layerSnapshots: layerSnapshotsRef.current,
         printReport: true,
       });
       setReport(next);
@@ -122,10 +137,12 @@ export default function TenantRoleIsolationQaPanel({
     } finally {
       setRunning(false);
     }
-  }, [currentUser, enabled, layerSnapshots]);
+  }, [currentUser, enabled]);
 
   React.useEffect(() => {
     if (!autoRun || !enabled || !currentUser) return;
+    if (autoRanRef.current) return;
+    autoRanRef.current = true;
     runValidation();
   }, [autoRun, enabled, currentUser, runValidation]);
 
