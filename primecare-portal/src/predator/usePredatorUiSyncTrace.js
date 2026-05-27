@@ -1,9 +1,6 @@
 import { useEffect, useRef } from "react";
 import { isPredatorEnabled } from "@/predator/predatorGuards.js";
-import {
-  recordPredatorUiMetricSnapshot,
-  recordPredatorStateTransition,
-} from "@/predator/uiStateReliability.js";
+import { recordPredatorUiMetricSnapshot } from "@/predator/uiStateReliability.js";
 import { recordPredatorRenderStep } from "@/predator/renderTrace.js";
 
 /**
@@ -63,16 +60,6 @@ export function usePredatorUiSyncTrace(moduleName, { loading, apiReady = false, 
         source: "usePredatorUiSyncTrace",
       });
 
-      if (api != null && api > 0 && state === 0) {
-        recordPredatorStateTransition({
-          module: moduleName,
-          metricId,
-          kind: "derived.before_hydration",
-          from: api,
-          to: state,
-          detail: { note: "API value present but React state is zero" },
-        });
-      }
     }
 
     if (anyState && stateReadyAt.current == null) {

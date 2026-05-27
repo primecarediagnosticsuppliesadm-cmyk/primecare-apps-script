@@ -41,6 +41,12 @@ export function recordPredatorUiMetricSnapshot({
 }) {
   if (!isPredatorEnabled()) return;
 
+  const apiNum = num(api);
+  const stateNum = num(state);
+  if (source === "usePredatorUiSyncTrace" && apiNum != null && apiNum > 0 && stateNum === 0) {
+    return;
+  }
+
   const prevLatest = predatorStore.getLatestUiStateTrace(module, metricId);
   const snapshot = {
     module,
@@ -77,7 +83,12 @@ export function recordPredatorUiMetricSnapshot({
       });
     }
 
-    if (prevState != null && prevState > 0 && nextState === 0) {
+    if (
+      prevState != null &&
+      prevState > 0 &&
+      nextState === 0 &&
+      source !== "usePredatorUiSyncTrace"
+    ) {
       recordPredatorStateTransition({
         module,
         metricId,
