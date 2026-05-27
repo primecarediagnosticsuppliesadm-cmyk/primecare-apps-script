@@ -45,17 +45,24 @@ export const TodayKpiStrip = memo(function TodayKpiStrip({ kpis, loading }) {
     <KpiCardGrid columns={6}>
       <KpiCard
         loading={loading}
-        title="Assigned Labs"
-        value={kpis.assignedLabs}
-        icon={Building2}
-        subtitle="Your territory"
-      />
-      <KpiCard
-        loading={loading}
         title="Visits Today"
         value={kpis.visitsCompletedToday}
         icon={ClipboardCheck}
         subtitle="Logged today"
+      />
+      <KpiCard
+        loading={loading}
+        title="Collections Today"
+        value={kpis.collectionsToday}
+        icon={CircleDollarSign}
+        subtitle="Collection visits logged"
+      />
+      <KpiCard
+        loading={loading}
+        title="Overdue Labs"
+        value={kpis.overdueLabs}
+        icon={ShieldAlert}
+        subtitle="Past due threshold"
       />
       <KpiCard
         loading={loading}
@@ -66,24 +73,17 @@ export const TodayKpiStrip = memo(function TodayKpiStrip({ kpis, loading }) {
       />
       <KpiCard
         loading={loading}
-        title="Collections Due"
-        value={kpis.collectionsDue}
-        icon={CircleDollarSign}
-        subtitle="Needs payment action"
+        title="Active Labs"
+        value={kpis.activeLabs}
+        icon={Building2}
+        subtitle="In your territory"
       />
       <KpiCard
         loading={loading}
-        title="Risk Labs"
-        value={kpis.overdueRiskLabs}
-        icon={ShieldAlert}
-        subtitle="Hold or near limit"
-      />
-      <KpiCard
-        loading={loading}
-        title="Sales Today"
-        value={formatCurrency(kpis.salesLoggedToday)}
+        title="Recovery"
+        value={kpis.recoveryPct != null ? `${kpis.recoveryPct}%` : "—"}
         icon={IndianRupee}
-        subtitle="From visit outcomes"
+        subtitle="Paid vs exposure"
       />
     </KpiCardGrid>
   );
@@ -93,7 +93,7 @@ export const ActionQueueCard = memo(function ActionQueueCard({
   item,
   onStartVisit,
   onRecordCollection,
-  onViewLab,
+  onOpenLab,
   onAddFollowUp,
 }) {
   return (
@@ -165,9 +165,9 @@ export const ActionQueueCard = memo(function ActionQueueCard({
           size="sm"
           variant="outline"
           className="h-8 rounded-lg px-2.5 text-xs"
-          onClick={() => onViewLab(item)}
+          onClick={() => onOpenLab(item)}
         >
-          View Lab
+          Open Lab
         </Button>
         <Button
           type="button"
@@ -254,6 +254,86 @@ export function QuickActionsBar({ onLogVisit, onRecordCollection, onMyLabs }) {
     </div>
   );
 }
+
+export const TodaysRouteSection = memo(function TodaysRouteSection({ route, onOpenStop }) {
+  if (!route?.flat?.length) {
+    return (
+      <p className="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
+        No route stops ranked yet — clear queue items will appear here.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {route.sections?.length > 1 ? (
+        <div className="flex flex-wrap gap-1">
+          {route.sections.map((section) => (
+            <span
+              key={section.area}
+              className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[10px] text-muted-foreground"
+            >
+              {section.area} · {section.stopCount}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <ul className="space-y-1.5">
+        {route.flat.map((stop) => (
+          <li key={stop.id}>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-xl border border-border bg-card px-2.5 py-2 text-left shadow-sm transition hover:border-primary/30"
+              onClick={() => onOpenStop(stop)}
+            >
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
+                {stop.routeOrder}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-semibold">{stop.labName}</p>
+                <p className="truncate text-[10px] text-muted-foreground">
+                  {stop.area || "Territory"} · {queueTypeLabel(stop.queueType)}
+                </p>
+              </div>
+              {stop.outstanding > 0 ? (
+                <span className="shrink-0 text-[10px] font-semibold tabular-nums">
+                  {formatCurrency(stop.outstanding)}
+                </span>
+              ) : null}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+});
+
+export const AgentPerformanceStrip = memo(function AgentPerformanceStrip({ metrics }) {
+  const tiles = [
+    { label: "Visits", value: metrics.visitsCompleted },
+    { label: "Recovered", value: metrics.collectionsRecoveredLabel },
+    { label: "Labs touched", value: metrics.activeLabsTouched },
+    { label: "Overdue", value: metrics.overdueLabs },
+    {
+      label: "Follow-ups",
+      value: metrics.followUpCompletionPct != null ? `${metrics.followUpCompletionPct}%` : "—",
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+      {tiles.map((tile) => (
+        <div
+          key={tile.label}
+          className="rounded-lg border border-border/80 bg-muted/20 px-2.5 py-2 text-center"
+        >
+          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{tile.label}</p>
+          <p className="mt-0.5 text-sm font-semibold tabular-nums text-foreground">{tile.value}</p>
+        </div>
+      ))}
+    </div>
+  );
+});
 
 export function QueueEmptyState({ type }) {
   const copy =

@@ -26,10 +26,13 @@ const PRIORITY_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 const QUEUE_TYPE_RANK = {
   CREDIT_RISK: 0,
   COLLECTION_DUE: 1,
+  OVERDUE_ACCOUNT: 1,
   FOLLOW_UP_DUE: 2,
   VISIT_DUE: 3,
   NO_VISIT: 4,
+  INACTIVE_LAB: 4,
   QUALIFICATION_PENDING: 5,
+  ONBOARDING_PENDING: 5,
   TASK: 6,
 };
 
@@ -119,6 +122,9 @@ export function queueTypeLabel(queueType) {
   if (t === "CREDIT_RISK") return "Credit risk";
   if (t === "NO_VISIT") return "No recent visit";
   if (t === "QUALIFICATION_PENDING") return "Qualification";
+  if (t === "ONBOARDING_PENDING") return "Onboarding";
+  if (t === "INACTIVE_LAB") return "Inactive lab";
+  if (t === "OVERDUE_ACCOUNT") return "Overdue account";
   if (t === "TASK") return "Task";
   return "Action";
 }
@@ -143,16 +149,45 @@ export function buildAgentDailyKpis(workspace) {
   }).length;
 
   const creditBuckets = summarizeAgentLabsCreditBuckets(assignedLabs);
+  const overdueLabs = assignedLabs.filter((lab) => Number(lab.daysOverdue || 0) > 0).length;
   const overdueRiskLabs = creditBuckets.hold + creditBuckets.nearLimit;
+  const activeLabs = Number(summary.activeLabs ?? assignedLabs.length);
+
+  const collectionsToday = (recentVisits || []).filter((visit) => {
+    const onToday = String(visit.visitDate || "").slice(0, 10) === todayYmd;
+    const type = String(visit.visitType || "").toLowerCase();
+    return onToday && (type.includes("collection") || type.includes("payment"));
+  }).length;
+
+  let totalPaid = 0;
+  let totalExposure = 0;
+  for (const row of pendingCollections) {
+    totalPaid += Number(row.totalPaid ?? 0);
+    totalExposure +=
+      Number(row.outstandingAmount ?? row.outstanding ?? 0) + Number(row.totalPaid ?? 0);
+  }
+  if (!totalExposure) {
+    for (const lab of assignedLabs) {
+      const out = Number(lab.outstanding || 0);
+      totalExposure += out;
+    }
+    totalPaid = Math.max(0, totalExposure - Number(summary.totalOutstanding ?? 0));
+  }
+  const recoveryPct =
+    totalExposure > 0 ? Math.round((totalPaid / totalExposure) * 100) : null;
 
   return {
     assignedLabs: assignedLabs.length,
+    activeLabs,
     visitsCompletedToday: Number(summary.todayVisits ?? 0),
+    collectionsToday,
     pendingFollowUps,
     collectionsDue: pendingCollections.length || Number(summary.pendingCollections ?? 0),
+    overdueLabs,
     overdueRiskLabs,
     salesLoggedToday,
     totalOutstanding: Number(summary.totalOutstanding ?? 0),
+    recoveryPct,
     formatCurrency,
   };
 }
@@ -215,6 +250,43 @@ function scoreLabQueueItem(lab, opts) {
     });
   }
 
+  const isInactive = String(lab.status || "").toLowerCase() === "inactive";
+  if (isInactive) {
+    items.push({
+      id: `${lab.labId}-inactive`,
+      labId: lab.labId,
+      labName: lab.labName,
+      priority: "MEDIUM",
+      queueType: "INACTIVE_LAB",
+      reason: "Lab marked inactive — confirm status or re-engage",
+      nextAction: "Visit lab or update qualification",
+      outstanding,
+      daysOverdue: overdue,
+      lastVisit: lastVisitRaw || "-",
+      creditStatus: credit,
+      qualificationLabel: lab.stage || "",
+      area: lab.area || lab.city || "",
+    });
+  }
+
+  if (overdue > 0 && outstanding > 0) {
+    items.push({
+      id: `${lab.labId}-overdue`,
+      labId: lab.labId,
+      labName: lab.labName,
+      priority: overdue >= 14 ? "CRITICAL" : overdue >= 7 ? "HIGH" : "MEDIUM",
+      queueType: "OVERDUE_ACCOUNT",
+      reason: `Account overdue ${overdue} days`,
+      nextAction: "Record collection or escalate",
+      outstanding,
+      daysOverdue: overdue,
+      lastVisit: lastVisitRaw || "-",
+      creditStatus: credit,
+      qualificationLabel: lab.stage || "",
+      area: lab.area || lab.city || "",
+    });
+  }
+
   if (inCollections && outstanding > 0) {
     items.push({
       id: `${lab.labId}-collection`,
@@ -248,6 +320,7 @@ function scoreLabQueueItem(lab, opts) {
       dueDate: lab.nextFollowUp,
       creditStatus: credit,
       qualificationLabel: lab.stage || "",
+      area: lab.area || lab.city || "",
     });
   }
 
@@ -269,6 +342,7 @@ function scoreLabQueueItem(lab, opts) {
       dueDate: lab.nextFollowUp !== "-" ? lab.nextFollowUp : "",
       creditStatus: credit,
       qualificationLabel: lab.stage || "",
+      area: lab.area || lab.city || "",
     });
   }
 
@@ -280,12 +354,14 @@ function scoreLabQueueItem(lab, opts) {
       stage.includes("qualif") ||
       stage.includes("new");
     if (needsQualification && String(lab.status || "").toLowerCase() !== "inactive") {
+      const isOnboarding =
+        !stage || stage.includes("new") || stage.includes("onboard");
       items.push({
         id: `${lab.labId}-qual`,
         labId: lab.labId,
         labName: lab.labName,
         priority: "LOW",
-        queueType: "QUALIFICATION_PENDING",
+        queueType: isOnboarding ? "ONBOARDING_PENDING" : "QUALIFICATION_PENDING",
         reason: lab.stage ? `Stage: ${lab.stage}` : "Qualification not completed",
         nextAction: "Complete qualification during visit",
         outstanding,
@@ -293,6 +369,7 @@ function scoreLabQueueItem(lab, opts) {
         lastVisit: lastVisitRaw || "-",
         creditStatus: credit,
         qualificationLabel: lab.stage || "Pending",
+        area: lab.area || lab.city || "",
       });
     }
   }
@@ -368,7 +445,7 @@ function taskToQueueItem(task) {
  * @param {{ limit?: number }} [options]
  */
 export function buildAgentActionQueue(workspace, options = {}) {
-  const limit = options.limit ?? 12;
+  const limit = options.limit ?? 15;
   const assignedLabs = (workspace.assignedLabs || []).map(normalizeLab);
   const recentVisits = workspace.recentVisits || [];
   const pendingCollections = workspace.pendingCollections || [];
@@ -437,9 +514,114 @@ export function buildAgentLabPriorityList(workspace, options = {}) {
 /**
  * @param {Object} workspace
  */
+/**
+ * @param {Object} workspace
+ * @param {{ limit?: number }} [options]
+ */
+export function buildAgentTodaysRoute(workspace, options = {}) {
+  const limit = options.limit ?? 8;
+  const queue = buildAgentActionQueue(workspace, { limit: 20 });
+  const groups = new Map();
+
+  for (const item of queue) {
+    const areaKey = String(item.area || "Territory").trim() || "Territory";
+    if (!groups.has(areaKey)) groups.set(areaKey, []);
+    groups.get(areaKey).push(item);
+  }
+
+  const sections = [...groups.entries()]
+    .map(([area, stops]) => ({
+      area,
+      stops: stops.slice(0, 4),
+      stopCount: stops.length,
+    }))
+    .sort((a, b) => b.stopCount - a.stopCount);
+
+  const flat = queue.slice(0, limit).map((item, index) => ({
+    ...item,
+    routeOrder: index + 1,
+  }));
+
+  return { sections, flat };
+}
+
+/**
+ * @param {Object} workspace
+ */
+export function buildAgentPerformanceMetrics(workspace) {
+  const kpis = buildAgentDailyKpis(workspace);
+  const recentVisits = workspace.recentVisits || [];
+  const assignedLabs = workspace.assignedLabs || [];
+  const todayYmd = localDateYmd();
+
+  const labsTouchedToday = new Set(
+    recentVisits
+      .filter((v) => String(v.visitDate || "").slice(0, 10) === todayYmd)
+      .map((v) => String(v.labId || "").trim())
+      .filter(Boolean)
+  );
+
+  const followUpsDue = assignedLabs.filter((lab) => {
+    const due = parseYmd(lab.nextFollowUp);
+    return due && due.getTime() <= new Date(todayYmd).getTime();
+  }).length;
+
+  const followUpsClearedToday = [...labsTouchedToday].filter((labId) => {
+    const lab = assignedLabs.find((l) => String(l.labId) === labId);
+    if (!lab) return false;
+    const due = parseYmd(lab.nextFollowUp);
+    return due && due.getTime() <= new Date(todayYmd).getTime();
+  }).length;
+
+  const followUpCompletionPct =
+    followUpsDue > 0 ? Math.round((followUpsClearedToday / followUpsDue) * 100) : null;
+
+  const collectionsRecovered = (workspace.pendingCollections || []).reduce(
+    (sum, row) => sum + Number(row.totalPaid ?? 0),
+    0
+  );
+
+  return {
+    visitsCompleted: kpis.visitsCompletedToday,
+    collectionsRecovered,
+    collectionsRecoveredLabel: formatCurrency(collectionsRecovered),
+    activeLabsTouched: labsTouchedToday.size,
+    overdueLabs: kpis.overdueLabs,
+    followUpCompletionPct,
+    recoveryPct: kpis.recoveryPct,
+  };
+}
+
+/**
+ * @param {Object} workspace
+ * @param {string} labId
+ */
+export function buildLabSnapshot(workspace, labId) {
+  const key = String(labId || "").trim();
+  const lab =
+    (workspace.assignedLabs || []).find((l) => String(l.labId) === key) || null;
+  const collection =
+    (workspace.pendingCollections || []).find((c) => String(c.labId) === key) || null;
+  const visits = (workspace.recentVisits || []).filter((v) => String(v.labId) === key);
+  const queueItem =
+    buildAgentActionQueue(workspace, { limit: 30 }).find((q) => String(q.labId) === key) ||
+    null;
+
+  return {
+    lab,
+    collection,
+    visits,
+    queueItem,
+    labId: key,
+    labName: lab?.labName || collection?.labName || queueItem?.labName || key,
+  };
+}
+
 export function buildAgentDailyWorkspaceModel(workspace) {
   const kpis = buildAgentDailyKpis(workspace);
   const actionQueue = buildAgentActionQueue(workspace);
   const labPriorityList = buildAgentLabPriorityList(workspace);
-  return { kpis, actionQueue, labPriorityList };
+  const todaysRoute = buildAgentTodaysRoute(workspace);
+  const performance = buildAgentPerformanceMetrics(workspace);
+  return { kpis, actionQueue, labPriorityList, todaysRoute, performance };
 }

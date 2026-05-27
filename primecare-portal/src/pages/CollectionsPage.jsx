@@ -43,6 +43,7 @@ import {
 } from "@/config/environment";
 import { ROLES } from "@/config/roles";
 import { filterCollectionsForUser } from "@/utils/accessFilters.js";
+import { notifyAgentWorkspaceRefresh } from "@/pages/agentVisitContext.js";
 import { summarizeCollectionsList } from "@/metrics/computeReceivableMetrics.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { recordCollectionsRenderedSnapshot } from "@/predator/moduleUiSnapshot.js";
@@ -1373,6 +1374,10 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
                 ? "Payment recorded. You can mark the linked task complete."
                 : "Payment recorded successfully"
             );
+            notifyAgentWorkspaceRefresh({
+              source: "collection_payment",
+              labId: selectedLabId,
+            });
 
             await loadCollections();
             await openCollection(selectedLabId, {

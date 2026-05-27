@@ -1,6 +1,29 @@
 export const AGENT_VISIT_CONTEXT_KEY = "primecare_agent_visit_context";
 export const AGENT_PENDING_VISIT_TASK_KEY = "primecare_pending_visit_task";
 export const AGENT_PENDING_COLLECTION_TASK_KEY = "primecare_pending_collection_task";
+export const AGENT_WORKSPACE_RETURN_KEY = "primecare_agent_workspace_return";
+
+export function writeAgentWorkspaceReturnPath(path = "dashboard") {
+  if (typeof window === "undefined") return;
+  sessionStorage.setItem(AGENT_WORKSPACE_RETURN_KEY, String(path || "dashboard"));
+}
+
+export function consumeAgentWorkspaceReturnPath() {
+  if (typeof window === "undefined") return "";
+  const value = sessionStorage.getItem(AGENT_WORKSPACE_RETURN_KEY) || "";
+  sessionStorage.removeItem(AGENT_WORKSPACE_RETURN_KEY);
+  return value;
+}
+
+/**
+ * @param {Record<string, unknown>} [detail]
+ */
+export function notifyAgentWorkspaceRefresh(detail = {}) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent("primecare:agentWorkspaceRefresh", { detail: { ...detail } })
+  );
+}
 
 /**
  * @param {Object} params
@@ -53,6 +76,7 @@ export function writeAgentVisitContext(params = {}) {
  * @param {Object} item
  */
 export function startVisitFromWorkspaceItem(item, overrides = {}) {
+  writeAgentWorkspaceReturnPath("dashboard");
   writeAgentVisitContext({
     labId: item.labId,
     labName: item.labName,
@@ -73,6 +97,7 @@ export function startVisitFromWorkspaceItem(item, overrides = {}) {
  */
 export function startCollectionFromWorkspaceItem(item) {
   if (typeof window === "undefined") return;
+  writeAgentWorkspaceReturnPath("dashboard");
   sessionStorage.setItem(
     AGENT_PENDING_COLLECTION_TASK_KEY,
     JSON.stringify({

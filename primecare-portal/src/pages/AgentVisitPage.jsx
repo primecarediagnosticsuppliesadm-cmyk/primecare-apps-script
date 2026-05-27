@@ -48,6 +48,8 @@ import {
 
 import {
   AGENT_VISIT_CONTEXT_KEY,
+  consumeAgentWorkspaceReturnPath,
+  notifyAgentWorkspaceRefresh,
   AGENT_PENDING_VISIT_TASK_KEY,
 } from "@/pages/agentVisitContext.js";
 import {
@@ -1686,6 +1688,10 @@ export default function AgentVisitPage({ currentUser, authToken }) {
         "success",
         `Visit saved${res.data?.visitId ? `: ${res.data.visitId}` : ""}`
       );
+
+      if (consumeAgentWorkspaceReturnPath() === "dashboard") {
+        notifyAgentWorkspaceRefresh({ source: "visit_saved", labId: form.labId });
+      }
 
       setForm((prev) => ({
         ...prev,

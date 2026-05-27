@@ -8,21 +8,24 @@ import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
 import { AGENT_TASK_COMPLETION_ENABLED } from "@/config/environment";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import PageSkeleton from "@/components/ux/PageSkeleton";
+import AgentLabSnapshotDrawer from "@/components/agent/AgentLabSnapshotDrawer.jsx";
 import {
   TodayKpiStrip,
   ActionQueueCard,
-  LabPriorityRow,
   QuickActionsBar,
   QueueEmptyState,
+  TodaysRouteSection,
+  AgentPerformanceStrip,
 } from "@/pages/AgentDailyWorkspaceSections.jsx";
 import { buildAgentDailyWorkspaceModel } from "@/pages/agentDailyWorkspace.js";
 import {
-  recordAgentDailyWorkspaceEvent,
+  recordAgentWorkspaceEvent,
   traceAgentDailyWorkspaceLoad,
 } from "@/pages/agentDailyWorkspacePredator.js";
 import {
   startVisitFromWorkspaceItem,
   startCollectionFromWorkspaceItem,
+  notifyAgentWorkspaceRefresh,
 } from "@/pages/agentVisitContext.js";
 
 const EMPTY_WORKSPACE = {
@@ -39,8 +42,6 @@ const EMPTY_WORKSPACE = {
   recentVisits: [],
   pendingCollections: [],
 };
-
-const LAB_PREVIEW_COUNT = 8;
 
 function normalizeLab(lab) {
   const outstanding = Number(lab?.outstanding ?? lab?.outstandingAmount ?? 0);
@@ -71,12 +72,29 @@ function normalizeWorkspacePayload(payload) {
   };
 }
 
+function queueItemFromSnapshot(snapshot) {
+  if (!snapshot) return null;
+  if (snapshot.queueItem) return snapshot.queueItem;
+  if (!snapshot.labId) return null;
+  return {
+    labId: snapshot.labId,
+    labName: snapshot.labName,
+    nextAction: snapshot.collection?.nextAction || "Open lab",
+    outstanding: Number(snapshot.collection?.outstandingAmount ?? snapshot.lab?.outstanding ?? 0),
+    daysOverdue: Number(snapshot.collection?.overdueDays ?? snapshot.lab?.daysOverdue ?? 0),
+    priority: "MEDIUM",
+    queueType: "TASK",
+    reason: "Lab snapshot",
+  };
+}
+
 export default function AgentDashboard({ currentUser, setActivePage }) {
   const [workspace, setWorkspace] = useState(EMPTY_WORKSPACE);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
-  const [showAllLabs, setShowAllLabs] = useState(false);
+  const [snapshotLabId, setSnapshotLabId] = useState("");
+  const [completedQueueIds] = useState(() => new Set());
 
   const loadWorkspace = useCallback(
     async (showRefreshState = false) => {
@@ -85,7 +103,7 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
         else setLoading(true);
         setError("");
 
-        recordAgentDailyWorkspaceEvent("agent_daily_workspace.load_start");
+        recordAgentWorkspaceEvent("agent_workspace.load_start");
 
         await traceAgentDailyWorkspaceLoad(async () => {
           const apiRes = await getAgentWorkspaceRead(currentUser);
@@ -95,6 +113,10 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
           const normalized = normalizeWorkspacePayload(apiRes.data || EMPTY_WORKSPACE);
           const model = buildAgentDailyWorkspaceModel(normalized);
           setWorkspace(normalized);
+          recordAgentWorkspaceEvent("agent_workspace.load_success", {
+            queueCount: model.actionQueue.length,
+            assignedLabs: model.kpis.activeLabs,
+          });
           return model;
         });
       } catch (err) {
@@ -113,17 +135,32 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
     loadWorkspace(false);
   }, [loadWorkspace]);
 
+  useEffect(() => {
+    const onRefresh = () => {
+      void loadWorkspace(true);
+    };
+    window.addEventListener("primecare:agentWorkspaceRefresh", onRefresh);
+    return () => window.removeEventListener("primecare:agentWorkspaceRefresh", onRefresh);
+  }, [loadWorkspace]);
+
   const dailyModel = useMemo(
     () => buildAgentDailyWorkspaceModel(workspace),
     [workspace]
   );
 
-  const { kpis, actionQueue, labPriorityList } = dailyModel;
+  const { kpis, actionQueue, todaysRoute, performance } = dailyModel;
 
-  const visibleLabs = useMemo(() => {
-    if (showAllLabs) return labPriorityList;
-    return labPriorityList.slice(0, LAB_PREVIEW_COUNT);
-  }, [labPriorityList, showAllLabs]);
+  const visibleQueue = useMemo(
+    () => actionQueue.filter((item) => !completedQueueIds.has(item.id)),
+    [actionQueue, completedQueueIds]
+  );
+
+  useEffect(() => {
+    if (!visibleQueue.length) return;
+    recordAgentWorkspaceEvent("agent_workspace.priority_queue_render", {
+      count: visibleQueue.length,
+    });
+  }, [visibleQueue.length]);
 
   usePredatorModuleValidation(
     "Agent Visits",
@@ -132,21 +169,30 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
       recentVisitsCount: (workspace.recentVisits || []).length,
       todayVisits: Number(workspace.summary?.todayVisits ?? 0),
       assignedLabsCount: (workspace.assignedLabs || []).length,
-      actionQueueCount: actionQueue.length,
+      actionQueueCount: visibleQueue.length,
       collectionsDueCount: kpis.collectionsDue,
       pendingFollowUpsCount: kpis.pendingFollowUps,
+      trackingDrawerOpen: Boolean(snapshotLabId),
     },
     !loading
   );
 
+  const openLabSnapshot = useCallback((item) => {
+    const labId = String(item?.labId || "").trim();
+    if (!labId) return;
+    recordAgentWorkspaceEvent("agent_workspace.lab_drawer_open", { labId });
+    setSnapshotLabId(labId);
+  }, []);
+
   const handleStartVisit = useCallback(
     (item) => {
-      recordAgentDailyWorkspaceEvent("agent_daily_workspace.start_visit_clicked", {
+      recordAgentWorkspaceEvent("agent_workspace.start_visit", {
         labId: item.labId,
         queueType: item.queueType,
       });
       startVisitFromWorkspaceItem(item, {
         visitType: item.queueType === "FOLLOW_UP_DUE" ? "Follow-up" : "Field Visit",
+        source: "agent_daily_workspace",
       });
       setActivePage?.("visits");
     },
@@ -155,25 +201,50 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
 
   const handleRecordCollection = useCallback(
     (item) => {
+      recordAgentWorkspaceEvent("agent_workspace.collection_logged", {
+        labId: item.labId,
+        intent: "open_collections",
+      });
       startCollectionFromWorkspaceItem(item);
       setActivePage?.("collections");
     },
     [setActivePage]
   );
 
-  const handleViewLab = useCallback(() => {
-    setActivePage?.("labs");
-  }, [setActivePage]);
-
   const handleAddFollowUp = useCallback(
     (item) => {
       startVisitFromWorkspaceItem(item, {
         visitType: "Follow-up",
         followUpType: "Call",
+        source: "agent_daily_workspace",
       });
       setActivePage?.("visits");
     },
     [setActivePage]
+  );
+
+  const handleSnapshotAction = useCallback(
+    (action, snapshot) => {
+      const item = queueItemFromSnapshot(snapshot);
+      if (!item) return;
+      setSnapshotLabId("");
+      if (action === "start_visit") {
+        handleStartVisit(item);
+        return;
+      }
+      if (action === "record_payment") {
+        handleRecordCollection(item);
+        return;
+      }
+      if (action === "follow_up") {
+        handleAddFollowUp(item);
+        return;
+      }
+      if (action === "open_labs") {
+        setActivePage?.("labs");
+      }
+    },
+    [handleAddFollowUp, handleRecordCollection, handleStartVisit, setActivePage]
   );
 
   const handleCompleteTask = useCallback(
@@ -200,6 +271,7 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
           ...prev,
           tasks: (prev.tasks || []).filter((t) => t.taskId !== task.taskId),
         }));
+        notifyAgentWorkspaceRefresh({ source: "task_complete" });
         await loadWorkspace(true);
       } catch (err) {
         console.error(err);
@@ -211,29 +283,29 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
 
   if (loading) {
     return (
-      <PageSkeleton kpiCount={6} kpiColumns={6} listRows={5} className="max-w-3xl lg:max-w-none" />
+      <PageSkeleton kpiCount={6} kpiColumns={3} listRows={6} className="max-w-3xl lg:max-w-none" />
     );
   }
 
-  const hasQueue = actionQueue.length > 0;
-  const hasRisk = kpis.overdueRiskLabs > 0;
-  const hasCollections = kpis.collectionsDue > 0;
-  const hasFollowUps = kpis.pendingFollowUps > 0;
+  const hasQueue = visibleQueue.length > 0;
+  const topPriority = visibleQueue[0] || null;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 pb-6 lg:max-w-4xl">
+    <div className="mx-auto max-w-3xl space-y-4 pb-24 lg:max-w-4xl">
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Daily field workspace
+            Field execution workspace
           </p>
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-            Today · {currentUser?.name || "Agent"}
+            {topPriority
+              ? `Next: ${topPriority.labName}`
+              : `Today · ${currentUser?.name || "Agent"}`}
           </h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
             {hasQueue
-              ? `${actionQueue.length} prioritized action${actionQueue.length === 1 ? "" : "s"} ready`
-              : "You're clear — log visits or collections as the day unfolds"}
+              ? `${visibleQueue.length} prioritized action${visibleQueue.length === 1 ? "" : "s"} · ${kpis.collectionsDue} collections due`
+              : "Queue clear — log visits or collections as you work the territory"}
           </p>
         </div>
         <Button
@@ -267,20 +339,20 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
 
       <section className="space-y-2">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold">Today&apos;s action queue</h2>
+          <h2 className="text-sm font-semibold">Priority queue</h2>
           {hasQueue ? (
-            <span className="text-xs text-muted-foreground">Highest priority first</span>
+            <span className="text-xs text-muted-foreground">Highest urgency first</span>
           ) : null}
         </div>
         {hasQueue ? (
           <ul className="space-y-2">
-            {actionQueue.map((item) => (
+            {visibleQueue.map((item) => (
               <li key={item.id}>
                 <ActionQueueCard
                   item={item}
                   onStartVisit={handleStartVisit}
                   onRecordCollection={handleRecordCollection}
-                  onViewLab={handleViewLab}
+                  onOpenLab={openLabSnapshot}
                   onAddFollowUp={handleAddFollowUp}
                 />
               </li>
@@ -291,12 +363,15 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
         )}
       </section>
 
-      {!hasQueue && !hasCollections && !hasFollowUps && !hasRisk ? (
-        <div className="grid gap-2 sm:grid-cols-2">
-          <QueueEmptyState type="visits" />
-          <QueueEmptyState type="collections" />
-        </div>
-      ) : null}
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold">Today&apos;s route</h2>
+        <TodaysRouteSection route={todaysRoute} onOpenStop={openLabSnapshot} />
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold">Today&apos;s performance</h2>
+        <AgentPerformanceStrip metrics={performance} />
+      </section>
 
       {(workspace.tasks || []).length > 0 ? (
         <section className="space-y-2 rounded-xl border border-dashed border-border p-3">
@@ -327,37 +402,39 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
         </section>
       ) : null}
 
-      <section className="space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold">Assigned labs</h2>
-          {labPriorityList.length > LAB_PREVIEW_COUNT ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => setShowAllLabs((v) => !v)}
-            >
-              {showAllLabs ? "Show less" : `Show all (${labPriorityList.length})`}
-            </Button>
-          ) : null}
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 px-3 py-2 backdrop-blur md:hidden pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        <div className="mx-auto flex max-w-3xl gap-2">
+          <Button
+            type="button"
+            className="h-10 flex-1 rounded-xl text-xs"
+            onClick={() => {
+              if (topPriority) handleStartVisit(topPriority);
+              else setActivePage?.("visits");
+            }}
+          >
+            {topPriority ? "Start top visit" : "Log visit"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 flex-1 rounded-xl text-xs"
+            onClick={() => {
+              if (topPriority) handleRecordCollection(topPriority);
+              else setActivePage?.("collections");
+            }}
+          >
+            Collect
+          </Button>
         </div>
-        {visibleLabs.length === 0 ? (
-          <QueueEmptyState type="visits" />
-        ) : (
-          <ul className="space-y-2">
-            {visibleLabs.map((lab) => (
-              <li key={lab.labId || lab.labName}>
-                <LabPriorityRow
-                  lab={lab}
-                  onStartVisit={handleStartVisit}
-                  onRecordCollection={handleRecordCollection}
-                />
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      </div>
+
+      <AgentLabSnapshotDrawer
+        open={Boolean(snapshotLabId)}
+        onClose={() => setSnapshotLabId("")}
+        labId={snapshotLabId}
+        workspace={workspace}
+        onAction={handleSnapshotAction}
+      />
     </div>
   );
 }

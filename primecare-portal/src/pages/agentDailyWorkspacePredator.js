@@ -16,7 +16,7 @@ export async function traceAgentDailyWorkspaceLoad(fn) {
     const result = await fn();
     recordPredatorTiming({
       module: MODULE,
-      step: "agent_daily_workspace.load_success",
+      step: "agent_workspace.load_success",
       durationMs: Math.round(performance.now() - t0),
       detail: {
         assignedLabs: result?.kpis?.assignedLabs,
@@ -58,4 +58,9 @@ export function recordAgentDailyWorkspaceEvent(step, detail) {
     durationMs: 0,
     detail,
   });
+}
+
+/** V2 workspace instrumentation (aliases daily workspace module). */
+export function recordAgentWorkspaceEvent(step, detail) {
+  recordAgentDailyWorkspaceEvent(step, detail);
 }
