@@ -333,6 +333,10 @@ export default function LabOrderingPage({ currentUser }) {
     const key = labIdKey(labId);
     return key ? `lab-ordering-cart-draft:${key}` : "";
   }, [labId]);
+  const cartHandoffStorageKey = useMemo(() => {
+    const key = labIdKey(labId);
+    return key ? `lab-ordering-handoff:${key}` : "";
+  }, [labId]);
   const [outstandingBalance, setOutstandingBalance] = useState(
     Number(currentUser?.outstanding ?? 0)
   );
@@ -433,6 +437,20 @@ export default function LabOrderingPage({ currentUser }) {
       console.warn("[LabOrderingPage] failed to persist cart draft", error);
     }
   }, [cartDraftStorageKey, cartItems, notes, productQty]);
+
+  useEffect(() => {
+    if (!cartHandoffStorageKey) return;
+    try {
+      const raw = window.localStorage.getItem(cartHandoffStorageKey);
+      if (!raw) return;
+      const handoff = JSON.parse(raw);
+      if (handoff?.message) setStatusMessage(String(handoff.message));
+      if (handoff?.openCart) setIsCartOpen(true);
+      window.localStorage.removeItem(cartHandoffStorageKey);
+    } catch (error) {
+      console.warn("[LabOrderingPage] failed to process handoff", error);
+    }
+  }, [cartHandoffStorageKey]);
 
   async function loadAccountOutstanding() {
     try {

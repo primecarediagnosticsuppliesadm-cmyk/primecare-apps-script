@@ -3,6 +3,8 @@ import {
   getNotificationEventsRead,
   updateNotificationEventStatusWrite,
 } from "@/api/notificationApi.js";
+import { getOrderDetailsRead } from "@/api/primecareSupabaseApi.js";
+import { getOrderDetails } from "@/api/primecareApi";
 import {
   NOTIFICATION_CHANNELS,
   NOTIFICATION_EVENT_TYPES,
@@ -14,12 +16,13 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ux";
-import { Bell, Loader2, RefreshCw, CheckCircle2, AlertTriangle, Truck, Clock3 } from "lucide-react";
+import { Bell, Loader2, RefreshCw, CheckCircle2, AlertTriangle, Truck, Clock3, X } from "lucide-react";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { isNotificationsFoundationEnabled } from "@/config/notificationFoundation.js";
 import { resolveNotificationFoundationState } from "@/notifications/notificationFoundationProbe.js";
 import { ROLES } from "@/config/roles";
 import { cn } from "@/lib/utils";
+import { labIdKey } from "@/utils/labId.js";
 
 const LAB_SAFE_EVENT_TYPES = new Set([
   "order_created",
@@ -261,17 +264,55 @@ function buildOperationalActivity(row) {
   };
 }
 
+function mapOrderDetailsPayload(payload) {
+  const order = payload?.order || {};
+  const linesRaw = Array.isArray(payload?.lines) ? payload.lines : [];
+  const lines = linesRaw.map((line) => {
+    const quantity = Number(line.quantity || 0);
+    const lineTotal = Number(line.netLineTotal || line.lineTotal || 0);
+    const unitPrice = quantity > 0 ? lineTotal / quantity : Number(line.unitSellingPrice || line.unitPrice || 0);
+    return {
+      productId: String(line.productId || "").trim(),
+      productName: line.productName || line.productId || "Item",
+      quantity: quantity > 0 ? quantity : 1,
+      unitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
+      lineTotal: Number.isFinite(lineTotal) ? lineTotal : quantity * unitPrice,
+      status: line.status || line.lineStatus || "—",
+    };
+  });
+  return {
+    orderId: String(order.orderId || order.order_id || "").trim(),
+    orderStatus: String(order.orderStatus || order.status || "").trim() || "Received",
+    paymentStatus: String(order.paymentStatus || "").trim(),
+    orderDate: order.orderDate || order.order_date || order.date || "",
+    dispatchDate: order.dispatchDate || order.dispatch_at || order.eta || "",
+    invoiceId: order.invoiceId || order.invoice_id || "",
+    orderLabId: order.labId || order.lab_id || "",
+    total: Number(order.orderTotal || order.total || 0),
+    lines,
+  };
+}
+
 export default function NotificationCenterPage({ currentUser, setActivePage }) {
   const tenantId = currentUser?.tenantId ?? currentUser?.tenant_id ?? null;
   const role = String(currentUser?.role || "").toLowerCase();
   const showAdminUi = isAdminOrExecutive(role);
   const showSetupBanner = showAdminUi;
+  const labKey = labIdKey(
+    currentUser?.labId || currentUser?.labCode || currentUser?.accountId || currentUser?.id || ""
+  );
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [updatingId, setUpdatingId] = useState("");
   const [foundationState, setFoundationState] = useState(null);
+  const [actionMessage, setActionMessage] = useState("");
+  const [isOrderDrawerOpen, setIsOrderDrawerOpen] = useState(false);
+  const [orderDrawerLoading, setOrderDrawerLoading] = useState(false);
+  const [orderDrawerError, setOrderDrawerError] = useState("");
+  const [trackedOrder, setTrackedOrder] = useState(null);
+  const [completedExpanded, setCompletedExpanded] = useState(false);
 
   const [severity, setSeverity] = useState("");
   const [status, setStatus] = useState("");
@@ -371,6 +412,11 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
     }
     return sections;
   }, [operationalActivities]);
+  const completedRows = operationalSections.completed;
+  const visibleCompletedRows = useMemo(() => {
+    if (completedExpanded) return completedRows;
+    return completedRows.slice(0, 5);
+  }, [completedExpanded, completedRows]);
   const nonAdminSetupPending =
     !showAdminUi &&
     (foundationState?.mode === "setup_pending" || foundationState?.mode === "schema_cache");
@@ -395,6 +441,8 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
       activeOrdersCount: operationalSections.active.length,
       financialUpdatesCount: operationalSections.financial.length,
       completedCount: operationalSections.completed.length,
+      completedCollapsed: !completedExpanded && completedRows.length > 5,
+      orderDrawerOpen: isOrderDrawerOpen,
     },
     !loading
   );
@@ -419,6 +467,93 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
   function handleActivityCta(targetPage) {
     if (typeof setActivePage !== "function") return;
     setActivePage(targetPage);
+  }
+
+  async function fetchScopedOrderDetails(orderId) {
+    if (!orderId) throw new Error("Order ID is missing.");
+    let payload = null;
+    const supRes = await getOrderDetailsRead(orderId);
+    if (supRes?.data?.order) {
+      payload = supRes.data;
+    } else {
+      const fallback = await getOrderDetails(orderId);
+      const result = fallback?.data || fallback || null;
+      if (result?.order) payload = result;
+    }
+    if (!payload?.order) {
+      throw new Error("Unable to load order details right now.");
+    }
+    const mapped = mapOrderDetailsPayload(payload);
+    const orderLabKey = labIdKey(mapped.orderLabId);
+    if (labKey && orderLabKey && orderLabKey !== labKey) {
+      throw new Error("This order is not available for your lab.");
+    }
+    return mapped;
+  }
+
+  async function openTrackOrderDrawer(orderId) {
+    try {
+      setOrderDrawerLoading(true);
+      setOrderDrawerError("");
+      setIsOrderDrawerOpen(true);
+      const details = await fetchScopedOrderDetails(orderId);
+      setTrackedOrder(details);
+    } catch (err) {
+      setTrackedOrder(null);
+      setOrderDrawerError(err?.message || "Unable to open order details.");
+    } finally {
+      setOrderDrawerLoading(false);
+    }
+  }
+
+  async function handleRepeatOrder(orderId) {
+    try {
+      const details = await fetchScopedOrderDetails(orderId);
+      const cartItems = details.lines
+        .filter((line) => line.productId)
+        .map((line) => ({
+          productId: line.productId,
+          productName: line.productName,
+          quantity: Math.max(1, Number(line.quantity || 1)),
+          unitPrice: Number(line.unitPrice || 0),
+          category: "",
+          stockHealth: "OK",
+          currentStock: null,
+        }));
+      if (!cartItems.length) {
+        throw new Error("No reorderable items found on this order.");
+      }
+      const productQty = {};
+      for (const item of cartItems) {
+        productQty[item.productId] = item.quantity;
+      }
+      const draftKey = labKey ? `lab-ordering-cart-draft:${labKey}` : "";
+      const handoffKey = labKey ? `lab-ordering-handoff:${labKey}` : "";
+      if (draftKey) {
+        window.localStorage.setItem(
+          draftKey,
+          JSON.stringify({
+            cartItems,
+            notes: "",
+            productQty,
+          })
+        );
+      }
+      if (handoffKey) {
+        window.localStorage.setItem(
+          handoffKey,
+          JSON.stringify({
+            message: `Order ${details.orderId || orderId} loaded into cart.`,
+            openCart: true,
+            ts: Date.now(),
+          })
+        );
+      }
+      setActionMessage(`Repeat order ready: ${details.orderId || orderId}. Opening Lab Ordering…`);
+      handleActivityCta("labOrders");
+    } catch (err) {
+      setActionMessage(err?.message || "Unable to prepare repeat order.");
+    }
   }
 
   return (
@@ -561,6 +696,12 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
         </div>
       ) : null}
 
+      {actionMessage ? (
+        <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+          {actionMessage}
+        </div>
+      ) : null}
+
       {nonAdminSetupPending ? (
         <EmptyState
           title={role === ROLES.LAB ? "Updates are not available yet" : "Notifications are not available yet"}
@@ -623,22 +764,22 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
                   {section.rows.length}
                 </span>
               </div>
-              {section.rows.length === 0 ? (
+              {(section.key === "completed" ? visibleCompletedRows : section.rows).length === 0 ? (
                 <p className="rounded-md border border-dashed bg-white px-2 py-2 text-[11px] text-slate-500">
                   No updates in this section.
                 </p>
               ) : (
                 <div className="space-y-1.5">
-                  {section.rows.map((activity) => {
-                    const { row, payload, meta, eventType, urgency, progressLabel, progressIndex } = activity;
+                  {(section.key === "completed" ? visibleCompletedRows : section.rows).map((activity) => {
+                    const { row, payload, meta, urgency, progressLabel, progressIndex } = activity;
                     const Icon = eventIcon(row.event_type);
                     const rowKey = row.event_id || `${row.event_type}-${row.created_at}`;
                     const cta =
                       section.key === "financial"
                         ? { label: "Open Account", page: "labAccount" }
                         : section.key === "completed"
-                          ? { label: "Repeat Order", page: "labOrders" }
-                          : { label: "Track Order", page: "labOrders" };
+                          ? { label: "Repeat Order", page: "repeat" }
+                          : { label: "Track Order", page: "track" };
                     return (
                       <article
                         key={rowKey}
@@ -684,6 +825,19 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
                                   <span>{progressLabel}</span>
                                   <span>{progressIndex + 1}/5</span>
                                 </div>
+                                <div className="mb-0.5 flex items-center gap-1 text-[9px] text-slate-500">
+                                  {["Received", "Processing", "Packed", "Dispatch", "Delivered"].map((step, idx) => (
+                                    <span
+                                      key={`${rowKey}-${step}`}
+                                      className={cn(
+                                        "rounded px-1 py-0.5",
+                                        idx <= progressIndex ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-500"
+                                      )}
+                                    >
+                                      {step}
+                                    </span>
+                                  ))}
+                                </div>
                                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
                                   <div
                                     className="h-full rounded-full bg-blue-500 transition-all"
@@ -691,6 +845,32 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
                                   />
                                 </div>
                               </div>
+                            ) : null}
+                            {section.key === "financial" ? (
+                              <p className="mt-0.5 text-[10px] text-slate-600">
+                                {meta.amount
+                                  ? `₹${Number(meta.amount).toLocaleString()} payment update`
+                                  : "Financial status updated"}
+                                {parseAmount(
+                                  payloadValue(payload, [
+                                    "outstandingAfter",
+                                    "outstanding_after",
+                                    "outstandingBalance",
+                                    "outstanding",
+                                  ])
+                                )
+                                  ? ` · Outstanding ₹${Number(
+                                      parseAmount(
+                                        payloadValue(payload, [
+                                          "outstandingAfter",
+                                          "outstanding_after",
+                                          "outstandingBalance",
+                                          "outstanding",
+                                        ])
+                                      )
+                                    ).toLocaleString()}`
+                                  : ""}
+                              </p>
                             ) : null}
                             {section.key === "completed" ? (
                               <p className="mt-0.5 text-[10px] text-slate-500">{payloadSummary(payload)}</p>
@@ -701,7 +881,18 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
                             size="sm"
                             variant="outline"
                             className="h-7 shrink-0 px-2 text-[10px]"
-                            onClick={() => handleActivityCta(cta.page)}
+                            onClick={() => {
+                              if (cta.page === "track") {
+                                void openTrackOrderDrawer(meta.orderId);
+                                return;
+                              }
+                              if (cta.page === "repeat") {
+                                void handleRepeatOrder(meta.orderId);
+                                return;
+                              }
+                              handleActivityCta(cta.page);
+                            }}
+                            disabled={(cta.page === "track" || cta.page === "repeat") && !meta.orderId}
                           >
                             {cta.label}
                           </Button>
@@ -711,6 +902,19 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
                   })}
                 </div>
               )}
+              {section.key === "completed" && section.rows.length > 5 ? (
+                <div className="mt-1 flex justify-end">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-[10px]"
+                    onClick={() => setCompletedExpanded((prev) => !prev)}
+                  >
+                    {completedExpanded ? "Show less" : `Show ${section.rows.length - 5} more`}
+                  </Button>
+                </div>
+              ) : null}
             </section>
           ))}
         </div>
@@ -791,6 +995,115 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
           ))}
         </div>
       )}
+
+      {isOrderDrawerOpen ? (
+        <div className="fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label="Track order details">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-900/35 backdrop-blur-[2px]"
+            onClick={() => {
+              setIsOrderDrawerOpen(false);
+              setTrackedOrder(null);
+              setOrderDrawerError("");
+            }}
+          />
+          <div
+            className={cn(
+              "absolute right-0 flex h-full w-full max-w-[min(100vw,520px)] flex-col bg-white shadow-[-10px_0_32px_rgba(15,23,42,0.18)]",
+              "max-md:inset-x-0 max-md:bottom-0 max-md:h-[82vh] max-md:max-w-none max-md:rounded-t-xl"
+            )}
+          >
+            <div className="flex items-center justify-between border-b px-3 py-2.5">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Track Order</p>
+                <p className="text-[11px] text-slate-500">
+                  {trackedOrder?.orderId ? `ORD ${trackedOrder.orderId}` : "Order details"}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100"
+                onClick={() => {
+                  setIsOrderDrawerOpen(false);
+                  setTrackedOrder(null);
+                  setOrderDrawerError("");
+                }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              {orderDrawerLoading ? (
+                <div className="flex items-center gap-2 py-6 text-sm text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading order details...
+                </div>
+              ) : orderDrawerError ? (
+                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {orderDrawerError}
+                </div>
+              ) : trackedOrder ? (
+                <div className="space-y-3">
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-700">
+                      <span>Status: <strong>{trackedOrder.orderStatus || "Received"}</strong></span>
+                      {trackedOrder.paymentStatus ? <span>Payment: {trackedOrder.paymentStatus}</span> : null}
+                      {trackedOrder.dispatchDate ? <span>ETA: {trackedOrder.dispatchDate}</span> : null}
+                      {trackedOrder.invoiceId ? <span>Invoice: {trackedOrder.invoiceId}</span> : <span>Invoice: Pending</span>}
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      Order items
+                    </h3>
+                    <div className="space-y-1.5">
+                      {trackedOrder.lines.map((line, idx) => (
+                        <div
+                          key={`${line.productId}-${idx}`}
+                          className="flex items-center justify-between rounded-md border border-slate-100 px-2 py-1.5 text-[11px]"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-medium text-slate-800">{line.productName}</p>
+                            <p className="text-[10px] text-slate-500">{line.status || "In progress"}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-medium">x{line.quantity}</p>
+                            <p className="tabular-nums text-slate-700">₹{Number(line.lineTotal || 0).toLocaleString()}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <div className="border-t px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 flex-1 text-xs"
+                  onClick={() => handleActivityCta("labAccount")}
+                >
+                  Open Account
+                </Button>
+                <Button
+                  type="button"
+                  className="h-9 flex-1 text-xs"
+                  onClick={() => {
+                    if (trackedOrder?.orderId) {
+                      void handleRepeatOrder(trackedOrder.orderId);
+                    }
+                  }}
+                  disabled={!trackedOrder?.orderId}
+                >
+                  Repeat Order
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
