@@ -19,6 +19,7 @@ import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidat
 import { isNotificationsFoundationEnabled } from "@/config/notificationFoundation.js";
 import { resolveNotificationFoundationState } from "@/notifications/notificationFoundationProbe.js";
 import { ROLES } from "@/config/roles";
+import { cn } from "@/lib/utils";
 
 const LAB_SAFE_EVENT_TYPES = new Set([
   "order_created",
@@ -60,9 +61,53 @@ function formatWhen(iso) {
 
 function payloadSummary(payload) {
   if (!payload || typeof payload !== "object") return "—";
+  if (typeof payload.message === "string" && payload.message.trim()) {
+    return payload.message.trim();
+  }
   const keys = Object.keys(payload).slice(0, 4);
-  if (keys.length === 0) return "{}";
+  if (keys.length === 0) return "No details";
   return keys.map((k) => `${k}: ${JSON.stringify(payload[k])}`).join(" · ");
+}
+
+function formatGroupLabel(iso) {
+  if (!iso) return "Earlier";
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return "Earlier";
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+  if (d >= startOfToday) return "Today";
+  if (d >= startOfYesterday) return "Yesterday";
+  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+function groupNotificationsByDate(rows) {
+  const groups = [];
+  const indexByLabel = new Map();
+  for (const row of rows) {
+    const label = formatGroupLabel(row.created_at);
+    if (!indexByLabel.has(label)) {
+      const group = { label, rows: [] };
+      indexByLabel.set(label, groups.length);
+      groups.push(group);
+    }
+    groups[indexByLabel.get(label)].rows.push(row);
+  }
+  return groups;
+}
+
+function formatRelativeTime(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return "—";
+  const diffMs = Date.now() - d.getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
 function roleScopeHint(role) {
@@ -185,6 +230,9 @@ export default function NotificationCenterPage({ currentUser }) {
     if (role === ROLES.LAB && rows.length === 0) return LAB_PLACEHOLDER_NOTIFICATIONS;
     return rows;
   }, [role, rows]);
+
+  const groupedRows = useMemo(() => groupNotificationsByDate(displayRows), [displayRows]);
+  const isLabTimeline = role === ROLES.LAB;
   const nonAdminSetupPending =
     !showAdminUi &&
     (foundationState?.mode === "setup_pending" || foundationState?.mode === "schema_cache");
@@ -370,77 +418,93 @@ export default function NotificationCenterPage({ currentUser }) {
           }
         />
       ) : (
-        <div className="space-y-3">
-          {displayRows.map((row) => {
-            const payload =
-              row.payload_json && typeof row.payload_json === "object"
-                ? row.payload_json
-                : {};
-            const Icon = eventIcon(row.event_type);
-            const inApp = (row.deliveries || []).find(
-              (d) => String(d.channel).toLowerCase() === "in_app"
-            );
-            const isPending = String(row.status).toLowerCase() === "pending";
-            const busy = updatingId === row.event_id;
+        <div className={cn("space-y-4", isLabTimeline && "mx-auto max-w-2xl")}>
+          {groupedRows.map((group) => (
+            <section key={group.label}>
+              <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {group.label}
+              </h2>
+              <ul className="relative space-y-0 pl-3">
+                <div className="absolute bottom-1 left-[5px] top-1 w-px bg-border" aria-hidden />
+                {group.rows.map((row) => {
+                  const payload =
+                    row.payload_json && typeof row.payload_json === "object"
+                      ? row.payload_json
+                      : {};
+                  const Icon = eventIcon(row.event_type);
+                  const isPending = String(row.status).toLowerCase() === "pending";
+                  const busy = updatingId === row.event_id;
+                  const rowKey = row.event_id || `${row.event_type}-${row.created_at}`;
 
-            return (
-              <Card key={row.event_id || `${row.event_type}-${row.created_at}`} className="p-4 transition hover:shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-700">
-                        <Icon className="h-4 w-4" />
-                      </span>
-                      <span className="font-medium">{eventTitle(row.event_type)}</span>
-                      <Badge variant={severityVariant(row.severity)}>{row.severity}</Badge>
-                      <Badge variant={statusVariant(row.status)}>{row.status}</Badge>
-                      <span className="text-xs text-muted-foreground">{row.source_module}</span>
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {formatWhen(row.created_at)} · source {row.source_id || "—"} · lab{" "}
-                      {row.target_lab_id || "—"}
-                    </p>
-                    <p className="mt-2 text-sm text-foreground/90">{payloadSummary(payload)}</p>
-                    {inApp ? (
-                      <p className="mt-1 text-[11px] text-muted-foreground">
-                        in_app: {inApp.status}
-                        {row.deliveries?.length > 1
-                          ? ` (+${row.deliveries.length - 1} placeholder channel logs)`
-                          : null}
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="flex shrink-0 gap-2">
-                    {!row.event_id ? null : (
-                    <>
-                    {isPending ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={busy}
-                        onClick={() => markStatus(row.event_id, "read")}
-                      >
-                        Mark read
-                      </Button>
-                    ) : null}
-                    {String(row.status).toLowerCase() !== "acknowledged" ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        disabled={busy}
-                        onClick={() => markStatus(row.event_id, "acknowledged")}
-                      >
-                        Acknowledge
-                      </Button>
-                    ) : null}
-                    </>
-                    )}
-                  </div>
-                </div>
-              </Card>
-            );
-          })}
+                  return (
+                    <li key={rowKey} className="relative border-b border-border/50 py-2 pl-4 last:border-b-0">
+                      <span
+                        className={cn(
+                          "absolute left-0 top-3 flex h-2.5 w-2.5 items-center justify-center rounded-full border-2 border-background",
+                          isPending ? "bg-amber-400" : "bg-emerald-500"
+                        )}
+                        aria-hidden
+                      />
+                      <div className="rounded-lg border border-border bg-card p-2.5 shadow-sm transition hover:shadow-md">
+                        <div className="flex items-start gap-2">
+                          <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-foreground">
+                            <Icon className="h-3.5 w-3.5" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-sm font-semibold">{eventTitle(row.event_type)}</span>
+                              {!isLabTimeline ? (
+                                <Badge variant={severityVariant(row.severity)} className="text-[10px]">
+                                  {row.severity}
+                                </Badge>
+                              ) : null}
+                              <Badge variant={statusVariant(row.status)} className="text-[10px]">
+                                {row.status}
+                              </Badge>
+                            </div>
+                            <p className="mt-0.5 text-[11px] text-muted-foreground">
+                              {formatRelativeTime(row.created_at)}
+                              {!isLabTimeline && row.source_module ? ` · ${row.source_module}` : null}
+                            </p>
+                            <p className="mt-1 text-xs leading-snug text-foreground/90">
+                              {payloadSummary(payload)}
+                            </p>
+                          </div>
+                        </div>
+                        {!isLabTimeline && row.event_id ? (
+                          <div className="mt-2 flex justify-end gap-1.5">
+                            {isPending ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs"
+                                disabled={busy}
+                                onClick={() => markStatus(row.event_id, "read")}
+                              >
+                                Mark read
+                              </Button>
+                            ) : null}
+                            {String(row.status).toLowerCase() !== "acknowledged" ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="h-7 text-xs"
+                                disabled={busy}
+                                onClick={() => markStatus(row.event_id, "acknowledged")}
+                              >
+                                Acknowledge
+                              </Button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
         </div>
       )}
     </div>

@@ -1,11 +1,4 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -53,17 +46,20 @@ import {
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
+import { cn } from "@/lib/utils";
 
 function QuickStat({ title, value, icon: Icon }) {
   return (
-    <div className="rounded-2xl border bg-white p-4 shadow-sm">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="text-xs text-slate-500">{title}</div>
-          <div className="mt-1 text-xl font-semibold text-slate-900">{value}</div>
+    <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            {title}
+          </div>
+          <div className="truncate text-base font-semibold tabular-nums text-slate-900">{value}</div>
         </div>
-        <div className="rounded-xl bg-slate-50 p-2">
-          <Icon className="h-4 w-4 text-slate-700" />
+        <div className="shrink-0 rounded-md bg-slate-100 p-1.5">
+          <Icon className="h-3.5 w-3.5 text-slate-600" />
         </div>
       </div>
     </div>
@@ -74,35 +70,71 @@ function QtyControl({
   value,
   onDecrease,
   onIncrease,
-  compact = false,
+  size = "product",
   disabled = false,
 }) {
+  const isDrawer = size === "drawer";
   return (
     <div
-      className={`inline-flex items-center rounded-xl border bg-white ${
-        compact ? "h-9" : "h-11"
-      } ${disabled ? "opacity-50" : ""}`}
+      className={cn(
+        "inline-flex items-center rounded-md border border-slate-200 bg-white",
+        isDrawer ? "h-8" : "h-9",
+        disabled && "opacity-50"
+      )}
     >
       <button
         type="button"
         onClick={onDecrease}
         disabled={disabled}
-        className="flex h-full w-10 items-center justify-center text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed"
+        className={cn(
+          "flex h-full items-center justify-center text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed",
+          isDrawer ? "w-7" : "w-9"
+        )}
       >
-        <Minus className="h-4 w-4" />
+        <Minus className="h-3.5 w-3.5" />
       </button>
-      <div className="min-w-[42px] px-2 text-center text-sm font-semibold text-slate-900">
+      <div
+        className={cn(
+          "px-1.5 text-center font-semibold tabular-nums text-slate-900",
+          isDrawer ? "min-w-[26px] text-xs" : "min-w-[34px] text-sm"
+        )}
+      >
         {value}
       </div>
       <button
         type="button"
         onClick={onIncrease}
         disabled={disabled}
-        className="flex h-full w-10 items-center justify-center text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed"
+        className={cn(
+          "flex h-full items-center justify-center text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed",
+          isDrawer ? "w-7" : "w-9"
+        )}
       >
-        <Plus className="h-4 w-4" />
+        <Plus className="h-3.5 w-3.5" />
       </button>
     </div>
+  );
+}
+
+function CompactStockBadge({ stockHealth, currentStock }) {
+  if (stockHealth === "OUT") {
+    return (
+      <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium text-red-700 bg-red-50">
+        Out
+      </span>
+    );
+  }
+  if (stockHealth === "LOW") {
+    return (
+      <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium text-amber-700 bg-amber-50">
+        Low
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 bg-emerald-50">
+      {Number(currentStock || 0) > 0 ? `${Number(currentStock).toLocaleString()} left` : "In stock"}
+    </span>
   );
 }
 
@@ -143,11 +175,98 @@ function categoryIcon(category) {
   return Package;
 }
 
+function CollapsibleSection({ title, open, onToggle, children }) {
+  return (
+    <div className="border-b border-slate-100 last:border-b-0">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-50"
+        onClick={onToggle}
+      >
+        {title}
+        <span className="text-slate-400">{open ? "−" : "+"}</span>
+      </button>
+      {open ? <div className="px-3 pb-3">{children}</div> : null}
+    </div>
+  );
+}
+
+function ProductCatalogCard({ item, qty, onQtyChange, onAdd, disabled }) {
+  const unitPrice = Number(item.unitSellingPrice ?? item.price ?? 0);
+  const packSize = item.packSize || item.unit || item.pack || "";
+  const CategoryIcon = categoryIcon(item.category);
+
+  return (
+    <div
+      className={cn(
+        "rounded-lg border border-slate-200 bg-white p-2 transition-shadow hover:border-slate-300 hover:shadow-sm",
+        disabled && "opacity-70"
+      )}
+    >
+      <p className="line-clamp-2 text-[13px] font-semibold leading-snug text-slate-900">
+        {item.productName}
+      </p>
+      <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-slate-500">
+        <CategoryIcon className="h-3 w-3 shrink-0" />
+        <span className="truncate">
+          {item.category || "General"}
+          {packSize ? ` • ${packSize}` : ""}
+        </span>
+      </p>
+      <div className="mt-1.5 flex items-center justify-between gap-2">
+        <span className="text-sm font-bold tabular-nums text-slate-900">
+          ₹{unitPrice.toLocaleString()}
+        </span>
+        <CompactStockBadge stockHealth={item.stockHealth} currentStock={item.currentStock} />
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-1.5">
+        <QtyControl
+          size="product"
+          value={qty}
+          disabled={disabled}
+          onDecrease={() => onQtyChange(qty - 1)}
+          onIncrease={() => onQtyChange(qty + 1)}
+        />
+        <Button
+          type="button"
+          size="sm"
+          className="h-8 shrink-0 rounded-md px-2.5 text-xs font-semibold"
+          onClick={onAdd}
+          disabled={disabled}
+        >
+          {disabled ? "N/A" : "Add"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function QuickPickRow({ item, onAdd }) {
+  return (
+    <button
+      type="button"
+      className="flex w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-left text-xs hover:bg-slate-100"
+      onClick={onAdd}
+    >
+      <span className="min-w-0 flex-1 truncate font-medium text-slate-800">{item.productName}</span>
+      <span className="shrink-0 font-semibold text-slate-900">
+        ₹{Number(item.unitSellingPrice ?? item.price ?? 0).toLocaleString()}
+      </span>
+    </button>
+  );
+}
+
 export default function LabOrderingPage({ currentUser }) {
   const [activeTab, setActiveTab] = useState("catalog");
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [cartSections, setCartSections] = useState({
+    items: true,
+    notes: false,
+    summary: true,
+  });
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("name");
   const [catalog, setCatalog] = useState([]);
   const [recentOrders, setRecentOrders] = useState([]);
   const [cartItems, setCartItems] = useState([]);
@@ -378,16 +497,45 @@ export default function LabOrderingPage({ currentUser }) {
     }
   }
 
-  const visibleCatalog = useMemo(() => {
+  const baseFilteredCatalog = useMemo(() => {
+    const q = search.trim().toLowerCase();
     return catalog.filter((item) => {
-      const matchesSearch = `${item.productName || ""} ${item.category || ""} ${item.productId || ""}`
-        .toLowerCase()
-        .includes(search.toLowerCase());
-      if (!matchesSearch) return false;
+      const haystack = `${item.productName || ""} ${item.category || ""} ${item.productId || ""}`.toLowerCase();
+      if (q && !haystack.includes(q)) return false;
       if (categoryFilter === "all") return true;
       return String(item.category || "").toLowerCase() === categoryFilter;
     });
   }, [catalog, search, categoryFilter]);
+
+  const sortedAllProducts = useMemo(() => {
+    const list = [...baseFilteredCatalog];
+    if (sortBy === "price") {
+      return list.sort(
+        (a, b) =>
+          Number(b.unitSellingPrice ?? b.price ?? 0) - Number(a.unitSellingPrice ?? a.price ?? 0)
+      );
+    }
+    if (sortBy === "stock") {
+      const rank = (item) => {
+        if (item.stockHealth === "OUT" || item.canOrder === false) return 2;
+        if (item.stockHealth === "LOW") return 1;
+        return 0;
+      };
+      return list.sort((a, b) => rank(a) - rank(b));
+    }
+    return list.sort((a, b) =>
+      String(a.productName || "").localeCompare(String(b.productName || ""))
+    );
+  }, [baseFilteredCatalog, sortBy]);
+
+  useEffect(() => {
+    if (!isCartOpen) return undefined;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [isCartOpen]);
 
   const categoryOptions = useMemo(() => {
     const set = new Set();
@@ -420,7 +568,7 @@ export default function LabOrderingPage({ currentUser }) {
   }, [scopedRecentOrders]);
 
   const frequentlyOrdered = useMemo(() => {
-    return visibleCatalog
+    return baseFilteredCatalog
       .filter((item) => productOrderStats.has(String(item.productId || "")))
       .sort((a, b) => {
         const aa = productOrderStats.get(String(a.productId || ""));
@@ -428,10 +576,10 @@ export default function LabOrderingPage({ currentUser }) {
         return Number(bb?.qty || 0) - Number(aa?.qty || 0);
       })
       .slice(0, 6);
-  }, [visibleCatalog, productOrderStats]);
+  }, [baseFilteredCatalog, productOrderStats]);
 
   const recentlyOrdered = useMemo(() => {
-    return visibleCatalog
+    return baseFilteredCatalog
       .filter((item) => productOrderStats.has(String(item.productId || "")))
       .sort((a, b) => {
         const aa = String(productOrderStats.get(String(a.productId || ""))?.lastDate || "");
@@ -439,7 +587,7 @@ export default function LabOrderingPage({ currentUser }) {
         return bb.localeCompare(aa);
       })
       .slice(0, 6);
-  }, [visibleCatalog, productOrderStats]);
+  }, [baseFilteredCatalog, productOrderStats]);
 
   const cartCount = useMemo(() => {
     return cartItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
@@ -753,8 +901,12 @@ export default function LabOrderingPage({ currentUser }) {
     }
   }
 
+  function toggleCartSection(key) {
+    setCartSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
   return (
-    <div className="space-y-5 pb-28 lg:pb-6">
+    <div className="space-y-4 pb-[max(7rem,env(safe-area-inset-bottom))] lg:pb-6">
       <div className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">Lab Ordering</h1>
         <p className="text-sm text-slate-500">
@@ -763,7 +915,7 @@ export default function LabOrderingPage({ currentUser }) {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
         <QuickStat
           title="Outstanding"
           value={`₹${Number(outstandingBalance).toLocaleString()}`}
@@ -842,96 +994,192 @@ export default function LabOrderingPage({ currentUser }) {
       ) : null}
 
       {activeTab === "catalog" ? (
-        <div className="space-y-4">
-          <Card className="rounded-2xl shadow-sm">
-            <CardContent className="pt-6">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Input
-                  placeholder="Search product, category, SKU..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="h-11 rounded-xl"
-                />
-                <select
-                  className="h-11 rounded-xl border border-input bg-background px-3 text-sm"
-                  value={categoryFilter}
-                  onChange={(e) => setCategoryFilter(e.target.value)}
-                >
-                  <option value="all">All categories</option>
-                  {categoryOptions.map((c) => (
-                    <option key={c} value={c.toLowerCase()}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </CardContent>
-          </Card>
+        <div className="space-y-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Input
+              placeholder="Search products…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-9 flex-1 rounded-lg text-sm"
+            />
+            <select
+              className="h-9 rounded-lg border border-input bg-background px-2.5 text-sm sm:w-40"
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+            >
+              <option value="all">All categories</option>
+              {categoryOptions.map((c) => (
+                <option key={c} value={c.toLowerCase()}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <select
+              className="h-9 rounded-lg border border-input bg-background px-2.5 text-sm sm:w-36"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+            >
+              <option value="name">Sort: Name</option>
+              <option value="price">Sort: Price</option>
+              <option value="stock">Sort: Stock</option>
+            </select>
+          </div>
 
-          <Card className="rounded-2xl shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Product Catalog</CardTitle>
-              <CardDescription>Fast ordering cards for day-to-day lab operations.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loadingCatalog ? (
-                <div className="flex items-center gap-2 text-sm text-slate-500">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading catalog...
-                </div>
-              ) : visibleCatalog.length === 0 ? (
-                <div className="text-sm text-slate-500">No products found for this filter.</div>
-              ) : (
-                <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-                  {visibleCatalog.map((item) => {
-                    const unitPrice = Number(item.unitSellingPrice ?? item.price ?? 0);
+          {loadingCatalog ? (
+            <div className="flex items-center gap-2 py-8 text-sm text-slate-500">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading catalog…
+            </div>
+          ) : sortedAllProducts.length === 0 ? (
+            <div className="rounded-lg border border-dashed py-8 text-center text-sm text-slate-500">
+              No products match this filter.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {frequentlyOrdered.length > 0 ? (
+                <section>
+                  <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Frequently Ordered
+                  </h2>
+                  <div className="grid gap-1.5 sm:grid-cols-2">
+                    {frequentlyOrdered.map((item) => (
+                      <QuickPickRow
+                        key={`freq-${item.productId}`}
+                        item={item}
+                        onAdd={() => addToCart(item, 1)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
+              {recentlyOrdered.length > 0 ? (
+                <section>
+                  <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Recently Ordered
+                  </h2>
+                  <div className="grid gap-1.5 sm:grid-cols-2">
+                    {recentlyOrdered.map((item) => (
+                      <QuickPickRow
+                        key={`recent-${item.productId}`}
+                        item={item}
+                        onAdd={() => addToCart(item, 1)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
+              <section>
+                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  All Products
+                  <span className="ml-1.5 font-normal normal-case text-slate-400">
+                    ({sortedAllProducts.length})
+                  </span>
+                </h2>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {sortedAllProducts.map((item) => {
                     const qty = productQty[item.productId] || 1;
                     const isOut = item.stockHealth === "OUT" || item.canOrder === false;
-                    const packSize = item.packSize || item.unit || item.pack || "";
-                    const CategoryIcon = categoryIcon(item.category);
+                    return (
+                      <ProductCatalogCard
+                        key={item.productId}
+                        item={item}
+                        qty={qty}
+                        disabled={isOut}
+                        onQtyChange={(next) => updateProductQty(item.productId, next)}
+                        onAdd={() => addToCart(item)}
+                      />
+                    );
+                  })}
+                </div>
+              </section>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      
+
+      {activeTab === "orders" ? (
+        <div className="grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="rounded-lg border border-slate-200 bg-white">
+            <div className="border-b px-3 py-2">
+              <h2 className="text-sm font-semibold text-slate-900">Previous Orders</h2>
+              <p className="text-[11px] text-slate-500">Your lab order timeline</p>
+            </div>
+            <div className="p-2">
+              {loadingOrders ? (
+                <div className="flex items-center gap-2 py-6 text-sm text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading orders…
+                </div>
+              ) : scopedRecentOrders.length === 0 ? (
+                <div className="py-6 text-center text-sm text-slate-500">No orders yet.</div>
+              ) : (
+                <div className="relative space-y-0 pl-3">
+                  <div className="absolute bottom-2 left-[5px] top-2 w-px bg-slate-200" aria-hidden />
+                  {scopedRecentOrders.map((order) => {
+                    const isSelected = selectedOrderId === order.orderId;
+                    const orderStatus = order.orderStatus || order.status || "Placed";
                     return (
                       <div
-                        key={item.productId}
-                        className={`
-                          rounded-xl border bg-white p-3 transition-all duration-150
-                          hover:-translate-y-0.5 hover:shadow-md
-                          ${isOut ? "opacity-75" : ""}
-                        `}
+                        key={order.orderId}
+                        className={cn(
+                          "relative border-b border-slate-100 py-2 pl-4 last:border-b-0",
+                          isSelected && "bg-slate-50/80"
+                        )}
                       >
-                        <div className="space-y-1.5">
-                          <div className="line-clamp-2 text-sm font-semibold leading-5 text-slate-900">
-                            {item.productName}
+                        <span
+                          className={cn(
+                            "absolute left-0 top-3 h-2.5 w-2.5 rounded-full border-2 border-white",
+                            isSelected ? "bg-slate-900" : "bg-slate-300"
+                          )}
+                          aria-hidden
+                        />
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-semibold text-slate-900">{order.orderId}</p>
+                            <p className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-500">
+                              <Clock3 className="h-3 w-3 shrink-0" />
+                              {order.orderDate || order.date || "—"}
+                            </p>
                           </div>
-                          <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                            <CategoryIcon className="h-3.5 w-3.5" />
-                            <span>{item.category || "General"}</span>
-                            {packSize ? <span>• {packSize}</span> : null}
-                          </div>
+                          <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600 bg-slate-100">
+                            {orderStatus}
+                          </span>
                         </div>
-                        <div className="mt-2 flex items-center justify-between gap-2 text-xs">
-                          <Badge variant="secondary" className="text-xs font-semibold">
-                            ₹{unitPrice.toLocaleString()}
-                          </Badge>
-                          <StockBadge
-                            stockHealth={item.stockHealth}
-                            currentStock={item.currentStock}
-                          />
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-600">
+                          <span className="font-semibold tabular-nums text-slate-900">
+                            ₹{Number(order.orderTotal ?? order.total ?? 0).toLocaleString()}
+                          </span>
+                          <span>·</span>
+                          <span>{Number(order.itemCount || order.totalItems || 0)} items</span>
+                          <span className="rounded bg-slate-100 px-1 py-0.5 text-[10px]">
+                            {order.paymentStatus || "Pending"}
+                          </span>
                         </div>
-                        <div className="mt-3 flex items-center justify-between gap-2">
-                          <QtyControl
-                            compact
-                            value={qty}
-                            disabled={isOut}
-                            onDecrease={() => updateProductQty(item.productId, qty - 1)}
-                            onIncrease={() => updateProductQty(item.productId, qty + 1)}
-                          />
+                        <div className="mt-1.5 flex gap-1.5">
                           <Button
+                            type="button"
                             size="sm"
-                            className="h-9 rounded-lg px-3 font-medium"
-                            onClick={() => addToCart(item)}
-                            disabled={isOut}
+                            variant="ghost"
+                            className="h-7 px-2 text-[11px]"
+                            onClick={() => openOrderDetails(order.orderId)}
                           >
-                            {isOut ? "Unavailable" : "Add"}
+                            Details
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-7 px-2.5 text-[11px] font-semibold"
+                            onClick={async () => {
+                              const details = await openOrderDetails(order.orderId);
+                              handleRepeatOrder(details || undefined);
+                            }}
+                          >
+                            <RotateCcw className="mr-1 h-3 w-3" />
+                            Reorder
                           </Button>
                         </div>
                       </div>
@@ -939,188 +1187,70 @@ export default function LabOrderingPage({ currentUser }) {
                   })}
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
-          {frequentlyOrdered.length > 0 ? (
-            <Card className="rounded-2xl shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Frequently Ordered</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {frequentlyOrdered.map((item) => (
-                    <button
-                      key={`freq-${item.productId}`}
-                      type="button"
-                      className="rounded-lg border bg-slate-50 px-3 py-2 text-left text-sm transition hover:bg-slate-100"
-                      onClick={() => addToCart(item, 1)}
-                    >
-                      <div className="truncate font-medium text-slate-900">{item.productName}</div>
-                      <div className="text-xs text-slate-500">{item.category || "General"}</div>
-                    </button>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {recentlyOrdered.length > 0 ? (
-            <Card className="rounded-2xl shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Recently Ordered</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {recentlyOrdered.map((item) => (
-                    <button
-                      key={`recent-${item.productId}`}
-                      type="button"
-                      className="rounded-lg border bg-white px-3 py-2 text-left text-sm transition hover:bg-slate-50"
-                      onClick={() => addToCart(item, 1)}
-                    >
-                      <div className="truncate font-medium text-slate-900">{item.productName}</div>
-                      <div className="text-xs text-slate-500">{item.category || "General"}</div>
-                    </button>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
-        </div>
-      ) : null}
-
-      
-
-      {activeTab === "orders" ? (
-        <div className="grid gap-5 xl:grid-cols-[1.2fr_1fr]">
-          <Card className="rounded-2xl shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Previous Orders</CardTitle>
-              <CardDescription>Orders from your lab only.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loadingOrders ? (
-                <div className="flex items-center gap-2 text-sm text-slate-500">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading orders...
-                </div>
-              ) : scopedRecentOrders.length === 0 ? (
-                <div className="text-sm text-slate-500">No orders yet.</div>
-              ) : (
-                <div className="space-y-3">
-                  {scopedRecentOrders.map((order) => (
-                    <div
-                      key={order.orderId}
-                      className={`rounded-xl border bg-white p-3 ${
-                        selectedOrderId === order.orderId ? "ring-2 ring-slate-200" : ""
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="text-sm font-semibold">{order.orderId}</div>
-                          <div className="flex items-center gap-1 text-xs text-slate-500">
-                            <Clock3 className="h-3 w-3" />
-                            {order.orderDate || order.date || "-"}
-                          </div>
-                        </div>
-                        <Badge variant="secondary">{order.orderStatus || order.status || "Placed"}</Badge>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        <Badge variant="outline" className="text-[11px]">
-                          {order.paymentStatus || "Pending payment"}
-                        </Badge>
-                        <Badge variant="outline" className="text-[11px]">
-                          {selectedOrderId === order.orderId ? "Viewed" : "Ready to reorder"}
-                        </Badge>
-                      </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                        <span>Total: ₹{Number(order.orderTotal ?? order.total ?? 0).toLocaleString()}</span>
-                        <span>•</span>
-                        <span>Items: {Number(order.itemCount || order.totalItems || 0)}</span>
-                      </div>
-                      <div className="mt-3 flex gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="rounded-lg"
-                          onClick={() => openOrderDetails(order.orderId)}
-                        >
-                          <FileText className="mr-1.5 h-4 w-4" />
-                          View details
-                        </Button>
-                        <Button
-                          size="sm"
-                          className="rounded-lg"
-                          onClick={async () => {
-                            const details = await openOrderDetails(order.orderId);
-                            handleRepeatOrder(details || undefined);
-                          }}
-                        >
-                          <RotateCcw className="mr-1.5 h-4 w-4" />
-                          Repeat
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Order Details</CardTitle>
-              <CardDescription>Review selected order lines.</CardDescription>
-            </CardHeader>
-            <CardContent>
+          <div className="rounded-lg border border-slate-200 bg-white">
+            <div className="border-b px-3 py-2">
+              <h2 className="text-sm font-semibold text-slate-900">Order Details</h2>
+            </div>
+            <div className="p-3">
               {!selectedOrderId ? (
-                <div className="text-sm text-slate-500">Select an order to view details.</div>
+                <p className="py-4 text-center text-xs text-slate-500">Select an order from the timeline.</p>
               ) : loadingOrderDetails ? (
-                <div className="flex items-center gap-2 text-sm text-slate-500">
+                <div className="flex items-center gap-2 py-4 text-sm text-slate-500">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading details...
+                  Loading…
                 </div>
               ) : selectedOrderDetails?.order ? (
-                <div className="space-y-3">
-                  <div className="text-sm">
-                    <div className="font-semibold">{selectedOrderDetails.order.orderId}</div>
-                    <div className="text-slate-500">{selectedOrderDetails.order.orderDate || "-"}</div>
+                <div className="space-y-2">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-900">
+                      {selectedOrderDetails.order.orderId}
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      {selectedOrderDetails.order.orderDate || "—"}
+                    </p>
                   </div>
-                  <div className="text-sm space-y-1">
-                    <div>Status: {selectedOrderDetails.order.orderStatus || "-"}</div>
-                    <div>Payment: {selectedOrderDetails.order.paymentStatus || "-"}</div>
-                    <div>
-                      Total: ₹{Number(selectedOrderDetails.order.orderTotal || 0).toLocaleString()}
-                    </div>
+                  <div className="flex flex-wrap gap-1 text-[11px]">
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5">
+                      {selectedOrderDetails.order.orderStatus || "—"}
+                    </span>
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5">
+                      {selectedOrderDetails.order.paymentStatus || "—"}
+                    </span>
+                    <span className="font-semibold tabular-nums text-slate-900">
+                      ₹{Number(selectedOrderDetails.order.orderTotal || 0).toLocaleString()}
+                    </span>
                   </div>
-                  <Button className="rounded-lg" onClick={handleRepeatOrder}>
-                    <RotateCcw className="mr-2 h-4 w-4" />
-                    Repeat This Order
+                  <Button type="button" size="sm" className="h-8 w-full text-xs" onClick={handleRepeatOrder}>
+                    <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                    Reorder all items
                   </Button>
-                  <div className="space-y-2">
+                  <div className="max-h-64 space-y-1 overflow-y-auto">
                     {selectedOrderDetails.lines?.length ? (
                       selectedOrderDetails.lines.map((line) => (
-                        <div key={line.orderLineId} className="rounded-lg border p-2.5 text-sm">
-                          <div className="font-medium">{line.productName}</div>
-                          <div className="text-xs text-slate-500">
-                            {line.productId} • Qty {line.quantity}
-                          </div>
-                          <div className="text-xs text-slate-600">
+                        <div
+                          key={line.orderLineId || `${line.productId}-${line.quantity}`}
+                          className="flex items-center justify-between gap-2 rounded border border-slate-100 px-2 py-1.5 text-[11px]"
+                        >
+                          <span className="min-w-0 flex-1 truncate font-medium">{line.productName}</span>
+                          <span className="shrink-0 text-slate-500">×{line.quantity}</span>
+                          <span className="shrink-0 tabular-nums font-medium">
                             ₹{Number(line.netLineTotal || 0).toLocaleString()}
-                          </div>
+                          </span>
                         </div>
                       ))
                     ) : (
-                      <div className="text-sm text-slate-500">No line items found.</div>
+                      <p className="text-xs text-slate-500">No line items.</p>
                     )}
                   </div>
                 </div>
               ) : (
-                <div className="text-sm text-slate-500">No details available.</div>
+                <p className="py-4 text-xs text-slate-500">No details available.</p>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -1128,23 +1258,34 @@ export default function LabOrderingPage({ currentUser }) {
         <button
           type="button"
           onClick={() => setIsCartOpen(true)}
-          className="fixed bottom-20 right-4 z-30 flex items-center gap-2 rounded-full bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-slate-800 md:bottom-6"
+          className="fixed bottom-[max(5rem,env(safe-area-inset-bottom))] right-3 z-30 flex items-center gap-2 rounded-full bg-slate-900 px-3.5 py-2.5 text-xs font-semibold text-white shadow-lg transition hover:bg-slate-800 md:bottom-6 md:right-4 md:text-sm"
         >
           <ShoppingCart className="h-4 w-4" />
-          {cartCount} • ₹{cartSubTotal.toLocaleString()}
+          {cartCount} · ₹{cartSubTotal.toLocaleString()}
         </button>
       ) : null}
 
       {isCartOpen ? (
-        <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setIsCartOpen(false)}>
+        <div className="fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label="Shopping cart">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-900/35 backdrop-blur-[2px] transition-opacity"
+            aria-label="Close cart"
+            onClick={() => setIsCartOpen(false)}
+          />
           <div
-            className="absolute bottom-0 right-0 flex h-[82vh] w-full max-w-md flex-col rounded-t-2xl border bg-white shadow-2xl md:top-0 md:h-full md:rounded-none md:rounded-l-2xl"
+            className={cn(
+              "absolute right-0 flex w-full max-w-[min(100vw,480px)] flex-col bg-white shadow-[-8px_0_32px_rgba(15,23,42,0.12)]",
+              "transition-transform duration-300 ease-out",
+              "max-md:inset-0 max-md:max-w-none",
+              "md:inset-y-0 md:h-full md:border-l md:border-slate-200"
+            )}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b px-4 py-3">
+            <div className="flex shrink-0 items-center justify-between border-b px-3 py-2.5">
               <div>
                 <p className="text-sm font-semibold text-slate-900">Cart</p>
-                <p className="text-xs text-slate-500">{cartCount} items</p>
+                <p className="text-[11px] text-slate-500">{cartCount} units · {cartItems.length} lines</p>
               </div>
               <button
                 type="button"
@@ -1155,90 +1296,110 @@ export default function LabOrderingPage({ currentUser }) {
               </button>
             </div>
 
-            <div className="flex-1 space-y-3 overflow-y-auto p-4">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
               {cartItems.length === 0 ? (
-                <div className="rounded-xl border border-dashed p-6 text-center text-sm text-slate-500">
-                  Your cart is empty. Add products from Product Catalog.
+                <div className="p-4 text-center text-sm text-slate-500">
+                  Cart is empty. Add products from the catalog.
                 </div>
               ) : (
                 <>
-                  {cartItems.map((item) => {
-                    const lineTotal = Number(item.quantity) * Number(item.unitPrice);
-                    return (
-                      <div key={item.productId} className="rounded-xl border bg-white p-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-slate-900">
-                              {item.productName}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              {item.category || "General"} • ₹
-                              {Number(item.unitPrice).toLocaleString()} each
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => removeFromCart(item.productId)}
-                            className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-red-600"
+                  <CollapsibleSection
+                    title={`Items (${cartItems.length})`}
+                    open={cartSections.items}
+                    onToggle={() => toggleCartSection("items")}
+                  >
+                    <div className="space-y-1.5">
+                      {cartItems.map((item) => {
+                        const lineTotal = Number(item.quantity) * Number(item.unitPrice);
+                        return (
+                          <div
+                            key={item.productId}
+                            className="flex items-center gap-2 rounded-md border border-slate-100 bg-slate-50/50 px-2 py-1.5"
                           >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                        <div className="mt-2 flex items-center justify-between">
-                          <QtyControl
-                            compact
-                            value={item.quantity}
-                            onDecrease={() => decreaseCartQty(item.productId)}
-                            onIncrease={() => increaseCartQty(item.productId)}
-                          />
-                          <div className="text-sm font-semibold">₹{lineTotal.toLocaleString()}</div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-700">Order Notes (optional)</label>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-xs font-semibold text-slate-900">
+                                {item.productName}
+                              </p>
+                              <p className="text-[10px] text-slate-500">
+                                ₹{Number(item.unitPrice).toLocaleString()} ea
+                              </p>
+                            </div>
+                            <QtyControl
+                              size="drawer"
+                              value={item.quantity}
+                              onDecrease={() => decreaseCartQty(item.productId)}
+                              onIncrease={() => increaseCartQty(item.productId)}
+                            />
+                            <span className="w-14 shrink-0 text-right text-xs font-semibold tabular-nums">
+                              ₹{lineTotal.toLocaleString()}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => removeFromCart(item.productId)}
+                              className="shrink-0 rounded p-1 text-slate-400 hover:bg-white hover:text-red-600"
+                              aria-label={`Remove ${item.productName}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CollapsibleSection>
+
+                  <CollapsibleSection
+                    title="Notes"
+                    open={cartSections.notes}
+                    onToggle={() => toggleCartSection("notes")}
+                  >
                     <Textarea
-                      placeholder="Any delivery or packing notes..."
+                      placeholder="Delivery or packing notes (optional)"
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
-                      className="min-h-[84px] rounded-xl"
+                      className="min-h-[72px] resize-none rounded-md text-sm"
                     />
-                  </div>
+                  </CollapsibleSection>
                 </>
               )}
             </div>
 
-            <div className="sticky bottom-0 space-y-3 border-t bg-white p-4">
-              <div className="rounded-xl bg-slate-50 p-3">
-                <div className="flex items-center justify-between text-sm">
-                  <span>Items</span>
-                  <span className="font-medium">{cartCount}</span>
+            <div className="shrink-0 border-t bg-white shadow-[0_-4px_12px_rgba(15,23,42,0.06)]">
+              <CollapsibleSection
+                title="Summary"
+                open={cartSections.summary}
+                onToggle={() => toggleCartSection("summary")}
+              >
+                <div className="space-y-1 text-sm">
+                  <div className="flex justify-between text-slate-600">
+                    <span>Items</span>
+                    <span className="tabular-nums font-medium">{cartCount}</span>
+                  </div>
+                  <div className="flex justify-between font-semibold text-slate-900">
+                    <span>Subtotal</span>
+                    <span className="tabular-nums">₹{cartSubTotal.toLocaleString()}</span>
+                  </div>
                 </div>
-                <div className="mt-1 flex items-center justify-between text-base font-semibold">
-                  <span>Subtotal</span>
-                  <span>₹{cartSubTotal.toLocaleString()}</span>
-                </div>
-              </div>
-              <div className="flex gap-2">
+              </CollapsibleSection>
+              <div className="flex gap-2 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-11 rounded-xl"
+                  className="h-9 rounded-md px-3 text-xs"
                   onClick={() => setCartItems([])}
                   disabled={cartItems.length === 0}
                 >
                   Clear
                 </Button>
                 <Button
-                  className="h-11 flex-1 rounded-xl"
+                  type="button"
+                  className="h-9 flex-1 rounded-md text-sm"
                   onClick={handleSubmitOrder}
                   disabled={submitting || cartItems.length === 0 || isCreditHold}
                 >
                   {submitting ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Submitting...
+                      Submitting…
                     </>
                   ) : (
                     <>

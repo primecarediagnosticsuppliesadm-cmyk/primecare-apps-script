@@ -124,6 +124,108 @@ function SummaryMetric({ label, children }) {
   );
 }
 
+function CompactAccountKpi({ title, value, icon: Icon }) {
+  return (
+    <div className="rounded-lg border border-border bg-card px-2.5 py-2 shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            {title}
+          </div>
+          <div className="truncate text-sm font-semibold tabular-nums text-foreground">{value}</div>
+        </div>
+        {Icon ? (
+          <div className="shrink-0 rounded-md bg-muted p-1.5">
+            <Icon className="h-3.5 w-3.5 text-[var(--pc-brand-primary)]" />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function LabAccountTimeline({ item, history, detailsLoading, copy }) {
+  const outstanding = Number(item.outstandingAmount || 0);
+  const overdueDays = Number(item.overdueDays || 0);
+  const paymentLabel = displayPaymentStatus(item);
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg border border-border bg-card p-3 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              Outstanding balance
+            </p>
+            <p className="text-xl font-bold tabular-nums text-foreground">{formatMoney(outstanding)}</p>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            <StatusBadge variant={collectionRiskToVariant(item.riskStatus)} compact>
+              {item.riskStatus || "Low"}
+            </StatusBadge>
+            <StatusBadge variant={paymentStatusToVariant(paymentLabel)} compact>
+              {paymentLabel}
+            </StatusBadge>
+          </div>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+          {overdueDays > 0 ? (
+            <span className="text-[var(--pc-danger)]">Overdue {overdueDays}d</span>
+          ) : null}
+          {shouldShowPaidLabel(item) ? (
+            <span>Paid {formatMoney(item.totalPaid)}</span>
+          ) : null}
+        </div>
+        <Button type="button" size="sm" variant="outline" disabled className="mt-2 h-8 rounded-md text-xs">
+          Pay Now (coming soon)
+        </Button>
+      </div>
+
+      <section>
+        <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {copy?.viewHistory || "Payment activity"}
+        </h3>
+        {detailsLoading ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading activity…
+          </div>
+        ) : history.length ? (
+          <ul className="relative space-y-0 pl-3">
+            <div className="absolute bottom-1 left-[5px] top-1 w-px bg-border" aria-hidden />
+            {history.map((entry) => (
+              <li
+                key={entry.paymentId || `${entry.paymentDate}-${entry.amountCollected}`}
+                className="relative border-b border-border/60 py-2 pl-4 last:border-b-0"
+              >
+                <span
+                  className="absolute left-0 top-3 h-2 w-2 rounded-full border-2 border-background bg-emerald-500"
+                  aria-hidden
+                />
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-sm font-semibold tabular-nums">
+                    {formatMoney(entry.amountCollected)}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {formatShortDate(entry.paymentDate)}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {[entry.paymentMode, entry.note].filter(Boolean).join(" · ") || "Payment recorded"}
+                </p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
+            No payments recorded yet.
+          </p>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function CollectionsLoading() {
   return (
     <div className="space-y-3 pb-6">
@@ -1098,19 +1200,6 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
         </Button>
       </header>
 
-      {isLabAccount ? (
-        <div className="mx-auto max-w-3xl rounded-xl border border-border bg-card p-3 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-slate-900">Account Overview</p>
-              <p className="text-xs text-slate-500">Lab payments and outstanding summary</p>
-            </div>
-            <Button type="button" size="sm" variant="outline" disabled className="rounded-lg">
-              Pay Now (coming soon)
-            </Button>
-          </div>
-        </div>
-      ) : null}
 
       {pendingTaskContext && !isLabAccount ? (
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
@@ -1144,17 +1233,16 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
         </div>
       ) : null}
 
-      <div className={isLabAccount ? "mx-auto max-w-3xl" : ""}>
-      <KpiCardGrid columns={isLabAccount ? 3 : 4}>
-        <KpiCard
-          title="Outstanding balance"
-          value={formatMoney(summary.totalOutstanding)}
-          icon={IndianRupee}
-        />
+      <div className={isLabAccount ? "mx-auto max-w-2xl" : ""}>
         {isLabAccount ? (
-          <>
-            <KpiCard
-              title="Overdue days"
+          <div className="grid grid-cols-3 gap-2">
+            <CompactAccountKpi
+              title="Outstanding"
+              value={formatMoney(summary.totalOutstanding)}
+              icon={IndianRupee}
+            />
+            <CompactAccountKpi
+              title="Overdue"
               value={
                 filteredCollections[0]?.overdueDays
                   ? `${Number(filteredCollections[0].overdueDays)}d`
@@ -1162,14 +1250,19 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
               }
               icon={AlertTriangle}
             />
-            <KpiCard
+            <CompactAccountKpi
               title="Total paid"
               value={formatMoney(filteredCollections[0]?.totalPaid)}
               icon={Wallet}
             />
-          </>
+          </div>
         ) : (
-          <>
+          <KpiCardGrid columns={4}>
+            <KpiCard
+              title="Outstanding balance"
+              value={formatMoney(summary.totalOutstanding)}
+              icon={IndianRupee}
+            />
             <KpiCard
               title="Overdue labs"
               value={Number(summary.overdueCount || 0).toLocaleString("en-IN")}
@@ -1185,9 +1278,8 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
               value={formatMoney(summary.todayCollections)}
               icon={Wallet}
             />
-          </>
+          </KpiCardGrid>
         )}
-      </KpiCardGrid>
       </div>
 
       {!isLabAccount ? (
@@ -1225,10 +1317,21 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
           }
         />
       ) : (
-        <div className={cn("space-y-2", isLabAccount ? "mx-auto max-w-3xl" : "")} role="list">
+        <div className={cn("space-y-2", isLabAccount ? "mx-auto max-w-2xl" : "")} role="list">
           {filteredCollections.map((item) => {
             const key = labIdKey(item.labId);
             const isExpanded = expandedLabId === key;
+            if (isLabAccount) {
+              return (
+                <LabAccountTimeline
+                  key={key}
+                  item={item}
+                  history={isExpanded ? history : []}
+                  detailsLoading={isExpanded && detailsLoading}
+                  copy={accountLabels}
+                />
+              );
+            }
             return (
               <CollectionListItem
                 key={key}
@@ -1248,7 +1351,7 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
                 pendingTaskContext={pendingTaskContext}
                 onSave={handleSaveCollection}
                 onCompleteTask={handleCompleteLinkedTask}
-                readOnly={isLabAccount}
+                readOnly={false}
                 copy={accountLabels}
               />
             );
