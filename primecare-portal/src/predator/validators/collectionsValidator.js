@@ -13,6 +13,8 @@ import {
   finalizeModuleDiagnosis,
 } from "@/predator/buildModuleDiagnosis.js";
 import { predatorStore } from "@/predator/predatorStore.js";
+import { filterCollectionsForUser } from "@/utils/accessFilters.js";
+import { ROLES } from "@/config/roles";
 import {
   COLLECTIONS_MODULE,
   resolveCollectionsUiSnapshot,
@@ -79,6 +81,69 @@ export async function validateCollectionsModule({ ctx, rendered = null }) {
     const uiOutstanding = uiRendered
       ? Number(uiRendered.outstandingReceivables ?? uiRendered.summary?.totalOutstanding ?? 0)
       : null;
+
+    if (ctx.role === ROLES.LAB) {
+      const labUser = {
+        role: ROLES.LAB,
+        labId: renderedInput?.labId ?? ctx.labId,
+        lab_id: renderedInput?.labId ?? ctx.labId,
+        name: renderedInput?.userName ?? ctx.userName,
+      };
+      const scopedApi = filterCollectionsForUser(apiCollections, labUser);
+
+      entries.push(
+        createPredatorEntry({
+          status: renderedInput?.isLabAccountView ? "PASS" : "FAIL",
+          module: "Collections",
+          step: "lab.account_view.mode",
+          expected: "Lab user sees Payments & Account (read-only), not management UI",
+          actual: {
+            isLabAccountView: renderedInput?.isLabAccountView,
+            uiCollections,
+          },
+          rootCauseGuess: renderedInput?.isLabAccountView
+            ? "Lab account view active"
+            : "Lab user may see collections management controls",
+          suggestedFix:
+            "Route lab role to labAccount page with viewMode=labAccount; remove Collections from lab menu",
+          severity: renderedInput?.isLabAccountView ? "low" : "high",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      if (uiCollections != null && uiCollections > 1) {
+        entries.push(
+          createPredatorEntry({
+            status: "FAIL",
+            module: "Collections",
+            step: "lab.account_view.single_lab",
+            expected: "At most one lab visible to LAB role",
+            actual: { uiCollections, apiScopedCount: scopedApi.length },
+            rootCauseGuess: "Cross-lab AR rows visible to lab user",
+            suggestedFix: "Apply filterCollectionsForUser on CollectionsPage load",
+            severity: "critical",
+            tenantId: ctx.tenantId,
+            role: ctx.role,
+            userId: ctx.userId,
+          })
+        );
+      } else if (scopedApi.length <= 1) {
+        entries.push(
+          createPredatorEntry({
+            status: "PASS",
+            module: "Collections",
+            step: "lab.account_view.scope",
+            expected: "Own-lab collections only",
+            actual: { apiScopedCount: scopedApi.length, uiCollections },
+            tenantId: ctx.tenantId,
+            role: ctx.role,
+            userId: ctx.userId,
+          })
+        );
+      }
+    }
 
     if (!uiSnapshotFresh) {
       entries.push(

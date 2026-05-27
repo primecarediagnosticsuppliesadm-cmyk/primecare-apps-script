@@ -4,11 +4,13 @@ import { useAuth } from "./context/AuthContext";
 import { ROLES } from "./config/roles";
 import { PERMISSIONS } from "./config/permissions";
 import { getDefaultPageForRole } from "./config/menuConfig";
+import { resolvePageKeyForRole } from "./config/pageRouting.js";
 import { PortalToastProvider } from "@/context/PortalToastContext";
 
 function canRoleAccessPage(role, pageKey) {
   if (!role || !pageKey) return false;
-  return Array.isArray(PERMISSIONS[pageKey]) && PERMISSIONS[pageKey].includes(role);
+  const resolved = resolvePageKeyForRole(role, pageKey);
+  return Array.isArray(PERMISSIONS[resolved]) && PERMISSIONS[resolved].includes(role);
 }
 
 const PortalLayout = lazy(() => import("./layout/PortalLayout"));
@@ -112,7 +114,9 @@ export default function App() {
       const defaultPage =
         normalizedUser.defaultPage || getDefaultPageForRole(normalizedRole);
       if (!prev) return defaultPage;
-      if (canRoleAccessPage(normalizedRole, prev)) return prev;
+      if (canRoleAccessPage(normalizedRole, prev)) {
+        return resolvePageKeyForRole(normalizedRole, prev);
+      }
       return defaultPage;
     });
   }, [isAuthenticated, user]);
@@ -120,7 +124,10 @@ export default function App() {
   useEffect(() => {
     function handleSetActivePage(event) {
       if (event?.detail) {
-        setActivePage(event.detail);
+        const next = role
+          ? resolvePageKeyForRole(role, event.detail)
+          : event.detail;
+        setActivePage(next);
       }
     }
 
@@ -128,7 +135,7 @@ export default function App() {
     return () => {
       window.removeEventListener("primecare:setActivePage", handleSetActivePage);
     };
-  }, []);
+  }, [role]);
 
   const pageTitle = useMemo(() => {
     if (!currentUser) return "PrimeCare Portal";

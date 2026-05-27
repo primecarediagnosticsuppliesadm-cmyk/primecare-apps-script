@@ -1,5 +1,5 @@
 import { ROLES } from "@/config/roles";
-import { normalizeAgentIdKey } from "@/utils/labId";
+import { labIdKey, normalizeAgentIdKey } from "@/utils/labId";
 
 function normalize(value) {
   return String(value || "").trim().toLowerCase();
@@ -123,9 +123,17 @@ export function filterCollectionsForUser(collections = [], currentUser) {
   }
 
   if (currentUser.role === ROLES.LAB) {
+    const profileLabId = labIdKey(currentUser.labId || currentUser.lab_id);
     return collections.filter((item) => {
+      const rowLabId = labIdKey(item.labId || item.lab_id);
+      if (profileLabId && rowLabId) {
+        return rowLabId === profileLabId;
+      }
       const labName = item.labName || item.Lab_Name || "";
-      return normalize(labName) === normalize(currentUser.name);
+      return (
+        normalize(labName) === normalize(currentUser.name) ||
+        normalize(labName) === normalize(currentUser.labName)
+      );
     });
   }
 

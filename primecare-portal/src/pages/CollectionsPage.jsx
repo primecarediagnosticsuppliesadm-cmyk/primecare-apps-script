@@ -42,6 +42,8 @@ import {
   ALLOW_LEGACY_APPS_SCRIPT,
 } from "@/config/environment";
 import { ROLES } from "@/config/roles";
+import { filterCollectionsForUser } from "@/utils/accessFilters.js";
+import { summarizeCollectionsList } from "@/metrics/computeReceivableMetrics.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { recordCollectionsRenderedSnapshot } from "@/predator/moduleUiSnapshot.js";
 import { usePredatorRenderTrace } from "@/predator/renderTrace.js";
@@ -103,11 +105,8 @@ function formatShortDate(value) {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-function collectionsScopeHint(role) {
-  const r = String(role || "").toLowerCase();
-  if (r === ROLES.AGENT) return "Labs assigned to you only.";
-  if (r === ROLES.LAB) return "Your lab account and collection history.";
-  return "Tenant-wide receivables, follow-ups, and payments.";
+function isLabAccountViewMode(viewMode, role) {
+  return viewMode === "labAccount" || String(role || "").toLowerCase() === ROLES.LAB;
 }
 
 function SummaryMetric({ label, children }) {
@@ -133,7 +132,7 @@ function CollectionsLoading() {
   );
 }
 
-function CollectionSummaryRow({ item, expanded, onToggleExpand }) {
+function CollectionSummaryRow({ item, expanded, onToggleExpand, readOnly = false }) {
   const outstanding = Number(item.outstandingAmount || 0);
   const overdueDays = Number(item.overdueDays || 0);
   const agent = displayAgentName(item.assignedAgent);
@@ -204,10 +203,12 @@ function CollectionSummaryRow({ item, expanded, onToggleExpand }) {
           )}
         </SummaryMetric>
         <SummaryMetric label="Last follow-up">{formatShortDate(lastFollowUp)}</SummaryMetric>
-        <SummaryMetric label="Next follow-up">
-          {formatShortDate(item.nextFollowUp)}
-        </SummaryMetric>
-        <SummaryMetric label="Agent">{agent || "—"}</SummaryMetric>
+        {!readOnly ? (
+          <SummaryMetric label="Next follow-up">
+            {formatShortDate(item.nextFollowUp)}
+          </SummaryMetric>
+        ) : null}
+        {!readOnly ? <SummaryMetric label="Agent">{agent || "—"}</SummaryMetric> : null}
         {shouldShowPaidLabel(item) ? (
           <SummaryMetric label="Total paid">{formatMoney(item.totalPaid)}</SummaryMetric>
         ) : null}
@@ -221,7 +222,11 @@ function CollectionSummaryRow({ item, expanded, onToggleExpand }) {
           className="h-10 w-full rounded-lg"
           onClick={onToggleExpand}
         >
-          {expanded ? "Close details" : "Record payment / notes"}
+          {expanded
+            ? "Close details"
+            : readOnly
+              ? "View payment history"
+              : "Record payment / notes"}
         </Button>
       </div>
     </div>
@@ -247,6 +252,7 @@ function CollectionExpandedPanel({
   pendingTaskContext,
   onSave,
   onCompleteTask,
+  readOnly = false,
 }) {
   if (detailsLoading) {
     return (
@@ -309,127 +315,131 @@ function CollectionExpandedPanel({
           </div>
         </section>
 
-        <section className="space-y-3 rounded-lg border border-border bg-card p-3">
-          <h3 className="text-xs font-semibold text-slate-700">Record payment & follow-up</h3>
+        {!readOnly ? (
+          <section className="space-y-3 rounded-lg border border-border bg-card p-3">
+            <h3 className="text-xs font-semibold text-slate-700">Record payment & follow-up</h3>
 
-          <div className="space-y-2">
-            <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-              Amount collected
-            </label>
-            <Input
-              type="number"
-              value={amountCollected}
-              onChange={(e) => setAmountCollected(e.target.value)}
-              placeholder="Enter collected amount"
-              className="h-11 rounded-lg"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-              Payment mode
-            </label>
-            <select
-              className="h-11 w-full rounded-lg border border-input bg-background px-3 text-sm"
-              value={paymentMode}
-              onChange={(e) => setPaymentMode(e.target.value)}
-            >
-              <option value="Cash">Cash</option>
-              <option value="UPI">UPI</option>
-              <option value="Bank Transfer">Bank Transfer</option>
-              <option value="Cheque">Cheque</option>
-            </select>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-                Next follow-up date
+                Amount collected
               </label>
               <Input
-                type="date"
-                value={nextFollowUp}
-                onChange={(e) => setNextFollowUp(e.target.value)}
+                type="number"
+                value={amountCollected}
+                onChange={(e) => setAmountCollected(e.target.value)}
+                placeholder="Enter collected amount"
                 className="h-11 rounded-lg"
               />
             </div>
+
             <div className="space-y-2">
               <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-                Next action
+                Payment mode
               </label>
-              <Input
-                value={nextAction}
-                onChange={(e) => setNextAction(e.target.value)}
-                placeholder="Call, revisit, send reminder…"
-                className="h-11 rounded-lg"
+              <select
+                className="h-11 w-full rounded-lg border border-input bg-background px-3 text-sm"
+                value={paymentMode}
+                onChange={(e) => setPaymentMode(e.target.value)}
+              >
+                <option value="Cash">Cash</option>
+                <option value="UPI">UPI</option>
+                <option value="Bank Transfer">Bank Transfer</option>
+                <option value="Cheque">Cheque</option>
+              </select>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                  Next follow-up date
+                </label>
+                <Input
+                  type="date"
+                  value={nextFollowUp}
+                  onChange={(e) => setNextFollowUp(e.target.value)}
+                  className="h-11 rounded-lg"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                  Next action
+                </label>
+                <Input
+                  value={nextAction}
+                  onChange={(e) => setNextAction(e.target.value)}
+                  placeholder="Call, revisit, send reminder…"
+                  className="h-11 rounded-lg"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                Note
+              </label>
+              <Textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="Collection note…"
+                className="min-h-[88px] rounded-lg"
               />
             </div>
-          </div>
 
-          <div className="space-y-2">
-            <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-              Note
-            </label>
-            <Textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="Collection note…"
-              className="min-h-[88px] rounded-lg"
-            />
-          </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button
+                type="button"
+                className="h-11 flex-1 rounded-lg"
+                onClick={onSave}
+                disabled={saving}
+              >
+                {saving ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving…
+                  </>
+                ) : (
+                  <>
+                    <IndianRupee className="mr-2 h-4 w-4" />
+                    Save collection update
+                  </>
+                )}
+              </Button>
 
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Button
-              type="button"
-              className="h-11 flex-1 rounded-lg"
-              onClick={onSave}
-              disabled={saving}
-            >
-              {saving ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving…
-                </>
-              ) : (
-                <>
-                  <IndianRupee className="mr-2 h-4 w-4" />
-                  Save collection update
-                </>
-              )}
-            </Button>
-
-            {pendingTaskContext?.taskId ? (
-              AGENT_TASK_COMPLETION_ENABLED ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 flex-1 rounded-lg"
-                  onClick={onCompleteTask}
-                  disabled={completingTask}
-                >
-                  {completingTask ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Completing…
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 className="mr-2 h-4 w-4" />
-                      Mark linked task complete
-                    </>
-                  )}
-                </Button>
-              ) : (
-                <p className="rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground sm:flex-1">
-                  Task completion coming soon.
-                </p>
-              )
-            ) : null}
-          </div>
-        </section>
+              {pendingTaskContext?.taskId ? (
+                AGENT_TASK_COMPLETION_ENABLED ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 flex-1 rounded-lg"
+                    onClick={onCompleteTask}
+                    disabled={completingTask}
+                  >
+                    {completingTask ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Completing…
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        Mark linked task complete
+                      </>
+                    )}
+                  </Button>
+                ) : (
+                  <p className="rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground sm:flex-1">
+                    Task completion coming soon.
+                  </p>
+                )
+              ) : null}
+            </div>
+          </section>
+        ) : null}
 
         <section className="space-y-2">
-          <h3 className="text-xs font-semibold text-slate-700">Collection history</h3>
+          <h3 className="text-xs font-semibold text-slate-700">
+            {readOnly ? "Payment history" : "Collection history"}
+          </h3>
           {history.length ? (
             <ul className="space-y-2">
               {history.map((item) => (
@@ -467,6 +477,7 @@ function CollectionListItem({
   pendingTaskContext,
   onSave,
   onCompleteTask,
+  readOnly = false,
 }) {
   return (
     <Card className="overflow-hidden rounded-lg border-border shadow-sm">
@@ -474,6 +485,7 @@ function CollectionListItem({
         item={item}
         expanded={expanded}
         onToggleExpand={onToggleExpand}
+        readOnly={readOnly}
       />
       {expanded ? (
         <CollectionExpandedPanel
@@ -483,6 +495,7 @@ function CollectionListItem({
           pendingTaskContext={pendingTaskContext}
           onSave={onSave}
           onCompleteTask={onCompleteTask}
+          readOnly={readOnly}
           {...formProps}
         />
       ) : null}
@@ -490,7 +503,8 @@ function CollectionListItem({
   );
 }
 
-export default function CollectionsPage({ currentUser, authToken }) {
+export default function CollectionsPage({ currentUser, authToken, viewMode }) {
+  const isLabAccount = isLabAccountViewMode(viewMode, currentUser?.role);
   const { showToast } = usePortalToast();
   const [summary, setSummary] = useState({
     totalOutstanding: 0,
@@ -526,8 +540,12 @@ export default function CollectionsPage({ currentUser, authToken }) {
       collections,
       collectionsListCount: collections.length,
       outstandingReceivables: Number(summary.totalOutstanding ?? 0),
+      isLabAccountView: isLabAccount,
+      labScopedCollectionCount: isLabAccount ? collections.length : null,
+      labId: currentUser?.labId,
+      userName: currentUser?.name,
     }),
-    [summary, collections]
+    [summary, collections, isLabAccount, currentUser?.labId, currentUser?.name]
   );
 
   usePredatorModuleValidation("Collections", currentUser, predatorSnapshot, !loading);
@@ -569,14 +587,23 @@ export default function CollectionsPage({ currentUser, authToken }) {
         const res = await getCollectionsRead();
         const payload = res?.data || {};
 
-        const rows = Array.isArray(payload.collections) ? payload.collections : [];
-
+        const allRows = Array.isArray(payload.collections) ? payload.collections : [];
+        const rows = filterCollectionsForUser(allRows, currentUser);
         const summaryFromApi = payload.summary || {};
+        const scopedSummary = isLabAccount
+          ? summarizeCollectionsList(rows, 0)
+          : {
+              totalOutstanding: Number(summaryFromApi.totalOutstanding ?? 0),
+              overdueCount: Number(summaryFromApi.overdueCount ?? 0),
+              highRiskCount: Number(summaryFromApi.highRiskCount ?? 0),
+              todayCollections: Number(summaryFromApi.todayCollections ?? 0),
+            };
+
         setSummary({
-          totalOutstanding: Number(summaryFromApi.totalOutstanding ?? 0),
-          overdueCount: Number(summaryFromApi.overdueCount ?? 0),
-          highRiskCount: Number(summaryFromApi.highRiskCount ?? 0),
-          todayCollections: Number(summaryFromApi.todayCollections ?? 0),
+          totalOutstanding: Number(scopedSummary.totalOutstanding ?? 0),
+          overdueCount: Number(scopedSummary.overdueCount ?? 0),
+          highRiskCount: Number(scopedSummary.highRiskCount ?? 0),
+          todayCollections: Number(scopedSummary.todayCollections ?? 0),
         });
 
         setCollections(rows);
@@ -594,16 +621,16 @@ export default function CollectionsPage({ currentUser, authToken }) {
         setLoading(false);
       }
     });
-  }, []);
+  }, [currentUser, isLabAccount]);
 
   useEffect(() => {
     loadCollections();
   }, [loadCollections, authToken]);
 
   useEffect(() => {
-    if (loading) return;
+    if (loading || isLabAccount) return;
     hydratePendingCollectionTask();
-  }, [loading, collections]);
+  }, [loading, collections, isLabAccount]);
 
   async function openCollection(labId, options = {}) {
     const listMatch = findCollectionByLabId(collections, labId);
@@ -747,6 +774,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
   }
 
   async function handleSaveCollection() {
+    if (isLabAccount) return;
     const selectedLabId = expandedLabId;
     if (!selectedLabId) return;
 
@@ -936,6 +964,9 @@ export default function CollectionsPage({ currentUser, authToken }) {
   }
 
   const filteredCollections = useMemo(() => {
+    if (isLabAccount) {
+      return [...collections];
+    }
     const q = search.trim().toLowerCase();
     const filtered = collections.filter((item) =>
       `${item.labId} ${item.labName} ${item.assignedAgent} ${item.area}`
@@ -945,7 +976,14 @@ export default function CollectionsPage({ currentUser, authToken }) {
     return [...filtered].sort(
       (a, b) => Number(b.outstandingAmount || 0) - Number(a.outstandingAmount || 0)
     );
-  }, [collections, search]);
+  }, [collections, search, isLabAccount]);
+
+  useEffect(() => {
+    if (!isLabAccount || loading || collections.length !== 1) return;
+    const key = labIdKey(collections[0].labId);
+    if (expandedLabId === key) return;
+    void openCollection(collections[0].labId);
+  }, [isLabAccount, loading, collections, expandedLabId]);
 
   useEffect(() => {
     if (
@@ -994,11 +1032,14 @@ export default function CollectionsPage({ currentUser, authToken }) {
         <div>
           <div className="flex items-center gap-2">
             <Wallet className="h-5 w-5 text-[var(--pc-brand-primary)]" />
-            <h1 className={typography.pageTitle}>Collections</h1>
+            <h1 className={typography.pageTitle}>
+              {isLabAccount ? "Payments & Account" : "Collections"}
+            </h1>
           </div>
           <p className={cn(typography.pageSubtitle, "mt-0.5")}>
-            {collectionsScopeHint(currentUser?.role)} Tap a lab to record payments and
-            follow-ups.
+            {isLabAccount
+              ? "Your outstanding balance and payment history."
+              : "Tenant-wide receivables, follow-ups, and payments. Tap a lab to record payments and follow-ups."}
           </p>
         </div>
         <Button
@@ -1013,7 +1054,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
         </Button>
       </header>
 
-      {pendingTaskContext ? (
+      {pendingTaskContext && !isLabAccount ? (
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
           <div className="flex items-start gap-2">
             <ClipboardCheck className="mt-0.5 h-4 w-4 shrink-0" />
@@ -1045,56 +1086,81 @@ export default function CollectionsPage({ currentUser, authToken }) {
         </div>
       ) : null}
 
-      <KpiCardGrid columns={4}>
+      <KpiCardGrid columns={isLabAccount ? 3 : 4}>
         <KpiCard
-          title="Total outstanding"
+          title="Outstanding balance"
           value={formatMoney(summary.totalOutstanding)}
           icon={IndianRupee}
         />
-        <KpiCard
-          title="Overdue labs"
-          value={Number(summary.overdueCount || 0).toLocaleString("en-IN")}
-          icon={AlertTriangle}
-        />
-        <KpiCard
-          title="High risk"
-          value={Number(summary.highRiskCount || 0).toLocaleString("en-IN")}
-          icon={ShieldAlert}
-        />
-        <KpiCard
-          title="Today's collections"
-          value={formatMoney(summary.todayCollections)}
-          icon={Wallet}
-        />
+        {isLabAccount ? (
+          <>
+            <KpiCard
+              title="Overdue days"
+              value={
+                filteredCollections[0]?.overdueDays
+                  ? `${Number(filteredCollections[0].overdueDays)}d`
+                  : "—"
+              }
+              icon={AlertTriangle}
+            />
+            <KpiCard
+              title="Total paid"
+              value={formatMoney(filteredCollections[0]?.totalPaid)}
+              icon={Wallet}
+            />
+          </>
+        ) : (
+          <>
+            <KpiCard
+              title="Overdue labs"
+              value={Number(summary.overdueCount || 0).toLocaleString("en-IN")}
+              icon={AlertTriangle}
+            />
+            <KpiCard
+              title="High risk"
+              value={Number(summary.highRiskCount || 0).toLocaleString("en-IN")}
+              icon={ShieldAlert}
+            />
+            <KpiCard
+              title="Today's collections"
+              value={formatMoney(summary.todayCollections)}
+              icon={Wallet}
+            />
+          </>
+        )}
       </KpiCardGrid>
 
-      <div className="sticky top-0 z-20 -mx-1 border-b border-border bg-background/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/90">
-        <div className="space-y-2 rounded-lg border border-border bg-card p-2 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-xs font-semibold text-slate-700">Lab collections</div>
-            <div className="text-[11px] text-muted-foreground">
-              {filteredCollections.length} of {collections.length} shown
+      {!isLabAccount ? (
+        <div className="sticky top-0 z-20 -mx-1 border-b border-border bg-background/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/90">
+          <div className="space-y-2 rounded-lg border border-border bg-card p-2 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs font-semibold text-slate-700">Receivables</div>
+              <div className="text-[11px] text-muted-foreground">
+                {filteredCollections.length} of {collections.length} shown
+              </div>
+            </div>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <Input
+                placeholder="Search lab, agent, area…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="h-9 rounded-lg pl-8 text-sm"
+                aria-label="Search collections"
+              />
             </div>
           </div>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-            <Input
-              placeholder="Search lab, agent, area…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="h-9 rounded-lg pl-8 text-sm"
-              aria-label="Search collections"
-            />
-          </div>
         </div>
-      </div>
+      ) : null}
 
       {filteredCollections.length === 0 ? (
         <EmptyState
-          title="No collection records"
+          title={isLabAccount ? "No account records" : "No collection records"}
           description={
             collections.length === 0
-              ? "Receivables will appear here when labs have outstanding balances."
+              ? isLabAccount
+                ? "Your lab payment and outstanding details will appear here when available."
+                : "Receivables will appear here when labs have outstanding balances."
               : "Try a different search term."
           }
         />
@@ -1122,6 +1188,7 @@ export default function CollectionsPage({ currentUser, authToken }) {
                 pendingTaskContext={pendingTaskContext}
                 onSave={handleSaveCollection}
                 onCompleteTask={handleCompleteLinkedTask}
+                readOnly={isLabAccount}
               />
             );
           })}

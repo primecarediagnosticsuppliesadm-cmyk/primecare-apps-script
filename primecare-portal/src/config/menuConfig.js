@@ -16,6 +16,7 @@ export const MENU_ITEMS = [
   // Field Ops
   { key: "visits", label: "Visits", icon: "ClipboardList" },
   { key: "collections", label: "Collections", icon: "Wallet" },
+  { key: "labAccount", label: "Payments & Account", icon: "Wallet" },
   { key: "labs", label: "Labs", icon: "Building2" },
 
   // Operations
@@ -45,6 +46,7 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "dashboard",
   "visits",
   "collections",
+  "labAccount",
   "labs",
   "inventory",
   "orders",

@@ -1,6 +1,7 @@
 import { ROLES } from "./config/roles";
 import { PERMISSIONS } from "./config/permissions";
 import { isPageVisibleInCurrentEnvironment } from "./config/menuConfig";
+import { normalizePageKey, resolvePageKeyForRole } from "./config/pageRouting.js";
 
 import AgentDashboard from "./pages/AgentDashboard";
 import AgentVisitPage from "./pages/AgentVisitPage";
@@ -28,37 +29,8 @@ function PlaceholderCard({ title, subtitle }) {
   );
 }
 
-function normalizePageKey(page) {
-  switch (page) {
-    case "stock":
-    case "inventory-ledger":
-    case "inventory-movements":
-      return "inventory";
-    case "purchase-orders":
-    case "procurement":
-    case "suppliers":
-      return "purchase";
-    case "reorder-forecast":
-      return "reorder";
-    case "ai-insights":
-      return "insights";
-    case "qualification-review":
-    case "qualifications":
-      return "qualificationReview";
-    case "predator-debug":
-    case "predatorDebug":
-      return "predatorDebug";
-    case "lab-orders":
-    case "lab-ordering":
-    case "ordering":
-      return "labOrders";
-    default:
-      return page;
-  }
-}
-
 function canAccessPage(role, activePage) {
-  const key = normalizePageKey(activePage);
+  const key = resolvePageKeyForRole(role, normalizePageKey(activePage));
   return Boolean(
     role &&
       key &&
@@ -316,7 +288,8 @@ export default function PrimeCareWebPortal({
   }
 
   if (role === ROLES.LAB) {
-    switch (activePage) {
+    const labPage = resolvePageKeyForRole(role, normalizePageKey(activePage));
+    switch (labPage) {
       case "labOrders":
       case "lab-orders":
       case "lab-ordering":
@@ -324,11 +297,12 @@ export default function PrimeCareWebPortal({
       case "orders":
         return <LabOrderingPage currentUser={currentUser} authToken={authToken} />;
 
-      case "collections":
+      case "labAccount":
         return (
           <CollectionsPage
             currentUser={currentUser}
             authToken={authToken}
+            viewMode="labAccount"
           />
         );
 
