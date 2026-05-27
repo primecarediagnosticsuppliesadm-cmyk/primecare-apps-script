@@ -177,6 +177,78 @@ export function checkRoleAccess({ module, step, ctx, role, allowedRoles }) {
  * @param {number} p.durationMs
  * @param {number} p.thresholdMs
  */
+/**
+ * Mutable metric: PASS when all provided layers agree; FAIL only on cross-layer drift.
+ * @param {Object} p
+ * @param {string} p.module
+ * @param {string} p.step
+ * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} p.ctx
+ * @param {Record<string, number|null|undefined>} p.layers
+ * @param {string} [p.label]
+ */
+export function checkMutableLayersAgreement({ module, step, ctx, layers, label = "" }) {
+  const comparable = Object.entries(layers || {}).filter(
+    ([, value]) => value !== null && value !== undefined && Number.isFinite(Number(value))
+  );
+
+  if (comparable.length === 0) {
+    return [
+      createPredatorEntry({
+        status: "WARN",
+        module,
+        step,
+        expected: label || "at least one comparable layer",
+        actual: layers,
+        rootCauseGuess: "No layer values available for mutable metric check",
+        suggestedFix: "Ensure UI snapshot is passed into Predator validation",
+        severity: "low",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      }),
+    ];
+  }
+
+  const values = comparable.map(([, value]) => Number(value));
+  const first = values[0];
+  const drift = values.some((v) => v !== first);
+
+  if (drift) {
+    return [
+      createPredatorEntry({
+        status: "FAIL",
+        module,
+        step,
+        expected: "DB, API, and UI agree on mutable visit metric",
+        actual: { ...layers, comparable: Object.fromEntries(comparable) },
+        rootCauseGuess:
+          "Cross-layer drift on a mutable operational metric (mapping, filter, or stale UI state)",
+        suggestedFix:
+          "Trace filterVisitsForUser, recent visit slice(10), and today date field (visit_date)",
+        severity: "high",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      }),
+    ];
+  }
+
+  return [
+    createPredatorEntry({
+      status: "PASS",
+      module,
+      step,
+      expected: label || "layers agree",
+      actual: { ...layers, agreedValue: first },
+      rootCauseGuess: "",
+      suggestedFix: "",
+      tenantId: ctx.tenantId,
+      role: ctx.role,
+      userId: ctx.userId,
+    }),
+  ];
+}
+
 export function checkSlowStep({ module, step, ctx, durationMs, thresholdMs }) {
   const slow = durationMs > thresholdMs;
   return createPredatorEntry({

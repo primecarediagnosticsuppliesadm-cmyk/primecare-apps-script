@@ -5,8 +5,51 @@ import {
   checkEmptyApiWhenDbHasRows,
   checkTenantConsistency,
   checkRoleAccess,
+  checkMutableLayersAgreement,
 } from "@/predator/predatorChecks.js";
+import { filterVisitsForUser } from "@/utils/accessFilters.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
+
+const RECENT_VISITS_LIMIT = 10;
+
+function localDateYmd(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * @param {object} row
+ */
+function mapVisitRowForValidation(row) {
+  return {
+    visitDate: String(row.visit_date ?? row.visitDate ?? row.Visit_Date ?? "").slice(0, 10),
+    agentId: row.agent_id ?? row.agentId ?? "",
+    agent: row.agent_name ?? row.agentName ?? row.Agent_Name ?? "",
+    agentName: row.agent_name ?? row.agentName ?? row.Agent_Name ?? "",
+  };
+}
+
+/**
+ * @param {object[]} visitsRaw
+ * @param {object|null} currentUser
+ */
+function computeScopedVisitMetrics(visitsRaw, currentUser) {
+  const mapped = (visitsRaw || []).map(mapVisitRowForValidation);
+  const scoped = filterVisitsForUser(mapped, currentUser);
+  const sorted = [...scoped].sort((a, b) => {
+    const tb = Date.parse(b.visitDate || "") || 0;
+    const ta = Date.parse(a.visitDate || "") || 0;
+    return tb - ta;
+  });
+  const todayYmd = localDateYmd();
+  return {
+    scopedCount: scoped.length,
+    recentListCount: sorted.slice(0, RECENT_VISITS_LIMIT).length,
+    todayCount: scoped.filter((v) => String(v.visitDate).slice(0, 10) === todayYmd).length,
+  };
+}
 
 /**
  * @param {Object} params
@@ -44,27 +87,74 @@ export async function validateAgentVisitsModule({ ctx, currentUser = null, rende
 
     const visitsRes = await supabase.from("agent_visits").select("*");
     const visitsRaw = visitsRes.error ? [] : visitsRes.data || [];
-    const dbCount = visitsRaw.length;
+    const dbMetrics = computeScopedVisitMetrics(visitsRaw, currentUser);
 
     const apiRes = await getAgentWorkspaceRead(currentUser || { role: ctx.role, id: ctx.userId });
     const apiRecent = Array.isArray(apiRes?.data?.recentVisits)
       ? apiRes.data.recentVisits.length
-      : 0;
+      : null;
     const apiToday = Number(apiRes?.data?.summary?.todayVisits ?? 0);
 
     const uiRecent = rendered?.recentVisitsCount ?? null;
     const uiToday = rendered?.todayVisits ?? null;
 
     entries.push(
-      ...checkEmptyApiWhenDbHasRows({
+      ...checkMutableLayersAgreement({
         module: "Agent Visits",
-        step: "visit_rows",
+        step: "recent_visits_list_count",
         ctx,
-        dbRowCount: dbCount,
-        apiCount: apiRecent,
-        uiCount: uiRecent,
+        label: "recent visits list length (max 10, scoped)",
+        layers: {
+          db: dbMetrics.recentListCount,
+          api: apiRecent,
+          ui: uiRecent,
+        },
       })
     );
+
+    entries.push(
+      ...checkMutableLayersAgreement({
+        module: "Agent Visits",
+        step: "today_visits_metric",
+        ctx,
+        label: "today visits count (scoped, visit_date = local today)",
+        layers: {
+          db: dbMetrics.todayCount,
+          api: apiToday,
+          ui: uiToday,
+        },
+      })
+    );
+
+    if (dbMetrics.scopedCount > 0 && apiRecent === 0 && uiRecent === 0) {
+      entries.push(
+        ...checkEmptyApiWhenDbHasRows({
+          module: "Agent Visits",
+          step: "visit_rows",
+          ctx,
+          dbRowCount: dbMetrics.scopedCount,
+          apiCount: apiRecent ?? 0,
+          uiCount: uiRecent,
+        })
+      );
+    } else if (dbMetrics.scopedCount > 0 && apiRecent != null && apiRecent > 0) {
+      entries.push(
+        createPredatorEntry({
+          status: "PASS",
+          module: "Agent Visits",
+          step: "visit_rows.row_visibility",
+          expected: "Scoped visits visible in API when DB has rows",
+          actual: {
+            dbScopedCount: dbMetrics.scopedCount,
+            apiRecent,
+            uiRecent,
+          },
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
 
     entries.push(
       ...checkTenantConsistency({
@@ -75,24 +165,6 @@ export async function validateAgentVisitsModule({ ctx, currentUser = null, rende
         rowTenantIds: visitsRaw.map((r) => r.tenant_id).filter(Boolean),
       })
     );
-
-    if (dbCount > 0 && apiToday === 0 && uiToday === 0) {
-      entries.push(
-        createPredatorEntry({
-          status: "WARN",
-          module: "Agent Visits",
-          step: "today_visits_metric",
-          expected: "todayVisits may be > 0 when visits exist for today",
-          actual: { dbCount, apiToday, uiToday },
-          rootCauseGuess: "Visit dates may not match local today or agent scope filter",
-          suggestedFix: "Check visit_date vs created_at and filterVisitsForUser",
-          severity: "low",
-          tenantId: ctx.tenantId,
-          role: ctx.role,
-          userId: ctx.userId,
-        })
-      );
-    }
 
     if (rendered?.hasQualificationStep === false) {
       entries.push(

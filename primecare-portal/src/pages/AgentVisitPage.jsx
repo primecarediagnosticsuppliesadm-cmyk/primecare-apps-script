@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,8 +7,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   StatusBadge,
-  KpiCard,
-  KpiCardGrid,
   PageSkeleton,
   ListSkeleton,
   EmptyState,
@@ -44,7 +43,27 @@ import {
   Building2,
   Pencil,
   Sparkles,
+  X,
 } from "lucide-react";
+
+import {
+  saveAgentVisitDraft,
+  loadAgentVisitDraft,
+  clearAgentVisitDraft,
+} from "@/pages/agentVisitDraftStorage.js";
+import {
+  AGENT_VISIT_STEP_SUBTITLES,
+  getWizardMotivationMessage,
+  formatRelativeVisitTime,
+} from "@/pages/agentVisitWizardUx.js";
+import {
+  recordAgentVisitDraftRestore,
+  recordAgentVisitMissingFields,
+  recordAgentVisitStepAbandonment,
+  recordAgentVisitStepTiming,
+  recordAgentVisitUxStep,
+  recordAgentVisitWizardCompletion,
+} from "@/pages/agentVisitWizardPredatorUx.js";
 
 import { saveAgentVisit } from "@/api/primecareApi";
 import {
@@ -120,9 +139,64 @@ function FieldLabel({ children, helper }) {
 }
 
 const STEP_PANEL_CLASS =
-  "space-y-5 rounded-2xl border border-border/70 bg-gradient-to-b from-card via-card to-[var(--pc-brand-primary)]/[0.04] p-4 shadow-[var(--pc-shadow-card)] md:max-w-3xl md:p-5";
+  "space-y-4 rounded-2xl border border-border/60 bg-gradient-to-b from-card via-card to-[var(--pc-brand-primary)]/[0.03] p-4 shadow-sm md:max-w-3xl md:p-5";
 
-const FIELD_INPUT_CLASS = "h-12 w-full rounded-xl border-input text-base md:max-w-xl";
+const QUALIFICATION_PANEL_CLASS =
+  "space-y-4 rounded-2xl border-2 border-violet-200/80 bg-gradient-to-br from-violet-50/80 via-card to-[var(--pc-brand-primary)]/[0.04] p-4 shadow-md ring-1 ring-violet-100 md:max-w-3xl md:p-5";
+
+const FIELD_INPUT_CLASS = "h-11 w-full rounded-xl border-input text-base md:max-w-xl";
+
+const STEP_MOTION = {
+  initial: { opacity: 0, x: 12 },
+  animate: { opacity: 1, x: 0 },
+  exit: { opacity: 0, x: -12 },
+  transition: { duration: 0.2, ease: [0.25, 0.1, 0.25, 1] },
+};
+
+function CompactVisitKpiStrip({ labs, todayVisits, followUps, salesLogged }) {
+  const items = [
+    { label: "My labs", value: labs, icon: Users },
+    { label: "Today", value: todayVisits, icon: ClipboardCheck },
+    { label: "Follow-ups", value: followUps, icon: PhoneCall },
+    { label: "Sales", value: `₹${Number(salesLogged || 0).toLocaleString("en-IN")}`, icon: IndianRupee },
+  ];
+  return (
+    <>
+      <div className="flex gap-2 overflow-x-auto pb-0.5 sm:hidden">
+        {items.map(({ label, value, icon: Icon }) => (
+          <div
+            key={label}
+            className="flex min-w-[4.75rem] shrink-0 items-center gap-1.5 rounded-lg border border-border/50 bg-muted/20 px-2 py-1.5"
+          >
+            <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <div className="min-w-0">
+              <p className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                {label}
+              </p>
+              <p className="truncate text-xs font-semibold text-slate-900">{value}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="hidden gap-2 sm:grid sm:grid-cols-4">
+        {items.map(({ label, value, icon: Icon }) => (
+          <div
+            key={label}
+            className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-2.5 py-2"
+          >
+            <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <div className="min-w-0">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                {label}
+              </p>
+              <p className="truncate text-sm font-semibold text-slate-900">{value}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
 
 function LabHeroCard({ lab, collection, latestVisit, form }) {
   if (!lab) return null;
@@ -189,48 +263,59 @@ function LabHeroCard({ lab, collection, latestVisit, form }) {
   );
 }
 
-function WizardMotivationStrip({ currentIndex, total, canSaveVisit, missingItems }) {
-  const completed = currentIndex;
-  const isReview = currentIndex === total - 1;
-  let headline = "You're doing great — one step at a time";
-  let detail = `${completed} of ${total} steps completed`;
-
-  if (isReview) {
-    headline = canSaveVisit ? "Ready to save" : "Almost done";
-    detail = canSaveVisit
-      ? "All required visit details are filled"
-      : `Fix ${missingItems.length} required item${missingItems.length === 1 ? "" : "s"} below`;
-  } else if (currentIndex >= total - 2) {
-    headline = "Almost done";
-    detail = "Review your answers on the next step";
-  }
+function WizardMotivationStrip({
+  currentIndex,
+  total,
+  labSelected,
+  canSaveVisit,
+  missingItems,
+}) {
+  const message = getWizardMotivationMessage(
+    currentIndex,
+    total,
+    labSelected,
+    canSaveVisit,
+    missingItems.length
+  );
 
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-[var(--pc-brand-primary)]/20 bg-[var(--pc-brand-primary)]/5 px-3 py-2.5">
-      <Sparkles className="h-5 w-5 shrink-0 text-[var(--pc-brand-primary)]" />
-      <div className="min-w-0">
-        <p className="text-sm font-semibold text-slate-900">{headline}</p>
-        <p className="text-xs text-muted-foreground">{detail}</p>
-      </div>
+    <div className="flex items-center gap-2.5 rounded-lg border border-[var(--pc-brand-primary)]/15 bg-[var(--pc-brand-primary)]/[0.04] px-3 py-2">
+      <Sparkles className="h-4 w-4 shrink-0 text-[var(--pc-brand-primary)]" />
+      <p className="text-xs font-medium text-slate-700 sm:text-sm">{message}</p>
     </div>
   );
 }
 
 function ReviewSummaryCard({ title, icon: Icon, onEdit, missing = [], children }) {
+  const isValid = missing.length === 0;
   return (
-    <div className="rounded-xl border border-border/70 bg-card p-3 shadow-sm">
+    <div
+      className={cn(
+        "rounded-xl border p-3 shadow-sm transition-colors",
+        isValid ? "border-border/60 bg-card" : "border-amber-200/80 bg-amber-50/40"
+      )}
+    >
       <div className="mb-2 flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Icon className="h-4 w-4 text-[var(--pc-brand-primary)]" />
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon className="h-4 w-4 shrink-0 text-[var(--pc-brand-primary)]" />
           <span className="text-sm font-semibold text-slate-900">{title}</span>
+          <StatusBadge variant={isValid ? "success" : "warning"} compact>
+            {isValid ? "Ready" : "Check"}
+          </StatusBadge>
         </div>
-        <Button type="button" variant="ghost" size="sm" className="h-8 shrink-0 px-2" onClick={onEdit}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 shrink-0 px-2 text-xs"
+          onClick={onEdit}
+        >
           <Pencil className="mr-1 h-3.5 w-3.5" />
           Edit
         </Button>
       </div>
       {missing.length > 0 ? (
-        <ul className="mb-2 list-inside list-disc text-xs font-medium text-red-600">
+        <ul className="mb-2 list-inside list-disc text-xs font-medium text-amber-800">
           {missing.map((item) => (
             <li key={item}>{item}</li>
           ))}
@@ -243,32 +328,51 @@ function ReviewSummaryCard({ title, icon: Icon, onEdit, missing = [], children }
 
 function RecentVisitTimelineCard({ visit }) {
   const sold = Number(visit.soldValue || 0);
+  const relativeTime = formatRelativeVisitTime(visit.date);
+  const nextPreview =
+    visit.nextAction ||
+    (visit.nextFollowUpDate
+      ? `${visit.nextFollowUpType || "Call"} · ${visit.nextFollowUpDate}`
+      : null);
+
   return (
-    <div className="relative flex gap-3 pl-4" role="listitem">
-      <div className="absolute bottom-0 left-[7px] top-3 w-0.5 bg-border" aria-hidden />
-      <div className="relative z-[1] mt-1 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-[var(--pc-brand-primary)] bg-card" />
-      <div className="min-w-0 flex-1 rounded-xl border border-border/60 bg-card p-3 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <p className="font-semibold text-slate-900">{visit.labName || "—"}</p>
-            <p className="text-xs text-muted-foreground">{visit.date || "—"}</p>
+    <div className="relative flex gap-2.5 pb-2 pl-3" role="listitem">
+      <div className="absolute bottom-0 left-[5px] top-2 w-0.5 bg-border/80" aria-hidden />
+      <div className="relative z-[1] mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full border-2 border-[var(--pc-brand-primary)] bg-card" />
+      <div className="min-w-0 flex-1 rounded-lg border border-border/50 bg-card px-2.5 py-2 shadow-sm">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-slate-900">
+              {visit.labName || "—"}
+            </p>
+            <div className="mt-1 flex flex-wrap gap-1">
+              <StatusBadge variant={visitTypeToVariant(visit.visitType)} compact>
+                {visit.visitType || "—"}
+              </StatusBadge>
+              <StatusBadge variant="info" compact>
+                {displayResponseLabel(visit.labResponse)}
+              </StatusBadge>
+              {visit.qualificationBand ? (
+                <StatusBadge
+                  variant={qualificationBandToVariant(visit.qualificationBand)}
+                  compact
+                >
+                  {formatQualificationBandLabel(visit.qualificationBand)}
+                </StatusBadge>
+              ) : null}
+            </div>
           </div>
-          <div className="flex flex-wrap gap-1">
-            <StatusBadge variant={visitTypeToVariant(visit.visitType)} compact>
-              {visit.visitType || "—"}
-            </StatusBadge>
-            <StatusBadge variant="info" compact>
-              {displayResponseLabel(visit.labResponse)}
-            </StatusBadge>
-          </div>
+          <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            {relativeTime}
+          </span>
         </div>
         {sold > 0 ? (
-          <p className="mt-2 text-xs font-medium text-emerald-700">
+          <p className="mt-1 text-[11px] font-semibold text-emerald-700">
             Sold ₹{sold.toLocaleString("en-IN")}
           </p>
         ) : null}
-        {visit.nextAction ? (
-          <p className="mt-1 text-xs text-muted-foreground">Next: {visit.nextAction}</p>
+        {nextPreview ? (
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">→ {nextPreview}</p>
         ) : null}
       </div>
     </div>
@@ -456,19 +560,22 @@ function hasPersistedQualificationData(form, lastUpdated) {
   );
 }
 
-function WizardProgressBar({ currentIndex, total, title }) {
+function WizardProgressBar({ currentIndex, total, stepKey }) {
   const progressPct = Math.round(((currentIndex + 1) / total) * 100);
+  const subtitle = AGENT_VISIT_STEP_SUBTITLES[stepKey] || "";
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-bold text-slate-900">
-          Step {currentIndex + 1} of {total}{" "}
-          <span className="font-semibold text-[var(--pc-brand-primary)]">({progressPct}%)</span>
+      <div className="space-y-0.5">
+        <p className="text-sm font-bold tracking-tight text-slate-900">
+          Step {currentIndex + 1} of {total}
+          {subtitle ? (
+            <span className="font-semibold text-[var(--pc-brand-primary)]"> — {subtitle}</span>
+          ) : null}
         </p>
-        <p className="truncate text-sm font-medium text-[var(--pc-brand-primary)]">{title}</p>
+        <p className="text-xs text-muted-foreground">{progressPct}% complete</p>
       </div>
       <div
-        className="h-2.5 w-full overflow-hidden rounded-full bg-muted"
+        className="h-3 w-full overflow-hidden rounded-full bg-muted/80"
         role="progressbar"
         aria-valuenow={currentIndex + 1}
         aria-valuemin={1}
@@ -476,7 +583,7 @@ function WizardProgressBar({ currentIndex, total, title }) {
         aria-label={`Step ${currentIndex + 1} of ${total}, ${progressPct} percent`}
       >
         <div
-          className="h-full rounded-full bg-gradient-to-r from-[var(--pc-brand-primary)] to-emerald-500 transition-all duration-300"
+          className="h-full rounded-full bg-gradient-to-r from-[var(--pc-brand-primary)] to-emerald-500 transition-all duration-300 ease-out"
           style={{ width: `${progressPct}%` }}
         />
       </div>
@@ -488,8 +595,8 @@ function VisitWizardStepper({ steps, currentIndex, labSelected, onGoToStep }) {
   const qualificationIndex = steps.findIndex((s) => s.key === "qualification");
 
   return (
-    <nav aria-label="Visit wizard progress" className="-mx-1 overflow-x-auto pb-2">
-      <ol className="flex min-w-max gap-2 px-1">
+    <nav aria-label="Visit wizard progress" className="-mx-1 overflow-x-auto pb-1">
+      <ol className="flex min-w-max items-center px-1">
         {steps.map((step, index) => {
           const StepIcon = step.icon || ClipboardCheck;
           const isActive = index === currentIndex;
@@ -497,7 +604,7 @@ function VisitWizardStepper({ steps, currentIndex, labSelected, onGoToStep }) {
           const needsLab = index > 0 && !labSelected;
           const isQualification = index === qualificationIndex;
           return (
-            <li key={step.key}>
+            <li key={step.key} className="flex items-center">
               <button
                 type="button"
                 disabled={needsLab}
@@ -505,45 +612,51 @@ function VisitWizardStepper({ steps, currentIndex, labSelected, onGoToStep }) {
                   if (!needsLab) onGoToStep(index);
                 }}
                 className={cn(
-                  "flex min-w-[5.25rem] flex-col items-center rounded-2xl px-2.5 py-2.5 text-center transition-all",
+                  "flex min-w-[4.75rem] flex-col items-center rounded-2xl px-2 py-2 text-center transition-all duration-200 sm:min-w-[5.25rem] sm:px-2.5 sm:py-2.5",
+                  "hover:scale-[1.02] disabled:hover:scale-100",
                   isActive &&
-                    "scale-[1.02] bg-[var(--pc-brand-primary)] text-white shadow-lg shadow-[var(--pc-brand-primary)]/25 ring-2 ring-[var(--pc-brand-primary)]",
-                  isComplete &&
-                    !isActive &&
-                    "bg-emerald-50 ring-1 ring-emerald-200",
+                    "min-w-[5.5rem] scale-[1.04] bg-[var(--pc-brand-primary)] text-white shadow-lg shadow-[var(--pc-brand-primary)]/30 ring-2 ring-[var(--pc-brand-primary)] sm:min-w-[6rem]",
+                  isComplete && !isActive && "bg-emerald-50 ring-1 ring-emerald-200/90",
                   isQualification &&
                     labSelected &&
                     !isActive &&
                     !isComplete &&
-                    "ring-2 ring-[var(--pc-brand-primary)]/30",
+                    "ring-2 ring-violet-300/50",
                   needsLab && "cursor-not-allowed opacity-45"
                 )}
               >
                 <span
                   className={cn(
-                    "flex h-9 w-9 items-center justify-center rounded-full",
-                    isActive
-                      ? "bg-white/20 text-white"
-                      : isComplete
-                        ? "bg-emerald-500 text-white"
-                        : "bg-muted text-muted-foreground"
+                    "flex items-center justify-center rounded-full transition-all duration-200",
+                    isActive ? "h-11 w-11 bg-white/20 text-white" : "h-9 w-9",
+                    !isActive && isComplete && "bg-emerald-500 text-white",
+                    !isActive && !isComplete && "bg-muted text-muted-foreground"
                   )}
                 >
                   {isComplete && !isActive ? (
                     <Check className="h-5 w-5" strokeWidth={3} />
                   ) : (
-                    <StepIcon className="h-4 w-4" />
+                    <StepIcon className={cn("h-4 w-4", isActive && "h-[1.125rem] w-[1.125rem]")} />
                   )}
                 </span>
                 <span
                   className={cn(
-                    "mt-1.5 text-[10px] font-semibold leading-tight sm:text-xs",
+                    "mt-2 text-[10px] font-semibold leading-tight sm:text-[11px]",
                     isActive ? "text-white" : "text-slate-700"
                   )}
                 >
                   {step.shortTitle}
                 </span>
               </button>
+              {index < steps.length - 1 ? (
+                <div
+                  className={cn(
+                    "mx-0.5 h-2 w-5 shrink-0 rounded-full transition-colors duration-200 sm:w-8",
+                    index < currentIndex ? "bg-emerald-500" : "bg-muted/90"
+                  )}
+                  aria-hidden
+                />
+              ) : null}
             </li>
           );
         })}
@@ -677,17 +790,20 @@ function SaveVisitButton({ saving, onClick, className, disabled = false }) {
       type="button"
       onClick={onClick}
       disabled={saving || disabled}
-      className={cn("h-12 min-h-12 w-full rounded-xl text-base font-semibold", className)}
+      className={cn(
+        "h-12 min-h-12 w-full rounded-xl bg-[var(--pc-brand-primary)] text-base font-semibold text-white shadow-md hover:opacity-95",
+        className
+      )}
     >
       {saving ? (
         <>
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          Saving visit…
+          Completing visit…
         </>
       ) : (
         <>
-          <PlusCircle className="mr-2 h-4 w-4" />
-          Save visit
+          <CheckCircle2 className="mr-2 h-4 w-4" />
+          Complete Visit Log
         </>
       )}
     </Button>
@@ -710,10 +826,17 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   const [qualificationLoading, setQualificationLoading] = useState(false);
   const [qualificationSaving, setQualificationSaving] = useState(false);
   const [qualificationLastUpdated, setQualificationLastUpdated] = useState("");
+  const [draftBannerVisible, setDraftBannerVisible] = useState(false);
 
   const hasLoadedDataRef = useRef(false);
   const authTokenRef = useRef(authToken);
   authTokenRef.current = authToken;
+  const draftRestoreAttemptedRef = useRef(false);
+  const wizardStartedAtRef = useRef(Date.now());
+  const stepEnteredAtRef = useRef(Date.now());
+  const prevStepIndexRef = useRef(0);
+  const currentStepIndexRef = useRef(0);
+  const wizardStepAnchorRef = useRef(null);
 
   const loadUserKey = useMemo(
     () =>
@@ -870,6 +993,102 @@ export default function AgentVisitPage({ currentUser, authToken }) {
     }
     return labs;
   }, [labs, currentUser]);
+
+  useEffect(() => {
+    if (loading || draftRestoreAttemptedRef.current) return;
+    if (typeof window !== "undefined" && sessionStorage.getItem("primecare_pending_visit_task")) {
+      draftRestoreAttemptedRef.current = true;
+      return;
+    }
+
+    draftRestoreAttemptedRef.current = true;
+    const { restored, draft } = loadAgentVisitDraft(currentUser, visibleLabs);
+    if (!restored || !draft) return;
+
+    if (draft.form && typeof draft.form === "object") {
+      setForm((prev) => ({ ...prev, ...draft.form }));
+    }
+    if (draft.qualificationForm && typeof draft.qualificationForm === "object") {
+      setQualificationForm((prev) => ({ ...prev, ...draft.qualificationForm }));
+    }
+    if (typeof draft.qualificationEditing === "boolean") {
+      setQualificationEditing(draft.qualificationEditing);
+    }
+    const stepIdx = Math.min(
+      Math.max(0, Number(draft.currentStepIndex) || 0),
+      AGENT_VISIT_SECTION_STEPS.length - 1
+    );
+    setCurrentStepIndex(stepIdx);
+    prevStepIndexRef.current = stepIdx;
+    stepEnteredAtRef.current = Date.now();
+    wizardStartedAtRef.current = Date.now();
+    setDraftBannerVisible(true);
+    showToast("info", "Draft restored — continue where you left off.");
+    recordAgentVisitDraftRestore({
+      stepIndex: stepIdx,
+      stepKey: AGENT_VISIT_SECTION_STEPS[stepIdx]?.key,
+    });
+  }, [loading, currentUser, visibleLabs, showToast]);
+
+  useEffect(() => {
+    if (loading || saving) return;
+    saveAgentVisitDraft({
+      user: currentUser,
+      currentStepIndex,
+      form,
+      qualificationForm,
+      qualificationEditing,
+    });
+  }, [
+    loading,
+    saving,
+    currentStepIndex,
+    form,
+    qualificationForm,
+    qualificationEditing,
+    currentUser,
+  ]);
+
+  useEffect(() => {
+    currentStepIndexRef.current = currentStepIndex;
+    recordAgentVisitUxStep({
+      stepIndex: currentStepIndex,
+      stepKey: AGENT_VISIT_SECTION_STEPS[currentStepIndex]?.key,
+    });
+
+    if (prevStepIndexRef.current !== currentStepIndex) {
+      recordAgentVisitStepTiming({
+        fromStepIndex: prevStepIndexRef.current,
+        fromStepKey: AGENT_VISIT_SECTION_STEPS[prevStepIndexRef.current]?.key,
+        toStepIndex: currentStepIndex,
+        toStepKey: AGENT_VISIT_SECTION_STEPS[currentStepIndex]?.key,
+        durationMs: Date.now() - stepEnteredAtRef.current,
+      });
+      stepEnteredAtRef.current = Date.now();
+      prevStepIndexRef.current = currentStepIndex;
+    }
+  }, [currentStepIndex]);
+
+  useEffect(() => {
+    const anchor = wizardStepAnchorRef.current;
+    if (!anchor || typeof window === "undefined") return;
+    const top = anchor.getBoundingClientRect().top + window.scrollY - 12;
+    window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  }, [currentStepIndex]);
+
+  useEffect(() => {
+    return () => {
+      const idx = currentStepIndexRef.current;
+      const isComplete = idx >= AGENT_VISIT_SECTION_STEPS.length - 1;
+      if (idx > 0 && !isComplete) {
+        recordAgentVisitStepAbandonment({
+          lastStepIndex: idx,
+          lastStepKey: AGENT_VISIT_SECTION_STEPS[idx]?.key,
+          elapsedMs: Date.now() - wizardStartedAtRef.current,
+        });
+      }
+    };
+  }, []);
 
   const labSelectOptions = useMemo(
     () => buildLabSelectOptions(visibleLabs),
@@ -1436,6 +1655,16 @@ export default function AgentVisitPage({ currentUser, authToken }) {
 
       setRecentVisits((prev) => [newVisit, ...prev]);
 
+      clearAgentVisitDraft(currentUser);
+      setDraftBannerVisible(false);
+      recordAgentVisitWizardCompletion({
+        totalMs: Date.now() - wizardStartedAtRef.current,
+        stepCount: AGENT_VISIT_SECTION_STEPS.length,
+      });
+      wizardStartedAtRef.current = Date.now();
+      stepEnteredAtRef.current = Date.now();
+      prevStepIndexRef.current = 0;
+
       showToast(
         "success",
         `Visit saved${res.data?.visitId ? `: ${res.data.visitId}` : ""}`
@@ -1486,6 +1715,17 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   const missingRequired = useMemo(() => getMissingVisitRequirements(form), [form]);
   const showMobileNav = !isReviewStep;
 
+  useEffect(() => {
+    if (!isReviewStep) return;
+    recordAgentVisitMissingFields(missingRequired);
+  }, [isReviewStep, missingRequired]);
+
+  function handleDismissDraftBanner() {
+    clearAgentVisitDraft(currentUser);
+    setDraftBannerVisible(false);
+    showToast("info", "Draft cleared.");
+  }
+
   if (loading) {
     return <AgentVisitLoading />;
   }
@@ -1509,18 +1749,39 @@ export default function AgentVisitPage({ currentUser, authToken }) {
         </p>
       </header>
 
-      <div className="hidden md:block">
-        <KpiCardGrid columns={4}>
-          <KpiCard title="My labs" value={visibleLabs.length} icon={Users} />
-          <KpiCard title="Today visits" value={todayVisits} icon={ClipboardCheck} />
-          <KpiCard title="Follow-ups" value={pendingFollowUps} icon={PhoneCall} />
-          <KpiCard
-            title="Sales logged"
-            value={`₹${totalSalesLogged.toLocaleString("en-IN")}`}
-            icon={IndianRupee}
-          />
-        </KpiCardGrid>
-      </div>
+      <CompactVisitKpiStrip
+        labs={visibleLabs.length}
+        todayVisits={todayVisits}
+        followUps={pendingFollowUps}
+        salesLogged={totalSalesLogged}
+      />
+
+      {draftBannerVisible ? (
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-blue-200/80 bg-blue-50/80 px-3 py-2 text-sm text-blue-900">
+          <span className="min-w-0">Draft restored — pick up where you left off.</span>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs"
+              onClick={handleDismissDraftBanner}
+            >
+              Clear draft
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              aria-label="Dismiss draft banner"
+              onClick={() => setDraftBannerVisible(false)}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {loadError ? (
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -1548,11 +1809,12 @@ export default function AgentVisitPage({ currentUser, authToken }) {
           <WizardProgressBar
             currentIndex={currentStepIndex}
             total={AGENT_VISIT_SECTION_STEPS.length}
-            title={currentStep.title}
+            stepKey={currentStep.key}
           />
         </CardHeader>
 
         <CardContent className="space-y-4 pt-4">
+          <div ref={wizardStepAnchorRef} className="h-0 w-full scroll-mt-4" aria-hidden />
           <VisitWizardStepper
             steps={AGENT_VISIT_SECTION_STEPS}
             currentIndex={currentStepIndex}
@@ -1563,11 +1825,22 @@ export default function AgentVisitPage({ currentUser, authToken }) {
           <WizardMotivationStrip
             currentIndex={currentStepIndex}
             total={AGENT_VISIT_SECTION_STEPS.length}
-            canSaveVisit={canSaveVisit}
+            labSelected={labSelected}
+            canSaveVisit={canSaveVisit && missingRequired.length === 0}
             missingItems={missingRequired}
           />
 
-          <div className="md:mx-auto md:max-w-3xl">
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={currentStep.key}
+              initial={STEP_MOTION.initial}
+              animate={STEP_MOTION.animate}
+              exit={STEP_MOTION.exit}
+              transition={STEP_MOTION.transition}
+              layout
+              layoutRoot
+              className="overflow-hidden md:mx-auto md:max-w-3xl"
+            >
           {currentStepIndex === 0 ? (
           <section className={STEP_PANEL_CLASS}>
             <SectionTitle
@@ -1843,13 +2116,20 @@ export default function AgentVisitPage({ currentUser, authToken }) {
 
           {currentStepIndex === qualificationStepIndex ? (
             <section
-              className={cn(STEP_PANEL_CLASS, "md:max-w-none")}
+              className={cn(QUALIFICATION_PANEL_CLASS, "md:max-w-none")}
               data-wizard-step="qualification"
             >
+              <div className="rounded-xl border border-violet-200/70 bg-violet-50/60 px-3 py-2.5">
+                <p className="text-sm font-semibold text-violet-900">Strategic lab intelligence</p>
+                <p className="text-xs text-violet-700/90">
+                  Help PrimeCare understand this lab better
+                </p>
+              </div>
+
               <SectionTitle
                 icon={ClipboardCheck}
                 title={currentStep.title}
-                subtitle="Optional — helps prioritize this lab"
+                subtitle="Capture signals that improve prioritization and follow-up"
                 accent
               />
 
@@ -1860,8 +2140,11 @@ export default function AgentVisitPage({ currentUser, authToken }) {
               ) : qualificationLoading ? (
                 <ListSkeleton rows={3} />
               ) : hasQualificationData && !qualificationEditing ? (
-                <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+                <div className="space-y-3 rounded-xl border border-violet-200/60 bg-white/70 p-3 shadow-sm">
                   <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge variant="info" compact>
+                      Prior qualification
+                    </StatusBadge>
                     <StatusBadge
                       variant={pipelineStageToVariant(qualificationForm.pipelineStage)}
                       compact
@@ -1878,8 +2161,11 @@ export default function AgentVisitPage({ currentUser, authToken }) {
                       </StatusBadge>
                     ) : null}
                     {qualificationForm.qualificationScore != null ? (
-                      <span className="text-sm text-slate-700">
-                        Score: {qualificationForm.qualificationScore}
+                      <span className="rounded-md bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-900">
+                        Score {qualificationForm.qualificationScore}
+                        {qualificationForm.qualificationBand
+                          ? ` · ${formatQualificationBandLabel(qualificationForm.qualificationBand)}`
+                          : ""}
                       </span>
                     ) : null}
                   </div>
@@ -2159,13 +2445,13 @@ export default function AgentVisitPage({ currentUser, authToken }) {
               <SectionTitle
                 icon={CheckCircle2}
                 title={currentStep.title}
-                subtitle="Check everything, then save your visit"
+                subtitle="Confirm details, then complete your visit log"
                 accent
               />
 
               {missingRequired.length > 0 ? (
-                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-                  <p className="font-semibold">Required before save:</p>
+                <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-sm text-amber-900">
+                  <p className="font-semibold">Fix before submitting:</p>
                   <ul className="mt-1 list-inside list-disc">
                     {missingRequired.map((item) => (
                       <li key={item}>{item}</li>
@@ -2173,8 +2459,8 @@ export default function AgentVisitPage({ currentUser, authToken }) {
                   </ul>
                 </div>
               ) : (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
-                  All required fields look good — you can save this visit.
+                <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/80 px-3 py-2 text-sm font-medium text-emerald-800">
+                  All required fields look good — ready to complete visit log.
                 </div>
               )}
 
@@ -2260,7 +2546,8 @@ export default function AgentVisitPage({ currentUser, authToken }) {
               </div>
             </section>
           ) : null}
-          </div>
+            </motion.div>
+          </AnimatePresence>
 
           {isReviewStep ? (
             <WizardReviewFooter
