@@ -131,7 +131,9 @@ function StockBadge({ stockHealth, currentStock }) {
 }
 
 export default function LabOrderingPage({ currentUser }) {
+  const [activeTab, setActiveTab] = useState("catalog");
   const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
   const [catalog, setCatalog] = useState([]);
   const [recentOrders, setRecentOrders] = useState([]);
   const [cartItems, setCartItems] = useState([]);
@@ -195,6 +197,9 @@ export default function LabOrderingPage({ currentUser }) {
       isLabAccountView: false,
       catalogLoaded: !loadingCatalog,
       ordersLoaded: !loadingOrders,
+      cartLineCount: cartItems.length,
+      cartQtyCount: cartItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
+      selectedOrderId: selectedOrderId || null,
     },
     !loadingCatalog && !loadingOrders
   );
@@ -337,7 +342,7 @@ export default function LabOrderingPage({ currentUser }) {
           }
           setSelectedOrderId(orderId);
           setSelectedOrderDetails(sup.data);
-          return;
+          return sup.data;
         }
       }
 
@@ -345,27 +350,37 @@ export default function LabOrderingPage({ currentUser }) {
       const result = res?.data || res || {};
       setSelectedOrderId(orderId);
       setSelectedOrderDetails(result);
+      return result;
     } catch (error) {
       console.error("Failed to load order details", error);
       setErrorMessage(
         error.message || "Unable to load order details right now."
       );
+      return null;
     } finally {
       setLoadingOrderDetails(false);
     }
   }
 
   const visibleCatalog = useMemo(() => {
-    return catalog.filter((item) =>
-      `${item.productName || ""} ${item.category || ""} ${item.productId || ""}`
+    return catalog.filter((item) => {
+      const matchesSearch = `${item.productName || ""} ${item.category || ""} ${item.productId || ""}`
         .toLowerCase()
-        .includes(search.toLowerCase())
-    );
-  }, [catalog, search]);
+        .includes(search.toLowerCase());
+      if (!matchesSearch) return false;
+      if (categoryFilter === "all") return true;
+      return String(item.category || "").toLowerCase() === categoryFilter;
+    });
+  }, [catalog, search, categoryFilter]);
 
-  const quickOrderItems = useMemo(() => {
-    return visibleCatalog.filter((item) => item.quickOrder || item.isQuickOrder);
-  }, [visibleCatalog]);
+  const categoryOptions = useMemo(() => {
+    const set = new Set();
+    for (const item of catalog) {
+      const c = String(item.category || "").trim();
+      if (c) set.add(c);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [catalog]);
 
   const cartCount = useMemo(() => {
     return cartItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
@@ -450,13 +465,6 @@ export default function LabOrderingPage({ currentUser }) {
     setErrorMessage("");
   }
 
-  function quickReorder(item) {
-    addToCart(item, 1);
-    if (item?.canOrder) {
-      setStatusMessage(`Quick reorder added for ${item.productName}`);
-    }
-  }
-
   function updateCartQty(productId, nextQty) {
     setCartItems((prev) =>
       prev.map((item) => {
@@ -502,8 +510,8 @@ export default function LabOrderingPage({ currentUser }) {
     setCartItems((prev) => prev.filter((item) => item.productId !== productId));
   }
 
-  function handleRepeatOrder() {
-    if (!selectedOrderDetails?.lines?.length) {
+  function handleRepeatOrder(orderDetails = selectedOrderDetails) {
+    if (!orderDetails?.lines?.length) {
       setErrorMessage("No line items found to repeat.");
       return;
     }
@@ -516,7 +524,7 @@ export default function LabOrderingPage({ currentUser }) {
     const nextCart = [];
     const issues = [];
 
-    selectedOrderDetails.lines.forEach((line) => {
+    orderDetails.lines.forEach((line) => {
       const product = catalogMap[line.productId];
 
       if (!product) {
@@ -573,6 +581,7 @@ export default function LabOrderingPage({ currentUser }) {
       nextQtyMap[item.productId] = item.quantity;
     });
     setProductQty(nextQtyMap);
+    setActiveTab("cart");
 
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -695,32 +704,47 @@ export default function LabOrderingPage({ currentUser }) {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         <QuickStat
           title="Outstanding"
           value={`₹${Number(outstandingBalance).toLocaleString()}`}
           icon={IndianRupee}
         />
-        <QuickStat
-          title="Your Orders"
-          value={scopedRecentOrders.length}
-          icon={FileText}
-        />
-        <QuickStat
-          title="Quick Reorder"
-          value={quickOrderItems.length}
-          icon={RotateCcw}
-        />
         <QuickStat title="Cart Items" value={cartCount} icon={ShoppingCart} />
+        <QuickStat title="Your Orders" value={scopedRecentOrders.length} icon={FileText} />
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant={activeTab === "catalog" ? "default" : "outline"}
+          className="rounded-full"
+          onClick={() => setActiveTab("catalog")}
+        >
+          Product Catalog
+        </Button>
+        <Button
+          type="button"
+          variant={activeTab === "cart" ? "default" : "outline"}
+          className="rounded-full"
+          onClick={() => setActiveTab("cart")}
+        >
+          Cart ({cartCount})
+        </Button>
+        <Button
+          type="button"
+          variant={activeTab === "orders" ? "default" : "outline"}
+          className="rounded-full"
+          onClick={() => setActiveTab("orders")}
+        >
+          Previous Orders
+        </Button>
       </div>
 
       {statusMessage ? (
-        <div className="rounded-xl bg-green-50 p-3 text-sm text-green-700">
-          {statusMessage}
-        </div>
+        <div className="rounded-xl bg-green-50 p-3 text-sm text-green-700">{statusMessage}</div>
       ) : null}
 
-      
       {isCreditHold ? (
         <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           🚫 Credit Hold: {creditReason || "You cannot place orders until payment is cleared."}
@@ -734,9 +758,7 @@ export default function LabOrderingPage({ currentUser }) {
       ) : null}
 
       {errorMessage ? (
-        <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">
-          {errorMessage}
-        </div>
+        <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{errorMessage}</div>
       ) : null}
 
       {submitResult?.success ? (
@@ -744,19 +766,13 @@ export default function LabOrderingPage({ currentUser }) {
           <div className="flex items-start gap-3">
             <CheckCircle2 className="mt-0.5 h-5 w-5 text-green-700" />
             <div>
-              <div className="text-sm font-semibold text-green-800">
-                Order placed successfully
-              </div>
+              <div className="text-sm font-semibold text-green-800">Order placed successfully</div>
               <div className="mt-1 text-sm text-green-700">
-                Order ID:{" "}
-                <span className="font-medium">{submitResult.orderId}</span>
+                Order ID: <span className="font-medium">{submitResult.orderId}</span>
                 {submitResult.invoiceId ? (
                   <>
                     {" "}
-                    • Invoice ID:{" "}
-                    <span className="font-medium">
-                      {submitResult.invoiceId}
-                    </span>
+                    • Invoice ID: <span className="font-medium">{submitResult.invoiceId}</span>
                   </>
                 ) : null}
               </div>
@@ -765,225 +781,188 @@ export default function LabOrderingPage({ currentUser }) {
         </div>
       ) : null}
 
-      <Card className="rounded-2xl shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Search Catalog</CardTitle>
-          <CardDescription>
-            Find products quickly and place orders on mobile.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Input
-            placeholder="Search products, category, SKU..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-12 rounded-xl text-base"
-          />
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-5 xl:grid-cols-[1.6fr_1fr]">
-        <Card className="rounded-2xl shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Product Catalog</CardTitle>
-            <CardDescription>
-              Tap-friendly ordering for frequently used items.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loadingCatalog ? (
-              <div className="flex items-center gap-2 text-sm text-slate-500">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading catalog...
-              </div>
-            ) : visibleCatalog.length === 0 ? (
-              <div className="text-sm text-slate-500">No products found.</div>
-            ) : (
-              <div className="space-y-3">
-                {visibleCatalog.map((item) => {
-                  const unitPrice = Number(
-                    item.unitSellingPrice ?? item.price ?? 0
-                  );
-                  const qty = productQty[item.productId] || 1;
-                  const isOut =
-                    item.stockHealth === "OUT" || item.canOrder === false;
-                  const isLow = item.stockHealth === "LOW";
-
-                  return (
-                    <div
-                      key={item.productId}
-                      className={`rounded-2xl border bg-white p-4 shadow-sm ${
-                        isOut ? "opacity-80" : ""
-                      }`}
-                    >
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <div className="text-base font-semibold text-slate-900">
-                            {item.productName}
-                          </div>
-                          <div className="mt-1 text-sm text-slate-500">
-                            {item.category || "General"} • {item.productId}
-                          </div>
-
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <Badge variant="secondary">
-                              ₹{unitPrice.toLocaleString()}
-                            </Badge>
-
-                            <StockBadge
-                              stockHealth={item.stockHealth}
-                              currentStock={item.currentStock}
-                            />
-
-                            {item.quickOrder || item.isQuickOrder ? (
-                              <Badge>Quick Reorder</Badge>
-                            ) : null}
-                          </div>
-
-                          {isLow ? (
-                            <div className="mt-2 text-xs text-amber-700">
-                              Limited stock available. Order soon.
-                            </div>
-                          ) : null}
-
-                          {isOut ? (
-                            <div className="mt-2 text-xs text-red-600">
-                              This product is currently unavailable for ordering.
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <QtyControl
-                          value={qty}
-                          disabled={isOut}
-                          onDecrease={() =>
-                            updateProductQty(item.productId, qty - 1)
-                          }
-                          onIncrease={() =>
-                            updateProductQty(item.productId, qty + 1)
-                          }
-                        />
-
-                        <Button
-                          className="h-11 rounded-xl sm:min-w-[180px]"
-                          onClick={() => addToCart(item)}
-                          disabled={isOut}
-                        >
-                          <ShoppingCart className="mr-2 h-4 w-4" />
-                          {isOut ? "Unavailable" : "Add to Cart"}
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <div className="space-y-5">
+      {activeTab === "catalog" ? (
+        <div className="space-y-4">
           <Card className="rounded-2xl shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg">Cart Summary</CardTitle>
-              <CardDescription>Review and submit your order.</CardDescription>
+            <CardContent className="pt-6">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input
+                  placeholder="Search product, category, SKU..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="h-11 rounded-xl"
+                />
+                <select
+                  className="h-11 rounded-xl border border-input bg-background px-3 text-sm"
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                >
+                  <option value="all">All categories</option>
+                  {categoryOptions.map((c) => (
+                    <option key={c} value={c.toLowerCase()}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Product Catalog</CardTitle>
+              <CardDescription>Simple, tap-friendly ordering cards.</CardDescription>
             </CardHeader>
             <CardContent>
-              {cartItems.length === 0 ? (
-                <div className="text-sm text-slate-500">Your cart is empty.</div>
+              {loadingCatalog ? (
+                <div className="flex items-center gap-2 text-sm text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading catalog...
+                </div>
+              ) : visibleCatalog.length === 0 ? (
+                <div className="text-sm text-slate-500">No products found for this filter.</div>
               ) : (
-                <div className="space-y-4">
-                  {cartItems.map((item) => {
-                    const lineTotal =
-                      Number(item.quantity) * Number(item.unitPrice);
-
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {visibleCatalog.map((item) => {
+                    const unitPrice = Number(item.unitSellingPrice ?? item.price ?? 0);
+                    const qty = productQty[item.productId] || 1;
+                    const isOut = item.stockHealth === "OUT" || item.canOrder === false;
+                    const packSize = item.packSize || item.unit || item.pack || "";
                     return (
                       <div
                         key={item.productId}
-                        className="rounded-2xl border bg-white p-4 shadow-sm"
+                        className={`rounded-xl border bg-white p-3 ${isOut ? "opacity-75" : ""}`}
                       >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-semibold text-slate-900">
-                              {item.productName}
-                            </div>
-                            <div className="mt-1 text-xs text-slate-500">
-                              {item.productId} • ₹
-                              {Number(item.unitPrice).toLocaleString()} each
-                            </div>
-                            {item.currentStock !== null &&
-                            item.currentStock !== undefined ? (
-                              <div className="mt-1 text-xs text-slate-500">
-                                Available stock:{" "}
-                                {Number(item.currentStock).toLocaleString()}
-                              </div>
-                            ) : null}
+                        <div className="space-y-1">
+                          <div className="line-clamp-2 text-sm font-semibold text-slate-900">
+                            {item.productName}
                           </div>
-
-                          <button
-                            type="button"
-                            onClick={() => removeFromCart(item.productId)}
-                            className="rounded-lg p-2 text-slate-500 hover:bg-slate-50 hover:text-red-600"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          <div className="text-xs text-slate-500">
+                            {item.category || "General"}
+                            {packSize ? ` • ${packSize}` : ""}
+                          </div>
                         </div>
-
-                        <div className="mt-3 flex items-center justify-between gap-3">
+                        <div className="mt-2 flex items-center justify-between gap-2">
+                          <Badge variant="secondary">₹{unitPrice.toLocaleString()}</Badge>
+                          <StockBadge
+                            stockHealth={item.stockHealth}
+                            currentStock={item.currentStock}
+                          />
+                        </div>
+                        <div className="mt-3 flex items-center justify-between gap-2">
                           <QtyControl
                             compact
-                            value={item.quantity}
-                            onDecrease={() => decreaseCartQty(item.productId)}
-                            onIncrease={() => increaseCartQty(item.productId)}
+                            value={qty}
+                            disabled={isOut}
+                            onDecrease={() => updateProductQty(item.productId, qty - 1)}
+                            onIncrease={() => updateProductQty(item.productId, qty + 1)}
                           />
-
-                          <div className="text-sm font-semibold text-slate-900">
-                            ₹{lineTotal.toLocaleString()}
-                          </div>
+                          <Button
+                            size="sm"
+                            className="h-9 rounded-lg px-3"
+                            onClick={() => addToCart(item)}
+                            disabled={isOut}
+                          >
+                            {isOut ? "Unavailable" : "Add"}
+                          </Button>
                         </div>
                       </div>
                     );
                   })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
 
-                  <div className="rounded-2xl border bg-slate-50 p-4">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-slate-500">Items</span>
-                      <span className="font-medium text-slate-900">
-                        {cartCount}
-                      </span>
+      {activeTab === "cart" ? (
+        <Card className="rounded-2xl shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Cart</CardTitle>
+            <CardDescription>Review selected items and place your order.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {cartItems.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-6 text-center text-sm text-slate-500">
+                Your cart is empty. Add products from Product Catalog.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {cartItems.map((item) => {
+                  const lineTotal = Number(item.quantity) * Number(item.unitPrice);
+                  return (
+                    <div key={item.productId} className="rounded-xl border bg-white p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-900">
+                            {item.productName}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {item.category || "General"} • ₹
+                            {Number(item.unitPrice).toLocaleString()} each
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeFromCart(item.productId)}
+                          className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-red-600"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between">
+                        <QtyControl
+                          compact
+                          value={item.quantity}
+                          onDecrease={() => decreaseCartQty(item.productId)}
+                          onIncrease={() => increaseCartQty(item.productId)}
+                        />
+                        <div className="text-sm font-semibold">₹{lineTotal.toLocaleString()}</div>
+                      </div>
                     </div>
-                    <div className="mt-2 flex items-center justify-between text-base">
-                      <span className="font-semibold text-slate-900">
-                        Subtotal
-                      </span>
-                      <span className="font-semibold text-slate-900">
-                        ₹{cartSubTotal.toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
+                  );
+                })}
 
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-700">
-                      Order Notes
-                    </label>
-                    <Textarea
-                      placeholder="Any urgent note, delivery request, or instruction..."
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value)}
-                      className="min-h-[96px] rounded-xl"
-                    />
+                <div className="rounded-xl bg-slate-50 p-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span>Items</span>
+                    <span className="font-medium">{cartCount}</span>
                   </div>
+                  <div className="mt-1 flex items-center justify-between text-base font-semibold">
+                    <span>Subtotal</span>
+                    <span>₹{cartSubTotal.toLocaleString()}</span>
+                  </div>
+                </div>
 
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-700">Order Notes (optional)</label>
+                  <Textarea
+                    placeholder="Any delivery or packing notes..."
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    className="min-h-[84px] rounded-xl"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <Button
-                    className="h-11 w-full rounded-xl"
+                    type="button"
+                    variant="outline"
+                    className="h-11 rounded-xl"
+                    onClick={() => setCartItems([])}
+                  >
+                    Clear Cart
+                  </Button>
+                  <Button
+                    className="h-11 flex-1 rounded-xl"
                     onClick={handleSubmitOrder}
                     disabled={submitting || cartItems.length === 0 || isCreditHold}
                   >
                     {submitting ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Submitting Order...
+                        Submitting...
                       </>
                     ) : (
                       <>
@@ -993,249 +972,157 @@ export default function LabOrderingPage({ currentUser }) {
                     )}
                   </Button>
                 </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {activeTab === "orders" ? (
+        <div className="grid gap-5 xl:grid-cols-[1.2fr_1fr]">
+          <Card className="rounded-2xl shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Previous Orders</CardTitle>
+              <CardDescription>Orders from your lab only.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loadingOrders ? (
+                <div className="flex items-center gap-2 text-sm text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading orders...
+                </div>
+              ) : scopedRecentOrders.length === 0 ? (
+                <div className="text-sm text-slate-500">No orders yet.</div>
+              ) : (
+                <div className="space-y-3">
+                  {scopedRecentOrders.map((order) => (
+                    <div
+                      key={order.orderId}
+                      className={`rounded-xl border bg-white p-3 ${
+                        selectedOrderId === order.orderId ? "ring-2 ring-slate-200" : ""
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-semibold">{order.orderId}</div>
+                          <div className="text-xs text-slate-500">
+                            {order.orderDate || order.date || "-"}
+                          </div>
+                        </div>
+                        <Badge variant="secondary">{order.orderStatus || order.status || "Placed"}</Badge>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                        <span>Total: ₹{Number(order.orderTotal ?? order.total ?? 0).toLocaleString()}</span>
+                        <span>•</span>
+                        <span>Items: {Number(order.itemCount || order.totalItems || 0)}</span>
+                      </div>
+                      <div className="mt-3 flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="rounded-lg"
+                          onClick={() => openOrderDetails(order.orderId)}
+                        >
+                          <FileText className="mr-1.5 h-4 w-4" />
+                          View details
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="rounded-lg"
+                          onClick={async () => {
+                            const details = await openOrderDetails(order.orderId);
+                            handleRepeatOrder(details || undefined);
+                          }}
+                        >
+                          <RotateCcw className="mr-1.5 h-4 w-4" />
+                          Repeat
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </CardContent>
           </Card>
 
           <Card className="rounded-2xl shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg">Quick Reorder</CardTitle>
-              <CardDescription>
-                Fast repeat ordering for common products.
-              </CardDescription>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Order Details</CardTitle>
+              <CardDescription>Review selected order lines.</CardDescription>
             </CardHeader>
             <CardContent>
-              {quickOrderItems.length === 0 ? (
-                <div className="text-sm text-slate-500">
-                  No quick reorder items found.
+              {!selectedOrderId ? (
+                <div className="text-sm text-slate-500">Select an order to view details.</div>
+              ) : loadingOrderDetails ? (
+                <div className="flex items-center gap-2 text-sm text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading details...
+                </div>
+              ) : selectedOrderDetails?.order ? (
+                <div className="space-y-3">
+                  <div className="text-sm">
+                    <div className="font-semibold">{selectedOrderDetails.order.orderId}</div>
+                    <div className="text-slate-500">{selectedOrderDetails.order.orderDate || "-"}</div>
+                  </div>
+                  <div className="text-sm space-y-1">
+                    <div>Status: {selectedOrderDetails.order.orderStatus || "-"}</div>
+                    <div>Payment: {selectedOrderDetails.order.paymentStatus || "-"}</div>
+                    <div>
+                      Total: ₹{Number(selectedOrderDetails.order.orderTotal || 0).toLocaleString()}
+                    </div>
+                  </div>
+                  <Button className="rounded-lg" onClick={handleRepeatOrder}>
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    Repeat This Order
+                  </Button>
+                  <div className="space-y-2">
+                    {selectedOrderDetails.lines?.length ? (
+                      selectedOrderDetails.lines.map((line) => (
+                        <div key={line.orderLineId} className="rounded-lg border p-2.5 text-sm">
+                          <div className="font-medium">{line.productName}</div>
+                          <div className="text-xs text-slate-500">
+                            {line.productId} • Qty {line.quantity}
+                          </div>
+                          <div className="text-xs text-slate-600">
+                            ₹{Number(line.netLineTotal || 0).toLocaleString()}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-sm text-slate-500">No line items found.</div>
+                    )}
+                  </div>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {quickOrderItems.map((item) => {
-                    const isOut =
-                      item.stockHealth === "OUT" || item.canOrder === false;
-
-                    return (
-                      <div
-                        key={item.productId}
-                        className="rounded-2xl border bg-white p-4 shadow-sm"
-                      >
-                        <div className="text-base font-semibold text-slate-900">
-                          {item.productName}
-                        </div>
-                        <div className="mt-1 text-sm text-slate-500">
-                          ₹
-                          {Number(
-                            item.unitSellingPrice ?? item.price ?? 0
-                          ).toLocaleString()}
-                        </div>
-                        <div className="mt-2">
-                          <StockBadge
-                            stockHealth={item.stockHealth}
-                            currentStock={item.currentStock}
-                          />
-                        </div>
-                        <Button
-                          className="mt-4 h-11 w-full rounded-xl"
-                          variant="outline"
-                          onClick={() => quickReorder(item)}
-                          disabled={isOut}
-                        >
-                          <RotateCcw className="mr-2 h-4 w-4" />
-                          {isOut ? "Unavailable" : "Quick Reorder"}
-                        </Button>
-                      </div>
-                    );
-                  })}
-                </div>
+                <div className="text-sm text-slate-500">No details available.</div>
               )}
             </CardContent>
           </Card>
         </div>
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-[1.2fr_1fr]">
-        <Card className="rounded-2xl shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Your Orders</CardTitle>
-            <CardDescription>Orders placed for your lab only.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loadingOrders ? (
-              <div className="flex items-center gap-2 text-sm text-slate-500">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading recent orders...
-              </div>
-            ) : scopedRecentOrders.length === 0 ? (
-              <div className="text-sm text-slate-500">No orders yet. Add items to your cart and submit.</div>
-            ) : (
-              <div className="space-y-3">
-                {scopedRecentOrders.map((order) => (
-                  <div
-                    key={order.orderId}
-                    className={`rounded-2xl border bg-white p-4 shadow-sm ${
-                      selectedOrderId === order.orderId
-                        ? "ring-2 ring-slate-200"
-                        : ""
-                    }`}
-                  >
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <div className="text-base font-semibold text-slate-900">
-                          {order.orderId}
-                        </div>
-                        <div className="mt-1 text-sm text-slate-500">
-                          Date: {order.orderDate || order.date || "-"}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        <Badge variant="secondary">
-                          {order.orderStatus || order.status || "Placed"}
-                        </Badge>
-                        <Badge variant="outline">
-                          {order.paymentStatus || "Pending"}
-                        </Badge>
-                        <Badge>
-                          ₹
-                          {Number(
-                            order.orderTotal ?? order.total ?? 0
-                          ).toLocaleString()}
-                        </Badge>
-                      </div>
-                    </div>
-
-                    <div className="mt-3">
-                      <Button
-                        variant="outline"
-                        className="rounded-xl"
-                        onClick={() => openOrderDetails(order.orderId)}
-                      >
-                        <FileText className="mr-2 h-4 w-4" />
-                        View Details
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Order Details</CardTitle>
-            <CardDescription>
-              Review the selected order and item details.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {!selectedOrderId ? (
-              <div className="text-sm text-slate-500">
-                Select a recent order to view details.
-              </div>
-            ) : loadingOrderDetails ? (
-              <div className="flex items-center gap-2 text-sm text-slate-500">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading order details...
-              </div>
-            ) : selectedOrderDetails?.order ? (
-              <div className="space-y-4">
-                <div>
-                  <div className="font-semibold">
-                    {selectedOrderDetails.order.orderId}
-                  </div>
-                  <div className="text-sm text-slate-500">
-                    {selectedOrderDetails.order.orderDate || "-"}
-                  </div>
-                </div>
-
-                <div className="text-sm space-y-1">
-                  <div>
-                    Invoice: {selectedOrderDetails.order.invoiceId || "-"}
-                  </div>
-                  <div>Status: {selectedOrderDetails.order.orderStatus || "-"}</div>
-                  <div>
-                    Payment: {selectedOrderDetails.order.paymentStatus || "-"}
-                  </div>
-                  <div>
-                    Total: ₹
-                    {Number(
-                      selectedOrderDetails.order.orderTotal || 0
-                    ).toLocaleString()}
-                  </div>
-                </div>
-
-                <div className="pt-1">
-                  <Button className="rounded-xl" onClick={handleRepeatOrder}>
-                    <RotateCcw className="mr-2 h-4 w-4" />
-                    Repeat This Order
-                  </Button>
-                </div>
-
-                {selectedOrderDetails.order.notes ? (
-                  <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">
-                    <div className="font-medium">Notes</div>
-                    <div className="mt-1 whitespace-pre-wrap">
-                      {selectedOrderDetails.order.notes}
-                    </div>
-                  </div>
-                ) : null}
-
-                <div className="space-y-2">
-                  {selectedOrderDetails.lines?.length ? (
-                    selectedOrderDetails.lines.map((line) => (
-                      <div
-                        key={line.orderLineId}
-                        className="rounded-xl border p-3"
-                      >
-                        <div className="font-medium">{line.productName}</div>
-                        <div className="text-sm text-slate-500">
-                          {line.productId} • Qty {line.quantity}
-                        </div>
-                        <div className="mt-1 text-sm text-slate-600">
-                          Unit Price: ₹
-                          {Number(
-                            line.unitSellingPrice || 0
-                          ).toLocaleString()}
-                        </div>
-                        <div className="text-sm text-slate-600">
-                          Tax: ₹{Number(line.taxAmount || 0).toLocaleString()}
-                        </div>
-                        <div className="text-sm font-medium">
-                          ₹{Number(line.netLineTotal || 0).toLocaleString()}
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-sm text-slate-500">
-                      No line items found.
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="text-sm text-slate-500">No details available.</div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      ) : null}
 
       {cartItems.length > 0 ? (
         <div className="fixed inset-x-0 bottom-16 z-30 border-t bg-white/95 px-4 py-3 shadow-lg backdrop-blur lg:hidden">
           <div className="mx-auto flex max-w-md items-center justify-between gap-3">
-            <div>
+            <button
+              type="button"
+              className="text-left"
+              onClick={() => setActiveTab("cart")}
+            >
               <div className="text-xs text-slate-500">Cart</div>
               <div className="text-sm font-semibold text-slate-900">
                 {cartCount} items • ₹{cartSubTotal.toLocaleString()}
               </div>
-            </div>
+            </button>
             <Button
               className="h-10 rounded-xl"
-              onClick={handleSubmitOrder}
-              disabled={submitting}
+              onClick={() => {
+                setActiveTab("cart");
+                handleSubmitOrder();
+              }}
+              disabled={submitting || isCreditHold}
             >
-              {submitting ? "Submitting..." : "Submit"}
+              {submitting ? "Submitting..." : "Checkout"}
             </Button>
           </div>
         </div>
