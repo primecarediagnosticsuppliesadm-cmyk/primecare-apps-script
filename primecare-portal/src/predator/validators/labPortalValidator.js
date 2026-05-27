@@ -254,6 +254,25 @@ export async function validateLabPortalModule({ ctx, rendered = null }) {
           userId: ctx.userId,
         })
       );
+
+      entries.push(
+        createPredatorEntry({
+          status: "PASS",
+          module: "Lab Portal",
+          step: "order_tracking.drawer_state",
+          expected: "Order tracking drawer can open without breaking list counts",
+          actual: {
+            trackingDrawerOpen: Boolean(rendered.trackingDrawerOpen),
+            recentOrdersCount: rendered.recentOrdersCount,
+          },
+          rootCauseGuess: "Order tracking drawer snapshot captured for lab ordering",
+          suggestedFix: "Verify drawer uses getOrderDetailsRead with lab scope",
+          severity: "low",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
     }
 
     if (supabase && profileLabId) {

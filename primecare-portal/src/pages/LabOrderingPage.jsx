@@ -24,7 +24,6 @@ import {
 import {
   getLabCatalog,
   getLabRecentOrders,
-  getOrderDetails,
   submitLabOrder,
 } from "@/api/primecareApi";
 import {
@@ -32,7 +31,6 @@ import {
   getCollectionsRead,
   getLabCatalogRead,
   getLabRecentOrdersRead,
-  getOrderDetailsRead,
   mapOrderRow,
 } from "@/api/primecareSupabaseApi";
 import { supabase } from "@/api/supabaseClient.js";
@@ -47,6 +45,15 @@ import {
 } from "@/utils/migrationTrace.js";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 import { cn } from "@/lib/utils";
+import OrderTrackingDrawer from "@/components/lab/OrderTrackingDrawer.jsx";
+import OrderProgressMini from "@/components/lab/OrderProgressMini.jsx";
+import { StatusBadge, usePortalToast } from "@/components/ux";
+import {
+  fetchScopedOrderDetails,
+  logOrderTrackingEvent,
+  orderStatusChipVariant,
+} from "@/utils/orderTracking.js";
+import { paymentStatusToVariant } from "@/utils/statusTokens.js";
 
 function QuickStat({ title, value, icon: Icon }) {
   return (
@@ -317,9 +324,12 @@ export default function LabOrderingPage({ currentUser }) {
   const hydratedDraftRef = useRef(false);
   const lastSubmittedHashRef = useRef("");
 
-  const [selectedOrderId, setSelectedOrderId] = useState("");
-  const [selectedOrderDetails, setSelectedOrderDetails] = useState(null);
-  const [loadingOrderDetails, setLoadingOrderDetails] = useState(false);
+  const [trackingOpen, setTrackingOpen] = useState(false);
+  const [trackingOrder, setTrackingOrder] = useState(null);
+  const [trackingLoading, setTrackingLoading] = useState(false);
+  const [trackingError, setTrackingError] = useState("");
+  const [repeatLoading, setRepeatLoading] = useState(false);
+  const { showToast } = usePortalToast();
 
   const labId =
     currentUser?.labId ||
@@ -382,7 +392,7 @@ export default function LabOrderingPage({ currentUser }) {
         (sum, item) => sum + Number(item.quantity || 0) * Number(item.unitPrice || 0),
         0
       ),
-      selectedOrderId: selectedOrderId || null,
+      trackingDrawerOpen: trackingOpen,
       cartDrawerOpen: isCartOpen,
       submitting,
       canCheckout: !submitting && cartItems.length > 0 && !isCreditHold,
@@ -563,37 +573,63 @@ export default function LabOrderingPage({ currentUser }) {
     }
   }
 
-  async function openOrderDetails(orderId) {
+  async function openOrderTracking(orderId) {
+    if (!orderId) return null;
     try {
-      setLoadingOrderDetails(true);
-      setErrorMessage("");
-
-      if (supabase) {
-        const sup = await getOrderDetailsRead(orderId);
-        if (sup?.data?.order) {
-          const orderLab = labIdKey(sup.data.order.labId || sup.data.order.lab_id);
-          if (profileLabKey && orderLab && orderLab !== profileLabKey) {
-            throw new Error("This order is not available for your lab account.");
-          }
-          setSelectedOrderId(orderId);
-          setSelectedOrderDetails(sup.data);
-          return sup.data;
-        }
-      }
-
-      const res = await getOrderDetails(orderId);
-      const result = res?.data || res || {};
-      setSelectedOrderId(orderId);
-      setSelectedOrderDetails(result);
-      return result;
+      setTrackingOpen(true);
+      setTrackingLoading(true);
+      setTrackingError("");
+      setTrackingOrder(null);
+      logOrderTrackingEvent("order_tracking.drawer_open", { orderId, source: "lab_ordering" });
+      const details = await fetchScopedOrderDetails(orderId, profileLabKey);
+      setTrackingOrder(details);
+      logOrderTrackingEvent("order_tracking.status_render", {
+        orderId: details.orderId,
+        status: details.orderStatus,
+      });
+      return details;
     } catch (error) {
-      console.error("Failed to load order details", error);
-      setErrorMessage(
-        error.message || "Unable to load order details right now."
-      );
+      console.error("Failed to load order tracking", error);
+      setTrackingError(error.message || "Unable to load order details right now.");
       return null;
     } finally {
-      setLoadingOrderDetails(false);
+      setTrackingLoading(false);
+    }
+  }
+
+  function closeOrderTracking() {
+    setTrackingOpen(false);
+    setTrackingOrder(null);
+    setTrackingError("");
+  }
+
+  async function handleTrackingDrawerAction(action, details) {
+    if (action === "invoice") {
+      showToast("info", "Invoice PDFs will be available in a future release.");
+      return;
+    }
+    if (action === "support") {
+      showToast("info", "Your account manager will follow up on this order.");
+      return;
+    }
+    if (action === "repeat" && details) {
+      try {
+        setRepeatLoading(true);
+        handleRepeatOrder({
+          lines: details.lines.map((line) => ({
+            productId: line.productId,
+            productName: line.productName,
+            quantity: line.quantity,
+            netLineTotal: line.lineTotal,
+            unitSellingPrice: line.unitPrice,
+          })),
+        });
+        closeOrderTracking();
+      } catch (err) {
+        setErrorMessage(err?.message || "Unable to prepare repeat order.");
+      } finally {
+        setRepeatLoading(false);
+      }
     }
   }
 
@@ -852,7 +888,7 @@ export default function LabOrderingPage({ currentUser }) {
     setProductQty((prev) => ({ ...prev, [productId]: 1 }));
   }
 
-  function handleRepeatOrder(orderDetails = selectedOrderDetails) {
+  function handleRepeatOrder(orderDetails) {
     if (!orderDetails?.lines?.length) {
       setErrorMessage("No line items found to repeat.");
       return;
@@ -1010,7 +1046,7 @@ export default function LabOrderingPage({ currentUser }) {
           await loadCatalog();
 
           if (orderId) {
-            await openOrderDetails(orderId);
+            await openOrderTracking(orderId);
           }
           return;
         }
@@ -1049,7 +1085,7 @@ export default function LabOrderingPage({ currentUser }) {
       await loadCatalog();
 
       if (result?.orderId) {
-        await openOrderDetails(result.orderId);
+        await openOrderTracking(result.orderId);
       }
     } catch (error) {
       console.error("Submit order failed", error);
@@ -1161,11 +1197,11 @@ export default function LabOrderingPage({ currentUser }) {
                   onClick={() => {
                     setActiveTab("orders");
                     if (submitResult.orderId) {
-                      void openOrderDetails(submitResult.orderId);
+                      void openOrderTracking(submitResult.orderId);
                     }
                   }}
                 >
-                  View Order
+                  Track Order
                 </Button>
                 <Button
                   type="button"
@@ -1293,157 +1329,181 @@ export default function LabOrderingPage({ currentUser }) {
       
 
       {activeTab === "orders" ? (
-        <div className="grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="rounded-lg border border-slate-200 bg-white">
-            <div className="border-b px-3 py-2">
-              <h2 className="text-sm font-semibold text-slate-900">Previous Orders</h2>
-              <p className="text-[11px] text-slate-500">Your lab order timeline</p>
-            </div>
-            <div className="p-2">
-              {loadingOrders ? (
-                <div className="flex items-center gap-2 py-6 text-sm text-slate-500">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading orders…
+        <div className="rounded-lg border border-slate-200 bg-white">
+          <div className="border-b px-3 py-2">
+            <h2 className="text-sm font-semibold text-slate-900">Previous Orders</h2>
+            <p className="text-[11px] text-slate-500">Track fulfillment, payments, and reorders</p>
+          </div>
+          <div className="p-2">
+            {loadingOrders ? (
+              <div className="flex items-center gap-2 py-6 text-sm text-slate-500">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading orders…
+              </div>
+            ) : scopedRecentOrders.length === 0 ? (
+              <div className="py-6 text-center text-sm text-slate-500">No orders yet.</div>
+            ) : (
+              <>
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full min-w-[640px] text-left text-xs">
+                    <thead>
+                      <tr className="border-b text-[10px] uppercase tracking-wide text-slate-500">
+                        <th className="px-2 py-1.5 font-medium">Order</th>
+                        <th className="px-2 py-1.5 font-medium">Status</th>
+                        <th className="px-2 py-1.5 font-medium">Progress</th>
+                        <th className="px-2 py-1.5 font-medium text-right">Total</th>
+                        <th className="px-2 py-1.5 font-medium text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scopedRecentOrders.map((order) => {
+                        const orderStatus = order.orderStatus || order.status || "Placed";
+                        const payment = order.paymentStatus || "Pending";
+                        return (
+                          <tr key={order.orderId} className="border-b border-slate-100 last:border-0">
+                            <td className="px-2 py-2">
+                              <p className="font-semibold text-slate-900">{order.orderId}</p>
+                              <p className="text-[10px] text-slate-500">{order.orderDate || "—"}</p>
+                            </td>
+                            <td className="px-2 py-2">
+                              <div className="flex flex-col gap-1">
+                                <StatusBadge variant={orderStatusChipVariant(orderStatus)}>
+                                  {orderStatus}
+                                </StatusBadge>
+                                <StatusBadge variant={paymentStatusToVariant(payment)}>{payment}</StatusBadge>
+                              </div>
+                            </td>
+                            <td className="px-2 py-2 min-w-[140px]">
+                              <OrderProgressMini status={orderStatus} />
+                            </td>
+                            <td className="px-2 py-2 text-right tabular-nums font-semibold">
+                              ₹{Number(order.orderTotal ?? order.total ?? 0).toLocaleString("en-IN")}
+                            </td>
+                            <td className="px-2 py-2">
+                              <div className="flex justify-end gap-1">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 px-2 text-[10px]"
+                                  onClick={() => void openOrderTracking(order.orderId)}
+                                >
+                                  Track
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 px-2 text-[10px]"
+                                  onClick={() =>
+                                    showToast("info", "Invoice download coming soon.")
+                                  }
+                                >
+                                  Invoice
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className="h-7 px-2 text-[10px]"
+                                  onClick={async () => {
+                                    const details = await openOrderTracking(order.orderId);
+                                    if (details) {
+                                      await handleTrackingDrawerAction("repeat", details);
+                                    }
+                                  }}
+                                >
+                                  Repeat
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
-              ) : scopedRecentOrders.length === 0 ? (
-                <div className="py-6 text-center text-sm text-slate-500">No orders yet.</div>
-              ) : (
-                <div className="relative space-y-0 pl-3">
-                  <div className="absolute bottom-2 left-[5px] top-2 w-px bg-slate-200" aria-hidden />
+
+                <div className="space-y-2 md:hidden">
                   {scopedRecentOrders.map((order) => {
-                    const isSelected = selectedOrderId === order.orderId;
                     const orderStatus = order.orderStatus || order.status || "Placed";
+                    const payment = order.paymentStatus || "Pending";
                     return (
-                      <div
+                      <article
                         key={order.orderId}
-                        className={cn(
-                          "relative border-b border-slate-100 py-2 pl-4 last:border-b-0",
-                          isSelected && "bg-slate-50/80"
-                        )}
+                        className="rounded-md border border-slate-200 px-2.5 py-2"
                       >
-                        <span
-                          className={cn(
-                            "absolute left-0 top-3 h-2.5 w-2.5 rounded-full border-2 border-white",
-                            isSelected ? "bg-slate-900" : "bg-slate-300"
-                          )}
-                          aria-hidden
-                        />
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <p className="truncate text-xs font-semibold text-slate-900">{order.orderId}</p>
-                            <p className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-500">
+                            <p className="mt-0.5 flex items-center gap-1 text-[10px] text-slate-500">
                               <Clock3 className="h-3 w-3 shrink-0" />
-                              {order.orderDate || order.date || "—"}
+                              {order.orderDate || "—"}
                             </p>
                           </div>
-                          <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600 bg-slate-100">
-                            {orderStatus}
-                          </span>
+                          <StatusBadge variant={orderStatusChipVariant(orderStatus)}>{orderStatus}</StatusBadge>
                         </div>
-                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-600">
-                          <span className="font-semibold tabular-nums text-slate-900">
-                            ₹{Number(order.orderTotal ?? order.total ?? 0).toLocaleString()}
-                          </span>
-                          <span>·</span>
-                          <span>{Number(order.itemCount || order.totalItems || 0)} items</span>
-                          <span className="rounded bg-slate-100 px-1 py-0.5 text-[10px]">
-                            {order.paymentStatus || "Pending"}
-                          </span>
+                        <div className="mt-1.5">
+                          <OrderProgressMini status={orderStatus} />
                         </div>
-                        <div className="mt-1.5 flex gap-1.5">
+                        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px]">
+                          <span className="font-semibold tabular-nums">
+                            ₹{Number(order.orderTotal ?? order.total ?? 0).toLocaleString("en-IN")}
+                          </span>
+                          <StatusBadge variant={paymentStatusToVariant(payment)}>{payment}</StatusBadge>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 flex-1 text-[11px]"
+                            onClick={() => void openOrderTracking(order.orderId)}
+                          >
+                            Track
+                          </Button>
                           <Button
                             type="button"
                             size="sm"
                             variant="ghost"
-                            className="h-7 px-2 text-[11px]"
-                            onClick={() => openOrderDetails(order.orderId)}
+                            className="h-8 px-2 text-[11px]"
+                            onClick={() =>
+                              showToast("info", "Invoice download coming soon.")
+                            }
                           >
-                            Details
+                            Invoice
                           </Button>
                           <Button
                             type="button"
                             size="sm"
-                            className="h-7 px-2.5 text-[11px] font-semibold"
+                            className="h-8 flex-1 text-[11px]"
                             onClick={async () => {
-                              const details = await openOrderDetails(order.orderId);
-                              handleRepeatOrder(details || undefined);
+                              const details = await openOrderTracking(order.orderId);
+                              if (details) await handleTrackingDrawerAction("repeat", details);
                             }}
                           >
                             <RotateCcw className="mr-1 h-3 w-3" />
-                            Reorder
+                            Repeat
                           </Button>
                         </div>
-                      </div>
+                      </article>
                     );
                   })}
                 </div>
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-slate-200 bg-white">
-            <div className="border-b px-3 py-2">
-              <h2 className="text-sm font-semibold text-slate-900">Order Details</h2>
-            </div>
-            <div className="p-3">
-              {!selectedOrderId ? (
-                <p className="py-4 text-center text-xs text-slate-500">Select an order from the timeline.</p>
-              ) : loadingOrderDetails ? (
-                <div className="flex items-center gap-2 py-4 text-sm text-slate-500">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading…
-                </div>
-              ) : selectedOrderDetails?.order ? (
-                <div className="space-y-2">
-                  <div>
-                    <p className="text-xs font-semibold text-slate-900">
-                      {selectedOrderDetails.order.orderId}
-                    </p>
-                    <p className="text-[11px] text-slate-500">
-                      {selectedOrderDetails.order.orderDate || "—"}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-1 text-[11px]">
-                    <span className="rounded bg-slate-100 px-1.5 py-0.5">
-                      {selectedOrderDetails.order.orderStatus || "—"}
-                    </span>
-                    <span className="rounded bg-slate-100 px-1.5 py-0.5">
-                      {selectedOrderDetails.order.paymentStatus || "—"}
-                    </span>
-                    <span className="font-semibold tabular-nums text-slate-900">
-                      ₹{Number(selectedOrderDetails.order.orderTotal || 0).toLocaleString()}
-                    </span>
-                  </div>
-                  <Button type="button" size="sm" className="h-8 w-full text-xs" onClick={handleRepeatOrder}>
-                    <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-                    Reorder all items
-                  </Button>
-                  <div className="max-h-64 space-y-1 overflow-y-auto">
-                    {selectedOrderDetails.lines?.length ? (
-                      selectedOrderDetails.lines.map((line) => (
-                        <div
-                          key={line.orderLineId || `${line.productId}-${line.quantity}`}
-                          className="flex items-center justify-between gap-2 rounded border border-slate-100 px-2 py-1.5 text-[11px]"
-                        >
-                          <span className="min-w-0 flex-1 truncate font-medium">{line.productName}</span>
-                          <span className="shrink-0 text-slate-500">×{line.quantity}</span>
-                          <span className="shrink-0 tabular-nums font-medium">
-                            ₹{Number(line.netLineTotal || 0).toLocaleString()}
-                          </span>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-xs text-slate-500">No line items.</p>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <p className="py-4 text-xs text-slate-500">No details available.</p>
-              )}
-            </div>
+              </>
+            )}
           </div>
         </div>
       ) : null}
+
+      <OrderTrackingDrawer
+        open={trackingOpen}
+        onClose={closeOrderTracking}
+        order={trackingOrder}
+        loading={trackingLoading}
+        error={trackingError}
+        repeatLoading={repeatLoading}
+        onAction={handleTrackingDrawerAction}
+      />
 
       {cartItems.length > 0 ? (
         <button
