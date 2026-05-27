@@ -5,6 +5,55 @@ import {
 
 export { normalizeAdminDashboardReadResult as normalizeAdminDashboardRead };
 
+/**
+ * Unwrap nested getAdminDashboardRead payloads ({ data }, { payload }).
+ * @param {object|null|undefined} data
+ */
+export function unwrapAdminDashboardReadPayload(data) {
+  if (!data) return null;
+
+  let raw = data;
+  if (raw?.data && (raw.summary == null || raw.executive == null)) {
+    raw = raw.data;
+  }
+  if (raw?.payload && (raw.summary == null || raw.executive == null)) {
+    raw = raw.payload;
+  }
+  if (!raw?.summary || !raw?.executive) return null;
+  return raw;
+}
+
+/**
+ * Normalize read result; falls back to direct payload normalization when wrapper checks fail.
+ * @param {{ success?: boolean, data?: object }|null|undefined} result
+ */
+export function resolveAdminDashboardModelFromRead(result) {
+  const fromRead = normalizeAdminDashboardReadResult(result);
+  if (fromRead) return fromRead;
+
+  const raw = unwrapAdminDashboardReadPayload(result?.data);
+  if (!raw) return null;
+
+  const model = normalizeAdminDashboardPayload(raw);
+  if (!model.summary.inventorySkus && model.summary.stockStats?.totalSkus) {
+    model.summary.inventorySkus = model.summary.stockStats.totalSkus;
+  }
+  return model;
+}
+
+/**
+ * Attach camelCase KPI model to a normalized dashboard model.
+ * @param {{ summary: object, executive: object, visits?: object, insights?: object, kpis?: AdminDashboardKpiModel }} model
+ */
+export function withAdminDashboardKpiModel(model) {
+  if (!model?.summary || !model?.executive) return null;
+  const kpis =
+    model.kpis && hasVisibleKpiModel(model.kpis)
+      ? model.kpis
+      : selectAdminDashboardKpis(model.summary, model.executive);
+  return { ...model, kpis };
+}
+
 /** @type {import('@/pages/adminDashboardState.js').AdminDashboardKpiModel} */
 export const EMPTY_DASHBOARD_KPIS = {
   outstandingReceivables: 0,
@@ -242,8 +291,15 @@ export function adminDashboardModelFromMerge(merged) {
 export function buildHydratedDashboardState(prevBundle, prevKpis, model) {
   const mergedSummary = mergeSummaryModel(prevBundle?.summary, model.summary);
   const mergedExecutive = mergeExecutiveModel(prevBundle?.executive, model.executive);
-  const nextKpis = selectAdminDashboardKpis(mergedSummary, mergedExecutive);
-  const mergedKpis = mergeKpiModel(prevKpis, nextKpis);
+  const nextKpisFromFields = selectAdminDashboardKpis(mergedSummary, mergedExecutive);
+  const nextKpis =
+    model.kpis && hasVisibleKpiModel(model.kpis) ? model.kpis : nextKpisFromFields;
+  let mergedKpis = mergeKpiModel(prevKpis, nextKpis);
+
+  if (!hasVisibleKpiModel(mergedKpis) && hasVisibleKpiModel(prevKpis)) {
+    mergedKpis = prevKpis;
+  }
+
   const synced = applyKpiModelToDashboardObjects(
     mergedSummary,
     mergedExecutive,
@@ -275,9 +331,10 @@ export function applyAdminDashboardModel({
   prevBundle,
   prevKpis,
 }) {
-  if (!model?.summary || !model?.executive) return false;
+  const modelWithKpis = withAdminDashboardKpiModel(model);
+  if (!modelWithKpis) return false;
 
-  const hydrated = buildHydratedDashboardState(prevBundle, prevKpis, model);
+  const hydrated = buildHydratedDashboardState(prevBundle, prevKpis, modelWithKpis);
 
   setDashboardBundle(hydrated.bundle);
   setKpiModel(hydrated.kpis);
@@ -286,12 +343,23 @@ export function applyAdminDashboardModel({
   if (executiveRef) executiveRef.current = hydrated.bundle.executive;
   if (kpiModelRef) kpiModelRef.current = hydrated.kpis;
 
-  if (model.visits != null && setRecentVisitsData) {
-    setRecentVisitsData(model.visits);
+  if (modelWithKpis.visits != null && setRecentVisitsData) {
+    setRecentVisitsData(modelWithKpis.visits);
   }
-  if (model.insights != null && setInsightsData) {
-    setInsightsData(model.insights);
+  if (modelWithKpis.insights != null && setInsightsData) {
+    setInsightsData(modelWithKpis.insights);
   }
 
   return hydrated.hasVisibleKpis;
+}
+
+/**
+ * @param {{ success?: boolean, data?: object }|null|undefined} result
+ * @param {object|null|undefined} prevBundle
+ * @param {AdminDashboardKpiModel|null|undefined} prevKpis
+ */
+export function hydrateAdminDashboardFromApiResult(result, prevBundle, prevKpis) {
+  const model = resolveAdminDashboardModelFromRead(result);
+  if (!model) return null;
+  return buildHydratedDashboardState(prevBundle, prevKpis, withAdminDashboardKpiModel(model));
 }

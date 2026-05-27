@@ -38,7 +38,7 @@ import {
   applyAdminDashboardModel,
   EMPTY_DASHBOARD_KPIS,
   hasVisibleKpiModel,
-  normalizeAdminDashboardRead,
+  resolveAdminDashboardModelFromRead,
   selectAdminDashboardKpis,
 } from "@/pages/adminDashboardState.js";
 import AdminDashboardQaValidationPanel from "@/components/qa/AdminDashboardQaValidationPanel.jsx";
@@ -622,9 +622,12 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       const result = await getAdminDashboardRead({ force });
       if (loadId !== loadGenerationRef.current) return;
 
-      const model = normalizeAdminDashboardRead(result);
+      const model = resolveAdminDashboardModelFromRead(result);
       if (!model) {
-        console.warn("[AdminDashboard] QA direct read returned no normalizable dashboard model");
+        console.warn("[AdminDashboard] QA direct read returned no normalizable dashboard model", {
+          success: result?.success,
+          hasData: Boolean(result?.data),
+        });
         return;
       }
 
@@ -640,6 +643,14 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
         prevBundle: dashboardBundleRef.current,
         prevKpis: kpiModelRef.current,
       });
+
+      if (import.meta.env.DEV) {
+        console.log("[AdminDashboard KPI hydrate]", {
+          rawApi: result?.data,
+          normalized: model,
+          kpiCardValues: kpiModelRef.current,
+        });
+      }
       return;
     }
 
@@ -929,8 +940,18 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   }, [loading]);
 
   const stockStats = summaryData?.stockStats ?? EMPTY_STOCK_STATS;
-  const displayKpis = kpiModel ?? EMPTY_DASHBOARD_KPIS;
-  const dashboardHydrated = hasVisibleKpiModel(kpiModel);
+  const committedKpis = kpiModel ?? kpiModelRef.current;
+  const displayKpis = committedKpis ?? EMPTY_DASHBOARD_KPIS;
+  const dashboardHydrated = hasVisibleKpiModel(committedKpis);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || loading) return;
+    console.log("[AdminDashboard KPI render]", {
+      kpiModel,
+      committedKpis: kpiModelRef.current,
+      displayKpis,
+    });
+  }, [loading, kpiModel, displayKpis]);
   const insights = Array.isArray(insightsData?.insights)
     ? insightsData.insights.map(normalizeInsight)
     : [];
