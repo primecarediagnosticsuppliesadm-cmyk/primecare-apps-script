@@ -33,7 +33,6 @@ import { recordPredatorTiming } from "@/predator/predatorTiming.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { usePredatorRenderTrace } from "@/predator/renderTrace.js";
 import { usePredatorUiSyncTrace } from "@/predator/usePredatorUiSyncTrace.js";
-import { getLatestUiMetricApi } from "@/predator/uiStateReliability.js";
 import { adminDashboardModelFromMerge } from "@/pages/adminDashboardState.js";
 import AdminDashboardQaValidationPanel from "@/components/qa/AdminDashboardQaValidationPanel.jsx";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
@@ -459,6 +458,29 @@ function normalizeDashboardFromReadResult(result) {
 /**
  * Commit API dashboard into React state without zeroing last good KPIs.
  */
+function bundleWithKpiModel(summary, executive, kpis) {
+  const stock = summary?.stockStats || {};
+  return {
+    summary: {
+      ...summary,
+      recentVisits: kpis.recentVisits,
+      totalSoldValue: kpis.totalSoldValue,
+      inventorySkus: kpis.inventorySkus,
+      stockStats: {
+        ...stock,
+        totalSkus: kpis.inventorySkus,
+      },
+    },
+    executive: {
+      ...executive,
+      outstandingReceivables: kpis.outstandingReceivables,
+      todaysRevenue: kpis.todaysRevenue,
+      labsAtCreditRisk: kpis.labsAtCreditRisk,
+      productsNearStockout: kpis.productsNearStockout,
+    },
+  };
+}
+
 function commitDashboardHydration(
   hydrated,
   {
@@ -467,6 +489,7 @@ function commitDashboardHydration(
     setRecentVisitsData,
     setInsightsData,
     kpiModelRef,
+    apiKpisRef,
     dashboardBundleRef,
     summaryDataRef,
     executiveDataRef,
@@ -481,13 +504,17 @@ function commitDashboardHydration(
     return false;
   }
 
-  const bundle = { summary: hydrated.summary, executive: hydrated.executive };
+  if (hasVisibleKpis(hydrated.kpis)) {
+    apiKpisRef.current = hydrated.kpis;
+  }
+
+  const bundle = bundleWithKpiModel(hydrated.summary, hydrated.executive, mergedKpis);
   setDashboardBundle(bundle);
   setKpiModel(mergedKpis);
   kpiModelRef.current = mergedKpis;
   dashboardBundleRef.current = bundle;
-  summaryDataRef.current = hydrated.summary;
-  executiveDataRef.current = hydrated.executive;
+  summaryDataRef.current = bundle.summary;
+  executiveDataRef.current = bundle.executive;
 
   if (hydrated.visits != null) setRecentVisitsData(hydrated.visits);
   if (hydrated.insights != null) setInsightsData(hydrated.insights);
@@ -735,6 +762,8 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   const loadGenerationRef = useRef(0);
   const dashboardBundleRef = useRef(dashboardBundle);
   const kpiModelRef = useRef(kpiModel);
+  const apiKpisRef = useRef(null);
+  const lastRawReadRef = useRef(null);
   const summaryDataRef = useRef(summaryData);
   const executiveDataRef = useRef(executiveData);
 
@@ -754,6 +783,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     setRecentVisitsData,
     setInsightsData,
     kpiModelRef,
+    apiKpisRef,
     dashboardBundleRef,
     summaryDataRef,
     executiveDataRef,
@@ -771,6 +801,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       const result = await getAdminDashboardRead({ force });
       if (loadId !== loadGenerationRef.current) return;
 
+      lastRawReadRef.current = result;
       console.log("[AdminDashboard] getAdminDashboardRead raw", result);
 
       const hydrated = normalizeDashboardFromReadResult(result);
@@ -862,6 +893,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
 
     const readResult = supabaseSlice.dashboardRead;
     if (readResult?.success && readResult?.data) {
+      lastRawReadRef.current = readResult;
       console.log("[AdminDashboard] getAdminDashboardRead raw", readResult);
       const fromRead = normalizeDashboardFromReadResult(readResult);
       if (fromRead) {
@@ -1106,11 +1138,14 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   }, [executiveData]);
 
   const qaValidationSnapshot = useMemo(() => {
-    if (!dashboardHydrated) return null;
+    if (!dashboardHydrated || !displayKpis) return null;
     return {
       executive: {
         ...executiveData,
         outstandingReceivables: displayKpis.outstandingReceivables,
+        todaysRevenue: displayKpis.todaysRevenue,
+        labsAtCreditRisk: displayKpis.labsAtCreditRisk,
+        productsNearStockout: displayKpis.productsNearStockout,
       },
       summary: {
         ...summaryData,
@@ -1140,36 +1175,55 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   });
 
   const uiSyncMetrics = useMemo(() => {
-    if (!dashboardHydrated) return {};
+    if (!dashboardHydrated || !displayKpis) return {};
+    const apiKpis = apiKpisRef.current || displayKpis;
     return {
       outstanding_receivables: {
-        api: getLatestUiMetricApi("Admin Dashboard", "outstanding_receivables"),
+        api: apiKpis.outstandingReceivables,
         state: displayKpis.outstandingReceivables,
         render: displayKpis.outstandingReceivables,
       },
       recent_visits: {
-        api: getLatestUiMetricApi("Admin Dashboard", "recent_visits"),
+        api: apiKpis.recentVisits,
         state: displayKpis.recentVisits,
         render: displayKpis.recentVisits,
       },
       inventory_skus: {
-        api: getLatestUiMetricApi("Admin Dashboard", "inventory_skus"),
+        api: apiKpis.inventorySkus,
         state: displayKpis.inventorySkus,
         render: displayKpis.inventorySkus,
       },
       total_sold_value: {
-        api: getLatestUiMetricApi("Admin Dashboard", "total_sold_value"),
+        api: apiKpis.totalSoldValue,
         state: displayKpis.totalSoldValue,
         render: displayKpis.totalSoldValue,
       },
     };
-  }, [dashboardHydrated, displayKpis]);
+  }, [dashboardHydrated, displayKpis, kpiModel]);
 
   usePredatorUiSyncTrace("Admin Dashboard", {
     loading,
     apiReady: dashboardHydrated,
     metrics: uiSyncMetrics,
   });
+
+  useEffect(() => {
+    if (loading) return;
+    const kpiCards = displayKpis
+      ? {
+          outstandingReceivables: displayKpis.outstandingReceivables,
+          recentVisits: displayKpis.recentVisits,
+          inventorySkus: displayKpis.inventorySkus,
+          totalSoldValue: displayKpis.totalSoldValue,
+        }
+      : null;
+    console.log("[AdminDashboard] proof", {
+      rawGetAdminDashboardRead: lastRawReadRef.current,
+      normalizedKpiModel: kpiModel,
+      kpiCardValuesRendered: kpiCards,
+      predatorUiSyncTraceInput: uiSyncMetrics,
+    });
+  }, [loading, kpiModel, displayKpis, uiSyncMetrics]);
 
   if (loading) {
     return <AdminDashboardLoading />;

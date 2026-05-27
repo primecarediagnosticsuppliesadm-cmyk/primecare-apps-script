@@ -48,12 +48,26 @@ export function recordPredatorUiMetricSnapshot({
   }
 
   const prevLatest = predatorStore.getLatestUiStateTrace(module, metricId);
+  const prevState = num(prevLatest?.state);
+  const nextState = num(state);
+  const prevRender = num(prevLatest?.render);
+  const nextRender = num(render);
   const snapshot = {
     module,
     metricId,
     api: num(api) ?? prevLatest?.api ?? null,
-    state: num(state) ?? prevLatest?.state ?? null,
-    render: num(render) ?? prevLatest?.render ?? null,
+    state:
+      nextState != null
+        ? nextState
+        : prevState != null && prevState > 0
+          ? prevState
+          : null,
+    render:
+      nextRender != null
+        ? nextRender
+        : prevRender != null && prevRender > 0
+          ? prevRender
+          : null,
     source: source || "unknown",
     timestamp: new Date().toISOString(),
   };
