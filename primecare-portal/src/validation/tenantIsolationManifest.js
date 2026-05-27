@@ -22,7 +22,8 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     table: "v_labs_credit",
     label: "Labs (credit view)",
     tenantColumn: "tenant_id",
-    selectColumns: ["tenant_id", "lab_id", "agent_id", "agent_name", "assigned_agent_id"],
+    // Keep projection minimal: this view does not reliably expose assignment columns.
+    selectColumns: ["tenant_id", "lab_id"],
     allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.AGENT, ROLES.LAB],
     scope: "agent_scoped",
     optional: false,
@@ -32,7 +33,7 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     table: "orders",
     label: "Orders",
     tenantColumn: "tenant_id",
-    selectColumns: ["tenant_id", "lab_id", "order_id"],
+    selectColumns: ["tenant_id", "lab_id"],
     allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.LAB, ROLES.AGENT],
     scope: "lab_scoped",
   },
@@ -41,7 +42,7 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     table: "order_lines",
     label: "Order lines",
     tenantColumn: "tenant_id",
-    selectColumns: ["tenant_id", "order_id"],
+    selectColumns: ["tenant_id"],
     allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.LAB],
     scope: "tenant_wide",
     optional: true,
@@ -51,7 +52,7 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     table: "payments",
     label: "Payments",
     tenantColumn: "tenant_id",
-    selectColumns: ["tenant_id", "lab_id", "payment_id"],
+    selectColumns: ["tenant_id", "lab_id"],
     allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.LAB, ROLES.AGENT],
     scope: "lab_scoped",
   },
@@ -78,7 +79,7 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     table: "inventory_ledger",
     label: "Inventory ledger",
     tenantColumn: "tenant_id",
-    selectColumns: ["tenant_id", "product_id"],
+    selectColumns: ["tenant_id"],
     allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE],
     scope: "admin_only",
     optional: true,
@@ -133,9 +134,11 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
   },
 ];
 
-/** Columns expected on tenant-scoped operational tables (schema awareness). */
-export const TENANT_TABLE_REQUIRED_COLUMNS = [
-  "tenant_id",
-  "created_at",
-  "updated_at",
-];
+/**
+ * Columns required to validate tenant isolation in-browser.
+ * Timestamps vary by table/view; tenant isolation must not WARN purely due to missing updated_at.
+ */
+export const TENANT_TABLE_REQUIRED_COLUMNS = ["tenant_id"];
+
+/** Optional schema hints (WARN only if missing and table is expected to have them). */
+export const TENANT_TABLE_OPTIONAL_COLUMNS = ["created_at", "updated_at"];

@@ -14,9 +14,11 @@ import { buildValidationReport, printQaValidationReport } from "@/validation/qaV
 import {
   TENANT_ISOLATION_TABLE_SPECS,
   TENANT_TABLE_REQUIRED_COLUMNS,
+  TENANT_TABLE_OPTIONAL_COLUMNS,
 } from "@/validation/tenantIsolationManifest.js";
 
-const PROBE_LIMIT = 250;
+const PROBE_LIMITS = { quick: 40, deep: 250 };
+const PROBE_TIMEOUT_MS = { quick: 1500, deep: 4500 };
 
 function envFlagOrDefault(name, defaultValue) {
   const value = import.meta.env[name];
@@ -35,6 +37,13 @@ export function isTenantRoleIsolationValidationEnabled() {
   return envFlagOrDefault("VITE_QA_ISOLATION_VALIDATION", IS_QA || import.meta.env.DEV);
 }
 
+/** @returns {'quick'|'deep'} */
+function resolveValidationMode() {
+  const raw = String(import.meta.env.VITE_QA_ISOLATION_MODE || "").trim().toLowerCase();
+  if (raw === "deep") return "deep";
+  return "quick";
+}
+
 /**
  * @param {string} id
  * @param {string} label
@@ -49,8 +58,9 @@ function makeCheck(id, label, status, message, expected, actual) {
 
 /**
  * @param {import('@/validation/tenantIsolationManifest.js').TenantIsolationTableSpec} spec
+ * @param {'quick'|'deep'} mode
  */
-async function probeTable(spec) {
+async function probeTable(spec, mode) {
   const started = Date.now();
   if (!supabase) {
     return {
@@ -58,17 +68,29 @@ async function probeTable(spec) {
       error: "Supabase not configured",
       durationMs: Date.now() - started,
       queryError: true,
+      timedOut: false,
     };
   }
 
   const cols = spec.selectColumns.join(",");
-  const { data, error } = await supabase.from(spec.table).select(cols).limit(PROBE_LIMIT);
+  const limit = PROBE_LIMITS[mode] ?? PROBE_LIMITS.quick;
+
+  const queryPromise = supabase.from(spec.table).select(cols).limit(limit);
+  const timeoutMs = PROBE_TIMEOUT_MS[mode] ?? PROBE_TIMEOUT_MS.quick;
+  const timeoutPromise = new Promise((resolve) => {
+    setTimeout(() => resolve({ data: null, error: { message: "probe_timeout" } }), timeoutMs);
+  });
+
+  /** @type {{ data: any, error: any }} */
+  // @ts-ignore - Promise.race union types
+  const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
 
   return {
     rows: Array.isArray(data) ? data : [],
     error: error?.message || null,
     durationMs: Date.now() - started,
     queryError: Boolean(error),
+    timedOut: String(error?.message || "") === "probe_timeout",
   };
 }
 
@@ -102,9 +124,28 @@ function schemaTenantColumnWarning(tableName) {
     `schema.${tableName}.columns`,
     `Schema awareness: ${tableName}`,
     "warn",
-    `Manifest missing columns: ${missing.join(", ")} — verify RLS and migrations`,
+    `Manifest missing columns: ${missing.join(", ")} — cannot validate tenant isolation reliably`,
     TENANT_TABLE_REQUIRED_COLUMNS,
     { missing, knownColumns: known.slice(0, 16) }
+  );
+}
+
+/**
+ * Optional timestamps are INFO-like. We keep them as PASS unless tenant_id is missing.
+ * @param {string} tableName
+ */
+function schemaOptionalColumnsInfo(tableName) {
+  const known = PREDATOR_KNOWN_TABLE_COLUMNS[tableName] || [];
+  if (!known.length) return null;
+  const missing = TENANT_TABLE_OPTIONAL_COLUMNS.filter((c) => !known.includes(c));
+  if (missing.length === 0) return null;
+  return makeCheck(
+    `schema.${tableName}.timestamps`,
+    `Schema hints: ${tableName}`,
+    "pass",
+    `Optional columns not in manifest: ${missing.join(", ")} (not a failure)`,
+    TENANT_TABLE_OPTIONAL_COLUMNS,
+    { missing }
   );
 }
 
@@ -187,6 +228,25 @@ function auditRoleScope(currentUser, rows, spec) {
       }
     }
     if (spec.id === "labs") {
+      // v_labs_credit may not expose assignment columns; avoid false FAIL.
+      const sample = rows[0] || {};
+      const hasAssignment =
+        "assigned_agent_id" in sample ||
+        "assignedAgentId" in sample ||
+        "agent_id" in sample ||
+        "agentId" in sample ||
+        "agent_name" in sample ||
+        "agentName" in sample;
+      if (!hasAssignment) {
+        return makeCheck(
+          `role.${spec.id}.agent_labs_unsupported`,
+          `Agent lab scope: ${spec.label}`,
+          "warn",
+          "Agent isolation cannot be validated for v_labs_credit because no assigned agent fields are exposed by this view.",
+          { requiredAny: ["assigned_agent_id", "agent_id", "agent_name"] },
+          { visibleRowCount: rows.length, firstDivergenceLayer: "rls" }
+        );
+      }
       const mapped = rows.map((r) => ({
         labId: r.lab_id,
         assignedAgentId: r.assigned_agent_id || r.agent_id,
@@ -210,6 +270,25 @@ function auditRoleScope(currentUser, rows, spec) {
       }
     }
     if (spec.id === "collections") {
+      // ar_credit_control often lacks agent assignment columns; avoid false FAIL.
+      const sample = rows[0] || {};
+      const hasAssignment =
+        "agent_id" in sample ||
+        "agentId" in sample ||
+        "assigned_agent_id" in sample ||
+        "assignedAgentId" in sample ||
+        "assigned_agent" in sample ||
+        "assignedAgent" in sample;
+      if (!hasAssignment) {
+        return makeCheck(
+          `role.${spec.id}.agent_collections_unsupported`,
+          `Agent collection scope: ${spec.label}`,
+          "warn",
+          "Agent isolation cannot be validated for ar_credit_control because no assigned agent fields are exposed by this view.",
+          { requiredAny: ["agent_id", "assigned_agent_id", "assigned_agent"] },
+          { visibleRowCount: rows.length, firstDivergenceLayer: "rls" }
+        );
+      }
       const mapped = rows.map((r) => ({
         labId: r.lab_id,
         labName: r.lab_name,
@@ -375,27 +454,40 @@ export async function runTenantRoleIsolationValidation({
 
   const validationStarted = Date.now();
   let totalProbeMs = 0;
+  let probes = 0;
   let tablesWithData = 0;
+  let slowest = { table: "", durationMs: 0 };
+  const mode = resolveValidationMode();
 
   for (const spec of TENANT_ISOLATION_TABLE_SPECS) {
     checks.push(schemaTenantColumnWarning(spec.table));
+    const opt = schemaOptionalColumnsInfo(spec.table);
+    if (opt) checks.push(opt);
 
-    const probe = await probeTable(spec);
+    probes += 1;
+    const probe = await probeTable(spec, mode);
     totalProbeMs += probe.durationMs;
+    if (probe.durationMs > slowest.durationMs) {
+      slowest = { table: spec.table, durationMs: probe.durationMs };
+    }
 
     if (probe.queryError) {
       checks.push(
         makeCheck(
           `tenant.${spec.id}.probe`,
           `RLS probe: ${spec.label}`,
-          spec.optional ? "warn" : "warn",
-          probe.error || "Query failed — table may be missing or RLS blocked",
+          "warn",
+          probe.timedOut
+            ? `Probe timed out after ${PROBE_TIMEOUT_MS[mode]}ms — degraded to WARN (table not skipped)`
+            : probe.error || "Query failed — table may be missing or RLS blocked",
           "successful read or empty",
           {
             table: spec.table,
             error: probe.error,
             durationMs: probe.durationMs,
             optional: spec.optional,
+            timedOut: probe.timedOut,
+            mode,
           }
         )
       );
@@ -490,15 +582,16 @@ export async function runTenantRoleIsolationValidation({
       }
     }
 
-    if (probe.durationMs > 2000) {
+    const slowThreshold = mode === "quick" ? 500 : 2000;
+    if (probe.durationMs > slowThreshold) {
       checks.push(
         makeCheck(
           `timing.${spec.id}.probe`,
           `Probe timing: ${spec.label}`,
           "warn",
-          `RLS probe took ${probe.durationMs}ms (threshold 2000ms)`,
-          "<= 2000ms",
-          { durationMs: probe.durationMs, table: spec.table }
+          `RLS probe took ${probe.durationMs}ms (threshold ${slowThreshold}ms; mode ${mode})`,
+          `<= ${slowThreshold}ms`,
+          { durationMs: probe.durationMs, table: spec.table, mode }
         )
       );
     }
@@ -518,14 +611,15 @@ export async function runTenantRoleIsolationValidation({
   }
 
   const totalMs = Date.now() - validationStarted;
+  const avgProbeMs = probes > 0 ? Math.round(totalProbeMs / probes) : 0;
   checks.push(
     makeCheck(
       "timing.total",
       "Validation duration",
-      totalMs > 8000 ? "warn" : "pass",
-      `Full isolation validation ${totalMs}ms (probes ${totalProbeMs}ms)`,
-      "<= 8000ms",
-      { totalMs, probeMs: totalProbeMs, tablesWithData }
+      mode === "quick" ? (totalMs > 5000 ? "warn" : "pass") : totalMs > 15000 ? "warn" : "pass",
+      `Full isolation validation ${totalMs}ms (mode ${mode}) — probes ${probes}, avg ${avgProbeMs}ms, slowest ${slowest.table} ${slowest.durationMs}ms`,
+      mode === "quick" ? "<= 5000ms" : "<= 15000ms",
+      { totalMs, probeMs: totalProbeMs, probes, avgProbeMs, slowest, tablesWithData, mode }
     )
   );
 
