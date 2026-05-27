@@ -1,4 +1,4 @@
-/** @typedef {'pass' | 'warn' | 'fail'} QaCheckStatus */
+/** @typedef {'pass' | 'info' | 'warn' | 'fail'} QaCheckStatus */
 
 /**
  * @typedef {Object} QaValidationCheck
@@ -16,7 +16,7 @@
  * @property {string} scope
  * @property {string} ranAt
  * @property {QaValidationCheck[]} checks
- * @property {{ pass: number, warn: number, fail: number }} summary
+ * @property {{ pass: number, warn: number, fail: number, info?: number }} summary
  */
 
 /**
@@ -46,6 +46,7 @@ export function numbersMatch(expected, actual, tolerance = 0) {
 export function worstStatus(a, b) {
   if (a === "fail" || b === "fail") return "fail";
   if (a === "warn" || b === "warn") return "warn";
+  if (a === "info" || b === "info") return "info";
   return "pass";
 }
 
@@ -56,10 +57,14 @@ export function worstStatus(a, b) {
 export function summarizeChecks(checks) {
   return checks.reduce(
     (acc, c) => {
-      acc[c.status] += 1;
+      if (c.status === "info") {
+        acc.info = (acc.info ?? 0) + 1;
+      } else {
+        acc[c.status] += 1;
+      }
       return acc;
     },
-    { pass: 0, warn: 0, fail: 0 }
+    { pass: 0, warn: 0, fail: 0, info: 0 }
   );
 }
 
@@ -68,7 +73,8 @@ export function summarizeChecks(checks) {
  * @returns {QaCheckStatus}
  */
 export function overallStatusFromChecks(checks) {
-  const summary = summarizeChecks(checks);
+  const actionable = checks.filter((c) => c.status !== "info");
+  const summary = summarizeChecks(actionable);
   if (summary.fail > 0) return "fail";
   if (summary.warn > 0) return "warn";
   return "pass";

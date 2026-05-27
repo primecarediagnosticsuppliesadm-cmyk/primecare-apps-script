@@ -13,6 +13,7 @@ import { ROLES } from "@/config/roles.js";
  * @property {string[]} allowedRoles — roles that may legitimately read rows
  * @property {'tenant_wide'|'agent_scoped'|'lab_scoped'|'admin_only'} scope
  * @property {boolean} [optional] — probe failure is WARN not FAIL
+ * @property {boolean} [notificationsFoundation] — skip or INFO until foundation migration + env flag
  */
 
 /** @type {TenantIsolationTableSpec[]} */
@@ -141,6 +142,7 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE],
     scope: "tenant_wide",
     optional: true,
+    notificationsFoundation: true,
   },
   {
     id: "notification_delivery_log",
@@ -151,6 +153,7 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE],
     scope: "tenant_wide",
     optional: true,
+    notificationsFoundation: true,
   },
 ];
 

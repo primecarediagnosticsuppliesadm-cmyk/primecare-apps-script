@@ -3,6 +3,11 @@ import { createPredatorEntry, summarizePredatorEntries } from "@/predator/predat
 import { checkTenantConsistency } from "@/predator/predatorChecks.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
 import { PLACEHOLDER_CHANNELS } from "@/notifications/notificationConstants.js";
+import {
+  createNotificationFoundationPredatorEntry,
+  resolveNotificationFoundationState,
+  shouldSkipNotificationIsolationProbes,
+} from "@/notifications/notificationFoundationProbe.js";
 
 const FORBIDDEN_LIVE_DELIVERY_STATUSES = new Set([
   "sent",
@@ -13,12 +18,43 @@ const FORBIDDEN_LIVE_DELIVERY_STATUSES = new Set([
 ]);
 
 /**
+ * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} ctx
+ * @param {Object} partial
+ */
+function infoEntry(ctx, partial = {}) {
+  return createPredatorEntry(
+    createNotificationFoundationPredatorEntry(ctx, {
+      status: "INFO",
+      issueClass: "setup_pending",
+      severity: "low",
+      ...partial,
+    })
+  );
+}
+
+/**
  * @param {Object} params
  * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} params.ctx
  */
 export async function validateNotificationsFoundationModule({ ctx }) {
   return predatorTrace("Notifications", "validation.foundation", async () => {
     const entries = [];
+    const foundationState = await resolveNotificationFoundationState();
+
+    entries.push(
+      infoEntry(ctx, {
+        step: "foundation.state",
+        expected: "ready | setup_pending | disabled",
+        actual: {
+          mode: foundationState.mode,
+          enabled: foundationState.enabled,
+          tablesExist: foundationState.tablesExist,
+          probeRequired: foundationState.probeRequired,
+        },
+        rootCauseGuess: foundationState.message,
+        suggestedFix: foundationState.suggestedFix,
+      })
+    );
 
     if (!supabase) {
       entries.push(
@@ -36,6 +72,23 @@ export async function validateNotificationsFoundationModule({ ctx }) {
       return { module: "Notifications", summary: summarizePredatorEntries(entries), entries };
     }
 
+    if (shouldSkipNotificationIsolationProbes(foundationState)) {
+      entries.push(
+        infoEntry(ctx, {
+          step: "foundation.probes_skipped",
+          rootCauseGuess: foundationState.message,
+          suggestedFix: foundationState.suggestedFix,
+          actual: { error: foundationState.error },
+        })
+      );
+
+      return {
+        module: "Notifications",
+        summary: summarizePredatorEntries(entries),
+        entries,
+      };
+    }
+
     const tables = [
       "notification_events",
       "notification_templates",
@@ -47,15 +100,12 @@ export async function validateNotificationsFoundationModule({ ctx }) {
       if (res.error) {
         entries.push(
           createPredatorEntry({
-            status: table === "notification_events" ? "WARN" : "PASS",
+            status: "WARN",
             module: "Notifications",
             step: `${table}.probe`,
             actual: res.error.message,
-            rootCauseGuess:
-              res.error.message?.includes("does not exist")
-                ? "Notification foundation migration not applied"
-                : "RLS or schema probe failed",
-            suggestedFix: "Run notifications_foundation_migration.sql",
+            rootCauseGuess: "RLS or schema probe failed after foundation reported ready",
+            suggestedFix: "Verify notifications_foundation_migration.sql and RLS policies",
             severity: "medium",
             tenantId: ctx.tenantId,
             role: ctx.role,
@@ -82,7 +132,22 @@ export async function validateNotificationsFoundationModule({ ctx }) {
       .select("channel, status, tenant_id")
       .limit(50);
 
-    if (!logRes.error && Array.isArray(logRes.data)) {
+    if (logRes.error) {
+      entries.push(
+        createPredatorEntry({
+          status: "WARN",
+          module: "Notifications",
+          step: "notification_delivery_log.probe",
+          actual: logRes.error.message,
+          rootCauseGuess: "Delivery log probe failed after foundation reported ready",
+          suggestedFix: "Verify notification_delivery_log RLS",
+          severity: "medium",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    } else if (Array.isArray(logRes.data)) {
       const liveLike = logRes.data.filter((r) =>
         FORBIDDEN_LIVE_DELIVERY_STATUSES.has(String(r.status || "").toLowerCase())
       );

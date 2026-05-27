@@ -19,7 +19,14 @@ const MODULE = "Tenant + Role Isolation";
  * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} ctx
  */
 function qaCheckToPredatorEntry(check, ctx) {
-  const status = check.status === "fail" ? "FAIL" : check.status === "warn" ? "WARN" : "PASS";
+  const status =
+    check.status === "fail"
+      ? "FAIL"
+      : check.status === "warn"
+        ? "WARN"
+        : check.status === "info"
+          ? "INFO"
+          : "PASS";
   return createPredatorEntry({
     status,
     module: MODULE,

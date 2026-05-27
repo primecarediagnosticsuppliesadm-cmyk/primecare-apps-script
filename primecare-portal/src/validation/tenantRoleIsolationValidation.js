@@ -4,6 +4,11 @@ import { hasSupabaseForValidation } from "@/config/qaValidation.js";
 import { ROLES } from "@/config/roles.js";
 import { PREDATOR_KNOWN_TABLE_COLUMNS } from "@/predator/schemaAwareness.js";
 import {
+  classifyNotificationTableError,
+  resolveNotificationFoundationState,
+  shouldSkipNotificationIsolationProbes,
+} from "@/notifications/notificationFoundationProbe.js";
+import {
   canSeeAllData,
   filterCollectionsForUser,
   filterLabsForUser,
@@ -458,8 +463,45 @@ export async function runTenantRoleIsolationValidation({
   let tablesWithData = 0;
   let slowest = { table: "", durationMs: 0 };
   const mode = resolveValidationMode();
+  const notificationFoundationState = await resolveNotificationFoundationState();
+
+  if (shouldSkipNotificationIsolationProbes(notificationFoundationState)) {
+    checks.push(
+      makeCheck(
+        "notifications.foundation",
+        "Notification Foundation",
+        "info",
+        notificationFoundationState.message,
+        "tables installed and VITE_NOTIFICATIONS_FOUNDATION_ENABLED=true",
+        {
+          mode: notificationFoundationState.mode,
+          enabled: notificationFoundationState.enabled,
+          suggestedFix: notificationFoundationState.suggestedFix,
+          error: notificationFoundationState.error,
+        }
+      )
+    );
+  }
 
   for (const spec of TENANT_ISOLATION_TABLE_SPECS) {
+    if (spec.notificationsFoundation && shouldSkipNotificationIsolationProbes(notificationFoundationState)) {
+      checks.push(
+        makeCheck(
+          `tenant.${spec.id}.setup_pending`,
+          `RLS probe: ${spec.label}`,
+          "info",
+          notificationFoundationState.message,
+          "successful read when foundation is active",
+          {
+            table: spec.table,
+            mode: notificationFoundationState.mode,
+            optional: spec.optional,
+          }
+        )
+      );
+      continue;
+    }
+
     checks.push(schemaTenantColumnWarning(spec.table));
     const opt = schemaOptionalColumnsInfo(spec.table);
     if (opt) checks.push(opt);
@@ -472,14 +514,32 @@ export async function runTenantRoleIsolationValidation({
     }
 
     if (probe.queryError) {
+      let probeStatus = "warn";
+      let probeMessage =
+        probe.timedOut
+          ? `Probe timed out after ${PROBE_TIMEOUT_MS[mode]}ms — degraded to WARN (table not skipped)`
+          : probe.error || "Query failed — table may be missing or RLS blocked";
+
+      if (spec.notificationsFoundation) {
+        const kind = classifyNotificationTableError(probe.error);
+        if (kind === "missing_table" || kind === "schema_cache") {
+          probeStatus = "info";
+          probeMessage =
+            kind === "schema_cache"
+              ? "Notification tables may need schema cache refresh"
+              : "Notification Foundation tables not installed yet";
+        } else if (notificationFoundationState.mode === "ready") {
+          probeStatus = spec.optional ? "warn" : "warn";
+          probeMessage = probe.error || "RLS probe failed for notification table";
+        }
+      }
+
       checks.push(
         makeCheck(
           `tenant.${spec.id}.probe`,
           `RLS probe: ${spec.label}`,
-          "warn",
-          probe.timedOut
-            ? `Probe timed out after ${PROBE_TIMEOUT_MS[mode]}ms — degraded to WARN (table not skipped)`
-            : probe.error || "Query failed — table may be missing or RLS blocked",
+          probeStatus,
+          probeMessage,
           "successful read or empty",
           {
             table: spec.table,
@@ -634,6 +694,9 @@ export async function runTenantRoleIsolationValidation({
  * @param {import('@/validation/qaValidationCore.js').QaValidationCheck} check
  */
 export function qaCheckToIssueClass(check) {
+  if (check.status === "info") return "setup_pending";
+  if (check.id.startsWith("notifications.foundation")) return "setup_pending";
+  if (check.id.includes("setup_pending")) return "setup_pending";
   if (check.id.startsWith("tenant.")) return "tenant_isolation";
   if (check.id.startsWith("role.")) return "security";
   if (check.id.startsWith("layers.")) return "data_integrity";

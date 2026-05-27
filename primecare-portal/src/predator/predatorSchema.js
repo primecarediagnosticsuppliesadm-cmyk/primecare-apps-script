@@ -1,4 +1,4 @@
-/** @typedef {'PASS' | 'WARN' | 'FAIL'} PredatorStatus */
+/** @typedef {'PASS' | 'INFO' | 'WARN' | 'FAIL'} PredatorStatus */
 /** @typedef {'low' | 'medium' | 'high' | 'critical'} PredatorSeverity */
 
 /**
@@ -61,7 +61,13 @@ export function createPredatorEntry(partial) {
     suggestedFix: partial.suggestedFix || "",
     severity:
       partial.severity ||
-      (status === "FAIL" ? "high" : status === "WARN" ? "medium" : "low"),
+      (status === "FAIL"
+        ? "high"
+        : status === "WARN"
+          ? "medium"
+          : status === "INFO"
+            ? "low"
+            : "low"),
     timestamp: partial.timestamp || new Date().toISOString(),
     tenantId: partial.tenantId ?? null,
     role: partial.role ?? null,
@@ -81,6 +87,7 @@ export function summarizePredatorEntries(entries) {
     else if (e.status === "WARN") counts.warn += 1;
     else counts.pass += 1;
   }
+  // INFO is counted in pass for module health (not WARN/FAIL)
   const status = counts.fail > 0 ? "FAIL" : counts.warn > 0 ? "WARN" : "PASS";
   return { status, ...counts };
 }
