@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
+import { recordQualificationRenderedSnapshot } from "@/predator/moduleUiSnapshot.js";
 import { usePredatorRenderTrace } from "@/predator/renderTrace.js";
 import { usePredatorUiSyncTrace } from "@/predator/usePredatorUiSyncTrace.js";
 import {
@@ -974,12 +975,23 @@ export default function QualificationReviewPage({ currentUser }) {
     loadRows();
   }, [loadRows]);
 
-  usePredatorModuleValidation(
-    "Qualification Review",
-    currentUser,
-    { rowCount: rows.length },
-    !loading
+  const predatorSnapshot = useMemo(
+    () => ({
+      rows,
+      rowCount: rows.length,
+      qualificationRowsCount: rows.length,
+    }),
+    [rows]
   );
+
+  usePredatorModuleValidation("Qualification Review", currentUser, predatorSnapshot, !loading);
+
+  useEffect(() => {
+    if (loading) return;
+    recordQualificationRenderedSnapshot(predatorSnapshot, {
+      source: "QualificationReviewPage.render",
+    });
+  }, [loading, predatorSnapshot]);
 
   usePredatorRenderTrace("Qualification Review", {
     ready: !loading,

@@ -12,6 +12,11 @@ import {
   finalizeModuleDiagnosis,
 } from "@/predator/buildModuleDiagnosis.js";
 import { diagnoseProjectionColumns } from "@/predator/schemaAwareness.js";
+import { predatorStore } from "@/predator/predatorStore.js";
+import {
+  QUALIFICATION_REVIEW_MODULE,
+  resolveQualificationUiSnapshot,
+} from "@/predator/moduleUiSnapshot.js";
 
 /**
  * @param {Object} params
@@ -20,6 +25,8 @@ import { diagnoseProjectionColumns } from "@/predator/schemaAwareness.js";
  */
 export async function validateQualificationModule({ ctx, rendered = null }) {
   return predatorTrace("Qualification Review", "validation.full", async () => {
+    const stored = predatorStore.getModuleRenderedSnapshot(QUALIFICATION_REVIEW_MODULE, ctx);
+    const renderedInput = rendered ?? stored?.snapshot ?? null;
     const entries = [
       ...checkRoleAccess({
         module: "Qualification Review",
@@ -54,9 +61,43 @@ export async function validateQualificationModule({ ctx, rendered = null }) {
     const qualRaw = qualRes.error ? [] : qualRes.data || [];
     const dbCount = qualRaw.length;
 
+    const apiValidatedAt = Date.now();
     const apiRes = await getQualificationReviewRead();
     const apiRows = Array.isArray(apiRes?.data) ? apiRes.data : [];
-    const uiCount = rendered?.rowCount ?? null;
+    const uiSnapshot = resolveQualificationUiSnapshot({
+      explicitRendered: renderedInput,
+      apiValidatedAt,
+    });
+    const uiSnapshotFresh = Boolean(uiSnapshot.fresh);
+    const uiRendered = uiSnapshotFresh ? uiSnapshot.rendered : null;
+    const uiCount = uiRendered
+      ? Number(uiRendered.qualificationRowsCount ?? uiRendered.rowCount ?? 0)
+      : null;
+
+    if (!uiSnapshotFresh) {
+      entries.push(
+        createPredatorEntry({
+          status: "WARN",
+          module: "Qualification Review",
+          step: "ui_snapshot_freshness",
+          expected: "fresh rendered snapshot from Qualification Review page",
+          actual: {
+            reason: uiSnapshot.reason,
+            source: uiSnapshot.source,
+            ageMs: uiSnapshot.ageMs,
+            capturedAt: uiSnapshot.capturedAt,
+            apiValidatedAt: uiSnapshot.apiValidatedAt,
+          },
+          rootCauseGuess: uiSnapshot.message || "UI snapshot not available for comparison",
+          suggestedFix:
+            "Open Qualification Review page and wait for data to load before full Predator run",
+          severity: "medium",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
 
     entries.push(
       ...checkEmptyApiWhenDbHasRows({
@@ -122,7 +163,7 @@ export async function validateQualificationModule({ ctx, rendered = null }) {
       apiCount: apiRows.length,
       uiCount,
     };
-    const metrics = buildQualificationMetricDiagnoses(layerSnap, ctx);
+    const metrics = buildQualificationMetricDiagnoses(layerSnap, ctx, { uiSnapshotFresh });
     const { diagnosis, extraEntries } = finalizeModuleDiagnosis({
       module: "Qualification Review",
       ctx,

@@ -9,6 +9,10 @@ import { validateAgentVisitsModule } from "@/predator/validators/agentVisitsVali
 import { validateTenantRoleIsolationModule } from "@/predator/validators/tenantRoleIsolationValidator.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
 import { ADMIN_DASHBOARD_MODULE } from "@/predator/adminDashboardUiSnapshot.js";
+import {
+  COLLECTIONS_MODULE,
+  QUALIFICATION_REVIEW_MODULE,
+} from "@/predator/moduleUiSnapshot.js";
 
 /**
  * @typedef {Object} PredatorRenderedSnapshots
@@ -42,16 +46,24 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
     predatorStore.setModuleReport("Admin Dashboard", admin.entries, ctx);
     modules.push(admin);
 
+    const storedCollectionsRendered = predatorStore.getModuleRenderedSnapshot(
+      COLLECTIONS_MODULE,
+      ctx
+    );
     const collections = await validateCollectionsModule({
       ctx,
-      rendered: snapshots.collections ?? null,
+      rendered: snapshots.collections ?? storedCollectionsRendered?.snapshot ?? null,
     });
     predatorStore.setModuleReport("Collections", collections.entries, ctx);
     modules.push(collections);
 
+    const storedQualificationRendered = predatorStore.getModuleRenderedSnapshot(
+      QUALIFICATION_REVIEW_MODULE,
+      ctx
+    );
     const qualification = await validateQualificationModule({
       ctx,
-      rendered: snapshots.qualificationReview ?? null,
+      rendered: snapshots.qualificationReview ?? storedQualificationRendered?.snapshot ?? null,
     });
     predatorStore.setModuleReport("Qualification Review", qualification.entries, ctx);
     modules.push(qualification);

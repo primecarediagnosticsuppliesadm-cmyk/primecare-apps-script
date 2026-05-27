@@ -12,6 +12,11 @@ import {
   buildCollectionsMetricDiagnoses,
   finalizeModuleDiagnosis,
 } from "@/predator/buildModuleDiagnosis.js";
+import { predatorStore } from "@/predator/predatorStore.js";
+import {
+  COLLECTIONS_MODULE,
+  resolveCollectionsUiSnapshot,
+} from "@/predator/moduleUiSnapshot.js";
 
 /**
  * @param {Object} params
@@ -20,6 +25,8 @@ import {
  */
 export async function validateCollectionsModule({ ctx, rendered = null }) {
   return predatorTrace("Collections", "validation.full", async () => {
+    const stored = predatorStore.getModuleRenderedSnapshot(COLLECTIONS_MODULE, ctx);
+    const renderedInput = rendered ?? stored?.snapshot ?? null;
     const entries = [
       ...checkRoleAccess({
         module: "Collections",
@@ -51,13 +58,51 @@ export async function validateCollectionsModule({ ctx, rendered = null }) {
     const { outstandingReceivables } = computeReceivableMetrics(arRaw);
     const dbArRows = arRaw.length;
 
+    const apiValidatedAt = Date.now();
     const apiRes = await getCollectionsRead();
     const apiCollections = Array.isArray(apiRes?.data?.collections) ? apiRes.data.collections : [];
     const apiOutstanding = Number(apiRes?.data?.summary?.totalOutstanding ?? 0);
 
-    const uiCollections = Array.isArray(rendered?.collections) ? rendered.collections.length : null;
-    const uiOutstanding =
-      rendered?.summary != null ? Number(rendered.summary.totalOutstanding ?? 0) : null;
+    const uiSnapshot = resolveCollectionsUiSnapshot({
+      explicitRendered: renderedInput,
+      apiValidatedAt,
+    });
+    const uiSnapshotFresh = Boolean(uiSnapshot.fresh);
+    const uiRendered = uiSnapshotFresh ? uiSnapshot.rendered : null;
+
+    const uiCollections = uiRendered
+      ? Number(
+          uiRendered.collectionsListCount ??
+            (Array.isArray(uiRendered.collections) ? uiRendered.collections.length : 0)
+        )
+      : null;
+    const uiOutstanding = uiRendered
+      ? Number(uiRendered.outstandingReceivables ?? uiRendered.summary?.totalOutstanding ?? 0)
+      : null;
+
+    if (!uiSnapshotFresh) {
+      entries.push(
+        createPredatorEntry({
+          status: "WARN",
+          module: "Collections",
+          step: "ui_snapshot_freshness",
+          expected: "fresh rendered snapshot from Collections page",
+          actual: {
+            reason: uiSnapshot.reason,
+            source: uiSnapshot.source,
+            ageMs: uiSnapshot.ageMs,
+            capturedAt: uiSnapshot.capturedAt,
+            apiValidatedAt: uiSnapshot.apiValidatedAt,
+          },
+          rootCauseGuess: uiSnapshot.message || "UI snapshot not available for comparison",
+          suggestedFix: "Open Collections page and wait for data to load before full Predator run",
+          severity: "medium",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
 
     entries.push(
       ...checkEmptyApiWhenDbHasRows({
@@ -127,7 +172,7 @@ export async function validateCollectionsModule({ ctx, rendered = null }) {
       uiOutstanding,
     };
 
-    const metrics = buildCollectionsMetricDiagnoses(layerSnap, ctx);
+    const metrics = buildCollectionsMetricDiagnoses(layerSnap, ctx, { uiSnapshotFresh });
     const { diagnosis, extraEntries } = finalizeModuleDiagnosis({
       module: "Collections",
       ctx,

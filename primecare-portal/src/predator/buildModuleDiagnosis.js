@@ -290,8 +290,16 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx, options = {}) {
  * @param {Object} snap
  * @param {import('@/predator/predatorDiagnosisSchema.js').PredatorTenantContext} ctx
  */
-export function buildCollectionsMetricDiagnoses(snap, ctx) {
+export function buildCollectionsMetricDiagnoses(snap, ctx, options = {}) {
+  const uiSnapshotFresh = options.uiSnapshotFresh !== false;
   const module = "Collections";
+  const uiLayer = (value) => ({
+    layerId: "ui",
+    label: "Rendered UI",
+    value: uiSnapshotFresh ? value : null,
+    meta: uiSnapshotFresh ? undefined : { unobserved: true, optional: true },
+  });
+
   return [
     diagnoseMetricLayers({
       metricId: "collections_list",
@@ -301,8 +309,14 @@ export function buildCollectionsMetricDiagnoses(snap, ctx) {
       layers: [
         { layerId: "rls", label: "AR rows", value: snap.dbArRows },
         { layerId: "api", label: "API collections", value: snap.apiCollectionCount },
-        stateLayer("collections_list", module, snap.uiCollectionCount),
-        { layerId: "ui", label: "Rendered list", value: snap.uiCollectionCount },
+        stateLayer(
+          "collections_list",
+          module,
+          null,
+          snap.uiCollectionCount,
+          uiSnapshotFresh
+        ),
+        uiLayer(snap.uiCollectionCount),
       ],
     }),
     diagnoseMetricLayers({
@@ -313,8 +327,14 @@ export function buildCollectionsMetricDiagnoses(snap, ctx) {
       layers: [
         { layerId: "rls", label: "AR rollup", value: snap.dbOutstanding },
         { layerId: "api", label: "API summary", value: snap.apiOutstanding },
-        stateLayer("outstanding_receivables", module, snap.uiOutstanding),
-        { layerId: "ui", label: "Rendered summary", value: snap.uiOutstanding },
+        stateLayer(
+          "outstanding_receivables",
+          module,
+          null,
+          snap.uiOutstanding,
+          uiSnapshotFresh
+        ),
+        uiLayer(snap.uiOutstanding),
       ],
     }),
   ];
@@ -324,8 +344,16 @@ export function buildCollectionsMetricDiagnoses(snap, ctx) {
  * @param {Object} snap
  * @param {import('@/predator/predatorDiagnosisSchema.js').PredatorTenantContext} ctx
  */
-export function buildQualificationMetricDiagnoses(snap, ctx) {
+export function buildQualificationMetricDiagnoses(snap, ctx, options = {}) {
+  const uiSnapshotFresh = options.uiSnapshotFresh !== false;
   const module = "Qualification Review";
+  const uiLayer = (value) => ({
+    layerId: "ui",
+    label: "Rendered UI",
+    value: uiSnapshotFresh ? value : null,
+    meta: uiSnapshotFresh ? undefined : { unobserved: true, optional: true },
+  });
+
   return [
     diagnoseMetricLayers({
       metricId: "qualification_rows",
@@ -335,8 +363,8 @@ export function buildQualificationMetricDiagnoses(snap, ctx) {
       layers: [
         { layerId: "rls", label: "lab_qualifications", value: snap.dbCount },
         { layerId: "api", label: "API rows", value: snap.apiCount },
-        stateLayer("qualification_rows", module, snap.uiCount),
-        { layerId: "ui", label: "Rendered table", value: snap.uiCount },
+        stateLayer("qualification_rows", module, null, snap.uiCount, uiSnapshotFresh),
+        uiLayer(snap.uiCount),
       ],
     }),
   ];

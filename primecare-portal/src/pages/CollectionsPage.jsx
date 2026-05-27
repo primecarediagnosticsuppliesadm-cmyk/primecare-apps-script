@@ -43,6 +43,7 @@ import {
 } from "@/config/environment";
 import { ROLES } from "@/config/roles";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
+import { recordCollectionsRenderedSnapshot } from "@/predator/moduleUiSnapshot.js";
 import { usePredatorRenderTrace } from "@/predator/renderTrace.js";
 import { usePredatorUiSyncTrace } from "@/predator/usePredatorUiSyncTrace.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
@@ -523,12 +524,20 @@ export default function CollectionsPage({ currentUser, authToken }) {
     () => ({
       summary,
       collections,
-      collectionCount: collections.length,
+      collectionsListCount: collections.length,
+      outstandingReceivables: Number(summary.totalOutstanding ?? 0),
     }),
     [summary, collections]
   );
 
   usePredatorModuleValidation("Collections", currentUser, predatorSnapshot, !loading);
+
+  useEffect(() => {
+    if (loading) return;
+    recordCollectionsRenderedSnapshot(predatorSnapshot, {
+      source: "CollectionsPage.render",
+    });
+  }, [loading, predatorSnapshot]);
 
   usePredatorRenderTrace("Collections", {
     ready: !loading,
