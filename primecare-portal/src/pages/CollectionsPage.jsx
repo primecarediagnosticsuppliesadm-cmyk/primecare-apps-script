@@ -61,6 +61,10 @@ import {
   AlertTriangle,
   ShieldAlert,
   Wallet,
+  FileText,
+  Download,
+  LifeBuoy,
+  ArrowRight,
 } from "lucide-react";
 
 function findCollectionByLabId(list, labId) {
@@ -222,7 +226,29 @@ function buildFinancialTimeline(item, history) {
   });
 }
 
-function LabAccountTimeline({ item, history, detailsLoading, copy, collectionDetails }) {
+function groupTimelineByDate(events) {
+  const buckets = [];
+  const byLabel = new Map();
+  for (const event of events || []) {
+    const label = formatShortDate(event.date || "");
+    if (!byLabel.has(label)) {
+      const next = { label, items: [] };
+      byLabel.set(label, buckets.length);
+      buckets.push(next);
+    }
+    buckets[byLabel.get(label)].items.push(event);
+  }
+  return buckets;
+}
+
+function LabAccountTimeline({
+  item,
+  history,
+  detailsLoading,
+  copy,
+  collectionDetails,
+  onWorkspaceAction,
+}) {
   const outstanding = Number(item.outstandingAmount || 0);
   const totalPaid = Number(item.totalPaid || 0);
   const overdueDays = Number(item.overdueDays || 0);
@@ -235,6 +261,8 @@ function LabAccountTimeline({ item, history, detailsLoading, copy, collectionDet
   );
   const creditUsed = Math.max(0, outstanding);
   const utilizationPct = creditLimit > 0 ? Math.min(100, Math.round((creditUsed / creditLimit) * 100)) : null;
+  const [expandedInvoiceId, setExpandedInvoiceId] = useState("");
+  const [invoiceDrawerId, setInvoiceDrawerId] = useState("");
   const invoices = useMemo(
     () => buildInvoiceRows(collectionDetails || item, history),
     [collectionDetails, item, history]
@@ -243,6 +271,14 @@ function LabAccountTimeline({ item, history, detailsLoading, copy, collectionDet
     () => buildFinancialTimeline(collectionDetails || item, history),
     [collectionDetails, item, history]
   );
+  const timelineGroups = useMemo(() => groupTimelineByDate(financialTimeline), [financialTimeline]);
+  const accountStandingSummary =
+    overdueDays > 0
+      ? `Attention needed: ${overdueDays} day overdue balance.`
+      : outstanding <= 0
+        ? "Account is in good standing with no pending balance."
+        : "Account is active with pending balance under monitoring.";
+  const availableCredit = creditLimit > 0 ? Math.max(0, creditLimit - creditUsed) : null;
 
   return (
     <div className="space-y-2.5">
@@ -302,7 +338,50 @@ function LabAccountTimeline({ item, history, detailsLoading, copy, collectionDet
             </div>
           </div>
         ) : null}
-        <p className="mt-2 text-[10px] text-muted-foreground">Online payments coming soon.</p>
+        <p className="mt-2 text-[10px] text-muted-foreground">{accountStandingSummary}</p>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 rounded-md px-2 text-[10px]"
+            onClick={() => onWorkspaceAction?.("view_orders")}
+          >
+            <FileText className="mr-1 h-3 w-3" />
+            View Orders
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 rounded-md px-2 text-[10px]"
+            onClick={() => onWorkspaceAction?.("download_statement")}
+          >
+            <Download className="mr-1 h-3 w-3" />
+            Download Statement
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 rounded-md px-2 text-[10px]"
+            onClick={() => onWorkspaceAction?.("repeat_last_order")}
+          >
+            <ArrowRight className="mr-1 h-3 w-3" />
+            Repeat Last Order
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 rounded-md px-2 text-[10px]"
+            onClick={() => onWorkspaceAction?.("contact_support")}
+          >
+            <LifeBuoy className="mr-1 h-3 w-3" />
+            Contact Support
+          </Button>
+        </div>
+        <p className="mt-1 text-[10px] text-muted-foreground">Online payments coming soon.</p>
       </section>
 
       <section className="rounded-lg border border-border bg-card p-2.5 shadow-sm">
@@ -314,7 +393,7 @@ function LabAccountTimeline({ item, history, detailsLoading, copy, collectionDet
             {invoices.map((invoice, idx) => (
               <div
                 key={`${invoice.invoiceId}-${invoice.orderId}-${idx}`}
-                className="rounded-md border border-border/70 px-2 py-1.5"
+                className="rounded-md border border-border/70 px-2 py-1.5 transition hover:border-slate-300"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -328,12 +407,49 @@ function LabAccountTimeline({ item, history, detailsLoading, copy, collectionDet
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-slate-600">
                   <span>Due {formatShortDate(invoice.dueDate)}</span>
+                  {invoice.orderId && invoice.invoiceId ? (
+                    <span className="rounded bg-slate-100 px-1 py-0.5">
+                      {invoice.orderId} <ArrowRight className="mx-0.5 inline h-2.5 w-2.5" /> {invoice.invoiceId}
+                    </span>
+                  ) : null}
                   {Number(invoice.overdueDays || 0) > 0 ? (
                     <span className="rounded bg-red-50 px-1 py-0.5 text-red-700">
                       Overdue {Number(invoice.overdueDays)}d
                     </span>
                   ) : null}
                 </div>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-6 rounded-md px-2 text-[10px]"
+                    onClick={() =>
+                      setExpandedInvoiceId((prev) =>
+                        prev === `${invoice.invoiceId}-${idx}` ? "" : `${invoice.invoiceId}-${idx}`
+                      )
+                    }
+                  >
+                    {expandedInvoiceId === `${invoice.invoiceId}-${idx}` ? "Hide details" : "View Invoice"}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-6 rounded-md px-2 text-[10px]"
+                    onClick={() => setInvoiceDrawerId(`${invoice.invoiceId}-${idx}`)}
+                  >
+                    <Download className="mr-1 h-3 w-3" />
+                    Download
+                  </Button>
+                </div>
+                {expandedInvoiceId === `${invoice.invoiceId}-${idx}` ? (
+                  <div className="mt-1.5 rounded border border-dashed border-border px-2 py-1.5 text-[10px] text-slate-600">
+                    <div>Invoice detail preview for {invoice.invoiceId}</div>
+                    <div>Linked order: {invoice.orderId || "—"}</div>
+                    <div>Status: {invoice.status}</div>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
@@ -354,30 +470,39 @@ function LabAccountTimeline({ item, history, detailsLoading, copy, collectionDet
             Loading activity…
           </div>
         ) : financialTimeline.length ? (
-          <ul className="relative space-y-0 pl-2.5">
-            <div className="absolute bottom-1 left-[4px] top-1 w-px bg-border" aria-hidden />
-            {financialTimeline.map((entry) => (
-              <li key={entry.id} className="relative border-b border-border/50 py-1.5 pl-3 last:border-b-0">
-                <span
-                  className={cn(
-                    "absolute left-0 top-2.5 h-1.5 w-1.5 rounded-full border border-background",
-                    entry.kind === "payment" ? "bg-emerald-500" : "bg-blue-500"
-                  )}
-                  aria-hidden
-                />
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-medium text-slate-900">{entry.title}</p>
-                    <p className="text-[10px] text-slate-500">{entry.subline}</p>
-                    <p className="text-[10px] text-slate-600">{entry.trailing}</p>
-                  </div>
-                  <span className="shrink-0 text-[10px] text-muted-foreground">
-                    {formatShortDate(entry.date)}
-                  </span>
+          <div className="space-y-2">
+            {timelineGroups.map((group) => (
+              <div key={group.label}>
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  {group.label}
                 </div>
-              </li>
+                <ul className="relative space-y-0 pl-2.5">
+                  <div className="absolute bottom-1 left-[4px] top-1 w-px bg-border" aria-hidden />
+                  {group.items.map((entry) => (
+                    <li key={entry.id} className="relative border-b border-border/50 py-1.5 pl-3 last:border-b-0">
+                      <span
+                        className={cn(
+                          "absolute left-0 top-2.5 h-1.5 w-1.5 rounded-full border border-background",
+                          entry.kind === "payment" ? "bg-emerald-500" : "bg-blue-500"
+                        )}
+                        aria-hidden
+                      />
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-medium text-slate-900">{entry.title}</p>
+                          <p className="text-[10px] text-slate-500">{entry.subline}</p>
+                          <p className="text-[10px] text-slate-600">{entry.trailing}</p>
+                        </div>
+                        <span className="shrink-0 text-[10px] text-muted-foreground">
+                          {formatShortDate(entry.date)}
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ))}
-          </ul>
+          </div>
         ) : history.length ? (
           <ul className="relative space-y-0 pl-2.5">
             <div className="absolute bottom-1 left-[4px] top-1 w-px bg-border" aria-hidden />
@@ -407,19 +532,51 @@ function LabAccountTimeline({ item, history, detailsLoading, copy, collectionDet
 
       <section className="rounded-lg border border-border bg-card p-2.5 shadow-sm">
         <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Financial KPI Strip
+          Quick Insights
         </h3>
-        <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
-          {overdueDays > 0 ? (
-            <span className="text-[var(--pc-danger)]">Overdue {overdueDays}d</span>
-          ) : null}
-          {shouldShowPaidLabel(item) ? (
-            <span>Paid {formatMoney(item.totalPaid)}</span>
-          ) : null}
-          <span>Outstanding {formatMoney(outstanding)}</span>
-          <span>Status {paymentLabel}</span>
+        <div className="grid gap-1.5 text-[11px] sm:grid-cols-2">
+          <div className="rounded-md border border-border/70 bg-muted/30 px-2 py-1.5">
+            <p className="text-[10px] text-slate-500">Credit availability</p>
+            <p className="font-semibold tabular-nums">
+              {availableCredit == null ? "Not configured" : formatMoney(availableCredit)}
+            </p>
+          </div>
+          <div className="rounded-md border border-border/70 bg-muted/30 px-2 py-1.5">
+            <p className="text-[10px] text-slate-500">Order to invoice continuity</p>
+            <p className="font-semibold">{invoices.length ? "Linked records available" : "Awaiting invoice links"}</p>
+          </div>
         </div>
       </section>
+
+      {invoiceDrawerId ? (
+        <div className="fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label="Invoice details">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-900/30"
+            onClick={() => setInvoiceDrawerId("")}
+          />
+          <div className="absolute bottom-0 right-0 h-[70vh] w-full max-w-[min(100vw,460px)] rounded-t-xl border border-border bg-white p-3 shadow-xl md:top-0 md:h-full md:rounded-none md:rounded-l-xl">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-semibold text-slate-900">Invoice Details</h4>
+              <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setInvoiceDrawerId("")}>
+                Close
+              </Button>
+            </div>
+            <p className="mt-2 text-xs text-slate-600">
+              Detailed invoice preview and download actions will be available here.
+            </p>
+            <div className="mt-3 flex gap-2">
+              <Button type="button" size="sm" variant="outline" className="h-8 text-xs">
+                View Invoice
+              </Button>
+              <Button type="button" size="sm" variant="outline" className="h-8 text-xs">
+                <Download className="mr-1 h-3 w-3" />
+                Download Statement
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1368,6 +1525,28 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
     completingTask,
   };
 
+  const handleLabWorkspaceAction = useCallback(
+    (action) => {
+      if (!isLabAccount) return;
+      if (action === "view_orders") {
+        showToast("info", "Open Lab Ordering from sidebar to view order details.");
+        return;
+      }
+      if (action === "download_statement") {
+        showToast("info", "Statement download placeholder is available in this release.");
+        return;
+      }
+      if (action === "repeat_last_order") {
+        showToast("info", "Use Activity Center or Lab Ordering to repeat your latest order.");
+        return;
+      }
+      if (action === "contact_support") {
+        showToast("info", "Contact support placeholder: support workflows are coming soon.");
+      }
+    },
+    [isLabAccount, showToast]
+  );
+
   if (loading) {
     return <CollectionsLoading />;
   }
@@ -1435,7 +1614,7 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
 
       <div className={isLabAccount ? "mx-auto max-w-2xl" : ""}>
         {isLabAccount ? (
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <CompactAccountKpi
               title="Outstanding"
               value={formatMoney(summary.totalOutstanding)}
@@ -1454,6 +1633,21 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
               title="Total paid"
               value={formatMoney(filteredCollections[0]?.totalPaid)}
               icon={Wallet}
+            />
+            <CompactAccountKpi
+              title="Credit left"
+              value={
+                Number(filteredCollections[0]?.creditLimit || filteredCollections[0]?.credit_limit || 0) > 0
+                  ? formatMoney(
+                      Math.max(
+                        0,
+                        Number(filteredCollections[0]?.creditLimit || filteredCollections[0]?.credit_limit || 0) -
+                          Number(filteredCollections[0]?.outstandingAmount || 0)
+                      )
+                    )
+                  : "—"
+              }
+              icon={ShieldAlert}
             />
           </div>
         ) : (
@@ -1534,6 +1728,7 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
                       ? selectedCollection
                       : item
                   }
+                  onWorkspaceAction={handleLabWorkspaceAction}
                 />
               );
             }
