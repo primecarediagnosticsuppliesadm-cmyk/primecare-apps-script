@@ -1701,32 +1701,51 @@ function adminDashboardServerCacheEnabled() {
   return !IS_QA;
 }
 
-function normalizeAdminDashboardPayload(data) {
+export function normalizeAdminDashboardPayload(data) {
   const e = data?.executive || {};
   const s = data?.summary || {};
   const stock = s.stockStats || EMPTY_ADMIN_DASHBOARD.summary.stockStats;
   return {
     executive: {
-      todaysRevenue: num(e.todaysRevenue),
-      outstandingReceivables: num(e.outstandingReceivables),
-      labsAtCreditRisk: num(e.labsAtCreditRisk),
-      productsNearStockout: num(e.productsNearStockout),
-      topLabsByRevenue: Array.isArray(e.topLabsByRevenue) ? e.topLabsByRevenue : [],
+      todaysRevenue: num(e.todaysRevenue ?? e.todays_revenue),
+      outstandingReceivables: num(
+        e.outstandingReceivables ?? e.outstanding_receivables
+      ),
+      labsAtCreditRisk: num(e.labsAtCreditRisk ?? e.labs_at_credit_risk),
+      productsNearStockout: num(
+        e.productsNearStockout ?? e.products_near_stockout
+      ),
+      topLabsByRevenue: Array.isArray(e.topLabsByRevenue)
+        ? e.topLabsByRevenue
+        : Array.isArray(e.top_labs_by_revenue)
+          ? e.top_labs_by_revenue
+          : [],
     },
     summary: {
       stockStats: {
-        totalSkus: num(stock.totalSkus),
-        criticalItems: num(stock.criticalItems),
-        reorderItems: num(stock.reorderItems),
-        healthyItems: num(stock.healthyItems),
+        totalSkus: num(stock.totalSkus ?? stock.total_skus ?? stock.inventory_skus),
+        criticalItems: num(stock.criticalItems ?? stock.critical_items),
+        reorderItems: num(stock.reorderItems ?? stock.reorder_items),
+        healthyItems: num(stock.healthyItems ?? stock.healthy_items),
       },
-      recentVisits: num(s.recentVisits),
-      totalSoldValue: num(s.totalSoldValue),
-      todayCollections: num(s.todayCollections),
+      recentVisits: num(s.recentVisits ?? s.recent_visits),
+      totalSoldValue: num(s.totalSoldValue ?? s.total_sold_value),
+      todayCollections: num(s.todayCollections ?? s.today_collections),
     },
     visits: data?.visits ?? { visits: [] },
     insights: data?.insights ?? { insights: [], recommendedActions: [] },
   };
+}
+
+/**
+ * Single normalization entry for getAdminDashboardRead results (UI + QA).
+ * @param {{ success?: boolean, data?: object }|null|undefined} result
+ */
+export function normalizeAdminDashboardReadResult(result) {
+  if (!result?.success || !result?.data) return null;
+  const raw = result.data?.data && result.data?.summary == null ? result.data.data : result.data;
+  if (!raw?.summary || !raw?.executive) return null;
+  return normalizeAdminDashboardPayload(raw);
 }
 
 function mapOrderLineToItemShape(row) {

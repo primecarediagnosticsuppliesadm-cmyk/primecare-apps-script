@@ -48,6 +48,12 @@ export default function AdminDashboardQaValidationPanel({ renderedSnapshot, auto
 
   React.useEffect(() => {
     if (!autoRun || !renderedSnapshot?.summary || !renderedSnapshot?.executive) return;
+    const hasKpi =
+      Number(renderedSnapshot.executive?.outstandingReceivables ?? 0) > 0 ||
+      Number(renderedSnapshot.summary?.recentVisits ?? 0) > 0 ||
+      Number(renderedSnapshot.summary?.stockStats?.totalSkus ?? 0) > 0 ||
+      Number(renderedSnapshot.summary?.totalSoldValue ?? 0) > 0;
+    if (!hasKpi) return;
     runValidation();
   }, [autoRun, renderedSnapshot, runValidation]);
 

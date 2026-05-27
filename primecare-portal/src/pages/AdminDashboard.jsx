@@ -33,6 +33,12 @@ import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidat
 import { usePredatorRenderTrace } from "@/predator/renderTrace.js";
 import { usePredatorUiSyncTrace } from "@/predator/usePredatorUiSyncTrace.js";
 import { getLatestUiMetricApi } from "@/predator/uiStateReliability.js";
+import {
+  adminDashboardModelFromMerge,
+  applyAdminDashboardModel,
+  hasVisibleDashboardKpis,
+  normalizeAdminDashboardRead,
+} from "@/pages/adminDashboardState.js";
 import AdminDashboardQaValidationPanel from "@/components/qa/AdminDashboardQaValidationPanel.jsx";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
 import {
@@ -107,49 +113,6 @@ function clearAdminDashboardModuleCache() {
   adminDashboardCache.executiveLoadedAt = 0;
   adminDashboardCache.insightsLoadedAt = 0;
   adminDashboardCache.visitsLoadedAt = 0;
-}
-
-function mapDirectDashboardStateFromRead(result) {
-  const data = result?.success ? result.data : null;
-  if (!data?.summary || !data?.executive) {
-    return {
-      summary: {
-        stockStats: EMPTY_STOCK_STATS,
-        recentVisits: 0,
-        totalSoldValue: 0,
-        todayCollections: 0,
-      },
-      executive: {
-        todaysRevenue: 0,
-        outstandingReceivables: 0,
-        labsAtCreditRisk: 0,
-        productsNearStockout: 0,
-        topLabsByRevenue: [],
-      },
-      visits: EMPTY_VISITS_PAYLOAD,
-      insights: EMPTY_AI_INSIGHTS,
-    };
-  }
-
-  return {
-    summary: {
-      stockStats: data.summary.stockStats || EMPTY_STOCK_STATS,
-      recentVisits: Number(data.summary.recentVisits ?? 0),
-      totalSoldValue: Number(data.summary.totalSoldValue ?? 0),
-      todayCollections: Number(data.summary.todayCollections ?? 0),
-    },
-    executive: {
-      todaysRevenue: Number(data.executive.todaysRevenue ?? 0),
-      outstandingReceivables: Number(data.executive.outstandingReceivables ?? 0),
-      labsAtCreditRisk: Number(data.executive.labsAtCreditRisk ?? 0),
-      productsNearStockout: Number(data.executive.productsNearStockout ?? 0),
-      topLabsByRevenue: Array.isArray(data.executive.topLabsByRevenue)
-        ? data.executive.topLabsByRevenue
-        : [],
-    },
-    visits: data.visits ?? EMPTY_VISITS_PAYLOAD,
-    insights: data.insights ?? EMPTY_AI_INSIGHTS,
-  };
 }
 
 const EMPTY_AI_INSIGHTS = { insights: [], recommendedActions: [] };
@@ -430,25 +393,14 @@ function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) 
   const dash = supabaseSlice.dashboardRead?.success ? supabaseSlice.dashboardRead.data : null;
 
   if (dash?.summary && dash?.executive) {
-    return {
-      summary: {
-        stockStats: dash.summary.stockStats || EMPTY_STOCK_STATS,
-        recentVisits: Number(dash.summary.recentVisits ?? 0),
-        totalSoldValue: Number(dash.summary.totalSoldValue ?? 0),
-        todayCollections: Number(dash.summary.todayCollections ?? 0),
-      },
-      executive: {
-        todaysRevenue: Number(dash.executive.todaysRevenue ?? 0),
-        outstandingReceivables: Number(dash.executive.outstandingReceivables ?? 0),
-        labsAtCreditRisk: Number(dash.executive.labsAtCreditRisk ?? 0),
-        productsNearStockout: Number(dash.executive.productsNearStockout ?? 0),
-        topLabsByRevenue: Array.isArray(dash.executive.topLabsByRevenue)
-          ? dash.executive.topLabsByRevenue
-          : [],
-      },
-      visits: dash.visits ?? null,
-      insights: dash.insights ?? null,
-    };
+    const model = normalizeAdminDashboardRead({ success: true, data: dash });
+    if (model) {
+      return {
+        ...model,
+        visits: model.visits ?? dash.visits ?? null,
+        insights: model.insights ?? dash.insights ?? null,
+      };
+    }
   }
 
   const stockStats =
@@ -607,19 +559,42 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   const [refreshing, setRefreshing] = useState(false);
   const [backgroundLoading, setBackgroundLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const loadGenerationRef = useRef(0);
+  const summaryDataRef = useRef(summaryData);
+  const executiveDataRef = useRef(executiveData);
+
+  useEffect(() => {
+    summaryDataRef.current = summaryData;
+    executiveDataRef.current = executiveData;
+  }, [summaryData, executiveData]);
 
   const loadPrimaryData = async ({ force = false } = {}) => {
+    const loadId = ++loadGenerationRef.current;
+
     if (shouldUseQaDirectDashboardRead()) {
-      clearAdminDashboardModuleCache();
-      invalidateAdminDashboardReadCache();
+      if (force) {
+        clearAdminDashboardModuleCache();
+        invalidateAdminDashboardReadCache();
+      }
 
-      const result = await getAdminDashboardRead({ force: true });
-      const dashboard = mapDirectDashboardStateFromRead(result);
+      const result = await getAdminDashboardRead({ force });
+      if (loadId !== loadGenerationRef.current) return;
 
-      setSummaryData(dashboard.summary);
-      setExecutiveData(dashboard.executive);
-      setRecentVisitsData(dashboard.visits);
-      setInsightsData(dashboard.insights);
+      const model = normalizeAdminDashboardRead(result);
+      if (!model) {
+        console.warn("[AdminDashboard] QA direct read returned no normalizable dashboard model");
+        return;
+      }
+
+      applyAdminDashboardModel({
+        model,
+        prevSummary: summaryDataRef.current,
+        prevExecutive: executiveDataRef.current,
+        setSummaryData,
+        setExecutiveData,
+        setRecentVisitsData,
+        setInsightsData,
+      });
       return;
     }
 
@@ -636,6 +611,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       isFresh(adminDashboardCache.executiveLoadedAt);
 
     if (dashboardFresh && executiveFresh) {
+      if (loadId !== loadGenerationRef.current) return;
       setSummaryData(adminDashboardCache.dashboard);
       setExecutiveData(adminDashboardCache.executive);
       return;
@@ -646,6 +622,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     });
     const endLoad = perfTime("AdminDashboard.loadPrimaryData");
     const supabaseSlice = await fetchSupabaseAdminSlice({ force });
+    if (loadId !== loadGenerationRef.current) return;
     endLoad({ force });
 
     const skipAppsScript = adminDashboardSkipAppsScriptReads();
@@ -692,16 +669,19 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       dashboardPayload,
       executivePayload
     );
+    if (loadId !== loadGenerationRef.current) return;
 
-    const hasVisibleKpis =
-      Number(merged.executive?.outstandingReceivables) > 0 ||
-      Number(merged.summary?.totalSoldValue) > 0 ||
-      Number(merged.summary?.recentVisits) > 0 ||
-      Number(merged.executive?.todaysRevenue) > 0;
+    const model = adminDashboardModelFromMerge(merged);
+    if (!model) {
+      console.warn("[AdminDashboard] merge produced no normalizable dashboard model");
+      return;
+    }
+
+    const hasVisibleKpis = hasVisibleDashboardKpis(model.summary, model.executive);
 
     if (adminDashboardClientCacheEnabled() && (hasVisibleKpis || force)) {
-      adminDashboardCache.dashboard = merged.summary;
-      adminDashboardCache.executive = merged.executive;
+      adminDashboardCache.dashboard = model.summary;
+      adminDashboardCache.executive = model.executive;
       adminDashboardCache.dashboardLoadedAt = Date.now();
       adminDashboardCache.executiveLoadedAt = Date.now();
     } else if (IS_QA) {
@@ -719,8 +699,13 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       setInsightsData(merged.insights);
     }
 
-    setSummaryData(merged.summary);
-    setExecutiveData(merged.executive);
+    applyAdminDashboardModel({
+      model,
+      prevSummary: summaryDataRef.current,
+      prevExecutive: executiveDataRef.current,
+      setSummaryData,
+      setExecutiveData,
+    });
   };
 
   const loadSecondaryData = async ({ force = false } = {}) => {
@@ -819,12 +804,15 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     try {
       setErrorMessage("");
 
-      if (shouldUseQaDirectDashboardRead()) {
+      const hydrated = hasVisibleDashboardKpis(
+        summaryDataRef.current,
+        executiveDataRef.current
+      );
+      if (!hydrated && (!summaryData || !executiveData)) {
         setLoading(true);
         setRefreshing(false);
-      } else if (!summaryData && !executiveData) {
-        setLoading(true);
       } else {
+        setLoading(false);
         setRefreshing(true);
       }
 
@@ -884,8 +872,8 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     return () => cancelAnimationFrame(id);
   }, [loading]);
 
-  const stockStats = summaryData?.stockStats || {};
-  const executive = executiveData || {};
+  const stockStats = summaryData?.stockStats ?? EMPTY_STOCK_STATS;
+  const dashboardHydrated = Boolean(summaryData && executiveData);
   const insights = Array.isArray(insightsData?.insights)
     ? insightsData.insights.map(normalizeInsight)
     : [];
@@ -900,21 +888,21 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   const canOpenVisits = typeof setActivePage === "function";
 
   const topLabs = useMemo(() => {
-    return Array.isArray(executive?.topLabsByRevenue)
-      ? executive.topLabsByRevenue.slice(0, 5)
+    return Array.isArray(executiveData?.topLabsByRevenue)
+      ? executiveData.topLabsByRevenue.slice(0, 5)
       : [];
-  }, [executive]);
+  }, [executiveData]);
 
-  const qaValidationSnapshot = useMemo(
-    () => ({
-      executive,
+  const qaValidationSnapshot = useMemo(() => {
+    if (!dashboardHydrated) return null;
+    return {
+      executive: executiveData,
       summary: {
         ...summaryData,
         stockStats,
       },
-    }),
-    [executive, summaryData, stockStats]
-  );
+    };
+  }, [dashboardHydrated, executiveData, summaryData, stockStats]);
 
   const showQaValidationPanel = isQaValidationLayerEnabled();
 
@@ -922,21 +910,21 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     "Admin Dashboard",
     currentUser,
     qaValidationSnapshot,
-    !loading && Boolean(summaryData) && Boolean(executiveData)
+    !loading && dashboardHydrated
   );
 
   usePredatorRenderTrace("Admin Dashboard", {
-    ready: !loading,
-    hasData: Boolean(summaryData) && Boolean(executiveData),
+    ready: !loading && dashboardHydrated,
+    hasData: dashboardHydrated && hasVisibleDashboardKpis(summaryData, executiveData),
   });
 
   const uiSyncMetrics = useMemo(() => {
-    const stock = summaryData?.stockStats || stockStats;
+    if (!dashboardHydrated) return {};
     return {
       outstanding_receivables: {
         api: getLatestUiMetricApi("Admin Dashboard", "outstanding_receivables"),
-        state: Number(executive?.outstandingReceivables ?? 0),
-        render: Number(executive?.outstandingReceivables ?? 0),
+        state: Number(executiveData?.outstandingReceivables ?? 0),
+        render: Number(executiveData?.outstandingReceivables ?? 0),
       },
       recent_visits: {
         api: getLatestUiMetricApi("Admin Dashboard", "recent_visits"),
@@ -945,8 +933,8 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       },
       inventory_skus: {
         api: getLatestUiMetricApi("Admin Dashboard", "inventory_skus"),
-        state: Number(stock?.totalSkus ?? 0),
-        render: Number(stock?.totalSkus ?? 0),
+        state: Number(stockStats?.totalSkus ?? 0),
+        render: Number(stockStats?.totalSkus ?? 0),
       },
       total_sold_value: {
         api: getLatestUiMetricApi("Admin Dashboard", "total_sold_value"),
@@ -954,11 +942,11 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
         render: Number(summaryData?.totalSoldValue ?? 0),
       },
     };
-  }, [executive, summaryData, stockStats]);
+  }, [dashboardHydrated, executiveData, summaryData, stockStats]);
 
   usePredatorUiSyncTrace("Admin Dashboard", {
     loading,
-    apiReady: Boolean(summaryData) && Boolean(executiveData),
+    apiReady: dashboardHydrated,
     metrics: uiSyncMetrics,
   });
 
@@ -996,7 +984,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
         </div>
       ) : null}
 
-      {showQaValidationPanel ? (
+      {showQaValidationPanel && qaValidationSnapshot ? (
         <AdminDashboardQaValidationPanel renderedSnapshot={qaValidationSnapshot} autoRun />
       ) : null}
 
@@ -1009,25 +997,25 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       <KpiCardGrid columns={6}>
         <KpiCard
           title="Today's Revenue"
-          value={currency(executive?.todaysRevenue || 0)}
+          value={currency(executiveData?.todaysRevenue || 0)}
           subtitle="Current day visible revenue"
           icon={TrendingUp}
         />
         <KpiCard
           title="Receivables"
-          value={currency(executive?.outstandingReceivables || 0)}
+          value={currency(executiveData?.outstandingReceivables || 0)}
           subtitle="Outstanding collections"
           icon={Wallet}
         />
         <KpiCard
           title="Credit Risk Labs"
-          value={executive?.labsAtCreditRisk || 0}
+          value={executiveData?.labsAtCreditRisk || 0}
           subtitle="Labs needing attention"
           icon={ShieldAlert}
         />
         <KpiCard
           title="Near Stockout"
-          value={executive?.productsNearStockout || 0}
+          value={executiveData?.productsNearStockout || 0}
           subtitle="Critical + reorder items"
           icon={Package}
         />
