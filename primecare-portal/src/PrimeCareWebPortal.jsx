@@ -104,7 +104,7 @@ export default function PrimeCareWebPortal({
 
       case "notifications":
       case "notification-center":
-        return <NotificationCenterPage currentUser={currentUser} />;
+        return <NotificationCenterPage currentUser={currentUser} setActivePage={setActivePage} />;
 
       default:
         return (
@@ -184,7 +184,7 @@ export default function PrimeCareWebPortal({
 
       case "notifications":
       case "notification-center":
-        return <NotificationCenterPage currentUser={currentUser} />;
+        return <NotificationCenterPage currentUser={currentUser} setActivePage={setActivePage} />;
 
       case "predatorDebug":
       case "predator-debug":
@@ -257,7 +257,7 @@ export default function PrimeCareWebPortal({
 
       case "notifications":
       case "notification-center":
-        return <NotificationCenterPage currentUser={currentUser} />;
+        return <NotificationCenterPage currentUser={currentUser} setActivePage={setActivePage} />;
 
       case "predatorDebug":
       case "predator-debug":
@@ -312,7 +312,7 @@ export default function PrimeCareWebPortal({
 
       case "notifications":
       case "notification-center":
-        return <NotificationCenterPage currentUser={currentUser} />;
+        return <NotificationCenterPage currentUser={currentUser} setActivePage={setActivePage} />;
 
       default:
         return (

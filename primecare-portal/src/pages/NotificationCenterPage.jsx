@@ -53,12 +53,6 @@ function statusVariant(status) {
   return "outline";
 }
 
-function formatWhen(iso) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return Number.isFinite(d.getTime()) ? d.toLocaleString() : "—";
-}
-
 function payloadSummary(payload) {
   if (!payload || typeof payload !== "object") return "—";
   if (typeof payload.message === "string" && payload.message.trim()) {
@@ -79,7 +73,7 @@ function formatGroupLabel(iso) {
   startOfYesterday.setDate(startOfYesterday.getDate() - 1);
   if (d >= startOfToday) return "Today";
   if (d >= startOfYesterday) return "Yesterday";
-  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  return "Earlier";
 }
 
 function groupNotificationsByDate(rows) {
@@ -123,8 +117,8 @@ function roleScopeHint(role) {
 
 function pageTitleForRole(role) {
   const r = String(role || "").toLowerCase();
-  if (r === ROLES.AGENT) return "My Notifications";
-  if (r === ROLES.LAB) return "Order & Payment Updates";
+  if (r === ROLES.AGENT) return "Activity Center";
+  if (r === ROLES.LAB) return "Order Activity Center";
   return "Notification Center";
 }
 
@@ -145,7 +139,59 @@ function eventIcon(eventType) {
   return Clock3;
 }
 
-export default function NotificationCenterPage({ currentUser }) {
+function payloadValue(payload, keys) {
+  for (const key of keys) {
+    const value = payload?.[key];
+    if (value !== undefined && value !== null && `${value}`.trim() !== "") {
+      return value;
+    }
+  }
+  return null;
+}
+
+function parseAmount(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function activityMeta(row, payload) {
+  const eventType = String(row?.event_type || "").toLowerCase();
+  const orderId = String(
+    payloadValue(payload, ["orderId", "order_id", "order_no", "orderNumber"]) ||
+      row?.source_id ||
+      ""
+  ).trim();
+  const invoiceId = String(payloadValue(payload, ["invoiceId", "invoice_id"]) || "").trim();
+  const amount = parseAmount(
+    payloadValue(payload, ["amount", "amountPaid", "amount_paid", "total", "orderTotal", "outstanding"])
+  );
+  const itemCount = Number(payloadValue(payload, ["itemCount", "items", "totalItems", "item_count"]) || 0);
+  const dispatchAt = String(payloadValue(payload, ["dispatchDate", "dispatch_at", "eta", "etaDate"]) || "").trim();
+  const paymentOverdue = eventType.includes("due") || String(row?.severity || "").toLowerCase() === "high";
+  return {
+    orderId: orderId || null,
+    invoiceId: invoiceId || null,
+    amount,
+    itemCount: Number.isFinite(itemCount) && itemCount > 0 ? itemCount : null,
+    dispatchAt: dispatchAt || null,
+    paymentOverdue,
+  };
+}
+
+function urgencyTone(row) {
+  const eventType = String(row?.event_type || "").toLowerCase();
+  const severity = String(row?.severity || "").toLowerCase();
+  if (eventType.includes("due")) return { label: "Overdue", tone: "text-red-700 bg-red-50 border-red-200" };
+  if (severity === "high" || severity === "critical") {
+    return { label: "High", tone: "text-amber-700 bg-amber-50 border-amber-200" };
+  }
+  if (String(row?.status || "").toLowerCase() === "pending") {
+    return { label: "New", tone: "text-blue-700 bg-blue-50 border-blue-200" };
+  }
+  return { label: "Update", tone: "text-emerald-700 bg-emerald-50 border-emerald-200" };
+}
+
+export default function NotificationCenterPage({ currentUser, setActivePage }) {
   const tenantId = currentUser?.tenantId ?? currentUser?.tenant_id ?? null;
   const role = String(currentUser?.role || "").toLowerCase();
   const showAdminUi = isAdminOrExecutive(role);
@@ -207,21 +253,6 @@ export default function NotificationCenterPage({ currentUser }) {
     };
   }, []);
 
-  usePredatorModuleValidation(
-    "Notifications",
-    currentUser,
-    {
-      notificationCenterLoaded: !loading,
-      eventCount: rows.length,
-      foundationEnabled: isNotificationsFoundationEnabled(),
-      foundationMode: foundationState?.mode,
-      isLabAccountView: role === ROLES.LAB,
-      labId: currentUser?.labId,
-      userName: currentUser?.name,
-    },
-    !loading
-  );
-
   const pendingCount = useMemo(
     () => rows.filter((r) => String(r.status).toLowerCase() === "pending").length,
     [rows]
@@ -233,9 +264,47 @@ export default function NotificationCenterPage({ currentUser }) {
 
   const groupedRows = useMemo(() => groupNotificationsByDate(displayRows), [displayRows]);
   const isLabTimeline = role === ROLES.LAB;
+  const duplicateEventCount = useMemo(() => {
+    const seen = new Set();
+    let duplicates = 0;
+    for (const row of displayRows) {
+      const key = String(row.event_id || `${row.event_type}-${row.created_at}`);
+      if (seen.has(key)) duplicates += 1;
+      seen.add(key);
+    }
+    return duplicates;
+  }, [displayRows]);
+  const timestampsStable = useMemo(
+    () => displayRows.every((row) => Number.isFinite(new Date(row.created_at).getTime())),
+    [displayRows]
+  );
+  const groupLabelsStable = useMemo(
+    () => groupedRows.every((group) => ["Today", "Yesterday", "Earlier"].includes(group.label)),
+    [groupedRows]
+  );
   const nonAdminSetupPending =
     !showAdminUi &&
     (foundationState?.mode === "setup_pending" || foundationState?.mode === "schema_cache");
+
+  usePredatorModuleValidation(
+    "Notifications",
+    currentUser,
+    {
+      notificationCenterLoaded: !loading,
+      eventCount: rows.length,
+      foundationEnabled: isNotificationsFoundationEnabled(),
+      foundationMode: foundationState?.mode,
+      isLabAccountView: role === ROLES.LAB,
+      labId: currentUser?.labId,
+      userName: currentUser?.name,
+      ownLabActivityOnly:
+        role !== ROLES.LAB || rows.every((r) => LAB_SAFE_EVENT_TYPES.has(String(r.event_type || ""))),
+      duplicateEventCount,
+      timestampsStable,
+      groupLabelsStable,
+    },
+    !loading
+  );
 
   async function markStatus(eventId, nextStatus) {
     setUpdatingId(eventId);
@@ -254,6 +323,11 @@ export default function NotificationCenterPage({ currentUser }) {
     }
   }
 
+  function handleActivityCta(targetPage) {
+    if (typeof setActivePage !== "function") return;
+    setActivePage(targetPage);
+  }
+
   return (
     <div className="space-y-5 p-4 sm:p-6">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -263,8 +337,10 @@ export default function NotificationCenterPage({ currentUser }) {
             {pageTitleForRole(role)}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Internal event log (in-app and placeholder channels only — no live WhatsApp, SMS, or
-            email). {roleScopeHint(role)}
+            {isLabTimeline
+              ? "Track live order and payment movement for your lab in one compact operational feed."
+              : "Internal in-app activity stream (no live WhatsApp, SMS, or email)."}{" "}
+            {roleScopeHint(role)}
           </p>
         </div>
         <Button type="button" variant="outline" onClick={loadRows} disabled={loading}>
@@ -410,10 +486,10 @@ export default function NotificationCenterPage({ currentUser }) {
         </div>
       ) : nonAdminSetupPending ? null : displayRows.length === 0 ? (
         <EmptyState
-          title={role === ROLES.LAB ? "No updates yet" : "No notification events"}
+          title={role === ROLES.LAB ? "No recent order or payment activity." : "No notification events"}
           description={
             role === ROLES.LAB
-              ? "Order and payment updates for your lab will appear here."
+              ? "New operational updates will appear here when orders or account activity changes."
               : "Events appear here when modules call createNotificationEvent (e.g. order created, payment received)."
           }
         />
@@ -435,42 +511,106 @@ export default function NotificationCenterPage({ currentUser }) {
                   const isPending = String(row.status).toLowerCase() === "pending";
                   const busy = updatingId === row.event_id;
                   const rowKey = row.event_id || `${row.event_type}-${row.created_at}`;
+                  const meta = activityMeta(row, payload);
+                  const urgency = urgencyTone(row);
+                  const eventType = String(row.event_type || "").toLowerCase();
+                  const orderRelated = eventType.includes("order");
+                  const paymentRelated = eventType.includes("payment") || eventType.includes("collection");
+                  const actionButtons = isLabTimeline
+                    ? [
+                        orderRelated && {
+                          key: "view-order",
+                          label: "View Order",
+                          page: "labOrders",
+                        },
+                        orderRelated && {
+                          key: "repeat-order",
+                          label: "Repeat Order",
+                          page: "labOrders",
+                        },
+                        (paymentRelated || eventType.includes("due")) && {
+                          key: "open-payment",
+                          label: "Open Payment Page",
+                          page: "labAccount",
+                        },
+                        meta.invoiceId && {
+                          key: "view-invoice",
+                          label: "View Invoice",
+                          page: "labAccount",
+                        },
+                      ].filter(Boolean)
+                    : [];
 
                   return (
-                    <li key={rowKey} className="relative border-b border-border/50 py-2 pl-4 last:border-b-0">
+                    <li key={rowKey} className="relative border-b border-border/40 py-1.5 pl-3.5 last:border-b-0">
                       <span
                         className={cn(
-                          "absolute left-0 top-3 flex h-2.5 w-2.5 items-center justify-center rounded-full border-2 border-background",
-                          isPending ? "bg-amber-400" : "bg-emerald-500"
+                          "absolute left-0 top-2.5 flex h-2 w-2 items-center justify-center rounded-full border border-background",
+                          isPending ? "bg-amber-500" : "bg-emerald-500"
                         )}
                         aria-hidden
                       />
-                      <div className="rounded-lg border border-border bg-card p-2.5 shadow-sm transition hover:shadow-md">
+                      <div className="rounded-md border border-border bg-card p-2 shadow-sm transition hover:shadow-md">
                         <div className="flex items-start gap-2">
-                          <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-foreground">
-                            <Icon className="h-3.5 w-3.5" />
+                          <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-foreground">
+                            <Icon className="h-3 w-3" />
                           </span>
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="text-sm font-semibold">{eventTitle(row.event_type)}</span>
+                              <span className="text-xs font-semibold">{eventTitle(row.event_type)}</span>
+                              {isLabTimeline ? (
+                                <span
+                                  className={cn(
+                                    "rounded border px-1 py-0 text-[10px] font-medium",
+                                    urgency.tone
+                                  )}
+                                >
+                                  {urgency.label}
+                                </span>
+                              ) : null}
                               {!isLabTimeline ? (
                                 <Badge variant={severityVariant(row.severity)} className="text-[10px]">
                                   {row.severity}
                                 </Badge>
                               ) : null}
-                              <Badge variant={statusVariant(row.status)} className="text-[10px]">
-                                {row.status}
-                              </Badge>
+                              {!isLabTimeline ? (
+                                <Badge variant={statusVariant(row.status)} className="text-[10px]">
+                                  {row.status}
+                                </Badge>
+                              ) : null}
                             </div>
                             <p className="mt-0.5 text-[11px] text-muted-foreground">
                               {formatRelativeTime(row.created_at)}
                               {!isLabTimeline && row.source_module ? ` · ${row.source_module}` : null}
                             </p>
-                            <p className="mt-1 text-xs leading-snug text-foreground/90">
+                            <p className="mt-1 text-[11px] leading-snug text-foreground/90">
                               {payloadSummary(payload)}
                             </p>
+                            <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
+                              {meta.orderId ? <span className="rounded bg-muted px-1 py-0.5">ORD {meta.orderId}</span> : null}
+                              {meta.itemCount ? <span>{meta.itemCount} items</span> : null}
+                              {meta.amount ? <span className="font-semibold text-foreground">₹{Number(meta.amount).toLocaleString()}</span> : null}
+                              {meta.dispatchAt ? <span>Dispatch {meta.dispatchAt}</span> : null}
+                              {meta.invoiceId ? <span>Invoice {meta.invoiceId}</span> : null}
+                            </div>
                           </div>
                         </div>
+                        {isLabTimeline && actionButtons.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {actionButtons.map((action) => (
+                              <Button
+                                key={`${rowKey}-${action.key}`}
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-7 rounded-md px-2 text-[11px]"
+                                onClick={() => handleActivityCta(action.page)}
+                              >
+                                {action.label}
+                              </Button>
+                            ))}
+                          </div>
+                        ) : null}
                         {!isLabTimeline && row.event_id ? (
                           <div className="mt-2 flex justify-end gap-1.5">
                             {isPending ? (
