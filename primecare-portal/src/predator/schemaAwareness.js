@@ -28,10 +28,13 @@ export const PREDATOR_KNOWN_TABLE_COLUMNS = {
     "tenant_id",
     "lab_id",
     "status",
-    "order_status",
     "total_amount",
     "order_date",
     "created_at",
+    "updated_at",
+    "notes",
+    "inventory_updated",
+    "ar_posted",
   ],
   ar_credit_control: [
     "lab_id",
@@ -43,7 +46,18 @@ export const PREDATOR_KNOWN_TABLE_COLUMNS = {
   ],
   agent_visits: [...AGENT_VISITS_INSERT_COLUMNS, "id", "created_at"],
   inventory: ["product_id", "tenant_id", "current_stock", "min_stock"],
-  lab_qualifications: ["tenant_id", "lab_id", "qualification_score", "updated_at"],
+  lab_qualifications: [
+    "tenant_id",
+    "lab_id",
+    "qualification_score",
+    "qualification_band",
+    "founder_review_status",
+    "updated_at",
+    "created_at",
+    "pipeline_stage",
+    "pipeline_stage_updated_at",
+    "next_follow_up_date",
+  ],
   order_lines: ["order_id", "tenant_id", "net_line_total", "quantity"],
   payments: ["payment_id", "lab_id", "tenant_id", "amount_received", "payment_date"],
   inventory_ledger: ["tenant_id", "product_id", "created_at", "updated_at"],
@@ -100,44 +114,98 @@ export async function resolveTableColumnsForPredator(tableName, schema = "public
 }
 
 /**
+ * @param {string[]|{ required?: string[], optional?: string[] }} columnsOrOptions
+ * @returns {{ required: string[], optional: string[] }}
+ */
+function normalizeProjectionColumnOptions(columnsOrOptions) {
+  if (Array.isArray(columnsOrOptions)) {
+    return { required: columnsOrOptions, optional: [] };
+  }
+  return {
+    required: columnsOrOptions?.required || [],
+    optional: columnsOrOptions?.optional || [],
+  };
+}
+
+/**
  * Diagnosis-only: validate projection columns; recommend select("*") on mismatch.
  * Does NOT change live queries unless caller explicitly uses returned safeProjection.
  * @param {string} tableName
- * @param {string[]} requestedColumns
+ * @param {string[]|{ required?: string[], optional?: string[] }} columnsOrOptions
  */
-export async function diagnoseProjectionColumns(tableName, requestedColumns) {
-  if (!isPredatorEnabled() || !requestedColumns?.length) {
+export async function diagnoseProjectionColumns(tableName, columnsOrOptions) {
+  const { required, optional } = normalizeProjectionColumnOptions(columnsOrOptions);
+  const requested = [...required, ...optional];
+
+  if (!isPredatorEnabled() || requested.length === 0) {
     return {
       ok: true,
       safeProjection: "*",
       missing: [],
+      missingOptional: [],
       source: "skipped",
     };
   }
 
   const { columns, source, error } = await resolveTableColumnsForPredator(tableName);
-  const known = new Set(columns);
-  const missing = requestedColumns.filter((c) => c !== "*" && !known.has(c));
 
-  if (missing.length > 0) {
+  if (source === "manifest_fallback" && error) {
+    console.info(
+      `[Predator Schema] information_schema unavailable for ${tableName}; using manifest (${columns.length} columns)`,
+      error
+    );
+  }
+
+  const known = new Set(columns);
+  const missingRequired = required.filter((c) => c !== "*" && !known.has(c));
+  const missingOptional = optional.filter((c) => c !== "*" && !known.has(c));
+
+  if (missingOptional.length > 0) {
+    console.info(
+      "[Predator Schema] optional projection column absent",
+      tableName,
+      missingOptional,
+      { source }
+    );
+  }
+
+  if (missingRequired.length > 0) {
     const entry = createPredatorEntry({
       status: "WARN",
       module: "Schema",
       step: `${tableName}.projection_drift`,
-      expected: requestedColumns,
-      actual: { missing, knownColumns: columns.slice(0, 20), source, error },
+      expected: required,
+      actual: {
+        missing: missingRequired,
+        missingOptional,
+        knownColumns: columns.slice(0, 20),
+        source,
+        ...(source === "manifest_fallback" ? {} : { schemaLookupError: error }),
+      },
       rootCauseGuess: "Optimized select() references columns not in schema manifest / information_schema",
       suggestedFix: 'Fail safe to select("*") until projection is verified against schema',
       severity: "medium",
       issueClass: "data_integrity",
     });
     predatorStore.recordError(entry);
-    console.warn("[Predator Schema] projection drift", tableName, missing);
+    console.warn("[Predator Schema] projection drift", tableName, missingRequired);
 
-    return { ok: false, safeProjection: "*", missing, source };
+    return {
+      ok: false,
+      safeProjection: "*",
+      missing: missingRequired,
+      missingOptional,
+      source,
+    };
   }
 
-  return { ok: true, safeProjection: requestedColumns.join(","), missing: [], source };
+  return {
+    ok: true,
+    safeProjection: required.length ? required.join(",") : "*",
+    missing: [],
+    missingOptional,
+    source,
+  };
 }
 
 /**

@@ -161,7 +161,7 @@ export default function PredatorDebugConsole({ currentUser }) {
       tenant: predatorStore.getActiveTenantContext(),
       moduleReports: predatorStore.getModuleReportsForActiveTenant(),
       slowest: predatorStore.getSlowestProcesses(12),
-      errors: predatorStore.getErrors(),
+      errors: predatorStore.getOperationalErrors(),
       failedChecks: predatorStore.getFailedValidations(),
       diagnoses: lastReport?.diagnoses || predatorStore.getAllModuleDiagnosesForActiveTenant(),
       cacheEvents: predatorStore.getCacheEvents(),

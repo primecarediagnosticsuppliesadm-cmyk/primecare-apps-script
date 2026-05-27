@@ -61,8 +61,12 @@ export async function validateAdminDashboardModule({ ctx, rendered = null }) {
       })
     );
 
-    await diagnoseProjectionColumns("orders", ["order_status", "net_line_total"]);
-    await diagnoseProjectionColumns("order_lines", ["net_line_total"]);
+    await diagnoseProjectionColumns("orders", {
+      required: ["order_id", "lab_id", "status", "total_amount"],
+    });
+    await diagnoseProjectionColumns("order_lines", {
+      required: ["order_id", "net_line_total"],
+    });
 
     const predatorSnapshot = buildAdminDashboardPredatorSnapshot({
       legacyReport: report,

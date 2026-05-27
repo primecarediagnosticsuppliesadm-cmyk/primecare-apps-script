@@ -137,6 +137,11 @@ export const predatorStore = {
     return [...errorEntries];
   },
 
+  /** WARN/FAIL only — excludes INFO-level schema diagnostics. */
+  getOperationalErrors() {
+    return errorEntries.filter((e) => e.status === "WARN" || e.status === "FAIL");
+  },
+
   getSlowestProcesses(limit = 15) {
     return [...timingEntries]
       .filter((t) => typeof t.durationMs === "number")

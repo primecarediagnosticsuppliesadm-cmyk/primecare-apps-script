@@ -156,7 +156,10 @@ export async function validateQualificationModule({ ctx, rendered = null }) {
       );
     }
 
-    await diagnoseProjectionColumns("lab_qualifications", ["pipeline_stage", "invalid_column_probe"]);
+    await diagnoseProjectionColumns("lab_qualifications", {
+      required: ["tenant_id", "lab_id", "qualification_score", "founder_review_status"],
+      optional: ["pipeline_stage"],
+    });
 
     const layerSnap = {
       dbCount,
