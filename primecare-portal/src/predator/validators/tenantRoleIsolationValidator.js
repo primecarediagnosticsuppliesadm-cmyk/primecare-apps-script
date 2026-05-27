@@ -39,7 +39,11 @@ function qaCheckToPredatorEntry(check, ctx) {
         ? "Fix RLS tenant predicate or client filter; verify profile.tenant_id and role assignment"
         : status === "WARN"
           ? "Review schema manifest, QA seed coverage, or timing — not confirmed leakage"
-          : "",
+          : status === "INFO"
+            ? check.actual?.suggestedFix
+              ? String(check.actual.suggestedFix)
+              : ""
+            : "",
     severity:
       status === "FAIL"
         ? check.id.startsWith("tenant.")
@@ -47,7 +51,9 @@ function qaCheckToPredatorEntry(check, ctx) {
           : "high"
         : status === "WARN"
           ? "medium"
-          : "low",
+          : status === "INFO"
+            ? "low"
+            : "low",
     tenantId: ctx.tenantId,
     role: ctx.role,
     userId: ctx.userId,

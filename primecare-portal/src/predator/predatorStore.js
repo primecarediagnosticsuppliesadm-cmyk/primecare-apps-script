@@ -137,9 +137,14 @@ export const predatorStore = {
     return [...errorEntries];
   },
 
-  /** WARN/FAIL only — excludes INFO-level schema diagnostics. */
+  /** WARN/FAIL only — excludes INFO / setup_pending diagnostics. */
   getOperationalErrors() {
-    return errorEntries.filter((e) => e.status === "WARN" || e.status === "FAIL");
+    return errorEntries.filter(
+      (e) =>
+        (e.status === "WARN" || e.status === "FAIL") &&
+        e.issueClass !== "setup_pending" &&
+        e.issueClass !== "informational"
+    );
   },
 
   getSlowestProcesses(limit = 15) {
@@ -153,7 +158,10 @@ export const predatorStore = {
     const out = [];
     for (const report of this.getModuleReportsForActiveTenant()) {
       for (const e of report.entries) {
-        if (e.status === "FAIL" || e.status === "WARN") out.push(e);
+        if (e.status !== "FAIL" && e.status !== "WARN") continue;
+        if (e.issueClass === "setup_pending" || e.issueClass === "informational") continue;
+        if (String(e.step || "").includes("setup_pending")) continue;
+        out.push(e);
       }
     }
     return out.sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));

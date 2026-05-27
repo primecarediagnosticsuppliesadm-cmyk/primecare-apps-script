@@ -27,6 +27,7 @@ import {
 
 const STATUS_CLASS = {
   PASS: "text-emerald-700 bg-emerald-500/10 border-emerald-500/30",
+  INFO: "text-sky-800 bg-sky-500/10 border-sky-500/30",
   WARN: "text-amber-800 bg-amber-500/10 border-amber-500/30",
   FAIL: "text-red-700 bg-red-500/10 border-red-500/30",
 };
@@ -92,7 +93,9 @@ function SeveritySection({ title, entries, emptyLabel }) {
 function ModuleAccordion({ reports }) {
   const initial = useMemo(() => {
     const state = {};
-    for (const r of reports) state[r.module] = r.summary.status !== "PASS";
+    for (const r of reports) {
+      state[r.module] = r.summary.status === "FAIL" || r.summary.status === "WARN";
+    }
     return state;
   }, [reports]);
   const [openByModule, setOpenByModule] = useState(initial);

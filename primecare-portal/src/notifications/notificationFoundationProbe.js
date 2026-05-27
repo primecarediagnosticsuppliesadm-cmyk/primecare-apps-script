@@ -149,6 +149,25 @@ export function shouldSkipNotificationIsolationProbes(state) {
 }
 
 /**
+ * @param {string} [checkId]
+ */
+export function isNotificationFoundationSetupPendingId(checkId) {
+  const id = String(checkId || "");
+  return (
+    id === "notifications.foundation" ||
+    id.includes("setup_pending") ||
+    id.startsWith("foundation.")
+  );
+}
+
+/**
+ * @param {import('@/validation/qaValidationCore.js').QaValidationCheck} check
+ */
+export function isSetupPendingQaCheck(check) {
+  return check?.status === "info" || isNotificationFoundationSetupPendingId(check?.id);
+}
+
+/**
  * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} ctx
  * @param {Object} partial
  */

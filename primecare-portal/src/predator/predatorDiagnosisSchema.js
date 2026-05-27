@@ -14,7 +14,7 @@ export const PREDATOR_PIPELINE_LAYERS = [
 ];
 
 /**
- * @typedef {'cosmetic' | 'functional' | 'data_integrity' | 'security' | 'tenant_isolation' | 'performance' | 'ui_sync' | 'render_timing'} PredatorIssueClass
+ * @typedef {'cosmetic' | 'functional' | 'data_integrity' | 'security' | 'tenant_isolation' | 'performance' | 'ui_sync' | 'render_timing' | 'setup_pending' | 'informational'} PredatorIssueClass
  */
 
 /**
@@ -31,7 +31,7 @@ export const PREDATOR_PIPELINE_LAYERS = [
  * @typedef {Object} PredatorRootCauseDiagnosis
  * @property {string} metricId
  * @property {string} metricLabel
- * @property {'PASS' | 'WARN' | 'FAIL'} status
+ * @property {'PASS' | 'INFO' | 'WARN' | 'FAIL'} status
  * @property {PredatorIssueClass} issueClass
  * @property {string} firstDivergenceLayer
  * @property {string} probableRootCause
@@ -43,7 +43,7 @@ export const PREDATOR_PIPELINE_LAYERS = [
 /**
  * @typedef {Object} PredatorModuleDiagnosis
  * @property {string} module
- * @property {'PASS' | 'WARN' | 'FAIL'} status
+ * @property {'PASS' | 'INFO' | 'WARN' | 'FAIL'} status
  * @property {PredatorRootCauseDiagnosis[]} metrics
  * @property {Object[]} timeline
  * @property {Object|null} regression

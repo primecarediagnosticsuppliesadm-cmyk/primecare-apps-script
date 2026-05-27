@@ -292,15 +292,16 @@ export function buildUiSyncWarnings(module, metrics) {
   if (!isPredatorEnabled()) return [];
 
   const warnings = [];
-  const uiSnapshotUnobserved = metrics.every((m) => {
+  const actionableMetrics = metrics.filter((m) => m.status !== "INFO");
+  const uiSnapshotUnobserved = actionableMetrics.every((m) => {
     const uiLayer = m.layerTrace?.find((l) => l.layerId === "ui");
     return uiLayer?.meta?.unobserved === true;
   });
-  if (uiSnapshotUnobserved && metrics.length > 0) {
+  if (uiSnapshotUnobserved && actionableMetrics.length > 0) {
     return warnings;
   }
 
-  for (const m of metrics) {
+  for (const m of actionableMetrics) {
     if (m.status === "PASS") continue;
     const api = num(m.layerTrace.find((l) => l.layerId === "api")?.value);
     const state = num(m.layerTrace.find((l) => l.layerId === "state")?.value);
@@ -361,10 +362,11 @@ export function buildUiSyncWarnings(module, metrics) {
  * @param {import('@/predator/predatorDiagnosisSchema.js').PredatorRootCauseDiagnosis[]} metrics
  */
 export function buildModuleReliabilityScore(module, metrics) {
-  const total = metrics.length || 1;
-  const pass = metrics.filter((m) => m.status === "PASS").length;
-  const fail = metrics.filter((m) => m.status === "FAIL").length;
-  const warn = metrics.filter((m) => m.status === "WARN").length;
+  const actionable = metrics.filter((m) => m.status !== "INFO");
+  const total = actionable.length || 1;
+  const pass = actionable.filter((m) => m.status === "PASS").length;
+  const fail = actionable.filter((m) => m.status === "FAIL").length;
+  const warn = actionable.filter((m) => m.status === "WARN").length;
 
   const dataReliability = Math.round((pass / total) * 100);
   const uiSyncFails = metrics.filter(

@@ -12,6 +12,44 @@ import {
   buildUiSyncWarnings,
   formatModuleHealthHeadline,
 } from "@/predator/uiStateReliability.js";
+import { isSetupPendingQaCheck } from "@/notifications/notificationFoundationProbe.js";
+
+/** @param {import('@/validation/qaValidationCore.js').QaValidationCheck} check */
+function resolveCheckIssueClass(check) {
+  if (isSetupPendingQaCheck(check)) return "setup_pending";
+  if (check.id.startsWith("tenant.")) return "tenant_isolation";
+  if (check.id.startsWith("role.")) return "security";
+  if (check.id.startsWith("layers.")) return "data_integrity";
+  return "functional";
+}
+
+/**
+ * @param {import('@/validation/qaValidationCore.js').QaValidationCheck} check
+ * @param {import('@/predator/predatorDiagnosisSchema.js').PredatorTenantContext} ctx
+ * @returns {import('@/predator/rootCauseEngine.js').PredatorRootCauseDiagnosis}
+ */
+function buildInformationalDiagnosis(check, ctx) {
+  const actual = /** @type {Record<string, unknown>} */ (check.actual || {});
+  const suggestedFix = String(actual.suggestedFix || "").trim();
+  return {
+    metricId: check.id,
+    metricLabel: check.label,
+    status: "INFO",
+    issueClass: resolveCheckIssueClass(check),
+    firstDivergenceLayer: "none",
+    probableRootCause: check.message,
+    suggestions: suggestedFix ? [suggestedFix] : [],
+    layerTrace: [
+      {
+        layerId: "rls",
+        label: check.label,
+        value: null,
+        meta: { message: check.message, ...actual },
+      },
+    ],
+    timestamp: new Date().toISOString(),
+  };
+}
 
 /**
  * Build Auth → DB → API → Compute → UI timeline from store + module metrics.
@@ -117,9 +155,10 @@ export function buildDebugTimeline(module) {
  * @param {Array<import('@/predator/rootCauseEngine.js').PredatorRootCauseDiagnosis>} params.metrics
  */
 export function finalizeModuleDiagnosis({ module, ctx, metrics }) {
-  const status = metrics.some((m) => m.status === "FAIL")
+  const actionableMetrics = metrics.filter((m) => m.status !== "INFO");
+  const status = actionableMetrics.some((m) => m.status === "FAIL")
     ? "FAIL"
-    : metrics.some((m) => m.status === "WARN")
+    : actionableMetrics.some((m) => m.status === "WARN")
       ? "WARN"
       : "PASS";
 
@@ -376,7 +415,16 @@ export function buildQualificationMetricDiagnoses(snap, ctx, options = {}) {
  * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} ctx
  */
 export function buildTenantRoleIsolationDiagnoses(report, ctx) {
-  const openChecks = (report?.checks || []).filter((c) => c.status !== "pass");
+  const checks = report?.checks || [];
+  const informational = checks.filter((c) => c.status === "info");
+  const openChecks = checks.filter((c) => c.status === "fail" || c.status === "warn");
+
+  const infoMetrics = informational.map((check) => buildInformationalDiagnosis(check, ctx));
+
+  if (openChecks.length === 0 && infoMetrics.length > 0) {
+    return infoMetrics;
+  }
+
   if (openChecks.length === 0) {
     return [
       diagnoseMetricLayers({
@@ -390,17 +438,9 @@ export function buildTenantRoleIsolationDiagnoses(report, ctx) {
     ];
   }
 
-  return openChecks.map((check) => {
+  const actionableMetrics = openChecks.map((check) => {
     const actual = /** @type {Record<string, unknown>} */ (check.actual || {});
     const firstLayer = String(actual.firstDivergenceLayer || "rls");
-    const issueClass =
-      check.id.startsWith("tenant.")
-        ? "tenant_isolation"
-        : check.id.startsWith("role.")
-          ? "security"
-          : check.id.startsWith("layers.")
-            ? "data_integrity"
-            : "functional";
 
     const diagnosis = diagnoseMetricLayers({
       metricId: check.id,
@@ -417,11 +457,14 @@ export function buildTenantRoleIsolationDiagnoses(report, ctx) {
       ],
     });
 
-    diagnosis.status = check.status === "fail" ? "FAIL" : "WARN";
-    diagnosis.issueClass = issueClass;
+    diagnosis.status =
+      check.status === "fail" ? "FAIL" : check.status === "warn" ? "WARN" : "PASS";
+    diagnosis.issueClass = resolveCheckIssueClass(check);
     diagnosis.probableRootCause = check.message;
     diagnosis.firstDivergenceLayer =
       check.status === "pass" ? "none" : firstLayer === "none" ? "rls" : firstLayer;
     return diagnosis;
   });
+
+  return [...infoMetrics, ...actionableMetrics];
 }

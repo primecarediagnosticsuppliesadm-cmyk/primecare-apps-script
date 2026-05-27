@@ -316,7 +316,7 @@ export function diagnoseMetricLayers({
  */
 export function metricsToPredatorEntries(module, metrics, tenantCtx) {
   return metrics
-    .filter((m) => m.status !== "PASS")
+    .filter((m) => m.status === "WARN" || m.status === "FAIL")
     .map((m) =>
       createPredatorEntry({
         status: m.status === "FAIL" ? "FAIL" : "WARN",
