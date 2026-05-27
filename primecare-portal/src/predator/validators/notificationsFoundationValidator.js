@@ -93,16 +93,23 @@ export async function validateNotificationsFoundationModule({ ctx }) {
       "notification_events",
       "notification_templates",
       "notification_preferences",
+      "notification_delivery_log",
     ];
 
+    let deliveryLogRows = [];
+
     for (const table of tables) {
-      const res = await supabase.from(table).select("tenant_id").limit(25);
+      const selectCols =
+        table === "notification_delivery_log"
+          ? "tenant_id, channel, status"
+          : "tenant_id";
+      const res = await supabase.from(table).select(selectCols).limit(25);
       if (res.error) {
         entries.push(
           createPredatorEntry({
             status: "WARN",
             module: "Notifications",
-            step: `${table}.probe`,
+            step: `tenant_isolation.${table}.probe`,
             actual: res.error.message,
             rootCauseGuess: "RLS or schema probe failed after foundation reported ready",
             suggestedFix: "Verify notifications_foundation_migration.sql and RLS policies",
@@ -116,10 +123,14 @@ export async function validateNotificationsFoundationModule({ ctx }) {
       }
 
       const rows = Array.isArray(res.data) ? res.data : [];
+      if (table === "notification_delivery_log") {
+        deliveryLogRows = rows;
+      }
+
       entries.push(
         ...checkTenantConsistency({
           module: "Notifications",
-          step: table,
+          step: `tenant_isolation.${table}`,
           ctx,
           profileTenantId: ctx.tenantId,
           rowTenantIds: rows.map((r) => r.tenant_id).filter(Boolean),
@@ -127,31 +138,11 @@ export async function validateNotificationsFoundationModule({ ctx }) {
       );
     }
 
-    const logRes = await supabase
-      .from("notification_delivery_log")
-      .select("channel, status, tenant_id")
-      .limit(50);
-
-    if (logRes.error) {
-      entries.push(
-        createPredatorEntry({
-          status: "WARN",
-          module: "Notifications",
-          step: "notification_delivery_log.probe",
-          actual: logRes.error.message,
-          rootCauseGuess: "Delivery log probe failed after foundation reported ready",
-          suggestedFix: "Verify notification_delivery_log RLS",
-          severity: "medium",
-          tenantId: ctx.tenantId,
-          role: ctx.role,
-          userId: ctx.userId,
-        })
-      );
-    } else if (Array.isArray(logRes.data)) {
-      const liveLike = logRes.data.filter((r) =>
+    if (deliveryLogRows.length > 0) {
+      const liveLike = deliveryLogRows.filter((r) =>
         FORBIDDEN_LIVE_DELIVERY_STATUSES.has(String(r.status || "").toLowerCase())
       );
-      const externalChannelLive = logRes.data.filter(
+      const externalChannelLive = deliveryLogRows.filter(
         (r) =>
           PLACEHOLDER_CHANNELS.includes(String(r.channel || "").toLowerCase()) &&
           String(r.status || "").toLowerCase() === "delivered"
@@ -166,7 +157,7 @@ export async function validateNotificationsFoundationModule({ ctx }) {
           actual: {
             forbiddenStatusCount: liveLike.length,
             externalDeliveredCount: externalChannelLive.length,
-            sample: logRes.data.slice(0, 5),
+            sample: deliveryLogRows.slice(0, 5),
           },
           rootCauseGuess:
             liveLike.length > 0
@@ -177,16 +168,6 @@ export async function validateNotificationsFoundationModule({ ctx }) {
           tenantId: ctx.tenantId,
           role: ctx.role,
           userId: ctx.userId,
-        })
-      );
-
-      entries.push(
-        ...checkTenantConsistency({
-          module: "Notifications",
-          step: "notification_delivery_log",
-          ctx,
-          profileTenantId: ctx.tenantId,
-          rowTenantIds: logRes.data.map((r) => r.tenant_id).filter(Boolean),
         })
       );
     }

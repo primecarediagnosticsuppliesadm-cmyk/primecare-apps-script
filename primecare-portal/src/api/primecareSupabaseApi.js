@@ -47,7 +47,7 @@ import {
   sanitizeRowToKnownColumns,
 } from "@/predator/schemaAwareness.js";
 import { isPerfLogEnabled, perfLog, perfTime, shouldRunDashboardKpiAudit } from "@/utils/perfLog.js";
-import { createNotificationEvent } from "@/notifications/createNotificationEvent.js";
+import { fireNotificationEvent } from "@/notifications/fireNotificationEvent.js";
 
 export { labIdKey, normalizeLabIdKey };
 
@@ -1001,23 +1001,24 @@ export async function createPaymentWrite(payload = {}) {
       };
     }
 
-    void createNotificationEvent({
-      eventType: "payment_received",
-      sourceModule: "collections",
-      sourceId: payment_id,
-      tenantId: tenant_id,
-      targetLabId: lab_id,
-      targetRole: "admin",
-      severity: "info",
-      payload: {
-        paymentId: payment_id,
-        labId: lab_id,
-        amountReceived: amount_received,
-        mode,
+    fireNotificationEvent(
+      {
+        eventType: "payment_received",
+        sourceModule: "collections",
+        sourceId: payment_id,
+        tenantId: tenant_id,
+        targetLabId: lab_id,
+        targetRole: "admin",
+        severity: "info",
+        payload: {
+          paymentId: payment_id,
+          labId: lab_id,
+          amountReceived: amount_received,
+          mode,
+        },
       },
-    }).catch((notifyErr) => {
-      console.warn("[createPaymentWrite] notification event:", notifyErr?.message || notifyErr);
-    });
+      "createPaymentWrite"
+    );
 
     return {
       success: true,
@@ -2423,6 +2424,26 @@ export async function upsertLabQualificationWrite(payload = {}) {
     if (error) {
       return { success: false, error: error.message || "Upsert failed", data: null };
     }
+
+    fireNotificationEvent(
+      {
+        eventType: "qualification_updated",
+        sourceModule: "qualification",
+        sourceId: lab_id,
+        tenantId: tenant_id,
+        targetLabId: lab_id,
+        targetRole: "admin",
+        severity: "info",
+        payload: {
+          labId: lab_id,
+          qualificationBand: row.qualification_band,
+          qualificationScore: row.qualification_score,
+          founderReviewStatus: row.founder_review_status,
+        },
+      },
+      "upsertLabQualificationWrite"
+    );
+
     return { success: true, data: data || null, error: null };
   } catch (err) {
     return { success: false, error: err?.message || String(err), data: null };
@@ -2949,6 +2970,30 @@ export async function createAgentVisitWrite(payload = {}) {
     if (isPerfLogEnabled()) {
       perfLog("createAgentVisitWrite.success", { visit_id: insertRow.visit_id });
     }
+
+    const visitTenantId = str(insertRow.tenant_id ?? payload.tenantId ?? payload.tenant_id);
+    if (visitTenantId) {
+      fireNotificationEvent(
+        {
+          eventType: "agent_visit_logged",
+          sourceModule: "agent_visits",
+          sourceId: insertRow.visit_id,
+          tenantId: visitTenantId,
+          targetLabId: insertRow.lab_id,
+          targetRole: "admin",
+          actorUserId: insertRow.agent_id || null,
+          severity: "info",
+          payload: {
+            visitId: insertRow.visit_id,
+            labId: insertRow.lab_id,
+            visitType: insertRow.visit_type,
+            visitDate: insertRow.visit_date,
+          },
+        },
+        "createAgentVisitWrite"
+      );
+    }
+
     return { success: true, data: saved ?? null, error: null };
   } catch (err) {
     console.warn("[createAgentVisitWrite] failed:", err?.message || err);
@@ -3764,24 +3809,25 @@ export async function createOrderWrite(payload = {}) {
       }
     }
 
-    void createNotificationEvent({
-      eventType: "order_created",
-      sourceModule: "orders",
-      sourceId: order_id,
-      tenantId: tenant_id,
-      targetLabId: lab_id,
-      targetRole: "admin",
-      severity: "info",
-      payload: {
-        orderId: order_id,
-        labId: lab_id,
-        totalAmount: total_amount,
-        status,
-        lineCount: normalizedLines.length,
+    fireNotificationEvent(
+      {
+        eventType: "order_created",
+        sourceModule: "orders",
+        sourceId: order_id,
+        tenantId: tenant_id,
+        targetLabId: lab_id,
+        targetRole: "admin",
+        severity: "info",
+        payload: {
+          orderId: order_id,
+          labId: lab_id,
+          totalAmount: total_amount,
+          status,
+          lineCount: normalizedLines.length,
+        },
       },
-    }).catch((notifyErr) => {
-      console.warn("[createOrderWrite] notification event:", notifyErr?.message || notifyErr);
-    });
+      "createOrderWrite"
+    );
 
     return {
       success: true,

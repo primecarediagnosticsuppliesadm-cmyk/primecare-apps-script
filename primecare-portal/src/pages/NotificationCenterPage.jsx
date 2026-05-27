@@ -16,6 +16,8 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ux";
 import { Bell, Loader2, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
+import { isNotificationsFoundationEnabled } from "@/config/notificationFoundation.js";
 
 function severityVariant(severity) {
   const s = String(severity || "info").toLowerCase();
@@ -86,6 +88,17 @@ export default function NotificationCenterPage({ currentUser }) {
   useEffect(() => {
     loadRows();
   }, [loadRows]);
+
+  usePredatorModuleValidation(
+    "Notifications",
+    currentUser,
+    {
+      notificationCenterLoaded: !loading,
+      eventCount: rows.length,
+      foundationEnabled: isNotificationsFoundationEnabled(),
+    },
+    !loading
+  );
 
   const pendingCount = useMemo(
     () => rows.filter((r) => String(r.status).toLowerCase() === "pending").length,
