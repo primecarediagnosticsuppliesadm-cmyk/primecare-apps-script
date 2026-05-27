@@ -11,27 +11,43 @@ import { recordPredatorRenderStep } from "@/predator/renderTrace.js";
  * @param {Object} options
  * @param {boolean} options.loading
  * @param {boolean} [options.apiReady]
+ * @param {boolean} [options.traceReady] — when false, skip all UI sync snapshots
  * @param {Record<string, { api?: number|null, state?: number|null, render?: number|null }>} [options.metrics]
  */
-export function usePredatorUiSyncTrace(moduleName, { loading, apiReady = false, metrics = {} }) {
+export function usePredatorUiSyncTrace(moduleName, {
+  loading,
+  apiReady = false,
+  traceReady = true,
+  metrics = {},
+}) {
   const apiReadyAt = useRef(null);
   const stateReadyAt = useRef(null);
   const renderedAt = useRef(null);
   const lastMetricsKey = useRef("");
 
-  useEffect(() => {
-    if (!isPredatorEnabled() || loading) return;
+  const canTrace = traceReady && !loading && apiReady;
 
-    if (apiReady && apiReadyAt.current == null) {
+  useEffect(() => {
+    if (canTrace) return;
+    apiReadyAt.current = null;
+    stateReadyAt.current = null;
+    renderedAt.current = null;
+    lastMetricsKey.current = "";
+  }, [canTrace]);
+
+  useEffect(() => {
+    if (!isPredatorEnabled() || !canTrace) return;
+
+    if (apiReadyAt.current == null) {
       apiReadyAt.current = performance.now();
       recordPredatorRenderStep(moduleName, "pipeline.api_complete", {
         msSinceMount: Math.round(apiReadyAt.current),
       });
     }
-  }, [moduleName, loading, apiReady]);
+  }, [moduleName, canTrace, apiReady]);
 
   useEffect(() => {
-    if (!isPredatorEnabled() || loading) return;
+    if (!isPredatorEnabled() || !canTrace) return;
 
     const entries = Object.entries(metrics);
     if (entries.length === 0) return;
@@ -91,5 +107,5 @@ export function usePredatorUiSyncTrace(moduleName, { loading, apiReady = false, 
         msSinceMount: Math.round(renderedAt.current),
       });
     }
-  }, [moduleName, loading, metrics, apiReady]);
+  }, [moduleName, canTrace, metrics, apiReady]);
 }

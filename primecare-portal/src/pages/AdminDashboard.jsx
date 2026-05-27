@@ -527,7 +527,7 @@ async function fetchSupabaseAdminSlice({ force = false } = {}) {
   const slice = { stock: null, labs: null, forecast: null, dashboardRead: null };
   const endPrimary = perfTime("AdminDashboard.getAdminDashboardRead");
   try {
-    slice.dashboardRead = await getAdminDashboardRead({ force: IS_QA || force });
+    slice.dashboardRead = await getAdminDashboardRead({ force });
     endPrimary({ success: slice.dashboardRead?.success, force });
   } catch (e) {
     console.warn("[AdminDashboard] Supabase dashboard read skipped:", e?.message || e);
@@ -761,6 +761,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   const [backgroundLoading, setBackgroundLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const loadGenerationRef = useRef(0);
+  const loadAllInFlightRef = useRef(null);
   const dashboardBundleRef = useRef(dashboardBundle);
   const kpiModelRef = useRef(kpiModel);
   const apiKpisRef = useRef(null);
@@ -1047,33 +1048,48 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   };
 
   const loadAll = async ({ force = false } = {}) => {
-    const endLoadAll = perfTime("AdminDashboard.loadAll");
-    try {
-      setErrorMessage("");
-
-      const hydrated = hasVisibleKpis(kpiModelRef.current);
-      if (!hydrated && !dashboardBundleRef.current) {
-        setLoading(true);
-        setRefreshing(false);
-      } else {
-        setLoading(false);
-        setRefreshing(true);
-      }
-
-      await loadPrimaryData({ force });
-    } catch (err) {
-      console.error(err);
-      setErrorMessage(err?.message || "Failed to load admin dashboard");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-      endLoadAll({ force });
+    if (loadAllInFlightRef.current && !force) {
+      return loadAllInFlightRef.current;
     }
 
-    if (!shouldUseQaDirectDashboardRead()) {
-      loadSecondaryData({ force }).catch((err) => {
-        console.warn("[AdminDashboard] secondary panels:", err?.message || err);
-      });
+    const run = (async () => {
+      const endLoadAll = perfTime("AdminDashboard.loadAll");
+      try {
+        setErrorMessage("");
+
+        const hydrated = hasVisibleKpis(kpiModelRef.current);
+        if (!hydrated && !dashboardBundleRef.current) {
+          setLoading(true);
+          setRefreshing(false);
+        } else {
+          setLoading(false);
+          setRefreshing(true);
+        }
+
+        await loadPrimaryData({ force });
+      } catch (err) {
+        console.error(err);
+        setErrorMessage(err?.message || "Failed to load admin dashboard");
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+        endLoadAll({ force });
+      }
+
+      if (!shouldUseQaDirectDashboardRead()) {
+        loadSecondaryData({ force }).catch((err) => {
+          console.warn("[AdminDashboard] secondary panels:", err?.message || err);
+        });
+      }
+    })();
+
+    loadAllInFlightRef.current = run;
+    try {
+      await run;
+    } finally {
+      if (loadAllInFlightRef.current === run) {
+        loadAllInFlightRef.current = null;
+      }
     }
   };
 
@@ -1175,37 +1191,39 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     hasData: dashboardHydrated,
   });
 
-  const uiSyncMetrics = useMemo(() => {
-    if (!dashboardHydrated || !displayKpis) return {};
-    const apiKpis = apiKpisRef.current || displayKpis;
+  const predatorKpiTraceReady = !loading && dashboardHydrated && Boolean(displayKpis);
+
+  const kpiCardMetrics = useMemo(() => {
+    if (!predatorKpiTraceReady || !displayKpis) return {};
     return {
       outstanding_receivables: {
-        api: apiKpis.outstandingReceivables,
+        api: displayKpis.outstandingReceivables,
         state: displayKpis.outstandingReceivables,
         render: displayKpis.outstandingReceivables,
       },
       recent_visits: {
-        api: apiKpis.recentVisits,
+        api: displayKpis.recentVisits,
         state: displayKpis.recentVisits,
         render: displayKpis.recentVisits,
       },
       inventory_skus: {
-        api: apiKpis.inventorySkus,
+        api: displayKpis.inventorySkus,
         state: displayKpis.inventorySkus,
         render: displayKpis.inventorySkus,
       },
       total_sold_value: {
-        api: apiKpis.totalSoldValue,
+        api: displayKpis.totalSoldValue,
         state: displayKpis.totalSoldValue,
         render: displayKpis.totalSoldValue,
       },
     };
-  }, [dashboardHydrated, displayKpis, kpiModel]);
+  }, [predatorKpiTraceReady, displayKpis]);
 
   usePredatorUiSyncTrace("Admin Dashboard", {
     loading,
-    apiReady: dashboardHydrated,
-    metrics: uiSyncMetrics,
+    apiReady: predatorKpiTraceReady,
+    traceReady: predatorKpiTraceReady,
+    metrics: kpiCardMetrics,
   });
 
   useEffect(() => {

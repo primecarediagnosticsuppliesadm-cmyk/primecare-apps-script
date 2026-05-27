@@ -75,54 +75,67 @@ export function recordPredatorUiMetricSnapshot({
   const prev = predatorStore.getLatestUiStateTrace(module, metricId);
   predatorStore.recordUiStateTrace(snapshot);
 
-  if (prev) {
-    const prevApi = num(prev.api);
-    const prevState = num(prev.state);
-    const nextState = num(state);
-    const nextRender = num(render);
+  const observesUi = state != null || render != null;
+  if (!prev || !observesUi) return;
 
-    if (
-      prevApi != null &&
-      prevApi > 0 &&
-      nextState === 0 &&
-      source !== "usePredatorUiSyncTrace"
-    ) {
-      recordPredatorStateTransition({
-        module,
-        metricId,
-        kind: "state.overwrite",
-        from: prevState,
-        to: nextState,
-        detail: { source, prevApi },
-      });
-    }
+  const prevApi = num(prev.api);
+  const priorState = num(prev.state);
+  const priorRender = num(prev.render);
+  const observedState = num(state);
+  const observedRender = num(render);
+  const prevHadUi = (priorState != null && priorState > 0) || (priorRender != null && priorRender > 0);
 
-    if (
-      prevState != null &&
-      prevState > 0 &&
-      nextState === 0 &&
-      source !== "usePredatorUiSyncTrace"
-    ) {
-      recordPredatorStateTransition({
-        module,
-        metricId,
-        kind: "state.reset_after_load",
-        from: prevState,
-        to: nextState,
-        detail: { source },
-      });
-    }
+  if (
+    source !== "usePredatorUiSyncTrace" &&
+    prevApi != null &&
+    prevApi > 0 &&
+    state != null &&
+    observedState === 0
+  ) {
+    recordPredatorStateTransition({
+      module,
+      metricId,
+      kind: "state.overwrite",
+      from: priorState,
+      to: observedState,
+      detail: { source, prevApi },
+    });
+  }
 
-    if (prevApi != null && prevApi > 0 && nextRender === 0 && nextState === 0) {
-      recordPredatorStateTransition({
-        module,
-        metricId,
-        kind: "render.stale_zero",
-        from: prevApi,
-        to: 0,
-        detail: { source },
-      });
-    }
+  if (
+    source !== "usePredatorUiSyncTrace" &&
+    priorState != null &&
+    priorState > 0 &&
+    state != null &&
+    observedState === 0
+  ) {
+    recordPredatorStateTransition({
+      module,
+      metricId,
+      kind: "state.reset_after_load",
+      from: priorState,
+      to: observedState,
+      detail: { source },
+    });
+  }
+
+  if (
+    prevApi != null &&
+    prevApi > 0 &&
+    prevHadUi &&
+    render != null &&
+    state != null &&
+    observedRender === 0 &&
+    observedState === 0
+  ) {
+    recordPredatorStateTransition({
+      module,
+      metricId,
+      kind: "render.stale_zero",
+      from: prevApi,
+      to: 0,
+      detail: { source },
+    });
   }
 }
 

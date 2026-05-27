@@ -1794,8 +1794,12 @@ let adminDashboardReadCache = {
   loadedAt: 0,
 };
 
+/** @type {Promise<{ success: boolean, data?: object }>|null} */
+let adminDashboardReadInFlight = null;
+
 export function invalidateAdminDashboardReadCache() {
   adminDashboardReadCache = { result: null, loadedAt: 0 };
+  adminDashboardReadInFlight = null;
   perfLog("getAdminDashboardRead.cacheCleared");
   recordPredatorCacheEvent({ cacheKey: "adminDashboardRead", event: "invalidate" });
 }
@@ -1824,8 +1828,12 @@ async function timedSupabaseQuery(label, queryFnOrPromise) {
  * @param {{ force?: boolean }} [options]
  */
 export async function getAdminDashboardRead(options = {}) {
-  return predatorTrace("Admin Dashboard", "api.getAdminDashboardRead", async () => {
   const force = options.force === true;
+  if (!force && adminDashboardReadInFlight) {
+    return adminDashboardReadInFlight;
+  }
+
+  const run = predatorTrace("Admin Dashboard", "api.getAdminDashboardRead", async () => {
   const dashboardReadT0 = performance.now();
   traceSupabaseRead("AdminDashboard.getAdminDashboardRead", {
     tables: [
@@ -1869,10 +1877,11 @@ export async function getAdminDashboardRead(options = {}) {
       ageMs,
       hydrationPhase: "hydrate",
       summary: {
-        ordersCount: 0,
         outstandingReceivables: cachedData?.executive?.outstandingReceivables ?? 0,
         recentVisits: cachedData?.summary?.recentVisits ?? 0,
-        totalSkus: cachedData?.summary?.stockStats?.totalSkus ?? 0,
+        totalSkus:
+          cachedData?.summary?.stockStats?.totalSkus ?? cachedData?.summary?.inventorySkus ?? 0,
+        totalSoldValue: cachedData?.summary?.totalSoldValue ?? 0,
       },
     });
     recordAdminDashboardApiUiSnapshots(cachedData, "getAdminDashboardRead.cacheHit");
@@ -2132,6 +2141,16 @@ export async function getAdminDashboardRead(options = {}) {
     return { success: true, data: { ...EMPTY_ADMIN_DASHBOARD } };
   }
   });
+
+  if (!force) {
+    adminDashboardReadInFlight = run.finally(() => {
+      if (adminDashboardReadInFlight === run) {
+        adminDashboardReadInFlight = null;
+      }
+    });
+  }
+
+  return run;
 }
 
 const EMPTY_AGENT_WORKSPACE = {

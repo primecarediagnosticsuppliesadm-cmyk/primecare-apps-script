@@ -257,6 +257,20 @@ export const predatorStore = {
         uiStateTraces.splice(i, 1);
       }
     }
+    this.clearStaleZeroStateTransitions(module);
+  },
+
+  /** Remove false-positive UI sync transitions recorded before hydration. */
+  clearStaleZeroStateTransitions(module) {
+    const staleKinds = new Set(["render.stale_zero", "state.reset_after_load", "state.overwrite"]);
+    for (let i = stateTransitions.length - 1; i >= 0; i -= 1) {
+      const t = stateTransitions[i];
+      if (t.module !== module || !staleKinds.has(t.kind)) continue;
+      const to = Number(t.to);
+      if (Number.isFinite(to) && to === 0) {
+        stateTransitions.splice(i, 1);
+      }
+    }
   },
 
   recordStateTransition(transition) {

@@ -27,12 +27,12 @@ export function recordPredatorCacheEvent({
   const staleZeroRisk =
     (event === "hit" || event === "stale_reuse") &&
     summary &&
-    (summary.ordersCount === 0 ||
-      summary.outstandingReceivables === 0 ||
-      summary.recentVisits === 0 ||
-      summary.totalSkus === 0) &&
     ageMs != null &&
-    ageMs > 0;
+    ageMs > 0 &&
+    Number(summary.outstandingReceivables ?? 0) === 0 &&
+    Number(summary.recentVisits ?? 0) === 0 &&
+    Number(summary.totalSkus ?? 0) === 0 &&
+    Number(summary.totalSoldValue ?? summary.ordersCount ?? 0) === 0;
 
   const derivedBeforeHydration =
     hydrationPhase === "hydrate" &&

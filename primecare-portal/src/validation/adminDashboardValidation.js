@@ -118,7 +118,7 @@ export async function runAdminDashboardValidation(options = {}) {
   const expected = QA_ADMIN_DASHBOARD_SEED;
 
   const browser = await fetchBrowserDashboardDbSnapshot();
-  const apiResult = await getAdminDashboardRead({ force: true });
+  const apiResult = await getAdminDashboardRead({ force: options.forceApi === true });
   const apiValidatedAt = Date.now();
   const api = apiResult?.success ? apiResult.data : null;
 
