@@ -12,3 +12,9 @@ export {
 export {
   runAdminDashboardValidation,
 } from "@/validation/adminDashboardValidation.js";
+export {
+  isTenantRoleIsolationValidationEnabled,
+  runTenantRoleIsolationValidation,
+  qaCheckToIssueClass,
+} from "@/validation/tenantRoleIsolationValidation.js";
+export { TENANT_ISOLATION_TABLE_SPECS } from "@/validation/tenantIsolationManifest.js";

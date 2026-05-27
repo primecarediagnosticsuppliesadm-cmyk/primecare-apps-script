@@ -20,3 +20,6 @@ export function isQaValidationLayerEnabled() {
   if (!hasSupabaseForValidation()) return false;
   return envFlagOrDefault("VITE_QA_VALIDATION_LAYER", IS_QA || IS_DEV);
 }
+
+/** Phase 2: tenant + role isolation — re-export for config consumers. */
+export { isTenantRoleIsolationValidationEnabled } from "@/validation/tenantRoleIsolationValidation.js";

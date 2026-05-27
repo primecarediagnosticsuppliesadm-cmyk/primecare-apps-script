@@ -26,4 +26,10 @@ export { diagnoseProjectionColumns } from "@/predator/schemaAwareness.js";
 export {
   buildDebugTimeline,
   finalizeModuleDiagnosis,
+  buildTenantRoleIsolationDiagnoses,
 } from "@/predator/buildModuleDiagnosis.js";
+export { validateTenantRoleIsolationModule } from "@/predator/validators/tenantRoleIsolationValidator.js";
+export {
+  isTenantRoleIsolationValidationEnabled,
+  runTenantRoleIsolationValidation,
+} from "@/validation/tenantRoleIsolationValidation.js";

@@ -4,6 +4,7 @@ import { runAllPredatorValidations } from "@/predator/runPredatorValidation.js";
 import { isPredatorEnabled } from "@/predator/predatorGuards.js";
 import { PREDATOR_TIMING_THRESHOLDS_MS } from "@/predator/predatorSchema.js";
 import PredatorTimeline from "@/components/qa/PredatorTimeline.jsx";
+import TenantRoleIsolationQaPanel from "@/components/qa/TenantRoleIsolationQaPanel.jsx";
 import { typography } from "@/styles/designTokens";
 import { cn } from "@/lib/utils";
 import { RefreshCw, ShieldAlert, Activity, Database } from "lucide-react";
@@ -73,7 +74,7 @@ export default function PredatorDebugConsole({ currentUser }) {
         <div>
           <h1 className={typography.pageTitle}>Predator Debug Console</h1>
           <p className={cn(typography.pageSubtitle, "mt-1")}>
-            Phase 3 autonomous diagnosis — read-only, no auto-fix, no data mutation.
+            Phase 2 isolation + Phase 3 diagnosis — read-only, no auto-fix, no data mutation.
           </p>
         </div>
         <button
@@ -146,6 +147,8 @@ export default function PredatorDebugConsole({ currentUser }) {
         </div>
       </section>
 
+      <TenantRoleIsolationQaPanel currentUser={currentUser} autoRun />
+
       <section>
         <h2 className="text-sm font-semibold">Module health</h2>
         <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -169,6 +172,18 @@ export default function PredatorDebugConsole({ currentUser }) {
           )}
         </div>
       </section>
+
+      {diagnoses.find((d) => d.module === "Tenant + Role Isolation") ? (
+        <section className="rounded-2xl border border-violet-500/30 bg-violet-500/5 p-4">
+          <h2 className="text-sm font-semibold">Tenant isolation timeline</h2>
+          <PredatorTimeline
+            title="Phase 2 pipeline"
+            steps={
+              diagnoses.find((d) => d.module === "Tenant + Role Isolation")?.timeline || []
+            }
+          />
+        </section>
+      ) : null}
 
       {selectedDiagnosis ? (
         <section className="rounded-2xl border border-border bg-card p-4">

@@ -6,6 +6,7 @@ import { validateAdminDashboardModule } from "@/predator/validators/adminDashboa
 import { validateCollectionsModule } from "@/predator/validators/collectionsValidator.js";
 import { validateQualificationModule } from "@/predator/validators/qualificationValidator.js";
 import { validateAgentVisitsModule } from "@/predator/validators/agentVisitsValidator.js";
+import { validateTenantRoleIsolationModule } from "@/predator/validators/tenantRoleIsolationValidator.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
 
 /**
@@ -14,6 +15,7 @@ import { predatorTrace } from "@/predator/predatorTiming.js";
  * @property {{ summary?: object, collections?: unknown[] }|null} [collections]
  * @property {{ rowCount?: number }|null} [qualificationReview]
  * @property {{ recentVisitsCount?: number, todayVisits?: number }|null} [agentVisits]
+ * @property {Record<string, { db?: number, api?: number, ui?: number }>|null} [tenantRoleIsolation]
  */
 
 /**
@@ -59,6 +61,14 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
     });
     predatorStore.setModuleReport("Agent Visits", agentVisits.entries, ctx);
     modules.push(agentVisits);
+
+    const isolation = await validateTenantRoleIsolationModule({
+      ctx,
+      currentUser,
+      rendered: snapshots.tenantRoleIsolation ?? { layerSnapshots: buildIsolationLayerSnapshots(snapshots) },
+    });
+    predatorStore.setModuleReport("Tenant + Role Isolation", isolation.entries, ctx);
+    modules.push(isolation);
 
     const allEntries = modules.flatMap((m) => m.entries);
     const summary = summarizePredatorEntries(allEntries);
@@ -109,6 +119,15 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
     case "Agent Visits":
       result = await validateAgentVisitsModule({ ctx, currentUser, rendered: snapshot });
       break;
+    case "Tenant + Role Isolation":
+      result = await validateTenantRoleIsolationModule({
+        ctx,
+        currentUser,
+        rendered: snapshot.layerSnapshots
+          ? snapshot
+          : { layerSnapshots: buildIsolationLayerSnapshots(snapshot) },
+      });
+      break;
     default:
       result = {
         module: moduleName,
@@ -132,4 +151,32 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
     }
   }
   return result;
+}
+
+/**
+ * Map module snapshots to cross-layer isolation probes (mutable counts).
+ * @param {PredatorRenderedSnapshots} snapshots
+ */
+function buildIsolationLayerSnapshots(snapshots) {
+  const admin = snapshots.adminDashboard || {};
+  const collections = snapshots.collections || {};
+  const visits = snapshots.agentVisits || {};
+
+  return {
+    visits: {
+      db: visits.recentVisitsCount ?? null,
+      api: visits.recentVisitsCount ?? null,
+      ui: visits.recentVisitsCount ?? null,
+    },
+    collections: {
+      db: collections.collections?.length ?? null,
+      api: collections.collections?.length ?? null,
+      ui: collections.collections?.length ?? null,
+    },
+    orders: {
+      rls: admin.ordersRowCount ?? null,
+      api: admin.apiTraceOrders ?? null,
+      ui: admin.uiOrdersCount ?? null,
+    },
+  };
 }

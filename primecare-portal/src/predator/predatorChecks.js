@@ -118,10 +118,11 @@ export function checkTenantConsistency({ module, step, ctx, profileTenantId, row
         module,
         step: `${step}.tenant_mixing`,
         expected: `all rows tenant_id = ${profileTenantId}`,
-        actual: { profileTenantId, foreignTenants: foreign },
+        actual: { profileTenantId, foreignTenants: foreign, table: step },
         rootCauseGuess: "Multi-tenant data leak or mixed seed across tenants",
         suggestedFix: "Never merge tenants in client; fix RLS tenant predicate",
         severity: "critical",
+        issueClass: "tenant_isolation",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,
@@ -135,6 +136,7 @@ export function checkTenantConsistency({ module, step, ctx, profileTenantId, row
       step: `${step}.tenant_consistency`,
       expected: profileTenantId,
       actual: { rowTenantSample: unique.slice(0, 5) },
+      issueClass: "tenant_isolation",
       tenantId: ctx.tenantId,
       role: ctx.role,
       userId: ctx.userId,
@@ -150,18 +152,97 @@ export function checkTenantConsistency({ module, step, ctx, profileTenantId, row
  * @param {string} p.role
  * @param {string[]} p.allowedRoles
  */
-export function checkRoleAccess({ module, step, ctx, role, allowedRoles }) {
+export function checkRoleAccess({ module, step, ctx, role, allowedRoles, failWhenDenied = false }) {
   const ok = allowedRoles.includes(String(role || "").toLowerCase());
+  const status = ok ? "PASS" : failWhenDenied ? "FAIL" : "WARN";
   return [
     createPredatorEntry({
-      status: ok ? "PASS" : "WARN",
+      status,
       module,
       step,
       expected: `role in [${allowedRoles.join(", ")}]`,
       actual: { role },
       rootCauseGuess: ok ? "" : "User role may not match module intent",
       suggestedFix: ok ? "" : "Verify PERMISSIONS map and profile.role",
-      severity: ok ? "low" : "medium",
+      severity: ok ? "low" : status === "FAIL" ? "high" : "medium",
+      issueClass: ok ? undefined : "security",
+      tenantId: ctx.tenantId,
+      role: ctx.role,
+      userId: ctx.userId,
+    }),
+  ];
+}
+
+/**
+ * Security drift across pipeline layers with first divergence detection.
+ * @param {Object} p
+ * @param {string} p.module
+ * @param {string} p.step
+ * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} p.ctx
+ * @param {Record<string, number|null|undefined>} p.layers — keys: rls, api, ui, state, cache
+ * @param {string} [p.label]
+ */
+export function checkSecurityLayersAgreement({ module, step, ctx, layers, label = "" }) {
+  const layerOrder = ["rls", "api", "normalize", "state", "cache", "ui"];
+  const comparable = layerOrder
+    .map((id) => ({ id, value: layers?.[id] }))
+    .filter((e) => e.value !== null && e.value !== undefined && Number.isFinite(Number(e.value)));
+
+  if (comparable.length === 0) {
+    return [
+      createPredatorEntry({
+        status: "WARN",
+        module,
+        step: `${step}.layers_missing`,
+        expected: label || "comparable security layers",
+        actual: layers,
+        rootCauseGuess: "Partial observability — not all layers reported",
+        suggestedFix: "Pass UI snapshot into isolation validation",
+        severity: "low",
+        issueClass: "data_integrity",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      }),
+    ];
+  }
+
+  const first = Number(comparable[0].value);
+  let firstDivergence = null;
+  for (let i = 1; i < comparable.length; i += 1) {
+    if (Number(comparable[i].value) !== first) {
+      firstDivergence = comparable[i].id;
+      break;
+    }
+  }
+
+  if (firstDivergence) {
+    return [
+      createPredatorEntry({
+        status: "FAIL",
+        module,
+        step: `${step}.security_drift`,
+        expected: "authorized layer agreement",
+        actual: { layers, firstDivergenceLayer: firstDivergence, comparable },
+        rootCauseGuess: `Cross-layer drift — first divergence at ${firstDivergence}`,
+        suggestedFix: "Trace RLS → API mapping → React state → rendered UI for this metric",
+        severity: "high",
+        issueClass: "tenant_isolation",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      }),
+    ];
+  }
+
+  return [
+    createPredatorEntry({
+      status: "PASS",
+      module,
+      step: `${step}.security_agreement`,
+      expected: label || "layers agree",
+      actual: { layers, agreedValue: first },
+      issueClass: "tenant_isolation",
       tenantId: ctx.tenantId,
       role: ctx.role,
       userId: ctx.userId,

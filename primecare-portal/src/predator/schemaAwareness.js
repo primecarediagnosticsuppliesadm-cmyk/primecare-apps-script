@@ -46,6 +46,11 @@ export const PREDATOR_KNOWN_TABLE_COLUMNS = {
   lab_qualifications: ["tenant_id", "lab_id", "qualification_score", "updated_at"],
   order_lines: ["order_id", "tenant_id", "net_line_total", "quantity"],
   payments: ["payment_id", "lab_id", "tenant_id", "amount_received", "payment_date"],
+  inventory_ledger: ["tenant_id", "product_id", "created_at", "updated_at"],
+  purchase_orders: ["tenant_id", "purchase_order_id", "created_at", "updated_at"],
+  purchase_order_items: ["tenant_id", "purchase_order_id", "created_at", "updated_at"],
+  profiles: ["tenant_id", "user_id", "role", "created_at", "updated_at"],
+  v_labs_credit: ["tenant_id", "lab_id", "created_at", "updated_at"],
 };
 
 const schemaColumnCache = new Map();

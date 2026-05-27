@@ -241,3 +241,59 @@ export function buildQualificationMetricDiagnoses(snap, ctx) {
     }),
   ];
 }
+
+/**
+ * Phase 2 tenant + role isolation — one diagnosis metric per non-pass QA check.
+ * @param {import('@/validation/qaValidationCore.js').QaValidationReport} report
+ * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} ctx
+ */
+export function buildTenantRoleIsolationDiagnoses(report, ctx) {
+  const openChecks = (report?.checks || []).filter((c) => c.status !== "pass");
+  if (openChecks.length === 0) {
+    return [
+      diagnoseMetricLayers({
+        metricId: "isolation.summary",
+        metricLabel: "Tenant + role isolation summary",
+        tenantCtx: ctx,
+        layers: [
+          { layerId: "rls", label: "RLS probes", value: report?.summary?.pass ?? 0 },
+        ],
+      }),
+    ];
+  }
+
+  return openChecks.map((check) => {
+    const actual = /** @type {Record<string, unknown>} */ (check.actual || {});
+    const firstLayer = String(actual.firstDivergenceLayer || "rls");
+    const issueClass =
+      check.id.startsWith("tenant.")
+        ? "tenant_isolation"
+        : check.id.startsWith("role.")
+          ? "security"
+          : check.id.startsWith("layers.")
+            ? "data_integrity"
+            : "functional";
+
+    const diagnosis = diagnoseMetricLayers({
+      metricId: check.id,
+      metricLabel: check.label,
+      tenantCtx: ctx,
+      compareMode: "rls_only",
+      layers: [
+        {
+          layerId: firstLayer === "api" ? "api" : firstLayer === "ui" ? "ui" : "rls",
+          label: check.label,
+          value: actual.rowCount ?? actual.unauthorizedCount ?? null,
+          meta: { message: check.message, ...actual },
+        },
+      ],
+    });
+
+    diagnosis.status = check.status === "fail" ? "FAIL" : "WARN";
+    diagnosis.issueClass = issueClass;
+    diagnosis.probableRootCause = check.message;
+    diagnosis.firstDivergenceLayer =
+      check.status === "pass" ? "none" : firstLayer === "none" ? "rls" : firstLayer;
+    return diagnosis;
+  });
+}
