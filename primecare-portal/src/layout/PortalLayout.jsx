@@ -19,6 +19,7 @@ const ICONS = {
   dashboard: LayoutDashboard,
   visits: ClipboardList,
   collections: Wallet,
+  labAccount: Wallet,
   labs: Building2,
   inventory: Boxes,
   orders: ShoppingCart,

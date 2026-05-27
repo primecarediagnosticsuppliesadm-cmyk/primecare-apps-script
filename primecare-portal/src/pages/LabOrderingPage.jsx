@@ -31,12 +31,16 @@ import {
 } from "@/api/primecareApi";
 import {
   createOrderWrite,
+  getCollectionsRead,
   getLabCatalogRead,
   getLabRecentOrdersRead,
   getOrderDetailsRead,
   mapOrderRow,
 } from "@/api/primecareSupabaseApi";
 import { supabase } from "@/api/supabaseClient.js";
+import { filterCollectionsForUser } from "@/utils/accessFilters.js";
+import { labIdKey } from "@/utils/labId.js";
+import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import {
   logAppsScriptFallbackUsed,
   logAppsScriptPrimarySource,
@@ -152,7 +156,9 @@ export default function LabOrderingPage({ currentUser }) {
     "";
 
   const labName = currentUser?.labName || currentUser?.name || "Lab";
-  const outstandingBalance = Number(currentUser?.outstanding ?? 18500);
+  const [outstandingBalance, setOutstandingBalance] = useState(
+    Number(currentUser?.outstanding ?? 0)
+  );
 
   // CREDIT CONTROL (NEW)
   const creditStatus = (currentUser?.creditStatus || "").toUpperCase();
@@ -161,11 +167,59 @@ export default function LabOrderingPage({ currentUser }) {
   const isNearLimit = creditStatus === "NEAR_LIMIT";
 
 
+  const profileLabKey = labIdKey(labId);
+
+  const scopedRecentOrders = useMemo(() => {
+    if (!profileLabKey) return recentOrders;
+    return recentOrders.filter((o) => {
+      const rowLab = labIdKey(o.labId || o.lab_id);
+      return !rowLab || rowLab === profileLabKey;
+    });
+  }, [recentOrders, profileLabKey]);
+
+  const crossLabOrderCount = useMemo(() => {
+    if (!profileLabKey) return 0;
+    return recentOrders.filter((o) => {
+      const rowLab = labIdKey(o.labId || o.lab_id);
+      return rowLab && rowLab !== profileLabKey;
+    }).length;
+  }, [recentOrders, profileLabKey]);
+
+  usePredatorModuleValidation(
+    "Lab Portal",
+    currentUser,
+    {
+      labId,
+      recentOrdersCount: scopedRecentOrders.length,
+      crossLabOrderCount,
+      isLabAccountView: false,
+      catalogLoaded: !loadingCatalog,
+      ordersLoaded: !loadingOrders,
+    },
+    !loadingCatalog && !loadingOrders
+  );
+
   useEffect(() => {
     loadCatalog();
     loadRecentOrders();
+    loadAccountOutstanding();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labId]);
+
+  async function loadAccountOutstanding() {
+    try {
+      const res = await getCollectionsRead();
+      const allRows = Array.isArray(res?.data?.collections) ? res.data.collections : [];
+      const rows = filterCollectionsForUser(allRows, currentUser);
+      const own = rows[0];
+      const amount = Number(own?.outstandingAmount ?? own?.outstanding_amount ?? 0);
+      if (Number.isFinite(amount)) {
+        setOutstandingBalance(amount);
+      }
+    } catch (e) {
+      console.warn("[LabOrderingPage] loadAccountOutstanding:", e?.message || e);
+    }
+  }
 
   async function loadCatalog() {
     try {
@@ -277,6 +331,10 @@ export default function LabOrderingPage({ currentUser }) {
       if (supabase) {
         const sup = await getOrderDetailsRead(orderId);
         if (sup?.data?.order) {
+          const orderLab = labIdKey(sup.data.order.labId || sup.data.order.lab_id);
+          if (profileLabKey && orderLab && orderLab !== profileLabKey) {
+            throw new Error("This order is not available for your lab account.");
+          }
           setSelectedOrderId(orderId);
           setSelectedOrderDetails(sup.data);
           return;
@@ -632,7 +690,8 @@ export default function LabOrderingPage({ currentUser }) {
       <div className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">Lab Ordering</h1>
         <p className="text-sm text-slate-500">
-          Welcome {labName} — fast mobile ordering for repeat purchases.
+          {labName} — place orders for your lab. Outstanding and payments are under{" "}
+          <span className="font-medium text-slate-700">Payments &amp; Account</span>.
         </p>
       </div>
 
@@ -643,8 +702,8 @@ export default function LabOrderingPage({ currentUser }) {
           icon={IndianRupee}
         />
         <QuickStat
-          title="Recent Orders"
-          value={recentOrders.length}
+          title="Your Orders"
+          value={scopedRecentOrders.length}
           icon={FileText}
         />
         <QuickStat
@@ -998,8 +1057,8 @@ export default function LabOrderingPage({ currentUser }) {
       <div className="grid gap-5 xl:grid-cols-[1.2fr_1fr]">
         <Card className="rounded-2xl shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Recent Orders</CardTitle>
-            <CardDescription>Your latest visible orders.</CardDescription>
+            <CardTitle className="text-lg">Your Orders</CardTitle>
+            <CardDescription>Orders placed for your lab only.</CardDescription>
           </CardHeader>
           <CardContent>
             {loadingOrders ? (
@@ -1007,11 +1066,11 @@ export default function LabOrderingPage({ currentUser }) {
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Loading recent orders...
               </div>
-            ) : recentOrders.length === 0 ? (
-              <div className="text-sm text-slate-500">No recent orders found.</div>
+            ) : scopedRecentOrders.length === 0 ? (
+              <div className="text-sm text-slate-500">No orders yet. Add items to your cart and submit.</div>
             ) : (
               <div className="space-y-3">
-                {recentOrders.map((order) => (
+                {scopedRecentOrders.map((order) => (
                   <div
                     key={order.orderId}
                     className={`rounded-2xl border bg-white p-4 shadow-sm ${

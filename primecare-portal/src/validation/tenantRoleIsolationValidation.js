@@ -317,6 +317,38 @@ function auditRoleScope(currentUser, rows, spec) {
     }
   }
 
+  if (role === ROLES.LAB && spec.id === "collections") {
+    const mapped = rows.map((r) => ({
+      labId: r.lab_id,
+      labName: r.lab_name,
+    }));
+    const scoped = filterCollectionsForUser(mapped, currentUser);
+    if (scoped.length !== rows.length) {
+      return makeCheck(
+        `role.${spec.id}.lab_account_scope`,
+        `Lab account scope: ${spec.label}`,
+        "fail",
+        `${rows.length - scoped.length} AR row(s) visible outside own lab`,
+        { ownLabOnly: true },
+        {
+          rowCount: rows.length,
+          authorizedCount: scoped.length,
+          firstDivergenceLayer: "rls",
+        }
+      );
+    }
+    if (rows.length > 1) {
+      return makeCheck(
+        `role.${spec.id}.lab_account_single`,
+        `Lab account scope: ${spec.label}`,
+        "warn",
+        `Lab role sees ${rows.length} AR rows; expected at most one for account view`,
+        { maxRows: 1 },
+        { rowCount: rows.length, firstDivergenceLayer: "rls" }
+      );
+    }
+  }
+
   if (role === ROLES.LAB && spec.scope === "lab_scoped") {
     const profileLabId = labIdKey(currentUser?.labId || currentUser?.lab_id || "");
     const profileName = String(currentUser?.name || currentUser?.labName || "").trim().toLowerCase();

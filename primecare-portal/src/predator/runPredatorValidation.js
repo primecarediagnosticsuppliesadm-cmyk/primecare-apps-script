@@ -8,6 +8,8 @@ import { validateQualificationModule } from "@/predator/validators/qualification
 import { validateAgentVisitsModule } from "@/predator/validators/agentVisitsValidator.js";
 import { validateTenantRoleIsolationModule } from "@/predator/validators/tenantRoleIsolationValidator.js";
 import { validateNotificationsFoundationModule } from "@/predator/validators/notificationsFoundationValidator.js";
+import { validateLabPortalModule } from "@/predator/validators/labPortalValidator.js";
+import { ROLES } from "@/config/roles.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
 import { ADMIN_DASHBOARD_MODULE } from "@/predator/adminDashboardUiSnapshot.js";
 import {
@@ -22,6 +24,7 @@ import {
  * @property {{ rowCount?: number }|null} [qualificationReview]
  * @property {{ recentVisitsCount?: number, todayVisits?: number }|null} [agentVisits]
  * @property {Record<string, { db?: number, api?: number, ui?: number }>|null} [tenantRoleIsolation]
+ * @property {object|null} [labPortal]
  */
 
 /**
@@ -38,14 +41,22 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
     predatorStore.setActiveTenantContext(ctx);
 
     const modules = [];
+    const isLabRole = ctx.role === ROLES.LAB;
 
-    const storedAdminRendered = predatorStore.getModuleRenderedSnapshot(ADMIN_DASHBOARD_MODULE, ctx);
-    const admin = await validateAdminDashboardModule({
-      ctx,
-      rendered: snapshots.adminDashboard ?? storedAdminRendered?.snapshot ?? null,
-    });
-    predatorStore.setModuleReport("Admin Dashboard", admin.entries, ctx);
-    modules.push(admin);
+    if (isLabRole) {
+      modules.push(skippedModuleForLabRole("Admin Dashboard", ctx));
+    } else {
+      const storedAdminRendered = predatorStore.getModuleRenderedSnapshot(
+        ADMIN_DASHBOARD_MODULE,
+        ctx
+      );
+      const admin = await validateAdminDashboardModule({
+        ctx,
+        rendered: snapshots.adminDashboard ?? storedAdminRendered?.snapshot ?? null,
+      });
+      predatorStore.setModuleReport("Admin Dashboard", admin.entries, ctx);
+      modules.push(admin);
+    }
 
     const storedCollectionsRendered = predatorStore.getModuleRenderedSnapshot(
       COLLECTIONS_MODULE,
@@ -58,24 +69,36 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
     predatorStore.setModuleReport("Collections", collections.entries, ctx);
     modules.push(collections);
 
-    const storedQualificationRendered = predatorStore.getModuleRenderedSnapshot(
-      QUALIFICATION_REVIEW_MODULE,
-      ctx
-    );
-    const qualification = await validateQualificationModule({
+    const labPortal = await validateLabPortalModule({
       ctx,
-      rendered: snapshots.qualificationReview ?? storedQualificationRendered?.snapshot ?? null,
+      rendered: snapshots.labPortal ?? null,
     });
-    predatorStore.setModuleReport("Qualification Review", qualification.entries, ctx);
-    modules.push(qualification);
+    predatorStore.setModuleReport("Lab Portal", labPortal.entries, ctx);
+    modules.push(labPortal);
 
-    const agentVisits = await validateAgentVisitsModule({
-      ctx,
-      currentUser,
-      rendered: snapshots.agentVisits ?? null,
-    });
-    predatorStore.setModuleReport("Agent Visits", agentVisits.entries, ctx);
-    modules.push(agentVisits);
+    if (isLabRole) {
+      modules.push(skippedModuleForLabRole("Qualification Review", ctx));
+      modules.push(skippedModuleForLabRole("Agent Visits", ctx));
+    } else {
+      const storedQualificationRendered = predatorStore.getModuleRenderedSnapshot(
+        QUALIFICATION_REVIEW_MODULE,
+        ctx
+      );
+      const qualification = await validateQualificationModule({
+        ctx,
+        rendered: snapshots.qualificationReview ?? storedQualificationRendered?.snapshot ?? null,
+      });
+      predatorStore.setModuleReport("Qualification Review", qualification.entries, ctx);
+      modules.push(qualification);
+
+      const agentVisits = await validateAgentVisitsModule({
+        ctx,
+        currentUser,
+        rendered: snapshots.agentVisits ?? null,
+      });
+      predatorStore.setModuleReport("Agent Visits", agentVisits.entries, ctx);
+      modules.push(agentVisits);
+    }
 
     const isolation = await validateTenantRoleIsolationModule({
       ctx,
@@ -150,6 +173,9 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
     case "Notifications":
       result = await validateNotificationsFoundationModule({ ctx });
       break;
+    case "Lab Portal":
+      result = await validateLabPortalModule({ ctx, rendered: snapshot });
+      break;
     default:
       result = {
         module: moduleName,
@@ -173,6 +199,34 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
     }
   }
   return result;
+}
+
+/**
+ * Map module snapshots to cross-layer isolation probes (mutable counts).
+ * @param {PredatorRenderedSnapshots} snapshots
+ */
+/**
+ * @param {string} moduleName
+ * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} ctx
+ */
+function skippedModuleForLabRole(moduleName, ctx) {
+  const entry = createPredatorEntry({
+    status: "PASS",
+    module: moduleName,
+    step: "lab_role.skip",
+    rootCauseGuess: "Not applicable to Lab Portal V1",
+    suggestedFix: "Use Lab Portal, Payments & Account, and Lab Ordering validators for lab QA",
+    tenantId: ctx.tenantId,
+    role: ctx.role,
+    userId: ctx.userId,
+  });
+  const entries = [entry];
+  predatorStore.setModuleReport(moduleName, entries, ctx);
+  return {
+    module: moduleName,
+    summary: summarizePredatorEntries(entries),
+    entries,
+  };
 }
 
 /**

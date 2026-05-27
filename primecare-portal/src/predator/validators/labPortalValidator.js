@@ -1,0 +1,206 @@
+import { getLabRecentOrdersRead } from "@/api/primecareSupabaseApi.js";
+import { supabase } from "@/api/supabaseClient.js";
+import { getMenuForRole } from "@/config/menuConfig.js";
+import { ROLES } from "@/config/roles.js";
+import { labIdKey } from "@/utils/labId.js";
+import { createPredatorEntry, summarizePredatorEntries } from "@/predator/predatorSchema.js";
+import { predatorTrace } from "@/predator/predatorTiming.js";
+
+const LAB_MENU_KEYS = new Set(["labOrders", "labAccount", "notifications"]);
+const FORBIDDEN_LAB_MENU_KEYS = new Set([
+  "collections",
+  "dashboard",
+  "visits",
+  "labs",
+  "orders",
+  "inventory",
+  "risk",
+  "purchase",
+  "qualificationReview",
+  "predatorDebug",
+]);
+
+/**
+ * @param {Object} params
+ * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} params.ctx
+ * @param {object|null} [params.rendered]
+ */
+export async function validateLabPortalModule({ ctx, rendered = null }) {
+  return predatorTrace("Lab Portal", "validation.full", async () => {
+    const entries = [];
+
+    if (ctx.role !== ROLES.LAB) {
+      entries.push(
+        createPredatorEntry({
+          status: "PASS",
+          module: "Lab Portal",
+          step: "role.skip",
+          rootCauseGuess: "Lab portal checks apply to lab role only",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+      return { module: "Lab Portal", summary: summarizePredatorEntries(entries), entries };
+    }
+
+    const menu = getMenuForRole(ROLES.LAB).map((item) => item.key);
+    const forbiddenVisible = menu.filter((key) => FORBIDDEN_LAB_MENU_KEYS.has(key));
+    const missingRequired = ["labOrders", "labAccount"].filter((key) => !menu.includes(key));
+
+    entries.push(
+      createPredatorEntry({
+        status:
+          forbiddenVisible.length === 0 && missingRequired.length === 0 ? "PASS" : "FAIL",
+        module: "Lab Portal",
+        step: "menu.lab_safe",
+        expected: Array.from(LAB_MENU_KEYS),
+        actual: { menu, forbiddenVisible, missingRequired },
+        rootCauseGuess:
+          forbiddenVisible.length > 0
+            ? "Lab sidebar exposes admin/agent pages"
+            : missingRequired.length > 0
+              ? "Lab sidebar missing core lab pages"
+              : "Lab menu is lab-safe",
+        suggestedFix:
+          forbiddenVisible.length > 0
+            ? "Restrict getMenuForRole(lab) to labOrders, labAccount, notifications"
+            : "Grant labAccount and labOrders in PERMISSIONS for LAB",
+        severity: forbiddenVisible.length > 0 ? "high" : "medium",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const profileLabId = labIdKey(ctx.labId || rendered?.labId);
+    entries.push(
+      createPredatorEntry({
+        status: profileLabId ? "PASS" : "WARN",
+        module: "Lab Portal",
+        step: "profile.lab_id",
+        expected: "non-empty labId on profile",
+        actual: { labId: profileLabId || null },
+        rootCauseGuess: profileLabId
+          ? "Lab identity present for RLS scoping"
+          : "Lab user missing labId — ordering and account scope may fail",
+        suggestedFix: profileLabId
+          ? ""
+          : "Set lab_id on profiles row for this lab user",
+        severity: profileLabId ? "low" : "medium",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    if (rendered) {
+      const recentCount = Number(rendered.recentOrdersCount ?? 0);
+      const crossLabOrders = Number(rendered.crossLabOrderCount ?? 0);
+      entries.push(
+        createPredatorEntry({
+          status: crossLabOrders > 0 ? "FAIL" : "PASS",
+          module: "Lab Portal",
+          step: "ordering.own_lab_orders",
+          expected: "0 orders from other labs in UI list",
+          actual: { recentOrdersCount: recentCount, crossLabOrderCount: crossLabOrders },
+          rootCauseGuess:
+            crossLabOrders > 0
+              ? "Lab ordering page shows another lab's orders"
+              : "Recent orders list is lab-scoped in UI",
+          suggestedFix:
+            crossLabOrders > 0
+              ? "Filter getLabRecentOrdersRead results by profile labId in LabOrderingPage"
+              : "",
+          severity: crossLabOrders > 0 ? "critical" : "low",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      entries.push(
+        createPredatorEntry({
+          status: rendered.isLabAccountView ? "PASS" : "FAIL",
+          module: "Lab Portal",
+          step: "account.payments_view",
+          expected: "Payments & Account read-only view",
+          actual: { isLabAccountView: rendered.isLabAccountView },
+          rootCauseGuess: rendered.isLabAccountView
+            ? "Lab account page mode active"
+            : "Lab user may see collections management UI",
+          suggestedFix: "Open labAccount route with viewMode=labAccount",
+          severity: rendered.isLabAccountView ? "low" : "high",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
+
+    if (supabase && profileLabId) {
+      const ordersRes = await getLabRecentOrdersRead(profileLabId);
+      const orders = Array.isArray(ordersRes?.data?.orders) ? ordersRes.data.orders : [];
+      const crossLab = orders.filter((o) => {
+        const rowLab = labIdKey(o.labId || o.lab_id);
+        return rowLab && rowLab !== profileLabId;
+      });
+
+      entries.push(
+        createPredatorEntry({
+          status: crossLab.length > 0 ? "FAIL" : "PASS",
+          module: "Lab Portal",
+          step: "ordering.api_lab_scope",
+          expected: "All recent orders match profile labId",
+          actual: { orderCount: orders.length, crossLabCount: crossLab.length },
+          rootCauseGuess:
+            crossLab.length > 0
+              ? "API returned orders for another lab"
+              : "getLabRecentOrdersRead is lab-scoped",
+          suggestedFix:
+            crossLab.length > 0 ? "Verify orders RLS for lab role" : "",
+          severity: crossLab.length > 0 ? "critical" : "low",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      const directRes = await supabase
+        .from("orders")
+        .select("tenant_id, lab_id")
+        .limit(25);
+      if (!directRes.error && Array.isArray(directRes.data)) {
+        const unauthorized = directRes.data.filter(
+          (r) => labIdKey(r.lab_id) && labIdKey(r.lab_id) !== profileLabId
+        );
+        entries.push(
+          createPredatorEntry({
+            status: unauthorized.length > 0 ? "FAIL" : "PASS",
+            module: "Lab Portal",
+            step: "orders.rls_own_lab",
+            expected: "No other-lab order rows visible to lab JWT",
+            actual: {
+              visibleCount: directRes.data.length,
+              unauthorizedCount: unauthorized.length,
+            },
+            rootCauseGuess:
+              unauthorized.length > 0
+                ? "RLS allows cross-lab order reads"
+                : "Orders table RLS scopes lab to own lab_id",
+            suggestedFix:
+              unauthorized.length > 0
+                ? "Review orders RLS policies (do not weaken other roles)"
+                : "",
+            severity: unauthorized.length > 0 ? "critical" : "low",
+            tenantId: ctx.tenantId,
+            role: ctx.role,
+            userId: ctx.userId,
+          })
+        );
+      }
+    }
+
+    return { module: "Lab Portal", summary: summarizePredatorEntries(entries), entries };
+  });
+}

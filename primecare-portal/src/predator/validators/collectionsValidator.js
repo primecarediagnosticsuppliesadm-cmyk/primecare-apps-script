@@ -169,16 +169,18 @@ export async function validateCollectionsModule({ ctx, rendered = null }) {
       );
     }
 
-    entries.push(
-      ...checkEmptyApiWhenDbHasRows({
-        module: "Collections",
-        step: "collections_list",
-        ctx,
-        dbRowCount: dbArRows,
-        apiCount: apiCollections.length,
-        uiCount: uiCollections,
-      })
-    );
+    if (ctx.role !== ROLES.LAB) {
+      entries.push(
+        ...checkEmptyApiWhenDbHasRows({
+          module: "Collections",
+          step: "collections_list",
+          ctx,
+          dbRowCount: dbArRows,
+          apiCount: apiCollections.length,
+          uiCount: uiCollections,
+        })
+      );
+    }
 
     entries.push(
       ...checkTenantConsistency({
@@ -190,26 +192,59 @@ export async function validateCollectionsModule({ ctx, rendered = null }) {
       })
     );
 
-    const arMismatch = Math.abs(outstandingReceivables - apiOutstanding) > 0.01;
-    entries.push(
-      createPredatorEntry({
-        status: arMismatch ? "FAIL" : "PASS",
-        module: "Collections",
-        step: "outstanding_receivables",
-        expected: outstandingReceivables,
-        actual: { dbComputed: outstandingReceivables, api: apiOutstanding, ui: uiOutstanding },
-        rootCauseGuess: arMismatch
-          ? "API summary.totalOutstanding does not match AR table rollup"
-          : "",
-        suggestedFix: arMismatch
-          ? "Trace getCollectionsRead summarizeCollectionsList vs computeReceivableMetrics"
-          : "",
-        severity: arMismatch ? "high" : "low",
-        tenantId: ctx.tenantId,
-        role: ctx.role,
-        userId: ctx.userId,
-      })
-    );
+    if (ctx.role !== ROLES.LAB) {
+      const arMismatch = Math.abs(outstandingReceivables - apiOutstanding) > 0.01;
+      entries.push(
+        createPredatorEntry({
+          status: arMismatch ? "FAIL" : "PASS",
+          module: "Collections",
+          step: "outstanding_receivables",
+          expected: outstandingReceivables,
+          actual: { dbComputed: outstandingReceivables, api: apiOutstanding, ui: uiOutstanding },
+          rootCauseGuess: arMismatch
+            ? "API summary.totalOutstanding does not match AR table rollup"
+            : "",
+          suggestedFix: arMismatch
+            ? "Trace getCollectionsRead summarizeCollectionsList vs computeReceivableMetrics"
+            : "",
+          severity: arMismatch ? "high" : "low",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    } else {
+      const labUser = {
+        role: ROLES.LAB,
+        labId: renderedInput?.labId ?? ctx.labId,
+        name: renderedInput?.userName ?? ctx.userName,
+      };
+      const scopedApi = filterCollectionsForUser(apiCollections, labUser);
+      const scopedOutstanding = Number(
+        scopedApi[0]?.outstandingAmount ?? scopedApi[0]?.outstanding_amount ?? 0
+      );
+      const uiOk =
+        uiOutstanding == null || Math.abs(uiOutstanding - scopedOutstanding) <= 0.01;
+      entries.push(
+        createPredatorEntry({
+          status: uiOk ? "PASS" : "FAIL",
+          module: "Collections",
+          step: "lab.account_outstanding",
+          expected: scopedOutstanding,
+          actual: { apiScoped: scopedOutstanding, ui: uiOutstanding },
+          rootCauseGuess: uiOk
+            ? "Lab account outstanding matches scoped API row"
+            : "UI outstanding does not match own-lab scoped API",
+          suggestedFix: uiOk
+            ? ""
+            : "Ensure CollectionsPage uses filterCollectionsForUser for lab account KPIs",
+          severity: uiOk ? "low" : "high",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
 
     if (arRes.error) {
       entries.push(

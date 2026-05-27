@@ -45,8 +45,9 @@ export function normalizePageKey(page) {
  */
 export function resolvePageKeyForRole(role, page) {
   const key = normalizePageKey(page);
-  if (role === ROLES.LAB && key === "collections") {
-    return "labAccount";
+  if (role === ROLES.LAB) {
+    if (key === "collections") return "labAccount";
+    if (key === "orders") return "labOrders";
   }
   return key;
 }

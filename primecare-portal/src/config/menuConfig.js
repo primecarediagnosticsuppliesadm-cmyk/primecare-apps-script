@@ -1,6 +1,10 @@
 import { PERMISSIONS } from "./permissions";
+import { ROLES } from "./roles";
 import { ALLOW_EXPERIMENTAL_MODULES, IS_QA, IS_PROD } from "./environment";
 import { isPredatorEnabled } from "@/predator/predatorGuards.js";
+
+/** Lab sidebar: ordering, account, notifications only. */
+const LAB_MENU_ORDER = ["labOrders", "labAccount", "notifications"];
 
 /**
  * Central Menu Configuration for PrimeCare Portal
@@ -69,12 +73,24 @@ export function isPageVisibleInCurrentEnvironment(pageKey) {
  * Returns menu filtered by role
  */
 export function getMenuForRole(role) {
-  return MENU_ITEMS.filter((item) => {
+  const normalizedRole = String(role || "").toLowerCase();
+  const items = MENU_ITEMS.filter((item) => {
     if (item.key === "predatorDebug" && !isPredatorEnabled()) return false;
+    if (normalizedRole === ROLES.LAB && !LAB_MENU_ORDER.includes(item.key)) {
+      return false;
+    }
     return (
       PERMISSIONS[item.key]?.includes(role) && isPageVisibleInCurrentEnvironment(item.key)
     );
   });
+
+  if (normalizedRole === ROLES.LAB) {
+    return [...items].sort(
+      (a, b) => LAB_MENU_ORDER.indexOf(a.key) - LAB_MENU_ORDER.indexOf(b.key)
+    );
+  }
+
+  return items;
 }
 
 /**

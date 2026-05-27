@@ -109,6 +109,10 @@ function isLabAccountViewMode(viewMode, role) {
   return viewMode === "labAccount" || String(role || "").toLowerCase() === ROLES.LAB;
 }
 
+function accountCopy(isLabAccount, management, account) {
+  return isLabAccount ? account : management;
+}
+
 function SummaryMetric({ label, children }) {
   return (
     <div className="min-w-0">
@@ -132,7 +136,13 @@ function CollectionsLoading() {
   );
 }
 
-function CollectionSummaryRow({ item, expanded, onToggleExpand, readOnly = false }) {
+function CollectionSummaryRow({ item, expanded, onToggleExpand, readOnly = false, copy }) {
+  const labels = copy || {
+    expandDetails: "Expand collection details",
+    collapseDetails: "Collapse collection details",
+    viewHistory: "View payment history",
+    recordPayment: "Record payment / notes",
+  };
   const outstanding = Number(item.outstandingAmount || 0);
   const overdueDays = Number(item.overdueDays || 0);
   const agent = displayAgentName(item.assignedAgent);
@@ -153,7 +163,7 @@ function CollectionSummaryRow({ item, expanded, onToggleExpand, readOnly = false
           className="mt-0.5 shrink-0 rounded-md p-1 text-slate-500 hover:bg-slate-100"
           aria-expanded={expanded}
           aria-controls={`collection-detail-${labIdKey(item.labId)}`}
-          aria-label={expanded ? "Collapse collection details" : "Expand collection details"}
+          aria-label={expanded ? labels.collapseDetails : labels.expandDetails}
         >
           {expanded ? (
             <ChevronUp className="h-5 w-5" />
@@ -222,11 +232,7 @@ function CollectionSummaryRow({ item, expanded, onToggleExpand, readOnly = false
           className="h-10 w-full rounded-lg"
           onClick={onToggleExpand}
         >
-          {expanded
-            ? "Close details"
-            : readOnly
-              ? "View payment history"
-              : "Record payment / notes"}
+          {expanded ? "Close details" : readOnly ? labels.viewHistory : labels.recordPayment}
         </Button>
       </div>
     </div>
@@ -237,6 +243,7 @@ function CollectionExpandedPanel({
   collection,
   history,
   detailsLoading,
+  copy,
   amountCollected,
   setAmountCollected,
   paymentMode,
@@ -259,7 +266,7 @@ function CollectionExpandedPanel({
       <div className="border-t border-slate-200 bg-slate-50/80 px-3 py-6">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Loading collection details…
+          {copy?.loadingDetails || "Loading collection details…"}
         </div>
       </div>
     );
@@ -268,7 +275,9 @@ function CollectionExpandedPanel({
   if (!collection) {
     return (
       <div className="border-t border-slate-200 bg-slate-50/80 px-3 py-6">
-        <p className="text-sm text-muted-foreground">No collection details found.</p>
+        <p className="text-sm text-muted-foreground">
+          {copy?.noDetails || "No collection details found."}
+        </p>
       </div>
     );
   }
@@ -478,6 +487,7 @@ function CollectionListItem({
   onSave,
   onCompleteTask,
   readOnly = false,
+  copy = null,
 }) {
   return (
     <Card className="overflow-hidden rounded-lg border-border shadow-sm">
@@ -486,6 +496,7 @@ function CollectionListItem({
         expanded={expanded}
         onToggleExpand={onToggleExpand}
         readOnly={readOnly}
+        copy={copy}
       />
       {expanded ? (
         <CollectionExpandedPanel
@@ -496,6 +507,7 @@ function CollectionListItem({
           onSave={onSave}
           onCompleteTask={onCompleteTask}
           readOnly={readOnly}
+          copy={copy}
           {...formProps}
         />
       ) : null}
@@ -505,6 +517,17 @@ function CollectionListItem({
 
 export default function CollectionsPage({ currentUser, authToken, viewMode }) {
   const isLabAccount = isLabAccountViewMode(viewMode, currentUser?.role);
+  const accountLabels = useMemo(() => {
+    if (!isLabAccount) return null;
+    return {
+      expandDetails: "Expand account details",
+      collapseDetails: "Collapse account details",
+      viewHistory: "View payment history",
+      recordPayment: "View payment history",
+      loadingDetails: "Loading account details…",
+      noDetails: "No account details found.",
+    };
+  }, [isLabAccount]);
   const { showToast } = usePortalToast();
   const [summary, setSummary] = useState({
     totalOutstanding: 0,
@@ -549,6 +572,17 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
   );
 
   usePredatorModuleValidation("Collections", currentUser, predatorSnapshot, !loading);
+
+  usePredatorModuleValidation(
+    "Lab Portal",
+    currentUser,
+    {
+      isLabAccountView: isLabAccount,
+      labId: currentUser?.labId,
+      userName: currentUser?.name,
+    },
+    !loading && isLabAccount
+  );
 
   useEffect(() => {
     if (loading) return;
@@ -609,7 +643,14 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
         setCollections(rows);
       } catch (err) {
         console.warn("CollectionsPage loadCollections:", err);
-        setLoadError(err?.message || "Failed to load collections");
+        setLoadError(
+          err?.message ||
+            accountCopy(
+              isLabAccount,
+              "Failed to load collections",
+              "Failed to load account information"
+            )
+        );
         setSummary({
           totalOutstanding: 0,
           overdueCount: 0,
@@ -1189,6 +1230,7 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
                 onSave={handleSaveCollection}
                 onCompleteTask={handleCompleteLinkedTask}
                 readOnly={isLabAccount}
+                copy={accountLabels}
               />
             );
           })}
