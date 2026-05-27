@@ -192,4 +192,119 @@ export const predatorStore = {
       .filter(([k]) => k.startsWith(prefix))
       .map(([, v]) => v);
   },
+
+  /**
+   * Metadata-only tenant operations summary (no business records).
+   * Safe for operational visibility cards.
+   */
+  getTenantOperationalSummaries() {
+    /** @type {Map<string, {
+     * tenantKey: string,
+     * tenantId: string,
+     * userId: string,
+     * moduleCount: number,
+     * pass: number,
+     * warn: number,
+     * fail: number,
+     * latestValidationAt: string|null,
+     * errorCount: number,
+     * slowTimingCount: number,
+     * avgValidationMs: number|null,
+   }>} */
+    const byTenant = new Map();
+
+    for (const report of moduleReportsByTenant.values()) {
+      const [tenantId = "_no_tenant", userId = "_no_user"] = String(report.tenantKey).split("::");
+      if (!byTenant.has(report.tenantKey)) {
+        byTenant.set(report.tenantKey, {
+          tenantKey: report.tenantKey,
+          tenantId,
+          userId,
+          moduleCount: 0,
+          pass: 0,
+          warn: 0,
+          fail: 0,
+          latestValidationAt: null,
+          errorCount: 0,
+          slowTimingCount: 0,
+          avgValidationMs: null,
+        });
+      }
+      const row = byTenant.get(report.tenantKey);
+      row.moduleCount += 1;
+      row.pass += report.summary?.pass || 0;
+      row.warn += report.summary?.warn || 0;
+      row.fail += report.summary?.fail || 0;
+      row.latestValidationAt =
+        !row.latestValidationAt || String(report.updatedAt) > String(row.latestValidationAt)
+          ? report.updatedAt
+          : row.latestValidationAt;
+    }
+
+    const timingAgg = new Map();
+    for (const t of timingEntries) {
+      const key = `${t.tenantId || "_no_tenant"}::${t.userId || "_no_user"}`;
+      if (!timingAgg.has(key)) timingAgg.set(key, { sum: 0, count: 0, slow: 0 });
+      const agg = timingAgg.get(key);
+      if (typeof t.durationMs === "number") {
+        agg.sum += t.durationMs;
+        agg.count += 1;
+        if (t.durationMs > 2000) agg.slow += 1;
+      }
+    }
+
+    const errorAgg = new Map();
+    for (const e of errorEntries) {
+      const key = `${e.tenantId || "_no_tenant"}::${e.userId || "_no_user"}`;
+      errorAgg.set(key, (errorAgg.get(key) || 0) + 1);
+    }
+
+    for (const [key, agg] of timingAgg.entries()) {
+      if (!byTenant.has(key)) {
+        const [tenantId = "_no_tenant", userId = "_no_user"] = String(key).split("::");
+        byTenant.set(key, {
+          tenantKey: key,
+          tenantId,
+          userId,
+          moduleCount: 0,
+          pass: 0,
+          warn: 0,
+          fail: 0,
+          latestValidationAt: null,
+          errorCount: 0,
+          slowTimingCount: 0,
+          avgValidationMs: null,
+        });
+      }
+      const row = byTenant.get(key);
+      row.slowTimingCount = agg.slow;
+      row.avgValidationMs = agg.count > 0 ? Math.round(agg.sum / agg.count) : null;
+    }
+
+    for (const [key, count] of errorAgg.entries()) {
+      if (!byTenant.has(key)) {
+        const [tenantId = "_no_tenant", userId = "_no_user"] = String(key).split("::");
+        byTenant.set(key, {
+          tenantKey: key,
+          tenantId,
+          userId,
+          moduleCount: 0,
+          pass: 0,
+          warn: 0,
+          fail: 0,
+          latestValidationAt: null,
+          errorCount: 0,
+          slowTimingCount: 0,
+          avgValidationMs: null,
+        });
+      }
+      byTenant.get(key).errorCount = count;
+    }
+
+    return [...byTenant.values()].sort((a, b) => {
+      if (a.fail !== b.fail) return b.fail - a.fail;
+      if (a.warn !== b.warn) return b.warn - a.warn;
+      return String(b.latestValidationAt || "").localeCompare(String(a.latestValidationAt || ""));
+    });
+  },
 };
