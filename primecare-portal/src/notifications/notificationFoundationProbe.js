@@ -61,23 +61,10 @@ export function classifyNotificationTableError(message) {
 export async function resolveNotificationFoundationState() {
   const enabled = isNotificationsFoundationEnabled();
 
-  if (!enabled) {
-    return {
-      mode: "disabled",
-      enabled: false,
-      tablesExist: false,
-      probeRequired: false,
-      message: DISABLED_MESSAGE,
-      suggestedFix:
-        "Run notifications_foundation_migration.sql, then set VITE_NOTIFICATIONS_FOUNDATION_ENABLED=true",
-      error: null,
-    };
-  }
-
   if (!supabase) {
     return {
       mode: "disabled",
-      enabled: true,
+      enabled,
       tablesExist: false,
       probeRequired: false,
       message: "Supabase client not configured",
@@ -89,6 +76,18 @@ export async function resolveNotificationFoundationState() {
   const res = await supabase.from("notification_events").select("event_id").limit(1);
 
   if (!res.error) {
+    if (!enabled) {
+      return {
+        mode: "disabled",
+        enabled: false,
+        tablesExist: true,
+        probeRequired: false,
+        message: DISABLED_MESSAGE,
+        suggestedFix:
+          "Set VITE_NOTIFICATIONS_FOUNDATION_ENABLED=true to run full notification RLS probes",
+        error: null,
+      };
+    }
     return {
       mode: "ready",
       enabled: true,
@@ -105,7 +104,7 @@ export async function resolveNotificationFoundationState() {
   if (kind === "missing_table") {
     return {
       mode: "setup_pending",
-      enabled: true,
+      enabled,
       tablesExist: false,
       probeRequired: false,
       message: SETUP_PENDING_MESSAGE,
@@ -117,7 +116,7 @@ export async function resolveNotificationFoundationState() {
   if (kind === "schema_cache") {
     return {
       mode: "schema_cache",
-      enabled: true,
+      enabled,
       tablesExist: false,
       probeRequired: false,
       message: SCHEMA_CACHE_MESSAGE,
@@ -128,11 +127,13 @@ export async function resolveNotificationFoundationState() {
 
   return {
     mode: "probe_error",
-    enabled: true,
-    tablesExist: true,
-    probeRequired: true,
+    enabled,
+    tablesExist: false,
+    probeRequired: enabled,
     message: res.error.message || "Notification table probe failed",
-    suggestedFix: "Verify RLS policies and authenticated role access",
+    suggestedFix: enabled
+      ? "Verify RLS policies and authenticated role access"
+      : "Apply migration first, then enable VITE_NOTIFICATIONS_FOUNDATION_ENABLED",
     error: res.error.message,
   };
 }

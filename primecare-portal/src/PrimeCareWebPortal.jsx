@@ -102,6 +102,10 @@ export default function PrimeCareWebPortal({
           />
         );
 
+      case "notifications":
+      case "notification-center":
+        return <NotificationCenterPage currentUser={currentUser} />;
+
       default:
         return (
           <PlaceholderCard
@@ -305,6 +309,10 @@ export default function PrimeCareWebPortal({
             viewMode="labAccount"
           />
         );
+
+      case "notifications":
+      case "notification-center":
+        return <NotificationCenterPage currentUser={currentUser} />;
 
       default:
         return (

@@ -18,6 +18,8 @@ import { Bell, Loader2, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { isNotificationsFoundationEnabled } from "@/config/notificationFoundation.js";
+import { resolveNotificationFoundationState } from "@/notifications/notificationFoundationProbe.js";
+import { ROLES } from "@/config/roles";
 
 function severityVariant(severity) {
   const s = String(severity || "info").toLowerCase();
@@ -46,13 +48,26 @@ function payloadSummary(payload) {
   return keys.map((k) => `${k}: ${JSON.stringify(payload[k])}`).join(" · ");
 }
 
+function roleScopeHint(role) {
+  const r = String(role || "").toLowerCase();
+  if (r === ROLES.AGENT) {
+    return "Assigned labs and targeted events only (RLS-scoped).";
+  }
+  if (r === ROLES.LAB) {
+    return "Your lab account events only (RLS-scoped).";
+  }
+  return "Tenant-wide internal event log (admin/executive view).";
+}
+
 export default function NotificationCenterPage({ currentUser }) {
   const tenantId = currentUser?.tenantId ?? currentUser?.tenant_id ?? null;
+  const role = String(currentUser?.role || "").toLowerCase();
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [updatingId, setUpdatingId] = useState("");
+  const [foundationState, setFoundationState] = useState(null);
 
   const [severity, setSeverity] = useState("");
   const [status, setStatus] = useState("");
@@ -89,6 +104,16 @@ export default function NotificationCenterPage({ currentUser }) {
     loadRows();
   }, [loadRows]);
 
+  useEffect(() => {
+    let cancelled = false;
+    resolveNotificationFoundationState().then((state) => {
+      if (!cancelled) setFoundationState(state);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   usePredatorModuleValidation(
     "Notifications",
     currentUser,
@@ -96,6 +121,10 @@ export default function NotificationCenterPage({ currentUser }) {
       notificationCenterLoaded: !loading,
       eventCount: rows.length,
       foundationEnabled: isNotificationsFoundationEnabled(),
+      foundationMode: foundationState?.mode,
+      isLabAccountView: role === ROLES.LAB,
+      labId: currentUser?.labId,
+      userName: currentUser?.name,
     },
     !loading
   );
@@ -132,7 +161,7 @@ export default function NotificationCenterPage({ currentUser }) {
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Internal event log (in-app and placeholder channels only — no live WhatsApp, SMS, or
-            email).
+            email). {roleScopeHint(role)}
           </p>
         </div>
         <Button type="button" variant="outline" onClick={loadRows} disabled={loading}>
@@ -228,6 +257,21 @@ export default function NotificationCenterPage({ currentUser }) {
         </p>
       </Card>
 
+      {foundationState?.mode === "setup_pending" ||
+      foundationState?.mode === "schema_cache" ||
+      foundationState?.mode === "disabled" ? (
+        <div
+          role="status"
+          className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-900 dark:text-sky-100"
+        >
+          <p className="font-medium">Notification Foundation — setup pending</p>
+          <p className="mt-1 text-xs opacity-90">{foundationState.message}</p>
+          {foundationState.suggestedFix ? (
+            <p className="mt-2 text-xs">{foundationState.suggestedFix}</p>
+          ) : null}
+        </div>
+      ) : null}
+
       {error ? (
         <div
           role="alert"
@@ -236,7 +280,7 @@ export default function NotificationCenterPage({ currentUser }) {
           {error}
           {String(error).toLowerCase().includes("does not exist") ? (
             <p className="mt-2 text-xs">
-              Run `notifications_foundation_migration.sql` in Supabase if tables are missing.
+              Run `primecare-portal/supabase/sql/notifications_foundation_migration.sql` in Supabase.
             </p>
           ) : null}
         </div>

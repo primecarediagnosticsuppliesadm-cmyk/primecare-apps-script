@@ -3809,15 +3809,19 @@ export async function createOrderWrite(payload = {}) {
       }
     }
 
+    const notifyBase = {
+      sourceModule: "orders",
+      sourceId: order_id,
+      tenantId: tenant_id,
+      targetLabId: lab_id,
+      targetRole: "admin",
+      severity: "info",
+    };
+
     fireNotificationEvent(
       {
+        ...notifyBase,
         eventType: "order_created",
-        sourceModule: "orders",
-        sourceId: order_id,
-        tenantId: tenant_id,
-        targetLabId: lab_id,
-        targetRole: "admin",
-        severity: "info",
         payload: {
           orderId: order_id,
           labId: lab_id,
@@ -3828,6 +3832,23 @@ export async function createOrderWrite(payload = {}) {
       },
       "createOrderWrite"
     );
+
+    if (str(status).toLowerCase() === "fulfilled") {
+      fireNotificationEvent(
+        {
+          ...notifyBase,
+          eventType: "order_fulfilled",
+          severity: "medium",
+          payload: {
+            orderId: order_id,
+            labId: lab_id,
+            totalAmount: total_amount,
+            status: "fulfilled",
+          },
+        },
+        "createOrderWrite"
+      );
+    }
 
     return {
       success: true,

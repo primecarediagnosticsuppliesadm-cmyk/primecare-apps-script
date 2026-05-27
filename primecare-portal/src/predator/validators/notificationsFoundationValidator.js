@@ -4,6 +4,7 @@ import { checkTenantConsistency } from "@/predator/predatorChecks.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
 import { PLACEHOLDER_CHANNELS } from "@/notifications/notificationConstants.js";
 import {
+  classifyNotificationTableError,
   createNotificationFoundationPredatorEntry,
   resolveNotificationFoundationState,
   shouldSkipNotificationIsolationProbes,
@@ -105,20 +106,35 @@ export async function validateNotificationsFoundationModule({ ctx }) {
           : "tenant_id";
       const res = await supabase.from(table).select(selectCols).limit(25);
       if (res.error) {
-        entries.push(
-          createPredatorEntry({
-            status: "WARN",
-            module: "Notifications",
-            step: `tenant_isolation.${table}.probe`,
-            actual: res.error.message,
-            rootCauseGuess: "RLS or schema probe failed after foundation reported ready",
-            suggestedFix: "Verify notifications_foundation_migration.sql and RLS policies",
-            severity: "medium",
-            tenantId: ctx.tenantId,
-            role: ctx.role,
-            userId: ctx.userId,
-          })
-        );
+        const errKind = classifyNotificationTableError(res.error.message);
+        if (errKind === "missing_table" || errKind === "schema_cache") {
+          entries.push(
+            infoEntry(ctx, {
+              step: `tenant_isolation.${table}.setup_pending`,
+              rootCauseGuess:
+                errKind === "missing_table"
+                  ? "Notification table not installed"
+                  : "Notification table not in PostgREST schema cache",
+              suggestedFix: "Run notifications_foundation_migration.sql",
+              actual: { error: res.error.message, table },
+            })
+          );
+        } else {
+          entries.push(
+            createPredatorEntry({
+              status: "WARN",
+              module: "Notifications",
+              step: `tenant_isolation.${table}.probe`,
+              actual: res.error.message,
+              rootCauseGuess: "RLS or schema probe failed after foundation reported ready",
+              suggestedFix: "Verify notifications_foundation_migration.sql and RLS policies",
+              severity: "medium",
+              tenantId: ctx.tenantId,
+              role: ctx.role,
+              userId: ctx.userId,
+            })
+          );
+        }
         continue;
       }
 
