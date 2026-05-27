@@ -154,14 +154,14 @@ export function finalizeModuleDiagnosis({ module, ctx, metrics }) {
   return { diagnosis, extraEntries };
 }
 
-function stateLayer(metricId, module, snapValue) {
+function stateLayer(metricId, module, snapValue, uiValue) {
   const traced = getLatestUiStateValue(module, metricId);
-  const value = snapValue ?? traced ?? null;
+  const value = snapValue ?? uiValue ?? traced ?? null;
   return {
     layerId: "state",
     label: "React state",
     value,
-    meta: traced != null && snapValue != null && traced !== snapValue ? { drift: true } : undefined,
+    meta: traced != null && uiValue != null && traced !== uiValue ? { drift: true } : undefined,
   };
 }
 
@@ -203,7 +203,12 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
       layers: [
         { layerId: "rls", label: "AR rollup (DB)", value: snap.arOutstanding, meta: { supporting: true } },
         { layerId: "api", label: "API executive.outstandingReceivables", value: snap.apiOutstanding },
-        stateLayer("outstanding_receivables", "Admin Dashboard", snap.stateOutstanding ?? snap.uiOutstanding),
+        stateLayer(
+          "outstanding_receivables",
+          "Admin Dashboard",
+          snap.stateOutstanding,
+          snap.uiOutstanding
+        ),
         { layerId: "ui", label: "Rendered executive", value: snap.uiOutstanding },
       ],
     }),
@@ -216,7 +221,7 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
       layers: [
         { layerId: "rls", label: "Visits rows", value: snap.visitsRowCount, meta: { supporting: true } },
         { layerId: "api", label: "API summary", value: snap.apiRecentVisits },
-        stateLayer("recent_visits", "Admin Dashboard", snap.stateRecentVisits ?? snap.uiRecentVisits),
+        stateLayer("recent_visits", "Admin Dashboard", snap.stateRecentVisits, snap.uiRecentVisits),
         { layerId: "ui", label: "Rendered UI", value: snap.uiRecentVisits },
       ],
     }),
@@ -229,7 +234,7 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
       layers: [
         { layerId: "rls", label: "Inventory rows", value: snap.inventorySkus, meta: { supporting: true } },
         { layerId: "api", label: "API summary.stockStats.totalSkus", value: snap.apiInventorySkus },
-        stateLayer("inventory_skus", "Admin Dashboard", snap.stateInventorySkus ?? snap.uiInventorySkus),
+        stateLayer("inventory_skus", "Admin Dashboard", snap.stateInventorySkus, snap.uiInventorySkus),
         { layerId: "ui", label: "Rendered stockStats", value: snap.uiInventorySkus },
       ],
     }),
@@ -242,7 +247,7 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx) {
       layers: [
         { layerId: "rls", label: "Revenue compute (DB)", value: snap.totalSoldValue, meta: { supporting: true } },
         { layerId: "api", label: "API summary.totalSoldValue", value: snap.apiTotalSold },
-        stateLayer("total_sold_value", "Admin Dashboard", snap.stateTotalSold ?? snap.uiTotalSold),
+        stateLayer("total_sold_value", "Admin Dashboard", snap.stateTotalSold, snap.uiTotalSold),
         { layerId: "ui", label: "Rendered summary", value: snap.uiTotalSold },
       ],
     }),

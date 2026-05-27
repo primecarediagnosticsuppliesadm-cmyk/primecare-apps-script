@@ -61,7 +61,12 @@ export function recordPredatorUiMetricSnapshot({
     const nextState = num(state);
     const nextRender = num(render);
 
-    if (prevApi != null && prevApi > 0 && nextState === 0) {
+    if (
+      prevApi != null &&
+      prevApi > 0 &&
+      nextState === 0 &&
+      source !== "usePredatorUiSyncTrace"
+    ) {
       recordPredatorStateTransition({
         module,
         metricId,
@@ -397,7 +402,7 @@ export function recordAdminDashboardApiUiSnapshots(data, source = "getAdminDashb
   const pairs = [
     ["outstanding_receivables", executive.outstandingReceivables],
     ["recent_visits", summary.recentVisits],
-    ["inventory_skus", stock.totalSkus],
+    ["inventory_skus", summary.inventorySkus ?? stock.totalSkus],
     ["total_sold_value", summary.totalSoldValue],
   ];
 

@@ -38,6 +38,7 @@ import {
   applyAdminDashboardModel,
   hasVisibleDashboardKpis,
   normalizeAdminDashboardRead,
+  selectAdminDashboardKpis,
 } from "@/pages/adminDashboardState.js";
 import AdminDashboardQaValidationPanel from "@/components/qa/AdminDashboardQaValidationPanel.jsx";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
@@ -588,12 +589,12 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
 
       applyAdminDashboardModel({
         model,
-        prevSummary: summaryDataRef.current,
-        prevExecutive: executiveDataRef.current,
         setSummaryData,
         setExecutiveData,
         setRecentVisitsData,
         setInsightsData,
+        summaryRef: summaryDataRef,
+        executiveRef: executiveDataRef,
       });
       return;
     }
@@ -612,8 +613,16 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
 
     if (dashboardFresh && executiveFresh) {
       if (loadId !== loadGenerationRef.current) return;
-      setSummaryData(adminDashboardCache.dashboard);
-      setExecutiveData(adminDashboardCache.executive);
+      applyAdminDashboardModel({
+        model: {
+          summary: adminDashboardCache.dashboard,
+          executive: adminDashboardCache.executive,
+        },
+        setSummaryData,
+        setExecutiveData,
+        summaryRef: summaryDataRef,
+        executiveRef: executiveDataRef,
+      });
       return;
     }
 
@@ -701,10 +710,10 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
 
     applyAdminDashboardModel({
       model,
-      prevSummary: summaryDataRef.current,
-      prevExecutive: executiveDataRef.current,
       setSummaryData,
       setExecutiveData,
+      summaryRef: summaryDataRef,
+      executiveRef: executiveDataRef,
     });
   };
 
@@ -816,7 +825,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
         setRefreshing(true);
       }
 
-      await loadPrimaryData({ force: shouldUseQaDirectDashboardRead() || force });
+      await loadPrimaryData({ force });
     } catch (err) {
       console.error(err);
       setErrorMessage(err?.message || "Failed to load admin dashboard");
@@ -873,7 +882,11 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   }, [loading]);
 
   const stockStats = summaryData?.stockStats ?? EMPTY_STOCK_STATS;
-  const dashboardHydrated = Boolean(summaryData && executiveData);
+  const dashboardKpis = useMemo(
+    () => selectAdminDashboardKpis(summaryData, executiveData),
+    [summaryData, executiveData]
+  );
+  const dashboardHydrated = hasVisibleDashboardKpis(summaryData, executiveData);
   const insights = Array.isArray(insightsData?.insights)
     ? insightsData.insights.map(normalizeInsight)
     : [];
@@ -896,13 +909,22 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   const qaValidationSnapshot = useMemo(() => {
     if (!dashboardHydrated) return null;
     return {
-      executive: executiveData,
+      executive: {
+        ...executiveData,
+        outstandingReceivables: dashboardKpis.outstandingReceivables,
+      },
       summary: {
         ...summaryData,
-        stockStats,
+        recentVisits: dashboardKpis.recentVisits,
+        totalSoldValue: dashboardKpis.totalSoldValue,
+        inventorySkus: dashboardKpis.inventorySkus,
+        stockStats: {
+          ...stockStats,
+          totalSkus: dashboardKpis.inventorySkus,
+        },
       },
     };
-  }, [dashboardHydrated, executiveData, summaryData, stockStats]);
+  }, [dashboardHydrated, dashboardKpis, executiveData, summaryData, stockStats]);
 
   const showQaValidationPanel = isQaValidationLayerEnabled();
 
@@ -923,26 +945,26 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     return {
       outstanding_receivables: {
         api: getLatestUiMetricApi("Admin Dashboard", "outstanding_receivables"),
-        state: Number(executiveData?.outstandingReceivables ?? 0),
-        render: Number(executiveData?.outstandingReceivables ?? 0),
+        state: dashboardKpis.outstandingReceivables,
+        render: dashboardKpis.outstandingReceivables,
       },
       recent_visits: {
         api: getLatestUiMetricApi("Admin Dashboard", "recent_visits"),
-        state: Number(summaryData?.recentVisits ?? 0),
-        render: Number(summaryData?.recentVisits ?? 0),
+        state: dashboardKpis.recentVisits,
+        render: dashboardKpis.recentVisits,
       },
       inventory_skus: {
         api: getLatestUiMetricApi("Admin Dashboard", "inventory_skus"),
-        state: Number(stockStats?.totalSkus ?? 0),
-        render: Number(stockStats?.totalSkus ?? 0),
+        state: dashboardKpis.inventorySkus,
+        render: dashboardKpis.inventorySkus,
       },
       total_sold_value: {
         api: getLatestUiMetricApi("Admin Dashboard", "total_sold_value"),
-        state: Number(summaryData?.totalSoldValue ?? 0),
-        render: Number(summaryData?.totalSoldValue ?? 0),
+        state: dashboardKpis.totalSoldValue,
+        render: dashboardKpis.totalSoldValue,
       },
     };
-  }, [dashboardHydrated, executiveData, summaryData, stockStats]);
+  }, [dashboardHydrated, dashboardKpis]);
 
   usePredatorUiSyncTrace("Admin Dashboard", {
     loading,
@@ -997,37 +1019,37 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       <KpiCardGrid columns={6}>
         <KpiCard
           title="Today's Revenue"
-          value={currency(executiveData?.todaysRevenue || 0)}
+          value={currency(dashboardKpis.todaysRevenue)}
           subtitle="Current day visible revenue"
           icon={TrendingUp}
         />
         <KpiCard
           title="Receivables"
-          value={currency(executiveData?.outstandingReceivables || 0)}
+          value={currency(dashboardKpis.outstandingReceivables)}
           subtitle="Outstanding collections"
           icon={Wallet}
         />
         <KpiCard
           title="Credit Risk Labs"
-          value={executiveData?.labsAtCreditRisk || 0}
+          value={dashboardKpis.labsAtCreditRisk}
           subtitle="Labs needing attention"
           icon={ShieldAlert}
         />
         <KpiCard
           title="Near Stockout"
-          value={executiveData?.productsNearStockout || 0}
+          value={dashboardKpis.productsNearStockout}
           subtitle="Critical + reorder items"
           icon={Package}
         />
         <KpiCard
           title="Recent Visits"
-          value={summaryData?.recentVisits || 0}
+          value={dashboardKpis.recentVisits}
           subtitle="Latest field activity"
           icon={Activity}
         />
         <KpiCard
           title="Total Sold Value"
-          value={currency(summaryData?.totalSoldValue || 0)}
+          value={currency(dashboardKpis.totalSoldValue)}
           subtitle="Tracked visit-linked sales"
           icon={Users}
         />
@@ -1048,7 +1070,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
           }
         >
           <KpiCardGrid columns={4}>
-            <KpiCard title="Total SKUs" value={stockStats?.totalSkus || 0} icon={Package} />
+            <KpiCard title="Total SKUs" value={dashboardKpis.inventorySkus} icon={Package} />
             <KpiCard
               title="Critical Items"
               value={stockStats?.criticalItems || 0}

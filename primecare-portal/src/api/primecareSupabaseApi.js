@@ -1728,6 +1728,13 @@ export function normalizeAdminDashboardPayload(data) {
         reorderItems: num(stock.reorderItems ?? stock.reorder_items),
         healthyItems: num(stock.healthyItems ?? stock.healthy_items),
       },
+      inventorySkus: num(
+        s.inventorySkus ??
+          s.inventory_skus ??
+          stock.totalSkus ??
+          stock.total_skus ??
+          stock.inventory_skus
+      ),
       recentVisits: num(s.recentVisits ?? s.recent_visits),
       totalSoldValue: num(s.totalSoldValue ?? s.total_sold_value),
       todayCollections: num(s.todayCollections ?? s.today_collections),
@@ -1743,9 +1750,21 @@ export function normalizeAdminDashboardPayload(data) {
  */
 export function normalizeAdminDashboardReadResult(result) {
   if (!result?.success || !result?.data) return null;
-  const raw = result.data?.data && result.data?.summary == null ? result.data.data : result.data;
+
+  let raw = result.data;
+  if (raw?.data && (raw.summary == null || raw.executive == null)) {
+    raw = raw.data;
+  }
+  if (raw?.payload && (raw.summary == null || raw.executive == null)) {
+    raw = raw.payload;
+  }
   if (!raw?.summary || !raw?.executive) return null;
-  return normalizeAdminDashboardPayload(raw);
+
+  const model = normalizeAdminDashboardPayload(raw);
+  if (!model.summary.inventorySkus && model.summary.stockStats?.totalSkus) {
+    model.summary.inventorySkus = model.summary.stockStats.totalSkus;
+  }
+  return model;
 }
 
 function mapOrderLineToItemShape(row) {
