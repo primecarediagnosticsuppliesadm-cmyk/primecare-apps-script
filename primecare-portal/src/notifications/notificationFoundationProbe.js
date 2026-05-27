@@ -120,7 +120,8 @@ export async function resolveNotificationFoundationState() {
       tablesExist: false,
       probeRequired: false,
       message: SCHEMA_CACHE_MESSAGE,
-      suggestedFix: "Reload Supabase API schema / redeploy PostgREST after migration",
+      suggestedFix:
+        "After applying the migration, refresh Supabase API schema cache (Dashboard → Settings → API → Reload schema) or wait a few minutes for PostgREST schema cache to refresh.",
       error: res.error.message,
     };
   }

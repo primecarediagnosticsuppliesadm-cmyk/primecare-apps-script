@@ -21,6 +21,18 @@ import { isNotificationsFoundationEnabled } from "@/config/notificationFoundatio
 import { resolveNotificationFoundationState } from "@/notifications/notificationFoundationProbe.js";
 import { ROLES } from "@/config/roles";
 
+const LAB_SAFE_EVENT_TYPES = new Set([
+  "order_created",
+  "order_fulfilled",
+  "payment_received",
+  "collection_due",
+]);
+
+function isAdminOrExecutive(role) {
+  const r = String(role || "").toLowerCase();
+  return r === ROLES.ADMIN || r === ROLES.EXECUTIVE;
+}
+
 function severityVariant(severity) {
   const s = String(severity || "info").toLowerCase();
   if (s === "critical" || s === "high") return "destructive";
@@ -54,14 +66,23 @@ function roleScopeHint(role) {
     return "Assigned labs and targeted events only (RLS-scoped).";
   }
   if (r === ROLES.LAB) {
-    return "Your lab account events only (RLS-scoped).";
+    return "Order & payment updates for your lab only.";
   }
   return "Tenant-wide internal event log (admin/executive view).";
+}
+
+function pageTitleForRole(role) {
+  const r = String(role || "").toLowerCase();
+  if (r === ROLES.AGENT) return "My Notifications";
+  if (r === ROLES.LAB) return "Order & Payment Updates";
+  return "Notification Center";
 }
 
 export default function NotificationCenterPage({ currentUser }) {
   const tenantId = currentUser?.tenantId ?? currentUser?.tenant_id ?? null;
   const role = String(currentUser?.role || "").toLowerCase();
+  const showAdminUi = isAdminOrExecutive(role);
+  const showSetupBanner = showAdminUi;
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -81,24 +102,29 @@ export default function NotificationCenterPage({ currentUser }) {
     try {
       const res = await getNotificationEventsRead({
         tenantId,
-        severity: severity || undefined,
-        status: status || undefined,
-        sourceModule: sourceModule || undefined,
-        eventType: eventType || undefined,
-        channel: channel || undefined,
+        severity: showAdminUi ? severity || undefined : undefined,
+        status: showAdminUi ? status || undefined : undefined,
+        sourceModule: showAdminUi ? sourceModule || undefined : undefined,
+        eventType: showAdminUi ? eventType || undefined : undefined,
+        channel: showAdminUi ? channel || undefined : undefined,
         limit: 100,
       });
       if (!res?.success) {
         throw new Error(res?.error || "Failed to load notifications");
       }
-      setRows(Array.isArray(res.data) ? res.data : []);
+      const incoming = Array.isArray(res.data) ? res.data : [];
+      if (role === ROLES.LAB) {
+        setRows(incoming.filter((r) => LAB_SAFE_EVENT_TYPES.has(String(r.event_type || ""))));
+      } else {
+        setRows(incoming);
+      }
     } catch (err) {
       setError(err?.message || "Failed to load notifications");
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [tenantId, severity, status, sourceModule, eventType, channel]);
+  }, [tenantId, severity, status, sourceModule, eventType, channel, role, showAdminUi]);
 
   useEffect(() => {
     loadRows();
@@ -157,7 +183,7 @@ export default function NotificationCenterPage({ currentUser }) {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
             <Bell className="h-6 w-6 text-muted-foreground" />
-            Notification Center
+            {pageTitleForRole(role)}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Internal event log (in-app and placeholder channels only — no live WhatsApp, SMS, or
@@ -174,6 +200,7 @@ export default function NotificationCenterPage({ currentUser }) {
         </Button>
       </header>
 
+      {showAdminUi ? (
       <Card className="p-4">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <label className="text-xs font-medium text-muted-foreground">
@@ -256,10 +283,12 @@ export default function NotificationCenterPage({ currentUser }) {
           {pendingCount} pending · {rows.length} shown (tenant-scoped via RLS)
         </p>
       </Card>
+      ) : null}
 
-      {foundationState?.mode === "setup_pending" ||
-      foundationState?.mode === "schema_cache" ||
-      foundationState?.mode === "disabled" ? (
+      {showSetupBanner &&
+      (foundationState?.mode === "setup_pending" ||
+        foundationState?.mode === "schema_cache" ||
+        foundationState?.mode === "disabled") ? (
         <div
           role="status"
           className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-900 dark:text-sky-100"
@@ -286,6 +315,18 @@ export default function NotificationCenterPage({ currentUser }) {
         </div>
       ) : null}
 
+      {!showAdminUi &&
+      (foundationState?.mode === "setup_pending" || foundationState?.mode === "schema_cache") ? (
+        <EmptyState
+          title={role === ROLES.LAB ? "Updates are not available yet" : "Notifications are not available yet"}
+          description={
+            role === ROLES.LAB
+              ? "Your lab will see order and payment updates here once enabled."
+              : "You’ll see your notifications here once enabled."
+          }
+        />
+      ) : null}
+
       {loading ? (
         <div className="flex items-center justify-center py-16 text-muted-foreground">
           <Loader2 className="mr-2 h-5 w-5 animate-spin" />
@@ -293,8 +334,12 @@ export default function NotificationCenterPage({ currentUser }) {
         </div>
       ) : rows.length === 0 ? (
         <EmptyState
-          title="No notification events"
-          description="Events appear here when modules call createNotificationEvent (e.g. order created, payment received)."
+          title={role === ROLES.LAB ? "No updates yet" : "No notification events"}
+          description={
+            role === ROLES.LAB
+              ? "Order and payment updates for your lab will appear here."
+              : "Events appear here when modules call createNotificationEvent (e.g. order created, payment received)."
+          }
         />
       ) : (
         <div className="space-y-3">
