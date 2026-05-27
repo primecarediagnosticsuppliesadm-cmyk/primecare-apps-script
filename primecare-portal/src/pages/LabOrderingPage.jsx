@@ -22,6 +22,11 @@ import {
   Loader2,
   AlertTriangle,
   PackageX,
+  X,
+  Clock3,
+  Package,
+  FlaskConical,
+  ShieldCheck,
 } from "lucide-react";
 import {
   getLabCatalog,
@@ -104,7 +109,7 @@ function QtyControl({
 function StockBadge({ stockHealth, currentStock }) {
   if (stockHealth === "OUT") {
     return (
-      <Badge variant="destructive" className="gap-1">
+      <Badge variant="destructive" className="gap-1 border-red-300 bg-red-100 text-red-700">
         <PackageX className="h-3 w-3" />
         Out of Stock
       </Badge>
@@ -115,7 +120,7 @@ function StockBadge({ stockHealth, currentStock }) {
     return (
       <Badge
         variant="outline"
-        className="gap-1 border-amber-300 text-amber-700"
+        className="gap-1 border-amber-300 bg-amber-50 text-amber-700"
       >
         <AlertTriangle className="h-3 w-3" />
         Low Stock
@@ -124,14 +129,23 @@ function StockBadge({ stockHealth, currentStock }) {
   }
 
   return (
-    <Badge variant="outline">
-      Stock: {Number(currentStock || 0).toLocaleString()}
+    <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-700">
+      <ShieldCheck className="mr-1 h-3 w-3" />
+      In Stock {Number(currentStock || 0).toLocaleString()}
     </Badge>
   );
 }
 
+function categoryIcon(category) {
+  const c = String(category || "").toLowerCase();
+  if (c.includes("reagent") || c.includes("chemical")) return FlaskConical;
+  if (c.includes("kit") || c.includes("pack")) return Package;
+  return Package;
+}
+
 export default function LabOrderingPage({ currentUser }) {
   const [activeTab, setActiveTab] = useState("catalog");
+  const [isCartOpen, setIsCartOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [catalog, setCatalog] = useState([]);
@@ -200,6 +214,8 @@ export default function LabOrderingPage({ currentUser }) {
       cartLineCount: cartItems.length,
       cartQtyCount: cartItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
       selectedOrderId: selectedOrderId || null,
+      cartDrawerOpen: isCartOpen,
+      submitting,
     },
     !loadingCatalog && !loadingOrders
   );
@@ -381,6 +397,49 @@ export default function LabOrderingPage({ currentUser }) {
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [catalog]);
+
+  const productOrderStats = useMemo(() => {
+    const byProduct = new Map();
+    for (const order of scopedRecentOrders) {
+      const lines = Array.isArray(order?.lines) ? order.lines : [];
+      for (const line of lines) {
+        const productId = String(line?.productId || "").trim();
+        if (!productId) continue;
+        const row = byProduct.get(productId) || {
+          count: 0,
+          qty: 0,
+          lastDate: "",
+        };
+        row.count += 1;
+        row.qty += Number(line?.quantity || 0);
+        row.lastDate = String(order.orderDate || order.order_date || order.date || "");
+        byProduct.set(productId, row);
+      }
+    }
+    return byProduct;
+  }, [scopedRecentOrders]);
+
+  const frequentlyOrdered = useMemo(() => {
+    return visibleCatalog
+      .filter((item) => productOrderStats.has(String(item.productId || "")))
+      .sort((a, b) => {
+        const aa = productOrderStats.get(String(a.productId || ""));
+        const bb = productOrderStats.get(String(b.productId || ""));
+        return Number(bb?.qty || 0) - Number(aa?.qty || 0);
+      })
+      .slice(0, 6);
+  }, [visibleCatalog, productOrderStats]);
+
+  const recentlyOrdered = useMemo(() => {
+    return visibleCatalog
+      .filter((item) => productOrderStats.has(String(item.productId || "")))
+      .sort((a, b) => {
+        const aa = String(productOrderStats.get(String(a.productId || ""))?.lastDate || "");
+        const bb = String(productOrderStats.get(String(b.productId || ""))?.lastDate || "");
+        return bb.localeCompare(aa);
+      })
+      .slice(0, 6);
+  }, [visibleCatalog, productOrderStats]);
 
   const cartCount = useMemo(() => {
     return cartItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
@@ -581,7 +640,7 @@ export default function LabOrderingPage({ currentUser }) {
       nextQtyMap[item.productId] = item.quantity;
     });
     setProductQty(nextQtyMap);
-    setActiveTab("cart");
+    setIsCartOpen(true);
 
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -725,19 +784,20 @@ export default function LabOrderingPage({ currentUser }) {
         </Button>
         <Button
           type="button"
-          variant={activeTab === "cart" ? "default" : "outline"}
-          className="rounded-full"
-          onClick={() => setActiveTab("cart")}
-        >
-          Cart ({cartCount})
-        </Button>
-        <Button
-          type="button"
           variant={activeTab === "orders" ? "default" : "outline"}
           className="rounded-full"
           onClick={() => setActiveTab("orders")}
         >
           Previous Orders
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="rounded-full"
+          onClick={() => setIsCartOpen(true)}
+        >
+          <ShoppingCart className="mr-2 h-4 w-4" />
+          Cart ({cartCount})
         </Button>
       </div>
 
@@ -811,7 +871,7 @@ export default function LabOrderingPage({ currentUser }) {
           <Card className="rounded-2xl shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-lg">Product Catalog</CardTitle>
-              <CardDescription>Simple, tap-friendly ordering cards.</CardDescription>
+              <CardDescription>Fast ordering cards for day-to-day lab operations.</CardDescription>
             </CardHeader>
             <CardContent>
               {loadingCatalog ? (
@@ -822,28 +882,36 @@ export default function LabOrderingPage({ currentUser }) {
               ) : visibleCatalog.length === 0 ? (
                 <div className="text-sm text-slate-500">No products found for this filter.</div>
               ) : (
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
                   {visibleCatalog.map((item) => {
                     const unitPrice = Number(item.unitSellingPrice ?? item.price ?? 0);
                     const qty = productQty[item.productId] || 1;
                     const isOut = item.stockHealth === "OUT" || item.canOrder === false;
                     const packSize = item.packSize || item.unit || item.pack || "";
+                    const CategoryIcon = categoryIcon(item.category);
                     return (
                       <div
                         key={item.productId}
-                        className={`rounded-xl border bg-white p-3 ${isOut ? "opacity-75" : ""}`}
+                        className={`
+                          rounded-xl border bg-white p-3 transition-all duration-150
+                          hover:-translate-y-0.5 hover:shadow-md
+                          ${isOut ? "opacity-75" : ""}
+                        `}
                       >
-                        <div className="space-y-1">
-                          <div className="line-clamp-2 text-sm font-semibold text-slate-900">
+                        <div className="space-y-1.5">
+                          <div className="line-clamp-2 text-sm font-semibold leading-5 text-slate-900">
                             {item.productName}
                           </div>
-                          <div className="text-xs text-slate-500">
-                            {item.category || "General"}
-                            {packSize ? ` • ${packSize}` : ""}
+                          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                            <CategoryIcon className="h-3.5 w-3.5" />
+                            <span>{item.category || "General"}</span>
+                            {packSize ? <span>• {packSize}</span> : null}
                           </div>
                         </div>
-                        <div className="mt-2 flex items-center justify-between gap-2">
-                          <Badge variant="secondary">₹{unitPrice.toLocaleString()}</Badge>
+                        <div className="mt-2 flex items-center justify-between gap-2 text-xs">
+                          <Badge variant="secondary" className="text-xs font-semibold">
+                            ₹{unitPrice.toLocaleString()}
+                          </Badge>
                           <StockBadge
                             stockHealth={item.stockHealth}
                             currentStock={item.currentStock}
@@ -859,7 +927,7 @@ export default function LabOrderingPage({ currentUser }) {
                           />
                           <Button
                             size="sm"
-                            className="h-9 rounded-lg px-3"
+                            className="h-9 rounded-lg px-3 font-medium"
                             onClick={() => addToCart(item)}
                             disabled={isOut}
                           >
@@ -873,110 +941,56 @@ export default function LabOrderingPage({ currentUser }) {
               )}
             </CardContent>
           </Card>
+
+          {frequentlyOrdered.length > 0 ? (
+            <Card className="rounded-2xl shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Frequently Ordered</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {frequentlyOrdered.map((item) => (
+                    <button
+                      key={`freq-${item.productId}`}
+                      type="button"
+                      className="rounded-lg border bg-slate-50 px-3 py-2 text-left text-sm transition hover:bg-slate-100"
+                      onClick={() => addToCart(item, 1)}
+                    >
+                      <div className="truncate font-medium text-slate-900">{item.productName}</div>
+                      <div className="text-xs text-slate-500">{item.category || "General"}</div>
+                    </button>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {recentlyOrdered.length > 0 ? (
+            <Card className="rounded-2xl shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Recently Ordered</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {recentlyOrdered.map((item) => (
+                    <button
+                      key={`recent-${item.productId}`}
+                      type="button"
+                      className="rounded-lg border bg-white px-3 py-2 text-left text-sm transition hover:bg-slate-50"
+                      onClick={() => addToCart(item, 1)}
+                    >
+                      <div className="truncate font-medium text-slate-900">{item.productName}</div>
+                      <div className="text-xs text-slate-500">{item.category || "General"}</div>
+                    </button>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
         </div>
       ) : null}
 
-      {activeTab === "cart" ? (
-        <Card className="rounded-2xl shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-lg">Cart</CardTitle>
-            <CardDescription>Review selected items and place your order.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {cartItems.length === 0 ? (
-              <div className="rounded-xl border border-dashed p-6 text-center text-sm text-slate-500">
-                Your cart is empty. Add products from Product Catalog.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {cartItems.map((item) => {
-                  const lineTotal = Number(item.quantity) * Number(item.unitPrice);
-                  return (
-                    <div key={item.productId} className="rounded-xl border bg-white p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-slate-900">
-                            {item.productName}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            {item.category || "General"} • ₹
-                            {Number(item.unitPrice).toLocaleString()} each
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => removeFromCart(item.productId)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-red-600"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                      <div className="mt-2 flex items-center justify-between">
-                        <QtyControl
-                          compact
-                          value={item.quantity}
-                          onDecrease={() => decreaseCartQty(item.productId)}
-                          onIncrease={() => increaseCartQty(item.productId)}
-                        />
-                        <div className="text-sm font-semibold">₹{lineTotal.toLocaleString()}</div>
-                      </div>
-                    </div>
-                  );
-                })}
-
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <div className="flex items-center justify-between text-sm">
-                    <span>Items</span>
-                    <span className="font-medium">{cartCount}</span>
-                  </div>
-                  <div className="mt-1 flex items-center justify-between text-base font-semibold">
-                    <span>Subtotal</span>
-                    <span>₹{cartSubTotal.toLocaleString()}</span>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">Order Notes (optional)</label>
-                  <Textarea
-                    placeholder="Any delivery or packing notes..."
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    className="min-h-[84px] rounded-xl"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11 rounded-xl"
-                    onClick={() => setCartItems([])}
-                  >
-                    Clear Cart
-                  </Button>
-                  <Button
-                    className="h-11 flex-1 rounded-xl"
-                    onClick={handleSubmitOrder}
-                    disabled={submitting || cartItems.length === 0 || isCreditHold}
-                  >
-                    {submitting ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Submitting...
-                      </>
-                    ) : (
-                      <>
-                        <ShoppingCart className="mr-2 h-4 w-4" />
-                        Submit Order
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      ) : null}
+      
 
       {activeTab === "orders" ? (
         <div className="grid gap-5 xl:grid-cols-[1.2fr_1fr]">
@@ -1005,11 +1019,20 @@ export default function LabOrderingPage({ currentUser }) {
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <div className="text-sm font-semibold">{order.orderId}</div>
-                          <div className="text-xs text-slate-500">
+                          <div className="flex items-center gap-1 text-xs text-slate-500">
+                            <Clock3 className="h-3 w-3" />
                             {order.orderDate || order.date || "-"}
                           </div>
                         </div>
                         <Badge variant="secondary">{order.orderStatus || order.status || "Placed"}</Badge>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        <Badge variant="outline" className="text-[11px]">
+                          {order.paymentStatus || "Pending payment"}
+                        </Badge>
+                        <Badge variant="outline" className="text-[11px]">
+                          {selectedOrderId === order.orderId ? "Viewed" : "Ready to reorder"}
+                        </Badge>
                       </div>
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                         <span>Total: ₹{Number(order.orderTotal ?? order.total ?? 0).toLocaleString()}</span>
@@ -1102,28 +1125,130 @@ export default function LabOrderingPage({ currentUser }) {
       ) : null}
 
       {cartItems.length > 0 ? (
-        <div className="fixed inset-x-0 bottom-16 z-30 border-t bg-white/95 px-4 py-3 shadow-lg backdrop-blur lg:hidden">
-          <div className="mx-auto flex max-w-md items-center justify-between gap-3">
-            <button
-              type="button"
-              className="text-left"
-              onClick={() => setActiveTab("cart")}
-            >
-              <div className="text-xs text-slate-500">Cart</div>
-              <div className="text-sm font-semibold text-slate-900">
-                {cartCount} items • ₹{cartSubTotal.toLocaleString()}
+        <button
+          type="button"
+          onClick={() => setIsCartOpen(true)}
+          className="fixed bottom-20 right-4 z-30 flex items-center gap-2 rounded-full bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-slate-800 md:bottom-6"
+        >
+          <ShoppingCart className="h-4 w-4" />
+          {cartCount} • ₹{cartSubTotal.toLocaleString()}
+        </button>
+      ) : null}
+
+      {isCartOpen ? (
+        <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setIsCartOpen(false)}>
+          <div
+            className="absolute bottom-0 right-0 flex h-[82vh] w-full max-w-md flex-col rounded-t-2xl border bg-white shadow-2xl md:top-0 md:h-full md:rounded-none md:rounded-l-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Cart</p>
+                <p className="text-xs text-slate-500">{cartCount} items</p>
               </div>
-            </button>
-            <Button
-              className="h-10 rounded-xl"
-              onClick={() => {
-                setActiveTab("cart");
-                handleSubmitOrder();
-              }}
-              disabled={submitting || isCreditHold}
-            >
-              {submitting ? "Submitting..." : "Checkout"}
-            </Button>
+              <button
+                type="button"
+                className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100"
+                onClick={() => setIsCartOpen(false)}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-3 overflow-y-auto p-4">
+              {cartItems.length === 0 ? (
+                <div className="rounded-xl border border-dashed p-6 text-center text-sm text-slate-500">
+                  Your cart is empty. Add products from Product Catalog.
+                </div>
+              ) : (
+                <>
+                  {cartItems.map((item) => {
+                    const lineTotal = Number(item.quantity) * Number(item.unitPrice);
+                    return (
+                      <div key={item.productId} className="rounded-xl border bg-white p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-slate-900">
+                              {item.productName}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {item.category || "General"} • ₹
+                              {Number(item.unitPrice).toLocaleString()} each
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeFromCart(item.productId)}
+                            className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-red-600"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                        <div className="mt-2 flex items-center justify-between">
+                          <QtyControl
+                            compact
+                            value={item.quantity}
+                            onDecrease={() => decreaseCartQty(item.productId)}
+                            onIncrease={() => increaseCartQty(item.productId)}
+                          />
+                          <div className="text-sm font-semibold">₹{lineTotal.toLocaleString()}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-700">Order Notes (optional)</label>
+                    <Textarea
+                      placeholder="Any delivery or packing notes..."
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      className="min-h-[84px] rounded-xl"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="sticky bottom-0 space-y-3 border-t bg-white p-4">
+              <div className="rounded-xl bg-slate-50 p-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span>Items</span>
+                  <span className="font-medium">{cartCount}</span>
+                </div>
+                <div className="mt-1 flex items-center justify-between text-base font-semibold">
+                  <span>Subtotal</span>
+                  <span>₹{cartSubTotal.toLocaleString()}</span>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 rounded-xl"
+                  onClick={() => setCartItems([])}
+                  disabled={cartItems.length === 0}
+                >
+                  Clear
+                </Button>
+                <Button
+                  className="h-11 flex-1 rounded-xl"
+                  onClick={handleSubmitOrder}
+                  disabled={submitting || cartItems.length === 0 || isCreditHold}
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    <>
+                      <ShoppingCart className="mr-2 h-4 w-4" />
+                      Checkout
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       ) : null}

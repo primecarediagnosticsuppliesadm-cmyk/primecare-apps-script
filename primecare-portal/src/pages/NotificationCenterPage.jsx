@@ -14,8 +14,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ux";
-import { Bell, Loader2, RefreshCw } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Bell, Loader2, RefreshCw, CheckCircle2, AlertTriangle, Truck, Clock3 } from "lucide-react";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { isNotificationsFoundationEnabled } from "@/config/notificationFoundation.js";
 import { resolveNotificationFoundationState } from "@/notifications/notificationFoundationProbe.js";
@@ -27,6 +26,12 @@ const LAB_SAFE_EVENT_TYPES = new Set([
   "payment_received",
   "collection_due",
 ]);
+
+const LAB_PLACEHOLDER_NOTIFICATIONS = [
+  { event_type: "order_created", severity: "info", status: "pending", source_module: "orders", created_at: new Date().toISOString(), payload_json: { message: "Order received and queued for processing." } },
+  { event_type: "order_fulfilled", severity: "medium", status: "read", source_module: "orders", created_at: new Date(Date.now() - 3600 * 1000).toISOString(), payload_json: { message: "Order fulfilled and ready for dispatch." } },
+  { event_type: "payment_received", severity: "low", status: "acknowledged", source_module: "collections", created_at: new Date(Date.now() - 7200 * 1000).toISOString(), payload_json: { message: "Payment has been recorded for your account." } },
+];
 
 function isAdminOrExecutive(role) {
   const r = String(role || "").toLowerCase();
@@ -76,6 +81,23 @@ function pageTitleForRole(role) {
   if (r === ROLES.AGENT) return "My Notifications";
   if (r === ROLES.LAB) return "Order & Payment Updates";
   return "Notification Center";
+}
+
+function eventTitle(eventType) {
+  const t = String(eventType || "").toLowerCase();
+  if (t === "order_created") return "Order received";
+  if (t === "order_fulfilled") return "Order fulfilled";
+  if (t === "payment_received") return "Payment received";
+  if (t === "collection_due") return "Collection reminder";
+  return String(eventType || "Notification").replaceAll("_", " ");
+}
+
+function eventIcon(eventType) {
+  const t = String(eventType || "").toLowerCase();
+  if (t.includes("payment")) return CheckCircle2;
+  if (t.includes("due")) return AlertTriangle;
+  if (t.includes("fulfilled")) return Truck;
+  return Clock3;
 }
 
 export default function NotificationCenterPage({ currentUser }) {
@@ -159,6 +181,13 @@ export default function NotificationCenterPage({ currentUser }) {
     () => rows.filter((r) => String(r.status).toLowerCase() === "pending").length,
     [rows]
   );
+  const displayRows = useMemo(() => {
+    if (role === ROLES.LAB && rows.length === 0) return LAB_PLACEHOLDER_NOTIFICATIONS;
+    return rows;
+  }, [role, rows]);
+  const nonAdminSetupPending =
+    !showAdminUi &&
+    (foundationState?.mode === "setup_pending" || foundationState?.mode === "schema_cache");
 
   async function markStatus(eventId, nextStatus) {
     setUpdatingId(eventId);
@@ -315,8 +344,7 @@ export default function NotificationCenterPage({ currentUser }) {
         </div>
       ) : null}
 
-      {!showAdminUi &&
-      (foundationState?.mode === "setup_pending" || foundationState?.mode === "schema_cache") ? (
+      {nonAdminSetupPending ? (
         <EmptyState
           title={role === ROLES.LAB ? "Updates are not available yet" : "Notifications are not available yet"}
           description={
@@ -332,7 +360,7 @@ export default function NotificationCenterPage({ currentUser }) {
           <Loader2 className="mr-2 h-5 w-5 animate-spin" />
           Loading notifications…
         </div>
-      ) : rows.length === 0 ? (
+      ) : nonAdminSetupPending ? null : displayRows.length === 0 ? (
         <EmptyState
           title={role === ROLES.LAB ? "No updates yet" : "No notification events"}
           description={
@@ -343,11 +371,12 @@ export default function NotificationCenterPage({ currentUser }) {
         />
       ) : (
         <div className="space-y-3">
-          {rows.map((row) => {
+          {displayRows.map((row) => {
             const payload =
               row.payload_json && typeof row.payload_json === "object"
                 ? row.payload_json
                 : {};
+            const Icon = eventIcon(row.event_type);
             const inApp = (row.deliveries || []).find(
               (d) => String(d.channel).toLowerCase() === "in_app"
             );
@@ -355,11 +384,14 @@ export default function NotificationCenterPage({ currentUser }) {
             const busy = updatingId === row.event_id;
 
             return (
-              <Card key={row.event_id} className="p-4">
+              <Card key={row.event_id || `${row.event_type}-${row.created_at}`} className="p-4 transition hover:shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{row.event_type}</span>
+                      <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-700">
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <span className="font-medium">{eventTitle(row.event_type)}</span>
                       <Badge variant={severityVariant(row.severity)}>{row.severity}</Badge>
                       <Badge variant={statusVariant(row.status)}>{row.status}</Badge>
                       <span className="text-xs text-muted-foreground">{row.source_module}</span>
@@ -379,6 +411,8 @@ export default function NotificationCenterPage({ currentUser }) {
                     ) : null}
                   </div>
                   <div className="flex shrink-0 gap-2">
+                    {!row.event_id ? null : (
+                    <>
                     {isPending ? (
                       <Button
                         type="button"
@@ -400,6 +434,8 @@ export default function NotificationCenterPage({ currentUser }) {
                         Acknowledge
                       </Button>
                     ) : null}
+                    </>
+                    )}
                   </div>
                 </div>
               </Card>

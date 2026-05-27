@@ -204,24 +204,27 @@ function CollectionSummaryRow({ item, expanded, onToggleExpand, readOnly = false
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-4">
+      <div className={cn("grid gap-x-3 gap-y-2", readOnly ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-2 sm:grid-cols-4")}>
         <SummaryMetric label="Overdue days">
-          {overdueDays > 0 ? (
-            <span className="text-[var(--pc-danger)]">{overdueDays}d</span>
-          ) : (
-            "—"
-          )}
+          {overdueDays > 0 ? <span className="text-[var(--pc-danger)]">{overdueDays}d</span> : "—"}
         </SummaryMetric>
-        <SummaryMetric label="Last follow-up">{formatShortDate(lastFollowUp)}</SummaryMetric>
-        {!readOnly ? (
-          <SummaryMetric label="Next follow-up">
-            {formatShortDate(item.nextFollowUp)}
-          </SummaryMetric>
-        ) : null}
-        {!readOnly ? <SummaryMetric label="Agent">{agent || "—"}</SummaryMetric> : null}
-        {shouldShowPaidLabel(item) ? (
-          <SummaryMetric label="Total paid">{formatMoney(item.totalPaid)}</SummaryMetric>
-        ) : null}
+        {readOnly ? (
+          <>
+            <SummaryMetric label="Status">{paymentLabel}</SummaryMetric>
+            {shouldShowPaidLabel(item) ? (
+              <SummaryMetric label="Total paid">{formatMoney(item.totalPaid)}</SummaryMetric>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <SummaryMetric label="Last follow-up">{formatShortDate(lastFollowUp)}</SummaryMetric>
+            <SummaryMetric label="Next follow-up">{formatShortDate(item.nextFollowUp)}</SummaryMetric>
+            <SummaryMetric label="Agent">{agent || "—"}</SummaryMetric>
+            {shouldShowPaidLabel(item) ? (
+              <SummaryMetric label="Total paid">{formatMoney(item.totalPaid)}</SummaryMetric>
+            ) : null}
+          </>
+        )}
       </div>
 
       <div className="flex justify-end sm:hidden">
@@ -1079,7 +1082,7 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
           </div>
           <p className={cn(typography.pageSubtitle, "mt-0.5")}>
             {isLabAccount
-              ? "Your outstanding balance and payment history."
+              ? "Track your outstanding balance, risk status, and recent payments."
               : "Tenant-wide receivables, follow-ups, and payments. Tap a lab to record payments and follow-ups."}
           </p>
         </div>
@@ -1094,6 +1097,20 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
           Refresh
         </Button>
       </header>
+
+      {isLabAccount ? (
+        <div className="mx-auto max-w-3xl rounded-xl border border-border bg-card p-3 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Account Overview</p>
+              <p className="text-xs text-slate-500">Lab payments and outstanding summary</p>
+            </div>
+            <Button type="button" size="sm" variant="outline" disabled className="rounded-lg">
+              Pay Now (coming soon)
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {pendingTaskContext && !isLabAccount ? (
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
@@ -1127,6 +1144,7 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
         </div>
       ) : null}
 
+      <div className={isLabAccount ? "mx-auto max-w-3xl" : ""}>
       <KpiCardGrid columns={isLabAccount ? 3 : 4}>
         <KpiCard
           title="Outstanding balance"
@@ -1170,6 +1188,7 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
           </>
         )}
       </KpiCardGrid>
+      </div>
 
       {!isLabAccount ? (
         <div className="sticky top-0 z-20 -mx-1 border-b border-border bg-background/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/90">
@@ -1206,7 +1225,7 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
           }
         />
       ) : (
-        <div className="space-y-2" role="list">
+        <div className={cn("space-y-2", isLabAccount ? "mx-auto max-w-3xl" : "")} role="list">
           {filteredCollections.map((item) => {
             const key = labIdKey(item.labId);
             const isExpanded = expandedLabId === key;

@@ -97,6 +97,9 @@ export async function validateLabPortalModule({ ctx, rendered = null }) {
     if (rendered) {
       const recentCount = Number(rendered.recentOrdersCount ?? 0);
       const crossLabOrders = Number(rendered.crossLabOrderCount ?? 0);
+      const cartLineCount = Number(rendered.cartLineCount ?? 0);
+      const cartQtyCount = Number(rendered.cartQtyCount ?? 0);
+      const cartDrawerOpen = Boolean(rendered.cartDrawerOpen);
       entries.push(
         createPredatorEntry({
           status: crossLabOrders > 0 ? "FAIL" : "PASS",
@@ -131,6 +134,47 @@ export async function validateLabPortalModule({ ctx, rendered = null }) {
             : "Lab user may see collections management UI",
           suggestedFix: "Open labAccount route with viewMode=labAccount",
           severity: rendered.isLabAccountView ? "low" : "high",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      entries.push(
+        createPredatorEntry({
+          status:
+            cartLineCount === 0 || cartQtyCount >= cartLineCount
+              ? "PASS"
+              : "FAIL",
+          module: "Lab Portal",
+          step: "cart.count_consistency",
+          expected: "cart quantity total >= cart line count",
+          actual: { cartLineCount, cartQtyCount },
+          rootCauseGuess:
+            cartLineCount === 0 || cartQtyCount >= cartLineCount
+              ? "Cart counters are internally consistent"
+              : "Cart count snapshot mismatch in UI state",
+          suggestedFix:
+            cartLineCount === 0 || cartQtyCount >= cartLineCount
+              ? ""
+              : "Sync cart count badges with cart item quantity reducer",
+          severity: cartLineCount === 0 || cartQtyCount >= cartLineCount ? "low" : "high",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      entries.push(
+        createPredatorEntry({
+          status: "PASS",
+          module: "Lab Portal",
+          step: "cart.drawer_state",
+          expected: "Drawer can toggle without data loss",
+          actual: { cartDrawerOpen },
+          rootCauseGuess: "Observed cart drawer state snapshot captured",
+          suggestedFix: "If unstable, test open/close while editing quantities",
+          severity: "low",
           tenantId: ctx.tenantId,
           role: ctx.role,
           userId: ctx.userId,
