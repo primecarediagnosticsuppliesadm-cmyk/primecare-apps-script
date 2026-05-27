@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -256,6 +256,41 @@ function QuickPickRow({ item, onAdd }) {
   );
 }
 
+const DEMO_SEEDED_PRICES = [120, 350, 980, 160, 420, 1250, 275, 640];
+
+function applyDemoPriceIfNeeded(item, index) {
+  const currentPrice = Number(item?.unitSellingPrice ?? item?.price ?? 0);
+  if (currentPrice > 0) return item;
+  const seeded = DEMO_SEEDED_PRICES[index % DEMO_SEEDED_PRICES.length];
+  return {
+    ...item,
+    unitSellingPrice: seeded,
+    price: seeded,
+  };
+}
+
+function buildDefaultQtyMap(products) {
+  const next = {};
+  for (const item of products || []) {
+    const id = String(item?.productId || "").trim();
+    if (!id) continue;
+    next[id] = 1;
+  }
+  return next;
+}
+
+function buildCartHash(items) {
+  return JSON.stringify(
+    (items || [])
+      .map((item) => ({
+        productId: String(item.productId || ""),
+        quantity: Number(item.quantity || 0),
+        unitPrice: Number(item.unitPrice || 0),
+      }))
+      .sort((a, b) => a.productId.localeCompare(b.productId))
+  );
+}
+
 export default function LabOrderingPage({ currentUser }) {
   const [activeTab, setActiveTab] = useState("catalog");
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -278,6 +313,9 @@ export default function LabOrderingPage({ currentUser }) {
   const [loadingOrders, setLoadingOrders] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState(null);
+  const submitLockRef = useRef(false);
+  const hydratedDraftRef = useRef(false);
+  const lastSubmittedHashRef = useRef("");
 
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const [selectedOrderDetails, setSelectedOrderDetails] = useState(null);
@@ -291,6 +329,10 @@ export default function LabOrderingPage({ currentUser }) {
     "";
 
   const labName = currentUser?.labName || currentUser?.name || "Lab";
+  const cartDraftStorageKey = useMemo(() => {
+    const key = labIdKey(labId);
+    return key ? `lab-ordering-cart-draft:${key}` : "";
+  }, [labId]);
   const [outstandingBalance, setOutstandingBalance] = useState(
     Number(currentUser?.outstanding ?? 0)
   );
@@ -332,9 +374,19 @@ export default function LabOrderingPage({ currentUser }) {
       ordersLoaded: !loadingOrders,
       cartLineCount: cartItems.length,
       cartQtyCount: cartItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
+      cartSubTotal: cartItems.reduce(
+        (sum, item) => sum + Number(item.quantity || 0) * Number(item.unitPrice || 0),
+        0
+      ),
       selectedOrderId: selectedOrderId || null,
       cartDrawerOpen: isCartOpen,
       submitting,
+      canCheckout: !submitting && cartItems.length > 0 && !isCreditHold,
+      submitLocked: submitLockRef.current,
+      submitSuccess: Boolean(submitResult?.success),
+      productQtyInSync: cartItems.every(
+        (item) => Number(productQty[item.productId] || 0) === Number(item.quantity || 0)
+      ),
     },
     !loadingCatalog && !loadingOrders
   );
@@ -345,6 +397,42 @@ export default function LabOrderingPage({ currentUser }) {
     loadAccountOutstanding();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labId]);
+
+  useEffect(() => {
+    if (!cartDraftStorageKey || hydratedDraftRef.current) return;
+    try {
+      const raw = window.localStorage.getItem(cartDraftStorageKey);
+      if (!raw) {
+        hydratedDraftRef.current = true;
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      const nextItems = Array.isArray(parsed?.cartItems) ? parsed.cartItems : [];
+      const nextNotes = typeof parsed?.notes === "string" ? parsed.notes : "";
+      const nextQty = parsed?.productQty && typeof parsed.productQty === "object" ? parsed.productQty : {};
+      if (nextItems.length) setCartItems(nextItems);
+      if (nextNotes) setNotes(nextNotes);
+      setProductQty((prev) => ({ ...prev, ...nextQty }));
+    } catch (error) {
+      console.warn("[LabOrderingPage] failed to hydrate cart draft", error);
+    } finally {
+      hydratedDraftRef.current = true;
+    }
+  }, [cartDraftStorageKey]);
+
+  useEffect(() => {
+    if (!cartDraftStorageKey || !hydratedDraftRef.current) return;
+    try {
+      const payload = JSON.stringify({
+        cartItems,
+        notes,
+        productQty,
+      });
+      window.localStorage.setItem(cartDraftStorageKey, payload);
+    } catch (error) {
+      console.warn("[LabOrderingPage] failed to persist cart draft", error);
+    }
+  }, [cartDraftStorageKey, cartItems, notes, productQty]);
 
   async function loadAccountOutstanding() {
     try {
@@ -373,7 +461,8 @@ export default function LabOrderingPage({ currentUser }) {
           throw new Error(sbRes?.error || "Supabase lab catalog read failed.");
         }
 
-        const products = Array.isArray(sbRes?.data?.products) ? sbRes.data.products : [];
+        const productsRaw = Array.isArray(sbRes?.data?.products) ? sbRes.data.products : [];
+        const products = productsRaw.map((item, index) => applyDemoPriceIfNeeded(item, index));
         console.log("SUPABASE LAB CATALOG", {
           count: products.length,
           source: sbRes?.data?.source || "supabase",
@@ -381,11 +470,7 @@ export default function LabOrderingPage({ currentUser }) {
 
         setCatalog(products);
 
-        const defaultQtyMap = {};
-        products.forEach((item) => {
-          defaultQtyMap[item.productId] = 1;
-        });
-        setProductQty(defaultQtyMap);
+        setProductQty((prev) => ({ ...buildDefaultQtyMap(products), ...prev }));
         return;
       }
 
@@ -402,15 +487,12 @@ export default function LabOrderingPage({ currentUser }) {
       logAppsScriptPrimarySource("LabOrdering.catalog", "getLabCatalog");
       const res = await getLabCatalog(labId);
       const result = res?.data || res || {};
-      const products = Array.isArray(result?.products) ? result.products : [];
+      const productsRaw = Array.isArray(result?.products) ? result.products : [];
+      const products = productsRaw.map((item, index) => applyDemoPriceIfNeeded(item, index));
 
       setCatalog(products);
 
-      const defaultQtyMap = {};
-      products.forEach((item) => {
-        defaultQtyMap[item.productId] = 1;
-      });
-      setProductQty(defaultQtyMap);
+      setProductQty((prev) => ({ ...buildDefaultQtyMap(products), ...prev }));
     } catch (error) {
       console.error("Failed to load catalog", error);
       setErrorMessage("Unable to load product catalog right now.");
@@ -599,11 +681,42 @@ export default function LabOrderingPage({ currentUser }) {
     }, 0);
   }, [cartItems]);
 
+  const cartQtyByProduct = useMemo(() => {
+    const map = new Map();
+    for (const item of cartItems) {
+      map.set(String(item.productId || ""), Number(item.quantity || 0));
+    }
+    return map;
+  }, [cartItems]);
+
+  const canCheckout = !submitting && cartItems.length > 0 && !isCreditHold;
+
+  const clearCartState = useCallback(
+    ({ closeDrawer = true } = {}) => {
+      setCartItems([]);
+      setNotes("");
+      setProductQty(buildDefaultQtyMap(catalog));
+      setCartSections({ items: true, notes: false, summary: true });
+      if (closeDrawer) setIsCartOpen(false);
+      if (cartDraftStorageKey) {
+        try {
+          window.localStorage.removeItem(cartDraftStorageKey);
+        } catch (error) {
+          console.warn("[LabOrderingPage] failed to clear cart draft", error);
+        }
+      }
+    },
+    [catalog, cartDraftStorageKey]
+  );
+
   function updateProductQty(productId, nextQty) {
-    setProductQty((prev) => ({
-      ...prev,
-      [productId]: Math.max(1, Number(nextQty || 1)),
-    }));
+    const safeQty = Math.max(1, Number(nextQty || 1));
+    const inCart = cartQtyByProduct.has(String(productId || ""));
+    if (inCart) {
+      updateCartQty(productId, safeQty);
+      return;
+    }
+    setProductQty((prev) => ({ ...prev, [productId]: safeQty }));
   }
 
   function addToCart(item, forcedQty) {
@@ -614,10 +727,8 @@ export default function LabOrderingPage({ currentUser }) {
       return;
     }
 
-    const qty = Math.max(
-      1,
-      Number(forcedQty || productQty[item.productId] || 1)
-    );
+    const draftQty = Number(productQty[item.productId] || 1);
+    const qty = Math.max(1, Number(forcedQty || draftQty || 1));
 
     if (
       item.currentStock !== undefined &&
@@ -647,13 +758,16 @@ export default function LabOrderingPage({ currentUser }) {
           return prev;
         }
 
-        return prev.map((row) =>
+        const nextRows = prev.map((row) =>
           row.productId === item.productId
             ? { ...row, quantity: nextQty }
             : row
         );
+        setProductQty((qtyPrev) => ({ ...qtyPrev, [item.productId]: nextQty }));
+        return nextRows;
       }
 
+      setProductQty((qtyPrev) => ({ ...qtyPrev, [item.productId]: qty }));
       return [
         ...prev,
         {
@@ -670,6 +784,7 @@ export default function LabOrderingPage({ currentUser }) {
 
     setStatusMessage(`${item.productName} added to cart`);
     setErrorMessage("");
+    setSubmitResult(null);
   }
 
   function updateCartQty(productId, nextQty) {
@@ -690,6 +805,7 @@ export default function LabOrderingPage({ currentUser }) {
           return item;
         }
 
+        setProductQty((qtyPrev) => ({ ...qtyPrev, [productId]: safeQty }));
         return { ...item, quantity: safeQty };
       })
     );
@@ -715,6 +831,7 @@ export default function LabOrderingPage({ currentUser }) {
 
   function removeFromCart(productId) {
     setCartItems((prev) => prev.filter((item) => item.productId !== productId));
+    setProductQty((prev) => ({ ...prev, [productId]: 1 }));
   }
 
   function handleRepeatOrder(orderDetails = selectedOrderDetails) {
@@ -794,6 +911,7 @@ export default function LabOrderingPage({ currentUser }) {
   }
 
   async function handleSubmitOrder() {
+    if (submitLockRef.current || submitting) return;
     if (!labId) {
       setErrorMessage("Lab identity is missing. Please refresh and try again.");
       return;
@@ -804,7 +922,21 @@ export default function LabOrderingPage({ currentUser }) {
       return;
     }
 
+    const cartSnapshot = cartItems.map((item) => ({
+      productId: item.productId,
+      quantity: Number(item.quantity || 0),
+      unitPrice: Number(item.unitPrice || 0),
+    }));
+    const itemCount = cartSnapshot.reduce((sum, item) => sum + item.quantity, 0);
+    const total = cartSnapshot.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const cartHash = buildCartHash(cartSnapshot);
+    if (submitResult?.success && lastSubmittedHashRef.current && lastSubmittedHashRef.current === cartHash) {
+      setErrorMessage("This cart was already submitted. Update quantities before checkout again.");
+      return;
+    }
+
     try {
+      submitLockRef.current = true;
       setSubmitting(true);
       setErrorMessage("");
       setStatusMessage("");
@@ -822,9 +954,10 @@ export default function LabOrderingPage({ currentUser }) {
           labName ||
           labId ||
           null,
-        items: cartItems.map((item) => ({
+        items: cartSnapshot.map((item) => ({
           productId: item.productId,
-          productName: item.productName,
+          productName:
+            cartItems.find((row) => row.productId === item.productId)?.productName || item.productId,
           quantity: Number(item.quantity || 0),
           unitSellingPrice: Number(item.unitPrice || 0),
         })),
@@ -836,14 +969,16 @@ export default function LabOrderingPage({ currentUser }) {
         if (sbRes?.success) {
           const orderId =
             sbRes.data?.orderId ?? sbRes.data?.order?.order_id ?? "";
-          setSubmitResult({ success: true, orderId, invoiceId: null });
-          setCartItems([]);
-          setNotes("");
-          setStatusMessage(
-            orderId
-              ? `Order submitted successfully (Supabase): ${orderId}`
-              : "Order submitted successfully (Supabase)."
-          );
+          setSubmitResult({
+            success: true,
+            orderId,
+            invoiceId: null,
+            itemCount,
+            total,
+            submittedAt: new Date().toISOString(),
+          });
+          lastSubmittedHashRef.current = cartHash;
+          clearCartState({ closeDrawer: true });
 
           if (sbRes?.data?.order) {
             setRecentOrders((prev) => {
@@ -882,10 +1017,15 @@ export default function LabOrderingPage({ currentUser }) {
         throw new Error(result?.message || "Order submission failed");
       }
 
-      setSubmitResult(result);
-      setCartItems([]);
-      setNotes("");
-      setStatusMessage(`Order submitted successfully: ${result.orderId || ""}`);
+      setSubmitResult({
+        ...result,
+        success: true,
+        itemCount,
+        total,
+        submittedAt: new Date().toISOString(),
+      });
+      lastSubmittedHashRef.current = cartHash;
+      clearCartState({ closeDrawer: true });
 
       await loadRecentOrders();
       await loadCatalog();
@@ -898,6 +1038,7 @@ export default function LabOrderingPage({ currentUser }) {
       setErrorMessage(error.message || "Unable to submit order right now.");
     } finally {
       setSubmitting(false);
+      submitLockRef.current = false;
     }
   }
 
@@ -953,7 +1094,7 @@ export default function LabOrderingPage({ currentUser }) {
         </Button>
       </div>
 
-      {statusMessage ? (
+      {statusMessage && !submitResult?.success ? (
         <div className="rounded-xl bg-green-50 p-3 text-sm text-green-700">{statusMessage}</div>
       ) : null}
 
@@ -974,19 +1115,51 @@ export default function LabOrderingPage({ currentUser }) {
       ) : null}
 
       {submitResult?.success ? (
-        <div className="rounded-2xl border border-green-200 bg-green-50 p-4 shadow-sm">
-          <div className="flex items-start gap-3">
-            <CheckCircle2 className="mt-0.5 h-5 w-5 text-green-700" />
-            <div>
-              <div className="text-sm font-semibold text-green-800">Order placed successfully</div>
-              <div className="mt-1 text-sm text-green-700">
-                Order ID: <span className="font-medium">{submitResult.orderId}</span>
-                {submitResult.invoiceId ? (
-                  <>
-                    {" "}
-                    • Invoice ID: <span className="font-medium">{submitResult.invoiceId}</span>
-                  </>
-                ) : null}
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
+          <div className="flex items-start gap-2.5">
+            <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-700" />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-emerald-800">Order placed successfully</div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-emerald-700">
+                <span>
+                  Order ID: <span className="font-semibold">{submitResult.orderId || "—"}</span>
+                </span>
+                <span>•</span>
+                <span>{Number(submitResult.itemCount || 0)} items</span>
+                <span>•</span>
+                <span>₹{Number(submitResult.total || 0).toLocaleString()}</span>
+              </div>
+              <div className="mt-1 text-[11px] text-emerald-700">
+                {submitResult.submittedAt
+                  ? new Date(submitResult.submittedAt).toLocaleString()
+                  : "Just now"}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 border-emerald-300 bg-transparent px-2 text-xs text-emerald-800"
+                  onClick={() => {
+                    setActiveTab("orders");
+                    if (submitResult.orderId) {
+                      void openOrderDetails(submitResult.orderId);
+                    }
+                  }}
+                >
+                  View Order
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-7 bg-emerald-700 px-2 text-xs hover:bg-emerald-800"
+                  onClick={() => {
+                    setActiveTab("catalog");
+                    setSubmitResult(null);
+                  }}
+                >
+                  Continue Shopping
+                </Button>
               </div>
             </div>
           </div>
@@ -1079,7 +1252,7 @@ export default function LabOrderingPage({ currentUser }) {
                 </h2>
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                   {sortedAllProducts.map((item) => {
-                    const qty = productQty[item.productId] || 1;
+                    const qty = cartQtyByProduct.get(String(item.productId || "")) || productQty[item.productId] || 1;
                     const isOut = item.stockHealth === "OUT" || item.canOrder === false;
                     return (
                       <ProductCatalogCard
@@ -1385,7 +1558,7 @@ export default function LabOrderingPage({ currentUser }) {
                   type="button"
                   variant="outline"
                   className="h-9 rounded-md px-3 text-xs"
-                  onClick={() => setCartItems([])}
+                  onClick={() => clearCartState({ closeDrawer: false })}
                   disabled={cartItems.length === 0}
                 >
                   Clear
@@ -1394,7 +1567,7 @@ export default function LabOrderingPage({ currentUser }) {
                   type="button"
                   className="h-9 flex-1 rounded-md text-sm"
                   onClick={handleSubmitOrder}
-                  disabled={submitting || cartItems.length === 0 || isCreditHold}
+                  disabled={!canCheckout}
                 >
                   {submitting ? (
                     <>

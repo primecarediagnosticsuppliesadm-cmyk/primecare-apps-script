@@ -99,7 +99,12 @@ export async function validateLabPortalModule({ ctx, rendered = null }) {
       const crossLabOrders = Number(rendered.crossLabOrderCount ?? 0);
       const cartLineCount = Number(rendered.cartLineCount ?? 0);
       const cartQtyCount = Number(rendered.cartQtyCount ?? 0);
+      const cartSubTotal = Number(rendered.cartSubTotal ?? 0);
       const cartDrawerOpen = Boolean(rendered.cartDrawerOpen);
+      const canCheckout = Boolean(rendered.canCheckout);
+      const submitLocked = Boolean(rendered.submitLocked);
+      const submitSuccess = Boolean(rendered.submitSuccess);
+      const productQtyInSync = rendered.productQtyInSync !== false;
       entries.push(
         createPredatorEntry({
           status: crossLabOrders > 0 ? "FAIL" : "PASS",
@@ -116,6 +121,75 @@ export async function validateLabPortalModule({ ctx, rendered = null }) {
               ? "Filter getLabRecentOrdersRead results by profile labId in LabOrderingPage"
               : "",
           severity: crossLabOrders > 0 ? "critical" : "low",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      entries.push(
+        createPredatorEntry({
+          status: productQtyInSync ? "PASS" : "FAIL",
+          module: "Lab Portal",
+          step: "cart.product_qty_sync",
+          expected: "Product qty steppers mirror cart quantities for items in cart",
+          actual: { productQtyInSync, cartLineCount, cartQtyCount },
+          rootCauseGuess: productQtyInSync
+            ? "Product qty state stays synchronized with cart lines"
+            : "Product qty state diverged from cart quantities",
+          suggestedFix: productQtyInSync
+            ? ""
+            : "Update productQty whenever cart quantities mutate or cart resets",
+          severity: productQtyInSync ? "low" : "high",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      entries.push(
+        createPredatorEntry({
+          status: !submitLocked || !canCheckout ? "PASS" : "FAIL",
+          module: "Lab Portal",
+          step: "checkout.duplicate_submit_guard",
+          expected: "Checkout disabled when submit lock active",
+          actual: { submitLocked, canCheckout },
+          rootCauseGuess:
+            !submitLocked || !canCheckout
+              ? "Submit lock and button disable states are coherent"
+              : "Checkout may still be clickable while submit lock is active",
+          suggestedFix:
+            !submitLocked || !canCheckout
+              ? ""
+              : "Drive checkout disabled state from submit lock and submitting flags",
+          severity: !submitLocked || !canCheckout ? "low" : "high",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      entries.push(
+        createPredatorEntry({
+          status: !submitSuccess || (cartLineCount === 0 && cartQtyCount === 0 && cartSubTotal === 0)
+            ? "PASS"
+            : "FAIL",
+          module: "Lab Portal",
+          step: "checkout.success_cart_reset",
+          expected: "After successful submit, cart lines/qty/subtotal reset to zero",
+          actual: { submitSuccess, cartLineCount, cartQtyCount, cartSubTotal, cartDrawerOpen },
+          rootCauseGuess:
+            !submitSuccess || (cartLineCount === 0 && cartQtyCount === 0 && cartSubTotal === 0)
+              ? "Successful checkout clears cart UI state"
+              : "Cart state remains stale after successful checkout",
+          suggestedFix:
+            !submitSuccess || (cartLineCount === 0 && cartQtyCount === 0 && cartSubTotal === 0)
+              ? ""
+              : "Use a single post-submit success handler to clear cart, qty, and drawer state",
+          severity:
+            !submitSuccess || (cartLineCount === 0 && cartQtyCount === 0 && cartSubTotal === 0)
+              ? "low"
+              : "critical",
           tenantId: ctx.tenantId,
           role: ctx.role,
           userId: ctx.userId,
