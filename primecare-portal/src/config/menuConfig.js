@@ -3,7 +3,7 @@ import { ROLES } from "./roles";
 import { ALLOW_EXPERIMENTAL_MODULES, IS_QA, IS_PROD } from "./environment";
 import { isPredatorEnabled } from "@/predator/predatorGuards.js";
 
-/** Lab sidebar: ordering, account, notifications only. */
+/** Lab sidebar: ordering, account, activity only. */
 const LAB_MENU_ORDER = ["labOrders", "labAccount", "notifications"];
 
 /**
@@ -34,7 +34,7 @@ export const MENU_ITEMS = [
     label: "Qualification Review",
     icon: "ClipboardCheck",
   },
-  { key: "notifications", label: "Notifications", icon: "Bell" },
+  { key: "notifications", label: "Activity Center", icon: "Bell" },
 
   // Performance / AI
   { key: "performance", label: "Performance", icon: "BarChart3" },
