@@ -263,6 +263,7 @@ function LabAccountTimeline({
   const utilizationPct = creditLimit > 0 ? Math.min(100, Math.round((creditUsed / creditLimit) * 100)) : null;
   const [expandedInvoiceId, setExpandedInvoiceId] = useState("");
   const [invoiceDrawerId, setInvoiceDrawerId] = useState("");
+  const [activeFinanceTab, setActiveFinanceTab] = useState("activity");
   const invoices = useMemo(
     () => buildInvoiceRows(collectionDetails || item, history),
     [collectionDetails, item, history]
@@ -279,199 +280,245 @@ function LabAccountTimeline({
         ? "Account is in good standing with no pending balance."
         : "Account is active with pending balance under monitoring.";
   const availableCredit = creditLimit > 0 ? Math.max(0, creditLimit - creditUsed) : null;
+  const topInvoices = invoices.slice(0, 12);
+  const statementRows = useMemo(
+    () =>
+      topInvoices.map((invoice, idx) => ({
+        id: `${invoice.invoiceId}-${idx}`,
+        title: `${invoice.invoiceId}`,
+        detail: `Order ${invoice.orderId || "—"} · ${formatMoney(invoice.amount)}`,
+        date: invoice.dueDate,
+      })),
+    [topInvoices]
+  );
+  const creditHistoryRows = useMemo(
+    () => [
+      {
+        id: "credit-used",
+        title: "Credit used",
+        detail: `${formatMoney(creditUsed)} used${creditLimit > 0 ? ` of ${formatMoney(creditLimit)}` : ""}`,
+        date: dueDate,
+      },
+      {
+        id: "credit-available",
+        title: "Credit available",
+        detail: availableCredit == null ? "Not configured" : formatMoney(availableCredit),
+        date: dueDate,
+      },
+    ],
+    [creditUsed, creditLimit, availableCredit, dueDate]
+  );
+  const notesRows = useMemo(
+    () =>
+      (history || [])
+        .filter((entry) => String(entry.note || "").trim())
+        .slice(0, 10)
+        .map((entry, idx) => ({
+          id: entry.paymentId || `note-${idx}`,
+          title: entry.note,
+          detail: `${entry.paymentMode || "Update"} · ${formatMoney(entry.amountCollected || 0)}`,
+          date: entry.paymentDate,
+        })),
+    [history]
+  );
+  const tabRows =
+    activeFinanceTab === "activity"
+      ? financialTimeline.map((entry) => ({
+          id: entry.id,
+          title: entry.title,
+          detail: `${entry.subline} · ${entry.trailing}`,
+          date: entry.date,
+          kind: entry.kind,
+        }))
+      : activeFinanceTab === "statements"
+        ? statementRows
+        : activeFinanceTab === "credit"
+          ? creditHistoryRows
+          : notesRows;
+  const groupedTabRows = groupTimelineByDate(tabRows);
 
   return (
-    <div className="space-y-2.5">
-      <section className="rounded-lg border border-border bg-card p-2.5 shadow-sm">
-        <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Account Health
-        </h3>
-        <div className="flex flex-wrap items-start justify-between gap-2.5">
-          <div>
-            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-              Outstanding balance
-            </p>
-            <p className="text-lg font-bold tabular-nums text-foreground">{formatMoney(outstanding)}</p>
-            <p className="text-[11px] text-muted-foreground">
-              Total paid {formatMoney(totalPaid)} · {paymentLabel}
-            </p>
-          </div>
-          <div className="flex flex-col items-start gap-1">
-            <span className={cn("rounded border px-1.5 py-0.5 text-[10px] font-medium", health.tone)}>
-              {health.label}
-            </span>
-            <span className="text-[10px] text-muted-foreground">Risk: {riskLabel}</span>
-          </div>
-        </div>
-        <div className="mt-2 grid gap-1.5 rounded-md border border-border/70 bg-muted/20 p-2 text-[11px] sm:grid-cols-2">
-          <div>
-            <span className="text-slate-500">Payment behavior: </span>
-            <span className="font-medium text-slate-800">
-              {overdueDays > 0 ? `Delayed by ${overdueDays}d` : "On track"}
+    <div className="space-y-2">
+      <div className="grid gap-2 lg:grid-cols-[1.35fr_0.9fr]">
+        <section className="min-w-0 rounded-lg border border-border bg-card p-2 shadow-sm">
+          <div className="mb-1.5 flex items-center justify-between">
+            <h3 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Outstanding Invoices
+            </h3>
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-slate-600">
+              {topInvoices.length}
             </span>
           </div>
-          <div>
-            <span className="text-slate-500">Next expected payment: </span>
-            <span className="font-medium text-slate-800">{formatShortDate(dueDate)}</span>
-          </div>
-        </div>
-        {utilizationPct != null ? (
-          <div className="mt-2">
-            <div className="mb-1 flex items-center justify-between text-[10px] text-slate-600">
-              <span>Credit utilization</span>
-              <span className="tabular-nums">
-                {formatMoney(creditUsed)} / {formatMoney(creditLimit)}
-              </span>
-            </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-              <div
-                className={cn(
-                  "h-full rounded-full",
-                  utilizationPct >= 85
-                    ? "bg-red-500"
-                    : utilizationPct >= 65
-                      ? "bg-amber-500"
-                      : "bg-emerald-500"
-                )}
-                style={{ width: `${utilizationPct}%` }}
-              />
-            </div>
-          </div>
-        ) : null}
-        <p className="mt-2 text-[10px] text-muted-foreground">{accountStandingSummary}</p>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-7 rounded-md px-2 text-[10px]"
-            onClick={() => onWorkspaceAction?.("view_orders")}
-          >
-            <FileText className="mr-1 h-3 w-3" />
-            View Orders
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-7 rounded-md px-2 text-[10px]"
-            onClick={() => onWorkspaceAction?.("download_statement")}
-          >
-            <Download className="mr-1 h-3 w-3" />
-            Download Statement
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-7 rounded-md px-2 text-[10px]"
-            onClick={() => onWorkspaceAction?.("repeat_last_order")}
-          >
-            <ArrowRight className="mr-1 h-3 w-3" />
-            Repeat Last Order
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-7 rounded-md px-2 text-[10px]"
-            onClick={() => onWorkspaceAction?.("contact_support")}
-          >
-            <LifeBuoy className="mr-1 h-3 w-3" />
-            Contact Support
-          </Button>
-        </div>
-        <p className="mt-1 text-[10px] text-muted-foreground">Online payments coming soon.</p>
-      </section>
-
-      <section className="rounded-lg border border-border bg-card p-2.5 shadow-sm">
-        <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Outstanding Invoices
-        </h3>
-        {invoices.length ? (
-          <div className="space-y-1.5">
-            {invoices.map((invoice, idx) => (
-              <div
-                key={`${invoice.invoiceId}-${invoice.orderId}-${idx}`}
-                className="rounded-md border border-border/70 px-2 py-1.5 transition hover:border-slate-300"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="truncate text-[11px] font-semibold text-slate-900">{invoice.invoiceId}</p>
-                    <p className="text-[10px] text-slate-500">Order {invoice.orderId || "—"}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[11px] font-semibold tabular-nums">{formatMoney(invoice.amount)}</p>
-                    <p className="text-[10px] text-slate-500">{invoice.status}</p>
-                  </div>
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-slate-600">
-                  <span>Due {formatShortDate(invoice.dueDate)}</span>
-                  {invoice.orderId && invoice.invoiceId ? (
-                    <span className="rounded bg-slate-100 px-1 py-0.5">
-                      {invoice.orderId} <ArrowRight className="mx-0.5 inline h-2.5 w-2.5" /> {invoice.invoiceId}
-                    </span>
-                  ) : null}
-                  {Number(invoice.overdueDays || 0) > 0 ? (
-                    <span className="rounded bg-red-50 px-1 py-0.5 text-red-700">
-                      Overdue {Number(invoice.overdueDays)}d
-                    </span>
-                  ) : null}
-                </div>
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-6 rounded-md px-2 text-[10px]"
-                    onClick={() =>
-                      setExpandedInvoiceId((prev) =>
-                        prev === `${invoice.invoiceId}-${idx}` ? "" : `${invoice.invoiceId}-${idx}`
-                      )
-                    }
-                  >
-                    {expandedInvoiceId === `${invoice.invoiceId}-${idx}` ? "Hide details" : "View Invoice"}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-6 rounded-md px-2 text-[10px]"
-                    onClick={() => setInvoiceDrawerId(`${invoice.invoiceId}-${idx}`)}
-                  >
-                    <Download className="mr-1 h-3 w-3" />
-                    Download
-                  </Button>
-                </div>
-                {expandedInvoiceId === `${invoice.invoiceId}-${idx}` ? (
-                  <div className="mt-1.5 rounded border border-dashed border-border px-2 py-1.5 text-[10px] text-slate-600">
-                    <div>Invoice detail preview for {invoice.invoiceId}</div>
-                    <div>Linked order: {invoice.orderId || "—"}</div>
-                    <div>Status: {invoice.status}</div>
-                  </div>
-                ) : null}
+          {topInvoices.length ? (
+            <>
+              <div className="hidden text-[10px] font-medium uppercase tracking-wide text-slate-500 md:grid md:grid-cols-[1fr_1fr_0.9fr_0.8fr_0.8fr_1fr] md:gap-2 md:px-2 md:py-1">
+                <span>Invoice</span>
+                <span>Order</span>
+                <span>Amount</span>
+                <span>Due</span>
+                <span>Status</span>
+                <span>Actions</span>
               </div>
-            ))}
+              <div className="space-y-1">
+                {topInvoices.map((invoice, idx) => {
+                  const id = `${invoice.invoiceId}-${idx}`;
+                  return (
+                    <div
+                      key={id}
+                      className="rounded-md border border-border/70 px-2 py-1.5 transition hover:border-slate-300"
+                    >
+                      <div className="grid items-center gap-1 md:grid-cols-[1fr_1fr_0.9fr_0.8fr_0.8fr_1fr] md:gap-2">
+                        <div className="min-w-0 text-[11px] font-semibold text-slate-900">{invoice.invoiceId}</div>
+                        <div className="min-w-0 text-[10px] text-slate-600">{invoice.orderId || "—"}</div>
+                        <div className="text-[11px] font-semibold tabular-nums text-slate-900">{formatMoney(invoice.amount)}</div>
+                        <div className="text-[10px] text-slate-600">{formatShortDate(invoice.dueDate)}</div>
+                        <div className="text-[10px]">
+                          <span
+                            className={cn(
+                              "rounded px-1 py-0.5",
+                              Number(invoice.overdueDays || 0) > 0
+                                ? "bg-red-50 text-red-700"
+                                : invoice.status === "Paid"
+                                  ? "bg-emerald-50 text-emerald-700"
+                                  : "bg-amber-50 text-amber-700"
+                            )}
+                          >
+                            {invoice.status}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-6 px-1.5 text-[10px]"
+                            onClick={() => setExpandedInvoiceId((prev) => (prev === id ? "" : id))}
+                          >
+                            View
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-6 px-1.5 text-[10px]"
+                            onClick={() => setInvoiceDrawerId(id)}
+                          >
+                            Download
+                          </Button>
+                        </div>
+                      </div>
+                      {expandedInvoiceId === id ? (
+                        <div className="mt-1.5 rounded border border-dashed border-border px-2 py-1 text-[10px] text-slate-600">
+                          <div>Order {invoice.orderId || "—"} <ArrowRight className="mx-0.5 inline h-2.5 w-2.5" /> {invoice.invoiceId}</div>
+                          <div>Due {formatShortDate(invoice.dueDate)} · {invoice.status}</div>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <p className="rounded-md border border-dashed px-2 py-2 text-[11px] text-muted-foreground">
+              No outstanding invoices right now.
+            </p>
+          )}
+        </section>
+
+        <aside className="rounded-lg border border-border bg-card p-2.5 shadow-sm">
+          <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Account Health
+          </h3>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-[10px] text-slate-500">Outstanding</p>
+              <p className="text-lg font-bold tabular-nums text-foreground">{formatMoney(outstanding)}</p>
+              <p className="text-[10px] text-muted-foreground">Paid {formatMoney(totalPaid)}</p>
+            </div>
+            <div className="text-right">
+              <span className={cn("rounded border px-1.5 py-0.5 text-[10px] font-medium", health.tone)}>
+                {health.label}
+              </span>
+              <p className="mt-1 text-[10px] text-muted-foreground">Risk: {riskLabel}</p>
+            </div>
           </div>
-        ) : (
-          <p className="rounded-md border border-dashed px-2 py-2 text-[11px] text-muted-foreground">
-            No outstanding invoices right now.
-          </p>
-        )}
-      </section>
+          <div className="mt-2 text-[10px] text-slate-600">
+            <div>Behavior: {overdueDays > 0 ? `Delayed by ${overdueDays}d` : "On track"}</div>
+            <div>Next payment: {formatShortDate(dueDate)}</div>
+          </div>
+          {utilizationPct != null ? (
+            <div className="mt-2">
+              <div className="mb-1 flex items-center justify-between text-[10px] text-slate-600">
+                <span>Credit used</span>
+                <span className="tabular-nums">
+                  {formatMoney(creditUsed)} / {formatMoney(creditLimit)}
+                </span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className={cn(
+                    "h-full rounded-full",
+                    utilizationPct >= 85
+                      ? "bg-red-500"
+                      : utilizationPct >= 65
+                        ? "bg-amber-500"
+                        : "bg-emerald-500"
+                  )}
+                  style={{ width: `${utilizationPct}%` }}
+                />
+              </div>
+            </div>
+          ) : null}
+          <p className="mt-2 text-[10px] text-muted-foreground">{accountStandingSummary}</p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => onWorkspaceAction?.("view_orders")}>
+              <FileText className="mr-1 h-3 w-3" />
+              Orders
+            </Button>
+            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => onWorkspaceAction?.("download_statement")}>
+              <Download className="mr-1 h-3 w-3" />
+              Statement
+            </Button>
+            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => onWorkspaceAction?.("repeat_last_order")}>
+              Repeat
+            </Button>
+            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => onWorkspaceAction?.("contact_support")}>
+              <LifeBuoy className="mr-1 h-3 w-3" />
+              Support
+            </Button>
+          </div>
+          <p className="mt-1 text-[10px] text-muted-foreground">Online payments coming soon.</p>
+        </aside>
+      </div>
 
       <section className="rounded-lg border border-border bg-card p-2.5 shadow-sm">
-        <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          {copy?.viewHistory || "Payment Timeline"}
-        </h3>
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {[
+            { id: "activity", label: "Payment Activity" },
+            { id: "statements", label: "Statements" },
+            { id: "credit", label: "Credit History" },
+            { id: "notes", label: "Notes" },
+          ].map((tab) => (
+            <Button
+              key={tab.id}
+              type="button"
+              size="sm"
+              variant={activeFinanceTab === tab.id ? "default" : "outline"}
+              className="h-7 rounded-md px-2 text-[10px]"
+              onClick={() => setActiveFinanceTab(tab.id)}
+            >
+              {tab.label}
+            </Button>
+          ))}
+        </div>
         {detailsLoading ? (
           <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading activity…
           </div>
-        ) : financialTimeline.length ? (
+        ) : tabRows.length ? (
           <div className="space-y-2">
-            {timelineGroups.map((group) => (
+            {groupedTabRows.map((group) => (
               <div key={group.label}>
                 <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                   {group.label}
@@ -490,8 +537,7 @@ function LabAccountTimeline({
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-[11px] font-medium text-slate-900">{entry.title}</p>
-                          <p className="text-[10px] text-slate-500">{entry.subline}</p>
-                          <p className="text-[10px] text-slate-600">{entry.trailing}</p>
+                          <p className="text-[10px] text-slate-600">{entry.detail}</p>
                         </div>
                         <span className="shrink-0 text-[10px] text-muted-foreground">
                           {formatShortDate(entry.date)}
@@ -503,49 +549,11 @@ function LabAccountTimeline({
               </div>
             ))}
           </div>
-        ) : history.length ? (
-          <ul className="relative space-y-0 pl-2.5">
-            <div className="absolute bottom-1 left-[4px] top-1 w-px bg-border" aria-hidden />
-            {history.map((entry) => (
-              <li
-                key={entry.paymentId || `${entry.paymentDate}-${entry.amountCollected}`}
-                className="relative border-b border-border/50 py-1.5 pl-3 last:border-b-0"
-              >
-                <span
-                  className="absolute left-0 top-2.5 h-1.5 w-1.5 rounded-full border border-background bg-emerald-500"
-                  aria-hidden
-                />
-                <p className="text-[11px] font-medium tabular-nums">{formatMoney(entry.amountCollected)}</p>
-                <p className="text-[10px] text-muted-foreground">
-                  {entry.paymentDate || "—"} · {entry.paymentMode || "—"}
-                </p>
-                <p className="text-[10px] text-slate-600">{entry.note || "No note"}</p>
-              </li>
-            ))}
-          </ul>
         ) : (
           <p className="rounded-md border border-dashed px-2 py-2 text-[11px] text-muted-foreground">
-            No payment activity recorded yet.
+            No entries in this tab yet.
           </p>
         )}
-      </section>
-
-      <section className="rounded-lg border border-border bg-card p-2.5 shadow-sm">
-        <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Quick Insights
-        </h3>
-        <div className="grid gap-1.5 text-[11px] sm:grid-cols-2">
-          <div className="rounded-md border border-border/70 bg-muted/30 px-2 py-1.5">
-            <p className="text-[10px] text-slate-500">Credit availability</p>
-            <p className="font-semibold tabular-nums">
-              {availableCredit == null ? "Not configured" : formatMoney(availableCredit)}
-            </p>
-          </div>
-          <div className="rounded-md border border-border/70 bg-muted/30 px-2 py-1.5">
-            <p className="text-[10px] text-slate-500">Order to invoice continuity</p>
-            <p className="font-semibold">{invoices.length ? "Linked records available" : "Awaiting invoice links"}</p>
-          </div>
-        </div>
       </section>
 
       {invoiceDrawerId ? (
