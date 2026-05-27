@@ -47,6 +47,10 @@ import {
 } from "lucide-react";
 
 import {
+  AGENT_VISIT_CONTEXT_KEY,
+  AGENT_PENDING_VISIT_TASK_KEY,
+} from "@/pages/agentVisitContext.js";
+import {
   saveAgentVisitDraft,
   loadAgentVisitDraft,
   clearAgentVisitDraft,
@@ -1156,34 +1160,47 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   }, [visibleLabs, showToast]);
 
   useEffect(() => {
-    const raw = sessionStorage.getItem("primecare_pending_visit_task");
+    const raw =
+      sessionStorage.getItem(AGENT_PENDING_VISIT_TASK_KEY) ||
+      sessionStorage.getItem("primecare_pending_visit_task");
     if (!raw) return;
 
     try {
       const task = JSON.parse(raw);
+      const contextRaw = sessionStorage.getItem(AGENT_VISIT_CONTEXT_KEY);
+      const visitContext = contextRaw ? JSON.parse(contextRaw) : null;
       const matchingLab =
         visibleLabs.find((lab) => String(lab.labId) === String(task.labId)) || null;
 
       setForm((prev) => ({
         ...prev,
-        labId: task.labId || "",
-        labName: task.labName || matchingLab?.labName || "",
+        labId: task.labId || visitContext?.labId || "",
+        labName: task.labName || visitContext?.labName || matchingLab?.labName || "",
         area: matchingLab?.area || prev.area || "",
         visitType: task.visitType || "Follow-up",
-        nextAction: task.nextAction || prev.nextAction || "",
+        nextAction:
+          task.nextAction || visitContext?.nextAction || prev.nextAction || "",
         nextFollowUpType: task.followUpType || prev.nextFollowUpType || "Call",
         nextFollowUpDate: task.followUpDate || prev.nextFollowUpDate || "",
       }));
 
+      const label = task.labName || visitContext?.labName || "selected lab";
+      const fromDaily = visitContext?.source === "agent_daily_workspace";
       showToast(
         "info",
-        `Task loaded for ${task.labName || "selected lab"}. Review and save your visit update.`
+        fromDaily
+          ? `Daily workspace: ${label} loaded. Complete the visit wizard.`
+          : `Task loaded for ${label}. Review and save your visit update.`
       );
 
+      sessionStorage.removeItem(AGENT_PENDING_VISIT_TASK_KEY);
       sessionStorage.removeItem("primecare_pending_visit_task");
+      sessionStorage.removeItem(AGENT_VISIT_CONTEXT_KEY);
     } catch (err) {
       console.error("Failed to read pending visit task", err);
+      sessionStorage.removeItem(AGENT_PENDING_VISIT_TASK_KEY);
       sessionStorage.removeItem("primecare_pending_visit_task");
+      sessionStorage.removeItem(AGENT_VISIT_CONTEXT_KEY);
     }
   }, [visibleLabs, showToast]);
 

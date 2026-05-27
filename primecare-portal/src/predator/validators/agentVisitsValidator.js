@@ -224,6 +224,53 @@ export async function validateAgentVisitsModule({ ctx, currentUser = null, rende
       );
     }
 
+    const apiAssignedCount = Array.isArray(apiRes?.data?.assignedLabs)
+      ? apiRes.data.assignedLabs.length
+      : null;
+    const uiAssignedCount =
+      rendered?.assignedLabsCount != null ? Number(rendered.assignedLabsCount) : null;
+
+    if (apiAssignedCount != null && uiAssignedCount != null) {
+      entries.push(
+        ...checkMutableLayersAgreement({
+          module: "Agent Visits",
+          step: "daily_workspace.assigned_labs_count",
+          ctx,
+          label: "assigned labs visible in daily workspace",
+          layers: {
+            api: apiAssignedCount,
+            ui: uiAssignedCount,
+          },
+        })
+      );
+    }
+
+    if (
+      rendered?.actionQueueCount != null &&
+      Array.isArray(apiRes?.data?.assignedLabs) &&
+      rendered.actionQueueCount > apiRes.data.assignedLabs.length + (apiRes.data.tasks?.length || 0)
+    ) {
+      entries.push(
+        createPredatorEntry({
+          status: "WARN",
+          module: "Agent Visits",
+          step: "daily_workspace.queue_bounds",
+          expected: "queue items bounded by assigned labs + tasks",
+          actual: {
+            actionQueueCount: rendered.actionQueueCount,
+            assignedLabs: apiRes.data.assignedLabs.length,
+            tasks: (apiRes.data.tasks || []).length,
+          },
+          rootCauseGuess: "Action queue may include unexpected cross-agent items",
+          suggestedFix: "Verify filterLabsForUser on workspace reads",
+          severity: "medium",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
+
     return { module: "Agent Visits", summary: summarizePredatorEntries(entries), entries };
   });
 }

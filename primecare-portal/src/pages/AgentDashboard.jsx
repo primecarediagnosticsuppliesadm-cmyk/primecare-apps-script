@@ -1,33 +1,29 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  ClipboardCheck,
-  Wallet,
-  Building2,
-  PlusCircle,
-  AlertTriangle,
-  ArrowRight,
-  CalendarClock,
-  RefreshCw,
-  CheckCircle2,
-  CircleDollarSign,
-  Target,
-  ShieldAlert,
-} from "lucide-react";
-
-import {
-  getAgentWorkspaceRead,
-} from "@/api/primecareSupabaseApi";
+import { RefreshCw } from "lucide-react";
+import { getAgentWorkspaceRead } from "@/api/primecareSupabaseApi";
 import { completeAgentTask } from "@/api/primecareApi";
-import {
-  logAppsScriptFallbackUsed,
-} from "@/utils/migrationTrace.js";
+import { logAppsScriptFallbackUsed } from "@/utils/migrationTrace.js";
 import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
-import { summarizeAgentLabsCreditBuckets } from "@/metrics/computeRiskMetrics.js";
 import { AGENT_TASK_COMPLETION_ENABLED } from "@/config/environment";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
+import PageSkeleton from "@/components/ux/PageSkeleton";
+import {
+  TodayKpiStrip,
+  ActionQueueCard,
+  LabPriorityRow,
+  QuickActionsBar,
+  QueueEmptyState,
+} from "@/pages/AgentDailyWorkspaceSections.jsx";
+import { buildAgentDailyWorkspaceModel } from "@/pages/agentDailyWorkspace.js";
+import {
+  recordAgentDailyWorkspaceEvent,
+  traceAgentDailyWorkspaceLoad,
+} from "@/pages/agentDailyWorkspacePredator.js";
+import {
+  startVisitFromWorkspaceItem,
+  startCollectionFromWorkspaceItem,
+} from "@/pages/agentVisitContext.js";
 
 const EMPTY_WORKSPACE = {
   summary: {
@@ -44,187 +40,66 @@ const EMPTY_WORKSPACE = {
   pendingCollections: [],
 };
 
-function QuickStat({ title, value, icon: Icon, subtitle }) {
-  return (
-    <div className="rounded-2xl border bg-white p-4 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-            {title}
-          </div>
-          <div className="mt-1 text-2xl font-semibold text-slate-900">{value}</div>
-          {subtitle ? <div className="mt-1 text-xs text-slate-500">{subtitle}</div> : null}
-        </div>
-        <div className="rounded-xl bg-slate-50 p-2">
-          <Icon className="h-5 w-5 text-slate-700" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function formatCurrency(value) {
-  return `₹${Number(value || 0).toLocaleString("en-IN")}`;
-}
-
-function priorityClass(priority) {
-  const value = String(priority || "").toUpperCase();
-  if (value === "HIGH" || value === "CRITICAL") return "bg-red-50 text-red-700 border-red-200";
-  if (value === "MEDIUM") return "bg-yellow-50 text-yellow-700 border-yellow-200";
-  return "bg-slate-50 text-slate-700 border-slate-200";
-}
-
-function taskTypeLabel(task) {
-  const type = String(task.taskType || "").toUpperCase();
-
-  if (type === "COLLECTION") return "Collection Follow-up";
-  if (type === "VISIT") return "Visit Required";
-  if (type === "FOLLOW_UP") return "Scheduled Follow-up";
-  if (type === "STOCK") return "Stock Action";
-  if (type === "DEMO") return "Demo Action";
-
-  return "Action Needed";
-}
-
-function taskActionLabel(task) {
-  const type = String(task.taskType || "").toUpperCase();
-
-  if (type === "COLLECTION") return "Open Collection";
-  if (type === "STOCK") return "Log Stock Follow-up";
-  if (type === "FOLLOW_UP") return "Log Follow-up";
-  if (type === "VISIT") return "Log Visit";
-
-  return "Open";
-}
-
-function taskInsight(task) {
-  const type = String(task.taskType || "").toUpperCase();
-
-  if (type === "COLLECTION") {
-    return task.taskDescription || "Payment follow-up needed for this lab.";
-  }
-
-  if (type === "STOCK") {
-    return task.taskDescription || "Stock-related follow-up is pending.";
-  }
-
-  if (type === "FOLLOW_UP") {
-    return task.taskDescription || "A follow-up is pending for this lab.";
-  }
-
-  if (type === "VISIT") {
-    return task.taskDescription || "A field visit is required.";
-  }
-
-  return task.taskDescription || "Action required.";
-}
-
-function taskContextLine(task) {
-  const dueDate = task.dueDate ? `Due: ${task.dueDate}` : "";
-  const nextAction = task.nextAction ? `Action: ${task.nextAction}` : "";
-
-  if (dueDate && nextAction) return `${dueDate} • ${nextAction}`;
-  if (dueDate) return dueDate;
-  if (nextAction) return nextAction;
-
-  return "Open this task and update the workflow.";
-}
-
-
-
-function getCreditBadgeClasses(status) {
-  switch ((status || "").toUpperCase()) {
-    case "HOLD":
-      return "bg-red-100 text-red-700 border border-red-200";
-    case "NEAR_LIMIT":
-      return "bg-yellow-100 text-yellow-700 border border-yellow-200";
-    default:
-      return "bg-green-100 text-green-700 border border-green-200";
-  }
-}
-
-function getCreditLabel(status) {
-  switch ((status || "").toUpperCase()) {
-    case "HOLD":
-      return "Credit Hold";
-    case "NEAR_LIMIT":
-      return "Near Limit";
-    default:
-      return "OK";
-  }
-}
-
-function CreditBadge({ status }) {
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${getCreditBadgeClasses(status)}`}
-    >
-      {getCreditLabel(status)}
-    </span>
-  );
-}
+const LAB_PREVIEW_COUNT = 8;
 
 function normalizeLab(lab) {
   const outstanding = Number(lab?.outstanding ?? lab?.outstandingAmount ?? 0);
-  const creditLimit = Number(lab?.creditLimit || 0);
-  const daysOverdue = Number(lab?.daysOverdue ?? lab?.overdueDays ?? 0);
-  const allowedOverdueDays = Number(lab?.allowedOverdueDays || 15);
   const creditStatus = deriveCreditTierFromLabRecord({
     ...lab,
     outstanding,
-    creditLimit,
-    daysOverdue,
-    allowedOverdueDays,
+    creditLimit: Number(lab?.creditLimit || 0),
+    daysOverdue: Number(lab?.daysOverdue ?? lab?.overdueDays ?? 0),
+    allowedOverdueDays: Number(lab?.allowedOverdueDays || 15),
   });
-
   return {
     ...lab,
     outstanding,
-    outstandingAmount: outstanding,
-    creditLimit,
-    daysOverdue,
-    allowedOverdueDays,
     creditStatus,
-    creditReason: lab?.creditReason || "",
-    creditHold: lab?.creditHold || "",
   };
 }
 
-export default function AgentDashboard({ currentUser, setActivePage, authToken }) {
+function normalizeWorkspacePayload(payload) {
+  return {
+    ...EMPTY_WORKSPACE,
+    ...payload,
+    assignedLabs: Array.isArray(payload.assignedLabs)
+      ? payload.assignedLabs.map(normalizeLab)
+      : [],
+    pendingCollections: Array.isArray(payload.pendingCollections)
+      ? payload.pendingCollections.map(normalizeLab)
+      : [],
+  };
+}
+
+export default function AgentDashboard({ currentUser, setActivePage }) {
   const [workspace, setWorkspace] = useState(EMPTY_WORKSPACE);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [completingTaskId, setCompletingTaskId] = useState("");
   const [error, setError] = useState("");
+  const [showAllLabs, setShowAllLabs] = useState(false);
 
   const loadWorkspace = useCallback(
     async (showRefreshState = false) => {
       try {
         if (showRefreshState) setRefreshing(true);
         else setLoading(true);
-
         setError("");
 
-        const res = await getAgentWorkspaceRead(currentUser);
+        recordAgentDailyWorkspaceEvent("agent_daily_workspace.load_start");
 
-        if (!res?.success) {
-          throw new Error(res?.error || "Failed to load agent workspace");
-        }
-
-        const payload = res.data || EMPTY_WORKSPACE;
-        setWorkspace({
-          ...EMPTY_WORKSPACE,
-          ...payload,
-          assignedLabs: Array.isArray(payload.assignedLabs)
-            ? payload.assignedLabs.map(normalizeLab)
-            : [],
-          pendingCollections: Array.isArray(payload.pendingCollections)
-            ? payload.pendingCollections.map(normalizeLab)
-            : [],
+        await traceAgentDailyWorkspaceLoad(async () => {
+          const apiRes = await getAgentWorkspaceRead(currentUser);
+          if (!apiRes?.success) {
+            throw new Error(apiRes?.error || "Failed to load agent workspace");
+          }
+          const normalized = normalizeWorkspacePayload(apiRes.data || EMPTY_WORKSPACE);
+          const model = buildAgentDailyWorkspaceModel(normalized);
+          setWorkspace(normalized);
+          return model;
         });
       } catch (err) {
         console.error(err);
-        setError(err.message || "Failed to load dashboard");
+        setError(err.message || "Failed to load daily workspace");
         setWorkspace(EMPTY_WORKSPACE);
       } finally {
         setLoading(false);
@@ -238,65 +113,64 @@ export default function AgentDashboard({ currentUser, setActivePage, authToken }
     loadWorkspace(false);
   }, [loadWorkspace]);
 
+  const dailyModel = useMemo(
+    () => buildAgentDailyWorkspaceModel(workspace),
+    [workspace]
+  );
+
+  const { kpis, actionQueue, labPriorityList } = dailyModel;
+
+  const visibleLabs = useMemo(() => {
+    if (showAllLabs) return labPriorityList;
+    return labPriorityList.slice(0, LAB_PREVIEW_COUNT);
+  }, [labPriorityList, showAllLabs]);
+
   usePredatorModuleValidation(
     "Agent Visits",
     currentUser,
     {
       recentVisitsCount: (workspace.recentVisits || []).length,
       todayVisits: Number(workspace.summary?.todayVisits ?? 0),
+      assignedLabsCount: (workspace.assignedLabs || []).length,
+      actionQueueCount: actionQueue.length,
+      collectionsDueCount: kpis.collectionsDue,
+      pendingFollowUpsCount: kpis.pendingFollowUps,
     },
     !loading
   );
 
-  const handleTaskAction = useCallback(
-    (task) => {
-      const type = String(task.taskType || "").toUpperCase();
+  const handleStartVisit = useCallback(
+    (item) => {
+      recordAgentDailyWorkspaceEvent("agent_daily_workspace.start_visit_clicked", {
+        labId: item.labId,
+        queueType: item.queueType,
+      });
+      startVisitFromWorkspaceItem(item, {
+        visitType: item.queueType === "FOLLOW_UP_DUE" ? "Follow-up" : "Field Visit",
+      });
+      setActivePage?.("visits");
+    },
+    [setActivePage]
+  );
 
-      if (type === "COLLECTION") {
-        sessionStorage.setItem(
-          "primecare_pending_collection_task",
-          JSON.stringify({
-            taskId: task.taskId || "",
-            labId: task.labId || "",
-            labName: task.labName || "",
-            nextAction: task.nextAction || task.taskDescription || "",
-          })
-        );
-        setActivePage?.("collections");
-        return;
-      }
+  const handleRecordCollection = useCallback(
+    (item) => {
+      startCollectionFromWorkspaceItem(item);
+      setActivePage?.("collections");
+    },
+    [setActivePage]
+  );
 
-      const visitTypeSuggestion =
-        type === "STOCK"
-          ? "Support Visit"
-          : type === "VISIT"
-          ? "Follow-up"
-          : type === "FOLLOW_UP"
-          ? "Follow-up"
-          : "Follow-up";
+  const handleViewLab = useCallback(() => {
+    setActivePage?.("labs");
+  }, [setActivePage]);
 
-      const followUpTypeSuggestion =
-        type === "STOCK"
-          ? "Visit"
-          : type === "DEMO"
-          ? "Demo"
-          : "Call";
-
-      sessionStorage.setItem(
-        "primecare_pending_visit_task",
-        JSON.stringify({
-          taskId: task.taskId || "",
-          taskType: type,
-          labId: task.labId || "",
-          labName: task.labName || "",
-          nextAction: task.nextAction || task.taskDescription || "",
-          followUpType: followUpTypeSuggestion,
-          followUpDate: task.dueDate || "",
-          visitType: visitTypeSuggestion,
-          priority: task.priority || "MEDIUM",
-        })
-      );
-
+  const handleAddFollowUp = useCallback(
+    (item) => {
+      startVisitFromWorkspaceItem(item, {
+        visitType: "Follow-up",
+        followUpType: "Call",
+      });
       setActivePage?.("visits");
     },
     [setActivePage]
@@ -304,16 +178,8 @@ export default function AgentDashboard({ currentUser, setActivePage, authToken }
 
   const handleCompleteTask = useCallback(
     async (task) => {
-      if (!task?.taskId) return;
-
+      if (!task?.taskId || !AGENT_TASK_COMPLETION_ENABLED) return;
       try {
-        setCompletingTaskId(task.taskId);
-        setError("");
-
-        if (!AGENT_TASK_COMPLETION_ENABLED) {
-          return;
-        }
-
         logAppsScriptFallbackUsed("AgentDashboard.completeTask", {
           primarySourceExpected: "Supabase agent_tasks table",
           fallbackSourceUsed: "Apps Script completeAgentTask",
@@ -326,443 +192,172 @@ export default function AgentDashboard({ currentUser, setActivePage, authToken }
           taskId: task.taskId,
           completedBy: currentUser?.name || currentUser?.agentName || "System User",
         });
-
         const payload = res?.data || res || {};
         if (!payload?.success) {
           throw new Error(payload?.message || "Failed to complete task");
         }
-
         setWorkspace((prev) => ({
           ...prev,
-          summary: {
-            ...prev.summary,
-            openTasks: Math.max(Number(prev.summary?.openTasks || 0) - 1, 0),
-            highPriorityTasks:
-              String(task.priority || "").toUpperCase() === "HIGH"
-                ? Math.max(Number(prev.summary?.highPriorityTasks || 0) - 1, 0)
-                : Number(prev.summary?.highPriorityTasks || 0),
-          },
           tasks: (prev.tasks || []).filter((t) => t.taskId !== task.taskId),
         }));
+        await loadWorkspace(true);
       } catch (err) {
         console.error(err);
         setError(err.message || "Failed to complete task");
-      } finally {
-        setCompletingTaskId("");
       }
     },
-    [currentUser]
+    [currentUser, loadWorkspace]
   );
-
-  const summary = workspace.summary || EMPTY_WORKSPACE.summary;
-  const tasks = workspace.tasks || [];
-  const assignedLabs = workspace.assignedLabs || [];
-  const recentVisits = workspace.recentVisits || [];
-  const pendingCollections = workspace.pendingCollections || [];
-
-  const topCollections = useMemo(() => {
-    return [...pendingCollections]
-      .sort((a, b) => {
-        if (deriveCreditTierFromLabRecord(a) !== deriveCreditTierFromLabRecord(b)) {
-          const rank = { HOLD: 1, NEAR_LIMIT: 2, OK: 3 };
-          return (rank[deriveCreditTierFromLabRecord(a)] || 9) - (rank[deriveCreditTierFromLabRecord(b)] || 9);
-        }
-        if (Number(b.daysOverdue || 0) !== Number(a.daysOverdue || 0)) {
-          return Number(b.daysOverdue || 0) - Number(a.daysOverdue || 0);
-        }
-        return Number(b.outstanding || 0) - Number(a.outstanding || 0);
-      })
-      .slice(0, 4);
-  }, [pendingCollections]);
-
-  const creditRiskSummary = useMemo(
-    () => summarizeAgentLabsCreditBuckets(assignedLabs),
-    [assignedLabs]
-  );
-
-  const todayFocus = useMemo(() => {
-    const highPriority = tasks.filter(
-      (task) => String(task.priority || "").toUpperCase() === "HIGH"
-    ).length;
-
-    const collectionTasks = tasks.filter(
-      (task) => String(task.taskType || "").toUpperCase() === "COLLECTION"
-    ).length;
-
-    return {
-      highPriority,
-      collectionTasks,
-    };
-  }, [tasks]);
 
   if (loading) {
     return (
-      <div className="rounded-2xl border bg-white p-6 shadow-sm">
-        <p className="text-sm text-slate-600">Loading agent dashboard...</p>
-      </div>
+      <PageSkeleton kpiCount={6} kpiColumns={6} listRows={5} className="max-w-3xl lg:max-w-none" />
     );
   }
 
+  const hasQueue = actionQueue.length > 0;
+  const hasRisk = kpis.overdueRiskLabs > 0;
+  const hasCollections = kpis.collectionsDue > 0;
+  const hasFollowUps = kpis.pendingFollowUps > 0;
+
   return (
-    <div className="space-y-5">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Welcome, {currentUser?.name || "Agent"}
+    <div className="mx-auto max-w-3xl space-y-4 pb-6 lg:max-w-4xl">
+      <header className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Daily field workspace
+          </p>
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+            Today · {currentUser?.name || "Agent"}
           </h1>
-          <p className="text-sm text-slate-500">
-            Focus on the next best action and keep field execution moving.
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {hasQueue
+              ? `${actionQueue.length} prioritized action${actionQueue.length === 1 ? "" : "s"} ready`
+              : "You're clear — log visits or collections as the day unfolds"}
           </p>
         </div>
-
         <Button
+          type="button"
           variant="outline"
-          className="rounded-xl"
+          size="sm"
+          className="shrink-0 rounded-xl"
           onClick={() => loadWorkspace(true)}
           disabled={refreshing}
         >
-          <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-          {refreshing ? "Refreshing..." : "Refresh"}
+          <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
         </Button>
-      </div>
+      </header>
 
       {error ? (
-        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="rounded-xl border border-red-500/30 bg-red-500/5 px-3 py-2 text-sm text-red-700">
           {error}
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <QuickStat
-          title="Today Visits"
-          value={summary.todayVisits || 0}
-          icon={ClipboardCheck}
-          subtitle="Visits logged today"
+      <TodayKpiStrip kpis={kpis} loading={false} />
+
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold">Quick actions</h2>
+        <QuickActionsBar
+          onLogVisit={() => setActivePage?.("visits")}
+          onRecordCollection={() => setActivePage?.("collections")}
+          onMyLabs={() => setActivePage?.("labs")}
         />
-        <QuickStat
-          title="Open Tasks"
-          value={summary.openTasks || 0}
-          icon={Target}
-          subtitle={`${summary.highPriorityTasks || 0} high priority`}
-        />
-        <QuickStat
-          title="My Labs"
-          value={summary.activeLabs || assignedLabs.length || 0}
-          icon={Building2}
-          subtitle="Mapped to this agent"
-        />
-        <QuickStat
-          title="Outstanding"
-          value={formatCurrency(summary.totalOutstanding || 0)}
-          icon={AlertTriangle}
-          subtitle={`${summary.pendingCollections || pendingCollections.length || 0} labs need collection`}
-        />
-      </div>
+      </section>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <QuickStat
-          title="Credit Hold"
-          value={creditRiskSummary.hold}
-          icon={ShieldAlert}
-          subtitle="Labs blocked from ordering"
-        />
-        <QuickStat
-          title="Near Limit"
-          value={creditRiskSummary.nearLimit}
-          icon={AlertTriangle}
-          subtitle="Labs approaching limit"
-        />
-        <QuickStat
-          title="Credit OK"
-          value={creditRiskSummary.ok}
-          icon={ClipboardCheck}
-          subtitle="Labs cleared for ordering"
-        />
-        <QuickStat
-          title="With Outstanding"
-          value={creditRiskSummary.withOutstanding}
-          icon={Wallet}
-          subtitle="Labs needing collections visibility"
-        />
-      </div>
+      <section className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold">Today&apos;s action queue</h2>
+          {hasQueue ? (
+            <span className="text-xs text-muted-foreground">Highest priority first</span>
+          ) : null}
+        </div>
+        {hasQueue ? (
+          <ul className="space-y-2">
+            {actionQueue.map((item) => (
+              <li key={item.id}>
+                <ActionQueueCard
+                  item={item}
+                  onStartVisit={handleStartVisit}
+                  onRecordCollection={handleRecordCollection}
+                  onViewLab={handleViewLab}
+                  onAddFollowUp={handleAddFollowUp}
+                />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <QueueEmptyState />
+        )}
+      </section>
 
-      <Card className="rounded-2xl border-slate-200 shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Today Focus</CardTitle>
-          <CardDescription>
-            Quick direction before you start actioning the queue
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-3">
-          <div className="rounded-2xl border bg-slate-50 p-4">
-            <div className="text-sm font-medium text-slate-900">
-              {todayFocus.highPriority} high-priority task
-              {todayFocus.highPriority === 1 ? "" : "s"}
-            </div>
-            <div className="mt-1 text-sm text-slate-500">
-              Start with urgent stock, collection, or follow-up actions first.
-            </div>
-          </div>
+      {!hasQueue && !hasCollections && !hasFollowUps && !hasRisk ? (
+        <div className="grid gap-2 sm:grid-cols-2">
+          <QueueEmptyState type="visits" />
+          <QueueEmptyState type="collections" />
+        </div>
+      ) : null}
 
-          <div className="rounded-2xl border bg-slate-50 p-4">
-            <div className="text-sm font-medium text-slate-900">
-              {todayFocus.collectionTasks} collection-related task
-              {todayFocus.collectionTasks === 1 ? "" : "s"}
-            </div>
-            <div className="mt-1 text-sm text-slate-500">
-              Prioritize receivables where payment follow-up is pending.
-            </div>
-          </div>
+      {(workspace.tasks || []).length > 0 ? (
+        <section className="space-y-2 rounded-xl border border-dashed border-border p-3">
+          <h2 className="text-sm font-semibold">Assigned tasks</h2>
+          <ul className="space-y-2">
+            {workspace.tasks.map((task) => (
+              <li
+                key={task.taskId}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/30 px-3 py-2 text-xs"
+              >
+                <span>
+                  {task.labName} · {task.taskType}
+                </span>
+                {AGENT_TASK_COMPLETION_ENABLED ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    onClick={() => handleCompleteTask(task)}
+                  >
+                    Complete
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
-          <div className="rounded-2xl border bg-slate-50 p-4">
-            <div className="text-sm font-medium text-slate-900">
-              {creditRiskSummary.hold + creditRiskSummary.nearLimit} credit-risk lab
-              {creditRiskSummary.hold + creditRiskSummary.nearLimit === 1 ? "" : "s"}
-            </div>
-            <div className="mt-1 text-sm text-slate-500">
-              Protect cash flow by following up hold and near-limit labs early.
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="rounded-2xl shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Quick Actions</CardTitle>
-          <CardDescription>Fast execution shortcuts for the field team</CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Button
-            className="h-12 rounded-xl"
-            onClick={() => setActivePage?.("visits")}
-          >
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Log Visit
-          </Button>
-
-          <Button
-            variant="outline"
-            className="h-12 rounded-xl"
-            onClick={() => setActivePage?.("collections")}
-          >
-            <CircleDollarSign className="mr-2 h-4 w-4" />
-            Record Collection
-          </Button>
-
-          <Button
-            variant="outline"
-            className="h-12 rounded-xl"
-            onClick={() => setActivePage?.("labs")}
-          >
-            <Building2 className="mr-2 h-4 w-4" />
-            My Labs
-          </Button>
-
-          <Button
-            variant="outline"
-            className="h-12 rounded-xl"
-            onClick={() => setActivePage?.("visits")}
-          >
-            <CalendarClock className="mr-2 h-4 w-4" />
-            Follow-up Update
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card className="rounded-2xl border-slate-200 shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Today’s Action Queue</CardTitle>
-          <CardDescription>
-            Open work items with context so the agent knows what to do next
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {tasks.length === 0 ? (
-            <div className="rounded-2xl border border-dashed p-5 text-sm text-slate-500">
-              No open tasks right now. Use Quick Actions to log new work or update field activity.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {tasks.map((task, idx) => (
-                <div
-                  key={`${task.taskId || task.labId || "task"}-${idx}`}
-                  className="rounded-2xl border bg-white p-4 shadow-sm"
-                >
-                  <div className="flex flex-col gap-4">
-                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <div className="font-semibold text-slate-900">
-                            {task.labName || "-"}
-                          </div>
-                          <Badge className={`border ${priorityClass(task.priority)}`}>
-                            {task.priority || "LOW"}
-                          </Badge>
-                          <Badge variant="outline">{taskTypeLabel(task)}</Badge>
-                        </div>
-
-                        <div className="text-sm font-medium text-slate-800">
-                          {taskInsight(task)}
-                        </div>
-
-                        <div className="text-sm text-slate-500">
-                          {taskContextLine(task)}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          className="rounded-xl"
-                          onClick={() => handleTaskAction(task)}
-                        >
-                          {taskActionLabel(task)}
-                          <ArrowRight className="ml-2 h-4 w-4" />
-                        </Button>
-
-                        {AGENT_TASK_COMPLETION_ENABLED ? (
-                          <Button
-                            variant="outline"
-                            className="rounded-xl"
-                            disabled={completingTaskId === task.taskId}
-                            onClick={() => handleCompleteTask(task)}
-                          >
-                            <CheckCircle2 className="mr-2 h-4 w-4" />
-                            {completingTaskId === task.taskId
-                              ? "Completing..."
-                              : "Mark Complete"}
-                          </Button>
-                        ) : (
-                          <Button
-                            variant="outline"
-                            className="rounded-xl"
-                            disabled
-                            title="Task completion coming soon"
-                          >
-                            <CheckCircle2 className="mr-2 h-4 w-4" />
-                            Task completion coming soon
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-5 lg:grid-cols-2">
-        <Card className="rounded-2xl shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Priority Collections & Credit Risk</CardTitle>
-            <CardDescription>Top items by urgency, overdue days, and credit risk</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {topCollections.length === 0 ? (
-                <div className="text-sm text-slate-500">No pending collection tasks.</div>
-              ) : (
-                topCollections.map((item, idx) => {
-                  const creditStatus = deriveCreditTierFromLabRecord(item);
-                  return (
-                    <div key={`${item.labId}-${idx}`} className="rounded-2xl border p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="font-semibold text-slate-900">{item.labName || "-"}</div>
-                          <div className="mt-1 text-sm text-slate-500">
-                            {formatCurrency(item.outstanding || item.outstandingAmount || 0)} • Overdue{" "}
-                            {Number(item.daysOverdue || item.overdueDays || 0)}d
-                          </div>
-                          {item.creditReason ? (
-                            <div className="mt-2 text-xs text-red-600">
-                              {item.creditReason}
-                            </div>
-                          ) : null}
-                        </div>
-                        <CreditBadge status={creditStatus} />
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Recent Activity</CardTitle>
-            <CardDescription>Your latest visible visit activity</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {recentVisits.length === 0 ? (
-                <div className="text-sm text-slate-500">No recent visits found.</div>
-              ) : (
-                recentVisits.slice(0, 4).map((visit, idx) => (
-                  <div key={`${visit.visitId || visit.labName}-${idx}`} className="rounded-2xl border p-4">
-                    <div className="font-semibold text-slate-900">{visit.labName || "-"}</div>
-                    <div className="mt-1 text-sm text-slate-500">
-                      {visit.area || "-"} • {visit.visitDate || "-"}
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <Badge>{visit.visitType || "-"}</Badge>
-                      <Badge variant="secondary">{visit.labResponse || "-"}</Badge>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="rounded-2xl shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Assigned Labs Snapshot</CardTitle>
-          <CardDescription>Labs currently mapped to this agent with credit visibility</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {assignedLabs.length === 0 ? (
-            <div className="text-sm text-slate-500">No labs assigned yet.</div>
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {assignedLabs.slice(0, 6).map((lab, idx) => (
-                <div key={`${lab.labId}-${idx}`} className="rounded-2xl border p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="font-semibold text-slate-900">{lab.labName || "-"}</div>
-                      <div className="mt-1 text-sm text-slate-500">
-                        {lab.city || lab.area || "-"} • {lab.phone || "-"}
-                      </div>
-                    </div>
-                    <CreditBadge status={deriveCreditTierFromLabRecord(lab)} />
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Badge variant="outline">{lab.status || "Active"}</Badge>
-                    {Number(lab.outstanding || 0) > 0 ? (
-                      <Badge variant="outline">
-                        {formatCurrency(lab.outstanding)}
-                      </Badge>
-                    ) : null}
-                    {Number(lab.daysOverdue || 0) > 0 ? (
-                      <Badge variant="outline">
-                        Overdue {lab.daysOverdue}d
-                      </Badge>
-                    ) : null}
-                  </div>
-
-                  {lab.creditReason ? (
-                    <div className="mt-2 text-xs text-red-600">{lab.creditReason}</div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <section className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold">Assigned labs</h2>
+          {labPriorityList.length > LAB_PREVIEW_COUNT ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => setShowAllLabs((v) => !v)}
+            >
+              {showAllLabs ? "Show less" : `Show all (${labPriorityList.length})`}
+            </Button>
+          ) : null}
+        </div>
+        {visibleLabs.length === 0 ? (
+          <QueueEmptyState type="visits" />
+        ) : (
+          <ul className="space-y-2">
+            {visibleLabs.map((lab) => (
+              <li key={lab.labId || lab.labName}>
+                <LabPriorityRow
+                  lab={lab}
+                  onStartVisit={handleStartVisit}
+                  onRecordCollection={handleRecordCollection}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }
