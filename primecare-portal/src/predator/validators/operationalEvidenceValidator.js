@@ -3,6 +3,9 @@ import { predatorTrace } from "@/predator/predatorTiming.js";
 import { ROLES } from "@/config/roles.js";
 import {
   listOperationalEvidence,
+  listOperationalEvidenceLocal,
+  checkOperationalEvidenceBucket,
+  resolveEvidencePreviewUrl,
   EVIDENCE_BUCKET,
 } from "@/api/operationalEvidenceApi.js";
 import { supabase } from "@/api/supabaseClient.js";
@@ -17,7 +20,10 @@ export async function validateOperationalEvidenceModule({ ctx, currentUser }) {
     const entries = [];
 
     if (ctx.role === ROLES.LAB) {
-      const labRows = listOperationalEvidence(ctx.tenantId, { role: ROLES.LAB, tenantId: ctx.tenantId });
+      const labRows = listOperationalEvidenceLocal(ctx.tenantId, {
+        role: ROLES.LAB,
+        tenantId: ctx.tenantId,
+      });
       entries.push(
         createPredatorEntry({
           status: labRows.length === 0 ? "PASS" : "FAIL",
@@ -25,7 +31,7 @@ export async function validateOperationalEvidenceModule({ ctx, currentUser }) {
           step: "lab_role.isolation",
           rootCauseGuess:
             labRows.length === 0
-              ? "Lab role cannot read agent evidence index"
+              ? "Lab role cannot read agent evidence"
               : "Lab role leaked evidence records",
           suggestedFix: "Ensure listOperationalEvidence returns [] for lab role",
           tenantId: ctx.tenantId,
@@ -53,52 +59,127 @@ export async function validateOperationalEvidenceModule({ ctx, currentUser }) {
       })
     );
 
-    const tenantRows = listOperationalEvidence(ctx.tenantId, {
-      role: ROLES.ADMIN,
-      tenantId: ctx.tenantId,
-      id: ctx.userId,
-    });
-    const crossTenant = tenantRows.filter((r) => r.tenantId && r.tenantId !== ctx.tenantId);
+    const bucket = await checkOperationalEvidenceBucket(ctx.tenantId);
     entries.push(
       createPredatorEntry({
-        status: crossTenant.length === 0 ? "PASS" : "FAIL",
+        status: bucket.ok ? "PASS" : bucket.missing ? "WARN" : "FAIL",
         module: "Operational Evidence",
-        step: "tenant.scope",
-        rootCauseGuess:
-          crossTenant.length === 0
-            ? "Evidence index scoped to active tenant"
-            : "Cross-tenant evidence rows in index",
-        suggestedFix: "Clear local evidence index or fix tenantId on upload",
+        step: "storage.bucket_reachable",
+        rootCauseGuess: bucket.ok
+          ? `Bucket ${EVIDENCE_BUCKET} reachable`
+          : bucket.error || "Bucket not reachable",
+        suggestedFix:
+          "Run supabase/sql/operational_evidence_storage_migration.sql in Supabase SQL editor",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,
-        detail: { crossTenantCount: crossTenant.length },
       })
     );
 
-    const stale = tenantRows.filter((r) => !r.previewUrl && !r.storagePath);
+    if (supabase && ctx.tenantId) {
+      const { data, error } = await supabase
+        .from("operational_evidence")
+        .select("evidence_id, storage_path, storage_backend, tenant_id")
+        .eq("tenant_id", ctx.tenantId)
+        .order("created_at", { ascending: false })
+        .limit(5);
+
+      entries.push(
+        createPredatorEntry({
+          status: error ? "WARN" : "PASS",
+          module: "Operational Evidence",
+          step: "metadata.table_read",
+          rootCauseGuess: error
+            ? error.message
+            : `operational_evidence readable (${(data || []).length} recent rows)`,
+          suggestedFix: "Apply operational_evidence_storage_migration.sql",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      const crossTenant = (data || []).filter((r) => r.tenant_id && r.tenant_id !== ctx.tenantId);
+      entries.push(
+        createPredatorEntry({
+          status: crossTenant.length === 0 ? "PASS" : "FAIL",
+          module: "Operational Evidence",
+          step: "tenant.scope",
+          rootCauseGuess:
+            crossTenant.length === 0
+              ? "DB evidence rows scoped to active tenant"
+              : "Cross-tenant evidence rows returned",
+          suggestedFix: "Review RLS on operational_evidence",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      const durableRow = (data || []).find(
+        (r) => r.storage_backend === "supabase" && r.storage_path
+      );
+      if (durableRow) {
+        const signed = await resolveEvidencePreviewUrl({
+          storagePath: durableRow.storage_path,
+          storageBackend: "supabase",
+        });
+        entries.push(
+          createPredatorEntry({
+            status: signed ? "PASS" : "WARN",
+            module: "Operational Evidence",
+            step: "storage.signed_url",
+            rootCauseGuess: signed
+              ? "Signed preview URL generated"
+              : "Could not create signed URL for stored evidence",
+            suggestedFix: "Check storage SELECT policies and object owner",
+            tenantId: ctx.tenantId,
+            role: ctx.role,
+            userId: ctx.userId,
+          })
+        );
+      } else {
+        entries.push(
+          createPredatorEntry({
+            status: bucket.ok ? "WARN" : "PASS",
+            module: "Operational Evidence",
+            step: "storage.signed_url",
+            rootCauseGuess: "No durable evidence rows yet to test signed URL",
+            suggestedFix: "Upload visit or collection proof once bucket is live",
+            tenantId: ctx.tenantId,
+            role: ctx.role,
+            userId: ctx.userId,
+          })
+        );
+      }
+    }
+
+    const localRows = listOperationalEvidenceLocal(ctx.tenantId, currentUser || { role: ctx.role });
+    const crossTenantLocal = localRows.filter((r) => r.tenantId && r.tenantId !== ctx.tenantId);
     entries.push(
       createPredatorEntry({
-        status: stale.length === 0 ? "PASS" : "WARN",
+        status: crossTenantLocal.length === 0 ? "PASS" : "FAIL",
         module: "Operational Evidence",
-        step: "preview.references",
+        step: "local_index.tenant_scope",
         rootCauseGuess:
-          stale.length === 0 ? "All indexed records have preview or storage path" : "Stale evidence without preview",
-        suggestedFix: "Re-upload or purge orphan index rows",
+          crossTenantLocal.length === 0
+            ? "Local fallback index scoped to tenant"
+            : "Cross-tenant rows in local index",
+        suggestedFix: "Clear localStorage evidence index for QA tenants",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,
-        detail: { staleCount: stale.length },
       })
     );
 
     if (ctx.role === ROLES.AGENT && currentUser) {
-      const agentRows = listOperationalEvidence(ctx.tenantId, currentUser);
+      const agentRows = await listOperationalEvidence(ctx.tenantId, currentUser, { limit: 20 });
       const foreign = agentRows.filter(
         (r) =>
           String(r.uploadedBy) !== String(currentUser.name) &&
           String(r.uploadedBy) !== String(currentUser.id) &&
-          String(r.uploadedBy) !== String(currentUser.agentId)
+          String(r.uploadedBy) !== String(currentUser.agentId) &&
+          String(r.uploadedByUserId || "") !== String(currentUser.id || currentUser.userId || "")
       );
       entries.push(
         createPredatorEntry({
@@ -107,9 +188,9 @@ export async function validateOperationalEvidenceModule({ ctx, currentUser }) {
           step: "agent.ownership",
           rootCauseGuess:
             foreign.length === 0
-              ? "Agent sees only own uploads"
+              ? "Agent sees only own evidence"
               : "Agent can see other agents' evidence",
-          suggestedFix: "Tighten listOperationalEvidence agent filter",
+          suggestedFix: "Review operational_evidence RLS and list filters",
           tenantId: ctx.tenantId,
           role: ctx.role,
           userId: ctx.userId,
@@ -121,9 +202,9 @@ export async function validateOperationalEvidenceModule({ ctx, currentUser }) {
       createPredatorEntry({
         status: "PASS",
         module: "Operational Evidence",
-        step: "storage.bucket",
-        rootCauseGuess: `Target bucket: ${EVIDENCE_BUCKET}`,
-        suggestedFix: "Create private bucket with tenant path policies in Supabase Storage",
+        step: "upload.failure_handling",
+        rootCauseGuess: "Upload API falls back to local embed when bucket unavailable",
+        suggestedFix: "Keep migration applied; monitor evidence.upload_fail Predator timings",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,

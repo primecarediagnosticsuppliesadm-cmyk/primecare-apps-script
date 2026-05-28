@@ -1,26 +1,59 @@
-# Operational Evidence Storage (V1)
+# Operational Evidence Storage — Durable V1
 
-## Bucket
+## Deploy steps (Supabase SQL Editor)
 
-Create a **private** Supabase Storage bucket:
+1. Run migrations in order:
+   - `supabase/sql/production_auth_rls_pilot_migration.sql`
+   - `supabase/sql/operational_evidence_storage_migration.sql`
 
-- Name: `operational-evidence`
-- Public: **false**
-- Path pattern: `{tenant_id}/{lab_id}/{kind}/{evidenceId}-{filename}`
+2. Confirm bucket in Dashboard → Storage:
+   - **Name:** `operational-evidence`
+   - **Public:** OFF
+   - **File size limit:** 8MB
+   - **Allowed MIME:** JPEG, PNG, WebP, HEIC
 
-## RLS / policies (recommended)
+3. Confirm policies on `storage.objects` and RLS on `public.operational_evidence`.
 
-- **Agent**: insert + read objects under tenant where `uploaded_by` matches JWT claim (or restrict via Edge Function).
-- **Admin / Executive**: read all objects for `tenant_id` on JWT.
-- **Lab**: no access.
+## Path format
 
-V1 pilot also persists a **tenant-scoped local index** (`localStorage`) and embeds small images when Storage is unavailable (<500KB).
-
-## Future table (optional)
-
-```sql
--- operational_evidence (future migration — not required for V1 pilot index)
--- evidence_id, tenant_id, lab_id, visit_id, payment_id, kind, storage_path, uploaded_by, uploaded_at, gps_json, remarks
+```
+{tenant_id}/{evidence_type}/{record_id}/{evidence_id}-{file_name}
 ```
 
-No core Postgres RLS changes were made in V1.
+| Segment | Example |
+|---------|---------|
+| `tenant_id` | UUID tenant |
+| `evidence_type` | `visit_photo`, `collection_receipt`, `collection_proof` |
+| `record_id` | `visit_id` or `payment_id` |
+| `file_name` | Sanitized original name |
+
+## Access model
+
+| Role | Upload | View |
+|------|--------|------|
+| Agent | Own tenant path | Own uploads (+ storage owner) |
+| Admin / Executive | Tenant path | All tenant evidence |
+| Lab | Denied | Denied |
+
+- Previews use **signed URLs** (1 hour TTL), never public bucket URLs.
+- Metadata lives in `public.operational_evidence` (durable across browsers).
+- **Local index fallback** remains when bucket/DB unavailable (<500KB embed).
+
+## Client API
+
+- `uploadOperationalEvidence` — storage upload → DB row → signed URL; retries ×3; optional `onProgress`
+- `listOperationalEvidence` — async; DB first, merge local fallback
+- `resolveEvidencePreviewUrl` — refresh signed URL
+- `checkOperationalEvidenceBucket` — Predator / health probe
+
+## QA checklist
+
+- [ ] Run SQL migration on target Supabase project
+- [ ] Agent: complete visit with photo → refresh → proof still visible
+- [ ] Admin: same tenant, different browser → sees visit proof
+- [ ] Lab user: no proof button / empty evidence list
+- [ ] Collection payment + receipt → proof in history
+- [ ] Storage object not public; signed URL expires
+- [ ] Upload >8MB rejected with clear error
+- [ ] Bucket missing: visit still saves; warning + local fallback if small
+- [ ] Predator → Operational Evidence: bucket + signed URL steps

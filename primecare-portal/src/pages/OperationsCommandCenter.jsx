@@ -99,6 +99,7 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [drawerLabId, setDrawerLabId] = useState("");
+  const [evidenceFeed, setEvidenceFeed] = useState([]);
   const { showToast } = usePortalToast();
 
   const load = useCallback(
@@ -145,7 +146,7 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
       feed,
       payload: { ...opsModel.payload, riskLabs: opsModel.riskLabs },
     };
-  }, [opsModel, currentUser]);
+  }, [opsModel, evidenceFeed]);
 
   useEffect(() => {
     if (!model?.attention?.length) return;

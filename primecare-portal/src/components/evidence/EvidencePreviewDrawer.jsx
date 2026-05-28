@@ -48,22 +48,34 @@ export default function EvidencePreviewDrawer({
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
-    setLoading(true);
-    const list = listOperationalEvidence(tenantId, currentUser, {
-      labId,
-      visitId,
-      paymentId,
-      limit: 24,
-    });
-    setRecords(list);
-    const first = initialRecord || list[0] || null;
-    setActive(first);
-    setLoading(false);
-    recordEvidenceEvent("evidence.preview_open", {
-      labId,
-      count: list.length,
-    });
+    if (!open) return undefined;
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const list = await listOperationalEvidence(tenantId, currentUser, {
+          labId,
+          visitId,
+          paymentId,
+          limit: 24,
+        });
+        if (cancelled) return;
+        setRecords(list);
+        const first = initialRecord || list[0] || null;
+        setActive(first);
+        recordEvidenceEvent("evidence.preview_open", {
+          labId,
+          count: list.length,
+        });
+      } catch {
+        if (!cancelled) setRecords([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [open, tenantId, currentUser, labId, visitId, paymentId, initialRecord]);
 
   useEffect(() => {

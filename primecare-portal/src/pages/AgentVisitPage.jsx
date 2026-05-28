@@ -1701,6 +1701,11 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
         uploadedBy: uploader,
         uploadedByRole: uploaderRole,
         remarks: proofRemarks,
+        onProgress: (p) => {
+          if (p?.phase === "uploading") {
+            setEvidenceUploadState((prev) => ({ ...prev, visit: "uploading" }));
+          }
+        },
       });
       visitOk = up.success;
       setEvidenceUploadState((prev) => ({
@@ -1725,6 +1730,11 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
         uploadedBy: uploader,
         uploadedByRole: uploaderRole,
         remarks: proofRemarks,
+        onProgress: (p) => {
+          if (p?.phase === "uploading") {
+            setEvidenceUploadState((prev) => ({ ...prev, collection: "uploading" }));
+          }
+        },
       });
       collectionOk = up.success;
       setEvidenceUploadState((prev) => ({

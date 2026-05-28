@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { listOperationalEvidence } from "@/api/operationalEvidenceApi.js";
 import EvidencePreviewDrawer from "@/components/evidence/EvidencePreviewDrawer.jsx";
-import { ImageIcon } from "lucide-react";
+import { ImageIcon, Loader2 } from "lucide-react";
 
 /**
  * @param {object} props
@@ -22,18 +22,45 @@ export default function EvidenceContextActions({
   size = "sm",
 }) {
   const [open, setOpen] = useState(false);
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(false);
   const tenantId = currentUser?.tenantId ?? currentUser?.tenant_id ?? "";
 
-  const records = useMemo(
-    () =>
-      listOperationalEvidence(tenantId, currentUser, {
-        labId,
-        visitId,
-        paymentId,
-        limit: 24,
-      }),
-    [tenantId, currentUser, labId, visitId, paymentId, open]
-  );
+  useEffect(() => {
+    if (!tenantId || !currentUser) {
+      setRecords([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const list = await listOperationalEvidence(tenantId, currentUser, {
+          labId,
+          visitId,
+          paymentId,
+          limit: 24,
+        });
+        if (!cancelled) setRecords(list);
+      } catch {
+        if (!cancelled) setRecords([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, currentUser, labId, visitId, paymentId, open]);
+
+  if (loading) {
+    return (
+      <Button type="button" variant="outline" size={size} className={className} disabled>
+        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+        Proof…
+      </Button>
+    );
+  }
 
   if (!records.length) return null;
 

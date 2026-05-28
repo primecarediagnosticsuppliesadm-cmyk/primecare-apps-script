@@ -49,6 +49,10 @@ import EvidenceUploadField, {
 } from "@/components/evidence/EvidenceUploadField.jsx";
 import EvidenceContextActions from "@/components/evidence/EvidenceContextActions.jsx";
 import { uploadOperationalEvidence, listOperationalEvidence } from "@/api/operationalEvidenceApi.js";
+
+function str(v) {
+  return String(v ?? "").trim();
+}
 import { summarizeCollectionsList } from "@/metrics/computeReceivableMetrics.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { recordCollectionsRenderedSnapshot } from "@/predator/moduleUiSnapshot.js";
@@ -741,6 +745,7 @@ function CollectionExpandedPanel({
   evidenceUploading,
   currentUser,
   tenantId,
+  collectionEvidence = [],
 }) {
   if (detailsLoading) {
     return (
@@ -955,12 +960,9 @@ function CollectionExpandedPanel({
             <ul className="space-y-2">
               {history.map((item) => {
                 const paymentId = item.paymentId || item.payment_id || "";
-                const proofCount = currentUser
-                  ? listOperationalEvidence(tenantId, currentUser, {
-                      labId: collection?.labId,
-                      paymentId,
-                    }).length
-                  : 0;
+                const proofCount = collectionEvidence.filter(
+                  (r) => str(r.paymentId) === str(paymentId)
+                ).length;
                 return (
                   <li
                     key={paymentId || `${item.paymentDate}-${item.amountCollected}`}
@@ -1083,6 +1085,24 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
   const [evidenceUploading, setEvidenceUploading] = useState(false);
 
   const tenantId = currentUser?.tenantId ?? currentUser?.tenant_id ?? "";
+  const [collectionEvidence, setCollectionEvidence] = useState([]);
+
+  useEffect(() => {
+    if (!tenantId || !selectedCollection?.labId || isLabAccount) {
+      setCollectionEvidence([]);
+      return;
+    }
+    let cancelled = false;
+    void listOperationalEvidence(tenantId, currentUser, {
+      labId: selectedCollection.labId,
+      limit: 80,
+    }).then((rows) => {
+      if (!cancelled) setCollectionEvidence(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, currentUser, selectedCollection?.labId, isLabAccount, saving]);
 
   const predatorSnapshot = useMemo(
     () => ({
@@ -1444,6 +1464,7 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
                 uploadedBy: currentUser?.name || "System User",
                 uploadedByRole: currentUser?.role || ROLES.AGENT,
                 remarks: proofRemarks || note,
+                onProgress: () => {},
               });
               setEvidenceUploading(false);
               if (!up.success) {
@@ -1628,6 +1649,7 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
     evidenceUploading,
     currentUser,
     tenantId,
+    collectionEvidence,
   };
 
   const handleLabWorkspaceAction = useCallback(
