@@ -36,7 +36,7 @@ export function getWizardMotivationMessage(stepIndex, total, labSelected, canSav
  */
 export function formatRelativeVisitTime(dateStr) {
   const raw = String(dateStr || "").trim();
-  if (!raw) return "—";
+  if (!raw) return "Recently";
   const parsed = Date.parse(raw.length <= 10 ? `${raw}T12:00:00` : raw);
   if (!Number.isFinite(parsed)) return raw;
 

@@ -73,8 +73,9 @@ import {
 import EvidenceUploadField, {
   EvidenceUploadProgress,
 } from "@/components/evidence/EvidenceUploadField.jsx";
-import EvidenceContextActions from "@/components/evidence/EvidenceContextActions.jsx";
-import { uploadOperationalEvidence } from "@/api/operationalEvidenceApi.js";
+import VisitEvidenceChips from "@/components/evidence/VisitEvidenceChips.jsx";
+import { uploadOperationalEvidence, listOperationalEvidence } from "@/api/operationalEvidenceApi.js";
+import { enrichVisitForDisplay, displayResponseLabel } from "@/utils/agentVisitDisplay.js";
 
 import { saveAgentVisit } from "@/api/primecareApi";
 import {
@@ -346,14 +347,18 @@ function ReviewSummaryCard({
   );
 }
 
-function RecentVisitTimelineCard({ visit, currentUser }) {
+function RecentVisitTimelineCard({ visit, currentUser, allEvidence = [] }) {
   const sold = Number(visit.soldValue || 0);
-  const relativeTime = formatRelativeVisitTime(visit.date);
-  const nextPreview =
-    visit.nextAction ||
-    (visit.nextFollowUpDate
+  const relativeTime = formatRelativeVisitTime(visit.date || visit.visitDate);
+  const nextPreview = visit.nextAction
+    ? visit.nextAction
+    : visit.nextFollowUpDate
       ? `${visit.nextFollowUpType || "Call"} · ${visit.nextFollowUpDate}`
-      : null);
+      : null;
+  const notesPreview =
+    visit.notes && !String(visit.notes).includes("[Visit]")
+      ? String(visit.notes).slice(0, 120)
+      : "";
 
   return (
     <div className="relative flex gap-2.5 pb-2 pl-3" role="listitem">
@@ -362,16 +367,18 @@ function RecentVisitTimelineCard({ visit, currentUser }) {
       <div className="min-w-0 flex-1 rounded-lg border border-border/50 bg-card px-2.5 py-2 shadow-sm">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-slate-900">
-              {visit.labName || "—"}
-            </p>
+            <p className="truncate text-sm font-semibold text-slate-900">{visit.labName}</p>
             <div className="mt-1 flex flex-wrap gap-1">
-              <StatusBadge variant={visitTypeToVariant(visit.visitType)} compact>
-                {visit.visitType || "—"}
-              </StatusBadge>
-              <StatusBadge variant="info" compact>
-                {displayResponseLabel(visit.labResponse)}
-              </StatusBadge>
+              {visit.visitType ? (
+                <StatusBadge variant={visitTypeToVariant(visit.visitType)} compact>
+                  {visit.visitType}
+                </StatusBadge>
+              ) : null}
+              {visit.outcomeLabel ? (
+                <StatusBadge variant="info" compact>
+                  {visit.outcomeLabel}
+                </StatusBadge>
+              ) : null}
               {visit.qualificationBand ? (
                 <StatusBadge
                   variant={qualificationBandToVariant(visit.qualificationBand)}
@@ -386,23 +393,28 @@ function RecentVisitTimelineCard({ visit, currentUser }) {
             {relativeTime}
           </span>
         </div>
+        {visit.visitDate ? (
+          <p className="mt-0.5 text-[10px] text-slate-500">Visit date · {visit.visitDate}</p>
+        ) : null}
         {sold > 0 ? (
           <p className="mt-1 text-[11px] font-semibold text-emerald-700">
             Sold ₹{sold.toLocaleString("en-IN")}
           </p>
         ) : null}
         {nextPreview ? (
-          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">→ {nextPreview}</p>
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">Next · {nextPreview}</p>
         ) : null}
-        {currentUser ? (
-          <div className="mt-2">
-            <EvidenceContextActions
-              currentUser={currentUser}
-              labId={visit.labId}
-              visitId={visit.id}
-              className="h-7 text-[10px]"
-            />
-          </div>
+        {notesPreview ? (
+          <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-600">{notesPreview}</p>
+        ) : null}
+        {currentUser && visit.visitId ? (
+          <VisitEvidenceChips
+            currentUser={currentUser}
+            visitId={visit.visitId}
+            labId={visit.labId}
+            allEvidence={allEvidence}
+            className="mt-2"
+          />
         ) : null}
       </div>
     </div>
@@ -414,19 +426,24 @@ function normalizeLab(lab) {
 }
 
 function normalizeVisit(v) {
+  const visitId = String(v.visitId || v.id || v.Visit_ID || "").trim();
   return {
-    id: v.id || v.Visit_ID || "",
+    id: visitId,
+    visitId,
     agent: v.agent || v.agentName || v.Agent_Name || "",
     date: v.date || v.visitDate || v.Visit_Date || "",
+    visitDate: v.visitDate || v.date || v.Visit_Date || "",
     labId: v.labId || v.Lab_ID || "",
     labName: v.labName || v.Lab_Name || "",
     area: v.area || v.Area || "",
     visitType: v.visitType || v.Visit_Type || "",
-    labResponse: v.labResponse || v.Lab_Response || "",
-    soldValue: Number(v.soldValue || v.Sold_Value || 0),
-    nextAction: v.nextAction || v.Next_Action || "",
-    nextFollowUpDate: v.nextFollowUpDate || v.Next_Follow_Up_Date || "",
-    nextFollowUpType: v.nextFollowUpType || v.Next_Follow_Up_Type || "",
+    labResponse: v.labResponse || v.lab_response || v.Lab_Response || "",
+    soldValue: Number(v.soldValue || v.sold_value || v.Sold_Value || 0),
+    nextAction: v.nextAction || v.next_action || v.Next_Action || "",
+    nextFollowUpDate: v.nextFollowUpDate || v.next_follow_up_date || v.Next_Follow_Up_Date || "",
+    nextFollowUpType: v.nextFollowUpType || v.next_follow_up_type || v.Next_Follow_Up_Type || "",
+    notes: v.notes || "",
+    qualificationBand: v.qualificationBand || v.qualification_band || "",
   };
 }
 
@@ -448,11 +465,13 @@ function normalizeCollection(c) {
 
 function mapWorkspaceVisitToPageVisit(visit) {
   return normalizeVisit({
+    visitId: visit.visitId || visit.id,
     id: visit.visitId || visit.id,
     agent: visit.agentName || visit.agent,
     agentName: visit.agentName || visit.agent,
     agentId: visit.agentId,
     date: visit.visitDate || visit.date,
+    visitDate: visit.visitDate || visit.date,
     labId: visit.labId,
     labName: visit.labName,
     area: visit.area,
@@ -462,6 +481,7 @@ function mapWorkspaceVisitToPageVisit(visit) {
     nextAction: visit.nextAction,
     nextFollowUpDate: visit.nextFollowUpDate,
     nextFollowUpType: visit.nextFollowUpType,
+    notes: visit.notes,
   });
 }
 
@@ -540,16 +560,6 @@ function normalizeQualificationRow(row) {
     pipelineStageLabel: pipeline.pipelineStageLabel,
     pipelineNextAction: pipeline.pipelineNextAction,
   };
-}
-
-function displayResponseLabel(value) {
-  const v = String(value || "").trim();
-  if (v === "Interested") return "Interested";
-  if (v === "Warm") return "Moderately Interested";
-  if (v === "Not Interested") return "Not Interested";
-  if (v === "Converted") return "Order Confirmed";
-  if (v === "Need Follow-up") return "Follow-up Needed";
-  return v || "-";
 }
 
 /** Match dropdown value to a lab (native select string values). */
@@ -1024,7 +1034,9 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
               recentVisits: ctx.recentVisits || [],
               pendingCollections: ctx.collections || [],
             };
-            visitRows = (ctx.recentVisits || []).map(mapWorkspaceVisitToPageVisit);
+            visitRows = (ctx.recentVisits || [])
+              .map(mapWorkspaceVisitToPageVisit)
+              .map((v) => enrichVisitForDisplay(v, (ctx.labs || []).map(normalizePortalLab)));
             collectionRows = (ctx.collections || []).map(normalizeCollection);
 
             labList = (ctx.labs || []).map(normalizePortalLab);
@@ -1216,7 +1228,29 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
     [visibleLabs]
   );
 
-  const visibleVisits = useMemo(() => recentVisits, [recentVisits]);
+  const [visitEvidenceList, setVisitEvidenceList] = useState([]);
+
+  const tenantIdForEvidence =
+    currentUser?.tenantId ?? currentUser?.tenant_id ?? "";
+
+  useEffect(() => {
+    if (!tenantIdForEvidence || !currentUser) {
+      setVisitEvidenceList([]);
+      return;
+    }
+    let cancelled = false;
+    void listOperationalEvidence(tenantIdForEvidence, currentUser, { limit: 120 }).then((rows) => {
+      if (!cancelled) setVisitEvidenceList(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantIdForEvidence, currentUser, recentVisits.length]);
+
+  const visibleVisits = useMemo(
+    () => recentVisits.map((v) => enrichVisitForDisplay(v, visibleLabs)),
+    [recentVisits, visibleLabs]
+  );
 
   const todayVisits = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -1228,6 +1262,9 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
     currentUser,
     {
       recentVisitsCount: visibleVisits.length,
+      recentVisitRowsWithLabName: visibleVisits
+        .filter((v) => v.labId)
+        .every((v) => Boolean(String(v.labName || "").trim())),
       todayVisits,
       wizardStepCount: AGENT_VISIT_SECTION_STEPS.length,
       hasQualificationStep: AGENT_VISIT_SECTION_STEPS.some((s) => s.key === "qualification"),
@@ -2971,9 +3008,10 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
           <div className="space-y-0" role="list">
             {visibleVisits.slice(0, 6).map((visit, idx) => (
               <RecentVisitTimelineCard
-                key={`${visit.id || visit.labName}-${idx}`}
+                key={`${visit.visitId || visit.labId}-${idx}`}
                 visit={visit}
                 currentUser={currentUser}
+                allEvidence={visitEvidenceList}
               />
             ))}
           </div>

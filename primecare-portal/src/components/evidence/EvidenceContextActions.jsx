@@ -2,6 +2,11 @@ import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { listOperationalEvidence } from "@/api/operationalEvidenceApi.js";
 import EvidencePreviewDrawer from "@/components/evidence/EvidencePreviewDrawer.jsx";
+import {
+  filterPaymentEvidence,
+  filterVisitProofEvidence,
+  getEvidenceKindLabel,
+} from "@/utils/operationalEvidenceUi.js";
 import { ImageIcon, Loader2 } from "lucide-react";
 
 /**
@@ -10,6 +15,7 @@ import { ImageIcon, Loader2 } from "lucide-react";
  * @param {string} [props.labId]
  * @param {string} [props.visitId]
  * @param {string} [props.paymentId]
+ * @param {'payment'|'visit'|'any'} [props.scope]
  * @param {string} [props.className]
  * @param {string} [props.size] sm | default
  */
@@ -18,6 +24,7 @@ export default function EvidenceContextActions({
   labId,
   visitId,
   paymentId,
+  scope = "any",
   className = "",
   size = "sm",
 }) {
@@ -37,11 +44,17 @@ export default function EvidenceContextActions({
       try {
         const list = await listOperationalEvidence(tenantId, currentUser, {
           labId,
-          visitId,
-          paymentId,
+          visitId: scope === "payment" ? undefined : visitId,
+          paymentId: scope === "visit" ? undefined : paymentId,
           limit: 24,
         });
-        if (!cancelled) setRecords(list);
+        let scoped = list;
+        if (scope === "payment" && paymentId) {
+          scoped = filterPaymentEvidence(list, paymentId);
+        } else if (scope === "visit" && visitId) {
+          scoped = filterVisitProofEvidence(list, visitId);
+        }
+        if (!cancelled) setRecords(scoped);
       } catch {
         if (!cancelled) setRecords([]);
       } finally {
@@ -51,7 +64,7 @@ export default function EvidenceContextActions({
     return () => {
       cancelled = true;
     };
-  }, [tenantId, currentUser, labId, visitId, paymentId, open]);
+  }, [tenantId, currentUser, labId, visitId, paymentId, scope, open]);
 
   if (loading) {
     return (
@@ -64,6 +77,15 @@ export default function EvidenceContextActions({
 
   if (!records.length) return null;
 
+  const label =
+    scope === "payment"
+      ? records.length === 1
+        ? getEvidenceKindLabel(records[0].kind)
+        : `Payment proof (${records.length})`
+      : scope === "visit"
+        ? `Visit proof (${records.length})`
+        : `Proof (${records.length})`;
+
   return (
     <>
       <Button
@@ -74,7 +96,7 @@ export default function EvidenceContextActions({
         onClick={() => setOpen(true)}
       >
         <ImageIcon className="mr-1.5 h-3.5 w-3.5" />
-        Proof ({records.length})
+        {label}
       </Button>
       <EvidencePreviewDrawer
         open={open}
@@ -84,6 +106,7 @@ export default function EvidenceContextActions({
         visitId={visitId}
         paymentId={paymentId}
         initialRecord={records[0]}
+        records={records}
       />
     </>
   );

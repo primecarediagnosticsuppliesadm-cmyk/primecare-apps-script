@@ -2195,18 +2195,27 @@ function mapVisitRowForAgentDashboard(row) {
   const created = str(row.created_at ?? row.createdAt ?? "");
   const agentId = str(row.agent_id ?? row.agentId ?? "");
   const agent = str(row.agent_name ?? row.Agent_Name ?? row.agent ?? row.agentName ?? "");
+  const notes = str(row.notes ?? "");
+  let labResponse = str(row.lab_response ?? row.Lab_Response ?? row.labResponse ?? "");
+  if (!labResponse && notes.includes("Response:")) {
+    const m = notes.match(/Response:\s*([^·\n]+)/);
+    if (m) labResponse = str(m[1]);
+  }
+
   return {
     visitId: str(row.visit_id ?? row.id ?? row.Visit_ID ?? ""),
     visitDate: visitDate || created.slice(0, 10),
     labName: str(row.lab_name ?? row.Lab_Name ?? row.labName ?? ""),
     area: str(row.area ?? row.Area ?? ""),
     visitType: str(row.visit_type ?? row.Visit_Type ?? row.visitType ?? ""),
-    labResponse: str(row.lab_response ?? row.Lab_Response ?? row.labResponse ?? ""),
+    labResponse,
     soldValue: num(row.sold_value ?? row.soldValue ?? row.Sold_Value ?? 0),
     nextFollowUpDate: str(
       row.next_follow_up_date ?? row.nextFollowUpDate ?? row.Next_Follow_Up_Date ?? ""
     ).slice(0, 10),
+    nextFollowUpType: str(row.next_follow_up_type ?? row.nextFollowUpType ?? ""),
     nextAction: str(row.next_action ?? row.nextAction ?? ""),
+    notes,
     agentId,
     agent,
     agentName: agent,

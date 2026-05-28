@@ -9,8 +9,14 @@ import {
 } from "@/predator/predatorChecks.js";
 import { filterVisitsForUser } from "@/utils/accessFilters.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
+import { labIdKey } from "@/utils/labId.js";
+import { enrichVisitForDisplay } from "@/utils/agentVisitDisplay.js";
 
 const RECENT_VISITS_LIMIT = 10;
+
+function str(v) {
+  return String(v ?? "").trim();
+}
 
 function localDateYmd(d = new Date()) {
   const y = d.getFullYear();
@@ -90,10 +96,77 @@ export async function validateAgentVisitsModule({ ctx, currentUser = null, rende
     const dbMetrics = computeScopedVisitMetrics(visitsRaw, currentUser);
 
     const apiRes = await getAgentWorkspaceRead(currentUser || { role: ctx.role, id: ctx.userId });
-    const apiRecent = Array.isArray(apiRes?.data?.recentVisits)
-      ? apiRes.data.recentVisits.length
-      : null;
+    const apiVisitRows = Array.isArray(apiRes?.data?.recentVisits) ? apiRes.data.recentVisits : [];
+    const apiAssignedLabs = Array.isArray(apiRes?.data?.assignedLabs)
+      ? apiRes.data.assignedLabs
+      : [];
+    const apiRecent = apiVisitRows.length;
     const apiToday = Number(apiRes?.data?.summary?.todayVisits ?? 0);
+
+    const visitsWithLabId = apiVisitRows.filter((v) => labIdKey(v.labId));
+    const enrichedRecent = visitsWithLabId.map((v) =>
+      enrichVisitForDisplay(v, apiAssignedLabs)
+    );
+    const missingLabNames = enrichedRecent.filter((v) => !str(v.labName));
+
+    entries.push(
+      createPredatorEntry({
+        status:
+          visitsWithLabId.length === 0 || missingLabNames.length === 0 ? "PASS" : "FAIL",
+        module: "Agent Visits",
+        step: "recent_visits.lab_name_display",
+        expected: "Recent visit rows with lab_id show a lab name after display enrichment",
+        actual: {
+          visitsWithLabId: visitsWithLabId.length,
+          missingLabNames: missingLabNames.length,
+          sample: missingLabNames.slice(0, 2).map((v) => ({
+            visitId: v.visitId,
+            labId: v.labId,
+          })),
+        },
+        rootCauseGuess:
+          missingLabNames.length > 0
+            ? "Visit row missing lab_name and assigned lab lookup failed"
+            : "Lab names resolve for recent visits",
+        suggestedFix:
+          "Ensure mapVisitRowForAgentDashboard and enrichVisitForDisplay resolve lab from assignedLabs",
+        severity: missingLabNames.length > 0 ? "high" : "low",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    if (rendered?.recentVisitRowsWithLabName === false) {
+      entries.push(
+        createPredatorEntry({
+          status: "FAIL",
+          module: "Agent Visits",
+          step: "ui.recent_visits.lab_name",
+          expected: "All rendered recent visits with labId show labName",
+          actual: rendered,
+          rootCauseGuess: "Recent Visits UI mapping dropped lab name",
+          suggestedFix: "Use enrichVisitForDisplay on recentVisits before render",
+          severity: "high",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    } else if (rendered?.recentVisitRowsWithLabName === true) {
+      entries.push(
+        createPredatorEntry({
+          status: "PASS",
+          module: "Agent Visits",
+          step: "ui.recent_visits.lab_name",
+          expected: "Rendered recent visits show lab names",
+          actual: { recentVisitsCount: rendered.recentVisitsCount },
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
 
     const uiRecent = rendered?.recentVisitsCount ?? null;
     const uiToday = rendered?.todayVisits ?? null;

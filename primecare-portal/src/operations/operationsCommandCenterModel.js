@@ -1,5 +1,11 @@
 import { summarizeCollectionsList } from "@/metrics/computeReceivableMetrics.js";
 import { productsNearStockoutFromInventoryStats } from "@/metrics/computeInventoryMetrics.js";
+import { filterVisitProofEvidence } from "@/utils/operationalEvidenceUi.js";
+import { labIdKey } from "@/utils/labId.js";
+
+function str(v) {
+  return String(v ?? "").trim();
+}
 
 const ATTENTION_SEVERITY_ORDER = { CRITICAL: 0, ATTENTION: 1, MONITORING: 2 };
 const RISK_LEVEL_RANK = { Critical: 0, High: 1, Medium: 2, Low: 3 };
@@ -134,9 +140,11 @@ function makeAttentionItem(item) {
     title: item.title,
     subtitle: item.subtitle,
     explanation: item.explanation,
+    recommendedAction: item.recommendedAction || item.explanation,
     ageLabel: item.ageLabel || "Today",
     labId: item.labId || "",
     labName: item.labName || "",
+    owner: item.owner || item.agent || "",
     orderId: item.orderId || "",
     action: item.action,
     actionLabel: item.actionLabel,
@@ -150,7 +158,36 @@ export function buildAttentionQueue(payload) {
   const items = [];
   const todayYmd = localDateYmd();
 
+  const evidence = payload.evidence || [];
+  const visitsByLab = new Map();
+  for (const v of payload.visits || []) {
+    const lid = labIdKey(v.labId || v.lab_id);
+    if (!lid) continue;
+    const list = visitsByLab.get(lid) || [];
+    list.push(v);
+    visitsByLab.set(lid, list);
+  }
+
   for (const c of payload.collections || []) {
+    const hold = str(c.creditHold || c.credit_hold).toUpperCase();
+    if (hold === "HOLD") {
+      items.push(
+        makeAttentionItem({
+          id: `hold-${c.labId}`,
+          severity: "CRITICAL",
+          title: "Credit hold",
+          subtitle: c.labName || c.labId,
+          explanation: "Account blocked for new orders until collections clear",
+          recommendedAction: "Review outstanding and release or escalate",
+          labId: c.labId,
+          labName: c.labName,
+          owner: c.agent || c.assignedAgent,
+          action: "collections",
+          actionLabel: "Review Account",
+        })
+      );
+    }
+
     const overdue = Number(c.overdueDays || 0);
     const outstanding = Number(c.outstandingAmount || 0);
     if (overdue >= 14 && outstanding > 0) {
@@ -164,6 +201,7 @@ export function buildAttentionQueue(payload) {
           ageLabel: `${overdue}d overdue`,
           labId: c.labId,
           labName: c.labName,
+          owner: c.agent || c.assignedAgent,
           action: "collections",
           actionLabel: "View Collections",
         })
@@ -277,8 +315,10 @@ export function buildAttentionQueue(payload) {
           title: "Follow-up due",
           subtitle: c.labName || c.labId,
           explanation: c.nextAction || "Scheduled follow-up is due",
+          recommendedAction: "Log visit or record collection follow-up",
           labId: c.labId,
           labName: c.labName,
+          owner: c.agent || c.assignedAgent,
           action: "visits",
           actionLabel: "Assign Follow-up",
         })
@@ -286,55 +326,271 @@ export function buildAttentionQueue(payload) {
     }
   }
 
-  items.sort(
+  let staleLabCount = 0;
+  for (const c of payload.collections || []) {
+    if (staleLabCount >= 8) break;
+    const lid = labIdKey(c.labId);
+    const labVisits = (visitsByLab.get(lid) || []).sort((a, b) => {
+      const tb = Date.parse(b.visitDate || b.date || "") || 0;
+      const ta = Date.parse(a.visitDate || a.date || "") || 0;
+      return tb - ta;
+    });
+    const lastVisit = labVisits[0];
+    const visitAge = lastVisit ? daysSince(lastVisit.visitDate || lastVisit.date) : null;
+    const strategic =
+      Number(c.outstandingAmount || 0) > 0 || labVisits.length > 0;
+    if (!strategic) continue;
+    if (visitAge == null || visitAge >= 14) {
+      staleLabCount += 1;
+      items.push(
+        makeAttentionItem({
+          id: `stale-lab-${c.labId}`,
+          severity: visitAge != null && visitAge >= 21 ? "CRITICAL" : "ATTENTION",
+          title: "Stale lab",
+          subtitle: c.labName || c.labId,
+          explanation:
+            visitAge == null
+              ? "No field visit on record"
+              : `No visit in ${visitAge} days`,
+          recommendedAction: "Schedule agent visit this week",
+          ageLabel: visitAge != null ? `${visitAge}d` : "No visit",
+          labId: c.labId,
+          labName: c.labName,
+          owner: c.agent || c.assignedAgent,
+          action: "visits",
+          actionLabel: "Plan Visit",
+        })
+      );
+    }
+  }
+
+  for (const q of payload.qualifications || []) {
+    const review = str(q.founderReviewStatus || q.founder_review_status).toLowerCase();
+    if (review === "pending" || review === "needs_info") {
+      items.push(
+        makeAttentionItem({
+          id: `qual-${q.labId}`,
+          severity: review === "needs_info" ? "ATTENTION" : "MONITORING",
+          title: "Qualification pending",
+          subtitle: q.labName || q.labId,
+          explanation: `Founder review: ${review.replaceAll("_", " ")}`,
+          recommendedAction: "Complete qualification review",
+          labId: q.labId,
+          labName: q.labName,
+          action: "qualification",
+          actionLabel: "Review Qualification",
+        })
+      );
+    }
+  }
+
+  const recentVisits = (payload.visits || [])
+    .filter((v) => {
+      const age = daysSince(v.visitDate || v.date);
+      return age != null && age <= 7;
+    })
+    .slice(0, 20);
+
+  for (const v of recentVisits) {
+    const vid = str(v.visitId || v.id);
+    if (!vid) continue;
+    const proofs = filterVisitProofEvidence(evidence, vid);
+    if (!proofs.length) {
+      items.push(
+        makeAttentionItem({
+          id: `no-proof-${vid}`,
+          severity: "MONITORING",
+          title: "Missing visit proof",
+          subtitle: v.labName || v.labId,
+          explanation: `Visit ${v.visitType || "logged"} without photo evidence`,
+          recommendedAction: "Ask agent to upload visit proof",
+          labId: v.labId,
+          labName: v.labName,
+          owner: v.agent || v.agentName,
+          action: "visits",
+          actionLabel: "Open Visits",
+        })
+      );
+    }
+  }
+
+  let localEvidenceAlerts = 0;
+  for (const ev of evidence) {
+    if (ev.storageBackend !== "local_embedded") continue;
+    if (localEvidenceAlerts >= 4) break;
+    localEvidenceAlerts += 1;
+    items.push(
+      makeAttentionItem({
+        id: `ev-fail-${ev.evidenceId}`,
+        severity: "ATTENTION",
+        title: "Evidence upload pending sync",
+        subtitle: ev.labId || "Operational evidence",
+        explanation: `${ev.fileName || "File"} stored locally — durable upload may have failed`,
+        recommendedAction: "Retry upload or verify storage bucket",
+        labId: ev.labId,
+        action: "visits",
+        actionLabel: "View Evidence",
+      })
+    );
+  }
+
+  const seen = new Set();
+  const deduped = items.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+
+  deduped.sort(
     (a, b) =>
       (ATTENTION_SEVERITY_ORDER[a.severity] ?? 9) - (ATTENTION_SEVERITY_ORDER[b.severity] ?? 9)
   );
 
-  return items.slice(0, 24);
+  return deduped.slice(0, 28);
 }
 
-const FEED_EVENT_ICONS = {
-  order_created: "order",
-  order_fulfilled: "order",
-  payment_received: "payment",
-  collection_due: "payment",
-  visit: "visit",
+const FEED_KIND_LABELS = {
+  order: "Order",
+  payment: "Payment",
+  visit: "Visit",
+  evidence: "Evidence",
+  inventory: "Inventory",
+  qualification: "Qualification",
+  ops: "Operations",
 };
+
+function feedRow(partial) {
+  return {
+    kind: "ops",
+    severity: "info",
+    ...partial,
+    telemetryLabel: FEED_KIND_LABELS[partial.kind] || "Operations",
+  };
+}
 
 /**
  * @param {import('./operationsCommandCenterLoader.js').OperationsPayload} payload
  */
-export function buildOperationsFeed(payload, limit = 30) {
+export function buildOperationsFeed(payload, limit = 36) {
   const feed = [];
 
   for (const row of payload.notifications || []) {
     const type = String(row.event_type || "").toLowerCase();
     const payloadJson =
       row.payload_json && typeof row.payload_json === "object" ? row.payload_json : {};
-    feed.push({
-      id: row.event_id || `evt-${row.created_at}`,
-      kind: FEED_EVENT_ICONS[type] || "ops",
-      title: type.replaceAll("_", " ") || "Operational update",
-      subtitle: String(payloadJson.message || row.source_module || "").slice(0, 120),
-      labName: payloadJson.labName || payloadJson.lab_name || "",
-      labId: payloadJson.labId || payloadJson.lab_id || "",
-      createdAt: row.created_at,
-      severity: String(row.severity || "info").toLowerCase(),
-    });
+    let kind = "ops";
+    let title = type.replaceAll("_", " ") || "Operational update";
+    if (type.includes("order")) {
+      kind = "order";
+      title = type.includes("fulfill") ? "Order fulfilled" : "Order placed";
+    } else if (type.includes("payment") || type.includes("collection")) {
+      kind = "payment";
+      title = type.includes("payment") ? "Payment received" : "Collection event";
+    } else if (type.includes("qualification")) {
+      kind = "qualification";
+      title = "Qualification updated";
+    } else if (type.includes("stock") || type.includes("inventory")) {
+      kind = "inventory";
+      title = "Inventory movement";
+    }
+    feed.push(
+      feedRow({
+        id: row.event_id || `evt-${row.created_at}`,
+        kind,
+        title,
+        subtitle: String(payloadJson.message || row.source_module || "").slice(0, 120),
+        labName: payloadJson.labName || payloadJson.lab_name || "",
+        labId: payloadJson.labId || payloadJson.lab_id || "",
+        createdAt: row.created_at,
+        severity: String(row.severity || "info").toLowerCase(),
+      })
+    );
   }
 
-  for (const v of (payload.visits || []).slice(0, 12)) {
-    feed.push({
-      id: `visit-${v.id || v.visitId}-${v.visitDate}`,
-      kind: "visit",
-      title: "Visit completed",
-      subtitle: `${v.visitType || "Visit"} · ${v.labName || ""}`,
-      labName: v.labName,
-      labId: v.labId,
-      createdAt: v.visitDate,
-      severity: "info",
-    });
+  for (const o of (payload.orders || []).slice(0, 10)) {
+    const status = normalizeOrderStatus(o.orderStatus);
+    feed.push(
+      feedRow({
+        id: `order-${o.orderId}`,
+        kind: "order",
+        title: status.toLowerCase().includes("fulfill") ? "Order fulfilled" : "Order placed",
+        subtitle: `${formatCurrency(o.orderTotal)} · ${status}`,
+        labName: o.labName,
+        labId: o.labId,
+        createdAt: o.orderDate || o.createdAt,
+        severity: isOrderDelayed(o) ? "warning" : "info",
+      })
+    );
+  }
+
+  for (const v of (payload.visits || []).slice(0, 14)) {
+    feed.push(
+      feedRow({
+        id: `visit-${v.id || v.visitId}-${v.visitDate}`,
+        kind: "visit",
+        title: "Visit logged",
+        subtitle: `${v.visitType || "Field visit"} · ${v.agentName || v.agent || "Agent"}`,
+        labName: v.labName,
+        labId: v.labId,
+        createdAt: v.visitDate || v.date,
+        severity: "info",
+      })
+    );
+  }
+
+  for (const ev of (payload.evidence || []).slice(0, 14)) {
+    const kind = str(ev.kind);
+    feed.push(
+      feedRow({
+        id: `evidence-${ev.evidenceId}`,
+        kind: "evidence",
+        title:
+          kind === "visit_photo"
+            ? "Proof uploaded"
+            : kind === "collection_receipt"
+              ? "Payment receipt uploaded"
+              : "Collection proof uploaded",
+        subtitle: ev.fileName || ev.remarks || ev.labId,
+        labName: "",
+        labId: ev.labId,
+        createdAt: ev.uploadedAt,
+        severity: ev.storageBackend === "local_embedded" ? "warning" : "info",
+      })
+    );
+  }
+
+  for (const q of (payload.qualifications || []).slice(0, 8)) {
+    feed.push(
+      feedRow({
+        id: `qual-feed-${q.labId}-${q.updatedAt}`,
+        kind: "qualification",
+        title: "Qualification updated",
+        subtitle: `${q.qualificationBand || "Band pending"} · ${q.founderReviewStatus || "review"}`,
+        labName: q.labName,
+        labId: q.labId,
+        createdAt: q.updatedAt || q.createdAt,
+        severity: "info",
+      })
+    );
+  }
+
+  for (const po of (payload.purchaseOrders || []).slice(0, 6)) {
+    const status = str(po.status || po.poStatus);
+    if (!status.toLowerCase().includes("received") && !status.toLowerCase().includes("closed")) {
+      continue;
+    }
+    feed.push(
+      feedRow({
+        id: `po-recv-${po.poId || po.id}`,
+        kind: "inventory",
+        title: "Stock received",
+        subtitle: po.supplierName || status || "Procurement",
+        labName: "",
+        labId: "",
+        createdAt: po.updatedAt || po.createdAt,
+        severity: "info",
+      })
+    );
   }
 
   feed.sort((a, b) => {
@@ -384,26 +640,41 @@ export function buildAgentOperationsPanel(payload) {
   const summary = payload.dashboard?.summary || {};
   const executive = payload.dashboard?.executive || {};
   const todayYmd = localDateYmd();
-  const visitsToday = (payload.visits || []).filter(
+  const visitsTodayList = (payload.visits || []).filter(
     (v) => String(v.visitDate || v.date || "").slice(0, 10) === todayYmd
-  ).length;
+  );
+  const visitsToday = visitsTodayList.length;
 
   const collSummary = summarizeCollectionsList(payload.collections || []);
-  const totalRecovered = (payload.collections || []).reduce(
-    (s, c) => s + Number(c.totalPaid || 0),
-    0
-  );
+  const todayCollectionsAmount = Number(summary.todayCollections ?? 0);
   const followUpsDue = (payload.collections || []).filter((c) => {
     const d = parseYmd(c.nextFollowUp);
     return d && d.getTime() <= new Date(todayYmd).getTime();
   }).length;
 
+  const evidence = payload.evidence || [];
+  const proofsToday = evidence.filter((e) => {
+    const d = str(e.uploadedAt).slice(0, 10);
+    return d === todayYmd;
+  }).length;
+
+  const labsTouched = new Set(
+    visitsTodayList.map((v) => labIdKey(v.labId)).filter(Boolean)
+  ).size;
+
   const agents = new Map();
   for (const v of payload.visits || []) {
-    const name = String(v.agent || v.agentName || "").trim() || "Unknown";
-    const row = agents.get(name) || { name, visits: 0, sold: 0 };
+    const name = str(v.agent || v.agentName) || "Unknown";
+    const row = agents.get(name) || {
+      name,
+      visits: 0,
+      sold: 0,
+      lastVisitDate: "",
+    };
     row.visits += 1;
     row.sold += Number(v.soldValue || 0);
+    const vd = str(v.visitDate || v.date).slice(0, 10);
+    if (vd > row.lastVisitDate) row.lastVisitDate = vd;
     agents.set(name, row);
   }
 
@@ -411,17 +682,160 @@ export function buildAgentOperationsPanel(payload) {
     .sort((a, b) => b.visits - a.visits)
     .slice(0, 8);
 
+  const staleAgents = agentRows.filter((a) => {
+    const last = parseYmd(a.lastVisitDate);
+    if (!last) return true;
+    const age = daysSince(a.lastVisitDate);
+    return age != null && age >= 7;
+  });
+
+  const activeAgentsToday = new Set(
+    visitsTodayList.map((v) => str(v.agent || v.agentName)).filter(Boolean)
+  ).size;
+
   return {
     visitsToday: visitsToday || Number(summary.recentVisits ?? 0),
-    collectionsRecovered: formatCurrency(
-      totalRecovered || executive.todaysRevenue || 0
-    ),
+    collectionsToday: formatCurrency(todayCollectionsAmount),
+    collectionsTodayRaw: todayCollectionsAmount,
+    proofsUploaded: proofsToday,
+    labsTouched,
+    activeAgentsToday,
+    followUpsPending: followUpsDue,
     missedFollowUps: followUpsDue,
     overdueCollections: collSummary.overdueCount,
+    staleAgents: staleAgents.slice(0, 6),
+    staleAgentCount: staleAgents.length,
     agentRows,
     healthLabel:
-      followUpsDue > 5 ? "Needs coaching" : visitsToday > 0 ? "Active field day" : "Quiet day",
+      followUpsDue > 5
+        ? "Follow-ups backing up"
+        : visitsToday > 0
+          ? "Active field day"
+          : "Low field activity",
   };
+}
+
+/**
+ * Compact executive KPI strip (deterministic, no forecasting).
+ */
+export function buildExecutiveDailySnapshot(payload) {
+  const executive = payload.dashboard?.executive || {};
+  const summary = payload.dashboard?.summary || {};
+  const collSummary = summarizeCollectionsList(payload.collections || []);
+  const todayYmd = localDateYmd();
+
+  const visitsToday = (payload.visits || []).filter(
+    (v) => str(v.visitDate || v.date).slice(0, 10) === todayYmd
+  );
+  const activeAgentsToday = new Set(
+    visitsToday.map((v) => str(v.agent || v.agentName)).filter(Boolean)
+  ).size;
+
+  const highRiskLabs = (payload.collections || []).filter((c) => {
+    const hold = str(c.creditHold || c.credit_hold).toUpperCase() === "HOLD";
+    const risk = str(c.riskStatus).toLowerCase() === "high";
+    return hold || risk || Number(c.overdueDays) >= 14;
+  }).length;
+
+  const pendingOrders = (payload.orders || []).filter((o) => {
+    const s = normalizeOrderStatus(o.orderStatus).toLowerCase();
+    return s !== "fulfilled" && s !== "cancelled" && s !== "delivered";
+  }).length;
+
+  const invPanel = buildInventoryRiskPanel(payload);
+  const lowStockSkus =
+    invPanel.critical.length ||
+    Number(executive.productsNearStockout ?? summary.stockStats?.nearStockout ?? 0);
+
+  return {
+    revenueToday: formatCurrency(Number(executive.todaysRevenue ?? 0)),
+    revenueTodayRaw: Number(executive.todaysRevenue ?? 0),
+    collectionsPending: collSummary.overdueCount ?? 0,
+    collectionsPendingLabel: `${collSummary.overdueCount ?? 0} overdue`,
+    collectionsExposure: formatCurrency(collSummary.totalOutstanding ?? 0),
+    highRiskLabs,
+    activeAgentsToday,
+    ordersPendingFulfillment: pendingOrders,
+    lowStockSkus,
+    visitsToday: visitsToday.length,
+  };
+}
+
+/**
+ * Simple operational health tiles (status, not charts).
+ */
+export function buildOperationalHealthTiles(payload, health) {
+  const collSummary = summarizeCollectionsList(payload.collections || []);
+  const agents = buildAgentOperationsPanel(payload);
+  const evidence = payload.evidence || [];
+  const recentVisits = (payload.visits || []).slice(0, 20);
+  const visitsWithProof = recentVisits.filter((v) => {
+    const vid = str(v.visitId || v.id);
+    return vid && filterVisitProofEvidence(evidence, vid).length > 0;
+  });
+  const compliancePct =
+    recentVisits.length > 0
+      ? Math.round((visitsWithProof.length / recentVisits.length) * 100)
+      : 100;
+  const localOnly = evidence.filter((e) => e.storageBackend === "local_embedded").length;
+
+  const orders = payload.orders || [];
+  const openOrders = orders.filter((o) => {
+    const s = normalizeOrderStatus(o.orderStatus).toLowerCase();
+    return s !== "fulfilled" && s !== "cancelled";
+  });
+  const delayed = openOrders.filter(isOrderDelayed);
+
+  function statusFromScore(score, invert = false) {
+    const s = invert ? 100 - score : score;
+    if (s >= 75) return { status: "healthy", label: "Healthy" };
+    if (s >= 50) return { status: "watch", label: "Watch" };
+    return { status: "risk", label: "At risk" };
+  }
+
+  return [
+    {
+      key: "collections",
+      title: "Collections",
+      ...statusFromScore(health.contributors.collectionsHealth),
+      detail: `${collSummary.overdueCount ?? 0} overdue · ${formatCurrency(collSummary.totalOutstanding ?? 0)} out`,
+      action: "collections",
+    },
+    {
+      key: "inventory",
+      title: "Inventory",
+      ...statusFromScore(health.contributors.inventoryHealth),
+      detail: `${buildInventoryRiskPanel(payload).critical.length} critical SKUs`,
+      action: "inventory",
+    },
+    {
+      key: "field",
+      title: "Field activity",
+      ...statusFromScore(Math.min(100, agents.visitsToday * 12)),
+      detail: `${agents.visitsToday} visits · ${agents.activeAgentsToday} agents active`,
+      action: "visits",
+    },
+    {
+      key: "evidence",
+      title: "Evidence compliance",
+      ...statusFromScore(compliancePct),
+      detail:
+        localOnly > 0
+          ? `${compliancePct}% visits with proof · ${localOnly} local-only upload`
+          : `${compliancePct}% recent visits with proof`,
+      action: "visits",
+    },
+    {
+      key: "fulfillment",
+      title: "Order fulfillment",
+      ...statusFromScore(health.contributors.fulfillmentHealth),
+      detail:
+        delayed.length > 0
+          ? `${delayed.length} delayed of ${openOrders.length} open`
+          : `${openOrders.length} open orders`,
+      action: "orders",
+    },
+  ];
 }
 
 export function buildFinancialPressurePanel(payload) {
@@ -567,14 +981,17 @@ export function buildRiskLabs(payload) {
 export function buildOperationsCommandCenterModel(payload) {
   const riskLabs = buildRiskLabs(payload);
   const attention = buildAttentionQueue(payload);
+  const health = buildOperationalHealth(payload);
   return {
+    snapshot: buildExecutiveDailySnapshot(payload),
     attention,
     attentionBySeverity: groupAttentionBySeverity(attention),
     feed: buildOperationsFeed(payload),
     inventory: buildInventoryRiskPanel(payload),
     agents: buildAgentOperationsPanel(payload),
     financial: buildFinancialPressurePanel(payload),
-    health: buildOperationalHealth(payload),
+    health,
+    healthTiles: buildOperationalHealthTiles(payload, health),
     riskLabs,
     payload,
   };

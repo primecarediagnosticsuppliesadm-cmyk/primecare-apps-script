@@ -2,11 +2,17 @@ import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { resolveEvidencePreviewUrl, listOperationalEvidence } from "@/api/operationalEvidenceApi.js";
 import { recordEvidenceEvent } from "@/operations/evidencePredator.js";
+import {
+  getEvidenceKindLabel,
+  getEvidenceLinkLabel,
+  getEvidenceRecordTypeLabel,
+} from "@/utils/operationalEvidenceUi.js";
+import { labIdKey } from "@/utils/labId.js";
 import { cn } from "@/lib/utils";
 import { Loader2, X, Image as ImageIcon } from "lucide-react";
 
 function formatWhen(iso) {
-  if (!iso) return "—";
+  if (!iso) return "Unknown time";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString();
@@ -21,6 +27,7 @@ function formatWhen(iso) {
  * @param {string} [props.visitId]
  * @param {string} [props.paymentId]
  * @param {object} [props.initialRecord]
+ * @param {object[]} [props.records] Pre-filtered list (skips broad fetch)
  */
 export default function EvidencePreviewDrawer({
   open,
@@ -30,6 +37,7 @@ export default function EvidencePreviewDrawer({
   visitId,
   paymentId,
   initialRecord = null,
+  records: recordsProp,
 }) {
   const [records, setRecords] = useState([]);
   const [active, setActive] = useState(initialRecord);
@@ -49,6 +57,18 @@ export default function EvidencePreviewDrawer({
 
   useEffect(() => {
     if (!open) return undefined;
+    if (Array.isArray(recordsProp)) {
+      setRecords(recordsProp);
+      setActive(initialRecord || recordsProp[0] || null);
+      setLoading(false);
+      recordEvidenceEvent("evidence.preview_open", {
+        labId,
+        count: recordsProp.length,
+        scoped: true,
+      });
+      return undefined;
+    }
+
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -61,8 +81,7 @@ export default function EvidencePreviewDrawer({
         });
         if (cancelled) return;
         setRecords(list);
-        const first = initialRecord || list[0] || null;
-        setActive(first);
+        setActive(initialRecord || list[0] || null);
         recordEvidenceEvent("evidence.preview_open", {
           labId,
           count: list.length,
@@ -76,7 +95,7 @@ export default function EvidencePreviewDrawer({
     return () => {
       cancelled = true;
     };
-  }, [open, tenantId, currentUser, labId, visitId, paymentId, initialRecord]);
+  }, [open, tenantId, currentUser, labId, visitId, paymentId, initialRecord, recordsProp]);
 
   useEffect(() => {
     if (!active) {
@@ -133,9 +152,9 @@ export default function EvidencePreviewDrawer({
                       )}
                       onClick={() => setActive(r)}
                     >
-                      <span className="font-semibold capitalize">{r.kind.replaceAll("_", " ")}</span>
+                      <span className="font-semibold">{getEvidenceKindLabel(r.kind)}</span>
                       <br />
-                      {formatWhen(r.uploadedAt)}
+                      <span className="opacity-80">{formatWhen(r.uploadedAt)}</span>
                     </button>
                   </li>
                 ))}
@@ -149,6 +168,22 @@ export default function EvidencePreviewDrawer({
             {active ? (
               <>
                 <dl className="mb-2 grid grid-cols-2 gap-2 text-[10px] text-slate-600">
+                  <div>
+                    <dt className="text-slate-400">Type</dt>
+                    <dd className="font-medium">{getEvidenceKindLabel(active.kind)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-400">Record</dt>
+                    <dd className="font-medium">{getEvidenceRecordTypeLabel(active)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-400">Linked to</dt>
+                    <dd className="font-medium">{getEvidenceLinkLabel(active)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-400">Lab</dt>
+                    <dd>{labIdKey(active.labId) || labId || "—"}</dd>
+                  </div>
                   <div>
                     <dt className="text-slate-400">Uploaded</dt>
                     <dd>{formatWhen(active.uploadedAt)}</dd>

@@ -3,11 +3,13 @@ import {
   getCollectionsRead,
   getOrdersRead,
   getPurchaseOrdersRead,
+  getQualificationReviewRead,
   getReorderForecastRead,
   getStockDashboard,
   normalizeAdminDashboardReadResult,
 } from "@/api/primecareSupabaseApi.js";
 import { getNotificationEventsRead } from "@/api/notificationApi.js";
+import { listOperationalEvidence } from "@/api/operationalEvidenceApi.js";
 
 const EMPTY_PAYLOAD = {
   dashboard: null,
@@ -18,6 +20,8 @@ const EMPTY_PAYLOAD = {
   purchaseOrders: [],
   notifications: [],
   visits: [],
+  qualifications: [],
+  evidence: [],
 };
 
 /**
@@ -27,7 +31,7 @@ const EMPTY_PAYLOAD = {
 export async function loadOperationsCommandCenterData(currentUser) {
   const tenantId = currentUser?.tenantId ?? currentUser?.tenant_id ?? null;
 
-  const [dashRes, collRes, stockRes, ordersRes, reorderRes, notifyRes, poRes] =
+  const [dashRes, collRes, stockRes, ordersRes, reorderRes, notifyRes, poRes, qualRes, evidenceRows] =
     await Promise.all([
       getAdminDashboardRead(),
       getCollectionsRead(),
@@ -36,6 +40,10 @@ export async function loadOperationsCommandCenterData(currentUser) {
       getReorderForecastRead().catch(() => ({ data: { forecast: [] } })),
       getNotificationEventsRead({ tenantId, limit: 60 }),
       getPurchaseOrdersRead(),
+      getQualificationReviewRead().catch(() => ({ data: [] })),
+      tenantId && currentUser
+        ? listOperationalEvidence(tenantId, currentUser, { limit: 100 }).catch(() => [])
+        : Promise.resolve([]),
     ]);
 
   const dashboard = normalizeAdminDashboardReadResult(dashRes);
@@ -56,6 +64,8 @@ export async function loadOperationsCommandCenterData(currentUser) {
   const visits = Array.isArray(dashboard?.visits?.visits)
     ? dashboard.visits.visits
     : [];
+  const qualifications = Array.isArray(qualRes?.data) ? qualRes.data : [];
+  const evidence = Array.isArray(evidenceRows) ? evidenceRows : [];
 
   return {
     ...EMPTY_PAYLOAD,
@@ -67,5 +77,7 @@ export async function loadOperationsCommandCenterData(currentUser) {
     purchaseOrders,
     notifications,
     visits,
+    qualifications,
+    evidence,
   };
 }

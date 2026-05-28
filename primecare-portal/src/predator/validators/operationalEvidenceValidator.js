@@ -9,6 +9,16 @@ import {
   EVIDENCE_BUCKET,
 } from "@/api/operationalEvidenceApi.js";
 import { supabase } from "@/api/supabaseClient.js";
+import {
+  filterVisitProofEvidence,
+  filterPaymentEvidence,
+  isCollectionEvidenceKind,
+} from "@/utils/operationalEvidenceUi.js";
+import { getAgentWorkspaceRead } from "@/api/primecareSupabaseApi.js";
+
+function str(v) {
+  return String(v ?? "").trim();
+}
 
 /**
  * @param {Object} params
@@ -173,7 +183,7 @@ export async function validateOperationalEvidenceModule({ ctx, currentUser }) {
     );
 
     if (ctx.role === ROLES.AGENT && currentUser) {
-      const agentRows = await listOperationalEvidence(ctx.tenantId, currentUser, { limit: 20 });
+      const agentRows = await listOperationalEvidence(ctx.tenantId, currentUser, { limit: 80 });
       const foreign = agentRows.filter(
         (r) =>
           String(r.uploadedBy) !== String(currentUser.name) &&
@@ -191,6 +201,110 @@ export async function validateOperationalEvidenceModule({ ctx, currentUser }) {
               ? "Agent sees only own evidence"
               : "Agent can see other agents' evidence",
           suggestedFix: "Review operational_evidence RLS and list filters",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      const crossTenantListed = agentRows.filter(
+        (r) => r.tenantId && str(r.tenantId) !== str(ctx.tenantId)
+      );
+      entries.push(
+        createPredatorEntry({
+          status: crossTenantListed.length === 0 ? "PASS" : "FAIL",
+          module: "Operational Evidence",
+          step: "api.list.tenant_scope",
+          expected: "listOperationalEvidence returns only active tenant rows",
+          actual: { crossTenantCount: crossTenantListed.length },
+          rootCauseGuess:
+            crossTenantListed.length === 0
+              ? "No cross-tenant evidence in agent list"
+              : "Cross-tenant evidence leaked via list API",
+          suggestedFix: "Verify tenant_id filter and RLS on operational_evidence",
+          severity: "high",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      const misScopedVisitProof = agentRows.filter(
+        (r) => isCollectionEvidenceKind(r.kind) && filterVisitProofEvidence([r], r.visitId).length
+      );
+      entries.push(
+        createPredatorEntry({
+          status: misScopedVisitProof.length === 0 ? "PASS" : "FAIL",
+          module: "Operational Evidence",
+          step: "association.visit_vs_collection",
+          expected: "Collection/payment proof is not counted as visit_photo",
+          actual: { misScopedCount: misScopedVisitProof.length },
+          rootCauseGuess:
+            misScopedVisitProof.length === 0
+              ? "Visit proof filter excludes collection kinds"
+              : "Collection proof may be mislabeled as visit proof in UI counts",
+          suggestedFix: "Use filterVisitProofEvidence and filterPaymentEvidence in UI",
+          severity: "medium",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      const wsRes = await getAgentWorkspaceRead(currentUser);
+      const recentVisits = Array.isArray(wsRes?.data?.recentVisits)
+        ? wsRes.data.recentVisits
+        : [];
+      const countMismatches = [];
+      for (const visit of recentVisits.slice(0, 6)) {
+        const vid = str(visit.visitId);
+        if (!vid) continue;
+        const visitProof = filterVisitProofEvidence(agentRows, vid);
+        const rawVisitPhotos = agentRows.filter(
+          (r) => str(r.kind) === "visit_photo" && str(r.visitId) === vid
+        );
+        if (visitProof.length !== rawVisitPhotos.length) {
+          countMismatches.push({
+            visitId: vid,
+            visitProof: visitProof.length,
+            raw: rawVisitPhotos.length,
+          });
+        }
+      }
+      const paymentIds = [
+        ...new Set(
+          agentRows
+            .filter((r) => isCollectionEvidenceKind(r.kind) && str(r.paymentId))
+            .map((r) => str(r.paymentId))
+        ),
+      ];
+      for (const pid of paymentIds.slice(0, 8)) {
+        const paymentProof = filterPaymentEvidence(agentRows, pid);
+        const rawPayment = agentRows.filter(
+          (r) => isCollectionEvidenceKind(r.kind) && str(r.paymentId) === pid
+        );
+        if (paymentProof.length !== rawPayment.length) {
+          countMismatches.push({
+            paymentId: pid,
+            paymentProof: paymentProof.length,
+            raw: rawPayment.length,
+          });
+        }
+      }
+
+      entries.push(
+        createPredatorEntry({
+          status: countMismatches.length === 0 ? "PASS" : "WARN",
+          module: "Operational Evidence",
+          step: "association.evidence_counts",
+          expected: "Visit and payment proof counts match scoped filters (no stale inflation)",
+          actual: { mismatches: countMismatches.slice(0, 5) },
+          rootCauseGuess:
+            countMismatches.length === 0
+              ? "Evidence counts align with visit_id / payment_id filters"
+              : "Evidence index may include rows outside scoped filters",
+          suggestedFix: "Refresh evidence list after upload; verify kind on each row",
+          severity: "medium",
           tenantId: ctx.tenantId,
           role: ctx.role,
           userId: ctx.userId,

@@ -49,6 +49,10 @@ import EvidenceUploadField, {
 } from "@/components/evidence/EvidenceUploadField.jsx";
 import EvidenceContextActions from "@/components/evidence/EvidenceContextActions.jsx";
 import { uploadOperationalEvidence, listOperationalEvidence } from "@/api/operationalEvidenceApi.js";
+import {
+  filterPaymentEvidence,
+  formatPaymentProofHistoryNote,
+} from "@/utils/operationalEvidenceUi.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -960,9 +964,8 @@ function CollectionExpandedPanel({
             <ul className="space-y-2">
               {history.map((item) => {
                 const paymentId = item.paymentId || item.payment_id || "";
-                const proofCount = collectionEvidence.filter(
-                  (r) => str(r.paymentId) === str(paymentId)
-                ).length;
+                const proofRows = filterPaymentEvidence(collectionEvidence, paymentId);
+                const proofNote = formatPaymentProofHistoryNote(proofRows);
                 return (
                   <li
                     key={paymentId || `${item.paymentDate}-${item.amountCollected}`}
@@ -972,16 +975,18 @@ function CollectionExpandedPanel({
                       {formatMoney(item.amountCollected)}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {item.paymentDate || "—"} · {item.paymentMode || "—"}
-                      {proofCount ? " · Proof attached" : ""}
+                      {[item.paymentDate, item.paymentMode].filter(Boolean).join(" · ") ||
+                        "Payment recorded"}
+                      {proofNote ? ` · ${proofNote}` : ""}
                     </div>
                     <p className="mt-1 text-slate-600">{item.note || "No note"}</p>
-                    {currentUser && proofCount ? (
+                    {currentUser && proofRows.length ? (
                       <div className="mt-2">
                         <EvidenceContextActions
                           currentUser={currentUser}
                           labId={collection?.labId}
                           paymentId={paymentId}
+                          scope="payment"
                           className="h-7 text-[10px]"
                         />
                       </div>
