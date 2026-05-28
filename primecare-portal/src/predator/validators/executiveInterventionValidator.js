@@ -3,6 +3,7 @@ import { predatorTrace } from "@/predator/predatorTiming.js";
 import { checkTenantConsistency } from "@/predator/predatorChecks.js";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import { buildExecutiveInterventionModel } from "@/operations/executiveInterventionModel.js";
+import { INTERVENTION_STATES } from "@/operations/executiveInterventionStateStore.js";
 import { ROLES } from "@/config/roles.js";
 
 function str(v) {
@@ -47,7 +48,7 @@ export async function validateExecutiveInterventionModule({
       const payload = await loadOperationsCommandCenterData(
         currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId }
       );
-      model = buildExecutiveInterventionModel(payload);
+      model = buildExecutiveInterventionModel(payload, { tenantId: ctx.tenantId });
     } catch (err) {
       entries.push(
         createPredatorEntry({
@@ -189,6 +190,97 @@ export async function validateExecutiveInterventionModule({
         userId: ctx.userId,
       })
     );
+
+    const iq = model.interventionQueues || {};
+    const clusterMemberSum = (iq.clusters || []).reduce((s, c) => s + (c.count || 0), 0);
+    const clusterCountOk =
+      clusterMemberSum === 0 ||
+      clusterMemberSum + (iq.singles?.length || 0) <= (model.priorities?.length || 0) + 5;
+    entries.push(
+      createPredatorEntry({
+        status: clusterCountOk ? "PASS" : "WARN",
+        module: "Executive Intervention",
+        step: "queue.cluster_counts",
+        expected: "Grouped cluster member counts align with priority pool",
+        actual: {
+          clusters: (iq.clusters || []).length,
+          clusterMembers: clusterMemberSum,
+          singles: iq.singles?.length ?? 0,
+        },
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const invalidStates = (iq.allIssues || []).filter(
+      (i) => i.workflowState && !INTERVENTION_STATES.includes(i.workflowState)
+    );
+    entries.push(
+      createPredatorEntry({
+        status: invalidStates.length === 0 ? "PASS" : "FAIL",
+        module: "Executive Intervention",
+        step: "workflow.state_consistency",
+        actual: { invalid: invalidStates.length },
+        severity: "high",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const escalatedFirst = (iq.founderActive || []).length < 2 || (iq.founderActive || [])[0]?.workflowState === "ESCALATED" || (iq.founderActive || [])[0]?.severity === "CRITICAL";
+    entries.push(
+      createPredatorEntry({
+        status: escalatedFirst ? "PASS" : "WARN",
+        module: "Executive Intervention",
+        step: "queue.escalation_ordering",
+        rootCauseGuess: "Founder queue should surface critical/escalated items first",
+        actual: {
+          topState: (iq.founderActive || [])[0]?.workflowState,
+          topSeverity: (iq.founderActive || [])[0]?.severity,
+        },
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const staleUnresolved = (iq.allIssues || []).filter(
+      (i) =>
+        i.workflowState !== "RESOLVED" &&
+        i.ageDays >= 30 &&
+        !["WAITING", "RESOLVED"].includes(i.workflowState)
+    );
+    entries.push(
+      createPredatorEntry({
+        status: staleUnresolved.length === 0 ? "PASS" : "WARN",
+        module: "Executive Intervention",
+        step: "workflow.stale_unresolved",
+        actual: { staleCount: staleUnresolved.length },
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const uiActive = rendered?.activeInterventionCount ?? null;
+    const apiActive =
+      (iq.singles?.length ?? 0) +
+      (iq.clusters || []).reduce((s, c) => s + (c.count || 0), 0);
+    if (uiActive != null) {
+      entries.push(
+        createPredatorEntry({
+          status: Math.abs(apiActive - uiActive) <= 4 ? "PASS" : "WARN",
+          module: "Executive Intervention",
+          step: "ui.active_intervention_sync",
+          actual: { api: apiActive, ui: uiActive },
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
 
     if (uiFeed != null && apiFeed > 0 && uiFeed === 0) {
       entries.push(

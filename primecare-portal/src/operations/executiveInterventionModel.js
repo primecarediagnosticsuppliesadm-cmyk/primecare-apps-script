@@ -6,6 +6,14 @@ import {
   buildRiskLabs,
   buildAgentOperationsPanel,
 } from "@/operations/operationsCommandCenterModel.js";
+import { loadInterventionRecords } from "@/operations/executiveInterventionStateStore.js";
+import {
+  hydrateInterventionIssue,
+  sortInterventionStack,
+  groupInterventionQueue,
+  filterActiveInterventions,
+  inferClusterType,
+} from "@/operations/executiveInterventionWorkflow.js";
 
 const SEVERITY_ORDER = { CRITICAL: 0, ATTENTION: 1, MONITORING: 2 };
 
@@ -22,7 +30,7 @@ function mapAttentionToPriority(item) {
   else if (action === "orders") cta = "open_orders";
   else if (action === "inventory") cta = "open_inventory";
 
-  return {
+  const mapped = {
     id: item.id,
     severity: item.severity,
     title: item.title,
@@ -39,6 +47,8 @@ function mapAttentionToPriority(item) {
     actionLabel: item.actionLabel || "Review",
     source: "attention",
   };
+  mapped.clusterType = inferClusterType(mapped);
+  return mapped;
 }
 
 /**
@@ -49,7 +59,7 @@ export function buildExecutivePriorities(payload, opsModel) {
 
   const agents = opsModel.agents || {};
   for (const agent of agents.staleAgents || []) {
-    items.push({
+    const row = {
       id: `agent-stale-${agent.name}`,
       severity: "ATTENTION",
       title: "Agent inactivity",
@@ -63,7 +73,9 @@ export function buildExecutivePriorities(payload, opsModel) {
       cta: "open_agent",
       actionLabel: "Open Agent",
       source: "agents",
-    });
+    };
+    row.clusterType = inferClusterType(row);
+    items.push(row);
   }
 
   const topLabs = payload.dashboard?.executive?.topLabsByRevenue || [];
@@ -87,7 +99,7 @@ export function buildExecutivePriorities(payload, opsModel) {
       ? Math.floor((Date.now() - Date.parse(String(lastDate).slice(0, 10))) / 86400000)
       : null;
     if (age == null || age >= 10) {
-      items.push({
+      const row = {
         id: `priority-lab-${lid || lab.labName}`,
         severity: age != null && age >= 14 ? "CRITICAL" : "ATTENTION",
         title: "High-value lab needs visit",
@@ -104,7 +116,9 @@ export function buildExecutivePriorities(payload, opsModel) {
         cta: "open_lab",
         actionLabel: "Open Lab",
         source: "revenue",
-      });
+      };
+      row.clusterType = inferClusterType(row);
+      items.push(row);
     }
   }
 
@@ -272,10 +286,63 @@ export function buildExecutiveHealthStrip(payload, opsModel) {
   })).concat(qualificationTile);
 }
 
+function worseSeverity(a, b) {
+  const rank = { CRITICAL: 0, ATTENTION: 1, MONITORING: 2 };
+  return (rank[a] ?? 9) <= (rank[b] ?? 9) ? a : b;
+}
+
+/**
+ * Merge priorities + founder queue, hydrate workflow state, compress clusters.
+ */
+export function buildInterventionQueues(priorities, founderQueue, tenantId, payload) {
+  const map = new Map();
+  for (const item of [...(founderQueue || []), ...(priorities || [])]) {
+    const existing = map.get(item.id);
+    if (!existing) {
+      map.set(item.id, { ...item, founderEscalation: founderQueue?.some((f) => f.id === item.id) });
+    } else {
+      map.set(item.id, {
+        ...existing,
+        ...item,
+        severity: worseSeverity(existing.severity, item.severity),
+        founderEscalation: existing.founderEscalation || founderQueue?.some((f) => f.id === item.id),
+      });
+    }
+  }
+
+  const records = loadInterventionRecords(tenantId);
+  const topLabs = payload?.dashboard?.executive?.topLabsByRevenue || [];
+  const hydrated = [...map.values()].map((item) =>
+    hydrateInterventionIssue(
+      { ...item, clusterType: item.clusterType || inferClusterType(item) },
+      tenantId,
+      records
+    )
+  );
+
+  const active = filterActiveInterventions(hydrated);
+  const sorted = sortInterventionStack(active, topLabs);
+  const { clusters, singles } = groupInterventionQueue(sorted);
+
+  const founderActive = founderQueue
+    .map((f) => hydrated.find((h) => h.id === f.id) || hydrateInterventionIssue(f, tenantId, records))
+    .filter((i) => i.workflowState !== "RESOLVED" && !i.snoozed);
+
+  return {
+    clusters,
+    singles,
+    allIssues: hydrated,
+    founderActive: sortInterventionStack(founderActive, topLabs),
+    resolvedCount: hydrated.filter((i) => i.workflowState === "RESOLVED").length,
+    snoozedCount: hydrated.filter((i) => i.snoozed).length,
+  };
+}
+
 /**
  * Full executive intervention model (reuses operations center core).
  */
-export function buildExecutiveInterventionModel(payload) {
+export function buildExecutiveInterventionModel(payload, options = {}) {
+  const tenantId = options.tenantId || payload?.tenantId || "";
   const ops = buildOperationsCommandCenterModel(payload);
   const priorities = buildExecutivePriorities(payload, ops);
   const founderQueue = buildFounderAttentionQueue(ops);
@@ -284,6 +351,12 @@ export function buildExecutiveInterventionModel(payload) {
   const snapshot = buildExecutiveDailySnapshot(payload);
   const riskLabs = buildRiskLabs(payload);
   const agents = buildAgentOperationsPanel(payload);
+  const interventionQueues = buildInterventionQueues(
+    priorities,
+    founderQueue,
+    tenantId,
+    payload
+  );
 
   return {
     ...ops,
@@ -295,5 +368,6 @@ export function buildExecutiveInterventionModel(payload) {
     riskLabs,
     agents,
     payload,
+    interventionQueues,
   };
 }

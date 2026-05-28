@@ -2,10 +2,17 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, PageSkeleton, KpiCard, KpiCardGrid } from "@/components/ux";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
-import { buildExecutiveInterventionModel } from "@/operations/executiveInterventionModel.js";
+import {
+  buildExecutiveInterventionModel,
+  buildInterventionQueues,
+} from "@/operations/executiveInterventionModel.js";
+import { applyInterventionAction } from "@/operations/executiveInterventionStateStore.js";
 import { traceOperationsCenterLoad } from "@/operations/operationsCommandCenterPredator.js";
 import OperationalLabDrawer from "@/components/operations/OperationalLabDrawer.jsx";
 import ExecutiveInterventionDrawer from "@/components/executive/ExecutiveInterventionDrawer.jsx";
+import ExecutiveWorkflowDrawer from "@/components/executive/ExecutiveWorkflowDrawer.jsx";
+import InterventionQueueCard from "@/components/executive/InterventionQueueCard.jsx";
+import InterventionClusterCard from "@/components/executive/InterventionClusterCard.jsx";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { cn } from "@/lib/utils";
 import {
@@ -22,14 +29,6 @@ import {
   FileCheck,
   ClipboardList,
 } from "lucide-react";
-
-const SEVERITY_STYLES = {
-  CRITICAL: "border-red-300 bg-red-50/90",
-  ATTENTION: "border-amber-300 bg-amber-50/70",
-  MONITORING: "border-slate-200 bg-slate-50/80",
-};
-
-const SEVERITY_BADGE = { CRITICAL: "danger", ATTENTION: "warning", MONITORING: "neutral" };
 
 const HEALTH_STYLES = {
   healthy: "border-emerald-200 bg-emerald-50/60",
@@ -58,90 +57,6 @@ function formatFeedTime(iso) {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function PriorityCard({ item, onCta }) {
-  return (
-    <article
-      className={cn(
-        "rounded-lg border px-2.5 py-2 shadow-sm",
-        SEVERITY_STYLES[item.severity] || SEVERITY_STYLES.MONITORING
-      )}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1">
-            <span className="text-xs font-semibold text-slate-900">{item.title}</span>
-            <StatusBadge variant={SEVERITY_BADGE[item.severity] || "neutral"} compact>
-              {item.severity}
-            </StatusBadge>
-            {item.ageLabel ? (
-              <span className="text-[10px] text-slate-500">{item.ageLabel}</span>
-            ) : null}
-          </div>
-          <p className="mt-0.5 truncate text-[11px] font-medium">{item.subtitle}</p>
-          {item.owner ? <p className="text-[10px] text-slate-500">Owner · {item.owner}</p> : null}
-          <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-600">{item.summary}</p>
-        </div>
-      </div>
-      <div className="mt-2 flex flex-wrap gap-1">
-        <Button
-          type="button"
-          size="sm"
-          className="h-7 px-2 text-[10px]"
-          onClick={() => onCta(item.cta, item)}
-        >
-          {item.actionLabel}
-        </Button>
-      </div>
-    </article>
-  );
-}
-
-function FounderCard({ item, onCta }) {
-  return (
-    <article className="rounded-lg border-2 border-slate-800/20 bg-white px-2.5 py-2 shadow-sm">
-      <div className="flex flex-wrap items-center gap-1">
-        <Crown className="h-3.5 w-3.5 text-amber-600" />
-        <span className="text-xs font-semibold">{item.title}</span>
-        <StatusBadge variant={SEVERITY_BADGE[item.severity] || "danger"} compact>
-          {item.severity}
-        </StatusBadge>
-        <span className="text-[10px] text-slate-500">Escalation · {item.escalationAge}</span>
-      </div>
-      <p className="mt-1 text-[11px] font-medium text-slate-800">{item.subtitle}</p>
-      <p className="text-[10px] text-slate-500">Owner · {item.owner || "Unassigned"}</p>
-      <p className="mt-0.5 text-[11px] text-slate-600">Last: {item.lastAction}</p>
-      <p className="text-[11px] font-medium text-slate-800">Next · {item.nextExpectedAction}</p>
-      <div className="mt-2 flex flex-wrap gap-1">
-        <Button type="button" size="sm" className="h-7 px-2 text-[10px]" onClick={() => onCta("assign_followup", item)}>
-          Assign follow-up
-        </Button>
-        {item.labId ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-7 px-2 text-[10px]"
-            onClick={() => onCta("view_timeline", item)}
-          >
-            Open timeline
-          </Button>
-        ) : null}
-        {item.labId ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-7 px-2 text-[10px]"
-            onClick={() => onCta("open_lab", item)}
-          >
-            View lab
-          </Button>
-        ) : null}
-      </div>
-    </article>
-  );
-}
-
 export default function ExecutiveControlTower({ currentUser, setActivePage }) {
   const [model, setModel] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -151,6 +66,10 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
   const [drawerContext, setDrawerContext] = useState(null);
   const [prioritiesOpen, setPrioritiesOpen] = useState(true);
   const [founderOpen, setFounderOpen] = useState(true);
+  const [workflowIssue, setWorkflowIssue] = useState(null);
+  const [workflowTick, setWorkflowTick] = useState(0);
+
+  const tenantId = currentUser?.tenantId || "";
 
   const load = useCallback(async (isRefresh = false) => {
     try {
@@ -159,7 +78,7 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
       setError("");
       const built = await traceOperationsCenterLoad(async () => {
         const payload = await loadOperationsCommandCenterData(currentUser);
-        return buildExecutiveInterventionModel(payload);
+        return buildExecutiveInterventionModel(payload, { tenantId: currentUser?.tenantId });
       });
       setModel(built);
     } catch (err) {
@@ -175,6 +94,54 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
     void load(false);
   }, [load]);
 
+  const interventionQueues = useMemo(() => {
+    if (!model) return { clusters: [], singles: [], founderActive: [], resolvedCount: 0 };
+    void workflowTick;
+    return (
+      model.interventionQueues ||
+      buildInterventionQueues(model.priorities, model.founderQueue, tenantId, model.payload)
+    );
+  }, [model, tenantId, workflowTick]);
+
+  const handleInterventionAction = useCallback(
+    (action, issue) => {
+      if (!issue?.id) return;
+      const actor = currentUser?.name || currentUser?.email || "Executive";
+      const assignTo =
+        action === "assign_owner"
+          ? issue.owner || issue.currentOwner || "Collections Team"
+          : "";
+      applyInterventionAction({
+        tenantId,
+        issueId: issue.id,
+        action,
+        actor,
+        actorRole: currentUser?.role || "executive",
+        assignTo,
+      });
+      setWorkflowTick((n) => n + 1);
+      if (workflowIssue?.id === issue.id) {
+        const refreshed = buildInterventionQueues(
+          model?.priorities,
+          model?.founderQueue,
+          tenantId,
+          model?.payload
+        );
+        const updated =
+          refreshed.allIssues?.find((i) => i.id === issue.id) ||
+          refreshed.singles.find((i) => i.id === issue.id) ||
+          refreshed.founderActive.find((i) => i.id === issue.id);
+        if (updated) setWorkflowIssue(updated);
+      }
+    },
+    [tenantId, currentUser, workflowIssue?.id, model]
+  );
+
+  const openIntervention = useCallback((item) => {
+    setWorkflowIssue(item);
+    setDrawerContext(null);
+  }, []);
+
   usePredatorModuleValidation(
     "Executive Intervention",
     currentUser,
@@ -183,6 +150,11 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
       founderQueueCount: model?.founderQueue?.length ?? 0,
       feedCount: model?.feed?.length ?? 0,
       healthTileCount: model?.healthStrip?.length ?? 0,
+      clusterCount: interventionQueues.clusters?.length ?? 0,
+      activeInterventionCount:
+        (interventionQueues.singles?.length ?? 0) +
+        (interventionQueues.clusters?.reduce((s, c) => s + c.count, 0) ?? 0),
+      resolvedCount: interventionQueues.resolvedCount ?? 0,
       executiveIntervention: true,
     },
     !loading && Boolean(model)
@@ -194,42 +166,6 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
       setActivePage?.(page);
     },
     [setActivePage]
-  );
-
-  const handleCta = useCallback(
-    (cta, item) => {
-      switch (cta) {
-        case "open_lab":
-        case "view_timeline":
-          if (item.labId) setLabDrawerId(String(item.labId));
-          break;
-        case "open_collection":
-          if (item.labId) setLabDrawerId(String(item.labId));
-          else navigate("collections");
-          break;
-        case "open_qualification":
-          navigate("qualificationReview");
-          break;
-        case "open_orders":
-          navigate("orders");
-          break;
-        case "open_inventory":
-          navigate("inventory");
-          break;
-        case "assign_followup":
-          navigate("visits");
-          break;
-        case "open_agent":
-          setDrawerContext({ type: "agent", agentName: item.owner || item.subtitle, title: item.subtitle });
-          break;
-        case "open_evidence":
-          if (item.labId) setLabDrawerId(String(item.labId));
-          break;
-        default:
-          if (item.labId) setLabDrawerId(String(item.labId));
-      }
-    },
-    [navigate]
   );
 
   const openFeed = useCallback((row) => {
@@ -253,7 +189,10 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
     return <div className="p-4 text-sm text-red-700">{error || "Unable to load executive workspace."}</div>;
   }
 
-  const { snapshot, priorities, founderQueue, feed, healthStrip } = model;
+  const { snapshot, feed, healthStrip } = model;
+  const { clusters, singles, founderActive, resolvedCount, snoozedCount } = interventionQueues;
+  const activeCount =
+    singles.length + clusters.reduce((s, c) => s + c.count, 0);
 
   return (
     <div className="mx-auto max-w-6xl space-y-3 p-4 pb-10 lg:p-5">
@@ -266,7 +205,7 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
             Control Tower
           </h1>
           <p className="mt-0.5 max-w-xl text-sm text-slate-600">
-            What needs attention, what is deteriorating, and what leadership should act on today.
+            Acknowledge, assign, escalate, and resolve operational issues without leaving this workspace.
           </p>
         </div>
         <Button
@@ -367,17 +306,22 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
             <Crown className="h-4 w-4 text-amber-700" />
             Founder attention queue
             <StatusBadge variant="danger" compact>
-              {founderQueue.length}
+              {founderActive.length}
             </StatusBadge>
           </h2>
           {founderOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
         </button>
         {founderOpen ? (
           <ul className="mt-2 grid gap-2 md:grid-cols-2">
-            {founderQueue.length ? (
-              founderQueue.map((item) => (
+            {founderActive.length ? (
+              founderActive.map((item) => (
                 <li key={item.id}>
-                  <FounderCard item={item} onCta={handleCta} />
+                  <InterventionQueueCard
+                    item={item}
+                    founder
+                    onOpen={openIntervention}
+                    onAction={handleInterventionAction}
+                  />
                 </li>
               ))
             ) : (
@@ -398,21 +342,40 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
           >
             <h2 className="flex items-center gap-2 text-sm font-semibold">
               <ClipboardList className="h-4 w-4 text-red-600" />
-              Priorities today
+              Intervention queue
             </h2>
-            <span className="text-[10px] text-slate-500">{priorities.length} items</span>
+            <span className="text-[10px] text-slate-500">
+              {activeCount} active
+              {resolvedCount ? ` · ${resolvedCount} resolved` : ""}
+              {snoozedCount ? ` · ${snoozedCount} snoozed` : ""}
+            </span>
           </button>
           {prioritiesOpen ? (
             <ul className="max-h-[min(480px,55vh)] space-y-1.5 overflow-y-auto pr-0.5">
-              {priorities.length ? (
-                priorities.map((item) => (
-                  <li key={item.id}>
-                    <PriorityCard item={item} onCta={handleCta} />
-                  </li>
-                ))
+              {clusters.length || singles.length ? (
+                <>
+                  {clusters.map((cluster) => (
+                    <li key={cluster.id}>
+                      <InterventionClusterCard
+                        cluster={cluster}
+                        onOpen={(item) => openIntervention(item)}
+                        onAction={handleInterventionAction}
+                      />
+                    </li>
+                  ))}
+                  {singles.map((item) => (
+                    <li key={item.id}>
+                      <InterventionQueueCard
+                        item={item}
+                        onOpen={openIntervention}
+                        onAction={handleInterventionAction}
+                      />
+                    </li>
+                  ))}
+                </>
               ) : (
                 <li className="rounded-lg border border-dashed py-6 text-center text-sm text-slate-500">
-                  No operational priorities flagged.
+                  No active interventions — resolved or snoozed items are hidden.
                 </li>
               )}
             </ul>
@@ -512,7 +475,7 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
       />
 
       <ExecutiveInterventionDrawer
-        open={Boolean(drawerContext) && !labDrawerId}
+        open={Boolean(drawerContext) && !labDrawerId && !workflowIssue}
         onClose={() => setDrawerContext(null)}
         context={drawerContext}
         opsPayload={model.payload}
@@ -522,6 +485,18 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
           setDrawerContext(null);
           if (snap?.labId) setLabDrawerId(String(snap.labId));
           else navigate(action);
+        }}
+      />
+
+      <ExecutiveWorkflowDrawer
+        open={Boolean(workflowIssue)}
+        onClose={() => setWorkflowIssue(null)}
+        issue={workflowIssue}
+        opsPayload={model.payload}
+        onAction={handleInterventionAction}
+        onOpenLab={(id) => {
+          setWorkflowIssue(null);
+          setLabDrawerId(String(id));
         }}
       />
     </div>
