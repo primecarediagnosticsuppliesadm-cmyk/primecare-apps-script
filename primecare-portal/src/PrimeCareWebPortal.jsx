@@ -76,6 +76,7 @@ export default function PrimeCareWebPortal({
           <AgentVisitPage
             currentUser={currentUser}
             authToken={authToken}
+            setActivePage={setActivePage}
           />
         );
 
@@ -132,6 +133,7 @@ export default function PrimeCareWebPortal({
           <AgentVisitPage
             currentUser={currentUser}
             authToken={authToken}
+            setActivePage={setActivePage}
           />
         );
 

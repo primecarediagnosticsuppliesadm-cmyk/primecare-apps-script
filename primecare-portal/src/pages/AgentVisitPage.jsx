@@ -297,7 +297,14 @@ function WizardMotivationStrip({
   );
 }
 
-function ReviewSummaryCard({ title, icon: Icon, onEdit, missing = [], children }) {
+function ReviewSummaryCard({
+  title,
+  icon: Icon,
+  onEdit,
+  missing = [],
+  children,
+  showEdit = true,
+}) {
   const isValid = missing.length === 0;
   return (
     <div
@@ -314,16 +321,18 @@ function ReviewSummaryCard({ title, icon: Icon, onEdit, missing = [], children }
             {isValid ? "Ready" : "Check"}
           </StatusBadge>
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-8 shrink-0 px-2 text-xs"
-          onClick={onEdit}
-        >
-          <Pencil className="mr-1 h-3.5 w-3.5" />
-          Edit
-        </Button>
+        {showEdit && onEdit ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 shrink-0 px-2 text-xs"
+            onClick={onEdit}
+          >
+            <Pencil className="mr-1 h-3.5 w-3.5" />
+            Edit
+          </Button>
+        ) : null}
       </div>
       {missing.length > 0 ? (
         <ul className="mb-2 list-inside list-disc text-xs font-medium text-amber-800">
@@ -744,14 +753,21 @@ function WizardMobileNavBar({ currentIndex, maxIndex, onBack, onNext, nextDisabl
   );
 }
 
-function WizardReviewFooter({ onBack, onSave, saving, saveDisabled }) {
+function WizardReviewFooter({ onBack, onSave, saving, uploadingProof, saveDisabled, saveError }) {
   return (
     <>
+      {saveError ? (
+        <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          <p className="font-semibold">Could not save visit</p>
+          <p className="mt-0.5 text-xs">{saveError}</p>
+        </div>
+      ) : null}
       <div className="mt-4 hidden gap-3 border-t border-border pt-4 md:flex">
         <Button
           type="button"
           variant="outline"
           onClick={onBack}
+          disabled={saving || uploadingProof}
           className="h-12 min-h-12 flex-1 rounded-xl text-base"
         >
           <ChevronLeft className="mr-1 h-5 w-5" />
@@ -759,6 +775,7 @@ function WizardReviewFooter({ onBack, onSave, saving, saveDisabled }) {
         </Button>
         <SaveVisitButton
           saving={saving}
+          uploadingProof={uploadingProof}
           onClick={onSave}
           disabled={saveDisabled}
           className="flex-1"
@@ -770,6 +787,7 @@ function WizardReviewFooter({ onBack, onSave, saving, saveDisabled }) {
             type="button"
             variant="outline"
             onClick={onBack}
+            disabled={saving || uploadingProof}
             className="h-12 min-h-12 flex-1 rounded-xl text-base"
           >
             <ChevronLeft className="mr-1 h-5 w-5" />
@@ -777,6 +795,7 @@ function WizardReviewFooter({ onBack, onSave, saving, saveDisabled }) {
           </Button>
           <SaveVisitButton
             saving={saving}
+            uploadingProof={uploadingProof}
             onClick={onSave}
             disabled={saveDisabled}
             className="flex-1"
@@ -805,21 +824,22 @@ function getMissingVisitRequirements(form) {
   return missing;
 }
 
-function SaveVisitButton({ saving, onClick, className, disabled = false }) {
+function SaveVisitButton({ saving, uploadingProof, onClick, className, disabled = false }) {
+  const busy = saving || uploadingProof;
   return (
     <Button
       type="button"
       onClick={onClick}
-      disabled={saving || disabled}
+      disabled={busy || disabled}
       className={cn(
         "h-12 min-h-12 w-full rounded-xl bg-[var(--pc-brand-primary)] text-base font-semibold text-white shadow-md hover:opacity-95",
         className
       )}
     >
-      {saving ? (
+      {busy ? (
         <>
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          Completing visit…
+          {uploadingProof ? "Uploading proof…" : "Saving visit…"}
         </>
       ) : (
         <>
@@ -831,7 +851,71 @@ function SaveVisitButton({ saving, onClick, className, disabled = false }) {
   );
 }
 
-export default function AgentVisitPage({ currentUser, authToken }) {
+function proofStatusLabel(visitFile, collectionFile, uploadState) {
+  const parts = [];
+  if (visitFile) {
+    if (uploadState.visit === "uploading") parts.push("Visit photo: uploading");
+    else if (uploadState.visit === "success") parts.push("Visit photo: uploaded");
+    else if (uploadState.visit === "failed") parts.push("Visit photo: failed");
+    else parts.push("Visit photo: attached");
+  }
+  if (collectionFile) {
+    if (uploadState.collection === "uploading") parts.push("Collection proof: uploading");
+    else if (uploadState.collection === "success") parts.push("Collection proof: uploaded");
+    else if (uploadState.collection === "failed") parts.push("Collection proof: failed");
+    else parts.push("Collection proof: attached");
+  }
+  if (!parts.length) return "No proof attached (optional)";
+  return parts.join(" · ");
+}
+
+function VisitSaveSuccessPanel({
+  savedVisit,
+  evidenceSummary,
+  onBackToWorkspace,
+  onLogAnother,
+  showWorkspaceCta,
+}) {
+  return (
+    <section className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/90 p-4">
+      <div className="flex items-start gap-2">
+        <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-emerald-600" />
+        <div>
+          <h2 className="text-base font-semibold text-emerald-900">Visit logged successfully</h2>
+          <p className="mt-1 text-sm text-emerald-800">
+            {savedVisit.labName}
+            {savedVisit.visitId ? ` · ${savedVisit.visitId}` : ""}
+          </p>
+          <p className="mt-0.5 text-xs text-emerald-700">
+            {savedVisit.visitDate} · {savedVisit.visitType} · {displayResponseLabel(savedVisit.labResponse)}
+          </p>
+        </div>
+      </div>
+      {evidenceSummary ? (
+        <p className="rounded-lg border border-emerald-200/80 bg-white/70 px-3 py-2 text-xs text-slate-700">
+          {evidenceSummary}
+        </p>
+      ) : null}
+      <div className="flex flex-col gap-2 sm:flex-row">
+        {showWorkspaceCta ? (
+          <Button type="button" className="h-11 flex-1 rounded-lg" onClick={onBackToWorkspace}>
+            Back to Agent Workspace
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          variant={showWorkspaceCta ? "outline" : "default"}
+          className="h-11 flex-1 rounded-lg"
+          onClick={onLogAnother}
+        >
+          Log Another Visit
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+export default function AgentVisitPage({ currentUser, authToken, setActivePage }) {
   const { showToast } = usePortalToast();
   const [labs, setLabs] = useState([]);
   /** Last agent workspace payload when loaded via getAgentWorkspaceRead (Supabase). */
@@ -852,6 +936,17 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   const [collectionProofFile, setCollectionProofFile] = useState(null);
   const [proofRemarks, setProofRemarks] = useState("");
   const [evidenceUploading, setEvidenceUploading] = useState(false);
+  const [evidenceUploadState, setEvidenceUploadState] = useState({
+    visit: "none",
+    collection: "none",
+    visitError: "",
+    collectionError: "",
+  });
+  const [savePhase, setSavePhase] = useState("idle");
+  const [saveError, setSaveError] = useState("");
+  const [savedVisitSummary, setSavedVisitSummary] = useState(null);
+  const [showWorkspaceReturnCta, setShowWorkspaceReturnCta] = useState(false);
+  const lastSavedVisitRef = useRef(null);
 
   const hasLoadedDataRef = useRef(false);
   const authTokenRef = useRef(authToken);
@@ -1056,7 +1151,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   }, [loading, currentUser, visibleLabs, showToast]);
 
   useEffect(() => {
-    if (loading || saving) return;
+    if (loading || saving || savePhase === "success" || savePhase === "saving") return;
     saveAgentVisitDraft({
       user: currentUser,
       currentStepIndex,
@@ -1072,6 +1167,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
     qualificationForm,
     qualificationEditing,
     currentUser,
+    savePhase,
   ]);
 
   useEffect(() => {
@@ -1248,6 +1344,9 @@ export default function AgentVisitPage({ currentUser, authToken }) {
         labSelected
     );
   }, [form.agentName, form.visitDate, form.visitType, labSelected]);
+
+  const missingRequired = useMemo(() => getMissingVisitRequirements(form), [form]);
+  const canSubmitVisit = canSaveVisit && missingRequired.length === 0;
 
   const currentStep = AGENT_VISIT_SECTION_STEPS[currentStepIndex] ?? AGENT_VISIT_SECTION_STEPS[0];
   const qualificationStepIndex = AGENT_VISIT_SECTION_STEPS.findIndex(
@@ -1574,14 +1673,144 @@ export default function AgentVisitPage({ currentUser, authToken }) {
     });
   }
 
-  async function handleSaveVisit() {
-    if (!form.agentName || !form.visitDate || !form.visitType) {
-      showToast("error", "Please fill agent name, date, and visit type.");
-      return;
+  async function uploadVisitEvidenceFiles({ savedVisitId, normalizedLabId, hadProof }) {
+    if (!hadProof) return { allOk: true, summary: "" };
+
+    setEvidenceUploading(true);
+    const tenantId = currentUser?.tenantId || currentUser?.tenant_id || "";
+    const uploader = currentUser?.name || currentUser?.agentName || form.agentName || "Agent";
+    const uploaderRole = currentUser?.role || ROLES.AGENT;
+    const nextState = {
+      visit: visitProofFile ? "uploading" : "none",
+      collection: collectionProofFile ? "uploading" : "none",
+      visitError: "",
+      collectionError: "",
+    };
+    setEvidenceUploadState(nextState);
+
+    let visitOk = !visitProofFile;
+    let collectionOk = !collectionProofFile;
+
+    if (visitProofFile) {
+      const up = await uploadOperationalEvidence({
+        file: visitProofFile,
+        tenantId,
+        labId: normalizedLabId,
+        kind: "visit_photo",
+        visitId: savedVisitId,
+        uploadedBy: uploader,
+        uploadedByRole: uploaderRole,
+        remarks: proofRemarks,
+      });
+      visitOk = up.success;
+      setEvidenceUploadState((prev) => ({
+        ...prev,
+        visit: up.success ? "success" : "failed",
+        visitError: up.error || "",
+      }));
+      if (!up.success) {
+        showToast("warning", up.error || "Visit saved; photo proof upload failed.");
+      } else {
+        setVisitProofFile(null);
+      }
     }
 
-    if (!String(form.labId ?? "").trim()) {
-      showToast("error", "Please select a lab from the dropdown.");
+    if (collectionProofFile) {
+      const up = await uploadOperationalEvidence({
+        file: collectionProofFile,
+        tenantId,
+        labId: normalizedLabId,
+        kind: "collection_proof",
+        visitId: savedVisitId,
+        uploadedBy: uploader,
+        uploadedByRole: uploaderRole,
+        remarks: proofRemarks,
+      });
+      collectionOk = up.success;
+      setEvidenceUploadState((prev) => ({
+        ...prev,
+        collection: up.success ? "success" : "failed",
+        collectionError: up.error || "",
+      }));
+      if (!up.success) {
+        showToast("warning", up.error || "Visit saved; collection proof upload failed.");
+      } else {
+        setCollectionProofFile(null);
+      }
+    }
+
+    setEvidenceUploading(false);
+    const allOk = visitOk && collectionOk;
+    const summary = allOk
+      ? hadProof
+        ? "Proof uploaded successfully."
+        : ""
+      : "Visit saved. One or more proof uploads failed — you can re-attach and save again from a new visit log, or retry from Collections.";
+    return { allOk, summary };
+  }
+
+  function resetVisitWizardForAnother() {
+    setSavePhase("idle");
+    setSaveError("");
+    setSavedVisitSummary(null);
+    setEvidenceUploadState({
+      visit: "none",
+      collection: "none",
+      visitError: "",
+      collectionError: "",
+    });
+    setVisitProofFile(null);
+    setCollectionProofFile(null);
+    setProofRemarks("");
+    setForm((prev) => ({
+      ...prev,
+      visitDate: new Date().toISOString().slice(0, 10),
+      labId: "",
+      labName: "",
+      area: currentUser?.assignedArea || "",
+      visitType: "Follow-up",
+      samplesGiven: "",
+      demoGiven: "No",
+      labResponse: "Warm",
+      soldValue: "",
+      stockAvailable: "Yes",
+      needsNewStock: "No",
+      nextAction: "",
+      nextFollowUpDate: "",
+      nextFollowUpType: "Call",
+      notes: "",
+    }));
+    setCurrentStepIndex(0);
+    setQualificationEditing(false);
+    clearAgentVisitDraft(currentUser);
+    setDraftBannerVisible(false);
+    wizardStartedAtRef.current = Date.now();
+    stepEnteredAtRef.current = Date.now();
+    prevStepIndexRef.current = 0;
+  }
+
+  function handleBackToAgentWorkspace() {
+    if (typeof setActivePage === "function") {
+      setActivePage("dashboard");
+    }
+    resetVisitWizardForAnother();
+  }
+
+  function handleLogAnotherVisit() {
+    resetVisitWizardForAnother();
+    showToast("info", "Ready to log another visit.");
+  }
+
+  async function handleSaveVisit() {
+    if (savePhase === "success" || isSubmitting) return;
+
+    if (!canSubmitVisit) {
+      const msg =
+        missingRequired.length > 0
+          ? `Fix before submitting: ${missingRequired.join(", ")}`
+          : "Please complete required visit fields.";
+      setSaveError(msg);
+      showToast("error", msg);
       return;
     }
 
@@ -1596,21 +1825,15 @@ export default function AgentVisitPage({ currentUser, authToken }) {
     const normalizedLabName = String(resolvedLab?.labName ?? form.labName ?? "").trim();
 
     if (!normalizedLabName) {
-      showToast("error", "Please fill agent name, lab, date, and visit type.");
-      return;
-    }
-
-    if (form.labResponse === "Converted" && !Number(form.soldValue || 0)) {
-      showToast("error", "Enter order value when the visit outcome is Order Confirmed.");
-      return;
-    }
-
-    if ((form.labResponse === "Need Follow-up" || form.nextFollowUpDate) && !form.nextFollowUpType) {
-      showToast("error", "Please choose a follow-up type.");
+      const msg = "Select a lab before completing the visit log.";
+      setSaveError(msg);
+      showToast("error", msg);
       return;
     }
 
     try {
+      setSaveError("");
+      setSavePhase("saving");
       setSaving(true);
 
       const payload = {
@@ -1680,49 +1903,14 @@ export default function AgentVisitPage({ currentUser, authToken }) {
 
       const savedVisitId = res.data?.visitId || "";
       const hadProof = Boolean(visitProofFile || collectionProofFile);
+      const fromWorkspace = consumeAgentWorkspaceReturnPath() === "dashboard";
+      setShowWorkspaceReturnCta(fromWorkspace);
 
-      if (hadProof) {
-        setEvidenceUploading(true);
-        const tenantId = currentUser?.tenantId || currentUser?.tenant_id || "";
-        const uploader =
-          currentUser?.name || currentUser?.agentName || form.agentName || "Agent";
-        const uploaderRole = currentUser?.role || ROLES.AGENT;
-
-        if (visitProofFile) {
-          const up = await uploadOperationalEvidence({
-            file: visitProofFile,
-            tenantId,
-            labId: normalizedLabId,
-            kind: "visit_photo",
-            visitId: savedVisitId,
-            uploadedBy: uploader,
-            uploadedByRole: uploaderRole,
-            remarks: proofRemarks,
-          });
-          if (!up.success) {
-            showToast("warning", up.error || "Visit saved; photo proof upload failed.");
-          }
-        }
-        if (collectionProofFile) {
-          const up = await uploadOperationalEvidence({
-            file: collectionProofFile,
-            tenantId,
-            labId: normalizedLabId,
-            kind: "collection_proof",
-            visitId: savedVisitId,
-            uploadedBy: uploader,
-            uploadedByRole: uploaderRole,
-            remarks: proofRemarks,
-          });
-          if (!up.success) {
-            showToast("warning", up.error || "Visit saved; collection proof upload failed.");
-          }
-        }
-        setEvidenceUploading(false);
-        setVisitProofFile(null);
-        setCollectionProofFile(null);
-        setProofRemarks("");
-      }
+      const evidenceResult = await uploadVisitEvidenceFiles({
+        savedVisitId,
+        normalizedLabId,
+        hadProof,
+      });
 
       const newVisit = normalizeVisit({
         id: savedVisitId || `VISIT-${Date.now()}`,
@@ -1740,47 +1928,45 @@ export default function AgentVisitPage({ currentUser, authToken }) {
       });
 
       setRecentVisits((prev) => [newVisit, ...prev]);
+      lastSavedVisitRef.current = { ...newVisit, visitId: savedVisitId };
 
       clearAgentVisitDraft(currentUser);
       setDraftBannerVisible(false);
+      sessionStorage.removeItem(AGENT_PENDING_VISIT_TASK_KEY);
+      sessionStorage.removeItem("primecare_pending_visit_task");
+      sessionStorage.removeItem(AGENT_VISIT_CONTEXT_KEY);
+
       recordAgentVisitWizardCompletion({
         totalMs: Date.now() - wizardStartedAtRef.current,
         stepCount: AGENT_VISIT_SECTION_STEPS.length,
       });
-      wizardStartedAtRef.current = Date.now();
-      stepEnteredAtRef.current = Date.now();
-      prevStepIndexRef.current = 0;
 
-      showToast(
-        "success",
-        `Visit saved${savedVisitId ? `: ${savedVisitId}` : ""}${hadProof ? " · Proof attached" : ""}`
-      );
+      notifyAgentWorkspaceRefresh({
+        source: "visit_saved",
+        labId: normalizedLabId,
+        visitId: savedVisitId,
+      });
 
-      if (consumeAgentWorkspaceReturnPath() === "dashboard") {
-        notifyAgentWorkspaceRefresh({ source: "visit_saved", labId: form.labId });
-      }
+      const evidenceSummary = hadProof
+        ? evidenceResult.allOk
+          ? "Proof uploaded successfully."
+          : evidenceResult.summary
+        : "";
 
-      setForm((prev) => ({
-        ...prev,
-        visitDate: new Date().toISOString().slice(0, 10),
-        labId: "",
-        labName: "",
-        area: currentUser?.assignedArea || "",
-        visitType: "Follow-up",
-        samplesGiven: "",
-        demoGiven: "No",
-        labResponse: "Warm",
-        soldValue: "",
-        stockAvailable: "Yes",
-        needsNewStock: "No",
-        nextAction: "",
-        nextFollowUpDate: "",
-        nextFollowUpType: "Call",
-        notes: "",
-      }));
-      setCurrentStepIndex(0);
-      setQualificationEditing(false);
+      setSavedVisitSummary({
+        visitId: savedVisitId,
+        labName: normalizedLabName,
+        visitDate: form.visitDate,
+        visitType: form.visitType,
+        labResponse: form.labResponse,
+        evidenceSummary,
+      });
+      setSavePhase("success");
+      setProofRemarks("");
+
+      showToast("success", "Visit logged successfully");
     } catch (err) {
+      setSavePhase("error");
       await logClientError({
         authToken,
         page: "AgentVisitPage",
@@ -1794,7 +1980,9 @@ export default function AgentVisitPage({ currentUser, authToken }) {
         },
       });
 
-      showToast("error", err.message || "Failed to save visit");
+      const msg = err.message || "Failed to save visit. Check connection and try again.";
+      setSaveError(msg);
+      showToast("error", msg);
     } finally {
       setSaving(false);
     }
@@ -1802,8 +1990,8 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   }
 
   const isReviewStep = currentStepIndex === AGENT_VISIT_SECTION_STEPS.length - 1;
-  const missingRequired = useMemo(() => getMissingVisitRequirements(form), [form]);
   const showMobileNav = !isReviewStep;
+  const isSubmitting = saving || evidenceUploading || savePhase === "saving";
 
   useEffect(() => {
     if (!isReviewStep) return;
@@ -1824,8 +2012,8 @@ export default function AgentVisitPage({ currentUser, authToken }) {
     <div
       className={cn(
         "mx-auto max-w-5xl space-y-4",
-        showMobileNav || isReviewStep
-          ? "pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-6"
+        showMobileNav || (isReviewStep && savePhase !== "success")
+          ? "pb-[calc(6.5rem+env(safe-area-inset-bottom,0px))] md:pb-6"
           : "pb-6"
       )}
     >
@@ -1916,7 +2104,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
             currentIndex={currentStepIndex}
             total={AGENT_VISIT_SECTION_STEPS.length}
             labSelected={labSelected}
-            canSaveVisit={canSaveVisit && missingRequired.length === 0}
+            canSaveVisit={canSubmitVisit}
             missingItems={missingRequired}
           />
 
@@ -2532,10 +2720,23 @@ export default function AgentVisitPage({ currentUser, authToken }) {
 
           {currentStepIndex === AGENT_VISIT_SECTION_STEPS.length - 1 ? (
             <section className={cn(STEP_PANEL_CLASS, "md:max-w-none")}>
+              {savePhase === "success" && savedVisitSummary ? (
+                <VisitSaveSuccessPanel
+                  savedVisit={savedVisitSummary}
+                  evidenceSummary={savedVisitSummary.evidenceSummary}
+                  showWorkspaceCta={
+                    typeof setActivePage === "function" &&
+                    (showWorkspaceReturnCta || isAgentUser(currentUser))
+                  }
+                  onBackToWorkspace={handleBackToAgentWorkspace}
+                  onLogAnother={handleLogAnotherVisit}
+                />
+              ) : (
+                <>
               <SectionTitle
                 icon={CheckCircle2}
                 title={currentStep.title}
-                subtitle="Confirm details, then complete your visit log"
+                subtitle="Confirm details, then tap Complete Visit Log"
                 accent
               />
 
@@ -2633,23 +2834,67 @@ export default function AgentVisitPage({ currentUser, authToken }) {
                     <p className="text-muted-foreground">Not captured (optional)</p>
                   )}
                 </ReviewSummaryCard>
+
+                <ReviewSummaryCard
+                  title="Field proof"
+                  icon={CheckCircle2}
+                  showEdit={false}
+                  missing={[]}
+                >
+                  <p className="text-xs">
+                    {proofStatusLabel(visitProofFile, collectionProofFile, evidenceUploadState)}
+                  </p>
+                </ReviewSummaryCard>
               </div>
 
               <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
                 <p className="text-xs font-semibold text-slate-800">Field proof (optional)</p>
+                <p className="text-[10px] text-slate-500">
+                  Proof uploads after your visit is saved — a failed photo will not cancel the visit.
+                </p>
                 <EvidenceUploadField
                   file={visitProofFile}
-                  onFileChange={setVisitProofFile}
+                  onFileChange={(f) => {
+                    setVisitProofFile(f);
+                    setEvidenceUploadState((prev) => ({
+                      ...prev,
+                      visit: f ? "none" : "none",
+                      visitError: "",
+                    }));
+                  }}
                   label="Visit photo proof"
-                  disabled={saving || evidenceUploading}
+                  disabled={isSubmitting}
                   hint="Capture at lab or upload from gallery"
+                  uploadStatus={
+                    visitProofFile
+                      ? evidenceUploadState.visit === "none"
+                        ? "attached"
+                        : evidenceUploadState.visit
+                      : "idle"
+                  }
+                  statusMessage={evidenceUploadState.visitError}
                 />
                 <EvidenceUploadField
                   file={collectionProofFile}
-                  onFileChange={setCollectionProofFile}
+                  onFileChange={(f) => {
+                    setCollectionProofFile(f);
+                    setEvidenceUploadState((prev) => ({
+                      ...prev,
+                      collection: f ? "none" : "none",
+                      collectionError: "",
+                    }));
+                  }}
                   label="Collection proof (optional)"
-                  disabled={saving || evidenceUploading}
+                  disabled={isSubmitting}
                   hint="Receipt, UPI screenshot, or signed slip"
+                  uploadStatus={
+                    collectionProofFile
+                      ? evidenceUploadState.collection === "none"
+                        ? "attached"
+                        : evidenceUploadState.collection
+                      : "idle"
+                  }
+                  statusMessage={evidenceUploadState.collectionError}
                 />
                 <div className="space-y-1">
                   <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
@@ -2660,22 +2905,26 @@ export default function AgentVisitPage({ currentUser, authToken }) {
                     onChange={(e) => setProofRemarks(e.target.value)}
                     placeholder="Optional note for audit trail"
                     className="min-h-[64px] rounded-lg text-sm"
-                    disabled={saving || evidenceUploading}
+                    disabled={isSubmitting}
                   />
                 </div>
-                <EvidenceUploadProgress uploading={evidenceUploading} />
+                <EvidenceUploadProgress uploading={evidenceUploading} message="Uploading proof…" />
               </div>
+                </>
+              )}
             </section>
           ) : null}
             </motion.div>
           </AnimatePresence>
 
-          {isReviewStep ? (
+          {isReviewStep && savePhase !== "success" ? (
             <WizardReviewFooter
               onBack={handleWizardBack}
               onSave={handleSaveVisit}
               saving={saving}
-              saveDisabled={!canSaveVisit}
+              uploadingProof={evidenceUploading}
+              saveDisabled={!canSubmitVisit}
+              saveError={saveError}
             />
           ) : (
             <>

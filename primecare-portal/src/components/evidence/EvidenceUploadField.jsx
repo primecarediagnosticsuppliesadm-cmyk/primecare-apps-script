@@ -11,6 +11,8 @@ import { Camera, ImagePlus, Loader2, X, AlertCircle } from "lucide-react";
  * @param {string} [props.label]
  * @param {boolean} [props.disabled]
  * @param {string} [props.hint]
+ * @param {'idle'|'attached'|'uploading'|'success'|'failed'} [props.uploadStatus]
+ * @param {string} [props.statusMessage]
  */
 export default function EvidenceUploadField({
   file,
@@ -18,6 +20,8 @@ export default function EvidenceUploadField({
   label = "Attach photo proof",
   disabled = false,
   hint = "Camera or gallery · JPEG/PNG",
+  uploadStatus = "idle",
+  statusMessage = "",
 }) {
   const cameraRef = useRef(null);
   const galleryRef = useRef(null);
@@ -108,9 +112,23 @@ export default function EvidenceUploadField({
         </div>
       )}
 
-      {file ? (
+      {file && uploadStatus === "idle" ? (
         <p className="mt-1.5 text-[10px] text-emerald-700">
-          Ready to upload on save · {(file.size / 1024).toFixed(0)} KB
+          Attached · will upload when you complete visit log · {(file.size / 1024).toFixed(0)} KB
+        </p>
+      ) : null}
+      {uploadStatus === "uploading" ? (
+        <p className="mt-1.5 flex items-center gap-1 text-[10px] text-blue-700">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          Uploading…
+        </p>
+      ) : null}
+      {uploadStatus === "success" ? (
+        <p className="mt-1.5 text-[10px] text-emerald-700">Uploaded successfully</p>
+      ) : null}
+      {uploadStatus === "failed" ? (
+        <p className="mt-1.5 text-[10px] text-amber-800">
+          Upload failed{statusMessage ? `: ${statusMessage}` : ""}. Visit was saved — remove and re-attach to retry.
         </p>
       ) : null}
 
