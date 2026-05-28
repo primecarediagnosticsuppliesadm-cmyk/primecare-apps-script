@@ -221,7 +221,12 @@ export default function PrimeCareWebPortal({
   if (role === ROLES.EXECUTIVE) {
     switch (activePage) {
       case "dashboard":
-        return <ExecutiveControlTower currentUser={currentUser} />;
+        return (
+          <ExecutiveControlTower
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+          />
+        );
 
       case "operationsCenter":
       case "operations-center":

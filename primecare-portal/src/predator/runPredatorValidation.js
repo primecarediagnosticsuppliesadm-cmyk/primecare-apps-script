@@ -11,6 +11,7 @@ import { validateNotificationsFoundationModule } from "@/predator/validators/not
 import { validateLabPortalModule } from "@/predator/validators/labPortalValidator.js";
 import { validateOperationalEvidenceModule } from "@/predator/validators/operationalEvidenceValidator.js";
 import { validateOperationsCommandCenterModule } from "@/predator/validators/operationsCommandCenterValidator.js";
+import { validateExecutiveInterventionModule } from "@/predator/validators/executiveInterventionValidator.js";
 import { ROLES } from "@/config/roles.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
 import { ADMIN_DASHBOARD_MODULE } from "@/predator/adminDashboardUiSnapshot.js";
@@ -117,6 +118,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
     if (isLabRole) {
       modules.push(skippedModuleForLabRole("Operational Evidence", ctx));
       modules.push(skippedModuleForLabRole("Operations Center", ctx));
+      modules.push(skippedModuleForLabRole("Executive Intervention", ctx));
     } else {
       const evidence = await validateOperationalEvidenceModule({ ctx, currentUser });
       predatorStore.setModuleReport("Operational Evidence", evidence.entries, ctx);
@@ -129,6 +131,14 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
       });
       predatorStore.setModuleReport("Operations Center", operationsCenter.entries, ctx);
       modules.push(operationsCenter);
+
+      const executiveIntervention = await validateExecutiveInterventionModule({
+        ctx,
+        currentUser,
+        rendered: snapshots.executiveIntervention ?? null,
+      });
+      predatorStore.setModuleReport("Executive Intervention", executiveIntervention.entries, ctx);
+      modules.push(executiveIntervention);
     }
 
     const allEntries = modules.flatMap((m) => m.entries);
@@ -200,6 +210,13 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
       break;
     case "Operations Center":
       result = await validateOperationsCommandCenterModule({
+        ctx,
+        currentUser,
+        rendered: snapshot,
+      });
+      break;
+    case "Executive Intervention":
+      result = await validateExecutiveInterventionModule({
         ctx,
         currentUser,
         rendered: snapshot,
