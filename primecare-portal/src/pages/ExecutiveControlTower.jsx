@@ -28,6 +28,8 @@ import ExecutiveInterventionDrawer from "@/components/executive/ExecutiveInterve
 import ExecutiveWorkflowDrawer from "@/components/executive/ExecutiveWorkflowDrawer.jsx";
 import InterventionQueueCard from "@/components/executive/InterventionQueueCard.jsx";
 import InterventionClusterCard from "@/components/executive/InterventionClusterCard.jsx";
+import ExecutiveIntelligenceLayer from "@/components/executive/ExecutiveIntelligenceLayer.jsx";
+import { buildExecutiveIntelligenceModel } from "@/operations/executiveIntelligenceModel.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { cn } from "@/lib/utils";
 import {
@@ -129,6 +131,18 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
     void taskTick;
     return buildExecutiveOperationalTaskModel(interventionQueues, tenantId, model.payload);
   }, [model, interventionQueues, tenantId, taskTick]);
+
+  const intelligence = useMemo(() => {
+    if (!model) return null;
+    void workflowTick;
+    void taskTick;
+    return buildExecutiveIntelligenceModel({
+      payload: model.payload,
+      opsModel: model,
+      tenantId,
+      interventionQueues,
+    });
+  }, [model, tenantId, interventionQueues, workflowTick, taskTick]);
 
   const handleInterventionAction = useCallback(
     (action, issue) => {
@@ -273,6 +287,29 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
     !loading && Boolean(model)
   );
 
+  const intelligencePredatorSnapshot = useMemo(() => {
+    if (loading || !intelligence) return null;
+    return {
+      intelligenceUiReady: true,
+      driftCount: intelligence.driftSignals?.length ?? 0,
+      driftCriticalCount: intelligence.driftSignals?.filter((d) => d.severity === "CRITICAL")
+        .length,
+      agentAtRiskCount: intelligence.agents?.filter((a) => a.atRisk).length ?? 0,
+      reliabilityOverall: intelligence.reliability?.overall ?? null,
+      escalationCount: intelligence.escalationInsights?.length ?? 0,
+      trendStripCount: intelligence.trendStrips?.length ?? 0,
+      intelligenceCapturedAt: Date.now(),
+      executiveIntelligence: true,
+    };
+  }, [loading, intelligence, workflowTick, taskTick]);
+
+  usePredatorModuleValidation(
+    "Executive Intelligence",
+    currentUser,
+    intelligencePredatorSnapshot ?? {},
+    Boolean(intelligencePredatorSnapshot)
+  );
+
   const navigate = useCallback(
     (page) => {
       if (!page) return;
@@ -405,6 +442,11 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
           ))}
         </div>
       </section>
+
+      <ExecutiveIntelligenceLayer
+        intelligence={intelligence}
+        onOpenLab={(id) => setLabDrawerId(String(id))}
+      />
 
       <section
         className="rounded-xl border-2 border-slate-800/15 bg-slate-50/50 p-3"

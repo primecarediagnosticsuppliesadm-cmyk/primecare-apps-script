@@ -14,6 +14,7 @@ import { validateOperationsCommandCenterModule } from "@/predator/validators/ope
 import { validateExecutiveInterventionModule } from "@/predator/validators/executiveInterventionValidator.js";
 import { validateOperationalTasksModule } from "@/predator/validators/operationalTaskValidator.js";
 import { validateOperationalEventLedgerModule } from "@/predator/validators/operationalEventLedgerValidator.js";
+import { validateExecutiveIntelligenceModule } from "@/predator/validators/executiveIntelligenceValidator.js";
 import { ROLES } from "@/config/roles.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
 import { ADMIN_DASHBOARD_MODULE } from "@/predator/adminDashboardUiSnapshot.js";
@@ -123,6 +124,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
       modules.push(skippedModuleForLabRole("Executive Intervention", ctx));
       modules.push(skippedModuleForLabRole("Operational Tasks", ctx));
       modules.push(skippedModuleForLabRole("Operational Event Ledger", ctx));
+      modules.push(skippedModuleForLabRole("Executive Intelligence", ctx));
     } else {
       const evidence = await validateOperationalEvidenceModule({ ctx, currentUser });
       predatorStore.setModuleReport("Operational Evidence", evidence.entries, ctx);
@@ -159,6 +161,14 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
       });
       predatorStore.setModuleReport("Operational Event Ledger", eventLedger.entries, ctx);
       modules.push(eventLedger);
+
+      const executiveIntelligence = await validateExecutiveIntelligenceModule({
+        ctx,
+        currentUser,
+        rendered: snapshots.executiveIntelligence ?? null,
+      });
+      predatorStore.setModuleReport("Executive Intelligence", executiveIntelligence.entries, ctx);
+      modules.push(executiveIntelligence);
     }
 
     const allEntries = modules.flatMap((m) => m.entries);
@@ -251,6 +261,13 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
       break;
     case "Operational Event Ledger":
       result = await validateOperationalEventLedgerModule({
+        ctx,
+        currentUser,
+        rendered: snapshot,
+      });
+      break;
+    case "Executive Intelligence":
+      result = await validateExecutiveIntelligenceModule({
         ctx,
         currentUser,
         rendered: snapshot,
