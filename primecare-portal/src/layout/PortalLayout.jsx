@@ -13,10 +13,12 @@ import {
   Package,
   Bug,
   Bell,
+  Radio,
 } from "lucide-react";
 
 const ICONS = {
   dashboard: LayoutDashboard,
+  operationsCenter: Radio,
   visits: ClipboardList,
   collections: Wallet,
   labAccount: Wallet,

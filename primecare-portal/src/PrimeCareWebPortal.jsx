@@ -19,6 +19,7 @@ import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
 import QualificationReviewPage from "./pages/QualificationReviewPage";
 import PredatorDebugConsole from "./pages/PredatorDebugConsole";
 import NotificationCenterPage from "./pages/NotificationCenterPage";
+import OperationsCommandCenter from "./pages/OperationsCommandCenter";
 
 function PlaceholderCard({ title, subtitle }) {
   return (
@@ -219,6 +220,15 @@ export default function PrimeCareWebPortal({
     switch (activePage) {
       case "dashboard":
         return <ExecutiveControlTower currentUser={currentUser} />;
+
+      case "operationsCenter":
+      case "operations-center":
+        return (
+          <OperationsCommandCenter
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+          />
+        );
 
       case "labs":
         return (

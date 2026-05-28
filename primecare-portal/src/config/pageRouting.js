@@ -24,6 +24,9 @@ export function normalizePageKey(page) {
     case "predator-debug":
     case "predatorDebug":
       return "predatorDebug";
+    case "operations-center":
+    case "operationsCenter":
+      return "operationsCenter";
     case "lab-orders":
     case "lab-ordering":
     case "ordering":

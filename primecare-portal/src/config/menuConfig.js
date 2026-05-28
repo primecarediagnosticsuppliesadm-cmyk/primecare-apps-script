@@ -16,6 +16,7 @@ const LAB_MENU_ORDER = ["labOrders", "labAccount", "notifications"];
 export const MENU_ITEMS = [
   // Core
   { key: "dashboard", label: "Dashboard", icon: "LayoutDashboard" },
+  { key: "operationsCenter", label: "Operations Center", icon: "Radio" },
 
   // Field Ops
   { key: "visits", label: "Visits", icon: "ClipboardList" },
@@ -48,6 +49,7 @@ export const MENU_ITEMS = [
 
 const PILOT_SAFE_PAGE_KEYS = new Set([
   "dashboard",
+  "operationsCenter",
   "visits",
   "collections",
   "labAccount",
