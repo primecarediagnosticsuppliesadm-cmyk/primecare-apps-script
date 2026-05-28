@@ -23,9 +23,12 @@
  * @param {number|null|undefined} value
  */
 export function numOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
+
+const MUTABLE_LAYER_KEYS = ["browserRls", "dbComputed", "apiPayload", "uiRendered"];
 
 /**
  * @param {number} expected
@@ -141,6 +144,7 @@ export function checkMetricAcrossLayers({ id, label, expected, layers, tolerance
  * @param {Record<string, number|null|undefined>} params.layers
  * @param {number} [params.seedBaseline] — informational seed reference only
  * @param {number} [params.tolerance]
+ * @param {boolean} [params.omitUiUnlessPresent] — skip uiRendered when null/undefined (non-KPI metrics)
  * @returns {QaValidationCheck}
  */
 export function checkMutableMetricAcrossLayers({
@@ -149,14 +153,21 @@ export function checkMutableMetricAcrossLayers({
   layers,
   seedBaseline,
   tolerance = 0,
+  omitUiUnlessPresent = false,
 }) {
   const actual = { ...layers, mutable: true, seedBaseline: seedBaseline ?? null };
   const browser = numOrNull(layers.browserRls);
   const db = numOrNull(layers.dbComputed);
   const runtimeBaseline = browser ?? db ?? null;
 
-  const comparableValues = Object.values(layers)
-    .map((value) => numOrNull(value))
+  const comparableValues = MUTABLE_LAYER_KEYS.filter((key) => key in layers)
+    .filter((key) => {
+      if (key !== "uiRendered") return true;
+      if (!omitUiUnlessPresent) return true;
+      const raw = layers.uiRendered;
+      return raw !== null && raw !== undefined;
+    })
+    .map((key) => numOrNull(layers[key]))
     .filter((value) => value !== null);
 
   let status = /** @type {QaCheckStatus} */ (

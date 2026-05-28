@@ -10,6 +10,7 @@ import { createPredatorEntry } from "@/predator/predatorSchema.js";
  * @param {unknown} v
  */
 function num(v) {
+  if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
@@ -259,7 +260,13 @@ export function diagnoseMetricLayers({
     if (!apiUiOk || !stateUiOk) status = "WARN";
   }
 
-  const uiObserved = layers.some((l) => l.layerId === "ui" && !l.meta?.unobserved);
+  const uiObserved = layers.some(
+    (l) =>
+      l.layerId === "ui" &&
+      !l.meta?.unobserved &&
+      !l.meta?.notRenderedOnDashboard &&
+      !l.meta?.optional
+  );
   if (compareMode === "kpi" && uiObserved && api != null && api > 0 && ui === 0) {
     status = status === "PASS" ? "FAIL" : status;
   }
@@ -279,7 +286,9 @@ export function diagnoseMetricLayers({
   );
 
   if (status === "PASS") {
-    inferred.probableRootCause = "Computed KPI layers align with QA seed expectation";
+    inferred.probableRootCause = cacheMeta?.ordersUiNotRendered
+      ? "Orders count validated on RLS/API; UI layer not rendered on Admin Dashboard"
+      : "Computed KPI layers align with QA seed expectation";
     inferred.issueClass = "cosmetic";
     inferred.firstLayer = "none";
     inferred.suggestions = [];

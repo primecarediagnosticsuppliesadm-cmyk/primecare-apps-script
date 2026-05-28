@@ -154,15 +154,19 @@ export async function runAdminDashboardValidation(options = {}) {
   const uiTotalSold = uiSnapshot.fresh ? numOrNull(uiSummary.totalSoldValue) : null;
 
   const apiOrdersRowCount = apiOrdersRowCountFromTrace();
-  const uiOrdersRowCount = uiSnapshot.fresh
+  const uiOrdersHasExplicitValue =
+    uiSnapshot.fresh &&
+    (uiRendered?.summary?.ordersCount != null || uiSummary.ordersCount != null);
+  const uiOrdersRowCount = uiOrdersHasExplicitValue
     ? numOrNull(uiRendered?.summary?.ordersCount ?? uiSummary.ordersCount)
     : null;
 
   const checks = [
     checkMutableMetricAcrossLayers({
       id: "orders_count",
-      label: "Orders row count (mutable, cross-layer)",
+      label: "Orders row count (mutable, RLS/API)",
       seedBaseline: expected.ordersCount,
+      omitUiUnlessPresent: true,
       layers: {
         browserRls: browser.ordersRowCount,
         dbComputed: browser.ordersRowCount,
@@ -215,6 +219,22 @@ export async function runAdminDashboardValidation(options = {}) {
       },
     }),
   ];
+
+  if (uiSnapshot.fresh && !uiOrdersHasExplicitValue) {
+    checks.push({
+      id: "ui_snapshot_metric_missing.orders_count",
+      label: "Orders count UI KPI",
+      status: "warn",
+      expected: "ordersCount only when Admin Dashboard renders that KPI",
+      actual: {
+        uiRendered: null,
+        browserRls: browser.ordersRowCount,
+        apiPayload: apiOrdersRowCount,
+      },
+      message:
+        "Orders count is backend/API validated; UI layer not rendered on Admin Dashboard",
+    });
+  }
 
   if (!uiSnapshot.fresh) {
     checks.push({

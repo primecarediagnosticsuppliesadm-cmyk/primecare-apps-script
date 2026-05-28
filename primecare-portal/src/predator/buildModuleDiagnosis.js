@@ -227,14 +227,24 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx, options = {}) {
     meta: uiSnapshotFresh ? undefined : { unobserved: true, optional: true },
   });
 
+  const ordersUiLayer =
+    snap.uiOrdersRowCount != null
+      ? uiLayer(snap.uiOrdersRowCount)
+      : {
+          layerId: "ui",
+          label: "Rendered UI",
+          value: null,
+          meta: { unobserved: true, optional: true, notRenderedOnDashboard: true },
+        };
+
   return [
     diagnoseMetricLayers({
       metricId: "orders_count",
-      metricLabel: "Orders row count (mutable)",
+      metricLabel: "Orders row count (mutable, backend/API)",
       expected:
         snap.ordersRowCount ?? snap.apiTraceOrders ?? snap.apiOrdersRowCount ?? seed.ordersCount,
       tenantCtx: ctx,
-      cacheMeta,
+      cacheMeta: { ...cacheMeta, ordersUiNotRendered: snap.uiOrdersRowCount == null },
       compareMode: "kpi",
       layers: [
         {
@@ -248,7 +258,7 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx, options = {}) {
           label: "API getAdminDashboardRead (orders rows)",
           value: snap.apiTraceOrders ?? snap.apiOrdersRowCount ?? null,
         },
-        uiLayer(snap.uiOrdersRowCount),
+        ordersUiLayer,
       ],
     }),
     diagnoseMetricLayers({

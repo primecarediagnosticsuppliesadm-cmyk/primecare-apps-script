@@ -43,9 +43,16 @@ export async function validateAdminDashboardModule({ ctx, rendered = null }) {
             ? ""
             : check.id === "ui_snapshot_freshness"
               ? check.message || "Admin Dashboard UI snapshot not fresh"
+              : check.id === "ui_snapshot_metric_missing.orders_count"
+                ? check.message ||
+                  "Orders count is backend/API validated; UI layer not rendered"
+              : check.id === "orders_count"
+                ? check.message || "Orders row count layer mismatch (RLS vs API)"
               : !uiSnapshotFresh && check.actual?.apiPayload > 0
                 ? "No fresh rendered snapshot — open Admin Dashboard before full Predator run"
-                : check.actual?.uiRendered === 0 && check.actual?.apiPayload > 0
+                : check.actual?.uiRendered === 0 &&
+                    check.actual?.apiPayload > 0 &&
+                    check.id !== "orders_count"
                   ? "Backend healthy, UI synchronization unhealthy"
                   : check.actual?.apiPayload === 0 && check.actual?.browserRls > 0
                     ? "Backend/API layer divergence detected"

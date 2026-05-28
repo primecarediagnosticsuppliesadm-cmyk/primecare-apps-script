@@ -17,9 +17,13 @@ import { predatorStore } from "@/predator/predatorStore.js";
  * @param {unknown} v
  */
 function num(v) {
+  if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
+
+/** Metrics validated on backend/API only — Admin Dashboard does not render these KPIs. */
+const ADMIN_DASHBOARD_NON_UI_KPI_METRICS = new Set(["orders_count"]);
 
 /**
  * Lightweight per-metric pipeline snapshot (no full state dumps).
@@ -303,6 +307,13 @@ export function buildUiSyncWarnings(module, metrics) {
 
   for (const m of actionableMetrics) {
     if (m.status === "PASS") continue;
+    if (module === "Admin Dashboard" && ADMIN_DASHBOARD_NON_UI_KPI_METRICS.has(m.metricId)) {
+      continue;
+    }
+    const uiLayer = m.layerTrace?.find((l) => l.layerId === "ui");
+    if (uiLayer?.meta?.unobserved || uiLayer?.meta?.notRenderedOnDashboard) {
+      continue;
+    }
     const api = num(m.layerTrace.find((l) => l.layerId === "api")?.value);
     const state = num(m.layerTrace.find((l) => l.layerId === "state")?.value);
     const ui = num(m.layerTrace.find((l) => l.layerId === "ui")?.value);
