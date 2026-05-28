@@ -1,5 +1,11 @@
 import { labIdKey } from "@/utils/labId.js";
-import { queryOperationalLedger, readOperationalLedger } from "@/operations/operationalEventLedger.js";
+import {
+  queryOperationalLedger,
+  readOperationalLedger,
+  compareOperationalEventsDesc,
+  normalizeLedgerEventForRead,
+  sortOperationalLedgerEvents,
+} from "@/operations/operationalEventLedger.js";
 import {
   synthesizeEventsFromPayload,
   eventToTimelineRow,
@@ -16,14 +22,15 @@ function str(v) {
 function mergeEvents(ledgerEvents, syntheticEvents, limit) {
   const seen = new Set();
   const merged = [];
+  let seq = syntheticEvents.length + ledgerEvents.length;
   for (const e of [...ledgerEvents, ...syntheticEvents]) {
     const key = e.dedupeKey || e.eventId;
     if (seen.has(key)) continue;
     seen.add(key);
-    merged.push(e);
+    merged.push(normalizeLedgerEventForRead(e, seq));
+    seq -= 1;
   }
-  merged.sort((a, b) => Date.parse(b.timestamp || "") - Date.parse(a.timestamp || ""));
-  return merged.slice(0, limit);
+  return sortOperationalLedgerEvents(merged).slice(0, limit);
 }
 
 /**
@@ -144,7 +151,7 @@ export function buildCorrelatedEventChains(tenantId, payload = {}, limit = 12) {
   const chains = [];
   for (const [correlationId, events] of byCorrelation) {
     if (events.length < 2) continue;
-    events.sort((a, b) => Date.parse(a.timestamp || "") - Date.parse(b.timestamp || ""));
+    events.sort((a, b) => compareOperationalEventsDesc(b, a));
     chains.push({
       correlationId,
       labId: events[0]?.linkedLabId || "",
@@ -188,7 +195,11 @@ export function buildUnifiedOperationsFeedRows({ tenantId, opsFeed = [], payload
     merged.push({ ...row, source: "ops_feed" });
   }
 
-  merged.sort((a, b) => Date.parse(b.createdAt || "") - Date.parse(a.createdAt || ""));
+  merged.sort((a, b) => {
+    const rowA = { event_timestamp: a.createdAt, inserted_at: a.createdAt, eventId: a.id };
+    const rowB = { event_timestamp: b.createdAt, inserted_at: b.createdAt, eventId: b.id };
+    return compareOperationalEventsDesc(rowA, rowB);
+  });
   return merged.slice(0, limit);
 }
 

@@ -5,6 +5,8 @@ import { buildExecutiveInterventionModel } from "@/operations/executiveIntervent
 import {
   readOperationalLedger,
   readPendingOperationalEvents,
+  isOperationalLedgerOrdered,
+  normalizeLedgerEventForRead,
 } from "@/operations/operationalEventLedger.js";
 import { buildOperationalAuditReplay, buildCorrelatedEventChains } from "@/operations/operationalEventTimeline.js";
 import { OPERATIONAL_EVENT_TYPES } from "@/operations/operationalEventTypes.js";
@@ -58,15 +60,21 @@ export async function validateOperationalEventLedgerModule({
       })
     );
 
-    const ordered =
-      ledger.length < 2 ||
-      Date.parse(ledger[0]?.timestamp || "") >= Date.parse(ledger[ledger.length - 1]?.timestamp || "");
+    const missingTimestamps = ledger.filter(
+      (e) => !normalizeLedgerEventForRead(e).event_timestamp
+    );
+    const ordered = isOperationalLedgerOrdered(ledger);
     entries.push(
       createPredatorEntry({
-        status: ordered ? "PASS" : "WARN",
+        status: ordered && missingTimestamps.length === 0 ? "PASS" : "WARN",
         module: "Operational Event Ledger",
         step: "ledger.ordering",
-        actual: { count: ledger.length, newestFirst: ordered },
+        expected: "event_timestamp desc, inserted_at desc, sequence/id desc",
+        actual: {
+          count: ledger.length,
+          newestFirst: ordered,
+          missingEventTimestamp: missingTimestamps.length,
+        },
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,
@@ -115,7 +123,7 @@ export async function validateOperationalEventLedgerModule({
 
         const orderedReplay =
           replay.length < 2 ||
-          Date.parse(replay[0]?.at || "") >= Date.parse(replay[replay.length - 1]?.at || "");
+          (Date.parse(replay[0]?.at || "") || 0) >= (Date.parse(replay[replay.length - 1]?.at || "") || 0);
         entries.push(
           createPredatorEntry({
             status: orderedReplay && replay.length > 0 ? "PASS" : replay.length === 0 ? "WARN" : "WARN",

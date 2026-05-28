@@ -15,8 +15,10 @@ export function synthesizeEventsFromPayload(payload = {}, existingDedupe = new S
   function push(partial) {
     const dedupeKey = str(partial.dedupeKey);
     if (dedupeKey && existingDedupe.has(dedupeKey)) return;
+    const event_timestamp = str(partial.timestamp) || new Date().toISOString();
+    const sequence = Number(partial.sequence) || Date.parse(event_timestamp) || Date.now();
     events.push({
-      eventId: partial.eventId || `syn-${dedupeKey || Date.now()}`,
+      eventId: partial.eventId || `syn-${dedupeKey || sequence}`,
       tenantId,
       eventType: partial.eventType,
       severity: partial.severity || "MONITORING",
@@ -26,7 +28,10 @@ export function synthesizeEventsFromPayload(payload = {}, existingDedupe = new S
       linkedEntityId: partial.linkedEntityId || "",
       linkedLabId: partial.linkedLabId || "",
       linkedAgentId: partial.linkedAgentId || "",
-      timestamp: partial.timestamp || new Date().toISOString(),
+      event_timestamp,
+      inserted_at: str(partial.inserted_at) || event_timestamp,
+      sequence,
+      timestamp: event_timestamp,
       metadata: partial.metadata || {},
       correlationId: partial.correlationId || "",
       dedupeKey,
@@ -119,7 +124,6 @@ export function synthesizeEventsFromPayload(payload = {}, existingDedupe = new S
     });
   }
 
-  events.sort((a, b) => Date.parse(b.timestamp || "") - Date.parse(a.timestamp || ""));
   return events;
 }
 
@@ -136,7 +140,7 @@ export function eventToTimelineRow(event) {
 
   return {
     id: event.eventId,
-    at: event.timestamp,
+    at: event.event_timestamp || event.timestamp,
     label,
     detail: String(detail),
     actor: event.actor,
