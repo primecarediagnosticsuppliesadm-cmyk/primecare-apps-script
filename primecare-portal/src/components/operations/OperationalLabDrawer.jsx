@@ -6,6 +6,7 @@ import { buildOperationalLabSnapshot } from "@/operations/operationsCommandCente
 import { collectionRiskToVariant } from "@/utils/statusTokens.js";
 import { cn } from "@/lib/utils";
 import { X, Loader2, IndianRupee, MapPin } from "lucide-react";
+import EvidenceContextActions from "@/components/evidence/EvidenceContextActions.jsx";
 
 function formatCurrency(value) {
   return `₹${Number(value || 0).toLocaleString("en-IN")}`;
@@ -26,7 +27,14 @@ function formatWhen(iso) {
  * @param {object} props.opsPayload
  * @param {(action: string, snapshot: object) => void} props.onAction
  */
-export default function OperationalLabDrawer({ open, onClose, labId, opsPayload, onAction }) {
+export default function OperationalLabDrawer({
+  open,
+  onClose,
+  labId,
+  opsPayload,
+  onAction,
+  currentUser,
+}) {
   const [qualification, setQualification] = useState(null);
   const [qualLoading, setQualLoading] = useState(false);
 
@@ -183,6 +191,19 @@ export default function OperationalLabDrawer({ open, onClose, labId, opsPayload,
               <p className="mt-2 text-xs text-slate-500">No recent visits cached.</p>
             )}
           </section>
+
+          {currentUser ? (
+            <section className="rounded-lg border border-dashed border-slate-200 p-2.5">
+              <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                Field evidence
+              </h3>
+              <EvidenceContextActions
+                currentUser={currentUser}
+                labId={labId}
+                className="h-8 w-full text-xs"
+              />
+            </section>
+          ) : null}
 
           <section className="rounded-lg border p-2.5">
             <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">

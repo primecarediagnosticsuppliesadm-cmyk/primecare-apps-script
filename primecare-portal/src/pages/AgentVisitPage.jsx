@@ -70,6 +70,11 @@ import {
   recordAgentVisitUxStep,
   recordAgentVisitWizardCompletion,
 } from "@/pages/agentVisitWizardPredatorUx.js";
+import EvidenceUploadField, {
+  EvidenceUploadProgress,
+} from "@/components/evidence/EvidenceUploadField.jsx";
+import EvidenceContextActions from "@/components/evidence/EvidenceContextActions.jsx";
+import { uploadOperationalEvidence } from "@/api/operationalEvidenceApi.js";
 
 import { saveAgentVisit } from "@/api/primecareApi";
 import {
@@ -332,7 +337,7 @@ function ReviewSummaryCard({ title, icon: Icon, onEdit, missing = [], children }
   );
 }
 
-function RecentVisitTimelineCard({ visit }) {
+function RecentVisitTimelineCard({ visit, currentUser }) {
   const sold = Number(visit.soldValue || 0);
   const relativeTime = formatRelativeVisitTime(visit.date);
   const nextPreview =
@@ -379,6 +384,16 @@ function RecentVisitTimelineCard({ visit }) {
         ) : null}
         {nextPreview ? (
           <p className="mt-0.5 truncate text-[11px] text-muted-foreground">→ {nextPreview}</p>
+        ) : null}
+        {currentUser ? (
+          <div className="mt-2">
+            <EvidenceContextActions
+              currentUser={currentUser}
+              labId={visit.labId}
+              visitId={visit.id}
+              className="h-7 text-[10px]"
+            />
+          </div>
         ) : null}
       </div>
     </div>
@@ -833,6 +848,10 @@ export default function AgentVisitPage({ currentUser, authToken }) {
   const [qualificationSaving, setQualificationSaving] = useState(false);
   const [qualificationLastUpdated, setQualificationLastUpdated] = useState("");
   const [draftBannerVisible, setDraftBannerVisible] = useState(false);
+  const [visitProofFile, setVisitProofFile] = useState(null);
+  const [collectionProofFile, setCollectionProofFile] = useState(null);
+  const [proofRemarks, setProofRemarks] = useState("");
+  const [evidenceUploading, setEvidenceUploading] = useState(false);
 
   const hasLoadedDataRef = useRef(false);
   const authTokenRef = useRef(authToken);
@@ -1121,6 +1140,8 @@ export default function AgentVisitPage({ currentUser, authToken }) {
     },
     !loading
   );
+
+  usePredatorModuleValidation("Operational Evidence", currentUser, {}, !loading);
 
   usePredatorRenderTrace("Agent Visits", {
     ready: !loading,
@@ -1657,8 +1678,54 @@ export default function AgentVisitPage({ currentUser, authToken }) {
 
       if (!res.success) throw new Error(res.error || "Failed to save visit");
 
+      const savedVisitId = res.data?.visitId || "";
+      const hadProof = Boolean(visitProofFile || collectionProofFile);
+
+      if (hadProof) {
+        setEvidenceUploading(true);
+        const tenantId = currentUser?.tenantId || currentUser?.tenant_id || "";
+        const uploader =
+          currentUser?.name || currentUser?.agentName || form.agentName || "Agent";
+        const uploaderRole = currentUser?.role || ROLES.AGENT;
+
+        if (visitProofFile) {
+          const up = await uploadOperationalEvidence({
+            file: visitProofFile,
+            tenantId,
+            labId: normalizedLabId,
+            kind: "visit_photo",
+            visitId: savedVisitId,
+            uploadedBy: uploader,
+            uploadedByRole: uploaderRole,
+            remarks: proofRemarks,
+          });
+          if (!up.success) {
+            showToast("warning", up.error || "Visit saved; photo proof upload failed.");
+          }
+        }
+        if (collectionProofFile) {
+          const up = await uploadOperationalEvidence({
+            file: collectionProofFile,
+            tenantId,
+            labId: normalizedLabId,
+            kind: "collection_proof",
+            visitId: savedVisitId,
+            uploadedBy: uploader,
+            uploadedByRole: uploaderRole,
+            remarks: proofRemarks,
+          });
+          if (!up.success) {
+            showToast("warning", up.error || "Visit saved; collection proof upload failed.");
+          }
+        }
+        setEvidenceUploading(false);
+        setVisitProofFile(null);
+        setCollectionProofFile(null);
+        setProofRemarks("");
+      }
+
       const newVisit = normalizeVisit({
-        id: res.data?.visitId || `VISIT-${Date.now()}`,
+        id: savedVisitId || `VISIT-${Date.now()}`,
         agent: form.agentName,
         date: form.visitDate,
         labId: normalizedLabId,
@@ -1686,7 +1753,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
 
       showToast(
         "success",
-        `Visit saved${res.data?.visitId ? `: ${res.data.visitId}` : ""}`
+        `Visit saved${savedVisitId ? `: ${savedVisitId}` : ""}${hadProof ? " · Proof attached" : ""}`
       );
 
       if (consumeAgentWorkspaceReturnPath() === "dashboard") {
@@ -2567,6 +2634,37 @@ export default function AgentVisitPage({ currentUser, authToken }) {
                   )}
                 </ReviewSummaryCard>
               </div>
+
+              <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                <p className="text-xs font-semibold text-slate-800">Field proof (optional)</p>
+                <EvidenceUploadField
+                  file={visitProofFile}
+                  onFileChange={setVisitProofFile}
+                  label="Visit photo proof"
+                  disabled={saving || evidenceUploading}
+                  hint="Capture at lab or upload from gallery"
+                />
+                <EvidenceUploadField
+                  file={collectionProofFile}
+                  onFileChange={setCollectionProofFile}
+                  label="Collection proof (optional)"
+                  disabled={saving || evidenceUploading}
+                  hint="Receipt, UPI screenshot, or signed slip"
+                />
+                <div className="space-y-1">
+                  <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                    Proof remarks
+                  </label>
+                  <Textarea
+                    value={proofRemarks}
+                    onChange={(e) => setProofRemarks(e.target.value)}
+                    placeholder="Optional note for audit trail"
+                    className="min-h-[64px] rounded-lg text-sm"
+                    disabled={saving || evidenceUploading}
+                  />
+                </div>
+                <EvidenceUploadProgress uploading={evidenceUploading} />
+              </div>
             </section>
           ) : null}
             </motion.div>
@@ -2616,6 +2714,7 @@ export default function AgentVisitPage({ currentUser, authToken }) {
               <RecentVisitTimelineCard
                 key={`${visit.id || visit.labName}-${idx}`}
                 visit={visit}
+                currentUser={currentUser}
               />
             ))}
           </div>

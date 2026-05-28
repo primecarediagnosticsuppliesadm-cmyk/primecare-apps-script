@@ -434,6 +434,7 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
         labId={snapshotLabId}
         workspace={workspace}
         onAction={handleSnapshotAction}
+        currentUser={currentUser}
       />
     </div>
   );

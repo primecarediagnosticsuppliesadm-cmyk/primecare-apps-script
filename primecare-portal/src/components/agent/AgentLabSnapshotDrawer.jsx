@@ -15,6 +15,7 @@ import {
   ClipboardList,
   ShieldAlert,
 } from "lucide-react";
+import EvidenceContextActions from "@/components/evidence/EvidenceContextActions.jsx";
 
 function formatCurrency(value) {
   return `₹${Number(value || 0).toLocaleString("en-IN")}`;
@@ -272,6 +273,19 @@ export default function AgentLabSnapshotDrawer({
               Order history opens from Labs — use View Orders for full line items.
             </p>
           </section>
+
+          {currentUser ? (
+            <section className="rounded-lg border border-slate-200 p-2.5">
+              <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                Visit & collection proof
+              </h3>
+              <EvidenceContextActions
+                currentUser={currentUser}
+                labId={labId}
+                className="h-8 w-full text-xs"
+              />
+            </section>
+          ) : null}
         </div>
 
         <div className="shrink-0 border-t bg-white px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">

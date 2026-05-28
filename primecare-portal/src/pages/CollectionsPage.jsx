@@ -44,6 +44,11 @@ import {
 import { ROLES } from "@/config/roles";
 import { filterCollectionsForUser } from "@/utils/accessFilters.js";
 import { notifyAgentWorkspaceRefresh } from "@/pages/agentVisitContext.js";
+import EvidenceUploadField, {
+  EvidenceUploadProgress,
+} from "@/components/evidence/EvidenceUploadField.jsx";
+import EvidenceContextActions from "@/components/evidence/EvidenceContextActions.jsx";
+import { uploadOperationalEvidence, listOperationalEvidence } from "@/api/operationalEvidenceApi.js";
 import { summarizeCollectionsList } from "@/metrics/computeReceivableMetrics.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { recordCollectionsRenderedSnapshot } from "@/predator/moduleUiSnapshot.js";
@@ -729,6 +734,13 @@ function CollectionExpandedPanel({
   onSave,
   onCompleteTask,
   readOnly = false,
+  collectionProofFile,
+  setCollectionProofFile,
+  proofRemarks,
+  setProofRemarks,
+  evidenceUploading,
+  currentUser,
+  tenantId,
 }) {
   if (detailsLoading) {
     return (
@@ -863,6 +875,27 @@ function CollectionExpandedPanel({
               />
             </div>
 
+            <EvidenceUploadField
+              file={collectionProofFile}
+              onFileChange={setCollectionProofFile}
+              label="Payment / receipt proof (optional)"
+              disabled={saving || evidenceUploading}
+              hint="Receipt, UPI screenshot, or signed slip"
+            />
+            <div className="space-y-1">
+              <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                Proof remarks
+              </label>
+              <Textarea
+                value={proofRemarks}
+                onChange={(e) => setProofRemarks(e.target.value)}
+                placeholder="Optional audit note"
+                className="min-h-[64px] rounded-lg text-sm"
+                disabled={saving || evidenceUploading}
+              />
+            </div>
+            <EvidenceUploadProgress uploading={evidenceUploading} />
+
             <div className="flex flex-col gap-2 sm:flex-row">
               <Button
                 type="button"
@@ -920,20 +953,40 @@ function CollectionExpandedPanel({
           </h3>
           {history.length ? (
             <ul className="space-y-2">
-              {history.map((item) => (
-                <li
-                  key={item.paymentId || `${item.paymentDate}-${item.amountCollected}`}
-                  className="rounded-lg border border-border bg-card p-3 text-sm"
-                >
-                  <div className="font-medium tabular-nums">
-                    {formatMoney(item.amountCollected)}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {item.paymentDate || "—"} · {item.paymentMode || "—"}
-                  </div>
-                  <p className="mt-1 text-slate-600">{item.note || "No note"}</p>
-                </li>
-              ))}
+              {history.map((item) => {
+                const paymentId = item.paymentId || item.payment_id || "";
+                const proofCount = currentUser
+                  ? listOperationalEvidence(tenantId, currentUser, {
+                      labId: collection?.labId,
+                      paymentId,
+                    }).length
+                  : 0;
+                return (
+                  <li
+                    key={paymentId || `${item.paymentDate}-${item.amountCollected}`}
+                    className="rounded-lg border border-border bg-card p-3 text-sm"
+                  >
+                    <div className="font-medium tabular-nums">
+                      {formatMoney(item.amountCollected)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {item.paymentDate || "—"} · {item.paymentMode || "—"}
+                      {proofCount ? " · Proof attached" : ""}
+                    </div>
+                    <p className="mt-1 text-slate-600">{item.note || "No note"}</p>
+                    {currentUser && proofCount ? (
+                      <div className="mt-2">
+                        <EvidenceContextActions
+                          currentUser={currentUser}
+                          labId={collection?.labId}
+                          paymentId={paymentId}
+                          className="h-7 text-[10px]"
+                        />
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <p className="text-sm text-muted-foreground">No payment history found.</p>
@@ -1025,6 +1078,11 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
   const [nextAction, setNextAction] = useState("");
 
   const [pendingTaskContext, setPendingTaskContext] = useState(null);
+  const [collectionProofFile, setCollectionProofFile] = useState(null);
+  const [proofRemarks, setProofRemarks] = useState("");
+  const [evidenceUploading, setEvidenceUploading] = useState(false);
+
+  const tenantId = currentUser?.tenantId ?? currentUser?.tenant_id ?? "";
 
   const predatorSnapshot = useMemo(
     () => ({
@@ -1043,6 +1101,7 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
   );
 
   usePredatorModuleValidation("Collections", currentUser, predatorSnapshot, !loading);
+  usePredatorModuleValidation("Operational Evidence", currentUser, {}, !loading && !isLabAccount);
 
   usePredatorModuleValidation(
     "Lab Portal",
@@ -1368,11 +1427,37 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
               await updateCollectionNotesWrite(notesPayload);
             }
 
+            const paymentId =
+              sbRes.data?.payment?.payment_id ??
+              sbRes.data?.payment?.paymentId ??
+              "";
+
+            const hadProof = Boolean(collectionProofFile);
+            if (hadProof && paymentId) {
+              setEvidenceUploading(true);
+              const up = await uploadOperationalEvidence({
+                file: collectionProofFile,
+                tenantId,
+                labId: labIdKey(selectedLabId),
+                kind: "collection_receipt",
+                paymentId,
+                uploadedBy: currentUser?.name || "System User",
+                uploadedByRole: currentUser?.role || ROLES.AGENT,
+                remarks: proofRemarks || note,
+              });
+              setEvidenceUploading(false);
+              if (!up.success) {
+                showToast("warning", up.error || "Payment saved; proof upload failed.");
+              }
+              setCollectionProofFile(null);
+              setProofRemarks("");
+            }
+
             showToast(
               "success",
               pendingTaskContext?.taskId
-                ? "Payment recorded. You can mark the linked task complete."
-                : "Payment recorded successfully"
+                ? `Payment recorded${hadProof ? " · Proof attached" : ""}. You can mark the linked task complete.`
+                : `Payment recorded successfully${hadProof ? " · Proof attached" : ""}`
             );
             notifyAgentWorkspaceRefresh({
               source: "collection_payment",
@@ -1536,6 +1621,13 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
     setNextAction,
     saving,
     completingTask,
+    collectionProofFile,
+    setCollectionProofFile,
+    proofRemarks,
+    setProofRemarks,
+    evidenceUploading,
+    currentUser,
+    tenantId,
   };
 
   const handleLabWorkspaceAction = useCallback(

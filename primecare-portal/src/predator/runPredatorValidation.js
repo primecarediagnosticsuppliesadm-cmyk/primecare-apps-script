@@ -9,6 +9,7 @@ import { validateAgentVisitsModule } from "@/predator/validators/agentVisitsVali
 import { validateTenantRoleIsolationModule } from "@/predator/validators/tenantRoleIsolationValidator.js";
 import { validateNotificationsFoundationModule } from "@/predator/validators/notificationsFoundationValidator.js";
 import { validateLabPortalModule } from "@/predator/validators/labPortalValidator.js";
+import { validateOperationalEvidenceModule } from "@/predator/validators/operationalEvidenceValidator.js";
 import { ROLES } from "@/config/roles.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
 import { ADMIN_DASHBOARD_MODULE } from "@/predator/adminDashboardUiSnapshot.js";
@@ -112,6 +113,14 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
     predatorStore.setModuleReport("Notifications", notifications.entries, ctx);
     modules.push(notifications);
 
+    if (isLabRole) {
+      modules.push(skippedModuleForLabRole("Operational Evidence", ctx));
+    } else {
+      const evidence = await validateOperationalEvidenceModule({ ctx, currentUser });
+      predatorStore.setModuleReport("Operational Evidence", evidence.entries, ctx);
+      modules.push(evidence);
+    }
+
     const allEntries = modules.flatMap((m) => m.entries);
     const summary = summarizePredatorEntries(allEntries);
 
@@ -175,6 +184,9 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
       break;
     case "Lab Portal":
       result = await validateLabPortalModule({ ctx, rendered: snapshot });
+      break;
+    case "Operational Evidence":
+      result = await validateOperationalEvidenceModule({ ctx, currentUser });
       break;
     default:
       result = {

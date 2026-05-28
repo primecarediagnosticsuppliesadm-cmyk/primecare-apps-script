@@ -4,6 +4,7 @@ import { StatusBadge, PageSkeleton, usePortalToast } from "@/components/ux";
 import OperationalLabDrawer from "@/components/operations/OperationalLabDrawer.jsx";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import { buildOperationsCommandCenterModel } from "@/operations/operationsCommandCenterModel.js";
+import { buildEvidenceFeedItems } from "@/api/operationalEvidenceApi.js";
 import {
   recordOperationsCenterEvent,
   traceOperationsCenterLoad,
@@ -130,11 +131,21 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
 
   const model = useMemo(() => {
     if (!opsModel) return null;
+    const tenantId = currentUser?.tenantId ?? currentUser?.tenant_id ?? "";
+    const evidenceFeed = buildEvidenceFeedItems(tenantId, currentUser, 12);
+    const feed = [...(opsModel.feed || []), ...evidenceFeed]
+      .sort((a, b) => {
+        const tb = Date.parse(b.createdAt || "") || 0;
+        const ta = Date.parse(a.createdAt || "") || 0;
+        return tb - ta;
+      })
+      .slice(0, 30);
     return {
       ...opsModel,
+      feed,
       payload: { ...opsModel.payload, riskLabs: opsModel.riskLabs },
     };
-  }, [opsModel]);
+  }, [opsModel, currentUser]);
 
   useEffect(() => {
     if (!model?.attention?.length) return;
@@ -519,6 +530,7 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
         labId={drawerLabId}
         opsPayload={model.payload}
         onAction={handleDrawerAction}
+        currentUser={currentUser}
       />
     </div>
   );
