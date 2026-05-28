@@ -7,6 +7,12 @@ import {
   buildInterventionQueues,
 } from "@/operations/executiveInterventionModel.js";
 import { applyInterventionAction } from "@/operations/executiveInterventionStateStore.js";
+import { applyOperationalTaskAction } from "@/operations/operationalTaskStateStore.js";
+import {
+  buildExecutiveOperationalTaskModel,
+  syncTaskFromInterventionAction,
+} from "@/operations/operationalTaskModel.js";
+import ExecutiveOperationalResolutionSection from "@/components/operational/ExecutiveOperationalResolutionSection.jsx";
 import { traceOperationsCenterLoad } from "@/operations/operationsCommandCenterPredator.js";
 import OperationalLabDrawer from "@/components/operations/OperationalLabDrawer.jsx";
 import ExecutiveInterventionDrawer from "@/components/executive/ExecutiveInterventionDrawer.jsx";
@@ -68,6 +74,7 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
   const [founderOpen, setFounderOpen] = useState(true);
   const [workflowIssue, setWorkflowIssue] = useState(null);
   const [workflowTick, setWorkflowTick] = useState(0);
+  const [taskTick, setTaskTick] = useState(0);
 
   const tenantId = currentUser?.tenantId || "";
 
@@ -103,6 +110,12 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
     );
   }, [model, tenantId, workflowTick]);
 
+  const operationalTaskModel = useMemo(() => {
+    if (!model) return null;
+    void taskTick;
+    return buildExecutiveOperationalTaskModel(interventionQueues, tenantId, model.payload);
+  }, [model, interventionQueues, tenantId, taskTick]);
+
   const handleInterventionAction = useCallback(
     (action, issue) => {
       if (!issue?.id) return;
@@ -119,7 +132,15 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
         actorRole: currentUser?.role || "executive",
         assignTo,
       });
+      syncTaskFromInterventionAction({
+        tenantId,
+        issue,
+        action,
+        actor,
+        assignTo,
+      });
       setWorkflowTick((n) => n + 1);
+      setTaskTick((n) => n + 1);
       if (workflowIssue?.id === issue.id) {
         const refreshed = buildInterventionQueues(
           model?.priorities,
@@ -141,6 +162,48 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
     setWorkflowIssue(item);
     setDrawerContext(null);
   }, []);
+
+  const openInterventionById = useCallback(
+    (interventionId) => {
+      const issue = interventionQueues.allIssues?.find((i) => i.id === interventionId);
+      if (issue) openIntervention(issue);
+    },
+    [interventionQueues.allIssues, openIntervention]
+  );
+
+  const handleTaskAction = useCallback(
+    (action, task) => {
+      if (!task?.taskId) return;
+      const actor = currentUser?.name || currentUser?.email || "Executive";
+      const assignTo =
+        action === "assign" || action === "reassign"
+          ? task.assignee || task.owner || "Collections Team"
+          : "";
+      applyOperationalTaskAction({
+        tenantId,
+        taskId: task.taskId,
+        action,
+        actor,
+        actorRole: currentUser?.role || "executive",
+        assignTo,
+        urgency: action === "set_urgency" ? "high" : "",
+      });
+      setTaskTick((n) => n + 1);
+    },
+    [tenantId, currentUser]
+  );
+
+  usePredatorModuleValidation(
+    "Operational Tasks",
+    currentUser,
+    {
+      activeTaskCount: operationalTaskModel?.active?.length ?? 0,
+      clusterCount: operationalTaskModel?.clusters?.length ?? 0,
+      criticalOpen: operationalTaskModel?.governance?.criticalOpen ?? 0,
+      slaBreaches: operationalTaskModel?.governance?.slaBreaches ?? 0,
+    },
+    !loading && Boolean(operationalTaskModel)
+  );
 
   usePredatorModuleValidation(
     "Executive Intervention",
@@ -436,6 +499,14 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
           </ul>
         </section>
       </div>
+
+      <ExecutiveOperationalResolutionSection
+        taskModel={operationalTaskModel}
+        opsPayload={model.payload}
+        onTaskAction={handleTaskAction}
+        onOpenIntervention={openInterventionById}
+        onOpenLab={(id) => setLabDrawerId(String(id))}
+      />
 
       <section className="rounded-lg border border-slate-200 bg-white p-3">
         <h2 className="mb-2 text-sm font-semibold">Quick intervention</h2>

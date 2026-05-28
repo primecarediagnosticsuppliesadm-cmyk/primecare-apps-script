@@ -27,6 +27,9 @@ import {
   startCollectionFromWorkspaceItem,
   notifyAgentWorkspaceRefresh,
 } from "@/pages/agentVisitContext.js";
+import { applyOperationalTaskAction } from "@/operations/operationalTaskStateStore.js";
+import { buildAgentOperationalTaskModel } from "@/operations/operationalTaskModel.js";
+import AgentOperationalTaskSection from "@/components/operational/AgentOperationalTaskSection.jsx";
 
 const EMPTY_WORKSPACE = {
   summary: {
@@ -95,6 +98,16 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
   const [error, setError] = useState("");
   const [snapshotLabId, setSnapshotLabId] = useState("");
   const [completedQueueIds] = useState(() => new Set());
+  const [taskTick, setTaskTick] = useState(0);
+
+  const tenantId = currentUser?.tenantId || "";
+  const agentMeta = useMemo(
+    () => ({
+      agentId: currentUser?.agentId || currentUser?.id || "",
+      agentName: currentUser?.agentName || currentUser?.name || "",
+    }),
+    [currentUser]
+  );
 
   const loadWorkspace = useCallback(
     async (showRefreshState = false) => {
@@ -155,6 +168,16 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
     [actionQueue, completedQueueIds]
   );
 
+  const operationalTaskModel = useMemo(() => {
+    void taskTick;
+    return buildAgentOperationalTaskModel(
+      { actionQueue: visibleQueue },
+      tenantId,
+      agentMeta,
+      {}
+    );
+  }, [visibleQueue, tenantId, agentMeta, taskTick]);
+
   useEffect(() => {
     if (!visibleQueue.length) return;
     recordAgentWorkspaceEvent("agent_workspace.priority_queue_render", {
@@ -170,9 +193,21 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
       todayVisits: Number(workspace.summary?.todayVisits ?? 0),
       assignedLabsCount: (workspace.assignedLabs || []).length,
       actionQueueCount: visibleQueue.length,
+      operationalTaskCount: operationalTaskModel?.active?.length ?? 0,
       collectionsDueCount: kpis.collectionsDue,
       pendingFollowUpsCount: kpis.pendingFollowUps,
       trackingDrawerOpen: Boolean(snapshotLabId),
+    },
+    !loading
+  );
+
+  usePredatorModuleValidation(
+    "Operational Tasks",
+    currentUser,
+    {
+      activeTaskCount: operationalTaskModel?.active?.length ?? 0,
+      overdueTaskCount: operationalTaskModel?.queues?.overdue?.length ?? 0,
+      clusterCount: operationalTaskModel?.clusters?.length ?? 0,
     },
     !loading
   );
@@ -245,6 +280,53 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
       }
     },
     [handleAddFollowUp, handleRecordCollection, handleStartVisit, setActivePage]
+  );
+
+  const handleOperationalTaskAction = useCallback(
+    (action, task) => {
+      if (!task?.taskId) return;
+      applyOperationalTaskAction({
+        tenantId,
+        taskId: task.taskId,
+        action,
+        actor: agentMeta.agentName || "Agent",
+        actorRole: "agent",
+        assignTo: agentMeta.agentName,
+      });
+      setTaskTick((n) => n + 1);
+      notifyAgentWorkspaceRefresh({ source: "operational_task" });
+    },
+    [tenantId, agentMeta]
+  );
+
+  const taskToQueueItem = useCallback((task) => {
+    const rawId = String(task.taskId || "").replace(/^task-agent-/, "");
+    return (
+      visibleQueue.find((q) => q.id === rawId) || {
+        id: rawId || task.taskId,
+        labId: task.linkedLabId,
+        labName: task.linkedLabName,
+        priority: task.severity === "CRITICAL" ? "CRITICAL" : task.severity === "ATTENTION" ? "HIGH" : "MEDIUM",
+        queueType: task.queueType || "TASK",
+        reason: task.summary,
+        nextAction: task.nextAction || task.title,
+        outstanding: task.outstanding || 0,
+        daysOverdue: task.ageDays || 0,
+      }
+    );
+  }, [visibleQueue]);
+
+  const handleTaskQuickAction = useCallback(
+    (kind, task) => {
+      const item = taskToQueueItem(task);
+      if (kind === "visit") handleStartVisit(item);
+      else if (kind === "collection") handleRecordCollection(item);
+      else if (kind === "proof") {
+        handleStartVisit(item);
+        setActivePage?.("visits");
+      }
+    },
+    [taskToQueueItem, handleStartVisit, handleRecordCollection, setActivePage]
   );
 
   const handleCompleteTask = useCallback(
@@ -336,6 +418,12 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
           onMyLabs={() => setActivePage?.("labs")}
         />
       </section>
+
+      <AgentOperationalTaskSection
+        taskModel={operationalTaskModel}
+        onTaskAction={handleOperationalTaskAction}
+        onQuickAction={handleTaskQuickAction}
+      />
 
       <section className="space-y-2">
         <div className="flex items-center justify-between gap-2">
