@@ -5,6 +5,7 @@ import {
   interventionAgeMs,
   timeToResolutionMs,
 } from "@/operations/executiveInterventionStateStore.js";
+import { buildEntityTimeline } from "@/operations/operationalEventTimeline.js";
 
 const SEVERITY_RANK = { CRITICAL: 0, ATTENTION: 1, MONITORING: 2 };
 const STATE_RANK = {
@@ -177,12 +178,48 @@ export function groupInterventionQueue(items, { minClusterSize = 2 } = {}) {
 }
 
 /**
- * Build intervention timeline for drawer.
+ * Build intervention timeline for drawer (unified event ledger + legacy fallback).
  */
-export function buildInterventionTimeline(issue, payload = {}) {
+export function buildInterventionTimeline(issue, payload = {}, options = {}) {
+  const tenantId = options.tenantId || payload?.tenantId || "";
+  if (tenantId && issue?.id) {
+    const unified = buildEntityTimeline({
+      tenantId,
+      linkedEntityType: "intervention",
+      linkedEntityId: issue.id,
+      linkedLabId: issue.labId,
+      correlationId: issue.labId ? `lab:${labIdKey(issue.labId)}` : `intervention:${issue.id}`,
+      payload,
+      limit: 24,
+    });
+    const rec = issue.interventionRecord;
+    const legacy = [];
+    legacy.push({
+      id: "created",
+      at: rec?.createdAt || new Date().toISOString(),
+      label: "Issue flagged",
+      detail: issue.summary || issue.title,
+      actor: "System",
+      severity: issue.severity,
+    });
+    for (const h of rec?.history || []) {
+      legacy.push({
+        id: `h-${h.at}-${h.action}`,
+        at: h.at,
+        label: h.action.replaceAll("_", " "),
+        detail: `${h.fromState} → ${h.toState}${h.note ? ` · ${h.note}` : ""}`,
+        actor: h.actor,
+        severity: h.toState === "ESCALATED" ? "CRITICAL" : "MONITORING",
+      });
+    }
+    const seen = new Set(unified.map((e) => e.id));
+    const merged = [...unified, ...legacy.filter((e) => !seen.has(e.id))];
+    merged.sort((a, b) => Date.parse(b.at || "") - Date.parse(a.at || ""));
+    return merged.slice(0, 24);
+  }
+
   const events = [];
   const rec = issue.interventionRecord;
-
   events.push({
     id: "created",
     at: rec?.createdAt || new Date().toISOString(),
@@ -191,7 +228,6 @@ export function buildInterventionTimeline(issue, payload = {}) {
     actor: "System",
     severity: issue.severity,
   });
-
   for (const h of rec?.history || []) {
     events.push({
       id: `h-${h.at}-${h.action}`,
@@ -202,39 +238,7 @@ export function buildInterventionTimeline(issue, payload = {}) {
       severity: h.toState === "ESCALATED" ? "CRITICAL" : "MONITORING",
     });
   }
-
-  if (issue.labId && payload.visits) {
-    const labVisits = payload.visits
-      .filter((v) => labIdKey(v.labId) === labIdKey(issue.labId))
-      .slice(0, 4);
-    for (const v of labVisits) {
-      events.push({
-        id: `visit-${v.visitId || v.id}`,
-        at: v.visitDate || v.date,
-        label: "Visit logged",
-        detail: `${v.visitType || "Visit"} · ${v.agent || v.agentName || ""}`,
-        actor: v.agent || v.agentName || "Agent",
-        severity: "MONITORING",
-      });
-    }
-  }
-
-  const evidence = (payload.evidence || []).filter(
-    (e) => labIdKey(e.labId) === labIdKey(issue.labId)
-  );
-  for (const ev of evidence.slice(0, 3)) {
-    events.push({
-      id: `ev-${ev.evidenceId}`,
-      at: ev.uploadedAt,
-      label: "Proof uploaded",
-      detail: ev.fileName || ev.kind,
-      actor: ev.uploadedBy || "Agent",
-      severity: "MONITORING",
-    });
-  }
-
   events.sort((a, b) => Date.parse(b.at || "") - Date.parse(a.at || ""));
-
   return events.slice(0, 24);
 }
 

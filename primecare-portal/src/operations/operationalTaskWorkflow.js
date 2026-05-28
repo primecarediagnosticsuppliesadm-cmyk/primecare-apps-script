@@ -13,6 +13,7 @@ import {
   taskAgeMs,
   taskCompletionMs,
 } from "@/operations/operationalTaskStateStore.js";
+import { buildEntityTimeline } from "@/operations/operationalEventTimeline.js";
 
 const SEVERITY_RANK = { CRITICAL: 0, ATTENTION: 1, MONITORING: 2 };
 const STATE_RANK = {
@@ -195,9 +196,27 @@ export function deriveTaskFromAgentQueue(item, agentMeta = {}) {
 }
 
 /**
- * Build operational timeline for task drawer.
+ * Build operational timeline for task drawer (unified ledger).
  */
-export function buildOperationalTaskTimeline(task, payload = {}) {
+export function buildOperationalTaskTimeline(task, payload = {}, options = {}) {
+  const tenantId = options.tenantId || payload?.tenantId || "";
+  if (tenantId && task?.taskId) {
+    const unified = buildEntityTimeline({
+      tenantId,
+      linkedEntityType: "task",
+      linkedEntityId: task.taskId,
+      linkedLabId: task.linkedLabId,
+      correlationId: task.linkedInterventionId
+        ? `intervention:${task.linkedInterventionId}`
+        : task.linkedLabId
+          ? `lab:${labIdKey(task.linkedLabId)}`
+          : "",
+      payload,
+      limit: 24,
+    });
+    if (unified.length) return unified;
+  }
+
   const events = [];
   events.push({
     id: "created",
@@ -207,7 +226,6 @@ export function buildOperationalTaskTimeline(task, payload = {}) {
     actor: "System",
     severity: task.severity,
   });
-
   for (const h of task.history || []) {
     events.push({
       id: `h-${h.at}-${h.action}`,
@@ -218,20 +236,6 @@ export function buildOperationalTaskTimeline(task, payload = {}) {
       severity: h.toState === "ESCALATED" ? "CRITICAL" : "MONITORING",
     });
   }
-
-  const lid = labIdKey(task.linkedLabId);
-  const evidence = (payload.evidence || []).filter((e) => labIdKey(e.labId) === lid);
-  for (const ev of evidence.slice(0, 4)) {
-    events.push({
-      id: `ev-${ev.evidenceId}`,
-      at: ev.uploadedAt,
-      label: "Evidence uploaded",
-      detail: ev.fileName || ev.kind,
-      actor: ev.uploadedBy || "Agent",
-      severity: "MONITORING",
-    });
-  }
-
   events.sort((a, b) => Date.parse(b.at || "") - Date.parse(a.at || ""));
   return events.slice(0, 24);
 }

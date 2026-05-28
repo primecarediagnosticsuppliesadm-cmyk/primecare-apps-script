@@ -30,6 +30,7 @@ export default function OperationalTaskDrawer({
   task,
   variant = "executive",
   opsPayload,
+  tenantId = "",
   onAction,
   onOpenIntervention,
   onOpenLab,
@@ -43,8 +44,8 @@ export default function OperationalTaskDrawer({
 
   const timeline = useMemo(() => {
     if (!task) return [];
-    return buildOperationalTaskTimeline(task, opsPayload || {});
-  }, [task, opsPayload]);
+    return buildOperationalTaskTimeline(task, opsPayload || {}, { tenantId });
+  }, [task, opsPayload, tenantId]);
 
   const linkedEvidence = useMemo(() => {
     if (!labId || !opsPayload?.evidence) return [];

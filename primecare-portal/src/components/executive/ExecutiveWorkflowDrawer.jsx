@@ -37,6 +37,7 @@ export default function ExecutiveWorkflowDrawer({
   onClose,
   issue,
   opsPayload,
+  tenantId = "",
   onAction,
   onOpenLab,
 }) {
@@ -49,8 +50,8 @@ export default function ExecutiveWorkflowDrawer({
 
   const timeline = useMemo(() => {
     if (!issue) return [];
-    return buildInterventionTimeline(issue, opsPayload || {});
-  }, [issue, opsPayload]);
+    return buildInterventionTimeline(issue, opsPayload || {}, { tenantId });
+  }, [issue, opsPayload, tenantId]);
 
   const relatedCollections = useMemo(() => {
     if (!labId || !opsPayload?.collections) return [];

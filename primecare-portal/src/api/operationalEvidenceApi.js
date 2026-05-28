@@ -1,5 +1,6 @@
 import { supabase } from "@/api/supabaseClient.js";
 import { fireNotificationEvent } from "@/notifications/fireNotificationEvent.js";
+import { appendOperationalEvent } from "@/operations/operationalEventBridge.js";
 import { recordEvidenceEvent } from "@/operations/evidencePredator.js";
 import { labIdKey } from "@/utils/labId.js";
 import { ROLES } from "@/config/roles.js";
@@ -496,6 +497,29 @@ export async function uploadOperationalEvidence(params) {
   if (kind.startsWith("collection")) {
     recordEvidenceEvent("evidence.collection_attached", { paymentId });
   }
+
+  void appendOperationalEvent({
+    tenantId,
+    eventType: "proof_uploaded",
+    severity: "MONITORING",
+    actor: uploadedBy,
+    actorRole: uploadedByRole,
+    linkedEntityType: "evidence",
+    linkedEntityId: evidenceId,
+    linkedLabId: labId,
+    linkedAgentId: uploadedBy,
+    correlationId: visitId ? `visit:${visitId}` : paymentId ? `payment:${paymentId}` : "",
+    metadata: {
+      fileName: record.fileName,
+      kind,
+      labName: params.labName,
+      summary: `${record.fileName || "Proof"} uploaded`,
+    },
+    dedupeKey: `proof_uploaded:${evidenceId}`,
+    sourceModule: "operational_evidence",
+    actorUserId: uploadedByUserId,
+  });
+
   onProgress?.({ phase: "done", pct: 100, durable });
 
   return { success: true, record, durable };

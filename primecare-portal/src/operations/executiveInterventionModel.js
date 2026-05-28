@@ -14,6 +14,7 @@ import {
   filterActiveInterventions,
   inferClusterType,
 } from "@/operations/executiveInterventionWorkflow.js";
+import { buildUnifiedOperationsFeedRows } from "@/operations/operationalEventTimeline.js";
 
 const SEVERITY_ORDER = { CRITICAL: 0, ATTENTION: 1, MONITORING: 2 };
 
@@ -198,52 +199,41 @@ function mapFeedKindToEventType(row) {
 /**
  * Telemetry feed with dedupe and agent enrichment.
  */
-export function buildExecutiveOperationsFeed(payload, opsFeed, limit = 28) {
+export function buildExecutiveOperationsFeed(payload, opsFeed, limit = 28, options = {}) {
+  const tenantId = options.tenantId || payload?.tenantId || "";
   const agentByLab = new Map();
-  const agentByVisit = new Map();
   for (const v of payload.visits || []) {
     const agent = str(v.agent || v.agentName);
     const lid = labIdKey(v.labId);
     if (lid && agent) agentByLab.set(lid, agent);
-    const vid = str(v.visitId || v.id);
-    if (vid && agent) agentByVisit.set(vid, agent);
   }
 
-  const seen = new Set();
-  const rows = [];
-
-  for (const row of opsFeed || []) {
-    if (!row?.id || seen.has(row.id)) continue;
-    seen.add(row.id);
-
+  const enrichedOps = (opsFeed || []).map((row) => {
     const severity =
       row.severity === "warning" || row.severity === "critical"
         ? "ATTENTION"
         : row.severity === "high"
           ? "CRITICAL"
           : "MONITORING";
-
-    rows.push({
+    return {
       ...row,
       eventType: mapFeedKindToEventType(row),
-      agentName:
-        str(row.agentName) ||
-        agentByLab.get(labIdKey(row.labId)) ||
-        "",
-      hasProof:
-        row.kind === "evidence" ||
-        str(row.title).toLowerCase().includes("proof"),
+      agentName: str(row.agentName) || agentByLab.get(labIdKey(row.labId)) || "",
+      hasProof: row.kind === "evidence" || str(row.title).toLowerCase().includes("proof"),
       feedSeverity: severity,
+    };
+  });
+
+  if (tenantId) {
+    return buildUnifiedOperationsFeedRows({
+      tenantId,
+      opsFeed: enrichedOps,
+      payload,
+      limit,
     });
   }
 
-  rows.sort((a, b) => {
-    const tb = Date.parse(b.createdAt || "") || 0;
-    const ta = Date.parse(a.createdAt || "") || 0;
-    return tb - ta;
-  });
-
-  return rows.slice(0, limit);
+  return enrichedOps.slice(0, limit);
 }
 
 function trendFromStatus(status) {
@@ -346,7 +336,7 @@ export function buildExecutiveInterventionModel(payload, options = {}) {
   const ops = buildOperationsCommandCenterModel(payload);
   const priorities = buildExecutivePriorities(payload, ops);
   const founderQueue = buildFounderAttentionQueue(ops);
-  const feed = buildExecutiveOperationsFeed(payload, ops.feed);
+  const feed = buildExecutiveOperationsFeed(payload, ops.feed, 28, { tenantId });
   const healthStrip = buildExecutiveHealthStrip(payload, ops);
   const snapshot = buildExecutiveDailySnapshot(payload);
   const riskLabs = buildRiskLabs(payload);

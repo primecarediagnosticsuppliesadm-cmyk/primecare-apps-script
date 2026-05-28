@@ -8,6 +8,7 @@ import { ChevronDown, ChevronUp, Gauge, ListChecks } from "lucide-react";
 export default function ExecutiveOperationalResolutionSection({
   taskModel,
   opsPayload,
+  tenantId = "",
   onTaskAction,
   onOpenIntervention,
   onOpenLab,
@@ -144,6 +145,7 @@ export default function ExecutiveOperationalResolutionSection({
         onClose={() => setDrawerTask(null)}
         task={drawerTask}
         opsPayload={opsPayload}
+        tenantId={tenantId}
         onAction={(action, t) => {
           onTaskAction?.(action, t);
           setDrawerTask(null);

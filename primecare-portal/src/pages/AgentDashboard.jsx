@@ -29,6 +29,7 @@ import {
 } from "@/pages/agentVisitContext.js";
 import { applyOperationalTaskAction } from "@/operations/operationalTaskStateStore.js";
 import { buildAgentOperationalTaskModel } from "@/operations/operationalTaskModel.js";
+import { emitTaskLedgerEvent, flushPendingOperationalEvents } from "@/operations/operationalEventBridge.js";
 import AgentOperationalTaskSection from "@/components/operational/AgentOperationalTaskSection.jsx";
 
 const EMPTY_WORKSPACE = {
@@ -147,6 +148,11 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
   useEffect(() => {
     loadWorkspace(false);
   }, [loadWorkspace]);
+
+  useEffect(() => {
+    if (!tenantId) return;
+    void flushPendingOperationalEvents(tenantId);
+  }, [tenantId]);
 
   useEffect(() => {
     const onRefresh = () => {
@@ -288,6 +294,14 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
       applyOperationalTaskAction({
         tenantId,
         taskId: task.taskId,
+        action,
+        actor: agentMeta.agentName || "Agent",
+        actorRole: "agent",
+        assignTo: agentMeta.agentName,
+      });
+      void emitTaskLedgerEvent({
+        tenantId,
+        task,
         action,
         actor: agentMeta.agentName || "Agent",
         actorRole: "agent",

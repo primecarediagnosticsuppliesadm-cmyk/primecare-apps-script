@@ -12,7 +12,15 @@ import {
   buildExecutiveOperationalTaskModel,
   syncTaskFromInterventionAction,
 } from "@/operations/operationalTaskModel.js";
+import {
+  backfillOperationalLedgerFromPayload,
+  flushPendingOperationalEvents,
+  emitInterventionLedgerEvent,
+  emitTaskLedgerEvent,
+} from "@/operations/operationalEventBridge.js";
+import { readOperationalLedger } from "@/operations/operationalEventLedger.js";
 import ExecutiveOperationalResolutionSection from "@/components/operational/ExecutiveOperationalResolutionSection.jsx";
+import OperationalAuditPanel from "@/components/operational/OperationalAuditPanel.jsx";
 import { traceOperationsCenterLoad } from "@/operations/operationsCommandCenterPredator.js";
 import OperationalLabDrawer from "@/components/operations/OperationalLabDrawer.jsx";
 import ExecutiveInterventionDrawer from "@/components/executive/ExecutiveInterventionDrawer.jsx";
@@ -101,6 +109,12 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
     void load(false);
   }, [load]);
 
+  useEffect(() => {
+    if (!tenantId || !model?.payload) return;
+    backfillOperationalLedgerFromPayload(tenantId, model.payload);
+    void flushPendingOperationalEvents(tenantId);
+  }, [tenantId, model?.payload]);
+
   const interventionQueues = useMemo(() => {
     if (!model) return { clusters: [], singles: [], founderActive: [], resolvedCount: 0 };
     void workflowTick;
@@ -137,6 +151,14 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
         issue,
         action,
         actor,
+        assignTo,
+      });
+      void emitInterventionLedgerEvent({
+        tenantId,
+        issue,
+        action,
+        actor,
+        actorRole: currentUser?.role || "executive",
         assignTo,
       });
       setWorkflowTick((n) => n + 1);
@@ -188,9 +210,27 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
         assignTo,
         urgency: action === "set_urgency" ? "high" : "",
       });
+      void emitTaskLedgerEvent({
+        tenantId,
+        task,
+        action,
+        actor,
+        actorRole: currentUser?.role || "executive",
+        assignTo,
+      });
       setTaskTick((n) => n + 1);
     },
     [tenantId, currentUser]
+  );
+
+  usePredatorModuleValidation(
+    "Operational Event Ledger",
+    currentUser,
+    {
+      ledgerEventCount: tenantId ? readOperationalLedger(tenantId).length : 0,
+      feedCount: model?.feed?.length ?? 0,
+    },
+    !loading && Boolean(model)
   );
 
   usePredatorModuleValidation(
@@ -503,9 +543,16 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
       <ExecutiveOperationalResolutionSection
         taskModel={operationalTaskModel}
         opsPayload={model.payload}
+        tenantId={tenantId}
         onTaskAction={handleTaskAction}
         onOpenIntervention={openInterventionById}
         onOpenLab={(id) => setLabDrawerId(String(id))}
+      />
+
+      <OperationalAuditPanel
+        tenantId={tenantId}
+        payload={model.payload}
+        onSelectLab={(id) => setLabDrawerId(String(id))}
       />
 
       <section className="rounded-lg border border-slate-200 bg-white p-3">
@@ -564,6 +611,7 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
         onClose={() => setWorkflowIssue(null)}
         issue={workflowIssue}
         opsPayload={model.payload}
+        tenantId={tenantId}
         onAction={handleInterventionAction}
         onOpenLab={(id) => {
           setWorkflowIssue(null);
