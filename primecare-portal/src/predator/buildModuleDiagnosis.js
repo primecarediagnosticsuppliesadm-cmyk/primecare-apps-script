@@ -230,19 +230,25 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx, options = {}) {
   return [
     diagnoseMetricLayers({
       metricId: "orders_count",
-      metricLabel: "Orders row count (RLS evidence)",
-      expected: seed.ordersCount,
+      metricLabel: "Orders row count (mutable)",
+      expected:
+        snap.ordersRowCount ?? snap.apiTraceOrders ?? snap.apiOrdersRowCount ?? seed.ordersCount,
       tenantCtx: ctx,
       cacheMeta,
-      compareMode: "rls_only",
+      compareMode: "kpi",
       layers: [
-        { layerId: "rls", label: "RLS / Browser DB", value: snap.ordersRowCount },
+        {
+          layerId: "rls",
+          label: "Orders rows (RLS / browser)",
+          value: snap.ordersRowCount,
+          meta: { supporting: true },
+        },
         {
           layerId: "api",
-          label: "API trace (orders table rows)",
-          value: snap.apiTraceOrders ?? null,
-          meta: { optional: true, notComparableToSeed: true },
+          label: "API getAdminDashboardRead (orders rows)",
+          value: snap.apiTraceOrders ?? snap.apiOrdersRowCount ?? null,
         },
+        uiLayer(snap.uiOrdersRowCount),
       ],
     }),
     diagnoseMetricLayers({

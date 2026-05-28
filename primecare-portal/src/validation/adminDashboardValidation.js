@@ -13,6 +13,14 @@ import {
   printQaValidationReport,
 } from "@/validation/qaValidationCore.js";
 import { resolveAdminDashboardUiSnapshot } from "@/predator/adminDashboardUiSnapshot.js";
+import { predatorStore } from "@/predator/predatorStore.js";
+import { ADMIN_DASHBOARD_MODULE } from "@/predator/adminDashboardUiSnapshot.js";
+
+function apiOrdersRowCountFromTrace() {
+  const traces = predatorStore.getApiExecutionsForModule(ADMIN_DASHBOARD_MODULE) || [];
+  const hit = traces.find((t) => t.apiName === "getAdminDashboardRead");
+  return numOrNull(hit?.detail?.orders);
+}
 
 function localDateYmd(d = new Date()) {
   const y = d.getFullYear();
@@ -145,16 +153,21 @@ export async function runAdminDashboardValidation(options = {}) {
     : null;
   const uiTotalSold = uiSnapshot.fresh ? numOrNull(uiSummary.totalSoldValue) : null;
 
+  const apiOrdersRowCount = apiOrdersRowCountFromTrace();
+  const uiOrdersRowCount = uiSnapshot.fresh
+    ? numOrNull(uiRendered?.summary?.ordersCount ?? uiSummary.ordersCount)
+    : null;
+
   const checks = [
-    checkMetricAcrossLayers({
+    checkMutableMetricAcrossLayers({
       id: "orders_count",
-      label: "Orders row count (immutable seed)",
-      expected: expected.ordersCount,
+      label: "Orders row count (mutable, cross-layer)",
+      seedBaseline: expected.ordersCount,
       layers: {
         browserRls: browser.ordersRowCount,
         dbComputed: browser.ordersRowCount,
-        apiPayload: null,
-        uiRendered: null,
+        apiPayload: apiOrdersRowCount,
+        uiRendered: uiOrdersRowCount,
       },
     }),
     checkMutableMetricAcrossLayers({
@@ -258,6 +271,8 @@ export async function runAdminDashboardValidation(options = {}) {
 
   report.layerSnapshot = {
     ordersRowCount: browser.ordersRowCount,
+    apiOrdersRowCount,
+    uiOrdersRowCount,
     arOutstanding: browser.arOutstanding,
     visitsRowCount: browser.visitsRowCount,
     inventorySkus: browser.inventorySkus,

@@ -67,8 +67,16 @@ export function buildAdminDashboardPredatorSnapshot({ legacyReport, rendered = n
   const apiTotalSold =
     layerFromCheck(checks, "total_sold_value", "apiPayload") ?? base.apiTotalSold;
 
+  const apiOrdersRowCount =
+    layerFromCheck(checks, "orders_count", "apiPayload") ??
+    base.apiOrdersRowCount ??
+    numOrNull(apiTrace?.detail?.orders);
+
   return {
     ordersRowCount: base.ordersRowCount ?? layerFromCheck(checks, "orders_count", "browserRls"),
+    apiOrdersRowCount,
+    uiOrdersRowCount:
+      layerFromCheck(checks, "orders_count", "uiRendered") ?? base.uiOrdersRowCount ?? null,
     arOutstanding: base.arOutstanding,
     visitsRowCount: base.visitsRowCount,
     inventorySkus: base.inventorySkus,
@@ -78,7 +86,7 @@ export function buildAdminDashboardPredatorSnapshot({ legacyReport, rendered = n
     apiInventorySkus,
     apiTotalSold,
     /** Orders table rows from API trace detail — not rowsReturned (aggregate). */
-    apiTraceOrders: numOrNull(apiTrace?.detail?.orders),
+    apiTraceOrders: apiOrdersRowCount ?? numOrNull(apiTrace?.detail?.orders),
     apiTracePayloadBytes: apiTrace?.payloadBytes ?? null,
     uiOutstanding: layerFromCheck(checks, "outstanding_receivables", "uiRendered") ?? ui.uiOutstanding,
     uiRecentVisits: layerFromCheck(checks, "recent_visits", "uiRendered") ?? ui.uiRecentVisits,

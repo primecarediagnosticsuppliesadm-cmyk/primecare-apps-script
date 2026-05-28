@@ -71,9 +71,9 @@ export default function AdminDashboardQaValidationPanel({ renderedSnapshot, auto
         <div>
           <p className="font-semibold">QA Validation — Admin Dashboard (Phase 1)</p>
           <p className="mt-0.5 text-xs opacity-90">
-            Immutable seed: orders {QA_ADMIN_DASHBOARD_SEED.ordersCount}, SKUs{" "}
-            {QA_ADMIN_DASHBOARD_SEED.inventorySkus}. Mutable metrics (receivables, visits, sold
-            value) validate cross-layer agreement — seed values are reference baselines only.
+            Immutable seed: SKUs {QA_ADMIN_DASHBOARD_SEED.inventorySkus}. Mutable metrics (orders,
+            receivables, visits, sold value) validate cross-layer agreement — seed values are
+            reference baselines only (orders grow during lab-ordering QA).
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
