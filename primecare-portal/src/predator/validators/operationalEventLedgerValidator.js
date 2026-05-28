@@ -8,13 +8,64 @@ import {
   isOperationalLedgerOrdered,
   normalizeLedgerEventForRead,
 } from "@/operations/operationalEventLedger.js";
-import { buildOperationalAuditReplay, buildCorrelatedEventChains } from "@/operations/operationalEventTimeline.js";
+import {
+  buildOperationalAuditReplay,
+  buildCorrelatedEventChains,
+} from "@/operations/operationalEventTimeline.js";
 import { OPERATIONAL_EVENT_TYPES } from "@/operations/operationalEventTypes.js";
 import { backfillOperationalLedgerFromPayload } from "@/operations/operationalEventBridge.js";
 import { ROLES } from "@/config/roles.js";
 
+const FEED_SYNC_TOLERANCE = 5;
+const LEDGER_STORE_TOLERANCE = 12;
+const SNAPSHOT_MAX_AGE_MS = 120_000;
+
 function str(v) {
   return String(v ?? "").trim();
+}
+
+/**
+ * @param {object|null|undefined} rendered
+ */
+function resolveExecutiveOpsUiSnapshot(rendered) {
+  const feedUiReady = rendered?.feedUiReady === true;
+  const ledgerUiReady = rendered?.ledgerUiReady === true;
+  const feedMounted = rendered?.feedMounted !== false;
+  const feedRenderedCount =
+    rendered?.feedRenderedCount != null
+      ? Number(rendered.feedRenderedCount)
+      : rendered?.feedCount != null
+        ? Number(rendered.feedCount)
+        : null;
+  const ledgerStoreCount =
+    rendered?.ledgerStoreCount != null
+      ? Number(rendered.ledgerStoreCount)
+      : rendered?.ledgerEventCount != null
+        ? Number(rendered.ledgerEventCount)
+        : null;
+  const auditReplayCount =
+    rendered?.auditReplayCount != null ? Number(rendered.auditReplayCount) : null;
+  const capturedAt = Number(rendered?.capturedAt) || 0;
+  const ageMs = capturedAt > 0 ? Date.now() - capturedAt : null;
+  const snapshotFresh =
+    feedUiReady &&
+    ledgerUiReady &&
+    feedMounted &&
+    feedRenderedCount != null &&
+    ledgerStoreCount != null &&
+    (ageMs == null || ageMs <= SNAPSHOT_MAX_AGE_MS);
+
+  return {
+    feedUiReady,
+    ledgerUiReady,
+    feedMounted,
+    feedRenderedCount,
+    ledgerStoreCount,
+    auditReplayCount,
+    capturedAt,
+    ageMs,
+    snapshotFresh,
+  };
 }
 
 /**
@@ -30,15 +81,18 @@ export async function validateOperationalEventLedgerModule({
 }) {
   return predatorTrace("Operational Event Ledger", "validation.full", async () => {
     const entries = [];
-    const ledger = readOperationalLedger(ctx.tenantId);
+    const ledgerAtStart = readOperationalLedger(ctx.tenantId);
+    const ui = resolveExecutiveOpsUiSnapshot(rendered);
 
-    const invalidTypes = ledger.filter((e) => !OPERATIONAL_EVENT_TYPES.includes(e.eventType));
+    const invalidTypes = ledgerAtStart.filter(
+      (e) => !OPERATIONAL_EVENT_TYPES.includes(e.eventType)
+    );
     entries.push(
       createPredatorEntry({
         status: invalidTypes.length === 0 ? "PASS" : "FAIL",
         module: "Operational Event Ledger",
         step: "ledger.event_types",
-        actual: { invalid: invalidTypes.length, total: ledger.length },
+        actual: { invalid: invalidTypes.length, total: ledgerAtStart.length },
         severity: "high",
         tenantId: ctx.tenantId,
         role: ctx.role,
@@ -46,7 +100,7 @@ export async function validateOperationalEventLedgerModule({
       })
     );
 
-    const ids = ledger.map((e) => e.eventId);
+    const ids = ledgerAtStart.map((e) => e.eventId);
     const uniqueIds = new Set(ids);
     entries.push(
       createPredatorEntry({
@@ -60,10 +114,10 @@ export async function validateOperationalEventLedgerModule({
       })
     );
 
-    const missingTimestamps = ledger.filter(
+    const missingTimestamps = ledgerAtStart.filter(
       (e) => !normalizeLedgerEventForRead(e).event_timestamp
     );
-    const ordered = isOperationalLedgerOrdered(ledger);
+    const ordered = isOperationalLedgerOrdered(ledgerAtStart);
     entries.push(
       createPredatorEntry({
         status: ordered && missingTimestamps.length === 0 ? "PASS" : "WARN",
@@ -71,7 +125,7 @@ export async function validateOperationalEventLedgerModule({
         step: "ledger.ordering",
         expected: "event_timestamp desc, inserted_at desc, sequence/id desc",
         actual: {
-          count: ledger.length,
+          count: ledgerAtStart.length,
           newestFirst: ordered,
           missingEventTimestamp: missingTimestamps.length,
         },
@@ -81,7 +135,9 @@ export async function validateOperationalEventLedgerModule({
       })
     );
 
-    const crossTenant = ledger.filter((e) => e.tenantId && str(e.tenantId) !== str(ctx.tenantId));
+    const crossTenant = ledgerAtStart.filter(
+      (e) => e.tenantId && str(e.tenantId) !== str(ctx.tenantId)
+    );
     entries.push(
       createPredatorEntry({
         status: crossTenant.length === 0 ? "PASS" : "FAIL",
@@ -113,20 +169,149 @@ export async function validateOperationalEventLedgerModule({
     );
 
     if (ctx.role !== ROLES.LAB && ctx.role !== ROLES.AGENT) {
+      let payload;
+      let execModelForUi;
       try {
-        const payload = await loadOperationsCommandCenterData(
+        payload = await loadOperationsCommandCenterData(
           currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId }
         );
+        execModelForUi = buildExecutiveInterventionModel(payload, {
+          tenantId: ctx.tenantId,
+        });
+      } catch (err) {
+        entries.push(
+          createPredatorEntry({
+            status: "FAIL",
+            module: "Operational Event Ledger",
+            step: "timeline.build",
+            actual: err?.message || String(err),
+            tenantId: ctx.tenantId,
+            role: ctx.role,
+            userId: ctx.userId,
+          })
+        );
+        payload = null;
+        execModelForUi = null;
+      }
+
+      if (payload) {
+        if (!ui.feedMounted) {
+          entries.push(
+            createPredatorEntry({
+              status: "PASS",
+              module: "Operational Event Ledger",
+              step: "ui.feed_sync",
+              rootCauseGuess: "Live operations feed not mounted on current view — model-only check",
+              actual: { skipped: true },
+              tenantId: ctx.tenantId,
+              role: ctx.role,
+              userId: ctx.userId,
+            })
+          );
+        } else if (!ui.snapshotFresh) {
+          entries.push(
+            createPredatorEntry({
+              status: "WARN",
+              module: "Operational Event Ledger",
+              step: "ui_snapshot_freshness",
+              expected: "hydrated Executive Control Tower snapshot (feed + ledger counts)",
+              actual: {
+                feedUiReady: ui.feedUiReady,
+                ledgerUiReady: ui.ledgerUiReady,
+                feedRenderedCount: ui.feedRenderedCount,
+                ledgerStoreCount: ui.ledgerStoreCount,
+                ageMs: ui.ageMs,
+                capturedAt: ui.capturedAt || null,
+              },
+              rootCauseGuess:
+                "UI snapshot missing or captured before ledger hydration — open Control Tower and refresh",
+              suggestedFix:
+                "Load Executive Control Tower, wait for data, then re-run Predator",
+              tenantId: ctx.tenantId,
+              role: ctx.role,
+              userId: ctx.userId,
+            })
+          );
+        } else if (execModelForUi) {
+          const apiFeedCount = execModelForUi.feed?.length ?? 0;
+          const feedDrift = Math.abs(apiFeedCount - (ui.feedRenderedCount ?? 0));
+          entries.push(
+            createPredatorEntry({
+              status: feedDrift <= FEED_SYNC_TOLERANCE ? "PASS" : "WARN",
+              module: "Operational Event Ledger",
+              step: "ui.feed_sync",
+              expected: `rendered live feed rows within ${FEED_SYNC_TOLERANCE} of unified model`,
+              actual: { api: apiFeedCount, ui: ui.feedRenderedCount, drift: feedDrift },
+              rootCauseGuess:
+                feedDrift <= FEED_SYNC_TOLERANCE
+                  ? "Executive feed row count matches hydrated model"
+                  : "Rendered feed count drifted from unified operations feed model",
+              tenantId: ctx.tenantId,
+              role: ctx.role,
+              userId: ctx.userId,
+            })
+          );
+
+          const storeCount = ledgerAtStart.length;
+          const ledgerDrift = Math.abs(storeCount - (ui.ledgerStoreCount ?? 0));
+          entries.push(
+            createPredatorEntry({
+              status: ledgerDrift <= LEDGER_STORE_TOLERANCE ? "PASS" : "WARN",
+              module: "Operational Event Ledger",
+              step: "ui.ledger_sync",
+              expected: `UI ledger store count within ${LEDGER_STORE_TOLERANCE} of read store (pre-validator backfill)`,
+              actual: {
+                store: storeCount,
+                ui: ui.ledgerStoreCount,
+                drift: ledgerDrift,
+              },
+              rootCauseGuess:
+                ledgerDrift <= LEDGER_STORE_TOLERANCE
+                  ? "UI ledger store count matches tenant ledger"
+                  : "UI ledger count taken before hydration or session events added after snapshot",
+              tenantId: ctx.tenantId,
+              role: ctx.role,
+              userId: ctx.userId,
+            })
+          );
+
+          if (ui.auditReplayCount != null) {
+            const apiReplayCount = buildOperationalAuditReplay(
+              ctx.tenantId,
+              payload,
+              40
+            ).length;
+            const replayDrift = Math.abs(apiReplayCount - ui.auditReplayCount);
+            entries.push(
+              createPredatorEntry({
+                status: replayDrift <= FEED_SYNC_TOLERANCE ? "PASS" : "WARN",
+                module: "Operational Event Ledger",
+                step: "ui.audit_replay_sync",
+                actual: {
+                  api: apiReplayCount,
+                  ui: ui.auditReplayCount,
+                  drift: replayDrift,
+                },
+                tenantId: ctx.tenantId,
+                role: ctx.role,
+                userId: ctx.userId,
+              })
+            );
+          }
+        }
+
         backfillOperationalLedgerFromPayload(ctx.tenantId, payload);
         const replay = buildOperationalAuditReplay(ctx.tenantId, payload, 40);
         const chains = buildCorrelatedEventChains(ctx.tenantId, payload, 8);
 
         const orderedReplay =
           replay.length < 2 ||
-          (Date.parse(replay[0]?.at || "") || 0) >= (Date.parse(replay[replay.length - 1]?.at || "") || 0);
+          (Date.parse(replay[0]?.at || "") || 0) >=
+            (Date.parse(replay[replay.length - 1]?.at || "") || 0);
         entries.push(
           createPredatorEntry({
-            status: orderedReplay && replay.length > 0 ? "PASS" : replay.length === 0 ? "WARN" : "WARN",
+            status:
+              orderedReplay && replay.length > 0 ? "PASS" : replay.length === 0 ? "WARN" : "WARN",
             module: "Operational Event Ledger",
             step: "timeline.hydration",
             actual: { replayRows: replay.length, chains: chains.length },
@@ -136,27 +321,12 @@ export async function validateOperationalEventLedgerModule({
           })
         );
 
-        const execModel = buildExecutiveInterventionModel(payload, { tenantId: ctx.tenantId });
-        const uiFeed = rendered?.feedCount ?? null;
-        const apiFeed = execModel.feed?.length ?? 0;
-        if (uiFeed != null) {
-          entries.push(
-            createPredatorEntry({
-              status: Math.abs(apiFeed - uiFeed) <= 5 ? "PASS" : "WARN",
-              module: "Operational Event Ledger",
-              step: "ui.feed_sync",
-              actual: { api: apiFeed, ui: uiFeed },
-              tenantId: ctx.tenantId,
-              role: ctx.role,
-              userId: ctx.userId,
-            })
-          );
-        }
-
+        const execModel = execModelForUi;
         const interventionIds = new Set(
-          (execModel.interventionQueues?.allIssues || []).map((i) => i.id)
+          (execModel?.interventionQueues?.allIssues || []).map((i) => i.id)
         );
-        const orphanTasks = ledger.filter(
+        const ledgerAfterBackfill = readOperationalLedger(ctx.tenantId);
+        const orphanTasks = ledgerAfterBackfill.filter(
           (e) =>
             e.linkedEntityType === "intervention" &&
             e.linkedEntityId &&
@@ -174,18 +344,6 @@ export async function validateOperationalEventLedgerModule({
             userId: ctx.userId,
           })
         );
-      } catch (err) {
-        entries.push(
-          createPredatorEntry({
-            status: "FAIL",
-            module: "Operational Event Ledger",
-            step: "timeline.build",
-            actual: err?.message || String(err),
-            tenantId: ctx.tenantId,
-            role: ctx.role,
-            userId: ctx.userId,
-          })
-        );
       }
     } else {
       entries.push(
@@ -194,21 +352,6 @@ export async function validateOperationalEventLedgerModule({
           module: "Operational Event Ledger",
           step: "role.scope",
           rootCauseGuess: "Agent/lab roles use scoped ledger reads only",
-          tenantId: ctx.tenantId,
-          role: ctx.role,
-          userId: ctx.userId,
-        })
-      );
-    }
-
-    const uiLedger = rendered?.ledgerEventCount ?? null;
-    if (uiLedger != null) {
-      entries.push(
-        createPredatorEntry({
-          status: Math.abs(ledger.length - uiLedger) <= 10 ? "PASS" : "WARN",
-          module: "Operational Event Ledger",
-          step: "ui.ledger_sync",
-          actual: { store: ledger.length, ui: uiLedger },
           tenantId: ctx.tenantId,
           role: ctx.role,
           userId: ctx.userId,

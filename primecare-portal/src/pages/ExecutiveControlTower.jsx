@@ -19,6 +19,7 @@ import {
   emitTaskLedgerEvent,
 } from "@/operations/operationalEventBridge.js";
 import { readOperationalLedger } from "@/operations/operationalEventLedger.js";
+import { buildOperationalAuditReplay } from "@/operations/operationalEventTimeline.js";
 import ExecutiveOperationalResolutionSection from "@/components/operational/ExecutiveOperationalResolutionSection.jsx";
 import OperationalAuditPanel from "@/components/operational/OperationalAuditPanel.jsx";
 import { traceOperationsCenterLoad } from "@/operations/operationsCommandCenterPredator.js";
@@ -93,7 +94,12 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
       setError("");
       const built = await traceOperationsCenterLoad(async () => {
         const payload = await loadOperationsCommandCenterData(currentUser);
-        return buildExecutiveInterventionModel(payload, { tenantId: currentUser?.tenantId });
+        const tid = currentUser?.tenantId || "";
+        if (tid) {
+          backfillOperationalLedgerFromPayload(tid, payload);
+          await flushPendingOperationalEvents(tid);
+        }
+        return buildExecutiveInterventionModel(payload, { tenantId: tid });
       });
       setModel(built);
     } catch (err) {
@@ -108,12 +114,6 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
   useEffect(() => {
     void load(false);
   }, [load]);
-
-  useEffect(() => {
-    if (!tenantId || !model?.payload) return;
-    backfillOperationalLedgerFromPayload(tenantId, model.payload);
-    void flushPendingOperationalEvents(tenantId);
-  }, [tenantId, model?.payload]);
 
   const interventionQueues = useMemo(() => {
     if (!model) return { clusters: [], singles: [], founderActive: [], resolvedCount: 0 };
@@ -223,14 +223,24 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
     [tenantId, currentUser]
   );
 
+  const opsLedgerPredatorSnapshot = useMemo(() => {
+    if (loading || !model || !tenantId) return null;
+    return {
+      feedUiReady: true,
+      feedMounted: true,
+      feedRenderedCount: model.feed?.length ?? null,
+      ledgerUiReady: true,
+      ledgerStoreCount: readOperationalLedger(tenantId).length,
+      auditReplayCount: buildOperationalAuditReplay(tenantId, model.payload, 40).length,
+      capturedAt: Date.now(),
+    };
+  }, [loading, model, tenantId, workflowTick, taskTick]);
+
   usePredatorModuleValidation(
     "Operational Event Ledger",
     currentUser,
-    {
-      ledgerEventCount: tenantId ? readOperationalLedger(tenantId).length : 0,
-      feedCount: model?.feed?.length ?? 0,
-    },
-    !loading && Boolean(model)
+    opsLedgerPredatorSnapshot ?? {},
+    Boolean(opsLedgerPredatorSnapshot)
   );
 
   usePredatorModuleValidation(
