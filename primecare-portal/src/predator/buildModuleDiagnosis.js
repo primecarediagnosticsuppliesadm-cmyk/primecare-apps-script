@@ -189,7 +189,15 @@ export function finalizeModuleDiagnosis({ module, ctx, metrics }) {
   diagnosis.healthHeadline = formatModuleHealthHeadline(diagnosis);
 
   predatorStore.setModuleDiagnosis(module, diagnosis, ctx);
-  const extraEntries = [...metricsToPredatorEntries(module, metrics, ctx), ...uiSyncEntries];
+  const diagnosisEntries = metricsToPredatorEntries(module, metrics, ctx);
+  const uiSyncSteps = new Set(
+    uiSyncEntries.map((e) => String(e.step || "").replace(/^ui_sync\./, ""))
+  );
+  const dedupedDiagnosis = diagnosisEntries.filter((e) => {
+    const metricId = String(e.step || "").replace(/^diagnosis\./, "");
+    return !uiSyncSteps.has(metricId);
+  });
+  const extraEntries = [...dedupedDiagnosis, ...uiSyncEntries];
   return { diagnosis, extraEntries };
 }
 

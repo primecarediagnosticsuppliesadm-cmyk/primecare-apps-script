@@ -11,10 +11,10 @@ import { buildExecutionAccountability } from "@/operations/operationalTaskWorkfl
 import { buildExecutiveOperationalTaskModel } from "@/operations/operationalTaskModel.js";
 
 const SEVERITY_RANK = { CRITICAL: 0, ATTENTION: 1, MONITORING: 2 };
-const MAX_DRIFT = 12;
-const MAX_AGENTS = 8;
-const MAX_LABS = 14;
-const MAX_ESCALATION_INSIGHTS = 8;
+const MAX_DRIFT = 6;
+const MAX_AGENTS = 5;
+const MAX_LABS = 8;
+const MAX_ESCALATION_INSIGHTS = 5;
 
 function str(v) {
   return String(v ?? "").trim();
@@ -173,7 +173,10 @@ export function buildOperationalDriftSignals(payload, opsModel = {}) {
     });
   }
 
+  const driftHasInactiveAgent = new Set();
   for (const agent of opsModel.agents?.staleAgents || []) {
+    if (driftHasInactiveAgent.has(agent.name)) continue;
+    driftHasInactiveAgent.add(agent.name);
     drifts.push({
       id: `drift-agent-${agent.name}`,
       type: "inactive_agent",
@@ -234,7 +237,16 @@ export function buildOperationalDriftSignals(payload, opsModel = {}) {
   }
 
   drifts.sort((a, b) => (SEVERITY_RANK[a.severity] ?? 9) - (SEVERITY_RANK[b.severity] ?? 9));
-  return drifts.slice(0, MAX_DRIFT);
+
+  const deduped = [];
+  const seenDrift = new Set();
+  for (const d of drifts) {
+    const key = d.labId ? `${d.type}:${d.labId}` : d.type;
+    if (seenDrift.has(key)) continue;
+    seenDrift.add(key);
+    deduped.push(d);
+  }
+  return deduped.slice(0, MAX_DRIFT);
 }
 
 /**
@@ -396,7 +408,17 @@ export function buildLabLifecycleIntelligence(payload) {
     });
   }
 
+  const priorityLifecycle = new Set([
+    "declining",
+    "collections_risk",
+    "dormant",
+    "onboarding",
+    "active_growth",
+    "strategic_account",
+  ]);
+
   return [...labs.values()]
+    .filter((l) => priorityLifecycle.has(l.lifecycle))
     .sort((a, b) => b.overdueDays - a.overdueDays || b.outstanding - a.outstanding)
     .slice(0, MAX_LABS);
 }
@@ -560,15 +582,16 @@ export function buildOperationalReliabilityScores({
       (trendStrips.find((t) => t.key === "collections")?.trend === "worsening" ? 10 : 0)
   );
   const executionReliability = clampScore(
-    (agents.reduce((s, a) => s + a.reliabilityScore, 0) || 70) /
-      Math.max(1, agents.length || 1)
+    agents.length > 0
+      ? agents.reduce((s, a) => s + a.reliabilityScore, 0) / agents.length
+      : null
   );
   const closureHealth = clampScore(
     resolved > 0 ? 75 : 60 - Math.min(30, openIssues * 2)
   );
 
   const overall = clampScore(
-    executionReliability * 0.3 +
+    (executionReliability ?? fieldDiscipline) * 0.3 +
       collectionsDiscipline * 0.25 +
       fieldDiscipline * 0.25 +
       closureHealth * 0.2 -
@@ -576,8 +599,8 @@ export function buildOperationalReliabilityScores({
   );
 
   return {
-    overall,
-    executionReliability,
+    overall: agents.length === 0 && activeDrift === 0 ? null : overall,
+    executionReliability: executionReliability ?? null,
     collectionsDiscipline,
     fieldDiscipline,
     interventionClosureHealth: closureHealth,

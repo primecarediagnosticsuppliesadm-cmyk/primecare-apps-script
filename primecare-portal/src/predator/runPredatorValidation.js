@@ -15,6 +15,13 @@ import { validateExecutiveInterventionModule } from "@/predator/validators/execu
 import { validateOperationalTasksModule } from "@/predator/validators/operationalTaskValidator.js";
 import { validateOperationalEventLedgerModule } from "@/predator/validators/operationalEventLedgerValidator.js";
 import { validateExecutiveIntelligenceModule } from "@/predator/validators/executiveIntelligenceValidator.js";
+import { validatePilotReadinessModule } from "@/predator/validators/pilotReadinessValidator.js";
+import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
+import {
+  primePredatorOpsPayload,
+  clearPredatorOpsPayload,
+} from "@/predator/predatorOpsPayload.js";
+import { polishPredatorEntries } from "@/predator/predatorEntryPolish.js";
 import { ROLES } from "@/config/roles.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
 import { ADMIN_DASHBOARD_MODULE } from "@/predator/adminDashboardUiSnapshot.js";
@@ -126,49 +133,68 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
       modules.push(skippedModuleForLabRole("Operational Event Ledger", ctx));
       modules.push(skippedModuleForLabRole("Executive Intelligence", ctx));
     } else {
+      let opsPayload = null;
+      try {
+        opsPayload = await loadOperationsCommandCenterData(currentUser);
+        primePredatorOpsPayload(opsPayload);
+      } catch (err) {
+        console.warn("[Predator] Shared ops payload load failed", err);
+      }
+
       const evidence = await validateOperationalEvidenceModule({ ctx, currentUser });
-      predatorStore.setModuleReport("Operational Evidence", evidence.entries, ctx);
-      modules.push(evidence);
+      modules.push(storePolishedModule("Operational Evidence", evidence, ctx));
 
-      const operationsCenter = await validateOperationsCommandCenterModule({
-        ctx,
-        currentUser,
-        rendered: snapshots.operationsCenter ?? null,
-      });
-      predatorStore.setModuleReport("Operations Center", operationsCenter.entries, ctx);
-      modules.push(operationsCenter);
+      const [
+        operationsCenter,
+        executiveIntervention,
+        operationalTasks,
+        eventLedger,
+        executiveIntelligence,
+        pilotReadiness,
+      ] = await Promise.all([
+        validateOperationsCommandCenterModule({
+          ctx,
+          currentUser,
+          rendered: snapshots.operationsCenter ?? null,
+          opsPayload,
+        }),
+        validateExecutiveInterventionModule({
+          ctx,
+          currentUser,
+          rendered: snapshots.executiveIntervention ?? null,
+          opsPayload,
+        }),
+        validateOperationalTasksModule({
+          ctx,
+          currentUser,
+          rendered: snapshots.operationalTasks ?? null,
+          opsPayload,
+        }),
+        validateOperationalEventLedgerModule({
+          ctx,
+          currentUser,
+          rendered: snapshots.operationalEventLedger ?? null,
+          opsPayload,
+        }),
+        validateExecutiveIntelligenceModule({
+          ctx,
+          currentUser,
+          rendered: snapshots.executiveIntelligence ?? null,
+          opsPayload,
+        }),
+        validatePilotReadinessModule({ ctx, currentUser, opsPayload }),
+      ]);
 
-      const executiveIntervention = await validateExecutiveInterventionModule({
-        ctx,
-        currentUser,
-        rendered: snapshots.executiveIntervention ?? null,
-      });
-      predatorStore.setModuleReport("Executive Intervention", executiveIntervention.entries, ctx);
-      modules.push(executiveIntervention);
+      modules.push(
+        storePolishedModule("Operations Center", operationsCenter, ctx),
+        storePolishedModule("Executive Intervention", executiveIntervention, ctx),
+        storePolishedModule("Operational Tasks", operationalTasks, ctx),
+        storePolishedModule("Operational Event Ledger", eventLedger, ctx),
+        storePolishedModule("Executive Intelligence", executiveIntelligence, ctx),
+        storePolishedModule("Pilot Readiness", pilotReadiness, ctx)
+      );
 
-      const operationalTasks = await validateOperationalTasksModule({
-        ctx,
-        currentUser,
-        rendered: snapshots.operationalTasks ?? null,
-      });
-      predatorStore.setModuleReport("Operational Tasks", operationalTasks.entries, ctx);
-      modules.push(operationalTasks);
-
-      const eventLedger = await validateOperationalEventLedgerModule({
-        ctx,
-        currentUser,
-        rendered: snapshots.operationalEventLedger ?? null,
-      });
-      predatorStore.setModuleReport("Operational Event Ledger", eventLedger.entries, ctx);
-      modules.push(eventLedger);
-
-      const executiveIntelligence = await validateExecutiveIntelligenceModule({
-        ctx,
-        currentUser,
-        rendered: snapshots.executiveIntelligence ?? null,
-      });
-      predatorStore.setModuleReport("Executive Intelligence", executiveIntelligence.entries, ctx);
-      modules.push(executiveIntelligence);
+      clearPredatorOpsPayload();
     }
 
     const allEntries = modules.flatMap((m) => m.entries);
@@ -273,6 +299,9 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
         rendered: snapshot,
       });
       break;
+    case "Pilot Readiness":
+      result = await validatePilotReadinessModule({ ctx, currentUser });
+      break;
     default:
       result = {
         module: moduleName,
@@ -290,6 +319,8 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
   }
 
   if (result) {
+    const polished = polishPredatorEntries(result.entries);
+    result = { ...result, entries: polished, summary: summarizePredatorEntries(polished) };
     predatorStore.setModuleReport(moduleName, result.entries, ctx);
     if (result.diagnosis) {
       predatorStore.setModuleDiagnosis(moduleName, result.diagnosis, ctx);
@@ -306,6 +337,67 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
  * @param {string} moduleName
  * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} ctx
  */
+function storePolishedModule(moduleName, result, ctx) {
+  const entries = polishPredatorEntries(result.entries || []);
+  const summary = summarizePredatorEntries(entries);
+  const module = { ...result, module: moduleName, entries, summary };
+  predatorStore.setModuleReport(moduleName, entries, ctx);
+  if (module.diagnosis) {
+    predatorStore.setModuleDiagnosis(moduleName, module.diagnosis, ctx);
+  }
+  return module;
+}
+
+/**
+ * Single batched validation for Executive Control Tower (one shared ops payload).
+ */
+export async function runPredatorExecutiveBatchValidation(currentUser, snapshots = {}) {
+  if (!isPredatorEnabled() || !currentUser) return null;
+  const ctx = await resolvePredatorTenantContext(currentUser);
+  predatorStore.setActiveTenantContext(ctx);
+
+  let opsPayload = null;
+  try {
+    opsPayload = await loadOperationsCommandCenterData(currentUser);
+    primePredatorOpsPayload(opsPayload);
+  } catch (err) {
+    console.warn("[Predator] Executive batch ops payload failed", err);
+  }
+
+  const results = await Promise.all([
+    validateExecutiveInterventionModule({
+      ctx,
+      currentUser,
+      rendered: snapshots.executiveIntervention ?? null,
+      opsPayload,
+    }),
+    validateOperationalTasksModule({
+      ctx,
+      currentUser,
+      rendered: snapshots.operationalTasks ?? null,
+      opsPayload,
+    }),
+    validateOperationalEventLedgerModule({
+      ctx,
+      currentUser,
+      rendered: snapshots.operationalEventLedger ?? null,
+      opsPayload,
+    }),
+    validateExecutiveIntelligenceModule({
+      ctx,
+      currentUser,
+      rendered: snapshots.executiveIntelligence ?? null,
+      opsPayload,
+    }),
+  ]);
+
+  for (const r of results) {
+    storePolishedModule(r.module, r, ctx);
+  }
+  clearPredatorOpsPayload();
+  return results;
+}
+
 function skippedModuleForLabRole(moduleName, ctx) {
   const entry = createPredatorEntry({
     status: "PASS",

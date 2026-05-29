@@ -11,6 +11,21 @@ import {
 import { getNotificationEventsRead } from "@/api/notificationApi.js";
 import { listOperationalEvidence } from "@/api/operationalEvidenceApi.js";
 
+const OPS_CACHE_MS = 45_000;
+/** @type {Map<string, { at: number, data: object }>} */
+const opsPayloadCache = new Map();
+
+export function invalidateOperationsCommandCenterCache(tenantId) {
+  if (!tenantId) {
+    opsPayloadCache.clear();
+    return;
+  }
+  const prefix = `${tenantId}:`;
+  for (const key of opsPayloadCache.keys()) {
+    if (key.startsWith(prefix)) opsPayloadCache.delete(key);
+  }
+}
+
 const EMPTY_PAYLOAD = {
   dashboard: null,
   collections: [],
@@ -28,8 +43,15 @@ const EMPTY_PAYLOAD = {
  * Single parallel load for Operations Command Center (reuses existing read APIs).
  * @param {object|null} currentUser
  */
-export async function loadOperationsCommandCenterData(currentUser) {
+export async function loadOperationsCommandCenterData(currentUser, options = {}) {
+  const { force = false } = options;
   const tenantId = currentUser?.tenantId ?? currentUser?.tenant_id ?? null;
+  const userId = currentUser?.id ?? "anon";
+  const cacheKey = `${tenantId || "none"}:${userId}`;
+  const cached = opsPayloadCache.get(cacheKey);
+  if (!force && cached && Date.now() - cached.at < OPS_CACHE_MS) {
+    return cached.data;
+  }
 
   const [dashRes, collRes, stockRes, ordersRes, reorderRes, notifyRes, poRes, qualRes, evidenceRows] =
     await Promise.all([
@@ -67,7 +89,7 @@ export async function loadOperationsCommandCenterData(currentUser) {
   const qualifications = Array.isArray(qualRes?.data) ? qualRes.data : [];
   const evidence = Array.isArray(evidenceRows) ? evidenceRows : [];
 
-  return {
+  const data = {
     ...EMPTY_PAYLOAD,
     dashboard,
     collections,
@@ -80,4 +102,6 @@ export async function loadOperationsCommandCenterData(currentUser) {
     qualifications,
     evidence,
   };
+  opsPayloadCache.set(cacheKey, { at: Date.now(), data });
+  return data;
 }

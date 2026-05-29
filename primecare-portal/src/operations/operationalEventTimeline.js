@@ -187,11 +187,17 @@ export function buildUnifiedOperationsFeedRows({ tenantId, opsFeed = [], payload
   }));
 
   const seen = new Set(fromLedger.map((r) => r.id));
+  const contentKeys = new Set(
+    fromLedger.map((r) => feedContentKey(r))
+  );
   const merged = [...fromLedger];
 
   for (const row of opsFeed || []) {
     if (!row?.id || seen.has(row.id)) continue;
+    const ck = feedContentKey(row);
+    if (contentKeys.has(ck)) continue;
     seen.add(row.id);
+    contentKeys.add(ck);
     merged.push({ ...row, source: "ops_feed" });
   }
 
@@ -201,6 +207,15 @@ export function buildUnifiedOperationsFeedRows({ tenantId, opsFeed = [], payload
     return compareOperationalEventsDesc(rowA, rowB);
   });
   return merged.slice(0, limit);
+}
+
+function feedContentKey(row) {
+  return [
+    str(row.labId),
+    str(row.kind || row.eventType),
+    str(row.createdAt).slice(0, 16),
+    str(row.subtitle).slice(0, 48),
+  ].join("|");
 }
 
 function mapEventTypeToFeedKind(eventType) {

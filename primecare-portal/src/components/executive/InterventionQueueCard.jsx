@@ -33,8 +33,11 @@ function formatDuration(ms) {
 export default function InterventionQueueCard({
   item,
   founder = false,
+  compact = false,
   onOpen,
   onAction,
+  busyAction = "",
+  actionsDisabled = false,
 }) {
   const sev = item.displaySeverity || item.severity;
   const state = item.workflowState || "NEW";
@@ -44,8 +47,9 @@ export default function InterventionQueueCard({
       role="button"
       tabIndex={0}
       className={cn(
-        "cursor-pointer rounded-lg border px-2.5 py-2 shadow-sm transition hover:shadow-md",
-        founder ? "border-2 border-slate-800/20 bg-white" : SEVERITY_STYLES[sev] || SEVERITY_STYLES.MONITORING
+        "cursor-pointer rounded-lg border shadow-sm transition hover:shadow-md",
+        compact ? "px-2 py-1.5" : "px-2.5 py-2",
+        founder && !compact ? "border-2 border-slate-800/20 bg-white" : SEVERITY_STYLES[sev] || SEVERITY_STYLES.MONITORING
       )}
       onClick={() => onOpen?.(item)}
       onKeyDown={(e) => {
@@ -63,9 +67,11 @@ export default function InterventionQueueCard({
             <StatusBadge variant={SEVERITY_BADGE[sev] || "neutral"} compact>
               {sev}
             </StatusBadge>
-            <StatusBadge variant={state === "ESCALATED" ? "danger" : "neutral"} compact>
-              {STATE_LABELS[state] || state}
-            </StatusBadge>
+            {!compact ? (
+              <StatusBadge variant={state === "ESCALATED" ? "danger" : "neutral"} compact>
+                {STATE_LABELS[state] || state}
+              </StatusBadge>
+            ) : null}
             {item.ageLabel || item.escalationAge ? (
               <span className="text-[10px] text-slate-500">
                 {item.escalationAge || item.ageLabel}
@@ -73,24 +79,25 @@ export default function InterventionQueueCard({
             ) : null}
           </div>
           <p className="mt-0.5 truncate text-[11px] font-medium">{item.subtitle}</p>
-          <div className="mt-0.5 flex flex-wrap gap-x-2 text-[10px] text-slate-500">
-            {item.currentOwner ? <span>Owner · {item.currentOwner}</span> : null}
-            {item.pendingActor ? <span>Waiting · {item.pendingActor}</span> : null}
-            {item.escalatedBy ? <span>Escalated · {item.escalatedBy}</span> : null}
-          </div>
-          <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-600">{item.summary}</p>
-          {item.interventionAgeMs > 0 ? (
-            <p className="text-[10px] text-slate-400">
-              Open {formatDuration(item.interventionAgeMs)}
-              {item.timeToResolutionMs != null
-                ? ` · Resolved in ${formatDuration(item.timeToResolutionMs)}`
-                : ""}
-            </p>
+          {!compact ? (
+            <>
+              <div className="mt-0.5 flex flex-wrap gap-x-2 text-[10px] text-slate-500">
+                {item.currentOwner ? <span>Owner · {item.currentOwner}</span> : null}
+                {item.pendingActor ? <span>Waiting · {item.pendingActor}</span> : null}
+              </div>
+              <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-600">{item.summary}</p>
+            </>
           ) : null}
         </div>
       </div>
-      <div className="mt-2" onClick={(e) => e.stopPropagation()} role="presentation">
-        <InterventionActionBar issue={item} onAction={onAction} compact />
+      <div className={cn(compact ? "mt-1" : "mt-2")} onClick={(e) => e.stopPropagation()} role="presentation">
+        <InterventionActionBar
+          issue={item}
+          onAction={onAction}
+          compact
+          busyAction={busyAction}
+          disabled={actionsDisabled}
+        />
       </div>
     </article>
   );

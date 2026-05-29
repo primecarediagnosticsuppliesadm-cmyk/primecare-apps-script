@@ -8,6 +8,7 @@ import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
 import { AGENT_TASK_COMPLETION_ENABLED } from "@/config/environment";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import PageSkeleton from "@/components/ux/PageSkeleton";
+import { usePortalToast } from "@/components/ux";
 import AgentLabSnapshotDrawer from "@/components/agent/AgentLabSnapshotDrawer.jsx";
 import {
   TodayKpiStrip,
@@ -100,8 +101,10 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
   const [snapshotLabId, setSnapshotLabId] = useState("");
   const [completedQueueIds] = useState(() => new Set());
   const [taskTick, setTaskTick] = useState(0);
+  const [completingTaskId, setCompletingTaskId] = useState("");
 
   const tenantId = currentUser?.tenantId || "";
+  const { showToast } = usePortalToast();
   const agentMeta = useMemo(
     () => ({
       agentId: currentUser?.agentId || currentUser?.id || "",
@@ -345,7 +348,8 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
 
   const handleCompleteTask = useCallback(
     async (task) => {
-      if (!task?.taskId || !AGENT_TASK_COMPLETION_ENABLED) return;
+      if (!task?.taskId || !AGENT_TASK_COMPLETION_ENABLED || completingTaskId) return;
+      setCompletingTaskId(task.taskId);
       try {
         logAppsScriptFallbackUsed("AgentDashboard.completeTask", {
           primarySourceExpected: "Supabase agent_tasks table",
@@ -369,12 +373,17 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
         }));
         notifyAgentWorkspaceRefresh({ source: "task_complete" });
         await loadWorkspace(true);
+        showToast("success", "Task marked complete");
       } catch (err) {
         console.error(err);
-        setError(err.message || "Failed to complete task");
+        const msg = err.message || "Failed to complete task";
+        setError(msg);
+        showToast("error", msg);
+      } finally {
+        setCompletingTaskId("");
       }
     },
-    [currentUser, loadWorkspace]
+    [currentUser, loadWorkspace, completingTaskId, showToast]
   );
 
   if (loading) {
@@ -493,9 +502,10 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
                     size="sm"
                     variant="outline"
                     className="h-7 text-xs"
+                    disabled={Boolean(completingTaskId)}
                     onClick={() => handleCompleteTask(task)}
                   >
-                    Complete
+                    {completingTaskId === task.taskId ? "Saving…" : "Complete"}
                   </Button>
                 ) : null}
               </li>

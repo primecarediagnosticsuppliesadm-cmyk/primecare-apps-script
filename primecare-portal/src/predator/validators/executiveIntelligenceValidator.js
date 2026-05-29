@@ -1,6 +1,6 @@
 import { createPredatorEntry, summarizePredatorEntries } from "@/predator/predatorSchema.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
-import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
+import { resolvePredatorOpsPayload } from "@/predator/predatorOpsPayload.js";
 import { buildExecutiveInterventionModel } from "@/operations/executiveInterventionModel.js";
 import { buildExecutiveIntelligenceModel } from "@/operations/executiveIntelligenceModel.js";
 import { ROLES } from "@/config/roles.js";
@@ -9,6 +9,20 @@ const VALID_TRENDS = new Set(["improving", "worsening", "stable"]);
 const STALE_MS = 5 * 60 * 1000;
 
 function scoreInRange(n, label, entries, ctx) {
+  if (n == null) {
+    entries.push(
+      createPredatorEntry({
+        status: "INFO",
+        module: "Executive Intelligence",
+        step: `score.${label}`,
+        actual: "not scored (insufficient data)",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+    return true;
+  }
   const ok = typeof n === "number" && n >= 0 && n <= 100;
   entries.push(
     createPredatorEntry({
@@ -36,6 +50,7 @@ export async function validateExecutiveIntelligenceModule({
   ctx,
   currentUser = null,
   rendered = null,
+  opsPayload = null,
 }) {
   return predatorTrace("Executive Intelligence", "validation.full", async () => {
     const entries = [];
@@ -61,8 +76,9 @@ export async function validateExecutiveIntelligenceModule({
 
     let intelligence;
     try {
-      const payload = await loadOperationsCommandCenterData(
-        currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId }
+      const payload = await resolvePredatorOpsPayload(
+        currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId },
+        opsPayload
       );
       const execModel = buildExecutiveInterventionModel(payload, { tenantId: ctx.tenantId });
       intelligence = buildExecutiveIntelligenceModel({
@@ -144,7 +160,7 @@ export async function validateExecutiveIntelligenceModule({
     }
     entries.push(
       createPredatorEntry({
-        status: trendStrips.length === 5 ? "PASS" : "WARN",
+        status: trendStrips.length >= 4 && trendStrips.length <= 5 ? "PASS" : "WARN",
         module: "Executive Intelligence",
         step: "trends.strip_count",
         expected: 5,

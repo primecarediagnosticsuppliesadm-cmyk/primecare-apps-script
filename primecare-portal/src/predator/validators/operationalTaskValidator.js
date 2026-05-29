@@ -1,7 +1,7 @@
 import { createPredatorEntry, summarizePredatorEntries } from "@/predator/predatorSchema.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
 import { checkTenantConsistency } from "@/predator/predatorChecks.js";
-import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
+import { resolvePredatorOpsPayload } from "@/predator/predatorOpsPayload.js";
 import { buildExecutiveInterventionModel } from "@/operations/executiveInterventionModel.js";
 import { buildExecutiveOperationalTaskModel } from "@/operations/operationalTaskModel.js";
 import { loadOperationalTaskRecords, TASK_STATES } from "@/operations/operationalTaskStateStore.js";
@@ -24,6 +24,7 @@ export async function validateOperationalTasksModule({
   ctx,
   currentUser = null,
   rendered = null,
+  opsPayload = null,
 }) {
   return predatorTrace("Operational Tasks", "validation.full", async () => {
     const entries = [];
@@ -122,8 +123,9 @@ export async function validateOperationalTasksModule({
       }
     } else {
       try {
-        const payload = await loadOperationsCommandCenterData(
-          currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId }
+        const payload = await resolvePredatorOpsPayload(
+          currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId },
+          opsPayload
         );
         const execModel = buildExecutiveInterventionModel(payload, { tenantId: ctx.tenantId });
         const taskModel = buildExecutiveOperationalTaskModel(

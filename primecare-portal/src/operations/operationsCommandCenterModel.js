@@ -747,17 +747,26 @@ export function buildExecutiveDailySnapshot(payload) {
     invPanel.critical.length ||
     Number(executive.productsNearStockout ?? summary.stockStats?.nearStockout ?? 0);
 
+  const hasCollections = (payload.collections || []).length > 0;
+  const hasVisits = (payload.visits || []).length > 0;
+  const revenueRaw = Number(executive.todaysRevenue ?? 0);
+
   return {
-    revenueToday: formatCurrency(Number(executive.todaysRevenue ?? 0)),
-    revenueTodayRaw: Number(executive.todaysRevenue ?? 0),
+    revenueToday: formatCurrency(revenueRaw),
+    revenueTodayRaw: revenueRaw,
+    hasRevenueActivity: revenueRaw > 0 || visitsToday.length > 0 || (payload.orders || []).length > 0,
+    hasCollections,
     collectionsPending: collSummary.overdueCount ?? 0,
-    collectionsPendingLabel: `${collSummary.overdueCount ?? 0} overdue`,
+    collectionsPendingLabel: hasCollections
+      ? `${collSummary.overdueCount ?? 0} overdue`
+      : "No AR data",
     collectionsExposure: formatCurrency(collSummary.totalOutstanding ?? 0),
     highRiskLabs,
     activeAgentsToday,
     ordersPendingFulfillment: pendingOrders,
     lowStockSkus,
     visitsToday: visitsToday.length,
+    hasVisits,
   };
 }
 
@@ -776,7 +785,7 @@ export function buildOperationalHealthTiles(payload, health) {
   const compliancePct =
     recentVisits.length > 0
       ? Math.round((visitsWithProof.length / recentVisits.length) * 100)
-      : 100;
+      : null;
   const localOnly = evidence.filter((e) => e.storageBackend === "local_embedded").length;
 
   const orders = payload.orders || [];
@@ -818,11 +827,15 @@ export function buildOperationalHealthTiles(payload, health) {
     {
       key: "evidence",
       title: "Evidence compliance",
-      ...statusFromScore(compliancePct),
+      ...(compliancePct != null
+        ? statusFromScore(compliancePct)
+        : { status: "watch", label: "No visits" }),
       detail:
-        localOnly > 0
-          ? `${compliancePct}% visits with proof · ${localOnly} local-only upload`
-          : `${compliancePct}% recent visits with proof`,
+        compliancePct == null
+          ? "No recent visits to measure proof compliance"
+          : localOnly > 0
+            ? `${compliancePct}% visits with proof · ${localOnly} local-only upload`
+            : `${compliancePct}% recent visits with proof`,
       action: "visits",
     },
     {

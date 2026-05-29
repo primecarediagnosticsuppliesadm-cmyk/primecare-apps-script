@@ -1,7 +1,7 @@
 import { createPredatorEntry, summarizePredatorEntries } from "@/predator/predatorSchema.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
 import { checkTenantConsistency } from "@/predator/predatorChecks.js";
-import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
+import { resolvePredatorOpsPayload } from "@/predator/predatorOpsPayload.js";
 import { buildOperationsCommandCenterModel } from "@/operations/operationsCommandCenterModel.js";
 import { listOperationalEvidence } from "@/api/operationalEvidenceApi.js";
 import { ROLES } from "@/config/roles.js";
@@ -20,6 +20,7 @@ export async function validateOperationsCommandCenterModule({
   ctx,
   currentUser = null,
   rendered = null,
+  opsPayload = null,
 }) {
   return predatorTrace("Operations Center", "validation.full", async () => {
     const entries = [];
@@ -46,8 +47,9 @@ export async function validateOperationsCommandCenterModule({
     let payload;
     let model;
     try {
-      payload = await loadOperationsCommandCenterData(
-        currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId }
+      payload = await resolvePredatorOpsPayload(
+        currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId },
+        opsPayload
       );
       model = buildOperationsCommandCenterModel(payload);
     } catch (err) {

@@ -32,6 +32,8 @@ export default function InterventionActionBar({
   onAction,
   compact = false,
   className,
+  busyAction = "",
+  disabled = false,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const resolved = issue?.workflowState === "RESOLVED";
@@ -56,7 +58,8 @@ export default function InterventionActionBar({
           type="button"
           variant="outline"
           size="sm"
-          className="h-7 gap-1 px-2 text-[10px]"
+          className="h-7 gap-1 px-2 text-[10px] max-md:min-h-9"
+          disabled={disabled || Boolean(busyAction)}
           onClick={(e) => {
             e.stopPropagation();
             run(key);

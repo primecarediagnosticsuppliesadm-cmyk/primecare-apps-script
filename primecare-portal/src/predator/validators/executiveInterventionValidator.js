@@ -1,7 +1,7 @@
 import { createPredatorEntry, summarizePredatorEntries } from "@/predator/predatorSchema.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
 import { checkTenantConsistency } from "@/predator/predatorChecks.js";
-import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
+import { resolvePredatorOpsPayload } from "@/predator/predatorOpsPayload.js";
 import { buildExecutiveInterventionModel } from "@/operations/executiveInterventionModel.js";
 import { INTERVENTION_STATES } from "@/operations/executiveInterventionStateStore.js";
 import { ROLES } from "@/config/roles.js";
@@ -20,6 +20,7 @@ export async function validateExecutiveInterventionModule({
   ctx,
   currentUser = null,
   rendered = null,
+  opsPayload = null,
 }) {
   return predatorTrace("Executive Intervention", "validation.full", async () => {
     const entries = [];
@@ -45,8 +46,9 @@ export async function validateExecutiveInterventionModule({
 
     let model;
     try {
-      const payload = await loadOperationsCommandCenterData(
-        currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId }
+      const payload = await resolvePredatorOpsPayload(
+        currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId },
+        opsPayload
       );
       model = buildExecutiveInterventionModel(payload, { tenantId: ctx.tenantId });
     } catch (err) {

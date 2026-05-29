@@ -1,7 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, PageSkeleton, KpiCard, KpiCardGrid } from "@/components/ux";
-import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
+import {
+  loadOperationsCommandCenterData,
+  invalidateOperationsCommandCenterCache,
+} from "@/operations/operationsCommandCenterLoader.js";
+import { usePortalToast } from "@/components/ux";
+import { useActionSubmit } from "@/hooks/useActionSubmit.js";
+import { formatPilotKpi, formatPilotCount } from "@/utils/pilotDisplay.js";
+import { usePredatorBatchValidation } from "@/predator/usePredatorBatchValidation.js";
 import {
   buildExecutiveInterventionModel,
   buildInterventionQueues,
@@ -31,6 +38,28 @@ import InterventionClusterCard from "@/components/executive/InterventionClusterC
 import ExecutiveIntelligenceLayer from "@/components/executive/ExecutiveIntelligenceLayer.jsx";
 import { buildExecutiveIntelligenceModel } from "@/operations/executiveIntelligenceModel.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
+
+const INTERVENTION_TOAST = {
+  assign_owner: "Owner assigned",
+  escalate: "Escalated to executive queue",
+  mark_reviewed: "Marked reviewed",
+  request_followup: "Follow-up requested",
+  require_proof: "Proof required on next visit",
+  snooze: "Snoozed for 24 hours",
+  resolve: "Intervention resolved",
+  reopen: "Intervention reopened",
+};
+
+const TASK_TOAST = {
+  assign: "Task assigned",
+  escalate: "Task escalated",
+  request_evidence: "Proof requested",
+  require_followup: "Follow-up required",
+  complete: "Task completed",
+  reopen: "Task reopened",
+  acknowledge: "Task acknowledged",
+  start: "Task started",
+};
 import { cn } from "@/lib/utils";
 import {
   RefreshCw,
@@ -52,6 +81,10 @@ const HEALTH_STYLES = {
   watch: "border-amber-200 bg-amber-50/50",
   risk: "border-red-200 bg-red-50/50",
 };
+
+const FOUNDER_PREVIEW = 4;
+const QUEUE_SINGLES_PREVIEW = 5;
+const FEED_PREVIEW = 8;
 
 const FEED_DOT = {
   order: "bg-blue-500",
@@ -81,13 +114,20 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
   const [error, setError] = useState("");
   const [labDrawerId, setLabDrawerId] = useState("");
   const [drawerContext, setDrawerContext] = useState(null);
-  const [prioritiesOpen, setPrioritiesOpen] = useState(true);
-  const [founderOpen, setFounderOpen] = useState(true);
+  const [healthOpen, setHealthOpen] = useState(false);
+  const [founderOpen, setFounderOpen] = useState(false);
+  const [prioritiesOpen, setPrioritiesOpen] = useState(false);
+  const [feedOpen, setFeedOpen] = useState(false);
+  const [founderShowAll, setFounderShowAll] = useState(false);
+  const [queueShowAll, setQueueShowAll] = useState(false);
+  const [feedShowAll, setFeedShowAll] = useState(false);
   const [workflowIssue, setWorkflowIssue] = useState(null);
   const [workflowTick, setWorkflowTick] = useState(0);
   const [taskTick, setTaskTick] = useState(0);
 
   const tenantId = currentUser?.tenantId || "";
+  const { showToast } = usePortalToast();
+  const actionSubmit = useActionSubmit();
 
   const load = useCallback(async (isRefresh = false) => {
     try {
@@ -95,7 +135,10 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
       else setLoading(true);
       setError("");
       const built = await traceOperationsCenterLoad(async () => {
-        const payload = await loadOperationsCommandCenterData(currentUser);
+        if (isRefresh && tenantId) invalidateOperationsCommandCenterCache(tenantId);
+        const payload = await loadOperationsCommandCenterData(currentUser, {
+          force: isRefresh,
+        });
         const tid = currentUser?.tenantId || "";
         if (tid) {
           backfillOperationalLedgerFromPayload(tid, payload);
@@ -111,7 +154,7 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [currentUser]);
+  }, [currentUser, tenantId]);
 
   useEffect(() => {
     void load(false);
@@ -145,53 +188,67 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
   }, [model, tenantId, interventionQueues, workflowTick, taskTick]);
 
   const handleInterventionAction = useCallback(
-    (action, issue) => {
+    async (action, issue) => {
       if (!issue?.id) return;
-      const actor = currentUser?.name || currentUser?.email || "Executive";
-      const assignTo =
-        action === "assign_owner"
-          ? issue.owner || issue.currentOwner || "Collections Team"
-          : "";
-      applyInterventionAction({
-        tenantId,
-        issueId: issue.id,
-        action,
-        actor,
-        actorRole: currentUser?.role || "executive",
-        assignTo,
-      });
-      syncTaskFromInterventionAction({
-        tenantId,
-        issue,
-        action,
-        actor,
-        assignTo,
-      });
-      void emitInterventionLedgerEvent({
-        tenantId,
-        issue,
-        action,
-        actor,
-        actorRole: currentUser?.role || "executive",
-        assignTo,
-      });
-      setWorkflowTick((n) => n + 1);
-      setTaskTick((n) => n + 1);
-      if (workflowIssue?.id === issue.id) {
-        const refreshed = buildInterventionQueues(
-          model?.priorities,
-          model?.founderQueue,
+      const key = `intervention:${issue.id}:${action}`;
+      const result = await actionSubmit.run(key, async () => {
+        const actor = currentUser?.name || currentUser?.email || "Executive";
+        const assignTo =
+          action === "assign_owner"
+            ? issue.owner || issue.currentOwner || "Collections Team"
+            : "";
+        applyInterventionAction({
           tenantId,
-          model?.payload
-        );
-        const updated =
-          refreshed.allIssues?.find((i) => i.id === issue.id) ||
-          refreshed.singles.find((i) => i.id === issue.id) ||
-          refreshed.founderActive.find((i) => i.id === issue.id);
-        if (updated) setWorkflowIssue(updated);
+          issueId: issue.id,
+          action,
+          actor,
+          actorRole: currentUser?.role || "executive",
+          assignTo,
+        });
+        syncTaskFromInterventionAction({
+          tenantId,
+          issue,
+          action,
+          actor,
+          assignTo,
+        });
+        try {
+          await emitInterventionLedgerEvent({
+            tenantId,
+            issue,
+            action,
+            actor,
+            actorRole: currentUser?.role || "executive",
+            assignTo,
+          });
+        } catch (ledgerErr) {
+          console.warn("[Control Tower] ledger emit failed", ledgerErr);
+        }
+        setWorkflowTick((n) => n + 1);
+        setTaskTick((n) => n + 1);
+        if (workflowIssue?.id === issue.id) {
+          const refreshed = buildInterventionQueues(
+            model?.priorities,
+            model?.founderQueue,
+            tenantId,
+            model?.payload
+          );
+          const updated =
+            refreshed.allIssues?.find((i) => i.id === issue.id) ||
+            refreshed.singles.find((i) => i.id === issue.id) ||
+            refreshed.founderActive.find((i) => i.id === issue.id);
+          if (updated) setWorkflowIssue(updated);
+        }
+        return true;
+      });
+      if (result.skipped) return;
+      if (result.ok) {
+        showToast("success", INTERVENTION_TOAST[action] || "Intervention updated");
+      } else {
+        showToast("error", result.error?.message || "Could not apply intervention action");
       }
     },
-    [tenantId, currentUser, workflowIssue?.id, model]
+    [tenantId, currentUser, workflowIssue?.id, model, actionSubmit, showToast]
   );
 
   const openIntervention = useCallback((item) => {
@@ -208,33 +265,47 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
   );
 
   const handleTaskAction = useCallback(
-    (action, task) => {
+    async (action, task) => {
       if (!task?.taskId) return;
-      const actor = currentUser?.name || currentUser?.email || "Executive";
-      const assignTo =
-        action === "assign" || action === "reassign"
-          ? task.assignee || task.owner || "Collections Team"
-          : "";
-      applyOperationalTaskAction({
-        tenantId,
-        taskId: task.taskId,
-        action,
-        actor,
-        actorRole: currentUser?.role || "executive",
-        assignTo,
-        urgency: action === "set_urgency" ? "high" : "",
+      const key = `task:${task.taskId}:${action}`;
+      const result = await actionSubmit.run(key, async () => {
+        const actor = currentUser?.name || currentUser?.email || "Executive";
+        const assignTo =
+          action === "assign" || action === "reassign"
+            ? task.assignee || task.owner || "Collections Team"
+            : "";
+        applyOperationalTaskAction({
+          tenantId,
+          taskId: task.taskId,
+          action,
+          actor,
+          actorRole: currentUser?.role || "executive",
+          assignTo,
+          urgency: action === "set_urgency" ? "high" : "",
+        });
+        try {
+          await emitTaskLedgerEvent({
+            tenantId,
+            task,
+            action,
+            actor,
+            actorRole: currentUser?.role || "executive",
+            assignTo,
+          });
+        } catch (ledgerErr) {
+          console.warn("[Control Tower] task ledger emit failed", ledgerErr);
+        }
+        setTaskTick((n) => n + 1);
+        return true;
       });
-      void emitTaskLedgerEvent({
-        tenantId,
-        task,
-        action,
-        actor,
-        actorRole: currentUser?.role || "executive",
-        assignTo,
-      });
-      setTaskTick((n) => n + 1);
+      if (result.skipped) return;
+      if (result.ok) {
+        showToast("success", TASK_TOAST[action] || "Task updated");
+      } else {
+        showToast("error", result.error?.message || "Could not update task");
+      }
     },
-    [tenantId, currentUser]
+    [tenantId, currentUser, actionSubmit, showToast]
   );
 
   const opsLedgerPredatorSnapshot = useMemo(() => {
@@ -257,58 +328,53 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
     Boolean(opsLedgerPredatorSnapshot)
   );
 
-  usePredatorModuleValidation(
-    "Operational Tasks",
-    currentUser,
-    {
-      activeTaskCount: operationalTaskModel?.active?.length ?? 0,
-      clusterCount: operationalTaskModel?.clusters?.length ?? 0,
-      criticalOpen: operationalTaskModel?.governance?.criticalOpen ?? 0,
-      slaBreaches: operationalTaskModel?.governance?.slaBreaches ?? 0,
-    },
-    !loading && Boolean(operationalTaskModel)
-  );
-
-  usePredatorModuleValidation(
-    "Executive Intervention",
-    currentUser,
-    {
-      prioritiesCount: model?.priorities?.length ?? 0,
-      founderQueueCount: model?.founderQueue?.length ?? 0,
-      feedCount: model?.feed?.length ?? 0,
-      healthTileCount: model?.healthStrip?.length ?? 0,
-      clusterCount: interventionQueues.clusters?.length ?? 0,
-      activeInterventionCount:
-        (interventionQueues.singles?.length ?? 0) +
-        (interventionQueues.clusters?.reduce((s, c) => s + c.count, 0) ?? 0),
-      resolvedCount: interventionQueues.resolvedCount ?? 0,
-      executiveIntervention: true,
-    },
-    !loading && Boolean(model)
-  );
-
-  const intelligencePredatorSnapshot = useMemo(() => {
-    if (loading || !intelligence) return null;
+  const executivePredatorBatch = useMemo(() => {
+    if (loading || !model || !operationalTaskModel) return null;
     return {
-      intelligenceUiReady: true,
-      driftCount: intelligence.driftSignals?.length ?? 0,
-      driftCriticalCount: intelligence.driftSignals?.filter((d) => d.severity === "CRITICAL")
-        .length,
-      agentAtRiskCount: intelligence.agents?.filter((a) => a.atRisk).length ?? 0,
-      reliabilityOverall: intelligence.reliability?.overall ?? null,
-      escalationCount: intelligence.escalationInsights?.length ?? 0,
-      trendStripCount: intelligence.trendStrips?.length ?? 0,
-      intelligenceCapturedAt: Date.now(),
-      executiveIntelligence: true,
+      executiveIntervention: {
+        prioritiesCount: model.priorities?.length ?? 0,
+        founderQueueCount: model.founderQueue?.length ?? 0,
+        feedCount: model.feed?.length ?? 0,
+        healthTileCount: model.healthStrip?.length ?? 0,
+        clusterCount: interventionQueues.clusters?.length ?? 0,
+        activeInterventionCount:
+          (interventionQueues.singles?.length ?? 0) +
+          (interventionQueues.clusters?.reduce((s, c) => s + c.count, 0) ?? 0),
+        resolvedCount: interventionQueues.resolvedCount ?? 0,
+        executiveIntervention: true,
+      },
+      operationalTasks: {
+        activeTaskCount: operationalTaskModel.active?.length ?? 0,
+        clusterCount: operationalTaskModel.clusters?.length ?? 0,
+        criticalOpen: operationalTaskModel.governance?.criticalOpen ?? 0,
+        slaBreaches: operationalTaskModel.governance?.slaBreaches ?? 0,
+      },
+      operationalEventLedger: opsLedgerPredatorSnapshot ?? {},
+      executiveIntelligence: intelligence
+        ? {
+            intelligenceUiReady: true,
+            driftCount: intelligence.driftSignals?.length ?? 0,
+            driftCriticalCount: intelligence.driftSignals?.filter(
+              (d) => d.severity === "CRITICAL"
+            ).length,
+            agentAtRiskCount: intelligence.agents?.filter((a) => a.atRisk).length ?? 0,
+            reliabilityOverall: intelligence.reliability?.overall ?? null,
+            escalationCount: intelligence.escalationInsights?.length ?? 0,
+            trendStripCount: intelligence.trendStrips?.length ?? 0,
+            executiveIntelligence: true,
+          }
+        : null,
     };
-  }, [loading, intelligence, workflowTick, taskTick]);
+  }, [
+    loading,
+    model,
+    operationalTaskModel,
+    interventionQueues,
+    opsLedgerPredatorSnapshot,
+    intelligence,
+  ]);
 
-  usePredatorModuleValidation(
-    "Executive Intelligence",
-    currentUser,
-    intelligencePredatorSnapshot ?? {},
-    Boolean(intelligencePredatorSnapshot)
-  );
+  usePredatorBatchValidation(currentUser, executivePredatorBatch ?? {}, Boolean(executivePredatorBatch));
 
   const navigate = useCallback(
     (page) => {
@@ -343,6 +409,13 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
   const { clusters, singles, founderActive, resolvedCount, snoozedCount } = interventionQueues;
   const activeCount =
     singles.length + clusters.reduce((s, c) => s + c.count, 0);
+  const healthRiskCount = healthStrip.filter((t) => t.status === "risk").length;
+  const healthWatchCount = healthStrip.filter((t) => t.status === "watch").length;
+  const visibleFounder = founderShowAll
+    ? founderActive
+    : founderActive.slice(0, FOUNDER_PREVIEW);
+  const visibleSingles = queueShowAll ? singles : singles.slice(0, QUEUE_SINGLES_PREVIEW);
+  const visibleFeed = feedShowAll ? feed : feed.slice(0, FEED_PREVIEW);
 
   return (
     <div className="mx-auto max-w-6xl space-y-3 p-4 pb-10 lg:p-5">
@@ -383,70 +456,111 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
         <KpiCardGrid columns={3} className="sm:grid-cols-2 lg:grid-cols-5">
           <KpiCard
             title="Revenue today"
-            value={snapshot.revenueToday}
-            subtitle="Fulfilled orders"
+            value={formatPilotKpi(
+              snapshot.revenueToday,
+              snapshot.revenueTodayRaw,
+              snapshot.hasRevenueActivity
+            )}
+            subtitle={snapshot.hasRevenueActivity ? "Fulfilled orders" : "No activity today"}
             className="!rounded-xl !p-3"
           />
           <KpiCard
             title="Collections exposure"
-            value={snapshot.collectionsExposure}
-            subtitle={`${snapshot.collectionsPending} overdue accounts`}
+            value={formatPilotKpi(
+              snapshot.collectionsExposure,
+              null,
+              snapshot.hasCollections
+            )}
+            subtitle={
+              snapshot.hasCollections
+                ? `${snapshot.collectionsPending} overdue accounts`
+                : "No AR loaded"
+            }
             className="!rounded-xl !p-3"
           />
           <KpiCard
             title="High-risk labs"
-            value={snapshot.highRiskLabs}
+            value={formatPilotCount(snapshot.highRiskLabs, snapshot.hasCollections)}
             subtitle="Credit & overdue flags"
             className="!rounded-xl !p-3"
           />
           <KpiCard
             title="Field activity"
-            value={snapshot.visitsToday}
-            subtitle={`${snapshot.activeAgentsToday} agents active`}
+            value={formatPilotCount(snapshot.visitsToday, snapshot.hasVisits)}
+            subtitle={
+              snapshot.hasVisits
+                ? `${snapshot.activeAgentsToday} agents active`
+                : "No visits logged"
+            }
             className="!rounded-xl !p-3"
           />
           <KpiCard
             title="Supply pressure"
-            value={snapshot.lowStockSkus}
+            value={formatPilotCount(
+              snapshot.lowStockSkus,
+              snapshot.lowStockSkus > 0 || snapshot.ordersPendingFulfillment > 0
+            )}
             subtitle={`${snapshot.ordersPendingFulfillment} orders open`}
             className="!rounded-xl !p-3"
           />
         </KpiCardGrid>
       </section>
 
-      <section aria-label="Operational health">
-        <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
-          <Shield className="h-4 w-4" />
-          Operational health
-        </h2>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-          {healthStrip.map((tile) => (
-            <button
-              key={tile.key}
-              type="button"
-              className={cn(
-                "rounded-lg border px-2.5 py-2 text-left transition hover:shadow-sm",
-                HEALTH_STYLES[tile.status] || HEALTH_STYLES.watch
-              )}
-              onClick={() => navigate(tile.action)}
-            >
-              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-                {tile.title}
-              </p>
-              <p className="text-sm font-semibold text-slate-900">{tile.label}</p>
-              <p className="text-[10px] capitalize text-slate-500">{tile.trend}</p>
-              <p className="mt-1 line-clamp-2 text-[10px] leading-snug text-slate-600">
-                {tile.detail}
-              </p>
-            </button>
-          ))}
-        </div>
+      <section aria-label="Operational health" className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-2 text-left"
+          onClick={() => setHealthOpen((v) => !v)}
+        >
+          <h2 className="flex items-center gap-2 text-sm font-semibold">
+            <Shield className="h-4 w-4" />
+            Operational health
+            {healthRiskCount > 0 ? (
+              <StatusBadge variant="danger" compact>
+                {healthRiskCount} risk
+              </StatusBadge>
+            ) : healthWatchCount > 0 ? (
+              <StatusBadge variant="warning" compact>
+                {healthWatchCount} watch
+              </StatusBadge>
+            ) : (
+              <StatusBadge variant="success" compact>
+                OK
+              </StatusBadge>
+            )}
+          </h2>
+          {healthOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </button>
+        {healthOpen ? (
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+            {healthStrip.map((tile) => (
+              <button
+                key={tile.key}
+                type="button"
+                className={cn(
+                  "rounded-lg border px-2.5 py-2 text-left transition hover:shadow-sm",
+                  HEALTH_STYLES[tile.status] || HEALTH_STYLES.watch
+                )}
+                onClick={() => navigate(tile.action)}
+              >
+                <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                  {tile.title}
+                </p>
+                <p className="text-sm font-semibold text-slate-900">{tile.label}</p>
+                <p className="text-[10px] capitalize text-slate-500">{tile.trend}</p>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-1 text-[10px] text-slate-500">
+            {healthStrip
+              .filter((t) => t.status !== "healthy")
+              .slice(0, 3)
+              .map((t) => t.title)
+              .join(" · ") || "All domains within normal range"}
+          </p>
+        )}
       </section>
-
-      <ExecutiveIntelligenceLayer
-        intelligence={intelligence}
-        onOpenLab={(id) => setLabDrawerId(String(id))}
-      />
 
       <section
         className="rounded-xl border-2 border-slate-800/15 bg-slate-50/50 p-3"
@@ -466,19 +580,46 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
           </h2>
           {founderOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
         </button>
+        {!founderOpen && founderActive.length > 0 ? (
+          <p className="mt-1 line-clamp-2 text-[10px] text-slate-600">
+            {founderActive
+              .slice(0, 2)
+              .map((i) => i.title)
+              .join(" · ")}
+            {founderActive.length > 2 ? ` · +${founderActive.length - 2} more` : ""}
+          </p>
+        ) : null}
         {founderOpen ? (
-          <ul className="mt-2 grid gap-2 md:grid-cols-2">
+          <ul className="mt-2 space-y-1.5">
             {founderActive.length ? (
-              founderActive.map((item) => (
-                <li key={item.id}>
-                  <InterventionQueueCard
-                    item={item}
-                    founder
-                    onOpen={openIntervention}
-                    onAction={handleInterventionAction}
-                  />
-                </li>
-              ))
+              <>
+                {visibleFounder.map((item) => (
+                  <li key={item.id}>
+                    <InterventionQueueCard
+                      item={item}
+                      founder
+                      compact
+                      busyAction={actionSubmit.busyKey}
+                      actionsDisabled={actionSubmit.isAnyBusy}
+                      onOpen={openIntervention}
+                      onAction={handleInterventionAction}
+                    />
+                  </li>
+                ))}
+                {founderActive.length > FOUNDER_PREVIEW ? (
+                  <li>
+                    <button
+                      type="button"
+                      className="text-[10px] font-medium text-amber-900 underline"
+                      onClick={() => setFounderShowAll((v) => !v)}
+                    >
+                      {founderShowAll
+                        ? "Show fewer"
+                        : `Show ${founderActive.length - FOUNDER_PREVIEW} more`}
+                    </button>
+                  </li>
+                ) : null}
+              </>
             ) : (
               <li className="col-span-full py-4 text-center text-sm text-emerald-800">
                 No founder escalations in the current operational window.
@@ -506,7 +647,7 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
             </span>
           </button>
           {prioritiesOpen ? (
-            <ul className="max-h-[min(480px,55vh)] space-y-1.5 overflow-y-auto pr-0.5">
+            <ul className="max-h-[min(320px,40vh)] space-y-1.5 overflow-y-auto pr-0.5">
               {clusters.length || singles.length ? (
                 <>
                   {clusters.map((cluster) => (
@@ -518,15 +659,31 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
                       />
                     </li>
                   ))}
-                  {singles.map((item) => (
+                  {visibleSingles.map((item) => (
                     <li key={item.id}>
                       <InterventionQueueCard
                         item={item}
+                        compact
+                        busyAction={actionSubmit.busyKey}
+                        actionsDisabled={actionSubmit.isAnyBusy}
                         onOpen={openIntervention}
                         onAction={handleInterventionAction}
                       />
                     </li>
                   ))}
+                  {singles.length > QUEUE_SINGLES_PREVIEW ? (
+                    <li>
+                      <button
+                        type="button"
+                        className="text-[10px] font-medium text-indigo-700 underline"
+                        onClick={() => setQueueShowAll((v) => !v)}
+                      >
+                        {queueShowAll
+                          ? "Show fewer items"
+                          : `Show ${singles.length - QUEUE_SINGLES_PREVIEW} more items`}
+                      </button>
+                    </li>
+                  ) : null}
                 </>
               ) : (
                 <li className="rounded-lg border border-dashed py-6 text-center text-sm text-slate-500">
@@ -538,13 +695,23 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
         </section>
 
         <section aria-label="Live operations feed">
-          <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
-            <Radio className="h-4 w-4" />
-            Live operations feed
-          </h2>
-          <ul className="max-h-[min(480px,55vh)] space-y-0.5 overflow-y-auto rounded-lg border bg-white p-1">
+          <button
+            type="button"
+            className="mb-2 flex w-full items-center justify-between gap-2"
+            onClick={() => setFeedOpen((v) => !v)}
+          >
+            <h2 className="flex items-center gap-2 text-sm font-semibold">
+              <Radio className="h-4 w-4" />
+              Live operations feed
+              <span className="text-[10px] font-normal text-slate-500">{feed.length} events</span>
+            </h2>
+            {feedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </button>
+          {feedOpen ? (
+          <ul className="max-h-[min(280px,35vh)] space-y-0.5 overflow-y-auto rounded-lg border bg-white p-1">
             {feed.length ? (
-              feed.map((row) => (
+              <>
+              {visibleFeed.map((row) => (
                 <li key={row.id}>
                   <button
                     type="button"
@@ -582,15 +749,39 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
                     </div>
                   </button>
                 </li>
-              ))
+              ))}
+              {feed.length > FEED_PREVIEW ? (
+                <li className="py-1 text-center">
+                  <button
+                    type="button"
+                    className="text-[10px] font-medium text-indigo-700 underline"
+                    onClick={() => setFeedShowAll((v) => !v)}
+                  >
+                    {feedShowAll ? "Show fewer" : `Show ${feed.length - FEED_PREVIEW} more`}
+                  </button>
+                </li>
+              ) : null}
+              </>
             ) : (
               <li className="py-6 text-center text-sm text-slate-500">
                 No operational events in the current window.
               </li>
             )}
           </ul>
+          ) : (
+            <p className="text-[10px] text-slate-500">
+              {feed[0]
+                ? `Latest: ${feed[0].eventType || "Event"}${feed[0].labName ? ` · ${feed[0].labName}` : ""}`
+                : "No events in the current window."}
+            </p>
+          )}
         </section>
       </div>
+
+      <ExecutiveIntelligenceLayer
+        intelligence={intelligence}
+        onOpenLab={(id) => setLabDrawerId(String(id))}
+      />
 
       <ExecutiveOperationalResolutionSection
         taskModel={operationalTaskModel}

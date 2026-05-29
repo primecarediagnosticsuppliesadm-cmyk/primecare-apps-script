@@ -18,6 +18,10 @@ import { buildUnifiedOperationsFeedRows } from "@/operations/operationalEventTim
 
 const SEVERITY_ORDER = { CRITICAL: 0, ATTENTION: 1, MONITORING: 2 };
 
+function worseSeverity(a, b) {
+  return (SEVERITY_ORDER[a] ?? 9) <= (SEVERITY_ORDER[b] ?? 9) ? a : b;
+}
+
 function str(v) {
   return String(v ?? "").trim();
 }
@@ -124,18 +128,34 @@ export function buildExecutivePriorities(payload, opsModel) {
   }
 
   const seen = new Set();
-  const deduped = items.filter((i) => {
+  const byId = items.filter((i) => {
     if (seen.has(i.id)) return false;
     seen.add(i.id);
     return true;
   });
 
-  deduped.sort(
-    (a, b) =>
-      (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9)
-  );
+  const byLabCluster = new Map();
+  for (const item of byId) {
+    const labKey = labIdKey(item.labId) || str(item.subtitle) || item.id;
+    const clusterKey = item.clusterType || "other";
+    const key = `${clusterKey}:${labKey}`;
+    const existing = byLabCluster.get(key);
+    if (!existing) {
+      byLabCluster.set(key, item);
+    } else {
+      byLabCluster.set(key, {
+        ...existing,
+        severity: worseSeverity(existing.severity, item.severity),
+        summary: (existing.summary || "").length >= (item.summary || "").length
+          ? existing.summary
+          : item.summary,
+      });
+    }
+  }
 
-  return deduped.slice(0, 18);
+  return [...byLabCluster.values()]
+    .sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9))
+    .slice(0, 12);
 }
 
 const FOUNDER_ESCALATION_TITLES = [
@@ -276,11 +296,6 @@ export function buildExecutiveHealthStrip(payload, opsModel) {
   })).concat(qualificationTile);
 }
 
-function worseSeverity(a, b) {
-  const rank = { CRITICAL: 0, ATTENTION: 1, MONITORING: 2 };
-  return (rank[a] ?? 9) <= (rank[b] ?? 9) ? a : b;
-}
-
 /**
  * Merge priorities + founder queue, hydrate workflow state, compress clusters.
  */
@@ -311,7 +326,9 @@ export function buildInterventionQueues(priorities, founderQueue, tenantId, payl
   );
 
   const active = filterActiveInterventions(hydrated);
-  const sorted = sortInterventionStack(active, topLabs);
+  const founderIds = new Set((founderQueue || []).map((f) => f.id));
+  const queueOnly = active.filter((i) => !founderIds.has(i.id));
+  const sorted = sortInterventionStack(queueOnly, topLabs);
   const { clusters, singles } = groupInterventionQueue(sorted);
 
   const founderActive = founderQueue

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { StatusBadge, KpiCard, KpiCardGrid } from "@/components/ux";
+import { StatusBadge } from "@/components/ux";
 import OperationalTaskCard from "@/components/operational/OperationalTaskCard.jsx";
 import OperationalTaskClusterCard from "@/components/operational/OperationalTaskClusterCard.jsx";
 import OperationalTaskDrawer from "@/components/operational/OperationalTaskDrawer.jsx";
@@ -13,7 +13,8 @@ export default function ExecutiveOperationalResolutionSection({
   onOpenIntervention,
   onOpenLab,
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [showAllTasks, setShowAllTasks] = useState(false);
   const [drawerTask, setDrawerTask] = useState(null);
   const [queueTab, setQueueTab] = useState("critical");
 
@@ -31,6 +32,10 @@ export default function ExecutiveOperationalResolutionSection({
           : queueTab === "escalations"
             ? queues.escalations
             : queues.proofRequired;
+
+  const TASK_PREVIEW = 4;
+  const listSource = queueTab === "critical" ? singles : queueItems;
+  const visibleTasks = showAllTasks ? listSource : listSource.slice(0, TASK_PREVIEW);
 
   return (
     <section
@@ -51,42 +56,20 @@ export default function ExecutiveOperationalResolutionSection({
         </h2>
         {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
       </button>
+      {!open ? (
+        <p className="mt-1 text-[10px] text-slate-600">
+          {governance.criticalOpen} critical · {governance.slaBreaches} SLA breach · tap to manage tasks
+        </p>
+      ) : null}
 
       {open ? (
         <>
-          <KpiCardGrid columns={4} className="mt-2 sm:grid-cols-2 lg:grid-cols-4">
-            <KpiCard title="Critical open" value={governance.criticalOpen} className="!rounded-lg !p-2.5" />
-            <KpiCard title="SLA breaches" value={governance.slaBreaches} className="!rounded-lg !p-2.5" />
-            <KpiCard title="Escalated" value={governance.escalated} className="!rounded-lg !p-2.5" />
-            <KpiCard title="Blocked" value={governance.blocked} className="!rounded-lg !p-2.5" />
-          </KpiCardGrid>
+          <p className="mt-1 text-[10px] text-slate-600">
+            {governance.criticalOpen} critical · {governance.slaBreaches} SLA · {governance.escalated}{" "}
+            escalated · {active.length} active tasks
+          </p>
 
-          <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-slate-600">
-            <span>Aging · {governance.aging}</span>
-            <span>Reopened · {governance.reopened}</span>
-            <span>Stale owners · {governance.staleOwners}</span>
-            <span>Inactive assignees · {governance.inactiveOwners}</span>
-          </div>
-
-          {accountability.length ? (
-            <div className="mt-3">
-              <h3 className="text-xs font-semibold text-slate-800">Execution accountability</h3>
-              <ul className="mt-1 grid gap-1 sm:grid-cols-2">
-                {accountability.slice(0, 4).map((row) => (
-                  <li key={row.agent} className="rounded border bg-white px-2 py-1.5 text-[10px]">
-                    <span className="font-semibold">{row.agent}</span>
-                    <span className="text-slate-500">
-                      {" "}
-                      · {row.assigned} assigned · {row.overdue} overdue
-                      {row.avgCompletionHours != null ? ` · ~${row.avgCompletionHours}h avg` : ""}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-
-          <div className="mt-3">
+          <div className="mt-2">
             <h3 className="mb-1 flex items-center gap-1 text-xs font-semibold">
               <ListChecks className="h-3.5 w-3.5" />
               Execution queues
@@ -111,9 +94,9 @@ export default function ExecutiveOperationalResolutionSection({
                 </button>
               ))}
             </div>
-            <ul className="mt-2 max-h-[min(360px,45vh)] space-y-1.5 overflow-y-auto">
+            <ul className="mt-2 max-h-[min(240px,32vh)] space-y-1.5 overflow-y-auto">
               {queueTab === "critical" && clusters.length
-                ? clusters.map((cluster) => (
+                ? clusters.slice(0, 3).map((cluster) => (
                     <li key={cluster.id}>
                       <OperationalTaskClusterCard
                         cluster={cluster}
@@ -123,8 +106,8 @@ export default function ExecutiveOperationalResolutionSection({
                     </li>
                   ))
                 : null}
-              {(queueTab === "critical" ? singles : queueItems).length ? (
-                (queueTab === "critical" ? singles : queueItems).map((task) => (
+              {visibleTasks.length ? (
+                visibleTasks.map((task) => (
                   <li key={task.taskId}>
                     <OperationalTaskCard task={task} onOpen={setDrawerTask} onAction={onTaskAction} />
                   </li>
@@ -132,6 +115,17 @@ export default function ExecutiveOperationalResolutionSection({
               ) : (
                 <li className="py-4 text-center text-xs text-slate-500">No tasks in this queue.</li>
               )}
+              {listSource.length > TASK_PREVIEW ? (
+                <li>
+                  <button
+                    type="button"
+                    className="text-[10px] font-medium text-indigo-700 underline"
+                    onClick={() => setShowAllTasks((v) => !v)}
+                  >
+                    {showAllTasks ? "Show fewer" : `Show ${listSource.length - TASK_PREVIEW} more`}
+                  </button>
+                </li>
+              ) : null}
             </ul>
             {resolvedCount ? (
               <p className="mt-1 text-[10px] text-slate-500">{resolvedCount} completed (hidden)</p>

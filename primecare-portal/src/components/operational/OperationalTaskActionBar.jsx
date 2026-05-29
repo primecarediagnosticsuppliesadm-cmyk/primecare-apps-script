@@ -35,6 +35,8 @@ export default function OperationalTaskActionBar({
   onAction,
   compact = true,
   className,
+  busyAction = "",
+  disabled = false,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const completed = task?.resolutionStatus === "COMPLETED";
@@ -56,7 +58,8 @@ export default function OperationalTaskActionBar({
           type="button"
           variant="outline"
           size="sm"
-          className="h-8 gap-1 px-2 text-[11px] max-md:h-9"
+          className="h-8 gap-1 px-2 text-[11px] max-md:min-h-10"
+          disabled={disabled || Boolean(busyAction)}
           onClick={(e) => {
             e.stopPropagation();
             run(key);

@@ -36,12 +36,6 @@ const LAB_SAFE_EVENT_TYPES = new Set([
   "collection_due",
 ]);
 
-const LAB_PLACEHOLDER_NOTIFICATIONS = [
-  { event_type: "order_created", severity: "info", status: "pending", source_module: "orders", created_at: new Date().toISOString(), payload_json: { message: "Order received and queued for processing." } },
-  { event_type: "order_fulfilled", severity: "medium", status: "read", source_module: "orders", created_at: new Date(Date.now() - 3600 * 1000).toISOString(), payload_json: { message: "Order fulfilled and ready for dispatch." } },
-  { event_type: "payment_received", severity: "low", status: "acknowledged", source_module: "collections", created_at: new Date(Date.now() - 7200 * 1000).toISOString(), payload_json: { message: "Payment has been recorded for your account." } },
-];
-
 function isAdminOrExecutive(role) {
   const r = String(role || "").toLowerCase();
   return r === ROLES.ADMIN || r === ROLES.EXECUTIVE;
@@ -328,7 +322,7 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
     [rows]
   );
   const displayRows = useMemo(() => {
-    if (role === ROLES.LAB && rows.length === 0) return LAB_PLACEHOLDER_NOTIFICATIONS;
+    if (role === ROLES.LAB && rows.length === 0) return [];
     return rows;
   }, [role, rows]);
 

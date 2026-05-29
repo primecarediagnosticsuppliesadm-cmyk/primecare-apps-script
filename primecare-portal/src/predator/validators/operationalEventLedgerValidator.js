@@ -1,6 +1,6 @@
 import { createPredatorEntry, summarizePredatorEntries } from "@/predator/predatorSchema.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
-import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
+import { resolvePredatorOpsPayload } from "@/predator/predatorOpsPayload.js";
 import { buildExecutiveInterventionModel } from "@/operations/executiveInterventionModel.js";
 import {
   readOperationalLedger,
@@ -78,6 +78,7 @@ export async function validateOperationalEventLedgerModule({
   ctx,
   currentUser = null,
   rendered = null,
+  opsPayload = null,
 }) {
   return predatorTrace("Operational Event Ledger", "validation.full", async () => {
     const entries = [];
@@ -172,8 +173,9 @@ export async function validateOperationalEventLedgerModule({
       let payload;
       let execModelForUi;
       try {
-        payload = await loadOperationsCommandCenterData(
-          currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId }
+        payload = await resolvePredatorOpsPayload(
+          currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId },
+          opsPayload
         );
         execModelForUi = buildExecutiveInterventionModel(payload, {
           tenantId: ctx.tenantId,
