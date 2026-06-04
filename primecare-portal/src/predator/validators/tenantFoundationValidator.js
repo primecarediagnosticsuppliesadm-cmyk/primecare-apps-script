@@ -6,6 +6,8 @@ import { buildTenantReadiness } from "@/tenant/tenantFoundationEngine.js";
 import { isolationChecksPass } from "@/tenant/tenantFoundationIsolation.js";
 import { polishPredatorEntries } from "@/predator/predatorEntryPolish.js";
 import { ROLES } from "@/config/roles.js";
+import { PERSISTENCE_STATUS } from "@/tenant/durableTenantStore.js";
+import { supabase } from "@/api/supabaseClient.js";
 
 const VALID_HEALTH = new Set(["Healthy", "Watch", "Risk"]);
 const VALID_STATUS = new Set(["ACTIVE", "INACTIVE", "PENDING"]);
@@ -206,6 +208,63 @@ export async function validateTenantFoundationModule({
         })
       );
     }
+
+    const nonHome = tenants.filter((t) => !t.isHome);
+    const localOnly = nonHome.filter(
+      (t) =>
+        t.persistenceStatus === PERSISTENCE_STATUS.LOCAL_ONLY ||
+        (t.source !== "database" && !t.durable)
+    );
+    const durable = nonHome.filter(
+      (t) => t.persistenceStatus === PERSISTENCE_STATUS.DURABLE || t.source === "database"
+    );
+    entries.push(
+      createPredatorEntry({
+        status: localOnly.length > 0 ? "WARN" : "PASS",
+        module: "Tenant Foundation",
+        step: "registry.local_only",
+        actual: `${localOnly.length} local-only`,
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+    entries.push(
+      createPredatorEntry({
+        status: durable.length > 0 || nonHome.length === 0 ? "PASS" : "WARN",
+        module: "Tenant Foundation",
+        step: "registry.durable_supabase",
+        actual: `${durable.length} durable`,
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const dupes = registry.duplicateNames || [];
+    entries.push(
+      createPredatorEntry({
+        status: dupes.length === 0 ? "PASS" : "FAIL",
+        module: "Tenant Foundation",
+        step: "registry.duplicate_names",
+        actual: dupes.length ? dupes.map((d) => d.name).join(", ") : "none",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    entries.push(
+      createPredatorEntry({
+        status: "PASS",
+        module: "Tenant Foundation",
+        step: "registry.local_fallback",
+        actual: supabase ? "fallback available" : "offline local registry",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
 
     if (rendered?.tenantCount !== undefined && rendered.tenantCount !== tenants.length) {
       entries.push(

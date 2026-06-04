@@ -129,8 +129,12 @@ export function mergeTenantRow(dbRow, registryRow, liveMetrics, isolationChecks)
     healthScore,
     isolationChecks: isolationChecks || registryRow?.isolationChecks || [],
     lastIsolationPass: isolationPass,
-    source: dbRow ? "database" : "registry",
+    source: dbRow ? "database" : registryRow?.source || "registry",
     isHome: Boolean(registryRow?.isHome),
+    durable: Boolean(dbRow || registryRow?.durable),
+    persistenceStatus: registryRow?.persistenceStatus,
+    syncFailed: Boolean(registryRow?.syncFailed),
+    lastSyncError: registryRow?.lastSyncError || null,
   };
 
   tenant.readiness = buildTenantReadiness(tenant);

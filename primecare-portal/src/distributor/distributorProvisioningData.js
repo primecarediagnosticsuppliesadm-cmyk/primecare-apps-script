@@ -2,12 +2,23 @@ import {
   loadTenantFoundationRegistry,
   fetchAdminProfilesForTenant,
 } from "@/tenant/tenantFoundationData.js";
+import {
+  upsertDistributorToSupabase,
+  syncLocalDistributorsToSupabase,
+  fetchDatabaseTenants as fetchDurableTenants,
+  updateDistributorStatusInSupabase,
+  PERSISTENCE_STATUS,
+} from "@/tenant/durableTenantStore.js";
 import { fetchAgentProfilesForTenant } from "@/distributor/distributorWorkspaceData.js";
 import { runTenantFoundationIsolationChecks } from "@/tenant/tenantFoundationIsolation.js";
 import {
   readTenantRegistry,
   upsertRegistryTenant,
   getRegistryTenant,
+  getTenantRegistryStorageDebug,
+  readTenantViewContext,
+  TENANT_REGISTRY_STORAGE_KEY,
+  TENANT_VIEW_STORAGE_KEY,
 } from "@/tenant/tenantFoundationStore.js";
 import {
   buildProvisioningDraft,
@@ -46,9 +57,6 @@ export async function loadProvisioningBundle(currentUser, options = {}) {
   }
 
   const refreshed = await loadTenantFoundationRegistry(currentUser, { skipLiveLoad: true });
-  const distributors = (refreshed.tenants || [])
-    .filter((t) => !t.isHome || refreshed.tenants.length === 1)
-    .map((t) => mapTenantToDistributorRegistryRow(t));
 
   const allRows = refreshed.tenants || [];
   const homeRow = allRows.find((t) => t.id === homeTenantId);
@@ -75,25 +83,82 @@ export async function loadProvisioningBundle(currentUser, options = {}) {
     }
   }
 
-  const registry = readTenantRegistry();
-  const list = registry.map((reg) => {
-    const db = allRows.find((t) => t.id === reg.id);
-    return db || reg;
-  });
-  for (const t of allRows) {
-    if (!list.find((r) => r.id === t.id)) list.push(t);
-  }
+  const distributors = allRows.map(mapTenantToDistributorRegistryRow);
+  const dbFetch = await fetchDurableTenants();
 
   return {
     homeTenantId,
-    tenants: list,
-    distributors: list.map(mapTenantToDistributorRegistryRow),
+    tenants: allRows,
+    distributors,
+    duplicateNames: refreshed.duplicateNames || [],
+    registryDebug: buildProvisioningRegistryDebug({
+      homeTenantId,
+      tenants: allRows,
+      distributors,
+      dbFetch,
+      duplicateNames: refreshed.duplicateNames || [],
+    }),
     opsPayload: foundation.opsPayload,
     isolationChecks,
     roleCount,
     agentCount,
   };
 }
+
+/**
+ * Registry diagnostics for Provisioning (localStorage + merge + view context).
+ */
+export function buildProvisioningRegistryDebug(bundle) {
+  const storage = getTenantRegistryStorageDebug();
+  const homeTenantId = str(bundle?.homeTenantId);
+  const view = readTenantViewContext(homeTenantId);
+  const loaded = bundle?.distributors || [];
+  const loadedNonHome = loaded.filter((d) => !d.isHome);
+  const rawNonHome = (storage.rawRows || []).filter((r) => !r.isHome);
+  const supabaseCount = bundle?.dbFetch?.rows?.length ?? 0;
+  const localOnlyRows = loadedNonHome.filter(
+    (d) => d.persistenceStatus === PERSISTENCE_STATUS.LOCAL_ONLY
+  );
+  const syncFailedRows = loadedNonHome.filter(
+    (d) => d.persistenceStatus === PERSISTENCE_STATUS.SYNC_FAILED
+  );
+  const durableRows = loadedNonHome.filter(
+    (d) => d.persistenceStatus === PERSISTENCE_STATUS.DURABLE
+  );
+
+  return {
+    storageKey: TENANT_REGISTRY_STORAGE_KEY,
+    viewStorageKey: TENANT_VIEW_STORAGE_KEY,
+    supabaseTenantsCount: supabaseCount,
+    supabaseFetchError: bundle?.dbFetch?.error || null,
+    rawDistributorCount: storage.rawDistributorCount,
+    rawDistributorCountExcludingHome: rawNonHome.length,
+    loadedDistributorCount: loaded.length,
+    loadedDistributorCountExcludingHome: loadedNonHome.length,
+    mergedCount: loaded.length,
+    durableCount: durableRows.length,
+    localOnlyCount: localOnlyRows.length,
+    syncFailedCount: syncFailedRows.length,
+    localOnlyRows: localOnlyRows.map((d) => ({ id: d.id, name: d.name })),
+    syncFailedRows: syncFailedRows.map((d) => ({
+      id: d.id,
+      name: d.name,
+      error: d.lastSyncError,
+    })),
+    duplicateNames: bundle?.duplicateNames || [],
+    homeTenantId: homeTenantId || null,
+    viewTenantId: view.viewTenantId,
+    readOnlyView: view.readOnly,
+    filteredByTenantContext: false,
+    rawRows: storage.rawRows,
+    loadedNames: loaded.map((d) => d.name),
+    loadedNonHomeNames: loadedNonHome.map((d) => d.name),
+    notes:
+      "Durable rows live in public.tenants (Supabase). localStorage is fallback when insert/RLS fails.",
+  };
+}
+
+export { syncLocalDistributorsToSupabase };
 
 export function resolveProvisioningModel(bundle, distributorId) {
   const id = str(distributorId);
@@ -130,16 +195,64 @@ function num(v) {
   return Number(v) || 0;
 }
 
-export function persistProvisioningDraft(draft) {
-  upsertRegistryTenant({
+/**
+ * Save distributor: Supabase first, localStorage fallback.
+ * @returns {Promise<{ row: object, durable: boolean, warning?: string, error?: string }>}
+ */
+export async function persistProvisioningDraft(draft) {
+  const registry = readTenantRegistry();
+  const { rows: dbTenants } = await fetchDurableTenants();
+
+  const supabaseResult = await upsertDistributorToSupabase(draft, {
+    dbTenants,
+    registry,
+  });
+
+  const now = new Date().toISOString();
+  const base = {
     ...draft,
     status: "PENDING",
     provisioning: {
       ...(draft.provisioning || {}),
       lifecycle: "configuring",
     },
-  });
-  return draft;
+    updatedAt: now,
+  };
+
+  if (supabaseResult.ok && supabaseResult.durable) {
+    const row = {
+      ...base,
+      ...supabaseResult.row,
+      durable: true,
+      localOnly: false,
+      syncFailed: false,
+      lastSyncError: null,
+      persistenceStatus: PERSISTENCE_STATUS.DURABLE,
+      source: "database",
+    };
+    upsertRegistryTenant(row);
+    return { row, durable: true };
+  }
+
+  const row = {
+    ...base,
+    durable: false,
+    localOnly: true,
+    syncFailed: Boolean(supabaseResult.error),
+    lastSyncError: supabaseResult.error || null,
+    persistenceStatus: supabaseResult.error
+      ? PERSISTENCE_STATUS.SYNC_FAILED
+      : PERSISTENCE_STATUS.LOCAL_ONLY,
+    source: "registry",
+  };
+  upsertRegistryTenant(row);
+
+  return {
+    row,
+    durable: false,
+    warning: "Saved locally only — durable tenant save failed",
+    error: supabaseResult.error,
+  };
 }
 
 function appendTimelineEvent(tenantId, event) {
@@ -159,7 +272,7 @@ function appendTimelineEvent(tenantId, event) {
 /**
  * Activate distributor when gates pass (registry status ACTIVE).
  */
-export function activateDistributorProvisioning(tenantId, model) {
+export async function activateDistributorProvisioning(tenantId, model) {
   if (!model?.gates?.canActivate) {
     return {
       ok: false,
@@ -168,13 +281,32 @@ export function activateDistributorProvisioning(tenantId, model) {
     };
   }
 
+  if (!model.durable && model.persistenceStatus !== PERSISTENCE_STATUS.DURABLE) {
+    return {
+      ok: false,
+      error: "Activation requires durable Supabase tenant",
+      blockers: ["Durable tenant (Supabase)"],
+    };
+  }
+
   const row = getRegistryTenant(tenantId);
   if (!row) return { ok: false, error: "Distributor not found" };
 
   const now = new Date().toISOString();
+  const dbUpdate = await updateDistributorStatusInSupabase(tenantId, "ACTIVE");
+  if (!dbUpdate.ok) {
+    return {
+      ok: false,
+      error: dbUpdate.error || "Failed to update Supabase tenant status",
+    };
+  }
+
   upsertRegistryTenant({
     ...row,
     status: "ACTIVE",
+    durable: true,
+    persistenceStatus: PERSISTENCE_STATUS.DURABLE,
+    source: "database",
     provisioning: {
       ...(row.provisioning || {}),
       lifecycle: "activated",
@@ -208,8 +340,11 @@ export function markProvisioningMilestone(tenantId, kind) {
 /**
  * Refresh bundle tenants from localStorage without reloading ops/API.
  */
-export function refreshProvisioningBundleState(bundle) {
+export async function refreshProvisioningBundleState(bundle, currentUser) {
   if (!bundle) return bundle;
+  if (currentUser) {
+    return loadProvisioningBundle(currentUser, { skipIsolation: true });
+  }
   const registry = readTenantRegistry();
   const byId = new Map();
   for (const t of bundle.tenants || []) byId.set(t.id, t);
@@ -218,10 +353,18 @@ export function refreshProvisioningBundleState(bundle) {
     byId.set(fresh.id, { ...byId.get(fresh.id), ...fresh });
   }
   const list = [...byId.values()];
+  const distributors = list.map(mapTenantToDistributorRegistryRow);
+  const dbFetch = await fetchDurableTenants();
   return {
     ...bundle,
     tenants: list,
-    distributors: list.map(mapTenantToDistributorRegistryRow),
+    distributors,
+    registryDebug: buildProvisioningRegistryDebug({
+      homeTenantId: bundle.homeTenantId,
+      tenants: list,
+      distributors,
+      dbFetch,
+    }),
   };
 }
 

@@ -1,4 +1,3 @@
-import { supabase } from "@/api/supabaseClient.js";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import {
   readTenantRegistry,
@@ -10,6 +9,15 @@ import {
   buildTenantReadiness,
 } from "@/tenant/tenantFoundationEngine.js";
 import { runTenantFoundationIsolationChecks } from "@/tenant/tenantFoundationIsolation.js";
+import {
+  fetchDatabaseTenants as fetchDurableDatabaseTenants,
+  mergeTenantRegistrySources,
+  findTenantNameCollision,
+  normalizeTenantName,
+} from "@/tenant/durableTenantStore.js";
+
+export { fetchDurableDatabaseTenants as fetchDatabaseTenantsDetailed };
+export { findTenantNameCollision, normalizeTenantName };
 
 function str(v) {
   return String(v ?? "").trim();
@@ -160,49 +168,22 @@ export async function loadTenantFoundationRegistry(currentUser, options = {}) {
   const adminProfiles = homeTenantId ? await fetchAdminProfilesForTenant(homeTenantId) : [];
   const rolesConfigured = adminProfiles.filter((p) => p.active !== false).length >= 2;
 
-  const merged = [];
-  const seenIds = new Set();
-
-  for (const db of dbTenants) {
-    const reg = registry.find((r) => r.id === db.id) || {};
-    const isHome = db.id === homeTenantId;
-    const metrics = isHome ? liveMetrics : reg.metrics;
-    const checks = isHome ? isolationChecks : reg.isolationChecks;
-    const config = {
-      ...(reg.config || {}),
-      rolesConfigured: isHome ? rolesConfigured : reg.config?.rolesConfigured,
-      productCatalogReady: isHome
-        ? Number(metrics?.products || 0) > 0
-        : reg.config?.productCatalogReady,
-    };
-    if (isHome && adminProfiles.length) {
-      const admin = adminProfiles.find((p) => p.role === "admin") || adminProfiles[0];
-      config.adminName = config.adminName || admin?.agent_name || "Admin";
-      config.rolesConfigured = rolesConfigured;
-    }
-
-    merged.push(
-      mergeTenantRow(db, { ...reg, config, isHome }, metrics, checks)
-    );
-    seenIds.add(db.id);
-  }
-
-  for (const reg of registry) {
-    if (!reg.id || seenIds.has(reg.id)) continue;
-    merged.push(mergeTenantRow(null, reg, reg.metrics, reg.isolationChecks));
-    seenIds.add(reg.id);
-  }
-
-  merged.sort((a, b) => {
-    if (a.isHome) return -1;
-    if (b.isHome) return 1;
-    return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+  const { tenants: merged, duplicateNames } = mergeTenantRegistrySources({
+    dbTenants,
+    registry,
+    homeTenantId,
+    liveMetrics,
+    isolationChecks,
+    rolesConfigured,
+    adminProfiles,
+    mergeTenantRow,
   });
 
   return {
     tenants: merged,
     homeTenantId,
     opsPayload,
+    duplicateNames,
     switcherOptions: buildTenantSwitcherOptions(homeTenantId, merged, registry),
   };
 }

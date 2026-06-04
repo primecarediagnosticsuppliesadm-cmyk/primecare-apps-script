@@ -13,8 +13,9 @@ const PIPELINE_STEPS = [
   { id: "activated", label: "Activated" },
 ];
 
-/** Gates that block activation (V3). */
+/** Gates that block activation (V3 + durable registry). */
 export const ACTIVATION_GATE_IDS = new Set([
+  "durable_tenant",
   "admin_user",
   "catalog_configured",
   "isolation_verified",
@@ -78,12 +79,31 @@ export function buildProvisioningChecks(ctx) {
   const metrics = ctx.metrics || {};
   const isLive = ctx.isLive;
   const isDb = ctx.source === "database";
+  const persistenceStatus = resolvePersistenceStatus({
+    source: ctx.source,
+    durable: ctx.durable,
+    persistenceStatus: ctx.persistenceStatus,
+    syncFailed: ctx.syncFailed,
+    lastSyncError: ctx.lastSyncError,
+  });
+  const isDurable = persistenceStatus === PERSISTENCE_STATUS.DURABLE || isDb;
   const isolationPass =
     ctx.isolationChecks?.length > 0
       ? isolationChecksPass(ctx.isolationChecks)
       : ctx.lastIsolationPass === true;
 
   const checks = [
+    {
+      id: "durable_tenant",
+      label: "Durable tenant (Supabase)",
+      required: true,
+      pass: isDurable,
+      detail: isDurable
+        ? "Saved in public.tenants"
+        : persistenceStatus === PERSISTENCE_STATUS.SYNC_FAILED
+          ? `Sync failed — ${str(ctx.lastSyncError) || "use Sync local distributors"}`
+          : "Local only — sync to Supabase before activation",
+    },
     {
       id: "admin_user",
       label: "Admin user",
@@ -229,6 +249,7 @@ export function computeReadinessDebug(checks, lastUpdated = null) {
 /** Activation gate rows for diagnosis UI (required + key optional). */
 export function buildActivationDiagnosis(checks) {
   const gateOrder = [
+    "durable_tenant",
     "admin_user",
     "catalog_configured",
     "isolation_verified",
@@ -551,11 +572,16 @@ export function buildProvisioningDraft(form) {
  * Full provisioning model for one distributor.
  */
 export function buildDistributorProvisioningModel(tenant, ctx = {}) {
+  const persistenceStatus = resolvePersistenceStatus(tenant);
   const checks = buildProvisioningChecks({
     config: tenant.config,
     metrics: tenant.metrics,
     isLive: ctx.isLive,
     source: tenant.source,
+    durable: tenant.durable,
+    persistenceStatus,
+    syncFailed: tenant.syncFailed,
+    lastSyncError: tenant.lastSyncError,
     isolationChecks: tenant.isolationChecks,
     lastIsolationPass: tenant.lastIsolationPass,
     roleCount: ctx.roleCount,
@@ -600,6 +626,9 @@ export function buildDistributorProvisioningModel(tenant, ctx = {}) {
     },
     isLive: ctx.isLive,
     isHome: tenant.isHome,
+    persistenceStatus,
+    persistenceLabel: persistenceStatusLabel(persistenceStatus),
+    durable: persistenceStatus === PERSISTENCE_STATUS.DURABLE,
   };
 }
 

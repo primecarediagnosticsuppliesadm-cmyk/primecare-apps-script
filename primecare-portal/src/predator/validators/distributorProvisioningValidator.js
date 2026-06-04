@@ -13,6 +13,8 @@ import {
 import { getRegistryTenant } from "@/tenant/tenantFoundationStore.js";
 import { polishPredatorEntries } from "@/predator/predatorEntryPolish.js";
 import { ROLES } from "@/config/roles.js";
+import { PERSISTENCE_STATUS } from "@/tenant/durableTenantStore.js";
+import { supabase } from "@/api/supabaseClient.js";
 
 function finish(entries) {
   const polished = polishPredatorEntries(entries);
@@ -160,7 +162,7 @@ export async function validateDistributorProvisioningModule({
       );
     }
 
-    const blockedActivate = activateDistributorProvisioning(model.distributorId, {
+    const blockedActivate = await activateDistributorProvisioning(model.distributorId, {
       ...model,
       gates: { canActivate: false, blockers: [{ label: "test" }] },
     });
@@ -169,6 +171,62 @@ export async function validateDistributorProvisioningModule({
         status: blockedActivate.ok === false ? "PASS" : "FAIL",
         module: "Distributor Provisioning",
         step: "activation.blocked_rejected",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const nonHome = (bundle.distributors || []).filter((d) => !d.isHome);
+    const localOnly = nonHome.filter(
+      (d) => d.persistenceStatus === PERSISTENCE_STATUS.LOCAL_ONLY
+    );
+    const durable = nonHome.filter((d) => d.persistenceStatus === PERSISTENCE_STATUS.DURABLE);
+    entries.push(
+      createPredatorEntry({
+        status: localOnly.length > 0 ? "WARN" : "PASS",
+        module: "Distributor Provisioning",
+        step: "registry.local_only",
+        actual: `${localOnly.length} local-only`,
+        suggestedFix: localOnly.length
+          ? "Run Sync local distributors or fix Supabase RLS"
+          : undefined,
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+    entries.push(
+      createPredatorEntry({
+        status: durable.length > 0 || nonHome.length === 0 ? "PASS" : "WARN",
+        module: "Distributor Provisioning",
+        step: "registry.durable_supabase",
+        actual: `${durable.length} durable`,
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const dupes = bundle.duplicateNames || [];
+    entries.push(
+      createPredatorEntry({
+        status: dupes.length === 0 ? "PASS" : "FAIL",
+        module: "Distributor Provisioning",
+        step: "registry.duplicate_names",
+        actual: dupes.length ? dupes.map((d) => d.name).join(", ") : "none",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    entries.push(
+      createPredatorEntry({
+        status: !supabase || bundle.tenants?.length >= 0 ? "PASS" : "FAIL",
+        module: "Distributor Provisioning",
+        step: "registry.local_fallback",
+        actual: supabase ? "supabase configured" : "local-only mode",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,

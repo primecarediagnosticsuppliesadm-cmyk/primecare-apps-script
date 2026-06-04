@@ -57,8 +57,8 @@ export default function ProvisioningCreateWizard({ onClose, onCreated }) {
     }
     setSaving(true);
     try {
-      const row = persistProvisioningDraft(draft);
-      onCreated?.(row);
+      const outcome = await persistProvisioningDraft(draft);
+      onCreated?.(outcome.row, outcome);
       onClose?.();
     } catch (err) {
       setError(err?.message || "Failed to create distributor");

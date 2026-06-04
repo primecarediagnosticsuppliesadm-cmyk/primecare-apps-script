@@ -9,7 +9,9 @@ import {
   acknowledgeProvisioningTask,
   refreshProvisioningBundleState,
   updateDistributorAdminDetails,
+  syncLocalDistributorsToSupabase,
 } from "@/distributor/distributorProvisioningData.js";
+import { PERSISTENCE_STATUS } from "@/tenant/durableTenantStore.js";
 import { PROVISIONING_CHECK_ACTIONS } from "@/distributor/distributorProvisioningEngine.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { cn } from "@/lib/utils";
@@ -41,6 +43,12 @@ const DIST_STATUS_VARIANT = {
   active: "success",
   pending: "info",
   suspended: "neutral",
+};
+
+const PERSISTENCE_VARIANT = {
+  [PERSISTENCE_STATUS.DURABLE]: "success",
+  [PERSISTENCE_STATUS.LOCAL_ONLY]: "warning",
+  [PERSISTENCE_STATUS.SYNC_FAILED]: "danger",
 };
 
 const TENANT_ISOLATION_FOCUS_KEY = "primecare_tenant_mgmt_section";
@@ -112,6 +120,147 @@ function ActivationDiagnosis({ diagnosis }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+function RegistryDebugDrawer({ debug, onClose }) {
+  if (!debug) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}>
+      <div
+        className="h-full w-full max-w-md overflow-y-auto bg-white p-4 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="flex items-center gap-2 text-sm font-bold">
+            <Bug className="h-4 w-4 text-indigo-600" />
+            Registry debug
+          </h3>
+          <Button type="button" variant="ghost" size="icon" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        <dl className="mt-3 space-y-2 text-xs">
+          <div className="rounded border px-2 py-1.5">
+            <dt className="font-bold text-slate-500">Storage key</dt>
+            <dd className="mt-0.5 break-all font-mono text-[10px]">{debug.storageKey}</dd>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="rounded border px-2 py-1.5">
+              <dt className="font-bold text-slate-500">Supabase tenants</dt>
+              <dd className="mt-0.5 text-lg font-bold tabular-nums">{debug.supabaseTenantsCount}</dd>
+              {debug.supabaseFetchError ? (
+                <dd className="text-[10px] text-amber-800">{debug.supabaseFetchError}</dd>
+              ) : null}
+            </div>
+            <div className="rounded border px-2 py-1.5">
+              <dt className="font-bold text-slate-500">localStorage registry</dt>
+              <dd className="mt-0.5 text-lg font-bold tabular-nums">{debug.rawDistributorCount}</dd>
+              <dd className="text-[10px] text-slate-500">
+                excl. HQ: {debug.rawDistributorCountExcludingHome}
+              </dd>
+            </div>
+            <div className="rounded border px-2 py-1.5">
+              <dt className="font-bold text-slate-500">Merged count</dt>
+              <dd className="mt-0.5 text-lg font-bold tabular-nums">{debug.mergedCount}</dd>
+              <dd className="text-[10px] text-slate-500">
+                durable {debug.durableCount} · local {debug.localOnlyCount} · failed{" "}
+                {debug.syncFailedCount}
+              </dd>
+            </div>
+            <div className="rounded border px-2 py-1.5">
+              <dt className="font-bold text-slate-500">Loaded (excl. HQ)</dt>
+              <dd className="mt-0.5 text-lg font-bold tabular-nums">
+                {debug.loadedDistributorCountExcludingHome}
+              </dd>
+            </div>
+          </div>
+          {debug.localOnlyRows?.length ? (
+            <>
+              <h4 className="mt-3 text-xs font-bold uppercase text-amber-700">Local-only rows</h4>
+              <ul className="mt-1 text-[10px] text-amber-900">
+                {debug.localOnlyRows.map((r) => (
+                  <li key={r.id}>
+                    {r.name} · {r.id.slice(0, 8)}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          {debug.syncFailedRows?.length ? (
+            <>
+              <h4 className="mt-3 text-xs font-bold uppercase text-red-700">Sync failures</h4>
+              <ul className="mt-1 space-y-1 text-[10px] text-red-900">
+                {debug.syncFailedRows.map((r) => (
+                  <li key={r.id} className="rounded border border-red-100 bg-red-50 px-2 py-1">
+                    {r.name}: {r.error || "unknown"}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          {debug.duplicateNames?.length ? (
+            <>
+              <h4 className="mt-3 text-xs font-bold uppercase text-red-700">Name collisions</h4>
+              <ul className="mt-1 text-[10px] text-red-900">
+                {debug.duplicateNames.map((d) => (
+                  <li key={`${d.localId}-${d.durableId}`}>
+                    {d.name}: local {d.localId?.slice(0, 8)} vs durable {d.durableId?.slice(0, 8)}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          <div className="rounded border px-2 py-1.5">
+            <dt className="font-bold text-slate-500">Tenant context</dt>
+            <dd className="mt-1 space-y-0.5 font-mono text-[10px]">
+              <p>
+                <span className="text-slate-500">homeTenantId:</span> {debug.homeTenantId || "—"}
+              </p>
+              <p>
+                <span className="text-slate-500">viewTenantId:</span> {debug.viewTenantId || "—"}
+              </p>
+              <p>
+                <span className="text-slate-500">readOnly view:</span>{" "}
+                {debug.readOnlyView ? "yes" : "no"}
+              </p>
+              <p>
+                <span className="text-slate-500">Filtered by view context:</span>{" "}
+                {debug.filteredByTenantContext ? "yes" : "no"}
+              </p>
+            </dd>
+          </div>
+          <div className="rounded border px-2 py-1.5">
+            <dt className="font-bold text-slate-500">View storage key</dt>
+            <dd className="mt-0.5 break-all font-mono text-[10px]">{debug.viewStorageKey}</dd>
+          </div>
+        </dl>
+        <h4 className="mt-4 text-xs font-bold uppercase text-slate-500">Loaded distributors</h4>
+        {debug.loadedNonHomeNames?.length ? (
+          <ul className="mt-1 list-inside list-disc text-xs">
+            {debug.loadedNonHomeNames.map((name) => (
+              <li key={name}>{name}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-amber-800">None (excluding HQ).</p>
+        )}
+        <h4 className="mt-4 text-xs font-bold uppercase text-slate-500">Raw localStorage rows</h4>
+        {debug.rawRows?.length ? (
+          <ul className="mt-1 max-h-40 space-y-1 overflow-y-auto text-[10px]">
+            {debug.rawRows.map((r) => (
+              <li key={r.id} className="rounded border px-2 py-1 font-mono">
+                {r.name}
+                {r.isHome ? " · HQ" : ""} · {r.status || "?"}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-red-700">Registry empty — create distributor or check origin/storage.</p>
+        )}
+        <p className="mt-4 text-[10px] leading-relaxed text-slate-500">{debug.notes}</p>
+      </div>
+    </div>
   );
 }
 
@@ -239,8 +388,10 @@ export default function DistributorProvisioningPage({
   const [tab, setTab] = useState("Pipeline");
   const [showWizard, setShowWizard] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
+  const [showRegistryDebug, setShowRegistryDebug] = useState(false);
   const [showEditAdmin, setShowEditAdmin] = useState(false);
   const [msg, setMsg] = useState("");
+  const [syncing, setSyncing] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -259,14 +410,16 @@ export default function DistributorProvisioningPage({
     void load();
   }, [load]);
 
-  const applyLocalBundleUpdate = useCallback((distributorId) => {
-    setBundle((prev) => {
-      if (!prev) return prev;
-      const next = refreshProvisioningBundleState(prev);
-      if (distributorId) setSelectedId(distributorId);
-      return next;
-    });
-  }, []);
+  const applyLocalBundleUpdate = useCallback(
+    async (distributorId) => {
+      const next = await refreshProvisioningBundleState(bundle, currentUser);
+      if (next) {
+        setBundle(next);
+        if (distributorId) setSelectedId(distributorId);
+      }
+    },
+    [bundle, currentUser]
+  );
 
   const model = useMemo(() => {
     if (!bundle) return null;
@@ -317,34 +470,57 @@ export default function DistributorProvisioningPage({
     if (!model) return;
     updateDistributorAdminDetails(model.distributorId, admin);
     setShowEditAdmin(false);
-    applyLocalBundleUpdate(model.distributorId);
+    void applyLocalBundleUpdate(model.distributorId);
     setMsg("Admin saved — readiness updated");
   }
 
-  function handleActivate() {
+  async function handleActivate() {
     if (!model || !bundle) return;
-    const nextBundle = refreshProvisioningBundleState(bundle);
+    const nextBundle = await refreshProvisioningBundleState(bundle, currentUser);
     const fresh = resolveProvisioningModel(nextBundle, model.distributorId);
-    const result = activateDistributorProvisioning(model.distributorId, fresh);
-    setBundle(refreshProvisioningBundleState(nextBundle));
+    const result = await activateDistributorProvisioning(model.distributorId, fresh);
+    const refreshed = await refreshProvisioningBundleState(nextBundle, currentUser);
+    setBundle(refreshed);
     setSelectedId(model.distributorId);
     if (!result.ok) {
-      setMsg("Activation blocked — see gate diagnosis below");
+      setMsg(result.error || "Activation blocked — see gate diagnosis below");
       return;
     }
-    setMsg("Distributor activated");
+    setMsg("Distributor activated (durable)");
   }
 
   function handleAckTask(taskId) {
     if (!model) return;
     acknowledgeProvisioningTask(model.distributorId, taskId);
-    applyLocalBundleUpdate(model.distributorId);
+    void applyLocalBundleUpdate(model.distributorId);
     setMsg("Setup step recorded — readiness updated");
+  }
+
+  async function handleSyncLocal() {
+    setSyncing(true);
+    try {
+      const homeId = bundle?.homeTenantId || currentUser?.tenantId;
+      const outcome = await syncLocalDistributorsToSupabase(homeId);
+      await load();
+      if (outcome.failed?.length) {
+        setMsg(
+          `Synced ${outcome.succeeded}/${outcome.attempted} — ${outcome.failed.length} failed (see Registry debug)`
+        );
+      } else if (outcome.attempted === 0) {
+        setMsg("No local-only distributors to sync");
+      } else {
+        setMsg(`Synced ${outcome.succeeded} distributor(s) to Supabase`);
+      }
+    } catch (err) {
+      setMsg(err?.message || "Sync failed");
+    } finally {
+      setSyncing(false);
+    }
   }
 
   if (loading) return <PageSkeleton rows={8} />;
 
-  const distributors = bundle?.distributors || [];
+  const distributors = (bundle?.distributors || []).filter((d) => !d.isHome);
 
   return (
     <div className="mx-auto max-w-5xl space-y-3 p-3 pb-8">
@@ -359,6 +535,25 @@ export default function DistributorProvisioningPage({
           </p>
         </div>
         <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void handleSyncLocal()}
+            disabled={syncing}
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
+            Sync local
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setShowRegistryDebug(true)}
+            disabled={!bundle?.registryDebug}
+          >
+            <Bug className="h-3.5 w-3.5" /> Registry
+          </Button>
           <Button type="button" variant="ghost" size="icon" onClick={() => void load()}>
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -372,15 +567,17 @@ export default function DistributorProvisioningPage({
       {showWizard ? (
         <ProvisioningCreateWizard
           onClose={() => setShowWizard(false)}
-          onCreated={(row) => {
+          onCreated={(row, meta) => {
             setShowWizard(false);
-            setBundle((prev) => {
-              if (!prev) return prev;
-              const tenants = [...(prev.tenants || []), row];
-              return refreshProvisioningBundleState({ ...prev, tenants });
-            });
+            void load();
             setSelectedId(row.id);
-            setMsg("Distributor draft created");
+            setMsg(
+              meta?.warning
+                ? `${meta.warning}${meta.error ? `: ${meta.error}` : ""}`
+                : meta?.durable
+                  ? "Distributor saved to Supabase (durable)"
+                  : "Distributor draft created"
+            );
           }}
         />
       ) : null}
@@ -390,6 +587,13 @@ export default function DistributorProvisioningPage({
           profile={model.profile}
           onClose={() => setShowEditAdmin(false)}
           onSave={handleSaveAdmin}
+        />
+      ) : null}
+
+      {showRegistryDebug && bundle?.registryDebug ? (
+        <RegistryDebugDrawer
+          debug={bundle.registryDebug}
+          onClose={() => setShowRegistryDebug(false)}
         />
       ) : null}
 
@@ -403,6 +607,12 @@ export default function DistributorProvisioningPage({
             Distributors
           </h2>
           <ul className="max-h-[320px] overflow-y-auto p-2 text-xs">
+            {distributors.length === 0 ? (
+              <li className="rounded-lg border border-dashed border-amber-200 bg-amber-50 px-2 py-3 text-amber-900">
+                No distributors loaded. Open <strong>Registry</strong> debug to compare localStorage vs
+                merged list.
+              </li>
+            ) : null}
             {distributors.map((d) => (
               <li key={d.id}>
                 <button
@@ -417,10 +627,16 @@ export default function DistributorProvisioningPage({
                 >
                   <p className="font-semibold">{d.name}</p>
                   <p className="text-slate-500">{d.territorySummary}</p>
-                  <StatusBadge
-                    variant={DIST_STATUS_VARIANT[d.status] || "neutral"}
-                    label={d.status}
-                  />
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    <StatusBadge
+                      variant={DIST_STATUS_VARIANT[d.status] || "neutral"}
+                      label={d.status}
+                    />
+                    <StatusBadge
+                      variant={PERSISTENCE_VARIANT[d.persistenceStatus] || "neutral"}
+                      label={d.persistenceLabel || "Local only"}
+                    />
+                  </div>
                 </button>
               </li>
             ))}
@@ -447,6 +663,10 @@ export default function DistributorProvisioningPage({
                   >
                     <Bug className="h-3 w-3" /> Debug
                   </Button>
+                  <StatusBadge
+                    variant={PERSISTENCE_VARIANT[model.persistenceStatus] || "neutral"}
+                    label={model.persistenceLabel || "Local only"}
+                  />
                   <StatusBadge
                     variant={LIFECYCLE_VARIANT[model.lifecycle] || "neutral"}
                     label={model.lifecycle}
