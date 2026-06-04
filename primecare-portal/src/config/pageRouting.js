@@ -27,6 +27,10 @@ export function normalizePageKey(page) {
     case "operations-center":
     case "operationsCenter":
       return "operationsCenter";
+    case "founder-navigation":
+    case "founderNavigation":
+    case "founder-journey":
+      return "founderNavigation";
     case "lab-orders":
     case "lab-ordering":
     case "ordering":

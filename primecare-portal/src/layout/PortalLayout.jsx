@@ -2,6 +2,7 @@ import { getMenuForRole } from "../config/menuConfig";
 import { ROLES } from "../config/roles";
 import {
   LayoutDashboard,
+  Compass,
   ClipboardList,
   Wallet,
   Building2,
@@ -18,6 +19,7 @@ import {
 
 const ICONS = {
   dashboard: LayoutDashboard,
+  founderNavigation: Compass,
   operationsCenter: Radio,
   visits: ClipboardList,
   collections: Wallet,
