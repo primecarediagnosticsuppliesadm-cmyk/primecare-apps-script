@@ -231,7 +231,10 @@ export default function PrimeCareWebPortal({
 
       case "founderNavigation":
         return (
-          <FounderNavigationPage setActivePage={setActivePage} />
+          <FounderNavigationPage
+            setActivePage={setActivePage}
+            currentUser={currentUser}
+          />
         );
 
       case "operationsCenter":

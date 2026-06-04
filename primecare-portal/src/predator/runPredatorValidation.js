@@ -16,6 +16,7 @@ import { validateOperationalTasksModule } from "@/predator/validators/operationa
 import { validateOperationalEventLedgerModule } from "@/predator/validators/operationalEventLedgerValidator.js";
 import { validateExecutiveIntelligenceModule } from "@/predator/validators/executiveIntelligenceValidator.js";
 import { validatePilotReadinessModule } from "@/predator/validators/pilotReadinessValidator.js";
+import { validateFounderNavigationModule } from "@/predator/validators/founderNavigationValidator.js";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import {
   primePredatorOpsPayload,
@@ -132,6 +133,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
       modules.push(skippedModuleForLabRole("Operational Tasks", ctx));
       modules.push(skippedModuleForLabRole("Operational Event Ledger", ctx));
       modules.push(skippedModuleForLabRole("Executive Intelligence", ctx));
+      modules.push(skippedModuleForLabRole("Founder Navigation", ctx));
     } else {
       let opsPayload = null;
       try {
@@ -151,6 +153,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         eventLedger,
         executiveIntelligence,
         pilotReadiness,
+        founderNavigation,
       ] = await Promise.all([
         validateOperationsCommandCenterModule({
           ctx,
@@ -183,6 +186,12 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
           opsPayload,
         }),
         validatePilotReadinessModule({ ctx, currentUser, opsPayload }),
+        validateFounderNavigationModule({
+          ctx,
+          currentUser,
+          rendered: snapshots.founderNavigation ?? null,
+          opsPayload,
+        }),
       ]);
 
       modules.push(
@@ -191,7 +200,8 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         storePolishedModule("Operational Tasks", operationalTasks, ctx),
         storePolishedModule("Operational Event Ledger", eventLedger, ctx),
         storePolishedModule("Executive Intelligence", executiveIntelligence, ctx),
-        storePolishedModule("Pilot Readiness", pilotReadiness, ctx)
+        storePolishedModule("Pilot Readiness", pilotReadiness, ctx),
+        storePolishedModule("Founder Navigation", founderNavigation, ctx)
       );
 
       clearPredatorOpsPayload();
@@ -301,6 +311,13 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
       break;
     case "Pilot Readiness":
       result = await validatePilotReadinessModule({ ctx, currentUser });
+      break;
+    case "Founder Navigation":
+      result = await validateFounderNavigationModule({
+        ctx,
+        currentUser,
+        rendered: snapshot,
+      });
       break;
     default:
       result = {

@@ -1,133 +1,171 @@
 /**
- * Static Year-1 founder journey map (no API / AI / forecasting).
- * Update phase ids and copy as the program advances.
+ * Founder journey templates (copy + structure).
+ * Progress and phase status come from founderPhaseEngine.js (V2).
  */
 
-export const FOUNDER_JOURNEY_VERSION = "v1";
+export const FOUNDER_JOURNEY_VERSION = "v2";
 
-/** @typedef {'complete' | 'current' | 'upcoming'} PhaseStatus */
-
-/**
- * @typedef {Object} JourneyPhase
- * @property {string} id
- * @property {string} title
- * @property {string} shortLabel
- * @property {PhaseStatus} status
- * @property {string} window
- * @property {string} headline
- */
-
-/**
- * @typedef {Object} JourneyBlocker
- * @property {string} id
- * @property {string} title
- * @property {string} detail
- * @property {'high' | 'medium' | 'low'} severity
- * @property {string} owner
- */
-
-export const FOUNDER_JOURNEY = {
+export const FOUNDER_JOURNEY_META = {
   programTitle: "PrimeCare Year 1",
-  programSubtitle: "Founder navigation · operational journey",
-  /** Active phase id */
-  currentPhaseId: "pilot_hardening",
-  /** 0–100 deterministic milestone completion for Year 1 */
-  year1ProgressPercent: 58,
-  year1MilestonesCompleted: 7,
-  year1MilestonesTotal: 12,
-  whereWeAreNow:
-    "Operational core is live. We are hardening trust, field execution, and executive visibility before scaling agent coverage.",
-  phases: [
-    {
-      id: "foundation",
-      title: "Foundation",
-      shortLabel: "Foundation",
-      status: "complete",
-      window: "Months 1–2",
-      headline: "Auth, tenant isolation, and portal shell",
-    },
-    {
-      id: "operational_core",
-      title: "Operational Core",
-      shortLabel: "Ops core",
-      status: "complete",
-      window: "Months 3–5",
-      headline: "Control Tower, interventions, tasks, evidence, ledger",
-    },
-    {
-      id: "pilot_hardening",
-      title: "Pilot Hardening",
-      shortLabel: "Pilot",
-      status: "current",
-      window: "Month 6 · now",
-      headline: "Trust, mobile field QA, Predator PASS, pilot readiness",
-    },
-    {
-      id: "field_scale",
-      title: "Field Scale",
-      shortLabel: "Scale",
-      status: "upcoming",
-      window: "Months 7–9",
-      headline: "Agent territory coverage and visit cadence at volume",
-    },
-    {
-      id: "revenue_discipline",
-      title: "Revenue Discipline",
-      shortLabel: "Revenue",
-      status: "upcoming",
-      window: "Months 10–12",
-      headline: "Collections velocity, credit discipline, strategic accounts",
-    },
-  ],
-  currentGoal: {
-    title: "Ship a trustworthy pilot",
-    summary:
-      "Every field action, intervention, and collection save must feel reliable on mobile and auditable in Control Tower.",
-    successCriteria: [
-      "Predator mostly PASS with actionable WARNs only",
-      "No fake UI, placeholder timelines, or silent failures",
-      "Executive reads operational state in under 30 seconds",
-    ],
-  },
-  nextUnlock: {
-    title: "Field Scale phase",
-    summary:
-      "Unlock when pilot labs run for 30 days with stable visit proof, collections follow-through, and intervention closure.",
-    unlocksWhen: [
-      "≥ 80% visit proof compliance on pilot labs",
-      "Intervention closure health ≥ 70 for 14 days",
-      "Agent mobile QA sign-off on visit + collections flows",
-    ],
-    portalHint: "operationsCenter",
-  },
-  blockers: [
-    {
-      id: "evidence-durability",
-      title: "Evidence storage migration",
-      detail: "Some proof still local-embedded until Supabase bucket migration is applied in tenant.",
-      severity: "medium",
-      owner: "Platform",
-    },
-    {
-      id: "task-persistence",
-      title: "Task state is device-local",
-      detail: "Operational tasks reset on fresh browser until server-backed task read ships.",
-      severity: "medium",
-      owner: "Engineering",
-    },
-    {
-      id: "collections-velocity",
-      title: "Collections recovery velocity",
-      detail: "Overdue AR concentration on pilot labs needs weekly executive collections rhythm.",
-      severity: "high",
-      owner: "Collections lead",
-    },
-  ],
+  programSubtitle: "Founder navigation · data-driven journey",
 };
 
-/**
- * Resolved view for UI (derived from static definition).
- */
+/** @typedef {Object} MilestoneTemplate */
+
+export const FOUNDER_MILESTONE_TEMPLATES = [
+  {
+    id: "platform_built",
+    phaseId: "foundation",
+    title: "Platform built",
+    description: "Portal shell and tenant session active.",
+    owner: "Engineering",
+    action: "dashboard",
+  },
+  {
+    id: "tenant_isolation",
+    phaseId: "foundation",
+    title: "Tenant isolation",
+    description: "Collections and reads scoped to active tenant.",
+    owner: "Platform",
+    action: "dashboard",
+  },
+  {
+    id: "ops_control_tower",
+    phaseId: "operational_core",
+    title: "Operations control tower",
+    description: "Interventions, feed, and ledger wired.",
+    owner: "Engineering",
+    action: "dashboard",
+  },
+  {
+    id: "evidence_layer",
+    phaseId: "operational_core",
+    title: "Evidence layer",
+    description: "Visit proof stored durably (not mostly local-embedded).",
+    owner: "Platform",
+    action: "operationsCenter",
+  },
+  {
+    id: "pilot_hardening",
+    phaseId: "pilot_hardening",
+    title: "Pilot hardening",
+    description: "Pilot Readiness score from live ops signals.",
+    owner: "Executive",
+    action: "founderNavigation",
+  },
+  {
+    id: "visit_proof_80",
+    phaseId: "pilot_hardening",
+    title: "Visit proof ≥ 80%",
+    description: "Recent visits have photo proof attached.",
+    owner: "Field",
+    action: "operationsCenter",
+    lockedUntilPhase: "pilot_hardening",
+  },
+  {
+    id: "collections_health",
+    phaseId: "pilot_hardening",
+    title: "Collections health",
+    description: "Overdue lab concentration under control.",
+    owner: "Collections",
+    action: "risk",
+  },
+  {
+    id: "predator_integrity",
+    phaseId: "pilot_hardening",
+    title: "Operational integrity",
+    description: "Feed dedupe, task linkage, ledger consistency.",
+    owner: "QA",
+    action: "predatorDebug",
+  },
+  {
+    id: "agent_field_qa",
+    phaseId: "pilot_hardening",
+    title: "Agent field QA",
+    description: "Visits logged in the last 14 days.",
+    owner: "Field",
+    action: "operationsCenter",
+  },
+  {
+    id: "lab_ordering_flow",
+    phaseId: "pilot_hardening",
+    title: "Lab ordering flow",
+    description: "At least one order in the tenant pipeline.",
+    owner: "Ops",
+    action: "orders",
+  },
+  {
+    id: "field_scale_ready",
+    phaseId: "field_scale",
+    title: "Field scale unlocked",
+    description: "All pilot unlock gates passed.",
+    owner: "Executive",
+    action: "founderNavigation",
+    lockedUntilPhase: "field_scale",
+  },
+  {
+    id: "revenue_discipline_ready",
+    phaseId: "revenue_discipline",
+    title: "Revenue discipline",
+    description: "Sustained field scale before revenue phase.",
+    owner: "Executive",
+    action: "risk",
+    lockedUntilPhase: "revenue_discipline",
+  },
+];
+
+export const FOUNDER_PHASE_TEMPLATES = [
+  {
+    id: "foundation",
+    title: "Foundation",
+    shortLabel: "Foundation",
+    window: "Months 1–2",
+    headline: "Auth, tenant isolation, portal shell",
+  },
+  {
+    id: "operational_core",
+    title: "Operational Core",
+    shortLabel: "Ops core",
+    window: "Months 3–5",
+    headline: "Control Tower, tasks, evidence, ledger",
+  },
+  {
+    id: "pilot_hardening",
+    title: "Pilot Hardening",
+    shortLabel: "Pilot",
+    window: "Now",
+    headline: "Trust, mobile QA, pilot readiness gates",
+  },
+  {
+    id: "field_scale",
+    title: "Field Scale",
+    shortLabel: "Scale",
+    window: "Months 7–9",
+    headline: "Territory coverage and visit cadence at volume",
+  },
+  {
+    id: "revenue_discipline",
+    title: "Revenue Discipline",
+    shortLabel: "Revenue",
+    window: "Months 10–12",
+    headline: "Collections velocity and strategic accounts",
+  },
+];
+
+/** @deprecated V1 static journey — use buildFounderPhaseEngineView */
+export const FOUNDER_JOURNEY = {
+  ...FOUNDER_JOURNEY_META,
+  currentPhaseId: "pilot_hardening",
+  year1ProgressPercent: 0,
+  year1MilestonesCompleted: 0,
+  year1MilestonesTotal: FOUNDER_MILESTONE_TEMPLATES.length,
+  phases: FOUNDER_PHASE_TEMPLATES.map((p) => ({ ...p, status: "upcoming" })),
+  whereWeAreNow: "Load operational data to compute journey progress.",
+  currentGoal: { title: "Pilot Readiness", summary: "", successCriteria: [] },
+  nextUnlock: { title: "Field Scale", summary: "", unlocksWhen: [], portalHint: "operationsCenter" },
+  blockers: [],
+};
+
 export function getFounderJourneyView(definition = FOUNDER_JOURNEY) {
   const phases = definition.phases || [];
   const currentPhase =
