@@ -6,6 +6,10 @@ import { PERMISSIONS } from "./config/permissions";
 import { getDefaultPageForRole } from "./config/menuConfig";
 import { resolvePageKeyForRole } from "./config/pageRouting.js";
 import { PortalToastProvider } from "@/context/PortalToastContext";
+import { TenantViewProvider, useTenantView } from "@/context/TenantViewContext.jsx";
+import TenantSwitcher from "@/components/tenant/TenantSwitcher.jsx";
+import { readTenantRegistry } from "@/tenant/tenantFoundationStore.js";
+import { buildTenantSwitcherOptions } from "@/tenant/tenantFoundationData.js";
 
 function canRoleAccessPage(role, pageKey) {
   if (!role || !pageKey) return false;
@@ -41,6 +45,43 @@ function UnauthorizedScreen({ message, onLogout }) {
           className="mt-5 rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
         >
           Back to login
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ExecutivePortalHeader({ currentUser, pageTitle, onLogout }) {
+  const { readOnly, isExecutive } = useTenantView();
+  const homeTenantId = currentUser?.tenantId || "";
+  const switcherOptions =
+    isExecutive && homeTenantId
+      ? buildTenantSwitcherOptions(homeTenantId, [], readTenantRegistry())
+      : [];
+
+  return (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h1 className="text-xl font-semibold">{pageTitle}</h1>
+        <p className="text-sm text-gray-500">
+          Logged in as <span className="font-medium">{currentUser.role}</span>
+          {readOnly ? (
+            <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+              Tenant view (read-only)
+            </span>
+          ) : null}
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {isExecutive && switcherOptions.length > 0 ? (
+          <TenantSwitcher options={switcherOptions} />
+        ) : null}
+        <button
+          type="button"
+          onClick={onLogout}
+          className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
+        >
+          Logout
         </button>
       </div>
     </div>
@@ -167,27 +208,17 @@ export default function App() {
   return (
     <PortalToastProvider>
       <Suspense fallback={<PortalLoadingScreen />}>
+        <TenantViewProvider currentUser={currentUser}>
         <PortalLayout
           role={role}
           activePage={activePage}
           setActivePage={setActivePage}
         >
-          <div className="mb-4 flex items-center justify-between gap-4">
-            <div>
-              <h1 className="text-xl font-semibold">{pageTitle}</h1>
-              <p className="text-sm text-gray-500">
-                Logged in as <span className="font-medium">{currentUser.role}</span>
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={signOut}
-              className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
-            >
-              Logout
-            </button>
-          </div>
+          <ExecutivePortalHeader
+            currentUser={currentUser}
+            pageTitle={pageTitle}
+            onLogout={signOut}
+          />
 
           <PrimeCareWebPortal
             role={role}
@@ -197,6 +228,7 @@ export default function App() {
             authToken={authToken}
           />
         </PortalLayout>
+        </TenantViewProvider>
       </Suspense>
     </PortalToastProvider>
   );

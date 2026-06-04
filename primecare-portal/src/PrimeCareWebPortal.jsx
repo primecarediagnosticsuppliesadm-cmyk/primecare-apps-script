@@ -11,6 +11,7 @@ import CollectionsPage from "./pages/CollectionsPage";
 import ExecutiveControlTower from "./pages/ExecutiveControlTower";
 import FounderNavigationPage from "./pages/FounderNavigationPage";
 import FounderStrategyPage from "./pages/FounderStrategyPage";
+import TenantManagementPage from "./pages/TenantManagementPage";
 import LabOrderingPage from "./pages/LabOrderingPage";
 import LabsPage from "./pages/LabsPage";
 import InventoryLedgerPage from "./pages/InventoryLedgerPage";
@@ -245,6 +246,9 @@ export default function PrimeCareWebPortal({
             currentUser={currentUser}
           />
         );
+
+      case "tenantManagement":
+        return <TenantManagementPage currentUser={currentUser} />;
 
       case "operationsCenter":
       case "operations-center":

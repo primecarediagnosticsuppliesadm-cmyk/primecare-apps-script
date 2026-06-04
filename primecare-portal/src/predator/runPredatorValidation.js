@@ -18,6 +18,7 @@ import { validateExecutiveIntelligenceModule } from "@/predator/validators/execu
 import { validatePilotReadinessModule } from "@/predator/validators/pilotReadinessValidator.js";
 import { validateFounderNavigationModule } from "@/predator/validators/founderNavigationValidator.js";
 import { validateFounderStrategyModule } from "@/predator/validators/founderStrategyValidator.js";
+import { validateTenantFoundationModule } from "@/predator/validators/tenantFoundationValidator.js";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import {
   primePredatorOpsPayload,
@@ -136,6 +137,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
       modules.push(skippedModuleForLabRole("Executive Intelligence", ctx));
       modules.push(skippedModuleForLabRole("Founder Navigation", ctx));
       modules.push(skippedModuleForLabRole("Founder Strategy", ctx));
+      modules.push(skippedModuleForLabRole("Tenant Foundation", ctx));
     } else {
       let opsPayload = null;
       try {
@@ -157,6 +159,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         pilotReadiness,
         founderNavigation,
         founderStrategy,
+        tenantFoundation,
       ] = await Promise.all([
         validateOperationsCommandCenterModule({
           ctx,
@@ -201,6 +204,12 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
           rendered: snapshots.founderStrategy ?? null,
           opsPayload,
         }),
+        validateTenantFoundationModule({
+          ctx,
+          currentUser,
+          rendered: snapshots.tenantFoundation ?? null,
+          opsPayload,
+        }),
       ]);
 
       modules.push(
@@ -211,7 +220,8 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         storePolishedModule("Executive Intelligence", executiveIntelligence, ctx),
         storePolishedModule("Pilot Readiness", pilotReadiness, ctx),
         storePolishedModule("Founder Navigation", founderNavigation, ctx),
-        storePolishedModule("Founder Strategy", founderStrategy, ctx)
+        storePolishedModule("Founder Strategy", founderStrategy, ctx),
+        storePolishedModule("Tenant Foundation", tenantFoundation, ctx)
       );
 
       clearPredatorOpsPayload();
@@ -331,6 +341,13 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
       break;
     case "Founder Strategy":
       result = await validateFounderStrategyModule({
+        ctx,
+        currentUser,
+        rendered: snapshot,
+      });
+      break;
+    case "Tenant Foundation":
+      result = await validateTenantFoundationModule({
         ctx,
         currentUser,
         rendered: snapshot,

@@ -37,6 +37,11 @@ function readLocalIndex(tenantId) {
   }
 }
 
+/** Read-only local evidence index for tenant isolation checks. */
+export function readOperationalEvidenceIndex(tenantId) {
+  return readLocalIndex(tenantId);
+}
+
 function writeLocalIndex(tenantId, rows) {
   if (typeof window === "undefined") return;
   try {

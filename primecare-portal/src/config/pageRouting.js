@@ -34,6 +34,9 @@ export function normalizePageKey(page) {
     case "founder-strategy":
     case "founderStrategy":
       return "founderStrategy";
+    case "tenant-management":
+    case "tenantManagement":
+      return "tenantManagement";
     case "lab-orders":
     case "lab-ordering":
     case "ordering":
