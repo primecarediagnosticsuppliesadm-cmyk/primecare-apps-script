@@ -26,6 +26,7 @@ const ICONS = {
   founderStrategy: Target,
   tenantManagement: Building,
   distributorManagement: Briefcase,
+  distributorProvisioning: ClipboardList,
   operationsCenter: Radio,
   visits: ClipboardList,
   collections: Wallet,

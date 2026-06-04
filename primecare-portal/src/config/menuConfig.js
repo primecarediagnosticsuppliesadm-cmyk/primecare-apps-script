@@ -20,6 +20,7 @@ export const MENU_ITEMS = [
   { key: "founderStrategy", label: "Founder Strategy", icon: "Target" },
   { key: "tenantManagement", label: "Tenant Management", icon: "Building" },
   { key: "distributorManagement", label: "Distributor Management", icon: "Briefcase" },
+  { key: "distributorProvisioning", label: "Provisioning", icon: "ClipboardList" },
   { key: "operationsCenter", label: "Operations Center", icon: "Radio" },
 
   // Field Ops
@@ -57,6 +58,7 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "founderStrategy",
   "tenantManagement",
   "distributorManagement",
+  "distributorProvisioning",
   "operationsCenter",
   "visits",
   "collections",

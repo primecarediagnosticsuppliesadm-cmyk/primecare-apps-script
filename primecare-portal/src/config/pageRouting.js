@@ -40,6 +40,10 @@ export function normalizePageKey(page) {
     case "distributor-management":
     case "distributorManagement":
       return "distributorManagement";
+    case "distributor-provisioning":
+    case "provisioning":
+    case "distributorProvisioning":
+      return "distributorProvisioning";
     case "lab-orders":
     case "lab-ordering":
     case "ordering":

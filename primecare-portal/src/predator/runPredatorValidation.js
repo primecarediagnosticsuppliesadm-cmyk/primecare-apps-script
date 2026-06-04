@@ -20,6 +20,7 @@ import { validateFounderNavigationModule } from "@/predator/validators/founderNa
 import { validateFounderStrategyModule } from "@/predator/validators/founderStrategyValidator.js";
 import { validateTenantFoundationModule } from "@/predator/validators/tenantFoundationValidator.js";
 import { validateDistributorWorkspaceModule } from "@/predator/validators/distributorWorkspaceValidator.js";
+import { validateDistributorProvisioningModule } from "@/predator/validators/distributorProvisioningValidator.js";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import {
   primePredatorOpsPayload,
@@ -140,6 +141,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
       modules.push(skippedModuleForLabRole("Founder Strategy", ctx));
       modules.push(skippedModuleForLabRole("Tenant Foundation", ctx));
       modules.push(skippedModuleForLabRole("Distributor Workspace", ctx));
+      modules.push(skippedModuleForLabRole("Distributor Provisioning", ctx));
     } else {
       let opsPayload = null;
       try {
@@ -163,6 +165,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         founderStrategy,
         tenantFoundation,
         distributorWorkspace,
+        distributorProvisioning,
       ] = await Promise.all([
         validateOperationsCommandCenterModule({
           ctx,
@@ -213,6 +216,18 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
           rendered: snapshots.tenantFoundation ?? null,
           opsPayload,
         }),
+        validateDistributorWorkspaceModule({
+          ctx,
+          currentUser,
+          rendered: snapshots.distributorWorkspace ?? null,
+          opsPayload,
+        }),
+        validateDistributorProvisioningModule({
+          ctx,
+          currentUser,
+          rendered: snapshots.distributorProvisioning ?? null,
+          opsPayload,
+        }),
       ]);
 
       modules.push(
@@ -225,7 +240,8 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         storePolishedModule("Founder Navigation", founderNavigation, ctx),
         storePolishedModule("Founder Strategy", founderStrategy, ctx),
         storePolishedModule("Tenant Foundation", tenantFoundation, ctx),
-        storePolishedModule("Distributor Workspace", distributorWorkspace, ctx)
+        storePolishedModule("Distributor Workspace", distributorWorkspace, ctx),
+        storePolishedModule("Distributor Provisioning", distributorProvisioning, ctx)
       );
 
       clearPredatorOpsPayload();
@@ -359,6 +375,13 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
       break;
     case "Distributor Workspace":
       result = await validateDistributorWorkspaceModule({
+        ctx,
+        currentUser,
+        rendered: snapshot,
+      });
+      break;
+    case "Distributor Provisioning":
+      result = await validateDistributorProvisioningModule({
         ctx,
         currentUser,
         rendered: snapshot,

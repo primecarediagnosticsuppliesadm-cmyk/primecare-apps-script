@@ -143,9 +143,21 @@ export default function DistributorManagementPage({ currentUser = null, setActiv
             Tenant = distributor company · territories are cities within a distributor
           </p>
         </div>
-        <Button type="button" variant="ghost" size="icon" onClick={() => void load()} aria-label="Refresh">
-          <RefreshCw className="h-4 w-4" />
-        </Button>
+        <div className="flex gap-2">
+          {setActivePage ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setActivePage("distributorProvisioning")}
+            >
+              Provisioning
+            </Button>
+          ) : null}
+          <Button type="button" variant="ghost" size="icon" onClick={() => void load()} aria-label="Refresh">
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+        </div>
       </header>
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1.4fr)]">

@@ -13,6 +13,7 @@ import FounderNavigationPage from "./pages/FounderNavigationPage";
 import FounderStrategyPage from "./pages/FounderStrategyPage";
 import TenantManagementPage from "./pages/TenantManagementPage";
 import DistributorManagementPage from "./pages/DistributorManagementPage";
+import DistributorProvisioningPage from "./pages/DistributorProvisioningPage";
 import LabOrderingPage from "./pages/LabOrderingPage";
 import LabsPage from "./pages/LabsPage";
 import InventoryLedgerPage from "./pages/InventoryLedgerPage";
@@ -254,6 +255,14 @@ export default function PrimeCareWebPortal({
       case "distributorManagement":
         return (
           <DistributorManagementPage
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+          />
+        );
+
+      case "distributorProvisioning":
+        return (
+          <DistributorProvisioningPage
             currentUser={currentUser}
             setActivePage={setActivePage}
           />
