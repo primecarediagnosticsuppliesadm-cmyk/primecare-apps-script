@@ -5,6 +5,7 @@ export const PERMISSIONS = {
   founderNavigation: [ROLES.EXECUTIVE],
   founderStrategy: [ROLES.EXECUTIVE],
   tenantManagement: [ROLES.EXECUTIVE],
+  distributorManagement: [ROLES.EXECUTIVE],
   operationsCenter: [ROLES.ADMIN, ROLES.EXECUTIVE],
   visits: [ROLES.AGENT, ROLES.ADMIN],
   collections: [ROLES.AGENT, ROLES.ADMIN],

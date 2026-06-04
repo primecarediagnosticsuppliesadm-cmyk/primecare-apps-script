@@ -37,6 +37,9 @@ export function normalizePageKey(page) {
     case "tenant-management":
     case "tenantManagement":
       return "tenantManagement";
+    case "distributor-management":
+    case "distributorManagement":
+      return "distributorManagement";
     case "lab-orders":
     case "lab-ordering":
     case "ordering":

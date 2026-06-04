@@ -19,6 +19,7 @@ import { validatePilotReadinessModule } from "@/predator/validators/pilotReadine
 import { validateFounderNavigationModule } from "@/predator/validators/founderNavigationValidator.js";
 import { validateFounderStrategyModule } from "@/predator/validators/founderStrategyValidator.js";
 import { validateTenantFoundationModule } from "@/predator/validators/tenantFoundationValidator.js";
+import { validateDistributorWorkspaceModule } from "@/predator/validators/distributorWorkspaceValidator.js";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import {
   primePredatorOpsPayload,
@@ -138,6 +139,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
       modules.push(skippedModuleForLabRole("Founder Navigation", ctx));
       modules.push(skippedModuleForLabRole("Founder Strategy", ctx));
       modules.push(skippedModuleForLabRole("Tenant Foundation", ctx));
+      modules.push(skippedModuleForLabRole("Distributor Workspace", ctx));
     } else {
       let opsPayload = null;
       try {
@@ -160,6 +162,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         founderNavigation,
         founderStrategy,
         tenantFoundation,
+        distributorWorkspace,
       ] = await Promise.all([
         validateOperationsCommandCenterModule({
           ctx,
@@ -221,7 +224,8 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         storePolishedModule("Pilot Readiness", pilotReadiness, ctx),
         storePolishedModule("Founder Navigation", founderNavigation, ctx),
         storePolishedModule("Founder Strategy", founderStrategy, ctx),
-        storePolishedModule("Tenant Foundation", tenantFoundation, ctx)
+        storePolishedModule("Tenant Foundation", tenantFoundation, ctx),
+        storePolishedModule("Distributor Workspace", distributorWorkspace, ctx)
       );
 
       clearPredatorOpsPayload();
@@ -348,6 +352,13 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
       break;
     case "Tenant Foundation":
       result = await validateTenantFoundationModule({
+        ctx,
+        currentUser,
+        rendered: snapshot,
+      });
+      break;
+    case "Distributor Workspace":
+      result = await validateDistributorWorkspaceModule({
         ctx,
         currentUser,
         rendered: snapshot,
