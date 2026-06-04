@@ -205,9 +205,53 @@ export function markProvisioningMilestone(tenantId, kind) {
 }
 
 /** Record manual Supabase setup (flags only — no fake lab/order counts). */
+/**
+ * Refresh bundle tenants from localStorage without reloading ops/API.
+ */
+export function refreshProvisioningBundleState(bundle) {
+  if (!bundle) return bundle;
+  const registry = readTenantRegistry();
+  const byId = new Map();
+  for (const t of bundle.tenants || []) byId.set(t.id, t);
+  for (const reg of registry) {
+    const fresh = getRegistryTenant(reg.id) || reg;
+    byId.set(fresh.id, { ...byId.get(fresh.id), ...fresh });
+  }
+  const list = [...byId.values()];
+  return {
+    ...bundle,
+    tenants: list,
+    distributors: list.map(mapTenantToDistributorRegistryRow),
+  };
+}
+
+export function updateDistributorAdminDetails(tenantId, admin) {
+  const row = getRegistryTenant(tenantId);
+  if (!row) return null;
+  const now = new Date().toISOString();
+  const config = {
+    ...(row.config || {}),
+    adminName: str(admin.name),
+    adminEmail: str(admin.email),
+    adminPhone: str(admin.phone),
+    adminUpdatedAt: now,
+  };
+  const hasAdmin = Boolean(str(config.adminEmail) && str(config.adminName));
+  upsertRegistryTenant({
+    ...row,
+    config,
+    adminUser: hasAdmin ? str(config.adminName) : row.adminUser,
+    updatedAt: now,
+  });
+  if (hasAdmin) {
+    markProvisioningMilestone(tenantId, "admin_added");
+  }
+  return getRegistryTenant(tenantId);
+}
+
 export function acknowledgeProvisioningTask(tenantId, taskId) {
   const row = getRegistryTenant(tenantId);
-  if (!row) return;
+  if (!row) return null;
   const now = new Date().toISOString();
   const config = { ...(row.config || {}) };
 
@@ -231,4 +275,5 @@ export function acknowledgeProvisioningTask(tenantId, taskId) {
   }
 
   upsertRegistryTenant({ ...row, config, updatedAt: now });
+  return getRegistryTenant(tenantId);
 }

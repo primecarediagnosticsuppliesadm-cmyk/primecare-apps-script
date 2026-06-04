@@ -145,15 +145,93 @@ export function buildProvisioningChecks(ctx) {
 }
 
 export function computeReadinessPercent(checks) {
-  if (!checks.length) return 0;
-  const weights = checks.map((c) => (c.required ? 2 : 1));
-  const total = weights.reduce((s, w) => s + w, 0);
-  const earned = checks.reduce(
-    (s, c, i) => s + (c.status === "PASS" ? weights[i] : c.status === "WARN" ? weights[i] * 0.5 : 0),
-    0
-  );
-  return clamp((earned / total) * 100);
+  const { readinessPct } = computeReadinessDebug(checks);
+  return readinessPct;
 }
+
+/** Weights + failing checks for executive debug drawer. */
+export function computeReadinessDebug(checks, lastUpdated = null) {
+  if (!checks.length) {
+    return {
+      readinessPct: 0,
+      weights: [],
+      failingChecks: [],
+      lastUpdated,
+    };
+  }
+  const weights = checks.map((c) => {
+    const w = c.required ? 2 : 1;
+    const earned =
+      c.status === "PASS" ? w : c.status === "WARN" ? w * 0.5 : 0;
+    return {
+      id: c.id,
+      label: c.label,
+      weight: w,
+      earned,
+      required: c.required,
+      status: c.status,
+    };
+  });
+  const total = weights.reduce((s, x) => s + x.weight, 0);
+  const earnedSum = weights.reduce((s, x) => s + x.earned, 0);
+  return {
+    readinessPct: total > 0 ? clamp((earnedSum / total) * 100) : 0,
+    weights,
+    failingChecks: checks.filter((c) => c.status !== "PASS"),
+    lastUpdated,
+  };
+}
+
+/** Activation gate rows for diagnosis UI (required + key optional). */
+export function buildActivationDiagnosis(checks) {
+  const gateOrder = [
+    "admin_user",
+    "roles_configured",
+    "catalog_configured",
+    "at_least_one_lab",
+    "isolation_verified",
+  ];
+  return gateOrder.map((id) => {
+    const c = checks.find((x) => x.id === id);
+    return {
+      id,
+      label: c?.label || id,
+      pass: c?.status === "PASS",
+      required: REQUIRED_GATE_IDS.has(id),
+      status: c?.status || "FAIL",
+      detail: c?.detail || "",
+    };
+  });
+}
+
+/** Open / inline actions per readiness check. */
+export const PROVISIONING_CHECK_ACTIONS = {
+  admin_user: { type: "edit_admin", label: "Edit admin" },
+  roles_configured: { page: "tenantManagement", label: "Open setup" },
+  catalog_configured: { page: "inventory", label: "Open catalog" },
+  at_least_one_lab: { page: "labs", label: "Open labs" },
+  isolation_verified: {
+    page: "tenantManagement",
+    section: "isolation",
+    label: "Open isolation",
+  },
+  agent_assigned: { page: "visits", label: "Open agents" },
+  ordering_enabled: { page: "orders", label: "Open orders" },
+  collections_enabled: { page: "risk", label: "Open collections" },
+};
+
+export const PROVISIONING_TASK_ACTIONS = {
+  create_admin: { type: "edit_admin", label: "Edit admin" },
+  configure_roles: { page: "tenantManagement", label: "Open setup" },
+  load_catalog: { page: "inventory", label: "Open catalog" },
+  create_lab: { page: "labs", label: "Open labs" },
+  assign_agent: { page: "visits", label: "Open agents" },
+  verify_isolation: {
+    page: "tenantManagement",
+    section: "isolation",
+    label: "Open isolation",
+  },
+};
 
 export function evaluateActivationGates(checks) {
   const blockers = checks.filter(
@@ -204,7 +282,19 @@ export function buildProvisioningTasks(checks) {
   return taskDefs.map((t) => {
     const check = t.checkId ? checks.find((c) => c.id === t.checkId) : null;
     const done = t.id === "activate" ? false : check?.status === "PASS";
-    return { ...t, done, status: check?.status || "WARN" };
+    const action = PROVISIONING_TASK_ACTIONS[t.id] || null;
+    return {
+      ...t,
+      done,
+      status: check?.status || "WARN",
+      action,
+      canMarkProvisioned: [
+        "configure_roles",
+        "load_catalog",
+        "assign_agent",
+        "verify_isolation",
+      ].includes(t.id),
+    };
   });
 }
 
@@ -417,6 +507,8 @@ export function buildDistributorProvisioningModel(tenant, ctx = {}) {
   const timeline = buildProvisioningTimeline(tenant, checks);
 
   const activated = lifecycle === "activated";
+  const readinessDebug = computeReadinessDebug(checks, tenant.updatedAt || tenant.createdAt);
+  const activationDiagnosis = buildActivationDiagnosis(checks);
 
   return {
     distributorId: tenant.id,
@@ -426,6 +518,8 @@ export function buildDistributorProvisioningModel(tenant, ctx = {}) {
     pipeline,
     checks,
     readinessPct,
+    readinessDebug,
+    activationDiagnosis,
     gates,
     tasks,
     timeline,

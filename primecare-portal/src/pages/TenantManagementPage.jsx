@@ -58,6 +58,23 @@ export default function TenantManagementPage({ currentUser = null }) {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    try {
+      const focus = sessionStorage.getItem("primecare_tenant_mgmt_section");
+      if (focus === "isolation") {
+        sessionStorage.removeItem("primecare_tenant_mgmt_section");
+        requestAnimationFrame(() => {
+          document.getElementById("tenant-isolation-panel")?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+        });
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [loading]);
+
   const displayTenant = useMemo(() => {
     const list = registry?.tenants || [];
     const id = selectedId || viewTenantId || homeTenantId;
@@ -216,7 +233,10 @@ export default function TenantManagementPage({ currentUser = null }) {
 
       {displayTenant ? (
         <>
-          <section className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+          <section
+            id="tenant-isolation-panel"
+            className="rounded-xl border border-slate-200 bg-slate-50/80 p-3"
+          >
             <h2 className="mb-2 flex items-center gap-1 text-xs font-bold uppercase text-slate-600">
               <ShieldCheck className="h-3.5 w-3.5" /> Tenant isolation
             </h2>
