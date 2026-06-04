@@ -109,7 +109,7 @@ export default function DistributorManagementPage({ currentUser = null, setActiv
   );
 
   function handleAction(action) {
-    if (!action.wired || !setActivePage) return;
+    if (!action?.wired || action.comingSoon || !setActivePage || !action.page) return;
     if (action.id === "open_tenant" && workspace?.profile.tenantId) {
       setViewTenant(workspace.profile.tenantId);
       setActivePage("tenantManagement");
@@ -332,8 +332,8 @@ export default function DistributorManagementPage({ currentUser = null, setActiv
                       type="button"
                       size="sm"
                       variant={a.wired ? "outline" : "ghost"}
-                      disabled={!a.wired}
-                      onClick={() => handleAction(a)}
+                      disabled={!a.wired || a.comingSoon}
+                      onClick={a.wired && !a.comingSoon ? () => handleAction(a) : undefined}
                     >
                       {a.comingSoon ? `${a.label} (Coming soon)` : a.label}
                     </Button>

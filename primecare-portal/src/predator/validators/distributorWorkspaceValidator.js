@@ -13,7 +13,16 @@ const WIRED_PAGES = new Set([
   "risk",
   "operationsCenter",
   "qualificationReview",
+  "distributorProvisioning",
 ]);
+
+/** Wired actions need a known page; disabled actions must be Coming soon. */
+function isWorkspaceActionValid(action) {
+  if (action.wired) {
+    return Boolean(action.page && WIRED_PAGES.has(action.page) && !action.comingSoon);
+  }
+  return action.comingSoon === true && !action.wired;
+}
 
 function finish(entries) {
   const polished = polishPredatorEntries(entries);
@@ -191,30 +200,50 @@ export async function validateDistributorWorkspaceModule({
         );
       }
 
-      const deadButtons = workspace.actions.filter(
-        (a) => !a.wired && !a.comingSoon
+      const invalidActions = (workspace.actions || []).filter(
+        (a) => !isWorkspaceActionValid(a)
       );
       entries.push(
         createPredatorEntry({
-          status: deadButtons.length === 0 ? "PASS" : "FAIL",
+          status: invalidActions.length === 0 ? "PASS" : "FAIL",
           module: "Distributor Workspace",
           step: "actions.no_dead",
-          actual: deadButtons.map((a) => a.id).join(", ") || "ok",
+          actual:
+            invalidActions.length === 0
+              ? "ok"
+              : invalidActions
+                  .map((a) => `${a.id}(wired=${a.wired},soon=${a.comingSoon})`)
+                  .join(", "),
           tenantId: ctx.tenantId,
           role: ctx.role,
           userId: ctx.userId,
         })
       );
 
-      const badWired = workspace.actions.filter(
-        (a) => a.wired && a.page && !WIRED_PAGES.has(a.page)
+      const enabledWithoutRoute = (workspace.actions || []).filter(
+        (a) => a.wired && (!a.page || !WIRED_PAGES.has(a.page))
       );
       entries.push(
         createPredatorEntry({
-          status: badWired.length === 0 ? "PASS" : "FAIL",
+          status: enabledWithoutRoute.length === 0 ? "PASS" : "FAIL",
           module: "Distributor Workspace",
           step: "actions.pages",
-          actual: badWired.map((a) => a.page).join(", ") || "ok",
+          actual: enabledWithoutRoute.map((a) => a.id).join(", ") || "ok",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      const disabledUnlabeled = (workspace.actions || []).filter(
+        (a) => !a.wired && a.comingSoon !== true
+      );
+      entries.push(
+        createPredatorEntry({
+          status: disabledUnlabeled.length === 0 ? "PASS" : "FAIL",
+          module: "Distributor Workspace",
+          step: "actions.coming_soon",
+          actual: disabledUnlabeled.map((a) => a.id).join(", ") || "ok",
           tenantId: ctx.tenantId,
           role: ctx.role,
           userId: ctx.userId,

@@ -523,44 +523,50 @@ export function buildDistributorWorkspace({
     registryOnly: distributorRow.registryOnly,
   };
 
+  const canNavigateOps = isLive && !distributorRow.registryOnly;
+
   const actions = [
     {
       id: "open_tenant",
       label: "Open tenant",
       wired: true,
+      comingSoon: false,
       page: "tenantManagement",
     },
     {
       id: "open_labs",
       label: "Open labs",
-      wired: isLive && !distributorRow.registryOnly,
+      wired: canNavigateOps,
+      comingSoon: !canNavigateOps,
       page: "labs",
     },
     {
       id: "open_collections",
       label: "Open collections",
-      wired: isLive && !distributorRow.registryOnly,
+      wired: canNavigateOps,
+      comingSoon: !canNavigateOps,
       page: "risk",
     },
     {
       id: "open_operations",
       label: "Open operations",
-      wired: isLive && !distributorRow.registryOnly,
+      wired: canNavigateOps,
+      comingSoon: !canNavigateOps,
       page: "operationsCenter",
     },
     {
       id: "assign_agent",
       label: "Assign agent",
       wired: false,
-      page: null,
       comingSoon: true,
+      page: null,
     },
     {
       id: "add_lab",
       label: "Add lab",
       wired: false,
-      page: null,
       comingSoon: true,
+      page: null,
     },
   ];
 
