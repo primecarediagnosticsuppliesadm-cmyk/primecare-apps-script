@@ -261,6 +261,34 @@ export default function DistributorManagementPage({ currentUser = null, setActiv
               </div>
             </div>
 
+            {workspace.contracts && tab === "Overview" ? (
+              <div className="rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2 text-xs">
+                <p className="font-semibold text-indigo-950">Contracts</p>
+                <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div>
+                    <p className="text-slate-500">Active</p>
+                    <p className="font-bold tabular-nums">{workspace.contracts.activeContracts}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">Monthly value</p>
+                    <p className="font-bold tabular-nums">
+                      ₹{Number(workspace.contracts.monthlyContractValue || 0).toLocaleString("en-IN")}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">Health</p>
+                    <p className="font-bold">{workspace.contracts.contractHealthBand}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">Expiry alerts</p>
+                    <p className="font-bold tabular-nums">
+                      {workspace.contracts.expiryAlerts?.length || 0}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             {workspace.risks.length > 0 && tab === "Overview" ? (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs">
                 <p className="flex items-center gap-1 font-semibold text-amber-950">

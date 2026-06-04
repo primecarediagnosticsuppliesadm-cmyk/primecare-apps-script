@@ -14,6 +14,7 @@ const WIRED_PAGES = new Set([
   "operationsCenter",
   "qualificationReview",
   "distributorProvisioning",
+  "labContractEngine",
 ]);
 
 /** Wired actions need a known page; disabled actions must be Coming soon. */

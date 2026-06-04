@@ -22,6 +22,7 @@ import { validateTenantFoundationModule } from "@/predator/validators/tenantFoun
 import { validateDistributorWorkspaceModule } from "@/predator/validators/distributorWorkspaceValidator.js";
 import { validateDistributorProvisioningModule } from "@/predator/validators/distributorProvisioningValidator.js";
 import { validateCommissionEngineModule } from "@/predator/validators/commissionEngineValidator.js";
+import { validateLabContractEngineModule } from "@/predator/validators/labContractEngineValidator.js";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import {
   primePredatorOpsPayload,
@@ -143,6 +144,8 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
       modules.push(skippedModuleForLabRole("Tenant Foundation", ctx));
       modules.push(skippedModuleForLabRole("Distributor Workspace", ctx));
       modules.push(skippedModuleForLabRole("Distributor Provisioning", ctx));
+      modules.push(skippedModuleForLabRole("Commission Engine", ctx));
+      modules.push(skippedModuleForLabRole("Lab Contract Engine", ctx));
     } else {
       let opsPayload = null;
       try {
@@ -168,6 +171,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         distributorWorkspace,
         distributorProvisioning,
         commissionEngine,
+        labContractEngine,
       ] = await Promise.all([
         validateOperationsCommandCenterModule({
           ctx,
@@ -236,6 +240,12 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
           rendered: snapshots.commissionEngine ?? null,
           opsPayload,
         }),
+        validateLabContractEngineModule({
+          ctx,
+          currentUser,
+          rendered: snapshots.labContractEngine ?? null,
+          opsPayload,
+        }),
       ]);
 
       modules.push(
@@ -250,7 +260,8 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         storePolishedModule("Tenant Foundation", tenantFoundation, ctx),
         storePolishedModule("Distributor Workspace", distributorWorkspace, ctx),
         storePolishedModule("Distributor Provisioning", distributorProvisioning, ctx),
-        storePolishedModule("Commission Engine", commissionEngine, ctx)
+        storePolishedModule("Commission Engine", commissionEngine, ctx),
+        storePolishedModule("Lab Contract Engine", labContractEngine, ctx)
       );
 
       clearPredatorOpsPayload();
@@ -398,6 +409,13 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
       break;
     case "Commission Engine":
       result = await validateCommissionEngineModule({
+        ctx,
+        currentUser,
+        rendered: snapshot,
+      });
+      break;
+    case "Lab Contract Engine":
+      result = await validateLabContractEngineModule({
         ctx,
         currentUser,
         rendered: snapshot,

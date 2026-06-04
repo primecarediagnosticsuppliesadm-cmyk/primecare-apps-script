@@ -15,6 +15,7 @@ import TenantManagementPage from "./pages/TenantManagementPage";
 import DistributorManagementPage from "./pages/DistributorManagementPage";
 import DistributorProvisioningPage from "./pages/DistributorProvisioningPage";
 import CommissionEnginePage from "./pages/CommissionEnginePage";
+import LabContractManagementPage from "./pages/LabContractManagementPage";
 import LabOrderingPage from "./pages/LabOrderingPage";
 import LabsPage from "./pages/LabsPage";
 import InventoryLedgerPage from "./pages/InventoryLedgerPage";
@@ -214,6 +215,14 @@ export default function PrimeCareWebPortal({
       case "suppliers":
         return <PurchaseOrdersPage currentUser={currentUser} />;
 
+      case "labContractEngine":
+        return (
+          <LabContractManagementPage
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+          />
+        );
+
       default:
         return (
           <PlaceholderCard
@@ -271,6 +280,14 @@ export default function PrimeCareWebPortal({
 
       case "commissionEngine":
         return <CommissionEnginePage currentUser={currentUser} />;
+
+      case "labContractEngine":
+        return (
+          <LabContractManagementPage
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+          />
+        );
 
       case "operationsCenter":
       case "operations-center":

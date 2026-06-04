@@ -9,6 +9,7 @@ import {
   buildDistributorWorkspace,
 } from "@/distributor/distributorWorkspaceEngine.js";
 import { computeFounderOperationalSignals } from "@/founder/founderPilotReadinessCompute.js";
+import { readLabContractRegistry } from "@/labContract/labContractStore.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -70,12 +71,17 @@ export async function loadDistributorWorkspaceBundle(currentUser, options = {}) 
   const refreshed = await loadTenantFoundationRegistry(currentUser, { skipLiveLoad: true });
   const registry = buildDistributorRegistry(refreshed.tenants);
 
+  const contracts = homeTenantId
+    ? readLabContractRegistry(homeTenantId).contracts
+    : [];
+
   return {
     registry,
     homeTenantId,
     opsPayload,
     agentProfiles,
     foundation: refreshed,
+    contracts,
   };
 }
 
@@ -107,5 +113,6 @@ export function resolveDistributorWorkspace(
     agentProfiles: isLive ? bundle.agentProfiles : [],
     isLive,
     homeTenantId,
+    contracts: bundle.contracts || [],
   });
 }

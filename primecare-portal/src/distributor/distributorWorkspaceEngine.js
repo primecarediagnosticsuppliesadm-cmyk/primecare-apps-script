@@ -12,6 +12,7 @@ import { filterVisitProofEvidence } from "@/utils/operationalEvidenceUi.js";
 import { getPipelineStageLabel, normalizeQualificationPipelineStage } from "@/utils/qualificationPipeline.js";
 import { labIdKey } from "@/utils/labId.js";
 import { computeTenantHealthBand, computeTenantHealthScore } from "@/tenant/tenantFoundationEngine.js";
+import { buildContractSummaryForDistributor } from "@/labContract/labContractEngine.js";
 
 const REVENUE_DAYS = YEAR1_TARGETS.revenueDaysPerMonth;
 
@@ -525,6 +526,16 @@ export function buildDistributorWorkspace({
 
   const canNavigateOps = isLive && !distributorRow.registryOnly;
 
+  const contractSummary = isLive
+    ? buildContractSummaryForDistributor(distributorRow.id, contracts, payload)
+    : {
+        activeContracts: 0,
+        monthlyContractValue: 0,
+        contractHealthScore: 0,
+        contractHealthBand: "Healthy",
+        expiryAlerts: [],
+      };
+
   const actions = [
     {
       id: "open_tenant",
@@ -532,6 +543,13 @@ export function buildDistributorWorkspace({
       wired: true,
       comingSoon: false,
       page: "tenantManagement",
+    },
+    {
+      id: "open_contracts",
+      label: "Open contracts",
+      wired: isLive,
+      comingSoon: !isLive,
+      page: "labContractEngine",
     },
     {
       id: "open_labs",
@@ -573,6 +591,7 @@ export function buildDistributorWorkspace({
   return {
     profile,
     health,
+    contracts: contractSummary,
     team,
     teamGap: team.length === 0,
     labs,

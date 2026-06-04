@@ -24,6 +24,7 @@ const PAGE_LABELS = {
   orders: "Orders",
   founderNavigation: "Founder Navigation",
   qualificationReview: "Qualification Review",
+  labContractEngine: "Lab Contracts",
 };
 
 const QUARTER_BAR = {
@@ -125,8 +126,17 @@ export default function FounderStrategyPage({ setActivePage = null, currentUser 
   }
   if (!model) return null;
 
-  const { todayPriorities, revenueGap, milestoneUnlock, flywheel, ninetyDayPlan, year1Roadmap, health, growthBlocker } =
-    model;
+  const {
+    todayPriorities,
+    revenueGap,
+    contractPipeline,
+    milestoneUnlock,
+    flywheel,
+    ninetyDayPlan,
+    year1Roadmap,
+    health,
+    growthBlocker,
+  } = model;
 
   return (
     <div className="mx-auto max-w-3xl space-y-3 p-3 pb-8">
@@ -200,6 +210,37 @@ export default function FounderStrategyPage({ setActivePage = null, currentUser 
           </ol>
         )}
       </Section>
+
+      {contractPipeline ? (
+        <Section title="Contract pipeline" icon={Target}>
+          <div className="grid grid-cols-3 gap-2 text-center text-xs">
+            <div className="rounded-lg border bg-white p-2">
+              <p className="text-slate-500">Active contracts</p>
+              <p className="text-lg font-bold tabular-nums">{contractPipeline.activeContractCount}</p>
+            </div>
+            <div className="rounded-lg border bg-white p-2">
+              <p className="text-slate-500">Committed / mo</p>
+              <p className="text-sm font-bold">{contractPipeline.monthlyCommittedLabel}</p>
+            </div>
+            <div className="rounded-lg border bg-white p-2">
+              <p className="text-slate-500">Pipeline</p>
+              <p className="text-lg font-bold tabular-nums">{contractPipeline.pipelineCount}</p>
+            </div>
+          </div>
+          {setActivePage ? (
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="mt-2 h-auto p-0 text-xs"
+              onClick={() => setActivePage("labContractEngine")}
+            >
+              Lab Contracts
+              <ArrowRight className="ml-0.5 h-3 w-3" />
+            </Button>
+          ) : null}
+        </Section>
+      ) : null}
 
       <Section title="Revenue gap" icon={TrendingUp}>
         <div className="grid gap-2 sm:grid-cols-2">

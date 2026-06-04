@@ -8,6 +8,7 @@ export const PERMISSIONS = {
   distributorManagement: [ROLES.EXECUTIVE],
   distributorProvisioning: [ROLES.EXECUTIVE],
   commissionEngine: [ROLES.EXECUTIVE],
+  labContractEngine: [ROLES.ADMIN, ROLES.EXECUTIVE],
   operationsCenter: [ROLES.ADMIN, ROLES.EXECUTIVE],
   visits: [ROLES.AGENT, ROLES.ADMIN],
   collections: [ROLES.AGENT, ROLES.ADMIN],

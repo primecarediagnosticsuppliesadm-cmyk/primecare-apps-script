@@ -22,6 +22,7 @@ export const MENU_ITEMS = [
   { key: "distributorManagement", label: "Distributor Management", icon: "Briefcase" },
   { key: "distributorProvisioning", label: "Provisioning", icon: "ClipboardList" },
   { key: "commissionEngine", label: "Commission Engine", icon: "Coins" },
+  { key: "labContractEngine", label: "Lab Contracts", icon: "FileText" },
   { key: "operationsCenter", label: "Operations Center", icon: "Radio" },
 
   // Field Ops
@@ -61,6 +62,7 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "distributorManagement",
   "distributorProvisioning",
   "commissionEngine",
+  "labContractEngine",
   "operationsCenter",
   "visits",
   "collections",

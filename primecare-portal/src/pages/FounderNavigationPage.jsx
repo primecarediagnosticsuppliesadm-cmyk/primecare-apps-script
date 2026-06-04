@@ -153,6 +153,7 @@ export default function FounderNavigationPage({ setActivePage = null, currentUse
     milestones,
     dailyFocus,
     signals,
+    contractPipeline,
   } = journey;
 
   return (
@@ -214,10 +215,22 @@ export default function FounderNavigationPage({ setActivePage = null, currentUse
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[10px]">
+        <div className="mt-3 grid grid-cols-2 gap-2 text-center text-[10px] sm:grid-cols-3">
           <div className="rounded-md border bg-white px-1 py-1.5">
             <p className="text-slate-500">Active labs</p>
             <p className="text-sm font-bold tabular-nums">{signals.activeLabs}</p>
+          </div>
+          <div className="rounded-md border bg-white px-1 py-1.5">
+            <p className="text-slate-500">Contracts</p>
+            <p className="text-sm font-bold tabular-nums">
+              {contractPipeline?.activeContractCount ?? 0}
+            </p>
+          </div>
+          <div className="rounded-md border bg-white px-1 py-1.5">
+            <p className="text-slate-500">Committed / mo</p>
+            <p className="text-xs font-bold tabular-nums">
+              {contractPipeline?.monthlyCommittedLabel ?? "₹0"}
+            </p>
           </div>
           <div className="rounded-md border bg-white px-1 py-1.5">
             <p className="text-slate-500">Visits · 14d</p>

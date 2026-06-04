@@ -3,6 +3,8 @@ import { buildFounderPhaseEngineView } from "@/founder/founderPhaseEngine.js";
 import { computeFounderOperationalSignals, PILOT_READINESS_TARGET } from "@/founder/founderPilotReadinessCompute.js";
 import { YEAR1_TARGETS, YEAR1_QUARTERS } from "@/founder/founderStrategyTargets.js";
 import { labIdKey } from "@/utils/labId.js";
+import { readLabContractRegistry } from "@/labContract/labContractStore.js";
+import { buildLabContractModel } from "@/labContract/labContractEngine.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -394,6 +396,21 @@ export function buildFounderStrategyModel(payload, tenantId) {
   const revenueGap = buildRevenueGap(payload, signals);
   const flywheel = buildFlywheel(payload, signals);
 
+  const contractRegistry = readLabContractRegistry(tenantId);
+  const distributors = new Set([str(tenantId)].filter(Boolean));
+  const contractModel = buildLabContractModel(
+    contractRegistry.contracts,
+    payload,
+    distributors
+  );
+  const contractPipeline = contractModel.growth;
+  const revenueGapWithContracts = {
+    ...revenueGap,
+    monthlyCommittedContracts: contractPipeline.monthlyCommittedRevenue,
+    monthlyCommittedLabel: contractPipeline.monthlyCommittedLabel,
+    activeContractCount: contractPipeline.activeContractCount,
+  };
+
   const growthBlocker = signals.dataStale
     ? "No operational data loaded"
     : journey.blockers?.[0]?.title
@@ -407,10 +424,12 @@ export function buildFounderStrategyModel(payload, tenantId) {
     signals,
     journey,
     todayPriorities: buildTodayPriorities(signals, journey, collSummary),
-    revenueGap,
+    revenueGap: revenueGapWithContracts,
+    contractPipeline,
+    contractDashboard: contractModel.dashboard,
     milestoneUnlock: buildMilestoneUnlock(journey),
     flywheel,
-    ninetyDayPlan: buildNinetyDayPlan(signals, revenueGap),
+    ninetyDayPlan: buildNinetyDayPlan(signals, revenueGapWithContracts),
     year1Roadmap: buildYear1Roadmap(journey),
     health: buildHealthScores(signals, journey),
     growthBlocker,
