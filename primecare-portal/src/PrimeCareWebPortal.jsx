@@ -10,6 +10,7 @@ import AIInsightsPage from "./pages/AIInsightsPage";
 import CollectionsPage from "./pages/CollectionsPage";
 import ExecutiveControlTower from "./pages/ExecutiveControlTower";
 import FounderNavigationPage from "./pages/FounderNavigationPage";
+import FounderStrategyPage from "./pages/FounderStrategyPage";
 import LabOrderingPage from "./pages/LabOrderingPage";
 import LabsPage from "./pages/LabsPage";
 import InventoryLedgerPage from "./pages/InventoryLedgerPage";
@@ -232,6 +233,14 @@ export default function PrimeCareWebPortal({
       case "founderNavigation":
         return (
           <FounderNavigationPage
+            setActivePage={setActivePage}
+            currentUser={currentUser}
+          />
+        );
+
+      case "founderStrategy":
+        return (
+          <FounderStrategyPage
             setActivePage={setActivePage}
             currentUser={currentUser}
           />

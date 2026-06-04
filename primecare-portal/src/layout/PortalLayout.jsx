@@ -3,6 +3,7 @@ import { ROLES } from "../config/roles";
 import {
   LayoutDashboard,
   Compass,
+  Target,
   ClipboardList,
   Wallet,
   Building2,
@@ -20,6 +21,7 @@ import {
 const ICONS = {
   dashboard: LayoutDashboard,
   founderNavigation: Compass,
+  founderStrategy: Target,
   operationsCenter: Radio,
   visits: ClipboardList,
   collections: Wallet,

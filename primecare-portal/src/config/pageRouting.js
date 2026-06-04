@@ -31,6 +31,9 @@ export function normalizePageKey(page) {
     case "founderNavigation":
     case "founder-journey":
       return "founderNavigation";
+    case "founder-strategy":
+    case "founderStrategy":
+      return "founderStrategy";
     case "lab-orders":
     case "lab-ordering":
     case "ordering":
