@@ -25,6 +25,21 @@ export const REQUIRED_GATE_IDS = ACTIVATION_GATE_IDS;
 
 const OPTIONAL_GATE_IDS = new Set(["at_least_one_lab", "roles_configured"]);
 
+/** Standard roles auto-provisioned when a distributor is created (V1). */
+export const STANDARD_DISTRIBUTOR_ROLES = [
+  { id: "distributor_admin", label: "Distributor Admin" },
+  { id: "agent", label: "Agent" },
+  { id: "lab_user", label: "Lab User" },
+];
+
+function standardRolesProvisioned(config = {}) {
+  return (
+    config.rolesAutoProvisioned === true ||
+    config.rolesConfigured === true ||
+    (Array.isArray(config.standardRoles) && config.standardRoles.length >= 3)
+  );
+}
+
 function readinessWeightFor(c) {
   if (c.comingSoon) return 0;
   if (c.readinessWeight != null) return c.readinessWeight;
@@ -82,10 +97,12 @@ export function buildProvisioningChecks(ctx) {
       required: false,
       readinessWeight: 2,
       pass:
-        config.rolesConfigured === true ||
+        standardRolesProvisioned(config) ||
         (isLive && num(ctx.roleCount) >= 2) ||
-        num(config.roleCount) >= 2,
-      detail: "Counts toward readiness · does not block activation (WARN if pending)",
+        num(config.roleCount) >= 3,
+      detail: standardRolesProvisioned(config)
+        ? `Auto-provisioned: ${STANDARD_DISTRIBUTOR_ROLES.map((r) => r.label).join(", ")}`
+        : "Standard roles provisioned at distributor creation (V1)",
     },
     {
       id: "users_roles",
@@ -238,7 +255,6 @@ export function buildActivationDiagnosis(checks) {
 /** Open / inline actions per readiness check. */
 export const PROVISIONING_CHECK_ACTIONS = {
   admin_user: { type: "edit_admin", label: "Edit admin" },
-  roles_configured: { page: "tenantManagement", label: "Open setup" },
   users_roles: { comingSoon: true, label: "Coming soon" },
   catalog_configured: { page: "inventory", label: "Open catalog" },
   at_least_one_lab: { page: "labs", label: "Open labs" },
@@ -331,6 +347,7 @@ export function buildProvisioningTasks(checks) {
 const TIMELINE_LABELS = {
   created: "Distributor created",
   admin_added: "Admin added",
+  roles_provisioned: "Standard roles provisioned",
   catalog_configured: "Catalog configured",
   lab_added: "Lab added",
   agent_assigned: "Agent assigned",
@@ -361,6 +378,14 @@ export function buildProvisioningTimeline(tenant, checks) {
       kind: "admin_added",
       label: TIMELINE_LABELS.admin_added,
       at: tenant.config?.adminAddedAt || tenant.updatedAt || tenant.createdAt,
+    });
+  }
+  if (checks.find((c) => c.id === "roles_configured")?.status === "PASS") {
+    inferred.push({
+      id: "roles_provisioned",
+      kind: "roles_provisioned",
+      label: TIMELINE_LABELS.roles_provisioned,
+      at: tenant.config?.rolesConfiguredAt || tenant.createdAt,
     });
   }
   if (checks.find((c) => c.id === "catalog_configured")?.status === "PASS") {
@@ -490,7 +515,11 @@ export function buildProvisioningDraft(form) {
       creditLimit: num(ops.creditLimit),
       commissionPct: num(ops.commissionPct),
       territoryNotes: str(ops.territoryNotes),
-      rolesConfigured: false,
+      rolesConfigured: true,
+      rolesAutoProvisioned: true,
+      rolesConfiguredAt: now,
+      standardRoles: STANDARD_DISTRIBUTOR_ROLES.map((r) => r.id),
+      roleCount: STANDARD_DISTRIBUTOR_ROLES.length,
       productCatalogReady: false,
       collectionsEnabled: false,
       orderingEnabled: false,
@@ -500,6 +529,12 @@ export function buildProvisioningDraft(form) {
       lifecycle: "configuring",
       timeline: [
         { id: "created", kind: "created", label: TIMELINE_LABELS.created, at: now },
+        {
+          id: "roles_provisioned",
+          kind: "roles_provisioned",
+          label: TIMELINE_LABELS.roles_provisioned,
+          at: now,
+        },
         ...(str(admin.email)
           ? [{ id: "admin_added", kind: "admin_added", label: TIMELINE_LABELS.admin_added, at: now }]
           : []),

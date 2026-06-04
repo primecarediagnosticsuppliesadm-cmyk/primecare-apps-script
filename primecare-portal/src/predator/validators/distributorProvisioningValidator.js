@@ -108,6 +108,22 @@ export async function validateDistributorProvisioningModule({
       model.checks
         .filter((c) => ACTIVATION_GATE_IDS.has(c.id))
         .every((c) => c.status === "PASS");
+
+    const rolesCheck = model.checks.find((c) => c.id === "roles_configured");
+    const rolesNotActivationBlocker =
+      !ACTIVATION_GATE_IDS.has("roles_configured") &&
+      (rolesCheck?.status === "PASS" || rolesCheck?.status === "WARN");
+    entries.push(
+      createPredatorEntry({
+        status: rolesNotActivationBlocker ? "PASS" : "FAIL",
+        module: "Distributor Provisioning",
+        step: "roles.not_activation_gate",
+        actual: rolesCheck?.status || "missing",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
     entries.push(
       createPredatorEntry({
         status: gateConsistent ? "PASS" : "FAIL",

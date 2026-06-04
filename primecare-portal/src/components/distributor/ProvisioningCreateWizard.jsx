@@ -187,8 +187,11 @@ export default function ProvisioningCreateWizard({ onClose, onCreated }) {
           <p>{draft.config.legalName}</p>
           <p>Territory: {draft.config.territory || draft.config.territories?.join(", ")}</p>
           <p>Admin: {draft.config.adminName} · {draft.config.adminEmail}</p>
+          <p className="mt-1 text-emerald-700">
+            Standard roles auto-provisioned: Distributor Admin, Agent, Lab User
+          </p>
           <p className="mt-2 text-slate-500">
-            Saved as PENDING. Complete readiness checklist, then activate.
+            Saved as PENDING. Complete catalog and isolation, then activate.
           </p>
         </div>
       ) : null}
