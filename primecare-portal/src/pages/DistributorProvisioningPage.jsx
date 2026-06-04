@@ -85,13 +85,28 @@ function ActivationDiagnosis({ diagnosis }) {
         <li key={g.id} className="flex items-center gap-2">
           {g.pass ? (
             <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+          ) : g.comingSoon || !g.blocksActivation ? (
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600" />
           ) : (
             <XCircle className="h-3.5 w-3.5 shrink-0 text-red-600" />
           )}
-          <span className={cn("font-medium", g.pass ? "text-emerald-900" : "text-red-900")}>
+          <span
+            className={cn(
+              "font-medium",
+              g.comingSoon
+                ? "text-amber-800"
+                : g.pass
+                  ? "text-emerald-900"
+                  : g.blocksActivation
+                    ? "text-red-900"
+                    : "text-amber-900"
+            )}
+          >
             {g.label}
-            {!g.required ? (
-              <span className="ml-1 font-normal text-slate-500">(recommended)</span>
+            {g.comingSoon ? (
+              <span className="ml-1 font-normal text-amber-700">· Coming Soon</span>
+            ) : !g.blocksActivation ? (
+              <span className="ml-1 font-normal text-slate-500">(readiness only)</span>
             ) : null}
           </span>
         </li>
@@ -492,7 +507,8 @@ export default function DistributorProvisioningPage({
               <div className="rounded-xl border bg-white p-3">
                 <PipelineStepper pipeline={model.pipeline} />
                 <p className="mt-2 text-[10px] text-slate-500">
-                  Draft → Configured → Ready → Activated. Blocked when required gates fail.
+                  Draft → Configured → Ready → Activated. Activation requires admin, product
+                  catalog, and isolation only.
                 </p>
               </div>
             ) : null}
@@ -512,10 +528,13 @@ export default function DistributorProvisioningPage({
                           variant="outline"
                           size="sm"
                           className="h-7 text-[10px]"
+                          disabled={action.comingSoon}
                           onClick={() => handleOpenAction(action)}
                         >
                           {action.label}
-                          <ArrowRight className="ml-0.5 h-3 w-3" />
+                          {!action.comingSoon ? (
+                            <ArrowRight className="ml-0.5 h-3 w-3" />
+                          ) : null}
                         </Button>
                       ) : null}
                     </li>
@@ -542,10 +561,13 @@ export default function DistributorProvisioningPage({
                           variant="outline"
                           size="sm"
                           className="h-7 text-[10px]"
+                          disabled={t.comingSoon || t.action.comingSoon}
                           onClick={() => handleOpenAction(t.action)}
                         >
                           {t.action.label}
-                          <ArrowRight className="ml-0.5 h-3 w-3" />
+                          {!t.comingSoon && !t.action.comingSoon ? (
+                            <ArrowRight className="ml-0.5 h-3 w-3" />
+                          ) : null}
                         </Button>
                       ) : null}
                       {!t.done && t.canMarkProvisioned ? (

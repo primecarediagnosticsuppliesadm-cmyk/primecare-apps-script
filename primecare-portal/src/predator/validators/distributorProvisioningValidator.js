@@ -6,7 +6,10 @@ import {
   resolveProvisioningModel,
   activateDistributorProvisioning,
 } from "@/distributor/distributorProvisioningData.js";
-import { isTimelineOrdered, REQUIRED_GATE_IDS } from "@/distributor/distributorProvisioningEngine.js";
+import {
+  isTimelineOrdered,
+  ACTIVATION_GATE_IDS,
+} from "@/distributor/distributorProvisioningEngine.js";
 import { getRegistryTenant } from "@/tenant/tenantFoundationStore.js";
 import { polishPredatorEntries } from "@/predator/predatorEntryPolish.js";
 import { ROLES } from "@/config/roles.js";
@@ -102,7 +105,9 @@ export async function validateDistributorProvisioningModule({
 
     const gateConsistent =
       model.gates.canActivate ===
-      model.checks.filter((c) => REQUIRED_GATE_IDS.has(c.id)).every((c) => c.status === "PASS");
+      model.checks
+        .filter((c) => ACTIVATION_GATE_IDS.has(c.id))
+        .every((c) => c.status === "PASS");
     entries.push(
       createPredatorEntry({
         status: gateConsistent ? "PASS" : "FAIL",

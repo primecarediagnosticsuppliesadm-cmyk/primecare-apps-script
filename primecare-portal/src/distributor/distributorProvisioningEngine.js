@@ -13,14 +13,23 @@ const PIPELINE_STEPS = [
   { id: "activated", label: "Activated" },
 ];
 
-const REQUIRED_GATE_IDS = new Set([
+/** Gates that block activation (V3). */
+export const ACTIVATION_GATE_IDS = new Set([
   "admin_user",
-  "roles_configured",
   "catalog_configured",
   "isolation_verified",
 ]);
 
-const OPTIONAL_GATE_IDS = new Set(["at_least_one_lab"]);
+/** @deprecated Use ACTIVATION_GATE_IDS — kept for imports that expect REQUIRED_GATE_IDS */
+export const REQUIRED_GATE_IDS = ACTIVATION_GATE_IDS;
+
+const OPTIONAL_GATE_IDS = new Set(["at_least_one_lab", "roles_configured"]);
+
+function readinessWeightFor(c) {
+  if (c.comingSoon) return 0;
+  if (c.readinessWeight != null) return c.readinessWeight;
+  return c.required ? 2 : 1;
+}
 
 function str(v) {
   return String(v ?? "").trim();
@@ -70,16 +79,25 @@ export function buildProvisioningChecks(ctx) {
     {
       id: "roles_configured",
       label: "Roles configured",
-      required: true,
+      required: false,
+      readinessWeight: 2,
       pass:
         config.rolesConfigured === true ||
         (isLive && num(ctx.roleCount) >= 2) ||
         num(config.roleCount) >= 2,
-      detail: "Admin + executive/agent profiles in Supabase",
+      detail: "Counts toward readiness · does not block activation (WARN if pending)",
+    },
+    {
+      id: "users_roles",
+      label: "Users & Roles",
+      required: false,
+      comingSoon: true,
+      pass: false,
+      detail: "Coming Soon — dedicated user/role management",
     },
     {
       id: "catalog_configured",
-      label: "Catalog configured",
+      label: "Product catalog",
       required: true,
       pass:
         config.productCatalogReady === true ||
@@ -134,14 +152,19 @@ export function buildProvisioningChecks(ctx) {
     },
   ];
 
-  return checks.map((c) => ({
-    ...c,
-    status: toCheckStatus(
-      c.pass,
-      c.required,
-      !c.pass && !isDb && c.id === "isolation_verified"
-    ),
-  }));
+  return checks.map((c) => {
+    if (c.comingSoon) {
+      return { ...c, status: "WARN" };
+    }
+    return {
+      ...c,
+      status: toCheckStatus(
+        c.pass,
+        c.required,
+        !c.pass && !isDb && c.id === "isolation_verified"
+      ),
+    };
+  });
 }
 
 export function computeReadinessPercent(checks) {
@@ -159,19 +182,23 @@ export function computeReadinessDebug(checks, lastUpdated = null) {
       lastUpdated,
     };
   }
-  const weights = checks.map((c) => {
-    const w = c.required ? 2 : 1;
-    const earned =
-      c.status === "PASS" ? w : c.status === "WARN" ? w * 0.5 : 0;
-    return {
-      id: c.id,
-      label: c.label,
-      weight: w,
-      earned,
-      required: c.required,
-      status: c.status,
-    };
-  });
+  const weights = checks
+    .map((c) => {
+      const w = readinessWeightFor(c);
+      const earned =
+        w === 0 ? 0 : c.status === "PASS" ? w : c.status === "WARN" ? w * 0.5 : 0;
+      return {
+        id: c.id,
+        label: c.label,
+        weight: w,
+        earned,
+        required: c.required,
+        activationRequired: ACTIVATION_GATE_IDS.has(c.id),
+        status: c.status,
+        comingSoon: Boolean(c.comingSoon),
+      };
+    })
+    .filter((w) => w.weight > 0);
   const total = weights.reduce((s, x) => s + x.weight, 0);
   const earnedSum = weights.reduce((s, x) => s + x.earned, 0);
   return {
@@ -186,19 +213,23 @@ export function computeReadinessDebug(checks, lastUpdated = null) {
 export function buildActivationDiagnosis(checks) {
   const gateOrder = [
     "admin_user",
-    "roles_configured",
     "catalog_configured",
-    "at_least_one_lab",
     "isolation_verified",
+    "roles_configured",
+    "at_least_one_lab",
+    "users_roles",
   ];
   return gateOrder.map((id) => {
     const c = checks.find((x) => x.id === id);
+    const blocksActivation = ACTIVATION_GATE_IDS.has(id);
     return {
       id,
       label: c?.label || id,
-      pass: c?.status === "PASS",
-      required: REQUIRED_GATE_IDS.has(id),
-      status: c?.status || "FAIL",
+      pass: c?.comingSoon ? false : c?.status === "PASS",
+      required: blocksActivation,
+      blocksActivation,
+      comingSoon: Boolean(c?.comingSoon),
+      status: c?.comingSoon ? "WARN" : c?.status || (blocksActivation ? "FAIL" : "WARN"),
       detail: c?.detail || "",
     };
   });
@@ -208,6 +239,7 @@ export function buildActivationDiagnosis(checks) {
 export const PROVISIONING_CHECK_ACTIONS = {
   admin_user: { type: "edit_admin", label: "Edit admin" },
   roles_configured: { page: "tenantManagement", label: "Open setup" },
+  users_roles: { comingSoon: true, label: "Coming soon" },
   catalog_configured: { page: "inventory", label: "Open catalog" },
   at_least_one_lab: { page: "labs", label: "Open labs" },
   isolation_verified: {
@@ -222,7 +254,7 @@ export const PROVISIONING_CHECK_ACTIONS = {
 
 export const PROVISIONING_TASK_ACTIONS = {
   create_admin: { type: "edit_admin", label: "Edit admin" },
-  configure_roles: { page: "tenantManagement", label: "Open setup" },
+  users_roles: { comingSoon: true, label: "Coming soon" },
   load_catalog: { page: "inventory", label: "Open catalog" },
   create_lab: { page: "labs", label: "Open labs" },
   assign_agent: { page: "visits", label: "Open agents" },
@@ -235,7 +267,7 @@ export const PROVISIONING_TASK_ACTIONS = {
 
 export function evaluateActivationGates(checks) {
   const blockers = checks.filter(
-    (c) => REQUIRED_GATE_IDS.has(c.id) && c.status !== "PASS"
+    (c) => ACTIVATION_GATE_IDS.has(c.id) && c.status !== "PASS"
   );
   const optionalPending = checks.filter(
     (c) => OPTIONAL_GATE_IDS.has(c.id) && c.status !== "PASS"
@@ -271,8 +303,8 @@ export function resolveProvisioningLifecycle(tenant, checks, gates) {
 export function buildProvisioningTasks(checks) {
   const taskDefs = [
     { id: "create_admin", label: "Create admin", checkId: "admin_user" },
-    { id: "configure_roles", label: "Configure roles", checkId: "roles_configured" },
-    { id: "load_catalog", label: "Load catalog", checkId: "catalog_configured" },
+    { id: "users_roles", label: "Users & Roles", checkId: "users_roles", comingSoon: true },
+    { id: "load_catalog", label: "Load product catalog", checkId: "catalog_configured" },
     { id: "create_lab", label: "Create first lab", checkId: "at_least_one_lab" },
     { id: "assign_agent", label: "Assign first agent", checkId: "agent_assigned" },
     { id: "verify_isolation", label: "Verify isolation", checkId: "isolation_verified" },
@@ -285,15 +317,13 @@ export function buildProvisioningTasks(checks) {
     const action = PROVISIONING_TASK_ACTIONS[t.id] || null;
     return {
       ...t,
-      done,
-      status: check?.status || "WARN",
-      action,
-      canMarkProvisioned: [
-        "configure_roles",
-        "load_catalog",
-        "assign_agent",
-        "verify_isolation",
-      ].includes(t.id),
+      done: t.comingSoon ? false : done,
+      status: t.comingSoon ? "WARN" : check?.status || "WARN",
+      action: t.comingSoon ? PROVISIONING_TASK_ACTIONS.users_roles : action,
+      comingSoon: Boolean(t.comingSoon),
+      canMarkProvisioned: ["load_catalog", "assign_agent", "verify_isolation"].includes(
+        t.id
+      ),
     };
   });
 }
@@ -538,4 +568,4 @@ export function buildDistributorProvisioningModel(tenant, ctx = {}) {
   };
 }
 
-export { PIPELINE_STEPS, REQUIRED_GATE_IDS, TIMELINE_LABELS };
+export { PIPELINE_STEPS, TIMELINE_LABELS };
