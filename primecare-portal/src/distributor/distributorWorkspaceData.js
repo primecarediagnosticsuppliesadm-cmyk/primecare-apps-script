@@ -71,9 +71,10 @@ export async function loadDistributorWorkspaceBundle(currentUser, options = {}) 
   const refreshed = await loadTenantFoundationRegistry(currentUser, { skipLiveLoad: true });
   const registry = buildDistributorRegistry(refreshed.tenants);
 
-  const contracts = homeTenantId
+  const registryContracts = homeTenantId
     ? readLabContractRegistry(homeTenantId).contracts
     : [];
+  const contracts = Array.isArray(registryContracts) ? registryContracts : [];
 
   return {
     registry,
@@ -113,6 +114,6 @@ export function resolveDistributorWorkspace(
     agentProfiles: isLive ? bundle.agentProfiles : [],
     isLive,
     homeTenantId,
-    contracts: bundle.contracts || [],
+    contracts: Array.isArray(bundle.contracts) ? bundle.contracts : [],
   });
 }

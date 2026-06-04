@@ -368,9 +368,10 @@ export function buildContractGrowthMetrics(contracts) {
 }
 
 export function buildContractSummaryForDistributor(distributorId, contracts, payload) {
-  const lookups = buildOpsLookups(payload);
+  const safeContracts = Array.isArray(contracts) ? contracts : [];
+  const lookups = buildOpsLookups(payload || {});
   const distributors = new Set([str(distributorId)]);
-  const scoped = contracts
+  const scoped = safeContracts
     .filter((c) => str(c.distributorId) === str(distributorId))
     .map((c) => enrichContract(c, lookups, distributors));
 

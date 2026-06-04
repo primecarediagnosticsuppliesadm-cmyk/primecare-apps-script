@@ -261,13 +261,23 @@ export default function DistributorManagementPage({ currentUser = null, setActiv
               </div>
             </div>
 
-            {workspace.contracts && tab === "Overview" ? (
+            {tab === "Overview" && workspace.contracts ? (
               <div className="rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2 text-xs">
                 <p className="font-semibold text-indigo-950">Contracts</p>
+                {workspace.contracts.activeContracts === 0 &&
+                !workspace.isLive ? (
+                  <p className="mt-1 text-slate-500">No contract data in registry-only view.</p>
+                ) : workspace.contracts.activeContracts === 0 ? (
+                  <p className="mt-1 text-slate-500">
+                    No active lab contracts — open Lab Contracts to create one.
+                  </p>
+                ) : null}
                 <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <div>
                     <p className="text-slate-500">Active</p>
-                    <p className="font-bold tabular-nums">{workspace.contracts.activeContracts}</p>
+                    <p className="font-bold tabular-nums">
+                      {workspace.contracts.activeContracts ?? 0}
+                    </p>
                   </div>
                   <div>
                     <p className="text-slate-500">Monthly value</p>
@@ -277,12 +287,12 @@ export default function DistributorManagementPage({ currentUser = null, setActiv
                   </div>
                   <div>
                     <p className="text-slate-500">Health</p>
-                    <p className="font-bold">{workspace.contracts.contractHealthBand}</p>
+                    <p className="font-bold">{workspace.contracts.contractHealthBand || "Healthy"}</p>
                   </div>
                   <div>
                     <p className="text-slate-500">Expiry alerts</p>
                     <p className="font-bold tabular-nums">
-                      {workspace.contracts.expiryAlerts?.length || 0}
+                      {workspace.contracts.expiryAlerts?.length ?? 0}
                     </p>
                   </div>
                 </div>

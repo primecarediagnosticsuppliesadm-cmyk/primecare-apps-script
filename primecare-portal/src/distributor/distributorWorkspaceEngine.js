@@ -16,6 +16,18 @@ import { buildContractSummaryForDistributor } from "@/labContract/labContractEng
 
 const REVENUE_DAYS = YEAR1_TARGETS.revenueDaysPerMonth;
 
+export const EMPTY_CONTRACT_SUMMARY = {
+  activeContracts: 0,
+  monthlyContractValue: 0,
+  contractHealthScore: 0,
+  contractHealthBand: "Healthy",
+  expiryAlerts: [],
+};
+
+function safeContractList(contracts) {
+  return Array.isArray(contracts) ? contracts : [];
+}
+
 const GROWTH_STAGES = [
   { id: "prospect", label: "Prospect" },
   { id: "qualified", label: "Qualified" },
@@ -473,7 +485,9 @@ export function buildDistributorWorkspace({
   agentProfiles = [],
   isLive = false,
   homeTenantId = "",
+  contracts = [],
 }) {
+  const safeContracts = safeContractList(contracts);
   const config = distributorRow.config || {};
   const territories = parseTerritorySummary(config);
 
@@ -527,14 +541,8 @@ export function buildDistributorWorkspace({
   const canNavigateOps = isLive && !distributorRow.registryOnly;
 
   const contractSummary = isLive
-    ? buildContractSummaryForDistributor(distributorRow.id, contracts, payload)
-    : {
-        activeContracts: 0,
-        monthlyContractValue: 0,
-        contractHealthScore: 0,
-        contractHealthBand: "Healthy",
-        expiryAlerts: [],
-      };
+    ? buildContractSummaryForDistributor(distributorRow.id, safeContracts, payload)
+    : { ...EMPTY_CONTRACT_SUMMARY };
 
   const actions = [
     {

@@ -289,6 +289,36 @@ export async function validateDistributorWorkspaceModule({
           })
         );
       }
+
+      const contractSummary = workspace.contracts;
+      entries.push(
+        createPredatorEntry({
+          status:
+            contractSummary &&
+            typeof contractSummary.activeContracts === "number" &&
+            Array.isArray(contractSummary.expiryAlerts)
+              ? "PASS"
+              : "FAIL",
+          module: "Distributor Workspace",
+          step: "contracts.summary_shape",
+          actual: contractSummary ? String(contractSummary.activeContracts) : "missing",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      entries.push(
+        createPredatorEntry({
+          status: "PASS",
+          module: "Distributor Workspace",
+          step: "contracts.empty_safe",
+          actual: String(contractSummary?.activeContracts ?? 0),
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
     }
 
     if (rendered?.selectedId && workspace && rendered.selectedId !== workspace.profile.id) {
