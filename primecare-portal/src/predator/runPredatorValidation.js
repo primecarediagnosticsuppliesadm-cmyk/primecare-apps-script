@@ -21,6 +21,7 @@ import { validateFounderStrategyModule } from "@/predator/validators/founderStra
 import { validateTenantFoundationModule } from "@/predator/validators/tenantFoundationValidator.js";
 import { validateDistributorWorkspaceModule } from "@/predator/validators/distributorWorkspaceValidator.js";
 import { validateDistributorProvisioningModule } from "@/predator/validators/distributorProvisioningValidator.js";
+import { validateCommissionEngineModule } from "@/predator/validators/commissionEngineValidator.js";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import {
   primePredatorOpsPayload,
@@ -166,6 +167,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         tenantFoundation,
         distributorWorkspace,
         distributorProvisioning,
+        commissionEngine,
       ] = await Promise.all([
         validateOperationsCommandCenterModule({
           ctx,
@@ -228,6 +230,12 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
           rendered: snapshots.distributorProvisioning ?? null,
           opsPayload,
         }),
+        validateCommissionEngineModule({
+          ctx,
+          currentUser,
+          rendered: snapshots.commissionEngine ?? null,
+          opsPayload,
+        }),
       ]);
 
       modules.push(
@@ -241,7 +249,8 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         storePolishedModule("Founder Strategy", founderStrategy, ctx),
         storePolishedModule("Tenant Foundation", tenantFoundation, ctx),
         storePolishedModule("Distributor Workspace", distributorWorkspace, ctx),
-        storePolishedModule("Distributor Provisioning", distributorProvisioning, ctx)
+        storePolishedModule("Distributor Provisioning", distributorProvisioning, ctx),
+        storePolishedModule("Commission Engine", commissionEngine, ctx)
       );
 
       clearPredatorOpsPayload();
@@ -382,6 +391,13 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
       break;
     case "Distributor Provisioning":
       result = await validateDistributorProvisioningModule({
+        ctx,
+        currentUser,
+        rendered: snapshot,
+      });
+      break;
+    case "Commission Engine":
+      result = await validateCommissionEngineModule({
         ctx,
         currentUser,
         rendered: snapshot,

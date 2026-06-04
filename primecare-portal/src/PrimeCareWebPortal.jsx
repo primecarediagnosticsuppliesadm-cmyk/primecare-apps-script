@@ -14,6 +14,7 @@ import FounderStrategyPage from "./pages/FounderStrategyPage";
 import TenantManagementPage from "./pages/TenantManagementPage";
 import DistributorManagementPage from "./pages/DistributorManagementPage";
 import DistributorProvisioningPage from "./pages/DistributorProvisioningPage";
+import CommissionEnginePage from "./pages/CommissionEnginePage";
 import LabOrderingPage from "./pages/LabOrderingPage";
 import LabsPage from "./pages/LabsPage";
 import InventoryLedgerPage from "./pages/InventoryLedgerPage";
@@ -267,6 +268,9 @@ export default function PrimeCareWebPortal({
             setActivePage={setActivePage}
           />
         );
+
+      case "commissionEngine":
+        return <CommissionEnginePage currentUser={currentUser} />;
 
       case "operationsCenter":
       case "operations-center":

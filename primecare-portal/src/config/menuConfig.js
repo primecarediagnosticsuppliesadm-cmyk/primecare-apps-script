@@ -21,6 +21,7 @@ export const MENU_ITEMS = [
   { key: "tenantManagement", label: "Tenant Management", icon: "Building" },
   { key: "distributorManagement", label: "Distributor Management", icon: "Briefcase" },
   { key: "distributorProvisioning", label: "Provisioning", icon: "ClipboardList" },
+  { key: "commissionEngine", label: "Commission Engine", icon: "Coins" },
   { key: "operationsCenter", label: "Operations Center", icon: "Radio" },
 
   // Field Ops
@@ -59,6 +60,7 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "tenantManagement",
   "distributorManagement",
   "distributorProvisioning",
+  "commissionEngine",
   "operationsCenter",
   "visits",
   "collections",
