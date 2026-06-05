@@ -3,7 +3,6 @@ import { buildFounderPhaseEngineView } from "@/founder/founderPhaseEngine.js";
 import { computeFounderOperationalSignals, PILOT_READINESS_TARGET } from "@/founder/founderPilotReadinessCompute.js";
 import { YEAR1_TARGETS, YEAR1_QUARTERS } from "@/founder/founderStrategyTargets.js";
 import { labIdKey } from "@/utils/labId.js";
-import { readLabContractRegistry } from "@/labContract/labContractStore.js";
 import { buildLabContractModel } from "@/labContract/labContractEngine.js";
 
 function str(v) {
@@ -389,20 +388,22 @@ function buildHealthScores(signals, journey) {
 /**
  * Full founder strategy model.
  */
-export function buildFounderStrategyModel(payload, tenantId) {
+export function buildFounderStrategyModel(payload, tenantId, options = {}) {
   const signals = computeFounderOperationalSignals(payload, tenantId);
-  const journey = buildFounderPhaseEngineView(payload, tenantId);
+  const portfolioContracts = Array.isArray(options.contracts) ? options.contracts : [];
+  const journey = buildFounderPhaseEngineView(payload, tenantId, {
+    contracts: portfolioContracts,
+  });
   const collSummary = summarizeCollectionsList(payload.collections || []);
   const revenueGap = buildRevenueGap(payload, signals);
   const flywheel = buildFlywheel(payload, signals);
 
-  const contractRegistry = readLabContractRegistry(tenantId);
-  const distributors = new Set([str(tenantId)].filter(Boolean));
-  const contractModel = buildLabContractModel(
-    contractRegistry.contracts,
-    payload,
-    distributors
-  );
+  const distributorIds = new Set([str(tenantId)].filter(Boolean));
+  for (const c of portfolioContracts) {
+    const did = str(c.distributorId);
+    if (did) distributorIds.add(did);
+  }
+  const contractModel = buildLabContractModel(portfolioContracts, payload, distributorIds);
   const contractPipeline = contractModel.growth;
   const revenueGapWithContracts = {
     ...revenueGap,

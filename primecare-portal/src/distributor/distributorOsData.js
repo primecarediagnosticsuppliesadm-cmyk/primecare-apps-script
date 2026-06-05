@@ -5,7 +5,6 @@ import {
 } from "@/api/primecareSupabaseApi.js";
 import {
   collectDistributorLabIds,
-  filterContractsByDistributor,
   filterRowsByDistributorLabs,
   filterRowsByTenant,
   rowTenantId,
@@ -16,7 +15,7 @@ import {
   loadDistributorWorkspaceBundle,
   resolveDistributorWorkspace,
 } from "@/distributor/distributorWorkspaceData.js";
-import { readLabContractRegistry } from "@/labContract/labContractStore.js";
+import { loadContractsForDistributor } from "@/labContract/labContractStore.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -109,12 +108,7 @@ export async function loadDistributorOsSnapshot(currentUser, scopeTenantId, opti
     );
   }
 
-  const hqRegistry = readLabContractRegistry(homeTenantId);
-  const scopedRegistry = readLabContractRegistry(tenantId);
-  const contracts = [
-    ...filterContractsByDistributor(hqRegistry.contracts, tenantId),
-    ...filterContractsByDistributor(scopedRegistry.contracts, tenantId),
-  ];
+  const contracts = await loadContractsForDistributor(tenantId, { homeTenantId });
 
   return {
     homeTenantId: bundle.homeTenantId || homeTenantId,

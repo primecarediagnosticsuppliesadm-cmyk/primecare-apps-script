@@ -8,11 +8,10 @@ import {
   lifecycleStatusLabel,
   lifecycleStatusVariant,
 } from "@/distributor/distributorLifecycleEngine.js";
+import { HEALTH_BAND_VARIANT } from "@/distributor/distributorHealthEngine.js";
 import { buildDistributorStageModel } from "@/distributor/distributorStageEngine.js";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, CheckCircle2, Circle, TrendingUp, XCircle } from "lucide-react";
-
-const HEALTH_VARIANT = { Healthy: "success", Watch: "warning", Risk: "danger" };
 
 export function DashboardPanel({ dashboard, comparison = [], onSelect }) {
   if (!dashboard) return null;
@@ -25,7 +24,10 @@ export function DashboardPanel({ dashboard, comparison = [], onSelect }) {
         <KpiCard title="Active" value={d.activeDistributors} />
         <KpiCard title="Suspended" value={d.suspendedDistributors} />
         <KpiCard title="Monthly revenue" value={d.monthlyDistributorRevenueLabel} />
-        <KpiCard title="Collections" value={d.collectionsFromDistributors} />
+        <KpiCard
+          title="Collected"
+          value={d.collectionsFromDistributorsLabel || d.collectionsFromDistributors}
+        />
         <KpiCard
           title="Top distributor"
           value={
@@ -40,10 +42,12 @@ export function DashboardPanel({ dashboard, comparison = [], onSelect }) {
           }
         />
         <KpiCard
-          title="At-risk"
-          value={d.atRiskCount}
+          title="Needs attention"
+          value={d.needsAttentionDistributor?.name || "None"}
           subtitle={
-            d.setupRiskCount > 0 ? `${d.setupRiskCount} in setup` : undefined
+            d.needsAttentionDistributor
+              ? `${d.needsAttentionDistributor.healthBand} · ${d.needsAttentionDistributor.nextAction}`
+              : undefined
           }
         />
         <KpiCard
@@ -63,7 +67,7 @@ export function DashboardPanel({ dashboard, comparison = [], onSelect }) {
         </div>
       ) : null}
 
-      <ComparisonPanel rows={comparison} onSelect={onSelect} title="Distributor comparison" />
+      <ComparisonPanel rows={comparison} onSelect={onSelect} title="Distributor portfolio" />
     </div>
   );
 }
@@ -85,13 +89,14 @@ export function ComparisonPanel({ rows = [], onSelect, title = "Comparison" }) {
           <thead>
             <tr className="border-b bg-slate-50 text-left text-slate-500">
               <th className="px-2 py-1.5">Distributor</th>
-              <th className="px-2 py-1.5">Territory</th>
+              <th className="px-2 py-1.5">Status</th>
               <th className="px-2 py-1.5">Labs</th>
               <th className="px-2 py-1.5">Revenue</th>
               <th className="px-2 py-1.5">Collections</th>
               <th className="px-2 py-1.5">Outstanding</th>
-              <th className="px-2 py-1.5">Health</th>
-              <th className="px-2 py-1.5">Status</th>
+              <th className="px-2 py-1.5">Collection efficiency</th>
+              <th className="px-2 py-1.5">Contract expiry</th>
+              <th className="px-2 py-1.5">Health score</th>
               <th className="px-2 py-1.5">Next action</th>
             </tr>
           </thead>
@@ -103,14 +108,25 @@ export function ComparisonPanel({ rows = [], onSelect, title = "Comparison" }) {
                 onClick={() => onSelect?.(row.distributorId)}
               >
                 <td className="px-2 py-1.5 font-medium">{row.distributor}</td>
-                <td className="px-2 py-1.5">{row.territory}</td>
-                <td className="px-2 py-1.5 tabular-nums">{row.labs}</td>
-                <td className="px-2 py-1.5 tabular-nums">{row.revenueLabel}</td>
-                <td className="px-2 py-1.5 tabular-nums">{row.collections}</td>
-                <td className="px-2 py-1.5 tabular-nums">{row.outstandingLabel}</td>
-                <td className="px-2 py-1.5 tabular-nums">{row.health}</td>
                 <td className="px-2 py-1.5">
                   <StatusBadge variant="neutral" label={row.status} />
+                </td>
+                <td className="px-2 py-1.5 tabular-nums">{row.labs}</td>
+                <td className="px-2 py-1.5 tabular-nums">{row.revenueLabel}</td>
+                <td className="px-2 py-1.5 tabular-nums">{row.collectionsLabel}</td>
+                <td className="px-2 py-1.5 tabular-nums">{row.outstandingLabel}</td>
+                <td className="px-2 py-1.5 tabular-nums">
+                  {row.collectionEfficiencyPct > 0 ? `${row.collectionEfficiencyPct}%` : "N/A"}
+                </td>
+                <td className="px-2 py-1.5">{row.contractExpiryLabel || "—"}</td>
+                <td className="px-2 py-1.5">
+                  <div className="flex items-center gap-1">
+                    <span className="tabular-nums font-semibold">{row.health}</span>
+                    <StatusBadge
+                      variant={HEALTH_BAND_VARIANT[row.healthBand] || "neutral"}
+                      label={row.healthColor || row.healthBand}
+                    />
+                  </div>
                 </td>
                 <td className="px-2 py-1.5 text-slate-600">{row.nextAction}</td>
               </tr>
@@ -138,11 +154,15 @@ export function BillingPanel({ billingRows = [], onSelect }) {
           <tr className="border-b bg-slate-50 text-left text-slate-500">
             <th className="px-2 py-1.5">Distributor</th>
             <th className="px-2 py-1.5">Billing model</th>
+            <th className="px-2 py-1.5">Monthly fee</th>
+            <th className="px-2 py-1.5">Revenue share %</th>
+            <th className="px-2 py-1.5">Per lab fee</th>
             <th className="px-2 py-1.5">Amount due</th>
             <th className="px-2 py-1.5">Collected</th>
             <th className="px-2 py-1.5">Outstanding</th>
-            <th className="px-2 py-1.5">Due date</th>
-            <th className="px-2 py-1.5">Status</th>
+            <th className="px-2 py-1.5">Last payment</th>
+            <th className="px-2 py-1.5">Next due</th>
+            <th className="px-2 py-1.5">Billing status</th>
           </tr>
         </thead>
         <tbody>
@@ -154,20 +174,20 @@ export function BillingPanel({ billingRows = [], onSelect }) {
             >
               <td className="px-2 py-1.5 font-medium">{row.distributorName}</td>
               <td className="px-2 py-1.5">{row.billingModelLabel}</td>
+              <td className="px-2 py-1.5 tabular-nums">{row.monthlyFeeLabel}</td>
+              <td className="px-2 py-1.5 tabular-nums">
+                {row.revenueSharePct > 0 ? `${row.revenueSharePct}%` : "—"}
+              </td>
+              <td className="px-2 py-1.5 tabular-nums">{row.perLabFeeLabel}</td>
               <td className="px-2 py-1.5 tabular-nums">{row.amountDueLabel}</td>
               <td className="px-2 py-1.5 tabular-nums">{row.collectedLabel}</td>
               <td className="px-2 py-1.5 tabular-nums">{row.outstandingLabel}</td>
+              <td className="px-2 py-1.5">{row.lastPaymentDate || "—"}</td>
               <td className="px-2 py-1.5">{row.dueDate || "—"}</td>
               <td className="px-2 py-1.5">
                 <StatusBadge
-                  variant={
-                    row.paymentStatus === "paid"
-                      ? "success"
-                      : row.paymentStatus === "overdue"
-                        ? "danger"
-                        : "warning"
-                  }
-                  label={row.paymentStatus}
+                  variant={row.billingStatusVariant || "neutral"}
+                  label={row.billingStatusLabel || row.paymentStatus}
                 />
               </td>
             </tr>
@@ -229,7 +249,10 @@ export function PerformancePanel({ performance, billing }) {
         <div className="rounded-lg border bg-white p-2 text-xs">
           <p className="text-slate-500">Health score</p>
           <p className="text-sm font-bold tabular-nums">{p.healthScore}</p>
-          <StatusBadge variant={HEALTH_VARIANT[p.healthBand] || "neutral"} label={p.healthBand} />
+          <StatusBadge
+            variant={HEALTH_BAND_VARIANT[p.healthBand] || "neutral"}
+            label={p.healthColor || p.healthBand}
+          />
         </div>
         {billing ? (
           <div className="rounded-lg border bg-white p-2 text-xs">
@@ -288,7 +311,6 @@ export function DistributorStageProgressBar({
         distributorRow?.lifecycleStatus,
         distributorRow?.durable,
         distributorRow?.config?.catalogAssigned,
-        distributorRow?.config?.adminEmail,
         distributorRow?.config?.isolationAcknowledged,
         catalogBundle?.assignedCount,
         catalogBundle?.catalogAssigned,
@@ -300,7 +322,6 @@ export function DistributorStageProgressBar({
       distributorRow?.lifecycleStatus,
       distributorRow?.durable,
       distributorRow?.config?.catalogAssigned,
-      distributorRow?.config?.adminEmail,
       distributorRow?.config?.isolationAcknowledged,
       catalogBundle?.assignedCount,
       catalogBundle?.catalogAssigned,

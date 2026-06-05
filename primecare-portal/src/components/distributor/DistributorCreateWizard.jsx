@@ -9,9 +9,8 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 
 const STEPS = [
   { id: 1, title: "Company" },
-  { id: 2, title: "Admin" },
-  { id: 3, title: "Commercial" },
-  { id: 4, title: "Review" },
+  { id: 2, title: "Commercial" },
+  { id: 3, title: "Review" },
 ];
 
 const EMPTY = {
@@ -23,8 +22,8 @@ const EMPTY = {
     territory: "",
     phone: "",
     email: "",
+    contactName: "",
   },
-  admin: { name: "", email: "", phone: "" },
   commercial: {
     contractStartDate: "",
     contractEndDate: "",
@@ -53,10 +52,6 @@ export default function DistributorCreateWizard({ onClose, onCreated }) {
     const name = form.company.distributorName?.trim();
     if (!name) {
       setError("Distributor name is required.");
-      return;
-    }
-    if (!form.admin.email?.trim()) {
-      setError("Admin email is required.");
       return;
     }
     setSaving(true);
@@ -122,31 +117,29 @@ export default function DistributorCreateWizard({ onClose, onCreated }) {
               onChange={(e) => patch("company", { state: e.target.value })}
             />
           </div>
+          <Input
+            placeholder="Primary contact name"
+            value={form.company.contactName}
+            onChange={(e) => patch("company", { contactName: e.target.value })}
+          />
+          <Input
+            placeholder="Phone"
+            value={form.company.phone}
+            onChange={(e) => patch("company", { phone: e.target.value })}
+          />
+          <Input
+            placeholder="Email"
+            type="email"
+            value={form.company.email}
+            onChange={(e) => patch("company", { email: e.target.value })}
+          />
+          <p className="text-[10px] text-slate-500">
+            HQ-operated distributor — no distributor login or user provisioning in Year-1.
+          </p>
         </div>
       ) : null}
 
       {step === 2 ? (
-        <div className="space-y-2 text-sm">
-          <Input
-            placeholder="Owner / admin name *"
-            value={form.admin.name}
-            onChange={(e) => patch("admin", { name: e.target.value })}
-          />
-          <Input
-            placeholder="Admin email *"
-            type="email"
-            value={form.admin.email}
-            onChange={(e) => patch("admin", { email: e.target.value })}
-          />
-          <Input
-            placeholder="Phone"
-            value={form.admin.phone}
-            onChange={(e) => patch("admin", { phone: e.target.value })}
-          />
-        </div>
-      ) : null}
-
-      {step === 3 ? (
         <div className="space-y-2 text-sm">
           <div className="grid grid-cols-2 gap-2">
             <Input
@@ -201,7 +194,7 @@ export default function DistributorCreateWizard({ onClose, onCreated }) {
         </div>
       ) : null}
 
-      {step === 4 ? (
+      {step === 3 ? (
         <div className="space-y-1 text-xs text-slate-700">
           <p>
             <strong>Name:</strong> {form.company.distributorName || "—"}
@@ -212,9 +205,11 @@ export default function DistributorCreateWizard({ onClose, onCreated }) {
           <p>
             <strong>Territories:</strong> {form.company.territory || "—"}
           </p>
-          <p>
-            <strong>Admin:</strong> {form.admin.name} · {form.admin.email}
-          </p>
+          {form.company.email ? (
+            <p>
+              <strong>Contact:</strong> {form.company.contactName || "—"} · {form.company.email}
+            </p>
+          ) : null}
           <p>
             <strong>Contract:</strong> {form.commercial.contractStartDate || "—"} →{" "}
             {form.commercial.contractEndDate || "—"}
@@ -239,8 +234,8 @@ export default function DistributorCreateWizard({ onClose, onCreated }) {
         >
           <ChevronLeft className="h-4 w-4" /> Back
         </Button>
-        {step < 4 ? (
-          <Button type="button" size="sm" onClick={() => setStep((s) => Math.min(4, s + 1))}>
+        {step < 3 ? (
+          <Button type="button" size="sm" onClick={() => setStep((s) => Math.min(3, s + 1))}>
             Next <ChevronRight className="h-4 w-4" />
           </Button>
         ) : (

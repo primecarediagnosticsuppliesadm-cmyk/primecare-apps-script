@@ -3,10 +3,7 @@
  */
 
 import { isCatalogAssigned } from "@/catalog/distributorCatalogEngine.js";
-import {
-  evaluateAdminUserGate,
-  buildProvisioningChecks,
-} from "@/distributor/distributorProvisioningEngine.js";
+import { buildProvisioningChecks } from "@/distributor/distributorProvisioningEngine.js";
 import {
   LIFECYCLE_STATUS,
   resolveDistributorLifecycleStatus,
@@ -39,6 +36,7 @@ export function buildDistributorStageChecklist({
   const metrics = distributorRow?.metrics || {};
   const labsFromSnapshot = num(snapshot?.labs?.length);
   const effectiveLabCount = labsFromSnapshot > 0 ? labsFromSnapshot : num(metrics.labs);
+  const contractCount = num(snapshot?.contracts?.length);
 
   const persistenceStatus = resolvePersistenceStatus(distributorRow || {});
   const durable =
@@ -46,7 +44,6 @@ export function buildDistributorStageChecklist({
     distributorRow?.durable === true ||
     distributorRow?.source === "database";
 
-  const adminPass = evaluateAdminUserGate(config).pass;
   const catalogPass =
     isCatalogAssigned(config) ||
     Boolean(catalogBundle?.catalogAssigned) ||
@@ -54,29 +51,34 @@ export function buildDistributorStageChecklist({
 
   const checks = buildProvisioningChecks({
     config,
-    metrics: { ...metrics, labs: effectiveLabCount },
+    metrics: { ...metrics, labs: effectiveLabCount, contracts: contractCount },
+    status: distributorRow?.status,
+    provisioningLifecycle: distributorRow?.provisioning?.lifecycle,
     isLive: false,
     source: distributorRow?.source,
     durable: distributorRow?.durable,
     persistenceStatus,
     lastIsolationPass: distributorRow?.lastIsolationPass,
     isolationChecks: distributorRow?.isolationChecks,
+    contractCount,
   });
 
   const checkById = (id) => checks.find((c) => c.id === id);
-  const securityPass =
+  const isolationPass =
     checkById("isolation_verified")?.status === "PASS" ||
     config.isolationAcknowledged === true;
   const firstLabPass = effectiveLabCount >= 1 || checkById("at_least_one_lab")?.status === "PASS";
+  const contractPass =
+    contractCount > 0 ||
+    num(config.contractCount) > 0 ||
+    config.contractConfigured === true ||
+    checkById("contract_configured")?.status === "PASS";
 
   const lifecycle = resolveDistributorLifecycleStatus(distributorRow || {});
-  const contractCount = num(snapshot?.contracts?.length);
-  const activePass =
+  const activatedPass =
     lifecycle === LIFECYCLE_STATUS.ACTIVE ||
     str(distributorRow?.status).toUpperCase() === "ACTIVE" ||
     distributorRow?.provisioning?.lifecycle === "activated";
-
-  const contractPass = contractCount > 0 || activePass;
 
   return [
     {
@@ -86,21 +88,15 @@ export function buildDistributorStageChecklist({
       tab: "launch",
     },
     {
-      id: "admin",
-      label: "Admin assigned",
-      pass: adminPass,
-      tab: "launch",
-    },
-    {
       id: "catalog",
       label: "Catalog assigned",
       pass: catalogPass,
       tab: "catalog",
     },
     {
-      id: "security",
-      label: "Security check passed",
-      pass: securityPass,
+      id: "isolation",
+      label: "Data isolation verified",
+      pass: isolationPass,
       tab: "launch",
     },
     {
@@ -110,27 +106,31 @@ export function buildDistributorStageChecklist({
       tab: "labs",
     },
     {
-      id: "active",
-      label: "Active contract/status",
+      id: "contract",
+      label: "Contract configured",
       pass: contractPass,
-      tab: contractCount > 0 ? "contracts" : "launch",
+      tab: "contracts",
+    },
+    {
+      id: "activated",
+      label: "Distributor activated",
+      pass: activatedPass,
+      tab: "launch",
     },
   ];
 }
 
 export function resolveDistributorStageId(checklist = []) {
   const byId = (id) => checklist.find((c) => c.id === id)?.pass;
-  const active = byId("active");
+  const activated = byId("activated");
   const firstLab = byId("first_lab");
   const catalog = byId("catalog");
-  const admin = byId("admin");
-  const security = byId("security");
   const durable = byId("durable");
 
-  if (active) return "active";
+  if (activated) return "active";
   if (firstLab) return "first_lab";
   if (catalog) return "catalog";
-  if (durable && admin && security) return "setup";
+  if (durable) return "setup";
   return "draft";
 }
 
@@ -149,5 +149,6 @@ export function buildDistributorStageModel(options = {}) {
     currentStageLabel: DISTRIBUTOR_STAGES.find((s) => s.id === currentStageId)?.label || "Draft",
     checklist,
     incomplete: checklist.filter((c) => !c.pass),
+    canActivate: checklist.every((c) => c.pass),
   };
 }

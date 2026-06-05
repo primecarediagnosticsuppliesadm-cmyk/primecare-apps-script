@@ -7,7 +7,6 @@ import {
   computeFounderOperationalSignals,
   PILOT_READINESS_TARGET,
 } from "@/founder/founderPilotReadinessCompute.js";
-import { readLabContractRegistry } from "@/labContract/labContractStore.js";
 import { buildLabContractModel } from "@/labContract/labContractEngine.js";
 
 /** @typedef {'completed' | 'in_progress' | 'blocked' | 'locked'} MilestoneStatus */
@@ -401,12 +400,13 @@ export function buildFounderPhaseEngineView(payload, tenantId, options = {}) {
       ? `Pilot gates passed. Field Scale is active — ${signals.activeLabs} labs, ${signals.visits14d} visits (14d).`
       : `Pilot Hardening — readiness ${signals.pilotReadinessPct}% (target ${PILOT_READINESS_TARGET}%). ${signals.activeLabs} active labs, proof ${signals.proofCompliancePct}%.`;
 
-  const contractRegistry = readLabContractRegistry(tenantId);
-  const contractModel = buildLabContractModel(
-    contractRegistry.contracts,
-    payload,
-    new Set([String(tenantId || "").trim()].filter(Boolean))
-  );
+  const portfolioContracts = Array.isArray(options.contracts) ? options.contracts : [];
+  const distributorIds = new Set([String(tenantId || "").trim()].filter(Boolean));
+  for (const c of portfolioContracts) {
+    const did = String(c?.distributorId || "").trim();
+    if (did) distributorIds.add(did);
+  }
+  const contractModel = buildLabContractModel(portfolioContracts, payload, distributorIds);
 
   return {
     ...FOUNDER_JOURNEY_META,

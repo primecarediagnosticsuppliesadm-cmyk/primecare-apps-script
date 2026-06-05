@@ -679,6 +679,7 @@ export async function acknowledgeProvisioningTask(tenantId, taskId, options = {}
   }
   if (taskId === "verify_isolation") {
     config.isolationAcknowledged = true;
+    config.isolationVerifiedAt = now;
     markProvisioningMilestone(tenantId, "isolation_verified");
   }
 

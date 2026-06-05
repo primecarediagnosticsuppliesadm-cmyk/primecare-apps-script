@@ -4,9 +4,13 @@ import {
   getOrdersRead,
 } from "@/api/primecareSupabaseApi.js";
 import { buildDistributorOsPortfolioModel } from "@/distributor/distributorOsPortfolioEngine.js";
-import { filterContractsByDistributor, filterDistributorRegistry } from "@/distributor/distributorOsEngine.js";
+import { filterDistributorRegistry } from "@/distributor/distributorOsEngine.js";
 import { fetchAgentProfilesForTenant, loadDistributorWorkspaceBundle } from "@/distributor/distributorWorkspaceData.js";
-import { readLabContractRegistry } from "@/labContract/labContractStore.js";
+import {
+  ensureLabContractsMigrated,
+  loadContractsForDistributor,
+} from "@/labContract/labContractStore.js";
+import { countContractsForDistributor } from "@/api/labContractsSupabaseApi.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -49,14 +53,17 @@ export async function loadDistributorOsPortfolio(currentUser, options = {}) {
   const contractCounts = {};
   const agentCounts = {};
 
+  await ensureLabContractsMigrated();
+
   await Promise.all(
     distributors.map(async (d) => {
-      const hqContracts = readLabContractRegistry(homeTenantId).contracts || [];
-      const scopedContracts = readLabContractRegistry(d.id).contracts || [];
-      contractCounts[d.id] = [
-        ...filterContractsByDistributor(hqContracts, d.id),
-        ...filterContractsByDistributor(scopedContracts, d.id),
-      ].length;
+      const countRes = await countContractsForDistributor(d.id);
+      if (countRes.ok) {
+        contractCounts[d.id] = countRes.count;
+      } else {
+        const list = await loadContractsForDistributor(d.id, { homeTenantId });
+        contractCounts[d.id] = list.length;
+      }
 
       const agents = await fetchAgentProfilesForTenant(d.id);
       agentCounts[d.id] = agents.length;

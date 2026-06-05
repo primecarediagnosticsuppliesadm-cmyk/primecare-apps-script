@@ -5,6 +5,7 @@
 import {
   contractExpiryState,
   defaultBillingDueDate,
+  LIFECYCLE_STATUS,
   resolveDistributorLifecycleStatus,
 } from "@/distributor/distributorLifecycleEngine.js";
 
@@ -83,6 +84,11 @@ export function calculateDistributorBilling({
   return {
     billingModel: model,
     billingModelLabel: billingModelLabel(model),
+    monthlyFee: monthlyFee,
+    monthlyFeeLabel: formatInr(monthlyFee),
+    revenueSharePct: sharePct,
+    perLabFee,
+    perLabFeeLabel: formatInr(perLabFee),
     fixedComponent,
     shareComponent,
     perLabComponent,
@@ -93,6 +99,7 @@ export function calculateDistributorBilling({
     outstanding,
     outstandingLabel: formatInr(outstanding),
     dueDate,
+    lastPaymentDate: str(config.billingLastPaymentDate || config.lastPaymentDate) || null,
     overdue,
     paymentStatus,
     breakdown: {
@@ -101,6 +108,20 @@ export function calculateDistributorBilling({
       perLab: perLabComponent,
     },
   };
+}
+
+export function resolveBillingHealthStatus(billing = {}, lifecycleStatus = "") {
+  const lifecycle = str(lifecycleStatus).toLowerCase();
+  if (
+    lifecycle === LIFECYCLE_STATUS.SUSPENDED ||
+    lifecycle === LIFECYCLE_STATUS.DEACTIVATED
+  ) {
+    return { label: "Blocked", variant: "danger" };
+  }
+  if (billing.overdue || billing.paymentStatus === "overdue") {
+    return { label: "Overdue", variant: "danger" };
+  }
+  return { label: "Healthy", variant: "success" };
 }
 
 export function buildDistributorBillingRow(distributorRow, metrics = {}) {
@@ -113,6 +134,7 @@ export function buildDistributorBillingRow(distributorRow, metrics = {}) {
   });
   const lifecycleStatus = resolveDistributorLifecycleStatus(distributorRow);
   const expiry = contractExpiryState(config);
+  const billingStatus = resolveBillingHealthStatus(billing, lifecycleStatus);
 
   return {
     distributorId: distributorRow.id,
@@ -120,6 +142,8 @@ export function buildDistributorBillingRow(distributorRow, metrics = {}) {
     territory: distributorRow.territorySummary || "—",
     lifecycleStatus,
     ...billing,
+    billingStatusLabel: billingStatus.label,
+    billingStatusVariant: billingStatus.variant,
     contractExpiryLabel: expiry.label,
     contractExpired: expiry.expired,
   };

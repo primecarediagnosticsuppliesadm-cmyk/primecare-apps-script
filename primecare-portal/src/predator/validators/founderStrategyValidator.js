@@ -2,6 +2,7 @@ import { createPredatorEntry, summarizePredatorEntries } from "@/predator/predat
 import { predatorTrace } from "@/predator/predatorTiming.js";
 import { resolvePredatorOpsPayload } from "@/predator/predatorOpsPayload.js";
 import { buildFounderStrategyModel } from "@/founder/founderStrategyEngine.js";
+import { loadVisibleLabContracts } from "@/labContract/labContractStore.js";
 import { YEAR1_TARGETS } from "@/founder/founderStrategyTargets.js";
 import { polishPredatorEntries } from "@/predator/predatorEntryPolish.js";
 import { ROLES } from "@/config/roles.js";
@@ -61,7 +62,8 @@ export async function validateFounderStrategyModule({
         currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId },
         opsPayload
       );
-      model = buildFounderStrategyModel(payload, ctx.tenantId);
+      const contracts = await loadVisibleLabContracts();
+      model = buildFounderStrategyModel(payload, ctx.tenantId, { contracts });
     } catch (err) {
       entries.push(
         createPredatorEntry({

@@ -41,13 +41,11 @@ import {
   DistributorStageProgressBar,
   LifecycleActionsPanel,
   OperationRestrictionBanner,
-  PerformancePanel,
 } from "@/components/distributor/DistributorOsV2Panels.jsx";
 import { cn } from "@/lib/utils";
 import { Building2, Plus, RefreshCw, AlertTriangle, Users } from "lucide-react";
 import { ROLES } from "@/config/roles";
 
-const HEALTH_VARIANT = { Healthy: "success", Watch: "warning", Risk: "danger" };
 const DEBUG_DISTRIBUTOR_OS = import.meta.env.DEV;
 
 function logDistributorOsTiming(label, detail = {}) {
@@ -55,26 +53,60 @@ function logDistributorOsTiming(label, detail = {}) {
   console.debug(`[DistributorOs:timing] ${label}`, { at: performance.now().toFixed(1), ...detail });
 }
 
-function AgentsPanel({ agents = [], tenantName = "" }) {
+function AgentsPanel({ agents = [], tenantName = "", territory = "", collectionsCount = 0, labCount = 0 }) {
   if (!agents.length) {
     return (
-      <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-        No agents registered for {tenantName || "this distributor"} yet.
-      </p>
+      <div className="space-y-2">
+        <p className="text-xs text-slate-600">
+          Operational agent records for {tenantName || "this distributor"} — HQ-managed, no distributor login.
+        </p>
+        <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+          No agents registered yet. Add agents from HQ when field coverage is ready.
+        </p>
+      </div>
     );
   }
   return (
-    <div className="grid gap-2 sm:grid-cols-2">
-      {agents.map((a) => (
-        <div key={a.user_id} className="rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-sm">
-          <div className="flex items-center gap-2">
-            <Users className="h-4 w-4 text-indigo-600" />
-            <p className="font-semibold text-slate-900">{a.agent_name || "Agent"}</p>
-          </div>
-          <p className="mt-1 text-slate-500">Role: {a.role}</p>
-          <p className="text-slate-500">Status: {a.active === false ? "Inactive" : "Active"}</p>
-        </div>
-      ))}
+    <div className="space-y-2">
+      <p className="text-xs text-slate-600">
+        Operational records only — PrimeCare HQ manages agents. No user provisioning or authentication.
+      </p>
+      <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b bg-slate-50 text-left text-slate-500">
+              <th className="px-2 py-1.5">Name</th>
+              <th className="px-2 py-1.5">Territory</th>
+              <th className="px-2 py-1.5">Phone</th>
+              <th className="px-2 py-1.5">Labs assigned</th>
+              <th className="px-2 py-1.5">Collections managed</th>
+              <th className="px-2 py-1.5">Performance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {agents.map((a) => (
+              <tr key={a.user_id} className="border-b border-slate-100">
+                <td className="px-2 py-1.5 font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    <Users className="h-3.5 w-3.5 text-indigo-600" />
+                    {a.agent_name || "Agent"}
+                  </span>
+                </td>
+                <td className="px-2 py-1.5">{a.territory || territory || "—"}</td>
+                <td className="px-2 py-1.5">{a.phone || "—"}</td>
+                <td className="px-2 py-1.5 tabular-nums">{a.labs_assigned ?? labCount ?? "—"}</td>
+                <td className="px-2 py-1.5 tabular-nums">{a.collections_managed ?? collectionsCount ?? "—"}</td>
+                <td className="px-2 py-1.5">
+                  <StatusBadge
+                    variant={a.active === false ? "neutral" : "success"}
+                    label={a.active === false ? "Inactive" : "Active"}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -139,7 +171,10 @@ export default function DistributorOsPage({
   const [loading, setLoading] = useState(true);
   const [portfolio, setPortfolio] = useState(null);
   const [osContext, setOsContext] = useState(() => readDistributorOsContext());
-  const [tab, setTab] = useState(() => readDistributorOsContext()?.tab || "dashboard");
+  const [tab, setTab] = useState(() => {
+    const preset = readDistributorOsContext()?.tab || "dashboard";
+    return preset === "overview" ? "dashboard" : preset;
+  });
   const [snapshot, setSnapshot] = useState(null);
   const [catalogBundle, setCatalogBundle] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -274,7 +309,7 @@ export default function DistributorOsPage({
 
   useEffect(() => {
     const presetTab = consumeDistributorOsTabPreset();
-    if (presetTab) setTab(presetTab);
+    if (presetTab) setTab(presetTab === "overview" ? "dashboard" : presetTab);
   }, []);
 
   useEffect(() => {
@@ -538,40 +573,6 @@ export default function DistributorOsPage({
           />
         ) : null}
 
-        {tab === "overview" ? (
-          scope ? (
-            <div className="space-y-3">
-              <DistributorStageProgressBar
-                distributorRow={enrichedRow || selectedRow}
-                catalogBundle={catalogBundle}
-                snapshot={snapshot}
-                onNavigateTab={changeTab}
-              />
-              <PerformancePanel performance={selectedPerformance} billing={selectedBilling} />
-              {selectedPerformance?.contractExpiryLabel ? (
-                <div className="flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  {selectedPerformance.contractExpiryLabel}
-                </div>
-              ) : null}
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
-                <p className="font-semibold text-slate-900">Catalog</p>
-                <p className="mt-1 text-slate-700">
-                  {catalogAssigned
-                    ? `Catalog assigned · ${catalogBundle?.assignedCount ?? 0} product(s) from HQ master`
-                    : "Assign at least one product from HQ master catalog in the Catalog tab."}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <DashboardPanel
-              dashboard={portfolio?.dashboard}
-              comparison={portfolio?.comparison}
-              onSelect={selectDistributor}
-            />
-          )
-        ) : null}
-
         {tab === "billing" ? (
           <BillingPanel billingRows={portfolio?.billingRows} onSelect={selectDistributor} />
         ) : null}
@@ -665,7 +666,13 @@ export default function DistributorOsPage({
 
         {tab === "agents" ? (
           scope ? (
-            <AgentsPanel agents={snapshot?.agents} tenantName={scope.tenantName} />
+            <AgentsPanel
+              agents={snapshot?.agents}
+              tenantName={scope.tenantName}
+              territory={enrichedRow?.territorySummary}
+              collectionsCount={snapshot?.collections?.length}
+              labCount={snapshot?.labs?.length}
+            />
           ) : (
             <ScopeRequiredMessage tabLabel="Agents" />
           )

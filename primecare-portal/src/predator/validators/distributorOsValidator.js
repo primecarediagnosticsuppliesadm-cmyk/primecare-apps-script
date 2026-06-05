@@ -66,7 +66,7 @@ export async function validateDistributorOsModule({ ctx, rendered = null }) {
       { tenantId: scopeTenantId, homeTenantId },
       homeTenantId
     );
-    const portfolioTab = ["dashboard", "billing", "overview"].includes(str(rendered?.tab));
+    const portfolioTab = ["dashboard", "billing"].includes(str(rendered?.tab));
     const portfolioMode = Boolean(rendered?.distributorOsV2 && portfolioTab && !scopeValid);
 
     entries.push(

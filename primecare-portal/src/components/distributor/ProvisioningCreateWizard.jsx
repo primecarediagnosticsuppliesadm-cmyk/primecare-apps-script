@@ -8,9 +8,8 @@ import { ChevronLeft, ChevronRight, CheckCircle2 } from "lucide-react";
 
 const STEPS = [
   { id: 1, title: "Company" },
-  { id: 2, title: "Admin" },
-  { id: 3, title: "Defaults" },
-  { id: 4, title: "Review" },
+  { id: 2, title: "Defaults" },
+  { id: 3, title: "Review" },
 ];
 
 const EMPTY = {
@@ -22,8 +21,8 @@ const EMPTY = {
     territory: "",
     phone: "",
     email: "",
+    contactName: "",
   },
-  admin: { name: "", email: "", phone: "" },
   operations: {
     paymentTerms: "Net 30",
     creditLimit: "",
@@ -49,10 +48,6 @@ export default function ProvisioningCreateWizard({ onClose, onCreated }) {
     const name = form.company.distributorName?.trim();
     if (!name) {
       setError("Distributor name is required.");
-      return;
-    }
-    if (!form.admin.email?.trim()) {
-      setError("Admin email is required.");
       return;
     }
     setSaving(true);
@@ -119,6 +114,11 @@ export default function ProvisioningCreateWizard({ onClose, onCreated }) {
             />
           </div>
           <Input
+            placeholder="Primary contact name"
+            value={form.company.contactName}
+            onChange={(e) => patch("company", { contactName: e.target.value })}
+          />
+          <Input
             placeholder="Company phone"
             value={form.company.phone}
             onChange={(e) => patch("company", { phone: e.target.value })}
@@ -130,33 +130,12 @@ export default function ProvisioningCreateWizard({ onClose, onCreated }) {
             onChange={(e) => patch("company", { email: e.target.value })}
           />
           <p className="text-[10px] text-slate-500">
-            Territory is where this distributor operates — not a separate tenant.
+            PrimeCare HQ operates this distributor — no distributor login or user provisioning in Year-1.
           </p>
         </div>
       ) : null}
 
       {step === 2 ? (
-        <div className="space-y-2 text-sm">
-          <Input
-            placeholder="Admin name *"
-            value={form.admin.name}
-            onChange={(e) => patch("admin", { name: e.target.value })}
-          />
-          <Input
-            placeholder="Admin email *"
-            type="email"
-            value={form.admin.email}
-            onChange={(e) => patch("admin", { email: e.target.value })}
-          />
-          <Input
-            placeholder="Admin phone"
-            value={form.admin.phone}
-            onChange={(e) => patch("admin", { phone: e.target.value })}
-          />
-        </div>
-      ) : null}
-
-      {step === 3 ? (
         <div className="space-y-2 text-sm">
           <Input
             placeholder="Payment terms"
@@ -181,17 +160,14 @@ export default function ProvisioningCreateWizard({ onClose, onCreated }) {
         </div>
       ) : null}
 
-      {step === 4 ? (
+      {step === 3 ? (
         <div className="text-xs text-slate-700">
           <p className="font-semibold">{draft.name}</p>
           <p>{draft.config.legalName}</p>
           <p>Territory: {draft.config.territory || draft.config.territories?.join(", ")}</p>
-          <p>Admin: {draft.config.adminName} · {draft.config.adminEmail}</p>
-          <p className="mt-1 text-emerald-700">
-            Standard roles auto-provisioned: Distributor Admin, Agent, Lab User
-          </p>
+          {draft.config.email ? <p>Contact: {draft.config.contactName || "—"} · {draft.config.email}</p> : null}
           <p className="mt-2 text-slate-500">
-            Saved as draft. Complete product catalog and security check, then launch.
+            Saved as draft. Complete catalog, isolation, lab, and contract milestones, then activate.
           </p>
         </div>
       ) : null}
@@ -208,8 +184,8 @@ export default function ProvisioningCreateWizard({ onClose, onCreated }) {
         >
           <ChevronLeft className="h-4 w-4" /> Back
         </Button>
-        {step < 4 ? (
-          <Button type="button" size="sm" onClick={() => setStep((s) => Math.min(4, s + 1))}>
+        {step < 3 ? (
+          <Button type="button" size="sm" onClick={() => setStep((s) => Math.min(3, s + 1))}>
             Next <ChevronRight className="h-4 w-4" />
           </Button>
         ) : (

@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge, PageSkeleton } from "@/components/ux";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import { buildFounderPhaseEngineView } from "@/founder/founderPhaseEngine.js";
+import { loadVisibleLabContracts } from "@/labContract/labContractStore.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { cn } from "@/lib/utils";
 import {
@@ -72,6 +73,7 @@ function PhaseBlock({ phase, showArrow }) {
  */
 export default function FounderNavigationPage({ setActivePage = null, currentUser = null }) {
   const [payload, setPayload] = useState(null);
+  const [portfolioContracts, setPortfolioContracts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -81,8 +83,12 @@ export default function FounderNavigationPage({ setActivePage = null, currentUse
     try {
       setLoading(true);
       setError("");
-      const data = await loadOperationsCommandCenterData(currentUser);
+      const [data, contracts] = await Promise.all([
+        loadOperationsCommandCenterData(currentUser),
+        loadVisibleLabContracts(),
+      ]);
       setPayload(data);
+      setPortfolioContracts(contracts);
     } catch (err) {
       setError(err?.message || "Failed to load operational data");
       setPayload(null);
@@ -97,8 +103,8 @@ export default function FounderNavigationPage({ setActivePage = null, currentUse
 
   const journey = useMemo(() => {
     if (!payload) return null;
-    return buildFounderPhaseEngineView(payload, tenantId);
-  }, [payload, tenantId]);
+    return buildFounderPhaseEngineView(payload, tenantId, { contracts: portfolioContracts });
+  }, [payload, tenantId, portfolioContracts]);
 
   const predatorSnapshot = useMemo(() => {
     if (!journey) return null;

@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge, PageSkeleton } from "@/components/ux";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import { buildFounderStrategyModel } from "@/founder/founderStrategyEngine.js";
+import { loadVisibleLabContracts } from "@/labContract/labContractStore.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { presetDistributorOsTab } from "@/tenant/tenantFoundationStore.js";
 import { cn } from "@/lib/utils";
@@ -67,6 +68,7 @@ function Section({ title, icon: Icon, children, className }) {
  */
 export default function FounderStrategyPage({ setActivePage = null, currentUser = null }) {
   const [payload, setPayload] = useState(null);
+  const [portfolioContracts, setPortfolioContracts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -76,8 +78,12 @@ export default function FounderStrategyPage({ setActivePage = null, currentUser 
     try {
       setLoading(true);
       setError("");
-      const data = await loadOperationsCommandCenterData(currentUser);
+      const [data, contracts] = await Promise.all([
+        loadOperationsCommandCenterData(currentUser),
+        loadVisibleLabContracts(),
+      ]);
       setPayload(data);
+      setPortfolioContracts(contracts);
     } catch (err) {
       setError(err?.message || "Failed to load operational data");
       setPayload(null);
@@ -92,8 +98,8 @@ export default function FounderStrategyPage({ setActivePage = null, currentUser 
 
   const model = useMemo(() => {
     if (!payload) return null;
-    return buildFounderStrategyModel(payload, tenantId);
-  }, [payload, tenantId]);
+    return buildFounderStrategyModel(payload, tenantId, { contracts: portfolioContracts });
+  }, [payload, tenantId, portfolioContracts]);
 
   const predatorSnapshot = useMemo(() => {
     if (!model) return null;

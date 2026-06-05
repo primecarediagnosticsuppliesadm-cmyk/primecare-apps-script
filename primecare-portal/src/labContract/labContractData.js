@@ -6,12 +6,15 @@ import { labIdKey } from "@/utils/labId.js";
 import {
   CONTRACT_STATUSES,
   CONTRACT_TYPES,
+  LAB_CONTRACT_VERSION,
   TIMELINE_EVENT_TYPES,
 } from "@/labContract/labContractTypes.js";
 import {
   readLabContractRegistry,
   upsertLabContract,
   getLabContractById,
+  loadContractsForDistributor,
+  loadVisibleLabContracts,
 } from "@/labContract/labContractStore.js";
 import {
   buildLabContractModel,
@@ -110,17 +113,14 @@ export async function loadLabContractEngineBundle(currentUser, options = {}) {
   }
 
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
-  const registry = readLabContractRegistry(scopeTenantId ? homeTenantId : tenantId);
   const scopedContracts = scopeTenantId
-    ? registry.contracts.filter(
-        (c) => str(c.distributorId) === scopeTenantId || str(c.tenantId) === scopeTenantId
-      )
-    : registry.contracts.filter(
-        (c) =>
-          !str(c.distributorId) ||
-          str(c.distributorId) === homeTenantId ||
-          str(c.tenantId) === homeTenantId
-      );
+    ? await loadContractsForDistributor(scopeTenantId, { homeTenantId })
+    : await loadVisibleLabContracts();
+  const registry = {
+    contracts: scopedContracts,
+    updatedAt: null,
+    version: LAB_CONTRACT_VERSION,
+  };
   const distributors = new Set(
     (foundation?.tenants || []).map((t) => str(t.id)).filter(Boolean)
   );

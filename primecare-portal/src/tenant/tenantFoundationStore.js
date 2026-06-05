@@ -255,7 +255,7 @@ export function setDistributorOsContext(ctx) {
       tenantId: ctx.tenantId,
       tenantName: ctx.tenantName || existing?.tenantName || "",
       homeTenantId: ctx.homeTenantId || existing?.homeTenantId || "",
-      tab: ctx.tab || existing?.tab || "overview",
+      tab: ctx.tab || existing?.tab || "dashboard",
       updatedAt: new Date().toISOString(),
     })
   );
@@ -267,9 +267,9 @@ export function clearDistributorOsContext() {
 }
 
 /** Remember a Distributor OS tab for the next navigation (no tenant required). */
-export function presetDistributorOsTab(tab = "overview") {
+export function presetDistributorOsTab(tab = "dashboard") {
   if (typeof window === "undefined") return;
-  window.sessionStorage.setItem(OS_TAB_PRESET_KEY, String(tab || "overview"));
+  window.sessionStorage.setItem(OS_TAB_PRESET_KEY, String(tab || "dashboard"));
 }
 
 /** @returns {string|null} */
@@ -287,7 +287,7 @@ export function enterDistributorOs({
   tenantId,
   tenantName = "",
   homeTenantId = "",
-  tab = "overview",
+  tab = "dashboard",
 }) {
   const id = String(tenantId || "").trim();
   const home = String(homeTenantId || "").trim();

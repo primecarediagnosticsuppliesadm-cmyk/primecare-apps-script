@@ -9,7 +9,6 @@ import {
   acknowledgeProvisioningTask,
   enableStandardProductCatalog,
   refreshProvisioningBundleState,
-  updateDistributorAdminDetails,
   syncLocalDistributorsToSupabase,
 } from "@/distributor/distributorProvisioningData.js";
 import { PERSISTENCE_STATUS } from "@/tenant/durableTenantStore.js";
@@ -25,7 +24,6 @@ import {
   XCircle,
   AlertTriangle,
   ArrowRight,
-  Pencil,
   Bug,
   X,
 } from "lucide-react";
@@ -387,68 +385,6 @@ function ReadinessDebugDrawer({ debug, onClose }) {
   );
 }
 
-function EditAdminModal({ profile, onClose, onSave }) {
-  const [form, setForm] = useState({
-    name: profile?.admin || "",
-    email: profile?.email || "",
-    phone: profile?.phone || "",
-  });
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <form
-        className="w-full max-w-md rounded-xl bg-white p-4 text-xs shadow-xl"
-        onSubmit={(e) => {
-          e.preventDefault();
-          onSave(form);
-        }}
-      >
-        <h3 className="flex items-center gap-2 text-sm font-bold">
-          <Pencil className="h-4 w-4" /> Edit distributor admin
-        </h3>
-        <p className="mt-1 text-slate-500">
-          Required for launch: admin name and email (phone optional).
-        </p>
-        <label className="mt-3 block">
-          Admin name
-          <input
-            className="mt-1 w-full rounded border px-2 py-1.5"
-            value={form.name}
-            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-            required
-          />
-        </label>
-        <label className="mt-2 block">
-          Admin email
-          <input
-            type="email"
-            className="mt-1 w-full rounded border px-2 py-1.5"
-            value={form.email}
-            onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-            required
-          />
-        </label>
-        <label className="mt-2 block">
-          Admin phone
-          <input
-            className="mt-1 w-full rounded border px-2 py-1.5"
-            value={form.phone}
-            onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-          />
-        </label>
-        <div className="mt-4 flex gap-2">
-          <Button type="submit" size="sm">
-            Save & recompute
-          </Button>
-          <Button type="button" size="sm" variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
 export default function DistributorProvisioningPage({
   currentUser = null,
   setActivePage = null,
@@ -463,7 +399,6 @@ export default function DistributorProvisioningPage({
   const [showWizard, setShowWizard] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const [showRegistryDebug, setShowRegistryDebug] = useState(false);
-  const [showEditAdmin, setShowEditAdmin] = useState(false);
   const [msg, setMsg] = useState("");
   const [syncing, setSyncing] = useState(false);
 
@@ -563,10 +498,18 @@ export default function DistributorProvisioningPage({
     );
   }
 
+  async function handleVerifyIsolation() {
+    if (!model || !bundle) return;
+    const fallbackTenant = bundle.tenants.find((t) => t.id === model.distributorId);
+    await acknowledgeProvisioningTask(model.distributorId, "verify_isolation", { fallbackTenant });
+    await applyLocalBundleUpdate(model.distributorId);
+    setMsg("Data isolation verified — tenant separation and RLS acknowledged");
+  }
+
   function handleOpenAction(action) {
     if (!action) return;
-    if (action.type === "edit_admin") {
-      setShowEditAdmin(true);
+    if (action.type === "verify_isolation") {
+      void handleVerifyIsolation();
       return;
     }
     if (action.type === "use_standard_catalog") {
@@ -591,26 +534,6 @@ export default function DistributorProvisioningPage({
       }
       setActivePage(action.page);
     }
-  }
-
-  async function handleSaveAdmin(admin) {
-    if (!model || !bundle) return;
-    const fallbackTenant = bundle.tenants.find((t) => t.id === model.distributorId);
-    const result = await updateDistributorAdminDetails(model.distributorId, admin, {
-      fallbackTenant,
-      dbRows: bundle.dbFetch?.rows,
-    });
-    if (!result?.ok) {
-      setMsg(result?.error || "Admin save failed — open Registry debug");
-      return;
-    }
-    setShowEditAdmin(false);
-    await applyLocalBundleUpdate(model.distributorId);
-    setMsg(
-      result.durablePatchOk === false
-        ? "Admin saved locally — Supabase metadata sync failed (see Registry debug)"
-        : "Admin saved — readiness updated"
-    );
   }
 
   async function handleActivate() {
@@ -748,14 +671,6 @@ export default function DistributorProvisioningPage({
         />
       ) : null}
 
-      {showEditAdmin && model ? (
-        <EditAdminModal
-          profile={model.profile}
-          onClose={() => setShowEditAdmin(false)}
-          onSave={handleSaveAdmin}
-        />
-      ) : null}
-
       {showRegistryDebug && bundle?.registryDebug ? (
         <RegistryDebugDrawer
           debug={bundle.registryDebug}
@@ -877,15 +792,15 @@ export default function DistributorProvisioningPage({
                 </>
               ) : null}
               {!model.gates.canActivate &&
-              model.checks.find((c) => c.id === "admin_user")?.status !== "PASS" ? (
+              model.checks.find((c) => c.id === "isolation_verified")?.status !== "PASS" ? (
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
                   className="mt-2 h-7 text-[10px]"
-                  onClick={() => setShowEditAdmin(true)}
+                  onClick={() => void handleVerifyIsolation()}
                 >
-                  <Pencil className="h-3 w-3" /> Edit admin
+                  Verify isolation
                 </Button>
               ) : null}
             </div>
@@ -910,7 +825,7 @@ export default function DistributorProvisioningPage({
               <div className="rounded-xl border bg-white p-3">
                 <PipelineStepper pipeline={model.launchFlow || model.pipeline} />
                 <p className="mt-2 text-[10px] text-slate-500">
-                  Company → Admin → Product Catalog → Security → Launch
+                  Company → Catalog → Isolation → First Lab → Contract → Launch
                 </p>
                 {model.checks.find((c) => c.id === "catalog_configured")?.status !== "PASS" ? (
                   <p className="mt-2 text-[10px] text-slate-600">
@@ -925,7 +840,8 @@ export default function DistributorProvisioningPage({
               <ul className="space-y-1 rounded-xl border bg-white p-3 text-xs">
                 {model.checks.map((c) => {
                   const action = PROVISIONING_CHECK_ACTIONS[c.id];
-                  const inlineAction = action?.type === "use_standard_catalog" || action?.type === "edit_admin";
+                  const inlineAction =
+                    action?.type === "use_standard_catalog" || action?.type === "verify_isolation";
                   return (
                     <li key={c.id} className="flex flex-wrap items-center gap-2 py-0.5">
                       <CheckIcon status={c.status} />
@@ -1041,9 +957,9 @@ export default function DistributorProvisioningPage({
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() => navigateToDistributorOsTab("overview")}
+                  onClick={() => navigateToDistributorOsTab("dashboard")}
                 >
-                  Open Distributor Overview
+                  Open Distributor Dashboard
                   <ArrowRight className="ml-1 h-3 w-3" />
                 </Button>
               ) : null}

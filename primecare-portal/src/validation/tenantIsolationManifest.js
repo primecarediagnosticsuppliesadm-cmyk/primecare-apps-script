@@ -115,6 +115,16 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     scope: "admin_only",
   },
   {
+    id: "lab_contracts",
+    table: "lab_contracts",
+    label: "Lab commercial contracts",
+    tenantColumn: "distributor_id",
+    selectColumns: ["distributor_id", "lab_id", "contract_number", "status"],
+    allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE],
+    scope: "admin_only",
+    optional: true,
+  },
+  {
     id: "visits",
     table: "agent_visits",
     label: "Agent visits",

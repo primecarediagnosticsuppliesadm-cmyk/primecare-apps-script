@@ -145,16 +145,45 @@ export async function validateDistributorProvisioningModule({
         .filter((c) => ACTIVATION_GATE_IDS.has(c.id))
         .every((c) => c.status === "PASS");
 
-    const rolesCheck = model.checks.find((c) => c.id === "roles_configured");
-    const rolesNotActivationBlocker =
-      !ACTIVATION_GATE_IDS.has("roles_configured") &&
-      (rolesCheck?.status === "PASS" || rolesCheck?.status === "WARN");
+    const adminCheck = model.checks.find((c) => c.id === "admin_user");
+    const usersRolesCheck = model.checks.find((c) => c.id === "users_roles");
+    const founderModelGates =
+      !adminCheck &&
+      !usersRolesCheck &&
+      !ACTIVATION_GATE_IDS.has("admin_user") &&
+      !ACTIVATION_GATE_IDS.has("roles_configured");
+    const isolationCheck = model.checks.find((c) => c.id === "isolation_verified");
+    const labGate = model.checks.find((c) => c.id === "at_least_one_lab");
+    const contractGate = model.checks.find((c) => c.id === "contract_configured");
     entries.push(
       createPredatorEntry({
-        status: rolesNotActivationBlocker ? "PASS" : "FAIL",
+        status: founderModelGates ? "PASS" : "FAIL",
         module: "Distributor Provisioning",
-        step: "roles.not_activation_gate",
-        actual: rolesCheck?.status || "missing",
+        step: "founder_model.no_distributor_user_gates",
+        actual: {
+          adminGate: adminCheck?.status || "removed",
+          usersRoles: usersRolesCheck?.status || "removed",
+        },
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+    entries.push(
+      createPredatorEntry({
+        status:
+          ACTIVATION_GATE_IDS.has("at_least_one_lab") &&
+          ACTIVATION_GATE_IDS.has("contract_configured") &&
+          ACTIVATION_GATE_IDS.has("isolation_verified")
+            ? "PASS"
+            : "FAIL",
+        module: "Distributor Provisioning",
+        step: "founder_model.operational_launch_gates",
+        actual: {
+          isolation: isolationCheck?.label,
+          firstLab: labGate?.label,
+          contract: contractGate?.label,
+        },
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,

@@ -4,6 +4,10 @@
 
 import { buildDistributorBillingRow, rollupPortfolioBilling } from "@/distributor/distributorBillingEngine.js";
 import {
+  computeDistributorHealthScore,
+  healthBandFromScore,
+} from "@/distributor/distributorHealthEngine.js";
+import {
   canDistributorOperate,
   contractExpiryState,
   enrichRegistryRowLifecycle,
@@ -66,7 +70,7 @@ export function isOperationalRiskDistributor(row = {}) {
   return (
     lifecycleStatus === LIFECYCLE_STATUS.SUSPENDED ||
     row.contractExpired === true ||
-    row.healthBand === "Risk"
+    row.healthBand === "At Risk"
   );
 }
 
@@ -115,9 +119,21 @@ export function computeDistributorMetrics(tenantId, { labs = [], orders = [], co
 
 export function buildDistributorPerformanceRow(distributorRow, metrics = {}, extras = {}) {
   const enriched = enrichRegistryRowLifecycle(distributorRow);
-  const healthScore = num(enriched.healthScore ?? metrics.healthScore);
-  const healthBand =
-    healthScore >= 75 ? "Healthy" : healthScore >= 50 ? "Watch" : healthScore > 0 ? "Risk" : enriched.healthBand || "Watch";
+  const expiry = contractExpiryState(enriched.config || {});
+  const launchComplete = enriched.lifecycleStatus === LIFECYCLE_STATUS.ACTIVE;
+  const healthScore = computeDistributorHealthScore({
+    activeLabs: metrics.activeLabs ?? 0,
+    labCount: metrics.labs ?? enriched.labs ?? 0,
+    collectionEfficiencyPct: metrics.collectionEfficiencyPct ?? 0,
+    outstanding: metrics.outstanding ?? enriched.outstanding ?? 0,
+    revenue: metrics.revenue ?? 0,
+    contractExpired: enriched.contractExpired,
+    contractDaysLeft: expiry.daysLeft,
+    launchComplete,
+    agentCount: num(extras.agents ?? enriched.agents),
+    lifecycleStatus: enriched.lifecycleStatus,
+  });
+  const health = healthBandFromScore(healthScore);
 
   return {
     distributorId: enriched.id,
@@ -127,11 +143,17 @@ export function buildDistributorPerformanceRow(distributorRow, metrics = {}, ext
     lifecycleLabel: enriched.lifecycleLabel,
     canOperate: enriched.canOperate,
     contractExpired: enriched.contractExpired,
-    contractExpiryLabel: enriched.contractExpiryLabel,
+    contractExpiryLabel: enriched.contractExpired
+      ? "Expired"
+      : expiry.daysLeft !== null
+        ? `${expiry.daysLeft} days`
+        : "Not configured",
     labs: metrics.labs ?? enriched.labs ?? 0,
     activeLabs: metrics.activeLabs ?? 0,
     orders: metrics.orders ?? enriched.orders ?? 0,
     collections: metrics.collections ?? enriched.collections ?? 0,
+    collectionsTotal: metrics.collectionsTotal ?? 0,
+    collectionsTotalLabel: formatInr(metrics.collectionsTotal ?? 0),
     contracts: num(extras.contracts),
     agents: num(extras.agents ?? enriched.agents),
     commissionPayouts: num(extras.commissionPayouts),
@@ -141,21 +163,26 @@ export function buildDistributorPerformanceRow(distributorRow, metrics = {}, ext
     outstanding: metrics.outstanding ?? enriched.outstanding ?? 0,
     outstandingLabel: formatInr(metrics.outstanding ?? enriched.outstanding ?? 0),
     healthScore,
-    healthBand,
+    healthBand: health.band,
+    healthColor: health.color,
+    healthVariant: health.variant,
     revenueContributionPct: num(extras.revenueContributionPct),
-    nextAction: suggestNextAction(enriched, metrics),
+    nextAction: suggestNextAction(enriched, metrics, health.band),
   };
 }
 
-function suggestNextAction(row, metrics = {}) {
+function suggestNextAction(row, metrics = {}, healthBand = "Watch") {
   if (row.lifecycleStatus === LIFECYCLE_STATUS.DRAFT) return "Complete setup";
   if (row.lifecycleStatus === LIFECYCLE_STATUS.PENDING_LAUNCH) return "Launch distributor";
   if (row.lifecycleStatus === LIFECYCLE_STATUS.SUSPENDED) return "Resolve suspension";
   if (row.lifecycleStatus === LIFECYCLE_STATUS.DEACTIVATED) return "Historical only";
   if (row.contractExpired) return "Renew contract";
+  if (!row.contractExpiryLabel || row.contractExpiryLabel === "Not configured") {
+    return "Configure contract";
+  }
   if (row.lifecycleStatus === LIFECYCLE_STATUS.ACTIVE) {
     if ((metrics.labs ?? row.labs) === 0) return "Add first lab";
-    if (row.healthBand === "Risk" || num(row.healthScore) < 50) return "Review collections risk";
+    if (healthBand === "At Risk") return "Review collections risk";
     return "Monitor performance";
   }
   return "Review status";
@@ -170,7 +197,8 @@ export function buildPortfolioDashboard(distributors = [], performanceRows = [],
 
   const rankingRows = performanceRows.filter((r) => isTopDistributorEligible(r));
   const monthlyRevenue = rankingRows.reduce((s, r) => s + num(r.revenue), 0);
-  const collectionsFromDistributors = rankingRows.reduce((s, r) => s + num(r.collections), 0);
+  const collectionsFromDistributors = rankingRows.reduce((s, r) => s + num(r.collectionsTotal), 0);
+  const collectionsFromDistributorsLabel = formatInr(collectionsFromDistributors);
   const billingRollup = rollupPortfolioBilling(
     billingRows.filter((b) => {
       const perf = performanceRows.find((r) => r.distributorId === b.distributorId);
@@ -180,6 +208,11 @@ export function buildPortfolioDashboard(distributors = [], performanceRows = [],
 
   const topByRevenue =
     [...rankingRows].sort((a, b) => num(b.revenue) - num(a.revenue))[0] || null;
+
+  const needsAttention =
+    [...performanceRows]
+      .filter((r) => isSetupRiskDistributor(r) || isOperationalRiskDistributor(r))
+      .sort((a, b) => num(a.healthScore) - num(b.healthScore))[0] || null;
 
   const setupRisk = performanceRows.filter((r) => isSetupRiskDistributor(r));
   const operationalRisk = performanceRows.filter((r) => isOperationalRiskDistributor(r));
@@ -204,6 +237,16 @@ export function buildPortfolioDashboard(distributors = [], performanceRows = [],
     monthlyDistributorRevenue: monthlyRevenue,
     monthlyDistributorRevenueLabel: formatInr(monthlyRevenue),
     collectionsFromDistributors,
+    collectionsFromDistributorsLabel,
+    needsAttentionDistributor: needsAttention
+      ? {
+          distributorId: needsAttention.distributorId,
+          name: needsAttention.name,
+          healthScore: needsAttention.healthScore,
+          healthBand: needsAttention.healthBand,
+          nextAction: needsAttention.nextAction,
+        }
+      : null,
     topDistributorByRevenue: topByRevenue
       ? {
           distributorId: topByRevenue.distributorId,
@@ -244,17 +287,21 @@ export function buildComparisonTable(performanceRows = []) {
   return performanceRows.map((r) => ({
     distributorId: r.distributorId,
     distributor: r.name,
-    territory: r.territory,
+    status: r.lifecycleLabel,
+    lifecycleStatus: r.lifecycleStatus,
     labs: r.labs,
     revenue: r.revenue,
     revenueLabel: r.revenueLabel,
-    collections: r.collections,
+    collections: r.collectionsTotal,
+    collectionsLabel: r.collectionsTotalLabel,
     outstanding: r.outstanding,
     outstandingLabel: r.outstandingLabel,
+    collectionEfficiencyPct: r.collectionEfficiencyPct,
+    contractExpiryLabel: r.contractExpiryLabel,
     health: r.healthScore,
     healthBand: r.healthBand,
-    status: r.lifecycleLabel,
-    lifecycleStatus: r.lifecycleStatus,
+    healthColor: r.healthColor,
+    healthVariant: r.healthVariant,
     nextAction: r.nextAction,
   }));
 }
