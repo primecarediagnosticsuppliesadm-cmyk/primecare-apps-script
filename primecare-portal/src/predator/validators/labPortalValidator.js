@@ -182,6 +182,73 @@ async function validateExecutiveLabsRegistry(ctx, entries, rendered = null) {
   const lastCreatedLabName = str(rendered?.lastCreatedLabName);
   const lastCreatedTenantId = str(rendered?.lastCreatedTenantId);
 
+  if (ctx.role === ROLES.EXECUTIVE && selectedDistributorTenantId && homeTenantId) {
+    let canInsert = false;
+    let rpcError = null;
+    try {
+      const rpc = await supabase.rpc("can_insert_lab_for_tenant", {
+        target_tenant_id: selectedDistributorTenantId,
+      });
+      if (rpc.error) {
+        rpcError = rpc.error.message;
+      } else {
+        canInsert = rpc.data === true;
+      }
+    } catch (err) {
+      rpcError = err?.message || String(err);
+    }
+
+    entries.push(
+      createPredatorEntry({
+        status: canInsert ? "PASS" : rpcError ? "FAIL" : "WARN",
+        module: "Lab Portal",
+        step: "executive_can_create_lab_for_distributor",
+        expected: "Executive can INSERT labs for registered distributor tenant",
+        actual: {
+          selectedDistributorTenantId,
+          canInsert,
+          rpcError: rpcError || null,
+        },
+        rootCauseGuess: canInsert
+          ? "RLS helper can_insert_lab_for_tenant allows distributor lab create"
+          : rpcError
+            ? "Run executive_distributor_lab_create_migration.sql — RLS blocks distributor lab insert"
+            : "Executive cannot insert lab for selected distributor (check tenants row + role)",
+        suggestedFix: canInsert
+          ? ""
+          : "Apply supabase/sql/executive_distributor_lab_create_migration.sql",
+        severity: canInsert ? "low" : "critical",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+  }
+
+  if (lastCreatedTenantId && selectedDistributorTenantId) {
+    const tenantMatch = lastCreatedTenantId === selectedDistributorTenantId;
+    entries.push(
+      createPredatorEntry({
+        status: tenantMatch ? "PASS" : "FAIL",
+        module: "Lab Portal",
+        step: "lab_tenant_id_matches_selected_distributor",
+        expected: "labs.tenant_id equals selected distributor tenant",
+        actual: {
+          selectedDistributorTenantId,
+          lastCreatedTenantId,
+          lastCreatedLabName: lastCreatedLabName || null,
+        },
+        rootCauseGuess: tenantMatch
+          ? "Lab tenant_id matches distributor context"
+          : "Lab created with wrong tenant_id vs selected distributor",
+        severity: tenantMatch ? "low" : "critical",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+  }
+
   if (selectedDistributorTenantId && homeTenantId && selectedDistributorTenantId !== homeTenantId) {
     const leakedToHome =
       lastCreatedTenantId === homeTenantId ||
