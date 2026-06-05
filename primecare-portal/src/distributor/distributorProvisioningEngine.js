@@ -308,15 +308,24 @@ export const PROVISIONING_CHECK_ACTIONS = {
     type: "use_standard_catalog",
     label: "Use PrimeCare standard catalog",
   },
-  at_least_one_lab: { page: "labs", label: "Open labs" },
+  at_least_one_lab: {
+    page: "distributorOs",
+    tab: "labs",
+    openAddLab: true,
+    label: "Open labs",
+  },
   isolation_verified: {
     page: "tenantManagement",
     section: "isolation",
     label: "Open security",
   },
-  agent_assigned: { page: "visits", label: "Open agents" },
-  ordering_enabled: { page: "orders", label: "Open orders" },
-  collections_enabled: { page: "risk", label: "Open collections" },
+  agent_assigned: { page: "distributorOs", tab: "agents", label: "Open agents" },
+  ordering_enabled: { page: "distributorOs", tab: "orders", label: "Open orders" },
+  collections_enabled: {
+    page: "distributorOs",
+    tab: "collections",
+    label: "Open collections",
+  },
 };
 
 export const PROVISIONING_TASK_ACTIONS = {
@@ -326,8 +335,13 @@ export const PROVISIONING_TASK_ACTIONS = {
     type: "use_standard_catalog",
     label: "Use PrimeCare standard catalog",
   },
-  create_lab: { page: "labs", label: "Open labs" },
-  assign_agent: { page: "visits", label: "Open agents" },
+  create_lab: {
+    page: "distributorOs",
+    tab: "labs",
+    openAddLab: true,
+    label: "Open labs",
+  },
+  assign_agent: { page: "distributorOs", tab: "agents", label: "Open agents" },
   verify_isolation: {
     page: "tenantManagement",
     section: "isolation",

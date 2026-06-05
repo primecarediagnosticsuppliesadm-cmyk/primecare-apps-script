@@ -525,9 +525,9 @@ export default function LabContractManagementPage({
                     type="button"
                     size="sm"
                     variant="outline"
-                    onClick={() => setActivePage("distributorManagement")}
+                    onClick={() => setActivePage("distributorOs")}
                   >
-                    Distributor workspace
+                    Distributor OS
                   </Button>
                 ) : null}
               </div>

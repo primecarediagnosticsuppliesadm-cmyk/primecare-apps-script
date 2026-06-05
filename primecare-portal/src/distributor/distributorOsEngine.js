@@ -6,6 +6,7 @@ function str(v) {
 
 export const DISTRIBUTOR_OS_TABS = [
   { id: "overview", label: "Overview" },
+  { id: "launch", label: "Launch" },
   { id: "labs", label: "Labs" },
   { id: "orders", label: "Orders" },
   { id: "collections", label: "Collections" },

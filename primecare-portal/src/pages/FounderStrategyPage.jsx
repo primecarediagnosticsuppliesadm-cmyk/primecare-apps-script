@@ -4,6 +4,7 @@ import { StatusBadge, PageSkeleton } from "@/components/ux";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import { buildFounderStrategyModel } from "@/founder/founderStrategyEngine.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
+import { presetDistributorOsTab } from "@/tenant/tenantFoundationStore.js";
 import { cn } from "@/lib/utils";
 import {
   Target,
@@ -24,7 +25,7 @@ const PAGE_LABELS = {
   orders: "Orders",
   founderNavigation: "Founder Navigation",
   qualificationReview: "Qualification Review",
-  labContractEngine: "Lab Contracts",
+  distributorOs: "Distributor OS",
 };
 
 const QUARTER_BAR = {
@@ -233,9 +234,12 @@ export default function FounderStrategyPage({ setActivePage = null, currentUser 
               variant="link"
               size="sm"
               className="mt-2 h-auto p-0 text-xs"
-              onClick={() => setActivePage("labContractEngine")}
+              onClick={() => {
+                presetDistributorOsTab("contracts");
+                setActivePage("distributorOs");
+              }}
             >
-              Lab Contracts
+              Distributor contracts
               <ArrowRight className="ml-0.5 h-3 w-3" />
             </Button>
           ) : null}

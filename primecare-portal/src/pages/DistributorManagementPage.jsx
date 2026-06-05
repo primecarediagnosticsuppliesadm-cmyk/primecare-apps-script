@@ -107,34 +107,33 @@ export default function DistributorManagementPage({ currentUser = null, setActiv
     Boolean(predatorSnapshot)
   );
 
+  function openOsTab(tab, openAddLab = false) {
+    if (!workspace?.profile?.tenantId || !setActivePage) return;
+    openDistributorOsTab({
+      tenantId: workspace.profile.tenantId,
+      tenantName: workspace.profile.name,
+      homeTenantId: bundle?.homeTenantId || homeTenantId,
+      tab,
+      openAddLab,
+    });
+    setActivePage("distributorOs");
+  }
+
   function handleAction(action) {
     if (!action?.wired || action.comingSoon || !setActivePage || !action.page) return;
     if (action.id === "open_tenant" && workspace?.profile.tenantId) {
       setActivePage("tenantManagement");
       return;
     }
+    if (action.page === "distributorOs" && action.tab) {
+      openOsTab(action.tab, Boolean(action.openAddLab));
+      return;
+    }
     if (
       (action.page === "labs" || action.id === "add_lab") &&
       workspace?.profile?.tenantId
     ) {
-      openDistributorOsTab({
-        tenantId: workspace.profile.tenantId,
-        tenantName: workspace.profile.name,
-        homeTenantId: bundle?.homeTenantId || homeTenantId,
-        tab: "labs",
-        openAddLab: action.id === "add_lab",
-      });
-      setActivePage("distributorOs");
-      return;
-    }
-    if (action.page === "distributorOs") {
-      openDistributorOsTab({
-        tenantId: workspace?.profile?.tenantId,
-        tenantName: workspace?.profile?.name,
-        homeTenantId: bundle?.homeTenantId || homeTenantId,
-        tab: "overview",
-      });
-      setActivePage("distributorOs");
+      openOsTab("labs", action.id === "add_lab");
       return;
     }
     setActivePage(action.page);
@@ -176,7 +175,7 @@ export default function DistributorManagementPage({ currentUser = null, setActiv
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => setActivePage("distributorProvisioning")}
+                onClick={() => openOsTab("launch")}
               >
                 Launch Distributor
               </Button>

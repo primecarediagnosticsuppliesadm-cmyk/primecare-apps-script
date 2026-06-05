@@ -38,6 +38,7 @@ import InterventionClusterCard from "@/components/executive/InterventionClusterC
 import ExecutiveIntelligenceLayer from "@/components/executive/ExecutiveIntelligenceLayer.jsx";
 import { buildExecutiveIntelligenceModel } from "@/operations/executiveIntelligenceModel.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
+import { presetDistributorOsTab } from "@/tenant/tenantFoundationStore.js";
 
 const INTERVENTION_TOAST = {
   assign_owner: "Owner assigned",
@@ -816,7 +817,16 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
             <FileCheck className="mr-1 h-3.5 w-3.5" />
             Qualifications
           </Button>
-          <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("labs")}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 text-xs"
+            onClick={() => {
+              presetDistributorOsTab("labs");
+              navigate("distributorOs");
+            }}
+          >
             <Building2 className="mr-1 h-3.5 w-3.5" />
             Labs
           </Button>

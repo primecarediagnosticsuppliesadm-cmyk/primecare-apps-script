@@ -6,11 +6,14 @@ export const TENANT_VIEW_STORAGE_KEY = "primecare_tenant_view_v1";
 export const DISTRIBUTOR_LAB_CONTEXT_KEY = "primecare_distributor_lab_context_v1";
 /** Distributor OS shell — selected distributor tenant for all OS tabs. */
 export const DISTRIBUTOR_OS_CONTEXT_KEY = "primecare_distributor_os_context_v1";
+/** Pending OS tab when navigating from HQ before a distributor is selected. */
+export const DISTRIBUTOR_OS_TAB_PRESET_KEY = "primecare_distributor_os_tab_preset_v1";
 
 const REGISTRY_KEY = TENANT_REGISTRY_STORAGE_KEY;
 const VIEW_KEY = TENANT_VIEW_STORAGE_KEY;
 const LAB_CONTEXT_KEY = DISTRIBUTOR_LAB_CONTEXT_KEY;
 const OS_CONTEXT_KEY = DISTRIBUTOR_OS_CONTEXT_KEY;
+const OS_TAB_PRESET_KEY = DISTRIBUTOR_OS_TAB_PRESET_KEY;
 const MAX_REGISTRY_ROWS = 50;
 
 /** Older builds did not use a separate key; kept for one-time migration if added later. */
@@ -261,6 +264,20 @@ export function setDistributorOsContext(ctx) {
 export function clearDistributorOsContext() {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(OS_CONTEXT_KEY);
+}
+
+/** Remember a Distributor OS tab for the next navigation (no tenant required). */
+export function presetDistributorOsTab(tab = "overview") {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.setItem(OS_TAB_PRESET_KEY, String(tab || "overview"));
+}
+
+/** @returns {string|null} */
+export function consumeDistributorOsTabPreset() {
+  if (typeof window === "undefined") return null;
+  const tab = window.sessionStorage.getItem(OS_TAB_PRESET_KEY);
+  window.sessionStorage.removeItem(OS_TAB_PRESET_KEY);
+  return tab || null;
 }
 
 /**

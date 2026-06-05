@@ -10,6 +10,7 @@ import {
 } from "@/distributor/distributorOsEngine.js";
 import { loadDistributorOsSnapshot } from "@/distributor/distributorOsData.js";
 import {
+  consumeDistributorOsTabPreset,
   enterDistributorOs,
   readDistributorOsContext,
   setDistributorOsContext,
@@ -21,11 +22,72 @@ import OrdersPage from "@/pages/OrdersPage.jsx";
 import CollectionsPage from "@/pages/CollectionsPage.jsx";
 import LabContractManagementPage from "@/pages/LabContractManagementPage.jsx";
 import CommissionEnginePage from "@/pages/CommissionEnginePage.jsx";
+import DistributorProvisioningPage from "@/pages/DistributorProvisioningPage.jsx";
 import { cn } from "@/lib/utils";
 import { Building2, RefreshCw, AlertTriangle, Users } from "lucide-react";
 import { ROLES } from "@/config/roles";
 
 const HEALTH_VARIANT = { Healthy: "success", Watch: "warning", Risk: "danger" };
+const STATUS_VARIANT = { active: "success", pending: "info", suspended: "neutral" };
+
+function PortfolioPanel({ distributors = [], onSelect }) {
+  if (!distributors.length) {
+    return (
+      <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+        No distributor tenants yet. Open the Launch tab after creating a distributor.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-slate-600">
+        Portfolio — select a distributor to open labs, orders, collections, and contracts.
+      </p>
+      <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b bg-slate-50 text-left text-slate-500">
+              <th className="px-2 py-1.5">Name</th>
+              <th className="px-2 py-1.5">Status</th>
+              <th className="px-2 py-1.5">Territory</th>
+              <th className="px-2 py-1.5">Labs</th>
+              <th className="px-2 py-1.5">Health</th>
+            </tr>
+          </thead>
+          <tbody>
+            {distributors.map((row) => (
+              <tr
+                key={row.id}
+                className="cursor-pointer border-b border-slate-100 hover:bg-slate-50"
+                onClick={() => onSelect(row.id)}
+              >
+                <td className="px-2 py-1.5 font-medium text-slate-900">{row.name}</td>
+                <td className="px-2 py-1.5">
+                  <StatusBadge
+                    variant={STATUS_VARIANT[row.status] || "neutral"}
+                    label={row.status}
+                  />
+                </td>
+                <td className="px-2 py-1.5 text-slate-600">{row.territorySummary || "—"}</td>
+                <td className="px-2 py-1.5 tabular-nums">{row.labs ?? 0}</td>
+                <td className="px-2 py-1.5 tabular-nums">{row.healthScore ?? "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ScopeRequiredMessage({ tabLabel = "this tab" }) {
+  return (
+    <p className="rounded-lg border border-dashed border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+      Select a distributor above to use {tabLabel}.
+    </p>
+  );
+}
 
 function OverviewPanel({ workspace, snapshot, launchStatus = null, catalogReady = false }) {
   if (!workspace) {
@@ -237,6 +299,11 @@ export default function DistributorOsPage({
   }, [currentUser, scope?.tenantId]);
 
   useEffect(() => {
+    const presetTab = consumeDistributorOsTabPreset();
+    if (presetTab) setTab(presetTab);
+  }, []);
+
+  useEffect(() => {
     void loadRegistry();
   }, [loadRegistry]);
 
@@ -337,16 +404,6 @@ export default function DistributorOsPage({
           </p>
         </div>
         <div className="flex gap-2">
-          {setActivePage ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => setActivePage("distributorManagement")}
-            >
-              Distributor Management
-            </Button>
-          ) : null}
           <Button
             type="button"
             variant="ghost"
@@ -384,81 +441,117 @@ export default function DistributorOsPage({
         </div>
       ) : (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Select a distributor tenant to enter Distributor OS. HQ operations stay in Labs / Orders /
-          Inventory menus.
+          Select a distributor tenant to run distributor operations. PrimeCare HQ stays platform-only.
         </div>
       )}
 
-      {scope ? (
-        <>
-          <div className="flex gap-1 overflow-x-auto pb-1">
-            {DISTRIBUTOR_OS_TABS.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => changeTab(t.id)}
-                className={cn(
-                  "whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium",
-                  tab === t.id ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"
-                )}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+      <div className="flex gap-1 overflow-x-auto pb-1">
+        {DISTRIBUTOR_OS_TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => changeTab(t.id)}
+            className={cn(
+              "whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium",
+              tab === t.id ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-          <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-            {tab === "overview" ? (
-              <OverviewPanel
-                workspace={snapshot?.workspace}
-                snapshot={snapshot}
-                launchStatus={launchStatus}
-                catalogReady={catalogReady}
-              />
-            ) : null}
-            {tab === "labs" ? (
-              <LabsPage
-                currentUser={currentUser}
-                authToken={authToken}
-                distributorScope={scope}
-                embedded
-              />
-            ) : null}
-            {tab === "orders" ? (
-              <OrdersPage
-                currentUser={currentUser}
-                distributorScope={scope}
-                embedded
-              />
-            ) : null}
-            {tab === "collections" ? (
-              <CollectionsPage
-                currentUser={currentUser}
-                authToken={authToken}
-                distributorScope={scope}
-                embedded
-              />
-            ) : null}
-            {tab === "contracts" ? (
-              <LabContractManagementPage
-                currentUser={currentUser}
-                setActivePage={setActivePage}
-                distributorScope={scope}
-                embedded
-              />
-            ) : null}
-            {tab === "agents" ? (
-              <AgentsPanel agents={snapshot?.agents} tenantName={scope.tenantName} />
-            ) : null}
-            {tab === "commissions" ? (
-              <CommissionEnginePage currentUser={currentUser} distributorScope={scope} embedded />
-            ) : null}
-            {tab === "risks" ? (
-              <RisksPanel workspace={snapshot?.workspace} collections={snapshot?.collections} />
-            ) : null}
-          </div>
-        </>
-      ) : null}
+      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+        {tab === "overview" ? (
+          scope ? (
+            <OverviewPanel
+              workspace={snapshot?.workspace}
+              snapshot={snapshot}
+              launchStatus={launchStatus}
+              catalogReady={catalogReady}
+            />
+          ) : (
+            <PortfolioPanel distributors={distributors} onSelect={selectDistributor} />
+          )
+        ) : null}
+        {tab === "launch" ? (
+          scope ? (
+            <DistributorProvisioningPage
+              currentUser={currentUser}
+              setActivePage={setActivePage}
+              embedded
+              lockedDistributorId={scope.tenantId}
+              onOsTabNavigate={changeTab}
+            />
+          ) : (
+            <ScopeRequiredMessage tabLabel="Launch" />
+          )
+        ) : null}
+        {tab === "labs" ? (
+          scope ? (
+            <LabsPage
+              currentUser={currentUser}
+              authToken={authToken}
+              distributorScope={scope}
+              embedded
+            />
+          ) : (
+            <ScopeRequiredMessage tabLabel="Labs" />
+          )
+        ) : null}
+        {tab === "orders" ? (
+          scope ? (
+            <OrdersPage currentUser={currentUser} distributorScope={scope} embedded />
+          ) : (
+            <ScopeRequiredMessage tabLabel="Orders" />
+          )
+        ) : null}
+        {tab === "collections" ? (
+          scope ? (
+            <CollectionsPage
+              currentUser={currentUser}
+              authToken={authToken}
+              distributorScope={scope}
+              embedded
+            />
+          ) : (
+            <ScopeRequiredMessage tabLabel="Collections" />
+          )
+        ) : null}
+        {tab === "contracts" ? (
+          scope ? (
+            <LabContractManagementPage
+              currentUser={currentUser}
+              setActivePage={setActivePage}
+              distributorScope={scope}
+              embedded
+            />
+          ) : (
+            <ScopeRequiredMessage tabLabel="Contracts" />
+          )
+        ) : null}
+        {tab === "agents" ? (
+          scope ? (
+            <AgentsPanel agents={snapshot?.agents} tenantName={scope.tenantName} />
+          ) : (
+            <ScopeRequiredMessage tabLabel="Agents" />
+          )
+        ) : null}
+        {tab === "commissions" ? (
+          scope ? (
+            <CommissionEnginePage currentUser={currentUser} distributorScope={scope} embedded />
+          ) : (
+            <ScopeRequiredMessage tabLabel="Commissions" />
+          )
+        ) : null}
+        {tab === "risks" ? (
+          scope ? (
+            <RisksPanel workspace={snapshot?.workspace} collections={snapshot?.collections} />
+          ) : (
+            <ScopeRequiredMessage tabLabel="Risks" />
+          )
+        ) : null}
+      </div>
     </div>
   );
 }

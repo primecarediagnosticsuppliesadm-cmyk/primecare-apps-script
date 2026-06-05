@@ -564,21 +564,24 @@ export function buildDistributorWorkspace({
       label: "Open contracts",
       wired: isLive,
       comingSoon: !isLive,
-      page: "labContractEngine",
+      page: "distributorOs",
+      tab: "contracts",
     },
     {
       id: "open_labs",
       label: "Open labs",
       wired: canNavigateOps,
       comingSoon: !canNavigateOps,
-      page: "labs",
+      page: "distributorOs",
+      tab: "labs",
     },
     {
       id: "open_collections",
       label: "Open collections",
       wired: canNavigateOps,
       comingSoon: !canNavigateOps,
-      page: "risk",
+      page: "distributorOs",
+      tab: "collections",
     },
     {
       id: "open_operations",
@@ -599,7 +602,9 @@ export function buildDistributorWorkspace({
       label: "Add lab",
       wired: canNavigateOps,
       comingSoon: !canNavigateOps,
-      page: "labs",
+      page: "distributorOs",
+      tab: "labs",
+      openAddLab: true,
     },
   ];
 

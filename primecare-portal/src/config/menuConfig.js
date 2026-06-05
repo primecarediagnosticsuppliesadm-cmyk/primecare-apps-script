@@ -3,6 +3,30 @@ import { ROLES } from "./roles";
 import { ALLOW_EXPERIMENTAL_MODULES, IS_QA, IS_PROD } from "./environment";
 import { isPredatorEnabled } from "@/predator/predatorGuards.js";
 
+/** PrimeCare HQ sidebar — platform modules only (no distributor ops). */
+const EXECUTIVE_HQ_MENU_KEYS = new Set([
+  "dashboard",
+  "founderNavigation",
+  "founderStrategy",
+  "tenantManagement",
+  "distributorOs",
+  "operationsCenter",
+  "inventory",
+  "purchase",
+  "predatorDebug",
+]);
+
+const ADMIN_HQ_MENU_KEYS = new Set([
+  "dashboard",
+  "distributorOs",
+  "operationsCenter",
+  "inventory",
+  "purchase",
+  "visits",
+  "notifications",
+  "predatorDebug",
+]);
+
 /** Lab sidebar: ordering, account, activity only. */
 const LAB_MENU_ORDER = ["labOrders", "labAccount", "notifications"];
 
@@ -92,11 +116,19 @@ export function isPageVisibleInCurrentEnvironment(pageKey) {
  */
 export function getMenuForRole(role) {
   const normalizedRole = String(role || "").toLowerCase();
+  const hqMenuKeys =
+    normalizedRole === ROLES.EXECUTIVE
+      ? EXECUTIVE_HQ_MENU_KEYS
+      : normalizedRole === ROLES.ADMIN
+        ? ADMIN_HQ_MENU_KEYS
+        : null;
+
   const items = MENU_ITEMS.filter((item) => {
     if (item.key === "predatorDebug" && !isPredatorEnabled()) return false;
     if (normalizedRole === ROLES.LAB && !LAB_MENU_ORDER.includes(item.key)) {
       return false;
     }
+    if (hqMenuKeys && !hqMenuKeys.has(item.key)) return false;
     return (
       PERMISSIONS[item.key]?.includes(role) && isPageVisibleInCurrentEnvironment(item.key)
     );

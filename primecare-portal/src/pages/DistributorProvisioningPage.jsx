@@ -452,10 +452,13 @@ function EditAdminModal({ profile, onClose, onSave }) {
 export default function DistributorProvisioningPage({
   currentUser = null,
   setActivePage = null,
+  embedded = false,
+  lockedDistributorId = null,
+  onOsTabNavigate = null,
 }) {
   const [loading, setLoading] = useState(true);
   const [bundle, setBundle] = useState(null);
-  const [selectedId, setSelectedId] = useState(null);
+  const [selectedId, setSelectedId] = useState(lockedDistributorId || null);
   const [tab, setTab] = useState("Pipeline");
   const [showWizard, setShowWizard] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
@@ -480,6 +483,10 @@ export default function DistributorProvisioningPage({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (lockedDistributorId) setSelectedId(lockedDistributorId);
+  }, [lockedDistributorId]);
 
   const applyLocalBundleUpdate = useCallback(
     async (distributorId) => {
@@ -519,16 +526,25 @@ export default function DistributorProvisioningPage({
     Boolean(predatorSnapshot)
   );
 
-  function navigateToLabsForDistributor(openAddLab = false) {
-    if (!model || !bundle || !setActivePage) return;
+  function navigateToDistributorOsTab(tab, openAddLab = false) {
+    if (!model || !bundle) return;
+    if (embedded && onOsTabNavigate) {
+      onOsTabNavigate(tab);
+      return;
+    }
+    if (!setActivePage) return;
     openDistributorOsTab({
       tenantId: model.distributorId,
       tenantName: model.name,
       homeTenantId: bundle.homeTenantId,
-      tab: "labs",
+      tab,
       openAddLab,
     });
     setActivePage("distributorOs");
+  }
+
+  function navigateToLabsForDistributor(openAddLab = false) {
+    navigateToDistributorOsTab("labs", openAddLab);
   }
 
   async function handleUseStandardCatalog() {
@@ -557,7 +573,11 @@ export default function DistributorProvisioningPage({
       void handleUseStandardCatalog();
       return;
     }
-    if (action.page === "labs" && setActivePage) {
+    if (action.page === "distributorOs" && action.tab) {
+      navigateToDistributorOsTab(action.tab, Boolean(action.openAddLab));
+      return;
+    }
+    if (action.page === "labs") {
       navigateToLabsForDistributor(true);
       return;
     }
@@ -647,45 +667,67 @@ export default function DistributorProvisioningPage({
   const distributors = (bundle?.distributors || []).filter((d) => !d.isHome);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-3 p-3 pb-8">
-      <header className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="flex items-center gap-2 text-lg font-bold text-slate-900">
-            <ClipboardList className="h-5 w-5 text-indigo-600" />
-            Provisioning
-          </h1>
-          <p className="text-[11px] text-slate-600">
-            Onboard distributor companies · tenant_id = business entity
-          </p>
+    <div className={cn("space-y-3", embedded ? "" : "mx-auto max-w-5xl p-3 pb-8")}>
+      {embedded ? null : (
+        <header className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h1 className="flex items-center gap-2 text-lg font-bold text-slate-900">
+              <ClipboardList className="h-5 w-5 text-indigo-600" />
+              Provisioning
+            </h1>
+            <p className="text-[11px] text-slate-600">
+              Onboard distributor companies · tenant_id = business entity
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void handleSyncLocal()}
+              disabled={syncing}
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
+              Sync local
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setShowRegistryDebug(true)}
+              disabled={!bundle?.registryDebug}
+            >
+              <Bug className="h-3.5 w-3.5" /> Registry
+            </Button>
+            <Button type="button" variant="ghost" size="icon" onClick={() => void load()}>
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+            <Button type="button" size="sm" onClick={() => setShowWizard(true)}>
+              <Plus className="h-4 w-4" /> New distributor
+            </Button>
+          </div>
+        </header>
+      )}
+      {embedded ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-semibold text-slate-700">Launch checklist & activation</p>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void handleSyncLocal()}
+              disabled={syncing}
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
+              Sync local
+            </Button>
+            <Button type="button" size="sm" onClick={() => setShowWizard(true)}>
+              <Plus className="h-4 w-4" /> New distributor
+            </Button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => void handleSyncLocal()}
-            disabled={syncing}
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
-            Sync local
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setShowRegistryDebug(true)}
-            disabled={!bundle?.registryDebug}
-          >
-            <Bug className="h-3.5 w-3.5" /> Registry
-          </Button>
-          <Button type="button" variant="ghost" size="icon" onClick={() => void load()}>
-            <RefreshCw className="h-4 w-4" />
-          </Button>
-          <Button type="button" size="sm" onClick={() => setShowWizard(true)}>
-            <Plus className="h-4 w-4" /> New distributor
-          </Button>
-        </div>
-      </header>
+      ) : null}
 
       {msg ? <p className="text-xs text-slate-600">{msg}</p> : null}
       {showWizard ? (
@@ -725,7 +767,15 @@ export default function DistributorProvisioningPage({
         <ReadinessDebugDrawer debug={model.readinessDebug} onClose={() => setShowDebug(false)} />
       ) : null}
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+      <div
+        className={cn(
+          "grid gap-3",
+          embedded && lockedDistributorId
+            ? "grid-cols-1"
+            : "lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]"
+        )}
+      >
+        {embedded && lockedDistributorId ? null : (
         <section className="rounded-xl border bg-white shadow-sm">
           <h2 className="border-b px-3 py-2 text-xs font-bold uppercase text-slate-500">
             Distributors
@@ -770,6 +820,7 @@ export default function DistributorProvisioningPage({
             ))}
           </ul>
         </section>
+        )}
 
         {model ? (
           <section className="space-y-2">
@@ -985,14 +1036,14 @@ export default function DistributorProvisioningPage({
               >
                 Launch distributor
               </Button>
-              {model.activated && setActivePage ? (
+              {model.activated ? (
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() => setActivePage("distributorManagement")}
+                  onClick={() => navigateToDistributorOsTab("overview")}
                 >
-                  Open Distributor Workspace
+                  Open Distributor Overview
                   <ArrowRight className="ml-1 h-3 w-3" />
                 </Button>
               ) : null}
