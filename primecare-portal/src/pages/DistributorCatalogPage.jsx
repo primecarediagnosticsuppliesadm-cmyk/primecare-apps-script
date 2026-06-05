@@ -2,7 +2,12 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusBadge, PageSkeleton } from "@/components/ux";
-import { formatInr } from "@/catalog/masterCatalogEngine.js";
+import {
+  formatInr,
+  formatMarginAmount,
+  formatMarginPct,
+  formatPriceOrNotConfigured,
+} from "@/catalog/masterCatalogEngine.js";
 import {
   assignMasterProductsToDistributor,
   loadDistributorCatalogBundle,
@@ -224,8 +229,11 @@ export default function DistributorCatalogPage({
           label={bundle?.catalogAssigned ? "Catalog assigned" : "No catalog assigned"}
         />
         <StatusBadge variant="neutral" label={`${bundle?.assignedCount ?? 0} products`} />
-        {bundle?.pricingValid === false ? (
-          <StatusBadge variant="danger" label="Pricing invalid" />
+        {bundle?.hqPricingValid === false ? (
+          <StatusBadge variant="danger" label="HQ pricing not configured" />
+        ) : null}
+        {bundle?.pricingValid === false && bundle?.hqPricingValid !== false ? (
+          <StatusBadge variant="danger" label="Distributor pricing invalid" />
         ) : null}
       </div>
 
@@ -236,8 +244,11 @@ export default function DistributorCatalogPage({
           <thead>
             <tr className="border-b bg-slate-50 text-left text-slate-500">
               <th className="px-2 py-2">Product</th>
-              <th className="px-2 py-2">Pricing</th>
-              <th className="px-2 py-2">Margin</th>
+              <th className="px-2 py-2">HQ Cost</th>
+              <th className="px-2 py-2">HQ Transfer Price</th>
+              <th className="px-2 py-2">Distributor Selling Price</th>
+              <th className="px-2 py-2">Margin ₹</th>
+              <th className="px-2 py-2">Margin %</th>
               <th className="px-2 py-2">Inventory</th>
               <th className="px-2 py-2" />
             </tr>
@@ -245,7 +256,7 @@ export default function DistributorCatalogPage({
           <tbody>
             {assigned.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-2 py-6 text-center text-slate-500">
+                <td colSpan={8} className="px-2 py-6 text-center text-slate-500">
                   No products assigned. Assign from HQ master catalog to pass launch gate.
                 </td>
               </tr>
@@ -293,6 +304,7 @@ export default function DistributorCatalogPage({
 function CatalogRow({ item, busy, onSave, onUnassign }) {
   const [price, setPrice] = useState(String(item.sellingPrice ?? ""));
   const [stock, setStock] = useState(String(item.currentStock ?? 0));
+  const marginReady = item.marginConfigured === true;
 
   return (
     <tr className="border-b border-slate-100">
@@ -300,17 +312,25 @@ function CatalogRow({ item, busy, onSave, onUnassign }) {
         <p className="font-medium">{item.productName}</p>
         <p className="text-slate-500">{item.category}</p>
       </td>
-      <td className="px-2 py-2">
-        <div className="flex items-center gap-1">
-          <Input
-            className="h-7 w-24 text-xs"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-          />
-          <span className="text-slate-400">HQ {formatInr(item.hqSellingPrice)}</span>
-        </div>
+      <td className="px-2 py-2 tabular-nums text-slate-600">
+        {formatPriceOrNotConfigured(item.hqCostPrice, item.hqPricingConfigured)}
       </td>
-      <td className="px-2 py-2 tabular-nums">{item.marginPct}%</td>
+      <td className="px-2 py-2 tabular-nums text-slate-600">
+        {formatPriceOrNotConfigured(item.hqTransferPrice, item.hqPricingConfigured)}
+      </td>
+      <td className="px-2 py-2">
+        <Input
+          className="h-7 w-24 text-xs"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+        />
+      </td>
+      <td className="px-2 py-2 tabular-nums">
+        {formatMarginAmount(item.marginAmount, marginReady)}
+      </td>
+      <td className="px-2 py-2 tabular-nums">
+        {formatMarginPct(item.marginPct, marginReady)}
+      </td>
       <td className="px-2 py-2">
         <Input
           className="h-7 w-20 text-xs"

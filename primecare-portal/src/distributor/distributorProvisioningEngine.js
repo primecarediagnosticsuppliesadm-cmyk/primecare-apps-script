@@ -11,6 +11,10 @@ import {
   normalizeCommercialConfig,
 } from "@/distributor/distributorLifecycleEngine.js";
 import {
+  readDistributorCatalogItems,
+  validateHqCatalogPricingConfigured,
+} from "@/catalog/distributorCatalogEngine.js";
+import {
   PERSISTENCE_STATUS,
   resolvePersistenceStatus,
   resolvePersistenceDisplay,
@@ -28,6 +32,7 @@ export const ACTIVATION_GATE_IDS = new Set([
   "durable_tenant",
   "admin_user",
   "catalog_configured",
+  "catalog_hq_pricing_configured",
   "isolation_verified",
 ]);
 
@@ -178,6 +183,24 @@ export function buildProvisioningChecks(ctx) {
           : "Assign at least one product from HQ master catalog in Distributor OS",
     },
     {
+      id: "catalog_hq_pricing_configured",
+      label: "HQ catalog pricing configured",
+      required: true,
+      pass: (() => {
+        const items = readDistributorCatalogItems(config);
+        if (!items.length) return false;
+        return validateHqCatalogPricingConfigured(items).valid;
+      })(),
+      detail: (() => {
+        const items = readDistributorCatalogItems(config);
+        if (!items.length) return "Assign catalog products before launch";
+        const hq = validateHqCatalogPricingConfigured(items);
+        return hq.valid
+          ? "All assigned products have HQ cost and transfer price"
+          : `${hq.missingCount} product(s) missing HQ cost/transfer price — configure in Master Catalog`;
+      })(),
+    },
+    {
       id: "at_least_one_lab",
       label: "At least one lab",
       required: false,
@@ -287,6 +310,7 @@ export function buildActivationDiagnosis(checks) {
     "durable_tenant",
     "admin_user",
     "catalog_configured",
+    "catalog_hq_pricing_configured",
     "isolation_verified",
     "roles_configured",
     "at_least_one_lab",
@@ -316,6 +340,10 @@ export const PROVISIONING_CHECK_ACTIONS = {
     page: "distributorOs",
     tab: "catalog",
     label: "Open catalog",
+  },
+  catalog_hq_pricing_configured: {
+    page: "masterCatalog",
+    label: "Configure HQ pricing",
   },
   at_least_one_lab: {
     page: "distributorOs",

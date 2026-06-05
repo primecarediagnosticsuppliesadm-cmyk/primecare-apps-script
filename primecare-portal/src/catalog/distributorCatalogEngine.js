@@ -2,7 +2,12 @@
  * Distributor catalog — assignment from HQ master, distributor pricing & inventory.
  */
 
-import { computeMarginPct, mapMasterCatalogRow } from "@/catalog/masterCatalogEngine.js";
+import {
+  computeDistributorMargin,
+  isHqPricingConfigured,
+  isPositivePrice,
+  mapMasterCatalogRow,
+} from "@/catalog/masterCatalogEngine.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -13,6 +18,38 @@ function num(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function readHqTransferPrice(item = {}) {
+  return num(
+    item.hqTransferPrice ??
+      item.transferPrice ??
+      item.hqTransfer ??
+      item.unitTransferPrice
+  );
+}
+
+function readHqCostPrice(item = {}) {
+  return num(item.hqCostPrice ?? item.costPrice ?? item.unitCost);
+}
+
+function enrichCatalogItemMargins(item = {}) {
+  const hqCostPrice = readHqCostPrice(item);
+  const hqTransferPrice = readHqTransferPrice(item);
+  const sellingPrice = num(item.sellingPrice ?? item.unitSellingPrice);
+  const hqPricingConfigured = isHqPricingConfigured(hqCostPrice, hqTransferPrice);
+  const margin = computeDistributorMargin(sellingPrice, hqTransferPrice);
+
+  return {
+    ...item,
+    hqCostPrice,
+    hqTransferPrice,
+    hqPricingConfigured,
+    sellingPrice,
+    marginAmount: margin.marginAmount,
+    marginPct: margin.marginPct,
+    marginConfigured: margin.configured && hqPricingConfigured,
+  };
+}
+
 export function readDistributorCatalogItems(config = {}) {
   const catalog = config.distributorCatalog || {};
   const items = Array.isArray(catalog.items) ? catalog.items : [];
@@ -20,24 +57,23 @@ export function readDistributorCatalogItems(config = {}) {
 }
 
 export function normalizeDistributorCatalogItem(item = {}) {
-  const sellingPrice = num(item.sellingPrice ?? item.unitSellingPrice);
-  const costPrice = num(item.costPrice ?? item.unitCost ?? item.hqCostPrice);
-  return {
+  const base = {
     productId: str(item.productId),
     productName: str(item.productName) || str(item.productId),
     category: str(item.category) || "Consumables",
     brand: str(item.brand) || "PrimeCare",
-    hqSellingPrice: num(item.hqSellingPrice ?? sellingPrice),
-    hqCostPrice: num(item.hqCostPrice ?? costPrice),
-    sellingPrice,
-    costPrice,
-    marginPct: num(item.marginPct) || computeMarginPct(sellingPrice, costPrice),
+    hqSellingPrice: num(item.hqSellingPrice ?? item.sellingPrice),
+    hqCostPrice: readHqCostPrice(item),
+    hqTransferPrice: readHqTransferPrice(item),
+    sellingPrice: num(item.sellingPrice ?? item.unitSellingPrice),
+    costPrice: readHqCostPrice(item),
     currentStock: num(item.currentStock),
     minStock: num(item.minStock),
     active: item.active !== false,
     assignedAt: item.assignedAt || null,
     tenantId: str(item.tenantId),
   };
+  return enrichCatalogItemMargins(base);
 }
 
 export function isCatalogAssigned(config = {}) {
@@ -52,23 +88,23 @@ export function catalogAssignedCount(config = {}) {
 export function buildDistributorCatalogItemFromMaster(masterRow, distributorTenantId, overrides = {}) {
   const base = mapMasterCatalogRow(masterRow);
   const sellingPrice = num(overrides.sellingPrice ?? base.sellingPrice);
-  const costPrice = num(overrides.costPrice ?? base.costPrice);
-  return {
+  const item = {
     productId: base.productId,
     productName: base.productName,
     category: base.category,
     brand: base.brand,
     hqSellingPrice: base.sellingPrice,
     hqCostPrice: base.costPrice,
+    hqTransferPrice: base.transferPrice,
     sellingPrice,
-    costPrice,
-    marginPct: computeMarginPct(sellingPrice, costPrice),
+    costPrice: base.costPrice,
     currentStock: num(overrides.currentStock ?? 0),
     minStock: num(overrides.minStock ?? base.minStock),
     active: base.active,
     assignedAt: new Date().toISOString(),
     tenantId: str(distributorTenantId),
   };
+  return enrichCatalogItemMargins(item);
 }
 
 export function mergeAssignedItems(existing = [], toAdd = [], distributorTenantId) {
@@ -85,15 +121,12 @@ export function updateDistributorCatalogPricing(items = [], productId, patch = {
   return items.map((item) => {
     if (str(item.productId) !== id) return item;
     const sellingPrice = num(patch.sellingPrice ?? item.sellingPrice);
-    const costPrice = num(patch.costPrice ?? item.costPrice);
-    return {
+    return enrichCatalogItemMargins({
       ...item,
       sellingPrice,
-      costPrice,
-      marginPct: computeMarginPct(sellingPrice, costPrice),
       currentStock: patch.currentStock != null ? num(patch.currentStock) : item.currentStock,
       minStock: patch.minStock != null ? num(patch.minStock) : item.minStock,
-    };
+    });
   });
 }
 
@@ -106,14 +139,33 @@ export function validateDistributorCatalogPricing(items = []) {
   if (!items.length) return { valid: false, invalidCount: 0, issues: ["No products assigned"] };
   const issues = [];
   for (const item of items) {
-    if (num(item.sellingPrice) <= 0) {
-      issues.push(`${item.productName || item.productId}: selling price must be > 0`);
-    }
-    if (num(item.costPrice) < 0) {
-      issues.push(`${item.productName || item.productId}: cost price invalid`);
+    const normalized = normalizeDistributorCatalogItem(item);
+    if (!isPositivePrice(normalized.sellingPrice)) {
+      issues.push(`${normalized.productName || normalized.productId}: distributor selling price must be > 0`);
     }
   }
   return { valid: issues.length === 0, invalidCount: issues.length, issues };
+}
+
+export function validateHqCatalogPricingConfigured(items = []) {
+  if (!items.length) {
+    return { valid: false, invalidCount: 0, issues: ["No products assigned"], missingCount: 0 };
+  }
+  const issues = [];
+  for (const item of items) {
+    const normalized = normalizeDistributorCatalogItem(item);
+    if (!normalized.hqPricingConfigured) {
+      issues.push(
+        `${normalized.productName || normalized.productId}: HQ cost/transfer price not configured`
+      );
+    }
+  }
+  return {
+    valid: issues.length === 0,
+    invalidCount: issues.length,
+    missingCount: issues.length,
+    issues,
+  };
 }
 
 export function validateDistributorInventoryIsolation(items = [], distributorTenantId, homeTenantId) {
@@ -130,22 +182,36 @@ export function validateDistributorInventoryIsolation(items = [], distributorTen
   };
 }
 
-export function buildDistributorCatalogModel({ masterItems = [], assignedItems = [], distributorTenantId, homeTenantId } = {}) {
-  const assignedIds = new Set(assignedItems.map((i) => str(i.productId)));
+export function buildDistributorCatalogModel({
+  masterItems = [],
+  assignedItems = [],
+  distributorTenantId,
+  homeTenantId,
+} = {}) {
+  const normalizedAssigned = assignedItems.map(normalizeDistributorCatalogItem);
+  const assignedIds = new Set(normalizedAssigned.map((i) => str(i.productId)));
   const available = masterItems.filter((m) => !assignedIds.has(str(m.productId)));
-  const pricing = validateDistributorCatalogPricing(assignedItems);
-  const isolation = validateDistributorInventoryIsolation(assignedItems, distributorTenantId, homeTenantId);
+  const pricing = validateDistributorCatalogPricing(normalizedAssigned);
+  const hqPricing = validateHqCatalogPricingConfigured(normalizedAssigned);
+  const isolation = validateDistributorInventoryIsolation(
+    normalizedAssigned,
+    distributorTenantId,
+    homeTenantId
+  );
 
   return {
     distributorTenantId,
     homeTenantId,
-    assignedItems,
+    assignedItems: normalizedAssigned,
     availableItems: available,
-    assignedCount: assignedItems.length,
+    assignedCount: normalizedAssigned.length,
     masterCount: masterItems.length,
-    catalogAssigned: assignedItems.length > 0,
-    pricingValid: pricing.valid,
-    pricingIssues: pricing.issues,
+    catalogAssigned: normalizedAssigned.length > 0,
+    pricingValid: pricing.valid && hqPricing.valid,
+    pricingIssues: [...pricing.issues, ...hqPricing.issues],
+    hqPricingValid: hqPricing.valid,
+    hqPricingIssues: hqPricing.issues,
+    hqPricingMissingCount: hqPricing.missingCount,
     inventoryIsolated: isolation.isolated,
     hqLeakCount: isolation.hqLeakCount,
   };

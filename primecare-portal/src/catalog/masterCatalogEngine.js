@@ -15,17 +15,66 @@ export function formatInr(n) {
   return `₹${num(n).toLocaleString("en-IN")}`;
 }
 
+export function isPositivePrice(value) {
+  const n = num(value);
+  return Number.isFinite(n) && n > 0;
+}
+
 export function computeMarginPct(sellingPrice, costPrice) {
   const sell = num(sellingPrice);
   const cost = num(costPrice);
-  if (sell <= 0) return 0;
+  if (sell <= 0 || cost <= 0) return null;
   return Math.round(((sell - cost) / sell) * 100);
+}
+
+/** Distributor margin vs HQ transfer price (not HQ cost). */
+export function computeDistributorMargin(distributorPrice, hqTransferPrice) {
+  const sell = num(distributorPrice);
+  const transfer = num(hqTransferPrice);
+  if (sell <= 0 || transfer <= 0) {
+    return {
+      marginAmount: null,
+      marginPct: null,
+      configured: false,
+    };
+  }
+  const marginAmount = Math.round((sell - transfer) * 100) / 100;
+  const marginPct = Math.round(((sell - transfer) / sell) * 100);
+  return { marginAmount, marginPct, configured: true };
+}
+
+export function isHqPricingConfigured(hqCostPrice, hqTransferPrice) {
+  return isPositivePrice(hqCostPrice) && isPositivePrice(hqTransferPrice);
+}
+
+export function formatPriceOrNotConfigured(value, configured = true) {
+  if (!configured || !isPositivePrice(value)) return "Not configured";
+  return formatInr(value);
+}
+
+export function formatMarginAmount(amount, configured = true) {
+  if (!configured || amount == null) return "--";
+  return formatInr(amount);
+}
+
+export function formatMarginPct(pct, configured = true) {
+  if (!configured || pct == null) return "--";
+  return `${pct}%`;
 }
 
 export function mapMasterCatalogRow(row = {}) {
   const productId = str(row.productId ?? row.product_id);
   const sellingPrice = num(row.unitSellingPrice ?? row.selling_price ?? row.sellingPrice);
   const costPrice = num(row.unitCost ?? row.cost_price ?? row.costPrice);
+  const transferPrice = num(
+    row.transferPrice ??
+      row.transfer_price ??
+      row.unitTransferPrice ??
+      row.unit_transfer_price ??
+      row.hqTransferPrice ??
+      row.hq_transfer_price
+  );
+  const hqPricingConfigured = isHqPricingConfigured(costPrice, transferPrice);
   return {
     productId,
     productName: str(row.productName ?? row.product_name) || productId,
@@ -33,7 +82,9 @@ export function mapMasterCatalogRow(row = {}) {
     brand: str(row.brand) || "PrimeCare",
     sellingPrice,
     costPrice,
-    marginPct: computeMarginPct(sellingPrice, costPrice),
+    transferPrice,
+    hqPricingConfigured,
+    marginPct: hqPricingConfigured ? computeMarginPct(sellingPrice, transferPrice) : null,
     currentStock: num(row.currentStock ?? row.current_stock),
     minStock: num(row.minStock ?? row.min_stock),
     active: row.active !== false && str(row.activeFlag).toUpperCase() !== "N",

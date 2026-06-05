@@ -288,6 +288,7 @@ export async function validateDistributorProvisioningModule({
     );
 
     const catalogCheck = model?.checks?.find((c) => c.id === "catalog_configured");
+    const hqPricingCheck = model?.checks?.find((c) => c.id === "catalog_hq_pricing_configured");
     const catalogAssigned =
       model?.profile?.catalogAssigned === true ||
       Number(model?.profile?.catalogAssignedCount || 0) > 0 ||
@@ -302,6 +303,26 @@ export async function validateDistributorProvisioningModule({
           catalogCheckStatus: catalogCheck?.status,
           catalogAssignedCount: model?.profile?.catalogAssignedCount,
         },
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    entries.push(
+      createPredatorEntry({
+        status: hqPricingCheck?.status === "PASS" ? "PASS" : catalogAssigned ? "FAIL" : "WARN",
+        module: "Distributor Provisioning",
+        step: "distributor_catalog_hq_pricing_configured",
+        expected: "Assigned catalog products have HQ cost and transfer price configured",
+        actual: {
+          status: hqPricingCheck?.status,
+          detail: hqPricingCheck?.detail,
+        },
+        suggestedFix:
+          hqPricingCheck?.status === "PASS"
+            ? undefined
+            : "Configure HQ cost and transfer price in Master Catalog before launch",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,

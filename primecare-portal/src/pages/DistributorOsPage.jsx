@@ -350,6 +350,8 @@ export default function DistributorOsPage({
       catalogAssigned: catalogBundle?.catalogAssigned ?? catalogAssigned,
       catalogAssignedCount: catalogBundle?.assignedCount ?? 0,
       catalogPricingValid: catalogBundle?.pricingValid ?? true,
+      catalogHqPricingValid: catalogBundle?.hqPricingValid ?? true,
+      catalogHqPricingMissingCount: catalogBundle?.hqPricingMissingCount ?? 0,
       catalogInventoryIsolated: catalogBundle?.inventoryIsolated ?? true,
       catalogHqLeakCount: catalogBundle?.hqLeakCount ?? 0,
       catalogItems: catalogBundle?.assignedItems || [],

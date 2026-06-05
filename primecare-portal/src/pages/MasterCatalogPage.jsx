@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { PageSkeleton } from "@/components/ux";
 import { loadMasterCatalog } from "@/catalog/masterCatalogData.js";
-import { formatInr } from "@/catalog/masterCatalogEngine.js";
+import { formatInr, formatMarginPct, formatPriceOrNotConfigured } from "@/catalog/masterCatalogEngine.js";
 import { Package } from "lucide-react";
 
 export default function MasterCatalogPage() {
@@ -68,7 +68,8 @@ export default function MasterCatalogPage() {
               <th className="px-2 py-2">Product</th>
               <th className="px-2 py-2">Category</th>
               <th className="px-2 py-2">HQ price</th>
-              <th className="px-2 py-2">Cost</th>
+              <th className="px-2 py-2">HQ cost</th>
+              <th className="px-2 py-2">Transfer price</th>
               <th className="px-2 py-2">Margin</th>
               <th className="px-2 py-2">HQ stock</th>
             </tr>
@@ -76,7 +77,7 @@ export default function MasterCatalogPage() {
           <tbody>
             {items.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-2 py-6 text-center text-slate-500">
+                <td colSpan={7} className="px-2 py-6 text-center text-slate-500">
                   No master products loaded. Add products to HQ inventory first.
                 </td>
               </tr>
@@ -86,8 +87,15 @@ export default function MasterCatalogPage() {
                 <td className="px-2 py-2 font-medium">{p.productName}</td>
                 <td className="px-2 py-2">{p.category}</td>
                 <td className="px-2 py-2 tabular-nums">{formatInr(p.sellingPrice)}</td>
-                <td className="px-2 py-2 tabular-nums">{formatInr(p.costPrice)}</td>
-                <td className="px-2 py-2 tabular-nums">{p.marginPct}%</td>
+                <td className="px-2 py-2 tabular-nums">
+                  {formatPriceOrNotConfigured(p.costPrice, p.hqPricingConfigured)}
+                </td>
+                <td className="px-2 py-2 tabular-nums">
+                  {formatPriceOrNotConfigured(p.transferPrice, p.hqPricingConfigured)}
+                </td>
+                <td className="px-2 py-2 tabular-nums">
+                  {formatMarginPct(p.marginPct, p.hqPricingConfigured)}
+                </td>
                 <td className="px-2 py-2 tabular-nums">{p.currentStock}</td>
               </tr>
             ))}

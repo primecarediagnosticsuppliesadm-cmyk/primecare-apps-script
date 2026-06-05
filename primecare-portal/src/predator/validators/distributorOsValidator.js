@@ -276,6 +276,7 @@ export async function validateDistributorOsModule({ ctx, rendered = null }) {
     const catalogItems = Array.isArray(rendered?.catalogItems) ? rendered.catalogItems : [];
     const catalogAssigned = Boolean(rendered?.catalogAssigned) && catalogItems.length > 0;
     const catalogPricingValid = rendered?.catalogPricingValid !== false;
+    const catalogHqPricingValid = rendered?.catalogHqPricingValid !== false;
     const catalogIsolated =
       rendered?.catalogInventoryIsolated !== false && num(rendered?.catalogHqLeakCount) === 0;
 
@@ -305,6 +306,32 @@ export async function validateDistributorOsModule({ ctx, rendered = null }) {
         expected: "All assigned catalog SKUs have valid distributor pricing",
         actual: { pricingValid: catalogPricingValid, itemCount: catalogItems.length },
         severity: catalogPricingValid ? "low" : "high",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const hqPricingMissing = catalogItems.filter(
+      (item) => !item.hqPricingConfigured || num(item.hqCostPrice) <= 0 || num(item.hqTransferPrice) <= 0
+    );
+    entries.push(
+      createPredatorEntry({
+        status: catalogHqPricingValid || !catalogItems.length ? "PASS" : "FAIL",
+        module: "Distributor OS",
+        step: "distributor_catalog_hq_pricing_configured",
+        expected: "Assigned products have HQ cost and transfer price > 0",
+        actual: {
+          hqPricingValid: catalogHqPricingValid,
+          itemCount: catalogItems.length,
+          missingCount: hqPricingMissing.length,
+          missingProducts: hqPricingMissing.slice(0, 5).map((i) => i.productName || i.productId),
+        },
+        rootCauseGuess:
+          catalogHqPricingValid || !catalogItems.length
+            ? "HQ catalog pricing configured for assigned SKUs"
+            : "HQ cost or transfer price is zero — margin cannot be calculated",
+        severity: catalogHqPricingValid ? "low" : "high",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,

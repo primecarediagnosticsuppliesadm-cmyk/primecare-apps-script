@@ -319,6 +319,14 @@ export function mapLabCatalogRow(row) {
         row.unitPrice
     ),
     unitCost: num(row.unit_cost ?? row.unitCost ?? row.cost_price ?? row.costPrice),
+    transferPrice: num(
+      row.transfer_price ??
+        row.transferPrice ??
+        row.unit_transfer_price ??
+        row.unitTransferPrice ??
+        row.hq_transfer_price ??
+        row.hqTransferPrice
+    ),
     taxRate: num(row.tax_rate ?? row.taxRate ?? row.gst_rate ?? row.gstRate),
     activeFlag,
     currentStock,
