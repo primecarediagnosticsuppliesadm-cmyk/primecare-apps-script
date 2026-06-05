@@ -109,7 +109,10 @@ export default function LabContractManagementPage({
     try {
       setLoading(true);
       invalidateLabContractCache();
-      const data = await loadLabContractEngineBundle(currentUser, { force: true });
+      const data = await loadLabContractEngineBundle(currentUser, {
+        force: true,
+        scopeTenantId: distributorScope?.tenantId || "",
+      });
       setBundle(data);
     } catch (err) {
       console.error(err);
@@ -199,7 +202,7 @@ export default function LabContractManagementPage({
           <p className="text-[11px] text-slate-600">
             {distributorScope?.tenantId
               ? `Contracts for ${distributorScope.tenantName || "selected distributor"} only.`
-              : "PrimeCare HQ contracts — use Distributor OS for distributor tenants."}
+              : "PrimeCare HQ contracts only — open Distributor OS for distributor lab contracts."}
           </p>
         </div>
         <div className="flex gap-1">

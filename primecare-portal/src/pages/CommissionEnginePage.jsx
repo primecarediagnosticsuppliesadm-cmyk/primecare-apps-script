@@ -72,7 +72,7 @@ export default function CommissionEnginePage({
     } finally {
       setLoading(false);
     }
-  }, [currentUser]);
+  }, [currentUser, distributorScope?.tenantId]);
 
   useEffect(() => {
     void load();
@@ -142,7 +142,7 @@ export default function CommissionEnginePage({
             <p className="text-[11px] text-slate-600">
               {distributorScope?.tenantId
                 ? `Commissions for ${distributorScope.tenantName || "selected distributor"} agents · ${model.periodYmd}`
-                : `Collection-driven incentives · ${model.periodYmd} · ${rule.label} phase`}
+                : `PrimeCare HQ commission summary · ${model.periodYmd} · distributor payouts live in Distributor OS`}
             </p>
           </div>
           <Button type="button" variant="ghost" size="icon" onClick={() => void load()}>

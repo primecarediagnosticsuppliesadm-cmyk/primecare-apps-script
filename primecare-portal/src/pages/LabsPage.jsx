@@ -323,7 +323,8 @@ export default function LabsPage({
   distributorScope = null,
   embedded = false,
 }) {
-  const { homeTenantId, viewTenantId, readOnly, isExecutive, syncFromStorage } = useTenantView();
+  const { homeTenantId, isExecutive } = useTenantView();
+  const isDistributorOs = Boolean(distributorScope?.tenantId);
   const [labs, setLabs] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -332,26 +333,17 @@ export default function LabsPage({
   const [showAddLab, setShowAddLab] = useState(false);
   const [distributors, setDistributors] = useState([]);
   const [msg, setMsg] = useState("");
-  const [labContext, setLabContext] = useState(() => readDistributorLabContext());
+  const [labContext, setLabContext] = useState(() =>
+    distributorScope?.tenantId ? readDistributorLabContext() : null
+  );
   const [lastCreatedLab, setLastCreatedLab] = useState(null);
 
   const canAddLab =
     currentUser?.role === ROLES.EXECUTIVE || currentUser?.role === ROLES.ADMIN;
 
   const selectedDistributorTenantId = useMemo(() => {
-    const scopeId = str(distributorScope?.tenantId);
-    if (scopeId) return scopeId;
-    const ctxId = str(labContext?.tenantId);
-    const ctxSource = str(labContext?.source);
-    const viewId = str(viewTenantId);
-    const homeId = str(homeTenantId);
-    if (ctxId && ctxId !== homeId) {
-      if (ctxSource === "distributor_os") return "";
-      return ctxId;
-    }
-    if (readOnly && viewId && viewId !== homeId) return viewId;
-    return "";
-  }, [distributorScope, labContext, viewTenantId, homeTenantId, readOnly]);
+    return str(distributorScope?.tenantId);
+  }, [distributorScope?.tenantId]);
 
   const selectedDistributorName = useMemo(() => {
     if (distributorScope?.tenantName) return distributorScope.tenantName;
@@ -360,17 +352,11 @@ export default function LabsPage({
   }, [distributorScope, labContext, distributors, selectedDistributorTenantId]);
 
   const lockDistributor = useMemo(() => {
-    if (distributorScope?.locked) return true;
+    if (isDistributorOs) return true;
     if (currentUser?.role === ROLES.ADMIN) return true;
-    if (!selectedDistributorTenantId) return false;
-    return Boolean(labContext?.locked || readOnly);
-  }, [
-    distributorScope,
-    currentUser?.role,
-    selectedDistributorTenantId,
-    labContext?.locked,
-    readOnly,
-  ]);
+    if (currentUser?.role === ROLES.EXECUTIVE) return true;
+    return false;
+  }, [isDistributorOs, currentUser?.role]);
 
   usePredatorModuleValidation(
     "Lab Portal",
@@ -419,7 +405,7 @@ export default function LabsPage({
   }, [authToken, currentUser, loadLabs]);
 
   useEffect(() => {
-    syncFromStorage?.();
+    if (!isDistributorOs) return;
     const ctx = readDistributorLabContext();
     setLabContext(ctx);
     if (ctx?.openAddLab) {
@@ -427,10 +413,10 @@ export default function LabsPage({
       setDistributorLabContext({ ...ctx, openAddLab: false });
       setLabContext({ ...ctx, openAddLab: false });
     }
-  }, [syncFromStorage]);
+  }, [isDistributorOs]);
 
   useEffect(() => {
-    if (!canAddLab) return;
+    if (!canAddLab || !isDistributorOs) return;
     async function loadDistributors() {
       try {
         const foundation = await loadTenantFoundationRegistry(currentUser, {
@@ -454,7 +440,7 @@ export default function LabsPage({
       }
     }
     void loadDistributors();
-  }, [canAddLab, currentUser]);
+  }, [canAddLab, currentUser, isDistributorOs]);
 
   const visibleLabs = useMemo(() => {
     if (currentUser?.role === ROLES.AGENT) {
@@ -474,6 +460,21 @@ export default function LabsPage({
     }
     return labs;
   }, [labs, currentUser, selectedDistributorTenantId, homeTenantId]);
+
+  usePredatorModuleValidation(
+    "PrimeCare OS",
+    currentUser,
+    {
+      primecareOs: true,
+      page: "labs",
+      homeTenantId,
+      visibleLabs: visibleLabs.map((l) => ({
+        tenantId: l.tenantId,
+        labId: l.labId,
+      })),
+    },
+    !isDistributorOs && !loading
+  );
 
   const filteredLabs = useMemo(() => {
     if (creditFilter === "ALL") return visibleLabs;
@@ -506,9 +507,9 @@ export default function LabsPage({
     return <div className="p-4 text-red-600">{error}</div>;
   }
 
-  const defaultTenantId =
-    selectedDistributorTenantId ||
-    (currentUser?.role === ROLES.ADMIN ? currentUser?.tenantId : "");
+  const defaultTenantId = isDistributorOs
+    ? selectedDistributorTenantId
+    : str(homeTenantId || currentUser?.tenantId);
 
   return (
     <div className={embedded ? "space-y-4" : "space-y-6"}>
@@ -528,7 +529,7 @@ export default function LabsPage({
             </p>
           ) : null}
         </div>
-        {canAddLab ? (
+        {canAddLab && (isDistributorOs || currentUser?.role !== ROLES.EXECUTIVE || defaultTenantId) ? (
           <Button type="button" size="sm" onClick={() => setShowAddLab(true)}>
             <Plus className="h-4 w-4" /> Add lab
           </Button>

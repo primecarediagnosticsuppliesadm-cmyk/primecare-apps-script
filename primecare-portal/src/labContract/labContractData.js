@@ -115,7 +115,12 @@ export async function loadLabContractEngineBundle(currentUser, options = {}) {
     ? registry.contracts.filter(
         (c) => str(c.distributorId) === scopeTenantId || str(c.tenantId) === scopeTenantId
       )
-    : registry.contracts;
+    : registry.contracts.filter(
+        (c) =>
+          !str(c.distributorId) ||
+          str(c.distributorId) === homeTenantId ||
+          str(c.tenantId) === homeTenantId
+      );
   const distributors = new Set(
     (foundation?.tenants || []).map((t) => str(t.id)).filter(Boolean)
   );

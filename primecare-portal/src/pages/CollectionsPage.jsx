@@ -1616,6 +1616,21 @@ export default function CollectionsPage({
     });
   }
 
+  usePredatorModuleValidation(
+    "PrimeCare OS",
+    currentUser,
+    {
+      primecareOs: true,
+      page: "collections",
+      homeTenantId: str(currentUser?.tenantId || currentUser?.tenant_id),
+      visibleCollections: collections.map((c) => ({
+        tenantId: c.tenantId,
+        labId: c.labId,
+      })),
+    },
+    !distributorScope?.tenantId && !loading && !isLabAccount
+  );
+
   const filteredCollections = useMemo(() => {
     if (isLabAccount) {
       return [...collections];

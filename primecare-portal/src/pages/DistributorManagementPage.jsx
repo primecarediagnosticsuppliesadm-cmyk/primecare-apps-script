@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, PageSkeleton } from "@/components/ux";
 import { useTenantView } from "@/context/TenantViewContext.jsx";
-import { openLabsForDistributor, setTenantViewContext } from "@/tenant/tenantFoundationStore.js";
+import { openDistributorOsTab } from "@/tenant/tenantFoundationStore.js";
 import {
   loadDistributorWorkspaceBundle,
   resolveDistributorWorkspace,
@@ -54,7 +54,7 @@ function LabCard({ lab }) {
 }
 
 export default function DistributorManagementPage({ currentUser = null, setActivePage = null }) {
-  const { viewTenantId, homeTenantId, readOnly, setViewTenant } = useTenantView();
+  const { homeTenantId } = useTenantView();
   const [loading, setLoading] = useState(true);
   const [bundle, setBundle] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
@@ -111,20 +111,31 @@ export default function DistributorManagementPage({ currentUser = null, setActiv
   function handleAction(action) {
     if (!action?.wired || action.comingSoon || !setActivePage || !action.page) return;
     if (action.id === "open_tenant" && workspace?.profile.tenantId) {
-      setViewTenant(workspace.profile.tenantId);
       setActivePage("tenantManagement");
       return;
     }
-    if (action.page === "labs" && workspace?.profile?.tenantId) {
-      openLabsForDistributor({
+    if (
+      (action.page === "labs" || action.id === "add_lab") &&
+      workspace?.profile?.tenantId
+    ) {
+      openDistributorOsTab({
         tenantId: workspace.profile.tenantId,
         tenantName: workspace.profile.name,
         homeTenantId: bundle?.homeTenantId || homeTenantId,
+        tab: "labs",
         openAddLab: action.id === "add_lab",
-        source: "management",
-        locked: workspace.profile.tenantId !== (bundle?.homeTenantId || homeTenantId),
       });
-      setActivePage("labs");
+      setActivePage("distributorOs");
+      return;
+    }
+    if (action.page === "distributorOs") {
+      openDistributorOsTab({
+        tenantId: workspace?.profile?.tenantId,
+        tenantName: workspace?.profile?.name,
+        homeTenantId: bundle?.homeTenantId || homeTenantId,
+        tab: "overview",
+      });
+      setActivePage("distributorOs");
       return;
     }
     setActivePage(action.page);
@@ -132,10 +143,6 @@ export default function DistributorManagementPage({ currentUser = null, setActiv
 
   function selectDistributor(id) {
     setSelectedId(id);
-    if (id && homeTenantId) {
-      setTenantViewContext(id, homeTenantId);
-      setViewTenant(id);
-    }
   }
 
   if (loading) return <PageSkeleton rows={8} />;

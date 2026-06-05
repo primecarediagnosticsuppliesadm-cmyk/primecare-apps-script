@@ -2,6 +2,7 @@ import { createPredatorEntry, summarizePredatorEntries } from "@/predator/predat
 import { predatorTrace } from "@/predator/predatorTiming.js";
 import { polishPredatorEntries } from "@/predator/predatorEntryPolish.js";
 import { ROLES } from "@/config/roles.js";
+import { readTenantViewContext } from "@/tenant/tenantFoundationStore.js";
 import {
   detectHqLeakage,
   isValidDistributorOsScope,
@@ -98,6 +99,71 @@ export async function validateDistributorOsModule({ ctx, rendered = null }) {
           ? "HQ data leaked into distributor OS scope"
           : "Distributor OS isolated from HQ tenant rows",
         severity: anyLeak ? "critical" : "low",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    entries.push(
+      createPredatorEntry({
+        status: anyLeak ? "FAIL" : "PASS",
+        module: "Distributor OS",
+        step: "distributor_os.no_hq_data",
+        expected: "Distributor OS tabs contain no HQ tenant operational rows",
+        actual: {
+          scopeTenantId,
+          hqRowCount: labLeak.homeCount + orderLeak.homeCount + collLeak.homeCount,
+        },
+        severity: anyLeak ? "critical" : "low",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const viewCtx = readTenantViewContext(homeTenantId);
+    const globalSwitched =
+      viewCtx.readOnly ||
+      (str(viewCtx.viewTenantId) && str(viewCtx.viewTenantId) !== homeTenantId);
+    entries.push(
+      createPredatorEntry({
+        status: globalSwitched ? "FAIL" : "PASS",
+        module: "Distributor OS",
+        step: "no_global_tenant_switch_leakage",
+        expected: "Selecting distributor must not switch global HQ header/view",
+        actual: {
+          homeTenantId,
+          viewTenantId: viewCtx.viewTenantId,
+          readOnly: viewCtx.readOnly,
+          scopeTenantId,
+        },
+        severity: globalSwitched ? "critical" : "low",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const actionsUseScope =
+      str(rendered?.globalViewTenantId || homeTenantId) === homeTenantId &&
+      (!labs.length || labs.every((r) => rowTenantId(r) === scopeTenantId)) &&
+      (!orders.length || orders.every((r) => rowTenantId(r) === scopeTenantId)) &&
+      (!collections.length || collections.every((r) => rowTenantId(r) === scopeTenantId));
+    entries.push(
+      createPredatorEntry({
+        status: actionsUseScope ? "PASS" : "FAIL",
+        module: "Distributor OS",
+        step: "distributor_os.all_actions_use_selected_distributor",
+        expected: "All Distributor OS operational data uses selected distributor tenant_id",
+        actual: {
+          scopeTenantId,
+          globalViewTenantId: rendered?.globalViewTenantId || homeTenantId,
+          labCount: labs.length,
+          orderCount: orders.length,
+          collectionCount: collections.length,
+        },
+        severity: actionsUseScope ? "low" : "critical",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,

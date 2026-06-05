@@ -6,10 +6,8 @@ import { PERMISSIONS } from "./config/permissions";
 import { getDefaultPageForRole } from "./config/menuConfig";
 import { resolvePageKeyForRole } from "./config/pageRouting.js";
 import { PortalToastProvider } from "@/context/PortalToastContext";
-import { TenantViewProvider, useTenantView } from "@/context/TenantViewContext.jsx";
-import TenantSwitcher from "@/components/tenant/TenantSwitcher.jsx";
-import { readTenantRegistry } from "@/tenant/tenantFoundationStore.js";
-import { buildTenantSwitcherOptions } from "@/tenant/tenantFoundationData.js";
+import { TenantViewProvider } from "@/context/TenantViewContext.jsx";
+import OperatingZoneSync from "@/components/OperatingZoneSync.jsx";
 
 function canRoleAccessPage(role, pageKey) {
   if (!role || !pageKey) return false;
@@ -209,6 +207,7 @@ export default function App() {
     <PortalToastProvider>
       <Suspense fallback={<PortalLoadingScreen />}>
         <TenantViewProvider currentUser={currentUser}>
+        <OperatingZoneSync activePage={activePage} />
         <PortalLayout
           role={role}
           activePage={activePage}

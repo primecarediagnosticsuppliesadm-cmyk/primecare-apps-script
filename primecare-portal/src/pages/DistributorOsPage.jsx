@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, PageSkeleton } from "@/components/ux";
-import { useTenantView } from "@/context/TenantViewContext.jsx";
 import {
   DISTRIBUTOR_OS_TABS,
   buildDistributorOsScope,
@@ -28,7 +27,7 @@ import { ROLES } from "@/config/roles";
 
 const HEALTH_VARIANT = { Healthy: "success", Watch: "warning", Risk: "danger" };
 
-function OverviewPanel({ workspace, snapshot }) {
+function OverviewPanel({ workspace, snapshot, launchStatus = null, catalogReady = false }) {
   if (!workspace) {
     return (
       <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
@@ -73,6 +72,26 @@ function OverviewPanel({ workspace, snapshot }) {
           </div>
         </div>
       </div>
+
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+        <p className="font-semibold text-slate-900">Product catalog</p>
+        <p className="mt-1">
+          {catalogReady
+            ? "Using PrimeCare standard catalog (shared HQ inventory)."
+            : "Standard catalog not enabled — complete Launch Distributor checklist."}
+        </p>
+      </div>
+
+      {launchStatus ? (
+        <div className="rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2 text-xs">
+          <p className="font-semibold text-indigo-950">Launch status</p>
+          <p className="text-indigo-900">
+            {launchStatus.activated
+              ? "Distributor activated"
+              : `${launchStatus.readyCount || 0}/${launchStatus.totalChecks || 0} launch checks ready`}
+          </p>
+        </div>
+      ) : null}
 
       {workspace.risks?.length ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs">
@@ -159,11 +178,11 @@ export default function DistributorOsPage({
   setActivePage = null,
   authToken = null,
 }) {
-  const { homeTenantId, setViewTenant } = useTenantView();
+  const homeTenantId = currentUser?.tenantId || currentUser?.tenant_id || "";
   const [loading, setLoading] = useState(true);
   const [registry, setRegistry] = useState([]);
   const [osContext, setOsContext] = useState(() => readDistributorOsContext());
-  const [tab, setTab] = useState(osContext?.tab || "overview");
+  const [tab, setTab] = useState(() => readDistributorOsContext()?.tab || "overview");
   const [snapshot, setSnapshot] = useState(null);
 
   const effectiveHomeId = homeTenantId || currentUser?.tenantId || "";
@@ -237,6 +256,9 @@ export default function DistributorOsPage({
     setOsContext(readDistributorOsContext());
   }, [selectedId, selectedName, effectiveHomeId, tab]);
 
+  const registryRow = selectedRow || registry.find((r) => r.id === selectedId);
+  const catalogReady = Boolean(registryRow?.config?.productCatalogReady);
+
   const predatorSnapshot = useMemo(() => {
     if (!scope) return null;
     return {
@@ -244,6 +266,7 @@ export default function DistributorOsPage({
       scopeTenantId: scope.tenantId,
       scopeTenantName: scope.tenantName,
       homeTenantId: scope.homeTenantId,
+      globalViewTenantId: scope.homeTenantId,
       tab,
       labCount: snapshot?.labs?.length ?? 0,
       orderCount: snapshot?.orders?.length ?? 0,
@@ -256,6 +279,16 @@ export default function DistributorOsPage({
       contracts: snapshot?.contracts || [],
     };
   }, [scope, tab, snapshot]);
+
+  const launchStatus = useMemo(() => {
+    if (!registryRow) return null;
+    const checks = registryRow.launchChecksReady;
+    return {
+      activated: String(registryRow.status).toLowerCase() === "active",
+      readyCount: Number(registryRow.launchReadyCount || checks || 0),
+      totalChecks: Number(registryRow.launchCheckTotal || 5),
+    };
+  }, [registryRow]);
 
   usePredatorModuleValidation(
     "Distributor OS",
@@ -274,7 +307,6 @@ export default function DistributorOsPage({
       tab,
     });
     setOsContext(readDistributorOsContext());
-    setViewTenant(id);
   }
 
   function changeTab(nextTab) {
@@ -377,7 +409,12 @@ export default function DistributorOsPage({
 
           <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
             {tab === "overview" ? (
-              <OverviewPanel workspace={snapshot?.workspace} snapshot={snapshot} />
+              <OverviewPanel
+                workspace={snapshot?.workspace}
+                snapshot={snapshot}
+                launchStatus={launchStatus}
+                catalogReady={catalogReady}
+              />
             ) : null}
             {tab === "labs" ? (
               <LabsPage

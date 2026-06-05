@@ -173,30 +173,57 @@ export function clearDistributorLabContext() {
 }
 
 /**
- * Set executive view + lab context, then caller navigates to Labs page.
+ * Open Distributor OS for a distributor tenant (does not switch global HQ header/view).
+ * @returns {{ tenantId: string, tab: string, openAddLab: boolean }|null}
  */
+export function openDistributorOsTab({
+  tenantId,
+  tenantName = "",
+  homeTenantId = "",
+  tab = "labs",
+  openAddLab = false,
+}) {
+  const id = String(tenantId || "").trim();
+  const home = String(homeTenantId || "").trim();
+  if (!id || !home || id === home) return null;
+  enterDistributorOs({ tenantId: id, tenantName, homeTenantId: home, tab });
+  if (openAddLab) {
+    setDistributorLabContext({
+      tenantId: id,
+      tenantName,
+      homeTenantId: home,
+      locked: true,
+      openAddLab: true,
+      source: "distributor_os",
+    });
+  }
+  return { tenantId: id, tab, openAddLab };
+}
+
+/** @deprecated Use openDistributorOsTab + navigate to distributorOs */
 export function openLabsForDistributor({
   tenantId,
   tenantName = "",
   homeTenantId = "",
   openAddLab = false,
-  source = "distributor",
-  locked = true,
+  tab = "labs",
 }) {
-  const id = String(tenantId || "").trim();
-  const home = String(homeTenantId || "").trim();
-  if (!id) return;
-  if (home) {
-    setTenantViewContext(id, home);
-  }
-  setDistributorLabContext({
-    tenantId: id,
+  return openDistributorOsTab({
+    tenantId,
     tenantName,
-    homeTenantId: home,
+    homeTenantId,
+    tab,
     openAddLab,
-    locked: locked && id !== home,
-    source,
   });
+}
+
+/** Clear Distributor OS context when leaving the module. */
+export function leaveDistributorOs() {
+  clearDistributorOsContext();
+  const labCtx = readDistributorLabContext();
+  if (labCtx?.source === "distributor_os") {
+    clearDistributorLabContext();
+  }
 }
 
 /**
@@ -248,7 +275,6 @@ export function enterDistributorOs({
   const id = String(tenantId || "").trim();
   const home = String(homeTenantId || "").trim();
   if (!id || !home || id === home) return false;
-  setTenantViewContext(id, home);
   setDistributorOsContext({ tenantId: id, tenantName, homeTenantId: home, tab });
   setDistributorLabContext({
     tenantId: id,

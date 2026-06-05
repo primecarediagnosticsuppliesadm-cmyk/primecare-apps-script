@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2 } from "lucide-react";
 import { ROLES } from "@/config/roles";
+import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import {
   filterRowsByTenant,
   rowTenantId,
@@ -311,6 +312,21 @@ export default function OrdersPage({
     console.log("ORDERS AFTER FILTER:", list);
     return list;
   }, [orders, search, status]);
+
+  usePredatorModuleValidation(
+    "PrimeCare OS",
+    currentUser,
+    {
+      primecareOs: true,
+      page: "orders",
+      homeTenantId: str(currentUser?.tenantId || currentUser?.tenant_id),
+      visibleOrders: orders.map((o) => ({
+        tenantId: o.tenantId,
+        orderId: o.orderId,
+      })),
+    },
+    !distributorScope?.tenantId && !loading
+  );
 
   return (
     <div className={embedded ? "space-y-4" : "space-y-5"}>
