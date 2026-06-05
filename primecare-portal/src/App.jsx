@@ -50,30 +50,15 @@ function UnauthorizedScreen({ message, onLogout }) {
 }
 
 function ExecutivePortalHeader({ currentUser, pageTitle, onLogout }) {
-  const { readOnly, isExecutive } = useTenantView();
-  const homeTenantId = currentUser?.tenantId || "";
-  const switcherOptions =
-    isExecutive && homeTenantId
-      ? buildTenantSwitcherOptions(homeTenantId, [], readTenantRegistry())
-      : [];
-
   return (
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
       <div>
         <h1 className="text-xl font-semibold">{pageTitle}</h1>
         <p className="text-sm text-gray-500">
-          Logged in as <span className="font-medium">{currentUser.role}</span>
-          {readOnly ? (
-            <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
-              Tenant view (read-only)
-            </span>
-          ) : null}
+          PrimeCare HQ · Logged in as <span className="font-medium">{currentUser.role}</span>
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        {isExecutive && switcherOptions.length > 0 ? (
-          <TenantSwitcher options={switcherOptions} />
-        ) : null}
         <button
           type="button"
           onClick={onLogout}

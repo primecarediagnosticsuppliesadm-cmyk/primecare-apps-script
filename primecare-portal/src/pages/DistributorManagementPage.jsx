@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, PageSkeleton } from "@/components/ux";
-import { useTenantView } from "@/context/TenantViewContext.jsx";
 import { openDistributorOsTab } from "@/tenant/tenantFoundationStore.js";
 import {
   loadDistributorWorkspaceBundle,
@@ -54,7 +53,7 @@ function LabCard({ lab }) {
 }
 
 export default function DistributorManagementPage({ currentUser = null, setActivePage = null }) {
-  const { homeTenantId } = useTenantView();
+  const homeTenantId = currentUser?.tenantId || currentUser?.tenant_id || "";
   const [loading, setLoading] = useState(true);
   const [bundle, setBundle] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
@@ -77,16 +76,16 @@ export default function DistributorManagementPage({ currentUser = null, setActiv
     void load();
   }, [load]);
 
-  const effectiveId = selectedId || viewTenantId || bundle?.homeTenantId;
+  const effectiveId = selectedId || bundle?.homeTenantId;
 
   const workspace = useMemo(() => {
     if (!bundle) return null;
     return resolveDistributorWorkspace(bundle, effectiveId, {
-      viewTenantId,
-      readOnly,
+      viewTenantId: effectiveId,
+      readOnly: effectiveId !== bundle.homeTenantId,
       homeTenantId: bundle.homeTenantId,
     });
-  }, [bundle, effectiveId, viewTenantId, readOnly]);
+  }, [bundle, effectiveId]);
 
   const predatorSnapshot = useMemo(() => {
     if (!bundle || !workspace) return null;

@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import { createLabWrite, getLabsCredit } from "@/api/primecareSupabaseApi";
 import { ROLES } from "@/config/roles";
-import { useTenantView } from "@/context/TenantViewContext.jsx";
 import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
 import { summarizeLabsCreditPortfolio } from "@/metrics/computeRiskMetrics.js";
 import { filterLabsForUser } from "@/utils/accessFilters.js";
@@ -323,7 +322,8 @@ export default function LabsPage({
   distributorScope = null,
   embedded = false,
 }) {
-  const { homeTenantId, isExecutive } = useTenantView();
+  const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
+  const isExecutive = currentUser?.role === ROLES.EXECUTIVE;
   const isDistributorOs = Boolean(distributorScope?.tenantId);
   const [labs, setLabs] = useState([]);
   const [summary, setSummary] = useState(null);

@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run check:tenant-view && vite build",
+    "check:tenant-view": "node scripts/check-tenant-view-imports.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },
