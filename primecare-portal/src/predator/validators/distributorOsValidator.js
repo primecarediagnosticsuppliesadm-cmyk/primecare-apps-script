@@ -8,9 +8,18 @@ import {
   isValidDistributorOsScope,
   rowTenantId,
 } from "@/distributor/distributorOsEngine.js";
+import {
+  blocksNewOrdersCollections,
+  LIFECYCLE_STATUS,
+} from "@/distributor/distributorLifecycleEngine.js";
 
 function str(v) {
   return String(v ?? "").trim();
+}
+
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
 }
 
 function finish(entries) {
@@ -57,18 +66,131 @@ export async function validateDistributorOsModule({ ctx, rendered = null }) {
       { tenantId: scopeTenantId, homeTenantId },
       homeTenantId
     );
+    const portfolioTab = ["dashboard", "billing", "overview"].includes(str(rendered?.tab));
+    const portfolioMode = Boolean(rendered?.distributorOsV2 && portfolioTab && !scopeValid);
 
     entries.push(
       createPredatorEntry({
-        status: scopeValid ? "PASS" : rendered?.distributorOs ? "FAIL" : "WARN",
+        status: scopeValid || portfolioMode ? "PASS" : rendered?.distributorOs ? "WARN" : "WARN",
         module: "Distributor OS",
         step: "distributor_os.selected_tenant_required",
-        expected: "Distributor OS requires non-HQ distributor tenant_id",
-        actual: { scopeTenantId, homeTenantId, scopeValid },
+        expected: "Scoped tabs require non-HQ distributor; portfolio tabs may show all distributors",
+        actual: { scopeTenantId, homeTenantId, scopeValid, portfolioMode, tab: rendered?.tab },
         rootCauseGuess: scopeValid
           ? "Distributor tenant selected"
-          : "Select a distributor before operating in Distributor OS",
-        severity: scopeValid ? "low" : "critical",
+          : portfolioMode
+            ? "Portfolio dashboard without single distributor scope"
+            : "Select a distributor before operating in Distributor OS",
+        severity: scopeValid || portfolioMode ? "low" : "medium",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const billingRows = Array.isArray(rendered?.billingRows) ? rendered.billingRows : [];
+    const performanceRows = Array.isArray(rendered?.performanceRows) ? rendered.performanceRows : [];
+    const portfolio = rendered?.portfolio || {};
+
+    const lifecycleValid = performanceRows.every((r) =>
+      ["draft", "pending_launch", "active", "suspended", "deactivated"].includes(
+        str(r.lifecycleStatus)
+      )
+    );
+    entries.push(
+      createPredatorEntry({
+        status: lifecycleValid || !performanceRows.length ? "PASS" : "FAIL",
+        module: "Distributor OS",
+        step: "distributor_os.lifecycle_status_valid",
+        expected: "All distributors use valid V2 lifecycle statuses",
+        actual: {
+          count: performanceRows.length,
+          invalid: performanceRows.filter(
+            (r) =>
+              !["draft", "pending_launch", "active", "suspended", "deactivated"].includes(
+                str(r.lifecycleStatus)
+              )
+          ).length,
+        },
+        severity: lifecycleValid ? "low" : "high",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const billingValid =
+      !billingRows.length ||
+      billingRows.every(
+        (r) =>
+          num(r.amountDue) >= 0 &&
+          num(r.collected) >= 0 &&
+          num(r.outstanding) >= 0 &&
+          num(r.outstanding) <= num(r.amountDue) + 0.01
+      );
+    entries.push(
+      createPredatorEntry({
+        status: billingValid ? "PASS" : "FAIL",
+        module: "Distributor OS",
+        step: "distributor_os.billing_calculation_valid",
+        expected: "Billing due/collected/outstanding are non-negative and consistent",
+        actual: { rowCount: billingRows.length, billingValid },
+        severity: billingValid ? "low" : "high",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const revenueRollup = num(rendered?.totalRevenue);
+    const perfRevenue = performanceRows.reduce((s, r) => s + num(r.revenue), 0);
+    const rollupOk = performanceRows.length === 0 || Math.abs(revenueRollup - perfRevenue) < 1;
+    entries.push(
+      createPredatorEntry({
+        status: rollupOk ? "PASS" : "WARN",
+        module: "Distributor OS",
+        step: "distributor_os.distributor_revenue_rollup",
+        expected: "Portfolio revenue equals sum of distributor performance rows",
+        actual: { revenueRollup, perfRevenue, delta: Math.abs(revenueRollup - perfRevenue) },
+        severity: rollupOk ? "low" : "medium",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const expiryWarnings =
+      num(portfolio.contractsExpiring30) +
+      num(portfolio.contractsExpiring60) +
+      num(portfolio.contractsExpiring90);
+    entries.push(
+      createPredatorEntry({
+        status: "PASS",
+        module: "Distributor OS",
+        step: "distributor_os.contract_expiry_warning",
+        expected: "Contract expiry windows computed for portfolio",
+        actual: {
+          expiring30: portfolio.contractsExpiring30 ?? 0,
+          expiring60: portfolio.contractsExpiring60 ?? 0,
+          expiring90: portfolio.contractsExpiring90 ?? 0,
+          totalWindows: expiryWarnings,
+        },
+        severity: expiryWarnings > 0 ? "medium" : "low",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const hqLeakPortfolio = num(rendered?.hqLeakCount) === 0;
+    entries.push(
+      createPredatorEntry({
+        status: hqLeakPortfolio ? "PASS" : "FAIL",
+        module: "Distributor OS",
+        step: "distributor_os.no_hq_leakage",
+        expected: "Portfolio aggregates exclude HQ tenant operational rows",
+        actual: { hqLeakCount: rendered?.hqLeakCount ?? 0 },
+        severity: hqLeakPortfolio ? "low" : "critical",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,
@@ -76,6 +198,41 @@ export async function validateDistributorOsModule({ ctx, rendered = null }) {
     );
 
     if (!scopeValid) return finish(entries);
+
+    const lifecycleStatus = str(rendered?.lifecycleStatus);
+    const canOperate = rendered?.canOperate === true;
+    const activeOnlyOk =
+      lifecycleStatus !== LIFECYCLE_STATUS.ACTIVE || canOperate || blocksNewOrdersCollections(lifecycleStatus);
+    entries.push(
+      createPredatorEntry({
+        status: activeOnlyOk ? "PASS" : "FAIL",
+        module: "Distributor OS",
+        step: "distributor_os.active_only_can_operate",
+        expected: "Only active, non-expired distributors can operate",
+        actual: { lifecycleStatus, canOperate },
+        severity: activeOnlyOk ? "low" : "high",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const deactivatedBlocks =
+      lifecycleStatus !== LIFECYCLE_STATUS.DEACTIVATED ||
+      blocksNewOrdersCollections(lifecycleStatus);
+    entries.push(
+      createPredatorEntry({
+        status: deactivatedBlocks ? "PASS" : "FAIL",
+        module: "Distributor OS",
+        step: "distributor_os.deactivated_blocks_actions",
+        expected: "Deactivated distributors block operational actions",
+        actual: { lifecycleStatus, blocksOps: blocksNewOrdersCollections(lifecycleStatus) },
+        severity: deactivatedBlocks ? "low" : "critical",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
 
     const labLeak = detectHqLeakage(labs, scopeTenantId, homeTenantId);
     const orderLeak = detectHqLeakage(orders, scopeTenantId, homeTenantId);
@@ -86,8 +243,8 @@ export async function validateDistributorOsModule({ ctx, rendered = null }) {
       createPredatorEntry({
         status: anyLeak ? "FAIL" : "PASS",
         module: "Distributor OS",
-        step: "distributor_os.no_hq_leakage",
-        expected: "No HQ tenant rows inside Distributor OS views",
+        step: "distributor_os.scoped_no_hq_data",
+        expected: "No HQ tenant rows inside scoped Distributor OS views",
         actual: {
           scopeTenantId,
           homeTenantId,

@@ -14,6 +14,7 @@ import { getPipelineStageLabel, normalizeQualificationPipelineStage } from "@/ut
 import { labIdKey } from "@/utils/labId.js";
 import { computeTenantHealthBand, computeTenantHealthScore } from "@/tenant/tenantFoundationEngine.js";
 import { buildContractSummaryForDistributor } from "@/labContract/labContractEngine.js";
+import { resolveDistributorLifecycleStatus } from "@/distributor/distributorLifecycleEngine.js";
 
 const REVENUE_DAYS = YEAR1_TARGETS.revenueDaysPerMonth;
 
@@ -64,10 +65,19 @@ function inDays(iso, maxDay) {
 
 /** @typedef {'pending'|'active'|'suspended'} DistributorStatus */
 
-export function mapDistributorStatus(tenantStatus) {
+export function mapDistributorStatus(tenantStatus, tenant = null) {
+  if (tenant) {
+    const lifecycle = resolveDistributorLifecycleStatus(tenant);
+    if (lifecycle === "active") return "active";
+    if (lifecycle === "suspended") return "suspended";
+    if (lifecycle === "deactivated") return "deactivated";
+    if (lifecycle === "pending_launch") return "pending";
+    if (lifecycle === "draft") return "draft";
+  }
   const s = str(tenantStatus).toUpperCase();
   if (s === "ACTIVE") return "active";
-  if (s === "INACTIVE") return "suspended";
+  if (s === "SUSPENDED") return "suspended";
+  if (s === "INACTIVE" || s === "DEACTIVATED") return "deactivated";
   return "pending";
 }
 
@@ -103,7 +113,8 @@ export function mapTenantToDistributorRegistryRow(tenant) {
     id: tenant.id,
     tenantId: tenant.id,
     name: tenant.name || config.displayName || config.companyName || "Distributor",
-    status: mapDistributorStatus(tenant.status),
+    status: mapDistributorStatus(tenant.status, tenant),
+    lifecycleStatus: resolveDistributorLifecycleStatus(tenant),
     ownerAdmin: tenant.adminUser || config.adminName || "—",
     territorySummary: territorySummaryLabel(config),
     territories,

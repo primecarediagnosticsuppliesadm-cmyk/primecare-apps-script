@@ -6,6 +6,11 @@
 import { isolationChecksPass } from "@/tenant/tenantFoundationIsolation.js";
 import { parseTerritorySummary } from "@/distributor/distributorWorkspaceEngine.js";
 import {
+  LIFECYCLE_DB_STATUS,
+  LIFECYCLE_STATUS,
+  normalizeCommercialConfig,
+} from "@/distributor/distributorLifecycleEngine.js";
+import {
   PERSISTENCE_STATUS,
   resolvePersistenceStatus,
   resolvePersistenceDisplay,
@@ -581,6 +586,7 @@ export function buildProvisioningDraft(form) {
   const company = form.company || {};
   const admin = form.admin || {};
   const ops = form.operations || {};
+  const commercial = form.commercial || {};
   const territories = str(company.territory)
     .split(/[,;]+/)
     .map((t) => str(t))
@@ -589,36 +595,61 @@ export function buildProvisioningDraft(form) {
   const id = crypto.randomUUID?.() || `dist-${Date.now()}`;
   const name = str(company.distributorName) || str(company.companyName);
   const now = new Date().toISOString();
+  const commercialConfig = normalizeCommercialConfig({
+    legalName: str(company.legalName),
+    territories: territories.length ? territories.join(", ") : str(company.territory),
+    adminName: str(admin.name),
+    adminEmail: str(admin.email),
+    adminPhone: str(admin.phone || company.phone),
+    contractStartDate: commercial.contractStartDate,
+    contractEndDate: commercial.contractEndDate,
+    billingModel: commercial.billingModel || "fixed_monthly",
+    monthlyPlatformFee: commercial.monthlyPlatformFee,
+    revenueSharePct: commercial.revenueSharePct || ops.commissionPct,
+    perLabFee: commercial.perLabFee,
+    lifecycleStatus: commercial.lifecycleStatus || LIFECYCLE_STATUS.DRAFT,
+  });
+  const lifecycleStatus = commercialConfig.lifecycleStatus;
+  const dbStatus = LIFECYCLE_DB_STATUS[lifecycleStatus] || "PENDING";
 
   return {
     id,
     tenantCode: `dist-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 20)}-${Date.now().toString(36).slice(-4)}`,
     name,
-    status: "PENDING",
+    status: dbStatus,
     config: {
       companyName: name,
-      legalName: str(company.legalName),
+      legalName: commercialConfig.legalName || str(company.legalName),
       country: str(company.country),
       state: str(company.state),
       territories: territories.length ? territories : [str(company.state), str(company.country)].filter(Boolean),
       territory: str(company.territory),
       phone: str(company.phone),
       email: str(company.email),
-      adminName: str(admin.name),
-      adminEmail: str(admin.email),
-      adminPhone: str(admin.phone),
+      adminName: commercialConfig.adminName || str(admin.name),
+      adminEmail: commercialConfig.adminEmail || str(admin.email),
+      adminPhone: commercialConfig.adminPhone || str(admin.phone),
       paymentTerms: str(ops.paymentTerms),
       creditLimit: num(ops.creditLimit),
-      commissionPct: num(ops.commissionPct),
+      commissionPct: num(ops.commissionPct ?? commercial.revenueSharePct),
       territoryNotes: str(ops.territoryNotes),
+      contractStartDate: commercialConfig.contractStartDate,
+      contractEndDate: commercialConfig.contractEndDate,
+      billingModel: commercialConfig.billingModel,
+      monthlyPlatformFee: commercialConfig.monthlyPlatformFee,
+      revenueSharePct: commercialConfig.revenueSharePct,
+      perLabFee: commercialConfig.perLabFee,
+      lifecycleStatus: commercialConfig.lifecycleStatus,
+      billingDueDate: commercialConfig.billingDueDate,
+      billingCollected: 0,
       rolesConfigured: true,
       rolesAutoProvisioned: true,
       rolesConfiguredAt: now,
       standardRoles: STANDARD_DISTRIBUTOR_ROLES.map((r) => r.id),
       roleCount: STANDARD_DISTRIBUTOR_ROLES.length,
       productCatalogReady: false,
-      collectionsEnabled: false,
-      orderingEnabled: false,
+      collectionsEnabled: lifecycleStatus === LIFECYCLE_STATUS.ACTIVE,
+      orderingEnabled: lifecycleStatus === LIFECYCLE_STATUS.ACTIVE,
     },
     metrics: { labs: 0, orders: 0, collections: 0, visits: 0, openInterventions: 0, products: 0, agents: 0 },
     provisioning: {

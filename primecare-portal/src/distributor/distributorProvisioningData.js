@@ -371,6 +371,12 @@ export async function activateDistributorProvisioning(tenantId, model) {
     durable: true,
     persistenceStatus: PERSISTENCE_STATUS.DURABLE,
     source: "database",
+    config: {
+      ...(row.config || {}),
+      lifecycleStatus: "active",
+      orderingEnabled: true,
+      collectionsEnabled: true,
+    },
     provisioning: {
       ...(row.provisioning || {}),
       lifecycle: "activated",

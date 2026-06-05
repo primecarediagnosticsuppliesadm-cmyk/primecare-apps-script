@@ -9,13 +9,21 @@ import {
   isValidDistributorOsScope,
 } from "@/distributor/distributorOsEngine.js";
 import { loadDistributorOsSnapshot } from "@/distributor/distributorOsData.js";
+import { loadDistributorOsPortfolio } from "@/distributor/distributorOsPortfolioData.js";
+import { applyDistributorLifecycleAction } from "@/distributor/distributorLifecycleData.js";
+import {
+  canDistributorOperate,
+  enrichRegistryRowLifecycle,
+  lifecycleStatusLabel,
+  lifecycleStatusVariant,
+  resolveDistributorLifecycleStatus,
+} from "@/distributor/distributorLifecycleEngine.js";
 import {
   consumeDistributorOsTabPreset,
   enterDistributorOs,
   readDistributorOsContext,
   setDistributorOsContext,
 } from "@/tenant/tenantFoundationStore.js";
-import { loadDistributorWorkspaceBundle } from "@/distributor/distributorWorkspaceData.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import LabsPage from "@/pages/LabsPage.jsx";
 import OrdersPage from "@/pages/OrdersPage.jsx";
@@ -23,153 +31,19 @@ import CollectionsPage from "@/pages/CollectionsPage.jsx";
 import LabContractManagementPage from "@/pages/LabContractManagementPage.jsx";
 import CommissionEnginePage from "@/pages/CommissionEnginePage.jsx";
 import DistributorProvisioningPage from "@/pages/DistributorProvisioningPage.jsx";
+import DistributorCreateWizard from "@/components/distributor/DistributorCreateWizard.jsx";
+import {
+  BillingPanel,
+  DashboardPanel,
+  LifecycleActionsPanel,
+  OperationRestrictionBanner,
+  PerformancePanel,
+} from "@/components/distributor/DistributorOsV2Panels.jsx";
 import { cn } from "@/lib/utils";
-import { Building2, RefreshCw, AlertTriangle, Users } from "lucide-react";
+import { Building2, Plus, RefreshCw, AlertTriangle, Users } from "lucide-react";
 import { ROLES } from "@/config/roles";
 
 const HEALTH_VARIANT = { Healthy: "success", Watch: "warning", Risk: "danger" };
-const STATUS_VARIANT = { active: "success", pending: "info", suspended: "neutral" };
-
-function PortfolioPanel({ distributors = [], onSelect }) {
-  if (!distributors.length) {
-    return (
-      <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-        No distributor tenants yet. Open the Launch tab after creating a distributor.
-      </p>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      <p className="text-xs text-slate-600">
-        Portfolio — select a distributor to open labs, orders, collections, and contracts.
-      </p>
-      <div className="overflow-x-auto rounded-lg border border-slate-200">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b bg-slate-50 text-left text-slate-500">
-              <th className="px-2 py-1.5">Name</th>
-              <th className="px-2 py-1.5">Status</th>
-              <th className="px-2 py-1.5">Territory</th>
-              <th className="px-2 py-1.5">Labs</th>
-              <th className="px-2 py-1.5">Health</th>
-            </tr>
-          </thead>
-          <tbody>
-            {distributors.map((row) => (
-              <tr
-                key={row.id}
-                className="cursor-pointer border-b border-slate-100 hover:bg-slate-50"
-                onClick={() => onSelect(row.id)}
-              >
-                <td className="px-2 py-1.5 font-medium text-slate-900">{row.name}</td>
-                <td className="px-2 py-1.5">
-                  <StatusBadge
-                    variant={STATUS_VARIANT[row.status] || "neutral"}
-                    label={row.status}
-                  />
-                </td>
-                <td className="px-2 py-1.5 text-slate-600">{row.territorySummary || "—"}</td>
-                <td className="px-2 py-1.5 tabular-nums">{row.labs ?? 0}</td>
-                <td className="px-2 py-1.5 tabular-nums">{row.healthScore ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function ScopeRequiredMessage({ tabLabel = "this tab" }) {
-  return (
-    <p className="rounded-lg border border-dashed border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-      Select a distributor above to use {tabLabel}.
-    </p>
-  );
-}
-
-function OverviewPanel({ workspace, snapshot, launchStatus = null, catalogReady = false }) {
-  if (!workspace) {
-    return (
-      <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-        Select a distributor to view overview.
-      </p>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-3">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <h2 className="text-base font-bold text-slate-900">{workspace.profile.name}</h2>
-            <p className="text-xs text-slate-600">{workspace.profile.territorySummary}</p>
-            <p className="text-[11px] text-slate-500">
-              Tenant ID: {workspace.profile.tenantId}
-              {workspace.isLive ? " · Live data" : " · Cross-tenant read"}
-            </p>
-          </div>
-          <StatusBadge
-            variant={HEALTH_VARIANT[workspace.health.healthBand] || "neutral"}
-            label={`${workspace.health.healthBand} · ${workspace.health.healthScore}`}
-          />
-        </div>
-        <div className="mt-2 grid grid-cols-2 gap-1 text-[10px] sm:grid-cols-4">
-          <div className="rounded border bg-white px-2 py-1">
-            <p className="text-slate-500">Labs</p>
-            <p className="font-semibold tabular-nums">{snapshot?.labs?.length ?? workspace.profile.labs ?? 0}</p>
-          </div>
-          <div className="rounded border bg-white px-2 py-1">
-            <p className="text-slate-500">Orders</p>
-            <p className="font-semibold tabular-nums">{snapshot?.orders?.length ?? 0}</p>
-          </div>
-          <div className="rounded border bg-white px-2 py-1">
-            <p className="text-slate-500">Collections</p>
-            <p className="font-semibold tabular-nums">{snapshot?.collections?.length ?? 0}</p>
-          </div>
-          <div className="rounded border bg-white px-2 py-1">
-            <p className="text-slate-500">Contracts</p>
-            <p className="font-semibold tabular-nums">{snapshot?.contracts?.length ?? 0}</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
-        <p className="font-semibold text-slate-900">Product catalog</p>
-        <p className="mt-1">
-          {catalogReady
-            ? "Using PrimeCare standard catalog (shared HQ inventory)."
-            : "Standard catalog not enabled — complete Launch Distributor checklist."}
-        </p>
-      </div>
-
-      {launchStatus ? (
-        <div className="rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2 text-xs">
-          <p className="font-semibold text-indigo-950">Launch status</p>
-          <p className="text-indigo-900">
-            {launchStatus.activated
-              ? "Distributor activated"
-              : `${launchStatus.readyCount || 0}/${launchStatus.totalChecks || 0} launch checks ready`}
-          </p>
-        </div>
-      ) : null}
-
-      {workspace.risks?.length ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs">
-          <p className="flex items-center gap-1 font-semibold text-amber-950">
-            <AlertTriangle className="h-3.5 w-3.5" /> Active risks
-          </p>
-          <ul className="mt-1 list-disc pl-4 text-amber-900">
-            {workspace.risks.slice(0, 3).map((r) => (
-              <li key={r.id || r.title}>{r.title}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 function AgentsPanel({ agents = [], tenantName = "" }) {
   if (!agents.length) {
@@ -195,7 +69,7 @@ function AgentsPanel({ agents = [], tenantName = "" }) {
   );
 }
 
-function RisksPanel({ workspace, collections = [] }) {
+function RisksPanel({ workspace, collections = [], performance }) {
   const workspaceRisks = workspace?.risks || [];
   const creditRisks = collections.filter(
     (c) =>
@@ -203,7 +77,7 @@ function RisksPanel({ workspace, collections = [] }) {
       String(c.creditHold || "").toUpperCase() === "HOLD"
   );
 
-  if (!workspaceRisks.length && !creditRisks.length) {
+  if (!workspaceRisks.length && !creditRisks.length && !performance?.contractExpired) {
     return (
       <p className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
         No elevated risks detected for this distributor.
@@ -213,6 +87,12 @@ function RisksPanel({ workspace, collections = [] }) {
 
   return (
     <div className="space-y-3">
+      {performance?.contractExpired ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs">
+          <p className="font-semibold text-red-950">Contract expired</p>
+          <p className="text-red-800">Renewal needed — operations are blocked until contract is renewed.</p>
+        </div>
+      ) : null}
       {workspaceRisks.map((r) => (
         <div key={r.id || r.title} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs">
           <p className="font-semibold text-amber-950">{r.title}</p>
@@ -220,10 +100,7 @@ function RisksPanel({ workspace, collections = [] }) {
         </div>
       ))}
       {creditRisks.map((c) => (
-        <div
-          key={c.labId}
-          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs"
-        >
+        <div key={c.labId} className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs">
           <p className="font-semibold text-red-950">{c.labName || c.labId}</p>
           <p className="text-red-800">
             Outstanding ₹{Number(c.outstandingAmount || 0).toLocaleString("en-IN")} ·{" "}
@@ -235,6 +112,14 @@ function RisksPanel({ workspace, collections = [] }) {
   );
 }
 
+function ScopeRequiredMessage({ tabLabel = "this tab" }) {
+  return (
+    <p className="rounded-lg border border-dashed border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+      Select a distributor above to use {tabLabel}.
+    </p>
+  );
+}
+
 export default function DistributorOsPage({
   currentUser = null,
   setActivePage = null,
@@ -242,12 +127,16 @@ export default function DistributorOsPage({
 }) {
   const homeTenantId = currentUser?.tenantId || currentUser?.tenant_id || "";
   const [loading, setLoading] = useState(true);
-  const [registry, setRegistry] = useState([]);
+  const [portfolio, setPortfolio] = useState(null);
   const [osContext, setOsContext] = useState(() => readDistributorOsContext());
-  const [tab, setTab] = useState(() => readDistributorOsContext()?.tab || "overview");
+  const [tab, setTab] = useState(() => readDistributorOsContext()?.tab || "dashboard");
   const [snapshot, setSnapshot] = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
+  const [lifecycleMsg, setLifecycleMsg] = useState("");
 
   const effectiveHomeId = homeTenantId || currentUser?.tenantId || "";
+  const registry = portfolio?.distributors || [];
 
   const distributors = useMemo(() => {
     if (currentUser?.role === ROLES.ADMIN && currentUser?.tenantId) {
@@ -257,28 +146,43 @@ export default function DistributorOsPage({
     return filterDistributorRegistry(registry, effectiveHomeId);
   }, [registry, effectiveHomeId, currentUser]);
 
-  const selectedId = osContext?.tenantId || distributors[0]?.id || "";
+  const selectedId = osContext?.tenantId || "";
   const selectedRow = distributors.find((d) => d.id === selectedId) || null;
+  const enrichedRow = selectedRow ? enrichRegistryRowLifecycle(selectedRow) : null;
   const selectedName =
     osContext?.tenantName || selectedRow?.name || selectedRow?.config?.companyName || "";
 
   const scope = useMemo(() => {
     if (!isValidDistributorOsScope({ tenantId: selectedId }, effectiveHomeId)) return null;
+    const lifecycleStatus = resolveDistributorLifecycleStatus(enrichedRow || selectedRow || {});
+    const config = enrichedRow?.config || selectedRow?.config || {};
     return buildDistributorOsScope({
       tenantId: selectedId,
       tenantName: selectedName,
       homeTenantId: effectiveHomeId,
+      lifecycleStatus,
+      canOperate: canDistributorOperate(lifecycleStatus, config),
     });
-  }, [selectedId, selectedName, effectiveHomeId]);
+  }, [selectedId, selectedName, effectiveHomeId, enrichedRow, selectedRow]);
 
-  const loadRegistry = useCallback(async () => {
+  const selectedPerformance = useMemo(() => {
+    if (!selectedId || !portfolio?.performanceRows) return null;
+    return portfolio.performanceRows.find((r) => r.distributorId === selectedId) || null;
+  }, [selectedId, portfolio]);
+
+  const selectedBilling = useMemo(() => {
+    if (!selectedId || !portfolio?.billingRows) return null;
+    return portfolio.billingRows.find((r) => r.distributorId === selectedId) || null;
+  }, [selectedId, portfolio]);
+
+  const loadPortfolio = useCallback(async () => {
     try {
       setLoading(true);
-      const bundle = await loadDistributorWorkspaceBundle(currentUser, { force: true });
-      setRegistry(bundle.registry || []);
+      const data = await loadDistributorOsPortfolio(currentUser, { force: true });
+      setPortfolio(data);
     } catch (err) {
       console.error(err);
-      setRegistry([]);
+      setPortfolio(null);
     } finally {
       setLoading(false);
     }
@@ -304,8 +208,8 @@ export default function DistributorOsPage({
   }, []);
 
   useEffect(() => {
-    void loadRegistry();
-  }, [loadRegistry]);
+    void loadPortfolio();
+  }, [loadPortfolio]);
 
   useEffect(() => {
     void loadSnapshot();
@@ -323,18 +227,29 @@ export default function DistributorOsPage({
     setOsContext(readDistributorOsContext());
   }, [selectedId, selectedName, effectiveHomeId, tab]);
 
-  const registryRow = selectedRow || registry.find((r) => r.id === selectedId);
-  const catalogReady = Boolean(registryRow?.config?.productCatalogReady);
+  const catalogReady = Boolean(enrichedRow?.config?.productCatalogReady);
 
   const predatorSnapshot = useMemo(() => {
-    if (!scope) return null;
-    return {
+    const base = {
       distributorOs: true,
+      distributorOsV2: true,
+      homeTenantId: effectiveHomeId,
+      globalViewTenantId: effectiveHomeId,
+      tab,
+      portfolio: portfolio?.dashboard || null,
+      billingRows: portfolio?.billingRows || [],
+      performanceRows: portfolio?.performanceRows || [],
+      comparison: portfolio?.comparison || [],
+      hqLeakCount: portfolio?.hqLeakCount ?? 0,
+      totalRevenue: portfolio?.totalRevenue ?? 0,
+    };
+    if (!scope) return base;
+    return {
+      ...base,
       scopeTenantId: scope.tenantId,
       scopeTenantName: scope.tenantName,
-      homeTenantId: scope.homeTenantId,
-      globalViewTenantId: scope.homeTenantId,
-      tab,
+      lifecycleStatus: scope.lifecycleStatus,
+      canOperate: scope.canOperate,
       labCount: snapshot?.labs?.length ?? 0,
       orderCount: snapshot?.orders?.length ?? 0,
       collectionCount: snapshot?.collections?.length ?? 0,
@@ -344,25 +259,12 @@ export default function DistributorOsPage({
       orders: snapshot?.orders || [],
       collections: snapshot?.collections || [],
       contracts: snapshot?.contracts || [],
+      billing: selectedBilling,
+      performance: selectedPerformance,
     };
-  }, [scope, tab, snapshot]);
+  }, [scope, tab, snapshot, portfolio, selectedBilling, selectedPerformance, effectiveHomeId]);
 
-  const launchStatus = useMemo(() => {
-    if (!registryRow) return null;
-    const checks = registryRow.launchChecksReady;
-    return {
-      activated: String(registryRow.status).toLowerCase() === "active",
-      readyCount: Number(registryRow.launchReadyCount || checks || 0),
-      totalChecks: Number(registryRow.launchCheckTotal || 5),
-    };
-  }, [registryRow]);
-
-  usePredatorModuleValidation(
-    "Distributor OS",
-    currentUser,
-    predatorSnapshot ?? {},
-    Boolean(predatorSnapshot)
-  );
+  usePredatorModuleValidation("Distributor OS", currentUser, predatorSnapshot ?? {}, Boolean(portfolio));
 
   function selectDistributor(id) {
     const row = distributors.find((d) => d.id === id);
@@ -389,7 +291,38 @@ export default function DistributorOsPage({
     }
   }
 
-  if (loading) return <PageSkeleton rows={8} />;
+  async function handleLifecycleAction(action) {
+    if (!scope?.tenantId) return;
+    setLifecycleBusy(true);
+    setLifecycleMsg("");
+    try {
+      const result = await applyDistributorLifecycleAction(scope.tenantId, action, {
+        tenant: enrichedRow || selectedRow,
+      });
+      if (!result.ok) {
+        setLifecycleMsg(result.error || "Lifecycle action failed");
+        return;
+      }
+      setLifecycleMsg(`${action} applied — status is now ${result.lifecycleStatus}`);
+      await loadPortfolio();
+      await loadSnapshot();
+    } catch (err) {
+      setLifecycleMsg(err?.message || "Lifecycle action failed");
+    } finally {
+      setLifecycleBusy(false);
+    }
+  }
+
+  function handleCreated(row) {
+    setShowCreate(false);
+    void loadPortfolio();
+    if (row?.id) selectDistributor(row.id);
+    setTab("launch");
+  }
+
+  const opsBlocked = scope && !scope.canOperate;
+
+  if (loading && !portfolio) return <PageSkeleton rows={8} />;
 
   return (
     <div className="mx-auto max-w-6xl space-y-3 p-3 pb-8">
@@ -400,16 +333,19 @@ export default function DistributorOsPage({
             Distributor OS
           </h1>
           <p className="text-[11px] text-slate-600">
-            Distributor operations isolated from PrimeCare HQ
+            Multi-distributor lifecycle, billing, and operations — isolated from PrimeCare HQ
           </p>
         </div>
         <div className="flex gap-2">
+          <Button type="button" size="sm" onClick={() => setShowCreate(true)}>
+            <Plus className="h-4 w-4" /> Add Distributor
+          </Button>
           <Button
             type="button"
             variant="ghost"
             size="icon"
             onClick={() => {
-              void loadRegistry();
+              void loadPortfolio();
               void loadSnapshot();
             }}
             aria-label="Refresh"
@@ -419,6 +355,10 @@ export default function DistributorOsPage({
         </div>
       </header>
 
+      {showCreate ? (
+        <DistributorCreateWizard onClose={() => setShowCreate(false)} onCreated={handleCreated} />
+      ) : null}
+
       <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
         <label className="text-xs font-semibold uppercase text-slate-500">Select distributor</label>
         <select
@@ -426,22 +366,38 @@ export default function DistributorOsPage({
           value={selectedId}
           onChange={(e) => selectDistributor(e.target.value)}
         >
-          <option value="">Choose distributor…</option>
+          <option value="">All distributors (portfolio view)…</option>
           {distributors.map((d) => (
             <option key={d.id} value={d.id}>
               {d.name}
+              {d.lifecycleLabel ? ` · ${d.lifecycleLabel}` : ""}
             </option>
           ))}
         </select>
       </section>
 
       {scope ? (
-        <div className="rounded-lg border border-indigo-300 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-950">
-          {distributorOsBannerText(scope.tenantName)}
+        <div className="space-y-2">
+          <div className="rounded-lg border border-indigo-300 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-950">
+            {distributorOsBannerText(scope.tenantName)}
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <StatusBadge
+              variant={lifecycleStatusVariant(scope.lifecycleStatus)}
+              label={lifecycleStatusLabel(scope.lifecycleStatus)}
+            />
+            <LifecycleActionsPanel
+              lifecycleStatus={scope.lifecycleStatus}
+              onAction={handleLifecycleAction}
+              busy={lifecycleBusy}
+            />
+          </div>
+          {lifecycleMsg ? <p className="text-xs text-slate-600">{lifecycleMsg}</p> : null}
+          <OperationRestrictionBanner scope={scope} registryRow={enrichedRow} />
         </div>
       ) : (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Select a distributor tenant to run distributor operations. PrimeCare HQ stays platform-only.
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          Portfolio view — aggregate metrics across all distributors. Select one to operate.
         </div>
       )}
 
@@ -462,18 +418,46 @@ export default function DistributorOsPage({
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+        {tab === "dashboard" ? (
+          <DashboardPanel
+            dashboard={portfolio?.dashboard}
+            comparison={portfolio?.comparison}
+            onSelect={selectDistributor}
+          />
+        ) : null}
+
         {tab === "overview" ? (
           scope ? (
-            <OverviewPanel
-              workspace={snapshot?.workspace}
-              snapshot={snapshot}
-              launchStatus={launchStatus}
-              catalogReady={catalogReady}
-            />
+            <div className="space-y-3">
+              <PerformancePanel performance={selectedPerformance} billing={selectedBilling} />
+              {selectedPerformance?.contractExpiryLabel ? (
+                <div className="flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  {selectedPerformance.contractExpiryLabel}
+                </div>
+              ) : null}
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                <p className="font-semibold text-slate-900">Product catalog</p>
+                <p className="mt-1 text-slate-700">
+                  {catalogReady
+                    ? "Using PrimeCare standard catalog."
+                    : "Complete Launch checklist to enable catalog."}
+                </p>
+              </div>
+            </div>
           ) : (
-            <PortfolioPanel distributors={distributors} onSelect={selectDistributor} />
+            <DashboardPanel
+              dashboard={portfolio?.dashboard}
+              comparison={portfolio?.comparison}
+              onSelect={selectDistributor}
+            />
           )
         ) : null}
+
+        {tab === "billing" ? (
+          <BillingPanel billingRows={portfolio?.billingRows} onSelect={selectDistributor} />
+        ) : null}
+
         {tab === "launch" ? (
           scope ? (
             <DistributorProvisioningPage
@@ -487,37 +471,53 @@ export default function DistributorOsPage({
             <ScopeRequiredMessage tabLabel="Launch" />
           )
         ) : null}
+
         {tab === "labs" ? (
           scope ? (
-            <LabsPage
-              currentUser={currentUser}
-              authToken={authToken}
-              distributorScope={scope}
-              embedded
-            />
+            opsBlocked ? (
+              <ScopeRequiredMessage tabLabel="Labs (active distributor required)" />
+            ) : (
+              <LabsPage
+                currentUser={currentUser}
+                authToken={authToken}
+                distributorScope={scope}
+                embedded
+              />
+            )
           ) : (
             <ScopeRequiredMessage tabLabel="Labs" />
           )
         ) : null}
+
         {tab === "orders" ? (
           scope ? (
-            <OrdersPage currentUser={currentUser} distributorScope={scope} embedded />
+            opsBlocked ? (
+              <ScopeRequiredMessage tabLabel="Orders (active distributor required)" />
+            ) : (
+              <OrdersPage currentUser={currentUser} distributorScope={scope} embedded />
+            )
           ) : (
             <ScopeRequiredMessage tabLabel="Orders" />
           )
         ) : null}
+
         {tab === "collections" ? (
           scope ? (
-            <CollectionsPage
-              currentUser={currentUser}
-              authToken={authToken}
-              distributorScope={scope}
-              embedded
-            />
+            opsBlocked ? (
+              <ScopeRequiredMessage tabLabel="Collections (active distributor required)" />
+            ) : (
+              <CollectionsPage
+                currentUser={currentUser}
+                authToken={authToken}
+                distributorScope={scope}
+                embedded
+              />
+            )
           ) : (
             <ScopeRequiredMessage tabLabel="Collections" />
           )
         ) : null}
+
         {tab === "contracts" ? (
           scope ? (
             <LabContractManagementPage
@@ -530,6 +530,7 @@ export default function DistributorOsPage({
             <ScopeRequiredMessage tabLabel="Contracts" />
           )
         ) : null}
+
         {tab === "agents" ? (
           scope ? (
             <AgentsPanel agents={snapshot?.agents} tenantName={scope.tenantName} />
@@ -537,6 +538,7 @@ export default function DistributorOsPage({
             <ScopeRequiredMessage tabLabel="Agents" />
           )
         ) : null}
+
         {tab === "commissions" ? (
           scope ? (
             <CommissionEnginePage currentUser={currentUser} distributorScope={scope} embedded />
@@ -544,9 +546,14 @@ export default function DistributorOsPage({
             <ScopeRequiredMessage tabLabel="Commissions" />
           )
         ) : null}
+
         {tab === "risks" ? (
           scope ? (
-            <RisksPanel workspace={snapshot?.workspace} collections={snapshot?.collections} />
+            <RisksPanel
+              workspace={snapshot?.workspace}
+              collections={snapshot?.collections}
+              performance={selectedPerformance}
+            />
           ) : (
             <ScopeRequiredMessage tabLabel="Risks" />
           )

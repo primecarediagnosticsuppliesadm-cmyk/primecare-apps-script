@@ -5,6 +5,7 @@ function str(v) {
 }
 
 export const DISTRIBUTOR_OS_TABS = [
+  { id: "dashboard", label: "Dashboard" },
   { id: "overview", label: "Overview" },
   { id: "launch", label: "Launch" },
   { id: "labs", label: "Labs" },
@@ -13,6 +14,7 @@ export const DISTRIBUTOR_OS_TABS = [
   { id: "contracts", label: "Contracts" },
   { id: "agents", label: "Agents" },
   { id: "commissions", label: "Commissions" },
+  { id: "billing", label: "Billing" },
   { id: "risks", label: "Risks" },
 ];
 
@@ -25,7 +27,13 @@ export const DISTRIBUTOR_OS_TABS = [
  * @property {string} [source]
  */
 
-export function buildDistributorOsScope({ tenantId, tenantName = "", homeTenantId = "" }) {
+export function buildDistributorOsScope({
+  tenantId,
+  tenantName = "",
+  homeTenantId = "",
+  lifecycleStatus = "",
+  canOperate = true,
+} = {}) {
   const id = str(tenantId);
   const home = str(homeTenantId);
   return {
@@ -34,6 +42,8 @@ export function buildDistributorOsScope({ tenantId, tenantName = "", homeTenantI
     homeTenantId: home,
     locked: Boolean(id && home && id !== home),
     source: "distributor_os",
+    lifecycleStatus: str(lifecycleStatus),
+    canOperate: Boolean(canOperate),
   };
 }
 
