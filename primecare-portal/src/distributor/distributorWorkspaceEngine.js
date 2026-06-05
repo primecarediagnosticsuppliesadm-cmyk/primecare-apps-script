@@ -6,10 +6,7 @@
  */
 
 import { summarizeCollectionsList } from "@/metrics/computeReceivableMetrics.js";
-import {
-  resolvePersistenceStatus,
-  persistenceStatusLabel,
-} from "@/tenant/durableTenantStore.js";
+import { resolvePersistenceDisplay } from "@/tenant/durableTenantStore.js";
 import { computeFounderOperationalSignals } from "@/founder/founderPilotReadinessCompute.js";
 import { YEAR1_TARGETS } from "@/founder/founderStrategyTargets.js";
 import { filterVisitProofEvidence } from "@/utils/operationalEvidenceUi.js";
@@ -100,7 +97,7 @@ export function mapTenantToDistributorRegistryRow(tenant) {
   const config = tenant.config || {};
   const metrics = tenant.metrics || {};
   const territories = parseTerritorySummary(config);
-  const persistenceStatus = resolvePersistenceStatus(tenant);
+  const persistence = resolvePersistenceDisplay(tenant);
 
   return {
     id: tenant.id,
@@ -122,8 +119,9 @@ export function mapTenantToDistributorRegistryRow(tenant) {
     config,
     registryOnly: tenant.source !== "database",
     createdAt: tenant.createdAt || null,
-    persistenceStatus,
-    persistenceLabel: tenant.persistenceLabel || persistenceStatusLabel(persistenceStatus),
+    persistenceStatus: persistence.key,
+    persistenceLabel: tenant.persistenceLabel || persistence.label,
+    persistenceTone: persistence.tone,
     durable: Boolean(tenant.durable || tenant.source === "database"),
     lastSyncError: tenant.lastSyncError || null,
   };

@@ -5,6 +5,11 @@
 
 import { isolationChecksPass } from "@/tenant/tenantFoundationIsolation.js";
 import { parseTerritorySummary } from "@/distributor/distributorWorkspaceEngine.js";
+import {
+  PERSISTENCE_STATUS,
+  resolvePersistenceStatus,
+  resolvePersistenceDisplay,
+} from "@/tenant/durableTenantStore.js";
 
 const PIPELINE_STEPS = [
   { id: "draft", label: "Draft" },
@@ -572,7 +577,8 @@ export function buildProvisioningDraft(form) {
  * Full provisioning model for one distributor.
  */
 export function buildDistributorProvisioningModel(tenant, ctx = {}) {
-  const persistenceStatus = resolvePersistenceStatus(tenant);
+  const persistence = resolvePersistenceDisplay(tenant);
+  const persistenceStatus = persistence.key;
   const checks = buildProvisioningChecks({
     config: tenant.config,
     metrics: tenant.metrics,
@@ -627,7 +633,8 @@ export function buildDistributorProvisioningModel(tenant, ctx = {}) {
     isLive: ctx.isLive,
     isHome: tenant.isHome,
     persistenceStatus,
-    persistenceLabel: persistenceStatusLabel(persistenceStatus),
+    persistenceLabel: persistence.label,
+    persistenceTone: persistence.tone,
     durable: persistenceStatus === PERSISTENCE_STATUS.DURABLE,
   };
 }

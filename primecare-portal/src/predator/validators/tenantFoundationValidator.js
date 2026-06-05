@@ -9,6 +9,7 @@ import { ROLES } from "@/config/roles.js";
 import {
   PERSISTENCE_STATUS,
   validateSupabaseClientForPredator,
+  validatePersistenceStatusResolvesForPredator,
 } from "@/tenant/durableTenantStore.js";
 
 const VALID_HEALTH = new Set(["Healthy", "Watch", "Risk"]);
@@ -40,6 +41,7 @@ export async function validateTenantFoundationModule({
     const entries = [];
 
     const supabaseClientCheck = validateSupabaseClientForPredator();
+    const persistenceCheck = validatePersistenceStatusResolvesForPredator();
     entries.push(
       createPredatorEntry({
         status: supabaseClientCheck.status,
@@ -49,6 +51,20 @@ export async function validateTenantFoundationModule({
         suggestedFix: supabaseClientCheck.ok
           ? undefined
           : "Import supabase from @/api/supabaseClient.js in tenantFoundationData.js",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+    entries.push(
+      createPredatorEntry({
+        status: persistenceCheck.status,
+        module: "Tenant Foundation",
+        step: "durableTenantStore.persistence_status_resolves",
+        actual: persistenceCheck.actual,
+        suggestedFix: persistenceCheck.ok
+          ? undefined
+          : "Ensure resolvePersistenceStatus is exported from durableTenantStore.js",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,

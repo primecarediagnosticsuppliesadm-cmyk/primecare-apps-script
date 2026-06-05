@@ -16,6 +16,7 @@ import { ROLES } from "@/config/roles.js";
 import {
   PERSISTENCE_STATUS,
   validateSupabaseClientForPredator,
+  validatePersistenceStatusResolvesForPredator,
 } from "@/tenant/durableTenantStore.js";
 
 function finish(entries) {
@@ -40,6 +41,7 @@ export async function validateDistributorProvisioningModule({
   return predatorTrace("Distributor Provisioning", "validation.full", async () => {
     const entries = [];
     const supabaseClientCheck = validateSupabaseClientForPredator();
+    const persistenceCheck = validatePersistenceStatusResolvesForPredator();
     entries.push(
       createPredatorEntry({
         status: supabaseClientCheck.status,
@@ -49,6 +51,20 @@ export async function validateDistributorProvisioningModule({
         suggestedFix: supabaseClientCheck.ok
           ? undefined
           : "Import supabase from @/api/supabaseClient.js in tenantFoundationData.js",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+    entries.push(
+      createPredatorEntry({
+        status: persistenceCheck.status,
+        module: "Distributor Provisioning",
+        step: "durableTenantStore.persistence_status_resolves",
+        actual: persistenceCheck.actual,
+        suggestedFix: persistenceCheck.ok
+          ? undefined
+          : "Export resolvePersistenceStatus from @/tenant/durableTenantStore.js and import in distributorProvisioningEngine.js",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,

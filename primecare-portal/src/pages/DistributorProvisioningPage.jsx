@@ -49,6 +49,8 @@ const PERSISTENCE_VARIANT = {
   [PERSISTENCE_STATUS.DURABLE]: "success",
   [PERSISTENCE_STATUS.LOCAL_ONLY]: "warning",
   [PERSISTENCE_STATUS.SYNC_FAILED]: "danger",
+  [PERSISTENCE_STATUS.UNKNOWN]: "warning",
+  unknown: "warning",
 };
 
 const TENANT_ISOLATION_FOCUS_KEY = "primecare_tenant_mgmt_section";
@@ -633,8 +635,12 @@ export default function DistributorProvisioningPage({
                       label={d.status}
                     />
                     <StatusBadge
-                      variant={PERSISTENCE_VARIANT[d.persistenceStatus] || "neutral"}
-                      label={d.persistenceLabel || "Local only"}
+                      variant={
+                        PERSISTENCE_VARIANT[d.persistenceStatus] ||
+                        PERSISTENCE_VARIANT.unknown ||
+                        "warning"
+                      }
+                      label={d.persistenceLabel || "Unknown"}
                     />
                   </div>
                 </button>
@@ -664,8 +670,12 @@ export default function DistributorProvisioningPage({
                     <Bug className="h-3 w-3" /> Debug
                   </Button>
                   <StatusBadge
-                    variant={PERSISTENCE_VARIANT[model.persistenceStatus] || "neutral"}
-                    label={model.persistenceLabel || "Local only"}
+                    variant={
+                      PERSISTENCE_VARIANT[model.persistenceStatus] ||
+                      PERSISTENCE_VARIANT.unknown ||
+                      "warning"
+                    }
+                    label={model.persistenceLabel || "Unknown"}
                   />
                   <StatusBadge
                     variant={LIFECYCLE_VARIANT[model.lifecycle] || "neutral"}

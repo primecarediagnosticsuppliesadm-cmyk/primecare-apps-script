@@ -9,7 +9,10 @@ export const PERSISTENCE_STATUS = {
   DURABLE: "durable",
   LOCAL_ONLY: "local_only",
   SYNC_FAILED: "sync_failed",
+  UNKNOWN: "unknown",
 };
+
+const KNOWN_PERSISTENCE_STATUSES = new Set(Object.values(PERSISTENCE_STATUS));
 
 /** True when the shared Supabase client module exported a client instance. */
 export function isSupabaseClientAvailable() {
@@ -45,20 +48,103 @@ export function normalizeTenantName(name) {
     .trim();
 }
 
+/**
+ * Resolve persistence key for a tenant/distributor row (never throws).
+ */
 export function resolvePersistenceStatus(tenant) {
-  if (!tenant) return PERSISTENCE_STATUS.LOCAL_ONLY;
-  if (tenant.persistenceStatus) return tenant.persistenceStatus;
-  if (tenant.source === "database" || tenant.durable === true) return PERSISTENCE_STATUS.DURABLE;
-  if (tenant.syncFailed === true || str(tenant.lastSyncError)) {
-    return PERSISTENCE_STATUS.SYNC_FAILED;
+  try {
+    if (!tenant || typeof tenant !== "object") return PERSISTENCE_STATUS.UNKNOWN;
+    const explicit = tenant.persistenceStatus;
+    if (explicit && KNOWN_PERSISTENCE_STATUSES.has(explicit)) return explicit;
+    if (tenant.source === "database" || tenant.durable === true) {
+      return PERSISTENCE_STATUS.DURABLE;
+    }
+    if (tenant.syncFailed === true || str(tenant.lastSyncError)) {
+      return PERSISTENCE_STATUS.SYNC_FAILED;
+    }
+    if (tenant.source === "registry" || tenant.localOnly === true) {
+      return PERSISTENCE_STATUS.LOCAL_ONLY;
+    }
+    return PERSISTENCE_STATUS.LOCAL_ONLY;
+  } catch {
+    return PERSISTENCE_STATUS.UNKNOWN;
   }
-  return PERSISTENCE_STATUS.LOCAL_ONLY;
 }
 
 export function persistenceStatusLabel(status) {
   if (status === PERSISTENCE_STATUS.DURABLE) return "Durable";
   if (status === PERSISTENCE_STATUS.SYNC_FAILED) return "Sync failed";
-  return "Local only";
+  if (status === PERSISTENCE_STATUS.LOCAL_ONLY) return "Local only";
+  if (status === PERSISTENCE_STATUS.UNKNOWN) return "Unknown";
+  return "Unknown";
+}
+
+/**
+ * UI-safe persistence display (badges must not crash the page).
+ * @returns {{ key: string, label: string, tone: 'success'|'warn'|'danger' }}
+ */
+export function resolvePersistenceDisplay(tenant) {
+  try {
+    const key = resolvePersistenceStatus(tenant);
+    if (key === PERSISTENCE_STATUS.DURABLE) {
+      return { key, label: "Durable", tone: "success" };
+    }
+    if (key === PERSISTENCE_STATUS.SYNC_FAILED) {
+      return { key, label: "Sync failed", tone: "danger" };
+    }
+    if (key === PERSISTENCE_STATUS.LOCAL_ONLY) {
+      return { key, label: "Local only", tone: "warn" };
+    }
+    if (key === PERSISTENCE_STATUS.UNKNOWN) {
+      return { key, label: "Unknown", tone: "warn" };
+    }
+    return { key: PERSISTENCE_STATUS.UNKNOWN, label: "Unknown", tone: "warn" };
+  } catch {
+    return { key: "unknown", label: "Unknown", tone: "warn" };
+  }
+}
+
+/**
+ * Predator step: durableTenantStore.persistence_status_resolves
+ */
+export function validatePersistenceStatusResolvesForPredator() {
+  try {
+    if (typeof resolvePersistenceStatus !== "function") {
+      return {
+        ok: false,
+        status: "FAIL",
+        actual: "resolvePersistenceStatus is not defined",
+      };
+    }
+    const samples = [
+      { source: "database", durable: true },
+      { source: "registry", localOnly: true },
+      { syncFailed: true, lastSyncError: "test" },
+      { persistenceStatus: PERSISTENCE_STATUS.UNKNOWN },
+      null,
+    ];
+    for (const sample of samples) {
+      const display = resolvePersistenceDisplay(sample);
+      if (!display?.key || !display?.label || !display?.tone) {
+        return {
+          ok: false,
+          status: "FAIL",
+          actual: `invalid display for ${JSON.stringify(sample)}`,
+        };
+      }
+    }
+    return {
+      ok: true,
+      status: "PASS",
+      actual: "resolvePersistenceStatus/export ok",
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: "FAIL",
+      actual: err?.message || String(err),
+    };
+  }
 }
 
 /**
