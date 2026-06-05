@@ -7,6 +7,7 @@ import {
   resolveProvisioningModel,
   activateDistributorProvisioning,
   acknowledgeProvisioningTask,
+  enableStandardProductCatalog,
   refreshProvisioningBundleState,
   updateDistributorAdminDetails,
   syncLocalDistributorsToSupabase,
@@ -531,10 +532,30 @@ export default function DistributorProvisioningPage({
     setActivePage("labs");
   }
 
+  async function handleUseStandardCatalog() {
+    if (!model || !bundle) return;
+    const fallbackTenant = bundle.tenants.find((t) => t.id === model.distributorId);
+    const result = await enableStandardProductCatalog(model.distributorId, { fallbackTenant });
+    if (!result?.ok) {
+      setMsg(result?.error || "Failed to enable standard catalog");
+      return;
+    }
+    await applyLocalBundleUpdate(model.distributorId);
+    setMsg(
+      result.durablePatchOk === false
+        ? "Standard catalog saved locally — Supabase metadata sync failed"
+        : "PrimeCare standard catalog enabled — readiness updated"
+    );
+  }
+
   function handleOpenAction(action) {
     if (!action) return;
     if (action.type === "edit_admin") {
       setShowEditAdmin(true);
+      return;
+    }
+    if (action.type === "use_standard_catalog") {
+      void handleUseStandardCatalog();
       return;
     }
     if (action.page === "labs" && setActivePage) {
@@ -589,8 +610,13 @@ export default function DistributorProvisioningPage({
   }
 
   async function handleAckTask(taskId) {
-    if (!model) return;
-    await acknowledgeProvisioningTask(model.distributorId, taskId);
+    if (!model || !bundle) return;
+    if (taskId === "load_catalog") {
+      await handleUseStandardCatalog();
+      return;
+    }
+    const fallbackTenant = bundle.tenants.find((t) => t.id === model.distributorId);
+    await acknowledgeProvisioningTask(model.distributorId, taskId, { fallbackTenant });
     await applyLocalBundleUpdate(model.distributorId);
     setMsg("Setup step recorded — readiness updated");
   }
@@ -836,6 +862,12 @@ export default function DistributorProvisioningPage({
                 <p className="mt-2 text-[10px] text-slate-500">
                   Company → Admin → Product Catalog → Security → Launch
                 </p>
+                {model.checks.find((c) => c.id === "catalog_configured")?.status !== "PASS" ? (
+                  <p className="mt-2 text-[10px] text-slate-600">
+                    Product catalog: enable PrimeCare standard catalog on this page — inventory
+                    stays HQ-only until distributor pricing is configured later.
+                  </p>
+                ) : null}
               </div>
             ) : null}
 
@@ -843,6 +875,7 @@ export default function DistributorProvisioningPage({
               <ul className="space-y-1 rounded-xl border bg-white p-3 text-xs">
                 {model.checks.map((c) => {
                   const action = PROVISIONING_CHECK_ACTIONS[c.id];
+                  const inlineAction = action?.type === "use_standard_catalog" || action?.type === "edit_admin";
                   return (
                     <li key={c.id} className="flex flex-wrap items-center gap-2 py-0.5">
                       <CheckIcon status={c.status} />
@@ -854,14 +887,23 @@ export default function DistributorProvisioningPage({
                           variant="outline"
                           size="sm"
                           className="h-7 text-[10px]"
-                          disabled={action.comingSoon}
+                          disabled={
+                            action.comingSoon ||
+                            (action.type === "use_standard_catalog" && c.status === "PASS")
+                          }
                           onClick={() => handleOpenAction(action)}
                         >
                           {action.label}
-                          {!action.comingSoon ? (
+                          {!action.comingSoon && !inlineAction ? (
                             <ArrowRight className="ml-0.5 h-3 w-3" />
                           ) : null}
                         </Button>
+                      ) : null}
+                      {c.id === "catalog_configured" && c.status !== "PASS" ? (
+                        <p className="w-full text-[10px] text-slate-500">
+                          PrimeCare standard catalog will be available to this distributor.
+                          Distributor-specific pricing/catalog can be configured later.
+                        </p>
                       ) : null}
                     </li>
                   );
@@ -887,11 +929,17 @@ export default function DistributorProvisioningPage({
                           variant="outline"
                           size="sm"
                           className="h-7 text-[10px]"
-                          disabled={t.comingSoon || t.action.comingSoon}
+                          disabled={
+                            t.comingSoon ||
+                            t.action.comingSoon ||
+                            (t.action.type === "use_standard_catalog" && t.done)
+                          }
                           onClick={() => handleOpenAction(t.action)}
                         >
                           {t.action.label}
-                          {!t.comingSoon && !t.action.comingSoon ? (
+                          {!t.comingSoon &&
+                          !t.action.comingSoon &&
+                          t.action.type !== "use_standard_catalog" ? (
                             <ArrowRight className="ml-0.5 h-3 w-3" />
                           ) : null}
                         </Button>

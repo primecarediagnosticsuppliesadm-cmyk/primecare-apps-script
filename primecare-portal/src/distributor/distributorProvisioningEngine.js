@@ -160,13 +160,14 @@ export function buildProvisioningChecks(ctx) {
     },
     {
       id: "catalog_configured",
-      label: "Product catalog",
+      label: "Product catalog ready",
       required: true,
       pass:
         config.productCatalogReady === true ||
-        num(metrics.products) > 0 ||
-        num(metrics.inventory) > 0,
-      detail: "Inventory/products loaded for tenant",
+        (isLive && (num(metrics.products) > 0 || num(metrics.inventory) > 0)),
+      detail: config.productCatalogReady === true
+        ? "PrimeCare standard catalog enabled for this distributor"
+        : "Enable PrimeCare standard catalog for this distributor",
     },
     {
       id: "at_least_one_lab",
@@ -303,7 +304,10 @@ export function buildActivationDiagnosis(checks) {
 export const PROVISIONING_CHECK_ACTIONS = {
   admin_user: { type: "edit_admin", label: "Edit admin" },
   users_roles: { comingSoon: true, label: "Coming soon" },
-  catalog_configured: { page: "inventory", label: "Open catalog" },
+  catalog_configured: {
+    type: "use_standard_catalog",
+    label: "Use PrimeCare standard catalog",
+  },
   at_least_one_lab: { page: "labs", label: "Open labs" },
   isolation_verified: {
     page: "tenantManagement",
@@ -318,7 +322,10 @@ export const PROVISIONING_CHECK_ACTIONS = {
 export const PROVISIONING_TASK_ACTIONS = {
   create_admin: { type: "edit_admin", label: "Edit admin" },
   users_roles: { comingSoon: true, label: "Coming soon" },
-  load_catalog: { page: "inventory", label: "Open catalog" },
+  load_catalog: {
+    type: "use_standard_catalog",
+    label: "Use PrimeCare standard catalog",
+  },
   create_lab: { page: "labs", label: "Open labs" },
   assign_agent: { page: "visits", label: "Open agents" },
   verify_isolation: {
@@ -367,7 +374,7 @@ export function buildProvisioningTasks(checks) {
   const taskDefs = [
     { id: "create_admin", label: "Create admin", checkId: "admin_user" },
     { id: "users_roles", label: "Users & Roles", checkId: "users_roles", comingSoon: true },
-    { id: "load_catalog", label: "Set up product catalog", checkId: "catalog_configured" },
+    { id: "load_catalog", label: "Use PrimeCare standard catalog", checkId: "catalog_configured" },
     { id: "create_lab", label: "Add first lab", checkId: "at_least_one_lab" },
     { id: "assign_agent", label: "Assign first agent", checkId: "agent_assigned" },
     { id: "verify_isolation", label: "Run security check", checkId: "isolation_verified" },
@@ -384,9 +391,7 @@ export function buildProvisioningTasks(checks) {
       status: t.comingSoon ? "WARN" : check?.status || "WARN",
       action: t.comingSoon ? PROVISIONING_TASK_ACTIONS.users_roles : action,
       comingSoon: Boolean(t.comingSoon),
-      canMarkProvisioned: ["load_catalog", "assign_agent", "verify_isolation"].includes(
-        t.id
-      ),
+      canMarkProvisioned: ["assign_agent", "verify_isolation"].includes(t.id),
     };
   });
 }

@@ -548,7 +548,99 @@ export async function updateDistributorAdminDetails(tenantId, admin, options = {
   };
 }
 
-export async function acknowledgeProvisioningTask(tenantId, taskId) {
+/**
+ * Enable PrimeCare standard catalog for a distributor (local + durable metadata).
+ */
+export async function enableStandardProductCatalog(tenantId, options = {}) {
+  const id = str(tenantId);
+  if (!id) {
+    return { ok: false, error: "Missing tenant id" };
+  }
+
+  let row = getRegistryTenant(id);
+  const fallback = options.fallbackTenant;
+  if (!row && fallback) {
+    row = {
+      ...fallback,
+      config: { ...(fallback.config || {}) },
+      provisioning: { ...(fallback.provisioning || {}) },
+    };
+  }
+  if (!row) {
+    row = {
+      id,
+      name: fallback?.name || id,
+      status: fallback?.status || "PENDING",
+      tenantCode: fallback?.tenantCode,
+      config: {},
+      provisioning: {},
+      source: fallback?.source || "registry",
+      durable: Boolean(fallback?.durable || fallback?.source === "database"),
+      persistenceStatus: fallback?.persistenceStatus,
+    };
+  }
+
+  const now = new Date().toISOString();
+  const config = {
+    ...(row.config || {}),
+    productCatalogReady: true,
+    catalogConfiguredAt: now,
+    standardCatalogEnabled: true,
+  };
+
+  upsertRegistryTenant({
+    ...row,
+    config,
+    updatedAt: now,
+  });
+  markProvisioningMilestone(id, "catalog_configured");
+
+  const fresh = getRegistryTenant(id) || { ...row, config };
+  const isDurable =
+    fresh.durable === true ||
+    fresh.source === "database" ||
+    fresh.persistenceStatus === PERSISTENCE_STATUS.DURABLE ||
+    fallback?.persistenceStatus === PERSISTENCE_STATUS.DURABLE;
+
+  let durablePatchOk = !isDurable;
+  if (isDurable) {
+    const patchResult = await patchDurableTenantMetadata(id, {
+      config: fresh.config || config,
+      provisioning: fresh.provisioning || row.provisioning || {},
+    });
+    durablePatchOk = patchResult.ok;
+    if (!patchResult.ok) {
+      console.warn("[provisioning] catalog durable patch failed", patchResult.error);
+      upsertRegistryTenant({
+        ...fresh,
+        lastSyncError: patchResult.error,
+        syncFailed: true,
+      });
+    } else {
+      upsertRegistryTenant({
+        ...fresh,
+        syncFailed: false,
+        lastSyncError: null,
+        durable: true,
+        source: "database",
+        persistenceStatus: PERSISTENCE_STATUS.DURABLE,
+      });
+    }
+  }
+
+  const saved = getRegistryTenant(id);
+  return {
+    ok: Boolean(saved?.config?.productCatalogReady),
+    row: saved,
+    durablePatchOk,
+  };
+}
+
+export async function acknowledgeProvisioningTask(tenantId, taskId, options = {}) {
+  if (taskId === "load_catalog") {
+    return enableStandardProductCatalog(tenantId, options);
+  }
+
   const row = getRegistryTenant(tenantId);
   if (!row) return null;
   const now = new Date().toISOString();
@@ -559,11 +651,6 @@ export async function acknowledgeProvisioningTask(tenantId, taskId) {
     config.rolesConfigured = true;
     config.rolesConfiguredAt = now;
     markProvisioningMilestone(tenantId, "admin_added");
-  }
-  if (taskId === "load_catalog") {
-    config.productCatalogReady = true;
-    config.catalogConfiguredAt = now;
-    markProvisioningMilestone(tenantId, "catalog_configured");
   }
   if (taskId === "assign_agent") {
     config.agentProvisioned = true;
