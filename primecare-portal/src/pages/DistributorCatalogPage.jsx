@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusBadge, PageSkeleton } from "@/components/ux";
@@ -10,6 +10,13 @@ import {
   updateDistributorCatalogItem,
 } from "@/catalog/distributorCatalogData.js";
 import { RefreshCw, Plus } from "lucide-react";
+
+const DEBUG_CATALOG = import.meta.env.DEV;
+
+function logCatalogTiming(label, detail = {}) {
+  if (!DEBUG_CATALOG) return;
+  console.debug(`[DistributorCatalog:timing] ${label}`, { at: performance.now().toFixed(1), ...detail });
+}
 
 export default function DistributorCatalogPage({
   currentUser = null,
@@ -26,32 +33,56 @@ export default function DistributorCatalogPage({
   const [bundle, setBundle] = useState(null);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
-
-  const rowOptions = { distributorRow: distributorRow || bundle?.distributorRow };
-
-  const load = useCallback(async () => {
-    if (!tenantId) {
-      setBundle(null);
-      setLoading(false);
-      return;
-    }
-    try {
-      setLoading(true);
-      const data = await loadDistributorCatalogBundle(tenantId, homeTenantId, {
-        distributorRow,
-      });
-      setBundle(data);
-    } catch (err) {
-      console.error(err);
-      setBundle(null);
-      setMsg(err?.message || "Failed to load catalog");
-    } finally {
-      setLoading(false);
-    }
-  }, [tenantId, homeTenantId, distributorRow]);
+  const renderCountRef = useRef(0);
+  const distributorRowRef = useRef(distributorRow);
+  const onCatalogChangedRef = useRef(onCatalogChanged);
+  distributorRowRef.current = distributorRow;
+  onCatalogChangedRef.current = onCatalogChanged;
+  renderCountRef.current += 1;
 
   useEffect(() => {
-    void load();
+    logCatalogTiming("render", { count: renderCountRef.current, tenantId });
+  });
+
+  const load = useCallback(
+    async ({ showLoading = true, syncParent = false } = {}) => {
+      if (!tenantId) {
+        setBundle(null);
+        setLoading(false);
+        return;
+      }
+      const started = performance.now();
+      logCatalogTiming("load:start", { tenantId, showLoading });
+      try {
+        if (showLoading) setLoading(true);
+        const data = await loadDistributorCatalogBundle(tenantId, homeTenantId, {
+          distributorRow: distributorRowRef.current,
+        });
+        setBundle(data);
+        if (syncParent && onCatalogChangedRef.current) {
+          await onCatalogChangedRef.current({
+            config: data.registryRow?.config || data.distributorRow?.config,
+            items: data.assignedItems,
+            assignedCount: data.assignedCount,
+          });
+        }
+        logCatalogTiming("load:done", {
+          tenantId,
+          ms: (performance.now() - started).toFixed(1),
+        });
+      } catch (err) {
+        console.error(err);
+        setBundle(null);
+        setMsg(err?.message || "Failed to load catalog");
+      } finally {
+        if (showLoading) setLoading(false);
+      }
+    },
+    [tenantId, homeTenantId]
+  );
+
+  useEffect(() => {
+    void load({ showLoading: true, syncParent: true });
   }, [load]);
 
   async function handleAssign(productId = null) {
@@ -61,7 +92,7 @@ export default function DistributorCatalogPage({
       const result = await assignMasterProductsToDistributor(
         tenantId,
         productId ? [productId] : [],
-        rowOptions
+        { distributorRow: distributorRowRef.current }
       );
       if (!result.ok) {
         setMsg(
@@ -82,7 +113,15 @@ export default function DistributorCatalogPage({
           ? "Product assigned from HQ master catalog"
           : `Assigned ${result.assignedCount} product(s) from HQ master catalog`) + persistedNote
       );
-      await load();
+      setBundle((prev) => ({
+        ...(prev || {}),
+        assignedItems: result.items || prev?.assignedItems || [],
+        assignedCount: result.assignedCount ?? prev?.assignedCount ?? 0,
+        catalogAssigned: true,
+        availableItems: (prev?.master?.items || prev?.availableItems || []).filter(
+          (p) => !(result.items || []).some((i) => i.productId === p.productId)
+        ),
+      }));
       await onCatalogChanged?.(result);
     } catch (err) {
       setMsg(err?.message || "Assignment failed");
@@ -93,30 +132,49 @@ export default function DistributorCatalogPage({
 
   async function handleUnassign(productId) {
     setBusy(true);
-    const result = await unassignDistributorCatalogProduct(tenantId, productId, rowOptions);
+    const result = await unassignDistributorCatalogProduct(tenantId, productId, {
+      distributorRow: distributorRowRef.current,
+    });
     setMsg(
       result.ok
         ? `Product removed from distributor catalog${result.supabasePersisted ? " · saved to Supabase" : ""}`
         : result.error || "Failed to remove product"
     );
-    await load();
-    if (result.ok) await onCatalogChanged?.(result);
+    if (result.ok) {
+      setBundle((prev) => {
+        const assignedItems = (prev?.assignedItems || []).filter(
+          (i) => i.productId !== productId
+        );
+        return {
+          ...(prev || {}),
+          assignedItems,
+          assignedCount: assignedItems.length,
+          catalogAssigned: assignedItems.length > 0,
+        };
+      });
+      await onCatalogChanged?.(result);
+    }
     setBusy(false);
   }
 
   async function handlePriceSave(productId, sellingPrice, currentStock) {
     setBusy(true);
-    await updateDistributorCatalogItem(
+    const result = await updateDistributorCatalogItem(
       tenantId,
       productId,
       {
         sellingPrice: Number(sellingPrice),
         currentStock: Number(currentStock),
       },
-      rowOptions
+      { distributorRow: distributorRowRef.current }
     );
-    setMsg("Pricing and inventory updated");
-    await load();
+    if (result.ok) {
+      setBundle((prev) => ({
+        ...(prev || {}),
+        assignedItems: result.items || prev?.assignedItems || [],
+      }));
+    }
+    setMsg(result.ok ? "Pricing and inventory updated" : result.error || "Update failed");
     setBusy(false);
   }
 
@@ -128,7 +186,7 @@ export default function DistributorCatalogPage({
     );
   }
 
-  if (loading) return <PageSkeleton rows={6} />;
+  if (loading && !bundle) return <PageSkeleton rows={6} />;
 
   const assigned = bundle?.assignedItems || [];
   const available = bundle?.availableItems || [];
@@ -145,7 +203,13 @@ export default function DistributorCatalogPage({
           </p>
         </div>
         <div className="flex gap-2">
-          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void load()}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => void load({ showLoading: false })}
+          >
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
           <Button type="button" size="sm" disabled={busy} onClick={() => void handleAssign()}>

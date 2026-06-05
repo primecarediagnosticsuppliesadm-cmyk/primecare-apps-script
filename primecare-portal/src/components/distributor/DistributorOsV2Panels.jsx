@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, KpiCard, KpiCardGrid } from "@/components/ux";
 import {
@@ -264,7 +264,50 @@ export function DistributorStageProgressBar({
   snapshot = null,
   onNavigateTab,
 }) {
-  const model = buildDistributorStageModel({ distributorRow, catalogBundle, snapshot });
+  const renderCountRef = useRef(0);
+  renderCountRef.current += 1;
+
+  const stageKey = useMemo(
+    () =>
+      [
+        distributorRow?.id,
+        distributorRow?.lifecycleStatus,
+        distributorRow?.durable,
+        distributorRow?.config?.catalogAssigned,
+        distributorRow?.config?.adminEmail,
+        distributorRow?.config?.isolationAcknowledged,
+        catalogBundle?.assignedCount,
+        catalogBundle?.catalogAssigned,
+        snapshot?.labs?.length,
+        snapshot?.contracts?.length,
+      ].join("|"),
+    [
+      distributorRow?.id,
+      distributorRow?.lifecycleStatus,
+      distributorRow?.durable,
+      distributorRow?.config?.catalogAssigned,
+      distributorRow?.config?.adminEmail,
+      distributorRow?.config?.isolationAcknowledged,
+      catalogBundle?.assignedCount,
+      catalogBundle?.catalogAssigned,
+      snapshot?.labs?.length,
+      snapshot?.contracts?.length,
+    ]
+  );
+
+  const model = useMemo(
+    () => buildDistributorStageModel({ distributorRow, catalogBundle, snapshot }),
+    [stageKey]
+  );
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    console.debug("[DistributorStage:timing] render", {
+      count: renderCountRef.current,
+      stageKey,
+      currentStage: model.currentStageId,
+    });
+  });
 
   return (
     <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">

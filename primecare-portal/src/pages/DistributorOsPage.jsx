@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, PageSkeleton } from "@/components/ux";
 import {
@@ -33,7 +33,7 @@ import CommissionEnginePage from "@/pages/CommissionEnginePage.jsx";
 import DistributorProvisioningPage from "@/pages/DistributorProvisioningPage.jsx";
 import DistributorCatalogPage from "@/pages/DistributorCatalogPage.jsx";
 import { loadDistributorCatalogBundle } from "@/catalog/distributorCatalogData.js";
-import { isCatalogAssigned } from "@/catalog/distributorCatalogEngine.js";
+import { catalogAssignedCount, isCatalogAssigned } from "@/catalog/distributorCatalogEngine.js";
 import DistributorCreateWizard from "@/components/distributor/DistributorCreateWizard.jsx";
 import {
   BillingPanel,
@@ -48,6 +48,12 @@ import { Building2, Plus, RefreshCw, AlertTriangle, Users } from "lucide-react";
 import { ROLES } from "@/config/roles";
 
 const HEALTH_VARIANT = { Healthy: "success", Watch: "warning", Risk: "danger" };
+const DEBUG_DISTRIBUTOR_OS = import.meta.env.DEV;
+
+function logDistributorOsTiming(label, detail = {}) {
+  if (!DEBUG_DISTRIBUTOR_OS) return;
+  console.debug(`[DistributorOs:timing] ${label}`, { at: performance.now().toFixed(1), ...detail });
+}
 
 function AgentsPanel({ agents = [], tenantName = "" }) {
   if (!agents.length) {
@@ -142,6 +148,8 @@ export default function DistributorOsPage({
 
   const effectiveHomeId = homeTenantId || currentUser?.tenantId || "";
   const registry = portfolio?.distributors || [];
+  const renderCountRef = useRef(0);
+  renderCountRef.current += 1;
 
   const distributors = useMemo(() => {
     if (currentUser?.role === ROLES.ADMIN && currentUser?.tenantId) {
@@ -152,10 +160,24 @@ export default function DistributorOsPage({
   }, [registry, effectiveHomeId, currentUser]);
 
   const selectedId = osContext?.tenantId || "";
-  const selectedRow = distributors.find((d) => d.id === selectedId) || null;
-  const enrichedRow = selectedRow ? enrichRegistryRowLifecycle(selectedRow) : null;
+  const selectedRow = useMemo(
+    () => distributors.find((d) => d.id === selectedId) || null,
+    [distributors, selectedId]
+  );
+  const enrichedRow = useMemo(
+    () => (selectedRow ? enrichRegistryRowLifecycle(selectedRow) : null),
+    [selectedRow]
+  );
   const selectedName =
     osContext?.tenantName || selectedRow?.name || selectedRow?.config?.companyName || "";
+
+  useEffect(() => {
+    logDistributorOsTiming("render", {
+      count: renderCountRef.current,
+      selectedId,
+      tab,
+    });
+  });
 
   const scope = useMemo(() => {
     if (!isValidDistributorOsScope({ tenantId: selectedId }, effectiveHomeId)) return null;
@@ -194,30 +216,61 @@ export default function DistributorOsPage({
   }, [currentUser]);
 
   const loadSnapshot = useCallback(async () => {
-    if (!scope?.tenantId) {
+    if (!selectedId) {
       setSnapshot(null);
-      setCatalogBundle(null);
       return;
     }
+    const started = performance.now();
+    logDistributorOsTiming("loadSnapshot:start", { selectedId });
     try {
-      const distributorRow = enrichedRow || selectedRow;
-      const [data, catalog] = await Promise.all([
-        loadDistributorOsSnapshot(currentUser, scope.tenantId),
-        loadDistributorCatalogBundle(scope.tenantId, effectiveHomeId, { distributorRow }),
-      ]);
+      const data = await loadDistributorOsSnapshot(currentUser, selectedId);
       setSnapshot(data);
-      setCatalogBundle(catalog);
+      logDistributorOsTiming("loadSnapshot:done", {
+        selectedId,
+        ms: (performance.now() - started).toFixed(1),
+      });
     } catch (err) {
       console.warn("[DistributorOs] snapshot", err);
       setSnapshot(null);
+    }
+  }, [currentUser, selectedId]);
+
+  const loadCatalogSummary = useCallback(async () => {
+    if (!selectedId) {
+      setCatalogBundle(null);
+      return;
+    }
+    const started = performance.now();
+    logDistributorOsTiming("loadCatalogSummary:start", { selectedId });
+    try {
+      const catalog = await loadDistributorCatalogBundle(selectedId, effectiveHomeId);
+      setCatalogBundle(catalog);
+      logDistributorOsTiming("loadCatalogSummary:done", {
+        selectedId,
+        ms: (performance.now() - started).toFixed(1),
+      });
+    } catch (err) {
+      console.warn("[DistributorOs] catalog summary", err);
       setCatalogBundle(null);
     }
-  }, [currentUser, scope?.tenantId, effectiveHomeId, enrichedRow, selectedRow]);
+  }, [selectedId, effectiveHomeId]);
 
-  const handleCatalogChanged = useCallback(async () => {
-    await loadSnapshot();
-    await loadPortfolio();
-  }, [loadSnapshot, loadPortfolio]);
+  const handleCatalogChanged = useCallback(
+    async (result) => {
+      logDistributorOsTiming("catalogChanged", { selectedId, assignedCount: result?.assignedCount });
+      if (result?.config || result?.items) {
+        setCatalogBundle((prev) => ({
+          ...(prev || {}),
+          catalogAssigned: isCatalogAssigned(result.config || {}),
+          assignedCount: result.assignedCount ?? catalogAssignedCount(result.config || {}),
+          assignedItems: result.items || prev?.assignedItems || [],
+        }));
+        return;
+      }
+      await loadCatalogSummary();
+    },
+    [selectedId, loadCatalogSummary]
+  );
 
   useEffect(() => {
     const presetTab = consumeDistributorOsTabPreset();
@@ -233,8 +286,22 @@ export default function DistributorOsPage({
   }, [loadSnapshot]);
 
   useEffect(() => {
+    if (tab === "catalog") return;
+    void loadCatalogSummary();
+  }, [loadCatalogSummary, tab]);
+
+  useEffect(() => {
     if (!selectedId || !effectiveHomeId) return;
     if (selectedId === effectiveHomeId) return;
+    const ctx = readDistributorOsContext();
+    if (
+      ctx?.tenantId === selectedId &&
+      ctx?.homeTenantId === effectiveHomeId &&
+      ctx?.tab === tab &&
+      ctx?.tenantName === selectedName
+    ) {
+      return;
+    }
     enterDistributorOs({
       tenantId: selectedId,
       tenantName: selectedName,
@@ -341,6 +408,7 @@ export default function DistributorOsPage({
       setLifecycleMsg(`${action} applied — status is now ${result.lifecycleStatus}`);
       await loadPortfolio();
       await loadSnapshot();
+      await loadCatalogSummary();
     } catch (err) {
       setLifecycleMsg(err?.message || "Lifecycle action failed");
     } finally {
@@ -382,6 +450,7 @@ export default function DistributorOsPage({
             onClick={() => {
               void loadPortfolio();
               void loadSnapshot();
+              void loadCatalogSummary();
             }}
             aria-label="Refresh"
           >
