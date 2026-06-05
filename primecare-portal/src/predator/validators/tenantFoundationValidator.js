@@ -6,8 +6,10 @@ import { buildTenantReadiness } from "@/tenant/tenantFoundationEngine.js";
 import { isolationChecksPass } from "@/tenant/tenantFoundationIsolation.js";
 import { polishPredatorEntries } from "@/predator/predatorEntryPolish.js";
 import { ROLES } from "@/config/roles.js";
-import { PERSISTENCE_STATUS } from "@/tenant/durableTenantStore.js";
-import { supabase } from "@/api/supabaseClient.js";
+import {
+  PERSISTENCE_STATUS,
+  validateSupabaseClientForPredator,
+} from "@/tenant/durableTenantStore.js";
 
 const VALID_HEALTH = new Set(["Healthy", "Watch", "Risk"]);
 const VALID_STATUS = new Set(["ACTIVE", "INACTIVE", "PENDING"]);
@@ -36,6 +38,22 @@ export async function validateTenantFoundationModule({
 }) {
   return predatorTrace("Tenant Foundation", "validation.full", async () => {
     const entries = [];
+
+    const supabaseClientCheck = validateSupabaseClientForPredator();
+    entries.push(
+      createPredatorEntry({
+        status: supabaseClientCheck.status,
+        module: "Tenant Foundation",
+        step: "durableTenantStore.supabase_client_available",
+        actual: supabaseClientCheck.actual,
+        suggestedFix: supabaseClientCheck.ok
+          ? undefined
+          : "Import supabase from @/api/supabaseClient.js in tenantFoundationData.js",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
 
     if (ctx.role !== ROLES.EXECUTIVE) {
       entries.push(
@@ -259,7 +277,7 @@ export async function validateTenantFoundationModule({
         status: "PASS",
         module: "Tenant Foundation",
         step: "registry.local_fallback",
-        actual: supabase ? "fallback available" : "offline local registry",
+        actual: supabaseClientCheck.ok ? "fallback available" : "offline local registry",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,

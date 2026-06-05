@@ -11,6 +11,24 @@ export const PERSISTENCE_STATUS = {
   SYNC_FAILED: "sync_failed",
 };
 
+/** True when the shared Supabase client module exported a client instance. */
+export function isSupabaseClientAvailable() {
+  return Boolean(supabase);
+}
+
+/**
+ * Predator step: durableTenantStore.supabase_client_available
+ * @returns {{ ok: boolean, status: 'PASS'|'FAIL', actual: string }}
+ */
+export function validateSupabaseClientForPredator() {
+  const ok = isSupabaseClientAvailable();
+  return {
+    ok,
+    status: ok ? "PASS" : "FAIL",
+    actual: ok ? "supabase client defined" : "supabase is not defined",
+  };
+}
+
 const EXTENDED_TENANT_SELECT =
   "id, tenant_code, tenant_name, status, created_at, updated_at, legal_name, country, state, timezone, metadata";
 const MINIMAL_TENANT_SELECT = "id, tenant_code, tenant_name, status, created_at";

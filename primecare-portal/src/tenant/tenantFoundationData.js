@@ -1,3 +1,4 @@
+import { supabase } from "@/api/supabaseClient.js";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import {
   readTenantRegistry,
@@ -58,17 +59,10 @@ export function metricsFromOpsPayload(payload) {
   };
 }
 
+/** @returns {Promise<object[]>} */
 export async function fetchDatabaseTenants() {
-  if (!supabase) return [];
-  const { data, error } = await supabase
-    .from("tenants")
-    .select("id, tenant_code, tenant_name, status, created_at")
-    .order("created_at", { ascending: true });
-  if (error) {
-    console.warn("[tenantFoundation] tenants read failed", error.message);
-    return [];
-  }
-  return Array.isArray(data) ? data : [];
+  const { rows } = await fetchDurableDatabaseTenants();
+  return rows;
 }
 
 export async function fetchAdminProfilesForTenant(tenantId) {

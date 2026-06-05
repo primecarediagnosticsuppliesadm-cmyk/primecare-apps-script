@@ -13,8 +13,10 @@ import {
 import { getRegistryTenant } from "@/tenant/tenantFoundationStore.js";
 import { polishPredatorEntries } from "@/predator/predatorEntryPolish.js";
 import { ROLES } from "@/config/roles.js";
-import { PERSISTENCE_STATUS } from "@/tenant/durableTenantStore.js";
-import { supabase } from "@/api/supabaseClient.js";
+import {
+  PERSISTENCE_STATUS,
+  validateSupabaseClientForPredator,
+} from "@/tenant/durableTenantStore.js";
 
 function finish(entries) {
   const polished = polishPredatorEntries(entries);
@@ -37,6 +39,21 @@ export async function validateDistributorProvisioningModule({
 }) {
   return predatorTrace("Distributor Provisioning", "validation.full", async () => {
     const entries = [];
+    const supabaseClientCheck = validateSupabaseClientForPredator();
+    entries.push(
+      createPredatorEntry({
+        status: supabaseClientCheck.status,
+        module: "Distributor Provisioning",
+        step: "durableTenantStore.supabase_client_available",
+        actual: supabaseClientCheck.actual,
+        suggestedFix: supabaseClientCheck.ok
+          ? undefined
+          : "Import supabase from @/api/supabaseClient.js in tenantFoundationData.js",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
 
     if (ctx.role !== ROLES.EXECUTIVE) {
       entries.push(
@@ -223,10 +240,10 @@ export async function validateDistributorProvisioningModule({
 
     entries.push(
       createPredatorEntry({
-        status: !supabase || bundle.tenants?.length >= 0 ? "PASS" : "FAIL",
+        status: supabaseClientCheck.ok || bundle.tenants?.length >= 0 ? "PASS" : "FAIL",
         module: "Distributor Provisioning",
         step: "registry.local_fallback",
-        actual: supabase ? "supabase configured" : "local-only mode",
+        actual: supabaseClientCheck.ok ? "supabase configured" : "local-only mode",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,
