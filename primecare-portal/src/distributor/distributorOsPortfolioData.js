@@ -12,6 +12,8 @@ import {
 } from "@/labContract/labContractStore.js";
 import { countContractsForDistributor } from "@/api/labContractsSupabaseApi.js";
 import { loadBillingLedgerTotalsForDistributors } from "@/api/distributorBillingSupabaseApi.js";
+import { loadCommissionPayoutCountsForDistributors } from "@/api/commissionSupabaseApi.js";
+import { ensureCommissionMigrated } from "@/commission/commissionStore.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -55,11 +57,13 @@ export async function loadDistributorOsPortfolio(currentUser, options = {}) {
   const agentCounts = {};
 
   await ensureLabContractsMigrated();
+  await ensureCommissionMigrated({ homeTenantId });
 
   const distributorIds = distributors.map((d) => d.id);
 
-  const [ledgerRes] = await Promise.all([
+  const [ledgerRes, commissionPayoutRes] = await Promise.all([
     loadBillingLedgerTotalsForDistributors(distributorIds),
+    loadCommissionPayoutCountsForDistributors(distributorIds),
     Promise.all(
       distributors.map(async (d) => {
         const countRes = await countContractsForDistributor(d.id);
@@ -90,6 +94,7 @@ export async function loadDistributorOsPortfolio(currentUser, options = {}) {
     billingLedgerTotals: ledgerRes.byDistributor || {},
     billingLedgerLoadOk: ledgerRes.ok,
     billingLedgerLoadError: ledgerRes.error || null,
+    commissionPayoutCounts: commissionPayoutRes.byDistributor || {},
     homeTenantId,
   });
 

@@ -3,6 +3,9 @@ import { predatorTrace } from "@/predator/predatorTiming.js";
 import { resolvePredatorOpsPayload } from "@/predator/predatorOpsPayload.js";
 import { buildFounderStrategyModel } from "@/founder/founderStrategyEngine.js";
 import { loadVisibleLabContracts } from "@/labContract/labContractStore.js";
+import { loadFounderCommissionMetrics } from "@/commission/commissionData.js";
+import { filterDistributorRegistry } from "@/distributor/distributorOsEngine.js";
+import { loadDistributorWorkspaceBundle } from "@/distributor/distributorWorkspaceData.js";
 import { YEAR1_TARGETS } from "@/founder/founderStrategyTargets.js";
 import { polishPredatorEntries } from "@/predator/predatorEntryPolish.js";
 import { ROLES } from "@/config/roles.js";
@@ -62,8 +65,21 @@ export async function validateFounderStrategyModule({
         currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId },
         opsPayload
       );
-      const contracts = await loadVisibleLabContracts();
-      model = buildFounderStrategyModel(payload, ctx.tenantId, { contracts });
+      const [contracts, bundle] = await Promise.all([
+        loadVisibleLabContracts(),
+        loadDistributorWorkspaceBundle(
+          currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId }
+        ).catch(() => ({ registry: [] })),
+      ]);
+      const distributors = filterDistributorRegistry(bundle.registry || [], ctx.tenantId);
+      const commissionRes = await loadFounderCommissionMetrics(
+        distributors.map((d) => d.id).filter(Boolean),
+        { homeTenantId: ctx.tenantId }
+      );
+      model = buildFounderStrategyModel(payload, ctx.tenantId, {
+        contracts,
+        commissionMetrics: commissionRes.ok ? commissionRes.portfolio : null,
+      });
     } catch (err) {
       entries.push(
         createPredatorEntry({
@@ -193,6 +209,31 @@ export async function validateFounderStrategyModule({
         })
       );
     }
+
+    const commission = model.commissionMetrics || {};
+    const commissionOk =
+      Number.isFinite(commission.liabilityTotal) &&
+      Number.isFinite(commission.approvedTotal) &&
+      Number.isFinite(commission.paidTotal) &&
+      Number.isFinite(commission.outstandingTotal);
+    entries.push(
+      createPredatorEntry({
+        status: commissionOk ? "PASS" : "WARN",
+        module: "Founder Strategy",
+        step: "commissions.metrics_present",
+        actual: commissionOk
+          ? {
+              liability: commission.liabilityTotal,
+              approved: commission.approvedTotal,
+              paid: commission.paidTotal,
+              outstanding: commission.outstandingTotal,
+            }
+          : "missing",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
 
     const roadmapOk = (model.year1Roadmap || []).length === 4;
     entries.push(

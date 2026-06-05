@@ -4,6 +4,9 @@ import { StatusBadge, PageSkeleton } from "@/components/ux";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import { buildFounderStrategyModel } from "@/founder/founderStrategyEngine.js";
 import { loadVisibleLabContracts } from "@/labContract/labContractStore.js";
+import { loadFounderCommissionMetrics } from "@/commission/commissionData.js";
+import { filterDistributorRegistry } from "@/distributor/distributorOsEngine.js";
+import { loadDistributorWorkspaceBundle } from "@/distributor/distributorWorkspaceData.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { presetDistributorOsTab } from "@/tenant/tenantFoundationStore.js";
 import { cn } from "@/lib/utils";
@@ -17,6 +20,7 @@ import {
   CheckCircle2,
   XCircle,
   Activity,
+  IndianRupee,
 } from "lucide-react";
 
 const PAGE_LABELS = {
@@ -69,6 +73,7 @@ function Section({ title, icon: Icon, children, className }) {
 export default function FounderStrategyPage({ setActivePage = null, currentUser = null }) {
   const [payload, setPayload] = useState(null);
   const [portfolioContracts, setPortfolioContracts] = useState([]);
+  const [commissionMetrics, setCommissionMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -78,12 +83,23 @@ export default function FounderStrategyPage({ setActivePage = null, currentUser 
     try {
       setLoading(true);
       setError("");
-      const [data, contracts] = await Promise.all([
+      const [data, contracts, bundle] = await Promise.all([
         loadOperationsCommandCenterData(currentUser),
         loadVisibleLabContracts(),
+        loadDistributorWorkspaceBundle(currentUser).catch(() => ({ registry: [] })),
       ]);
+      const distributors = filterDistributorRegistry(bundle.registry || [], tenantId);
+      const distributorIds = distributors.map((d) => d.id).filter(Boolean);
+      const commissionRes = await loadFounderCommissionMetrics(distributorIds, {
+        homeTenantId: tenantId,
+      });
       setPayload(data);
       setPortfolioContracts(contracts);
+      setCommissionMetrics(
+        commissionRes.ok
+          ? { ...commissionRes.portfolio, source: "supabase" }
+          : null
+      );
     } catch (err) {
       setError(err?.message || "Failed to load operational data");
       setPayload(null);
@@ -98,8 +114,11 @@ export default function FounderStrategyPage({ setActivePage = null, currentUser 
 
   const model = useMemo(() => {
     if (!payload) return null;
-    return buildFounderStrategyModel(payload, tenantId, { contracts: portfolioContracts });
-  }, [payload, tenantId, portfolioContracts]);
+    return buildFounderStrategyModel(payload, tenantId, {
+      contracts: portfolioContracts,
+      commissionMetrics,
+    });
+  }, [payload, tenantId, portfolioContracts, commissionMetrics]);
 
   const predatorSnapshot = useMemo(() => {
     if (!model) return null;
@@ -217,6 +236,41 @@ export default function FounderStrategyPage({ setActivePage = null, currentUser 
           </ol>
         )}
       </Section>
+
+      {commissionPanel ? (
+        <Section title="Commission liability" icon={IndianRupee}>
+          <div className="grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-4">
+            <div className="rounded-lg border bg-white p-2">
+              <p className="text-slate-500">Liability</p>
+              <p className="text-sm font-bold">{commissionPanel.liabilityLabel}</p>
+            </div>
+            <div className="rounded-lg border bg-white p-2">
+              <p className="text-slate-500">Approved</p>
+              <p className="text-sm font-bold">{commissionPanel.approvedLabel}</p>
+            </div>
+            <div className="rounded-lg border bg-white p-2">
+              <p className="text-slate-500">Paid</p>
+              <p className="text-sm font-bold">{commissionPanel.paidLabel}</p>
+            </div>
+            <div className="rounded-lg border bg-white p-2">
+              <p className="text-slate-500">Outstanding</p>
+              <p className="text-sm font-bold">{commissionPanel.outstandingLabel}</p>
+            </div>
+          </div>
+          {setActivePage ? (
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="mt-2 h-auto p-0 text-xs"
+              onClick={() => setActivePage("commissionEngine")}
+            >
+              Commission Engine
+              <ArrowRight className="ml-0.5 h-3 w-3" />
+            </Button>
+          ) : null}
+        </Section>
+      ) : null}
 
       {contractPipeline ? (
         <Section title="Contract pipeline" icon={Target}>

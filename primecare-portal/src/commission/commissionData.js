@@ -9,13 +9,16 @@ import {
   currentPeriodYmd,
 } from "@/commission/commissionEngine.js";
 import { getCommissionRule, DEFAULT_COMMISSION_PHASE_ID } from "@/commission/commissionRules.js";
+import { ensureCommissionMigrated, loadCommissionLedger } from "@/commission/commissionStore.js";
 import {
-  readCommissionLedger,
-  upsertCommissionEntries,
-  updateEntryStatus,
-  approveAllPending,
-  recordMonthlyPayout,
-} from "@/commission/commissionStore.js";
+  approveAllPendingCommissionsForPeriod,
+  approveCommission,
+  getCommissionLiability,
+  loadCommissionLiabilityForDistributors,
+  recordCommissionPayout as recordCommissionPayoutSupabase,
+  rejectCommission,
+  upsertCommissionEntriesBatch,
+} from "@/api/commissionSupabaseApi.js";
 import { getLabsCredit } from "@/api/primecareSupabaseApi.js";
 import {
   collectDistributorLabIds,
@@ -47,12 +50,13 @@ export async function fetchOrderLinesRaw() {
 }
 
 /**
- * Load ops data + compute commissions + merge ledger.
+ * Load ops data + compute commissions + merge durable ledger.
  */
 export async function loadCommissionEngineBundle(currentUser, options = {}) {
   const scopeTenantId = str(options.scopeTenantId);
   const tenantId = scopeTenantId || str(currentUser?.tenantId || currentUser?.tenant_id);
   const periodYmd = options.periodYmd || currentPeriodYmd();
+  const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
 
   const [opsPayload, payments, orderLines, labsRes] = await Promise.all([
     loadOperationsCommandCenterData(currentUser, { force: options.force }),
@@ -115,10 +119,22 @@ export async function loadCommissionEngineBundle(currentUser, options = {}) {
     tenantId,
   });
 
-  upsertCommissionEntries(tenantId, computed);
+  await ensureCommissionMigrated({ homeTenantId });
 
-  const ledger = readCommissionLedger(tenantId);
+  if (tenantId && supabase) {
+    const upsertRes = await upsertCommissionEntriesBatch(tenantId, computed, {
+      periodYmd,
+      registryTenantId: homeTenantId || tenantId,
+    });
+    if (!upsertRes.ok) {
+      console.warn("[commission] upsert failed:", upsertRes.error);
+    }
+  }
+
+  const ledger = await loadCommissionLedger(tenantId, { periodYmd, homeTenantId });
   const entries = ledger.entries.filter((e) => e.periodYmd === periodYmd);
+  const liabilityRes = await getCommissionLiability(tenantId, { periodYmd });
+
   const model = buildCommissionModel({
     entries,
     payouts: ledger.payouts,
@@ -134,22 +150,26 @@ export async function loadCommissionEngineBundle(currentUser, options = {}) {
     opsPayload,
     model,
     paymentsCount: payments.length,
+    ledgerSource: ledger.source,
+    liability: liabilityRes.ok ? liabilityRes.liability : null,
   };
 }
 
-export function approveCommissionEntry(tenantId, entryId, approvedBy) {
-  const ledger = readCommissionLedger(tenantId);
-  const existing = ledger.entries.find((e) => e.id === entryId);
-  if (!existing?.thresholdMet || existing.status !== "pending") return null;
-  const entry = updateEntryStatus(tenantId, entryId, "approved", {
-    approvedAt: new Date().toISOString(),
-    approvedBy,
-  });
-  return entry;
+export async function approveCommissionEntry(tenantId, entryId, approvedBy) {
+  const res = await approveCommission(tenantId, entryId, approvedBy);
+  return res.ok ? res.entry : null;
+}
+
+export async function rejectCommissionEntry(tenantId, entryId, rejectedBy) {
+  const res = await rejectCommission(tenantId, entryId, rejectedBy);
+  return res.ok ? res.entry : null;
 }
 
 export async function approveAllPendingCommissions(tenantId, periodYmd, currentUser) {
-  const approved = approveAllPending(tenantId, periodYmd, str(currentUser?.name || currentUser?.email));
+  const approvedBy = str(currentUser?.name || currentUser?.email);
+  const res = await approveAllPendingCommissionsForPeriod(tenantId, periodYmd, approvedBy);
+  const approved = res.entries || [];
+
   if (tenantId && approved.length) {
     void appendOperationalEvent({
       tenantId,
@@ -168,12 +188,19 @@ export async function approveAllPendingCommissions(tenantId, periodYmd, currentU
 }
 
 export async function recordCommissionPayout(tenantId, periodYmd, currentUser) {
-  const payout = recordMonthlyPayout(tenantId, periodYmd, {
+  const res = await recordCommissionPayoutSupabase(tenantId, periodYmd, {
     recordedBy: str(currentUser?.name || currentUser?.email),
+    registryTenantId: tenantId,
   });
-  if (!payout) {
+
+  if (res.duplicate) {
     return { duplicate: true };
   }
+  if (!res.ok) {
+    return { error: res.error || "Payout failed" };
+  }
+
+  const payout = res.payout;
   if (tenantId && payout) {
     void appendOperationalEvent({
       tenantId,
@@ -191,3 +218,15 @@ export async function recordCommissionPayout(tenantId, periodYmd, currentUser) {
   }
   return payout;
 }
+
+/**
+ * Portfolio commission metrics for Founder Strategy.
+ */
+export async function loadFounderCommissionMetrics(distributorIds = [], options = {}) {
+  await ensureCommissionMigrated({ homeTenantId: options.homeTenantId });
+  return loadCommissionLiabilityForDistributors(distributorIds, {
+    periodYmd: options.periodYmd,
+  });
+}
+
+export { getCommissionLiability } from "@/api/commissionSupabaseApi.js";

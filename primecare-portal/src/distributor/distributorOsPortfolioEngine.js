@@ -319,6 +319,7 @@ export function buildDistributorOsPortfolioModel({
   billingLedgerTotals = {},
   billingLedgerLoadOk = true,
   billingLedgerLoadError = null,
+  commissionPayoutCounts = {},
   homeTenantId = "",
 } = {}) {
   const enriched = distributors.map((d) => enrichRegistryRowLifecycle(d));
@@ -328,6 +329,7 @@ export function buildDistributorOsPortfolioModel({
     return buildDistributorPerformanceRow(d, metrics, {
       contracts: contractCounts[d.id] ?? 0,
       agents: agentCounts[d.id] ?? d.agents ?? 0,
+      commissionPayouts: commissionPayoutCounts[d.id] ?? 0,
       revenueContributionPct: 0,
     });
   });

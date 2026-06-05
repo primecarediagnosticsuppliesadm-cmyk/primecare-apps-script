@@ -9,12 +9,35 @@ function str(v) {
   return String(v ?? "").trim();
 }
 
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function clamp(n, lo = 0, hi = 100) {
   return Math.max(lo, Math.min(hi, Math.round(n)));
 }
 
 function formatInr(n) {
   return `₹${Number(n || 0).toLocaleString("en-IN")}`;
+}
+
+function buildCommissionMetricsView(liability) {
+  const liab = liability || {};
+  return {
+    liabilityTotal: num(liab.liabilityTotal),
+    liabilityLabel: formatInr(liab.liabilityTotal),
+    approvedTotal: num(liab.approvedTotal),
+    approvedLabel: formatInr(liab.approvedTotal),
+    paidTotal: num(liab.paidTotal),
+    paidLabel: formatInr(liab.paidTotal),
+    outstandingTotal: num(liab.outstandingTotal),
+    outstandingLabel: formatInr(liab.outstandingTotal),
+    pendingCount: num(liab.pendingCount),
+    approvedCount: num(liab.approvedCount),
+    paidCount: num(liab.paidCount),
+    source: liab.source || "supabase",
+  };
 }
 
 function inDays(iso, minDay, maxDay) {
@@ -420,6 +443,8 @@ export function buildFounderStrategyModel(payload, tenantId, options = {}) {
         ? `${flywheel.bottleneck.label} is the flywheel bottleneck`
         : "Pilot readiness below Field Scale unlock";
 
+  const commissionMetrics = buildCommissionMetricsView(options.commissionMetrics);
+
   return {
     version: "v1",
     signals,
@@ -428,6 +453,7 @@ export function buildFounderStrategyModel(payload, tenantId, options = {}) {
     revenueGap: revenueGapWithContracts,
     contractPipeline,
     contractDashboard: contractModel.dashboard,
+    commissionMetrics,
     milestoneUnlock: buildMilestoneUnlock(journey),
     flywheel,
     ninetyDayPlan: buildNinetyDayPlan(signals, revenueGapWithContracts),

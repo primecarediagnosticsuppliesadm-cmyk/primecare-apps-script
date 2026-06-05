@@ -1,4 +1,11 @@
-const LEDGER_PREFIX = "primecare_commission_ledger_v1";
+import {
+  LEDGER_PREFIX,
+  getCommissionEntries,
+  listCommissionPayoutsForDistributor,
+  migrateLocalCommissionLedgersToSupabase,
+  readCommissionMigrationStatus,
+  scanLocalCommissionLedgers,
+} from "@/api/commissionSupabaseApi.js";
 
 function safeParse(raw, fallback) {
   try {
@@ -12,6 +19,9 @@ function ledgerKey(tenantId) {
   return `${LEDGER_PREFIX}:${tenantId || "default"}`;
 }
 
+let migrationPromise = null;
+
+/** @deprecated Legacy local read — migration source only. */
 export function readCommissionLedger(tenantId) {
   if (typeof window === "undefined") {
     return { entries: [], payouts: [], updatedAt: null };
@@ -27,6 +37,7 @@ export function readCommissionLedger(tenantId) {
   };
 }
 
+/** @deprecated Legacy local write — no longer used after Supabase durability. */
 export function writeCommissionLedger(tenantId, ledger) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(
@@ -38,105 +49,66 @@ export function writeCommissionLedger(tenantId, ledger) {
   );
 }
 
-export function upsertCommissionEntries(tenantId, entries) {
-  const ledger = readCommissionLedger(tenantId);
-  const byKey = new Map(ledger.entries.map((e) => [entryKey(e), e]));
-  for (const row of entries) {
-    const key = entryKey(row);
-    const prev = byKey.get(key);
-    if (prev && (prev.status === "approved" || prev.status === "paid")) {
-      byKey.set(key, { ...prev, ...pickComputedFields(row) });
-    } else {
-      byKey.set(key, row);
-    }
+function hasLocalCommissionData() {
+  return scanLocalCommissionLedgers().some(
+    (l) => l.entries.length > 0 || l.payouts.length > 0
+  );
+}
+
+/**
+ * One-time localStorage → Supabase migration (idempotent).
+ */
+export async function ensureCommissionMigrated(options = {}) {
+  if (typeof window === "undefined") return { ok: true, alreadyDone: true };
+  const status = readCommissionMigrationStatus();
+  if (status.done && !options.force) return { ok: true, alreadyDone: true };
+  if (!hasLocalCommissionData() && !options.force) {
+    const result = await migrateLocalCommissionLedgersToSupabase(options);
+    return result;
   }
-  writeCommissionLedger(tenantId, {
-    ...ledger,
-    entries: [...byKey.values()],
-  });
+  if (!migrationPromise) {
+    migrationPromise = migrateLocalCommissionLedgersToSupabase(options).finally(() => {
+      migrationPromise = null;
+    });
+  }
+  return migrationPromise;
 }
 
-function entryKey(e) {
-  return `${e.periodYmd}:${e.agentKey}`;
-}
+/**
+ * Durable read — Supabase primary.
+ */
+export async function loadCommissionLedger(tenantId, options = {}) {
+  const id = String(tenantId ?? "").trim();
+  if (!id) return { entries: [], payouts: [], source: "empty" };
 
-function pickComputedFields(row) {
+  await ensureCommissionMigrated({ homeTenantId: options.homeTenantId });
+
+  const [entriesRes, payoutsRes] = await Promise.all([
+    getCommissionEntries(id, { periodYmd: options.periodYmd }),
+    listCommissionPayoutsForDistributor(id, { periodYmd: options.periodYmd }),
+  ]);
+
+  if (entriesRes.ok) {
+    return {
+      entries: entriesRes.entries,
+      payouts: payoutsRes.ok ? payoutsRes.payouts : [],
+      source: "supabase",
+      error: payoutsRes.ok ? null : payoutsRes.error,
+    };
+  }
+
+  console.warn("[commission] Supabase read failed, using local fallback:", entriesRes.error);
+  const local = readCommissionLedger(id);
   return {
-    collectedAmount: row.collectedAmount,
-    revenueAttributed: row.revenueAttributed,
-    commissionAmount: row.commissionAmount,
-    efficiencyPct: row.efficiencyPct,
-    labsTouched: row.labsTouched,
-    thresholdMet: row.thresholdMet,
-    phaseId: row.phaseId,
-    ruleVersion: row.ruleVersion,
-    updatedAt: row.updatedAt,
+    entries: local.entries,
+    payouts: local.payouts,
+    source: "local_fallback",
+    error: entriesRes.error,
   };
 }
 
-export function updateEntryStatus(tenantId, entryId, status, meta = {}) {
-  const ledger = readCommissionLedger(tenantId);
-  const entries = ledger.entries.map((e) =>
-    e.id === entryId
-      ? {
-          ...e,
-          status,
-          ...meta,
-          updatedAt: new Date().toISOString(),
-        }
-      : e
-  );
-  writeCommissionLedger(tenantId, { ...ledger, entries });
-  return entries.find((e) => e.id === entryId);
-}
-
-export function approveAllPending(tenantId, periodYmd, approvedBy) {
-  const ledger = readCommissionLedger(tenantId);
-  const now = new Date().toISOString();
-  const entries = ledger.entries.map((e) =>
-    e.periodYmd === periodYmd && e.status === "pending" && e.thresholdMet
-      ? { ...e, status: "approved", approvedAt: now, approvedBy, updatedAt: now }
-      : e
-  );
-  writeCommissionLedger(tenantId, { ...ledger, entries });
-  return entries.filter((e) => e.status === "approved" && e.approvedAt === now);
-}
-
-export function hasPayoutForPeriod(tenantId, periodYmd) {
-  const ledger = readCommissionLedger(tenantId);
-  return ledger.payouts.some(
-    (p) => p.periodYmd === periodYmd && p.status === "paid"
-  );
-}
-
-export function recordMonthlyPayout(tenantId, periodYmd, meta = {}) {
-  if (hasPayoutForPeriod(tenantId, periodYmd)) {
-    return null;
-  }
-  const ledger = readCommissionLedger(tenantId);
-  const approved = ledger.entries.filter(
-    (e) => e.periodYmd === periodYmd && e.status === "approved"
-  );
-  const total = approved.reduce((s, e) => s + Number(e.commissionAmount || 0), 0);
-  const now = new Date().toISOString();
-  const entries = ledger.entries.map((e) =>
-    e.periodYmd === periodYmd && e.status === "approved"
-      ? { ...e, status: "paid", paidAt: now, updatedAt: now }
-      : e
-  );
-  const payout = {
-    id: `payout-${periodYmd}`,
-    periodYmd,
-    totalCommission: total,
-    agentCount: approved.length,
-    status: "paid",
-    paidAt: now,
-    recordedBy: meta.recordedBy || "",
-  };
-  const payouts = [
-    payout,
-    ...ledger.payouts.filter((p) => p.periodYmd !== periodYmd),
-  ];
-  writeCommissionLedger(tenantId, { entries, payouts });
-  return payout;
+/** @deprecated Use commissionSupabaseApi.hasPayoutForPeriod via loadCommissionLedger */
+export async function hasPayoutForPeriod(tenantId, periodYmd) {
+  const ledger = await loadCommissionLedger(tenantId, { periodYmd });
+  return ledger.payouts.some((p) => p.periodYmd === periodYmd && p.status === "paid");
 }

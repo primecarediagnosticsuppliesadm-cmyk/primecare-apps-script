@@ -7,7 +7,6 @@ import {
   approveAllPendingCommissions,
   recordCommissionPayout,
 } from "@/commission/commissionData.js";
-import { hasPayoutForPeriod } from "@/commission/commissionStore.js";
 import { COMMISSION_PHASE_RULES } from "@/commission/commissionRules.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { cn } from "@/lib/utils";
@@ -99,8 +98,12 @@ export default function CommissionEnginePage({
   );
 
   async function handleApproveOne(entryId) {
-    approveCommissionEntry(bundle.tenantId, entryId, currentUser?.name || currentUser?.email);
-    setMsg("Commission approved");
+    const entry = await approveCommissionEntry(
+      bundle.tenantId,
+      entryId,
+      currentUser?.name || currentUser?.email
+    );
+    setMsg(entry ? "Commission approved" : "Could not approve commission");
     await load();
   }
 
@@ -128,7 +131,9 @@ export default function CommissionEnginePage({
   if (!model) return <p className="p-4 text-sm text-slate-500">No commission data.</p>;
 
   const { rule, summary } = model;
-  const payoutRecorded = hasPayoutForPeriod(bundle.tenantId, model.periodYmd);
+  const payoutRecorded = model.payouts.some(
+    (p) => p.periodYmd === model.periodYmd && p.status === "paid"
+  );
 
   return (
     <div className={embedded ? "space-y-3" : "mx-auto max-w-5xl space-y-3 p-3 pb-8"}>
