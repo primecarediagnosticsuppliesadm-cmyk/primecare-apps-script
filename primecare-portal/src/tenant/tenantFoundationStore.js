@@ -4,10 +4,13 @@ export const TENANT_REGISTRY_STORAGE_KEY = "primecare_tenant_registry_v1";
 export const TENANT_VIEW_STORAGE_KEY = "primecare_tenant_view_v1";
 /** Distributor-scoped Add Lab flow (Launch / Management / Workspace). */
 export const DISTRIBUTOR_LAB_CONTEXT_KEY = "primecare_distributor_lab_context_v1";
+/** Distributor OS shell — selected distributor tenant for all OS tabs. */
+export const DISTRIBUTOR_OS_CONTEXT_KEY = "primecare_distributor_os_context_v1";
 
 const REGISTRY_KEY = TENANT_REGISTRY_STORAGE_KEY;
 const VIEW_KEY = TENANT_VIEW_STORAGE_KEY;
 const LAB_CONTEXT_KEY = DISTRIBUTOR_LAB_CONTEXT_KEY;
+const OS_CONTEXT_KEY = DISTRIBUTOR_OS_CONTEXT_KEY;
 const MAX_REGISTRY_ROWS = 50;
 
 /** Older builds did not use a separate key; kept for one-time migration if added later. */
@@ -194,4 +197,66 @@ export function openLabsForDistributor({
     locked: locked && id !== home,
     source,
   });
+}
+
+/**
+ * @typedef {Object} DistributorOsContext
+ * @property {string} tenantId
+ * @property {string} [tenantName]
+ * @property {string} [homeTenantId]
+ * @property {string} [tab]
+ */
+
+/** @returns {DistributorOsContext|null} */
+export function readDistributorOsContext() {
+  if (typeof window === "undefined") return null;
+  const raw = safeParse(window.localStorage.getItem(OS_CONTEXT_KEY), null);
+  if (!raw?.tenantId) return null;
+  return raw;
+}
+
+/** @param {DistributorOsContext} ctx */
+export function setDistributorOsContext(ctx) {
+  if (typeof window === "undefined" || !ctx?.tenantId) return;
+  const existing = readDistributorOsContext();
+  window.localStorage.setItem(
+    OS_CONTEXT_KEY,
+    JSON.stringify({
+      tenantId: ctx.tenantId,
+      tenantName: ctx.tenantName || existing?.tenantName || "",
+      homeTenantId: ctx.homeTenantId || existing?.homeTenantId || "",
+      tab: ctx.tab || existing?.tab || "overview",
+      updatedAt: new Date().toISOString(),
+    })
+  );
+}
+
+export function clearDistributorOsContext() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(OS_CONTEXT_KEY);
+}
+
+/**
+ * Enter Distributor OS for a distributor tenant (never HQ).
+ */
+export function enterDistributorOs({
+  tenantId,
+  tenantName = "",
+  homeTenantId = "",
+  tab = "overview",
+}) {
+  const id = String(tenantId || "").trim();
+  const home = String(homeTenantId || "").trim();
+  if (!id || !home || id === home) return false;
+  setTenantViewContext(id, home);
+  setDistributorOsContext({ tenantId: id, tenantName, homeTenantId: home, tab });
+  setDistributorLabContext({
+    tenantId: id,
+    tenantName,
+    homeTenantId: home,
+    locked: true,
+    openAddLab: false,
+    source: "distributor_os",
+  });
+  return true;
 }

@@ -157,14 +157,24 @@ export default function DistributorManagementPage({ currentUser = null, setActiv
         </div>
         <div className="flex gap-2">
           {setActivePage ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => setActivePage("distributorProvisioning")}
-            >
-              Launch Distributor
-            </Button>
+            <>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setActivePage("distributorOs")}
+              >
+                Distributor OS
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setActivePage("distributorProvisioning")}
+              >
+                Launch Distributor
+              </Button>
+            </>
           ) : null}
           <Button type="button" variant="ghost" size="icon" onClick={() => void load()} aria-label="Refresh">
             <RefreshCw className="h-4 w-4" />

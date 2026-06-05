@@ -6,6 +6,7 @@ export const PERMISSIONS = {
   founderStrategy: [ROLES.EXECUTIVE],
   tenantManagement: [ROLES.EXECUTIVE],
   distributorManagement: [ROLES.EXECUTIVE],
+  distributorOs: [ROLES.EXECUTIVE, ROLES.ADMIN],
   distributorProvisioning: [ROLES.EXECUTIVE],
   commissionEngine: [ROLES.EXECUTIVE],
   labContractEngine: [ROLES.ADMIN, ROLES.EXECUTIVE],

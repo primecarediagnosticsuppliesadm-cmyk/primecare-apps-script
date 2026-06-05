@@ -72,7 +72,12 @@ function ContractRow({ c, selected, onSelect }) {
   );
 }
 
-export default function LabContractManagementPage({ currentUser = null, setActivePage = null }) {
+export default function LabContractManagementPage({
+  currentUser = null,
+  setActivePage = null,
+  distributorScope = null,
+  embedded = false,
+}) {
   const [loading, setLoading] = useState(true);
   const [bundle, setBundle] = useState(null);
   const [tab, setTab] = useState("Dashboard");
@@ -112,7 +117,7 @@ export default function LabContractManagementPage({ currentUser = null, setActiv
     } finally {
       setLoading(false);
     }
-  }, [currentUser]);
+  }, [currentUser, distributorScope?.tenantId]);
 
   useEffect(() => {
     void load();
@@ -183,7 +188,8 @@ export default function LabContractManagementPage({ currentUser = null, setActiv
   const renewal = model.renewal;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-3 p-3 pb-8">
+    <div className={embedded ? "space-y-3" : "mx-auto max-w-6xl space-y-3 p-3 pb-8"}>
+      {!embedded ? (
       <header className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="flex items-center gap-2 text-lg font-bold text-slate-900">
@@ -191,7 +197,9 @@ export default function LabContractManagementPage({ currentUser = null, setActiv
             Lab Contract Engine
           </h1>
           <p className="text-[11px] text-slate-600">
-            Commercial layer · Distributor → Lab → Order → Collection → Commission
+            {distributorScope?.tenantId
+              ? `Contracts for ${distributorScope.tenantName || "selected distributor"} only.`
+              : "PrimeCare HQ contracts — use Distributor OS for distributor tenants."}
           </p>
         </div>
         <div className="flex gap-1">
@@ -203,6 +211,7 @@ export default function LabContractManagementPage({ currentUser = null, setActiv
           </Button>
         </div>
       </header>
+      ) : null}
 
       {msg ? <p className="text-xs text-slate-600">{msg}</p> : null}
 

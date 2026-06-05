@@ -82,9 +82,13 @@ function AddLabModal({
       const res = await createLabWrite({
         ...form,
         homeTenantId,
-        distributorContextTenantId: distributorContextTenantId || (lockDistributor ? form.tenantId : ""),
+        distributorContextTenantId:
+          distributorContextTenantId || (lockDistributor ? form.tenantId : ""),
         selectedDistributorTenantId: distributorContextTenantId || form.tenantId,
-        forbidHomeTenant: lockDistributor && Boolean(distributorContextTenantId || form.tenantId),
+        forbidHomeTenant:
+          lockDistributor &&
+          Boolean(distributorContextTenantId || form.tenantId) &&
+          str(distributorContextTenantId || form.tenantId) !== str(homeTenantId),
       });
       if (!res?.success) {
         throw new Error(res?.error || "Failed to create lab");
@@ -313,7 +317,12 @@ function CreditBadge({ status }) {
   );
 }
 
-export default function LabsPage({ currentUser, authToken }) {
+export default function LabsPage({
+  currentUser,
+  authToken,
+  distributorScope = null,
+  embedded = false,
+}) {
   const { homeTenantId, viewTenantId, readOnly, isExecutive, syncFromStorage } = useTenantView();
   const [labs, setLabs] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -330,24 +339,38 @@ export default function LabsPage({ currentUser, authToken }) {
     currentUser?.role === ROLES.EXECUTIVE || currentUser?.role === ROLES.ADMIN;
 
   const selectedDistributorTenantId = useMemo(() => {
+    const scopeId = str(distributorScope?.tenantId);
+    if (scopeId) return scopeId;
     const ctxId = str(labContext?.tenantId);
+    const ctxSource = str(labContext?.source);
     const viewId = str(viewTenantId);
     const homeId = str(homeTenantId);
-    if (ctxId && ctxId !== homeId) return ctxId;
+    if (ctxId && ctxId !== homeId) {
+      if (ctxSource === "distributor_os") return "";
+      return ctxId;
+    }
     if (readOnly && viewId && viewId !== homeId) return viewId;
     return "";
-  }, [labContext, viewTenantId, homeTenantId, readOnly]);
+  }, [distributorScope, labContext, viewTenantId, homeTenantId, readOnly]);
 
   const selectedDistributorName = useMemo(() => {
+    if (distributorScope?.tenantName) return distributorScope.tenantName;
     if (labContext?.tenantName) return labContext.tenantName;
     return distributors.find((d) => d.id === selectedDistributorTenantId)?.name || "";
-  }, [labContext, distributors, selectedDistributorTenantId]);
+  }, [distributorScope, labContext, distributors, selectedDistributorTenantId]);
 
   const lockDistributor = useMemo(() => {
+    if (distributorScope?.locked) return true;
     if (currentUser?.role === ROLES.ADMIN) return true;
     if (!selectedDistributorTenantId) return false;
     return Boolean(labContext?.locked || readOnly);
-  }, [currentUser?.role, selectedDistributorTenantId, labContext?.locked, readOnly]);
+  }, [
+    distributorScope,
+    currentUser?.role,
+    selectedDistributorTenantId,
+    labContext?.locked,
+    readOnly,
+  ]);
 
   usePredatorModuleValidation(
     "Lab Portal",
@@ -442,8 +465,15 @@ export default function LabsPage({ currentUser, authToken }) {
         (lab) => str(lab.tenantId) === selectedDistributorTenantId
       );
     }
+    const homeId = str(homeTenantId || currentUser?.tenantId);
+    if (
+      (currentUser?.role === ROLES.EXECUTIVE || currentUser?.role === ROLES.ADMIN) &&
+      homeId
+    ) {
+      return labs.filter((lab) => str(lab.tenantId) === homeId);
+    }
     return labs;
-  }, [labs, currentUser, selectedDistributorTenantId]);
+  }, [labs, currentUser, selectedDistributorTenantId, homeTenantId]);
 
   const filteredLabs = useMemo(() => {
     if (creditFilter === "ALL") return visibleLabs;
@@ -481,16 +511,16 @@ export default function LabsPage({ currentUser, authToken }) {
     (currentUser?.role === ROLES.ADMIN ? currentUser?.tenantId : "");
 
   return (
-    <div className="space-y-6">
+    <div className={embedded ? "space-y-4" : "space-y-6"}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Labs</h1>
+          {!embedded ? <h1 className="text-2xl font-semibold tracking-tight">Labs</h1> : null}
           <p className="text-sm text-muted-foreground">
             {currentUser?.role === "agent"
               ? "Only labs assigned to this logged-in agent are visible."
               : selectedDistributorTenantId
                 ? `Showing labs for ${selectedDistributorName || "selected distributor"} only.`
-                : "Lab master, assignments, collections visibility, revenue snapshot, and credit risk."}
+                : "PrimeCare HQ labs only — use Distributor OS for distributor tenants."}
           </p>
           {selectedDistributorTenantId && lockDistributor ? (
             <p className="mt-1 text-xs font-medium text-indigo-700">

@@ -913,6 +913,7 @@ export function mapCollectionsRowFromArCredit(
   );
 
   return {
+    tenantId: str(arRow.tenant_id ?? arRow.tenantId ?? m?.tenantId ?? ""),
     labId,
     labName,
     assignedAgent,
@@ -4023,6 +4024,7 @@ export function mapOrderRow(row, labNameFallback = "", rowIndex = 0) {
   return {
     orderId,
     orderDate,
+    tenantId: str(row.tenant_id ?? row.tenantId ?? row.Tenant_ID ?? ""),
     labId: labIdKey(row.lab_id ?? row.labId ?? row.lab_uuid ?? row.labUUID ?? ""),
     labName: str(row.lab_name ?? row.labName ?? row.lab_title ?? labNameFallback),
     contactPerson: str(row.contact_person ?? row.contactPerson ?? row.contact_name ?? ""),

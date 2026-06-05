@@ -48,7 +48,11 @@ function AgentCard({ row, onApprove, showApprove }) {
   );
 }
 
-export default function CommissionEnginePage({ currentUser = null }) {
+export default function CommissionEnginePage({
+  currentUser = null,
+  distributorScope = null,
+  embedded = false,
+}) {
   const [loading, setLoading] = useState(true);
   const [bundle, setBundle] = useState(null);
   const [tab, setTab] = useState("Overview");
@@ -57,7 +61,10 @@ export default function CommissionEnginePage({ currentUser = null }) {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await loadCommissionEngineBundle(currentUser, { force: true });
+      const data = await loadCommissionEngineBundle(currentUser, {
+        force: true,
+        scopeTenantId: distributorScope?.tenantId || "",
+      });
       setBundle(data);
     } catch (err) {
       console.error(err);
@@ -124,21 +131,25 @@ export default function CommissionEnginePage({ currentUser = null }) {
   const payoutRecorded = hasPayoutForPeriod(bundle.tenantId, model.periodYmd);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-3 p-3 pb-8">
-      <header className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="flex items-center gap-2 text-lg font-bold text-slate-900">
-            <Coins className="h-5 w-5 text-indigo-600" />
-            Commission Engine
-          </h1>
-          <p className="text-[11px] text-slate-600">
-            Collection-driven incentives · {model.periodYmd} · {rule.label} phase
-          </p>
-        </div>
-        <Button type="button" variant="ghost" size="icon" onClick={() => void load()}>
-          <RefreshCw className="h-4 w-4" />
-        </Button>
-      </header>
+    <div className={embedded ? "space-y-3" : "mx-auto max-w-5xl space-y-3 p-3 pb-8"}>
+      {!embedded ? (
+        <header className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h1 className="flex items-center gap-2 text-lg font-bold text-slate-900">
+              <Coins className="h-5 w-5 text-indigo-600" />
+              Commission Engine
+            </h1>
+            <p className="text-[11px] text-slate-600">
+              {distributorScope?.tenantId
+                ? `Commissions for ${distributorScope.tenantName || "selected distributor"} agents · ${model.periodYmd}`
+                : `Collection-driven incentives · ${model.periodYmd} · ${rule.label} phase`}
+            </p>
+          </div>
+          <Button type="button" variant="ghost" size="icon" onClick={() => void load()}>
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+        </header>
+      ) : null}
 
       {msg ? <p className="text-xs text-slate-600">{msg}</p> : null}
 

@@ -58,6 +58,10 @@ function str(v) {
   return String(v ?? "").trim();
 }
 import { summarizeCollectionsList } from "@/metrics/computeReceivableMetrics.js";
+import {
+  filterRowsByTenant,
+  rowTenantId,
+} from "@/distributor/distributorOsEngine.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { recordCollectionsRenderedSnapshot } from "@/predator/moduleUiSnapshot.js";
 import { usePredatorRenderTrace } from "@/predator/renderTrace.js";
@@ -1044,7 +1048,13 @@ function CollectionListItem({
   );
 }
 
-export default function CollectionsPage({ currentUser, authToken, viewMode }) {
+export default function CollectionsPage({
+  currentUser,
+  authToken,
+  viewMode,
+  distributorScope = null,
+  embedded = false,
+}) {
   const isLabAccount = isLabAccountViewMode(viewMode, currentUser?.role);
   const accountLabels = useMemo(() => {
     if (!isLabAccount) return null;
@@ -1089,7 +1099,11 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
   const [proofRemarks, setProofRemarks] = useState("");
   const [evidenceUploading, setEvidenceUploading] = useState(false);
 
-  const tenantId = currentUser?.tenantId ?? currentUser?.tenant_id ?? "";
+  const tenantId =
+    distributorScope?.tenantId ||
+    currentUser?.tenantId ||
+    currentUser?.tenant_id ||
+    "";
   const [collectionEvidence, setCollectionEvidence] = useState([]);
 
   useEffect(() => {
@@ -1177,16 +1191,28 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
         const payload = res?.data || {};
 
         const allRows = Array.isArray(payload.collections) ? payload.collections : [];
-        const rows = filterCollectionsForUser(allRows, currentUser);
+        let rows = filterCollectionsForUser(allRows, currentUser);
+        if (distributorScope?.tenantId) {
+          rows = filterRowsByTenant(rows, distributorScope.tenantId, { tenantKey: rowTenantId });
+        } else if (
+          !isLabAccount &&
+          (currentUser?.role === ROLES.EXECUTIVE || currentUser?.role === ROLES.ADMIN)
+        ) {
+          const homeId = str(currentUser?.tenantId || currentUser?.tenant_id);
+          if (homeId) {
+            rows = filterRowsByTenant(rows, homeId, { tenantKey: rowTenantId });
+          }
+        }
         const summaryFromApi = payload.summary || {};
-        const scopedSummary = isLabAccount
-          ? summarizeCollectionsList(rows, 0)
-          : {
-              totalOutstanding: Number(summaryFromApi.totalOutstanding ?? 0),
-              overdueCount: Number(summaryFromApi.overdueCount ?? 0),
-              highRiskCount: Number(summaryFromApi.highRiskCount ?? 0),
-              todayCollections: Number(summaryFromApi.todayCollections ?? 0),
-            };
+        const scopedSummary =
+          isLabAccount || distributorScope?.tenantId
+            ? summarizeCollectionsList(rows, 0)
+            : {
+                totalOutstanding: Number(summaryFromApi.totalOutstanding ?? 0),
+                overdueCount: Number(summaryFromApi.overdueCount ?? 0),
+                highRiskCount: Number(summaryFromApi.highRiskCount ?? 0),
+                todayCollections: Number(summaryFromApi.todayCollections ?? 0),
+              };
 
         setSummary({
           totalOutstanding: Number(scopedSummary.totalOutstanding ?? 0),
@@ -1437,7 +1463,7 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
         if (supabase && amt > 0) {
           const sbRes = await createPaymentWrite({
             labId: labIdKey(selectedLabId),
-            tenantId: currentUser?.tenantId ?? currentUser?.tenant_id ?? null,
+            tenantId: tenantId || null,
             orderId: null,
             amountReceived: amt,
             paymentMode,
@@ -1685,31 +1711,35 @@ export default function CollectionsPage({ currentUser, authToken, viewMode }) {
 
   return (
     <div className="space-y-3 pb-6">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <Wallet className="h-5 w-5 text-[var(--pc-brand-primary)]" />
-            <h1 className={typography.pageTitle}>
-              {isLabAccount ? "Payments & Account" : "Collections"}
-            </h1>
+      {!embedded ? (
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <Wallet className="h-5 w-5 text-[var(--pc-brand-primary)]" />
+              <h1 className={typography.pageTitle}>
+                {isLabAccount ? "Payments & Account" : "Collections"}
+              </h1>
+            </div>
+            <p className={cn(typography.pageSubtitle, "mt-0.5")}>
+              {distributorScope?.tenantId
+                ? `Collections for ${distributorScope.tenantName || "selected distributor"} only.`
+                : isLabAccount
+                  ? "Operational financial workspace for your lab: account health, invoices, and payment activity."
+                  : "PrimeCare HQ receivables — use Distributor OS for distributor tenants."}
+            </p>
           </div>
-          <p className={cn(typography.pageSubtitle, "mt-0.5")}>
-            {isLabAccount
-              ? "Operational financial workspace for your lab: account health, invoices, and payment activity."
-              : "Tenant-wide receivables, follow-ups, and payments. Tap a lab to record payments and follow-ups."}
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-10 rounded-lg"
-          onClick={() => loadCollections()}
-        >
-          <RefreshCw className="mr-2 h-4 w-4" />
-          Refresh
-        </Button>
-      </header>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-10 rounded-lg"
+            onClick={() => loadCollections()}
+          >
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Refresh
+          </Button>
+        </header>
+      ) : null}
 
 
       {pendingTaskContext && !isLabAccount ? (

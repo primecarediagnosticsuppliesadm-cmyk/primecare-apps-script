@@ -90,8 +90,9 @@ async function fetchOrderLinesRaw() {
  * Single ops + registry load for contract engine (dedupe API calls).
  */
 export async function loadLabContractEngineBundle(currentUser, options = {}) {
-  const tenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
-  const key = `${tenantId}:${options.force ? Date.now() : "cached"}`;
+  const scopeTenantId = str(options.scopeTenantId);
+  const tenantId = scopeTenantId || str(currentUser?.tenantId || currentUser?.tenant_id);
+  const key = `${tenantId}:${scopeTenantId || "home"}:${options.force ? Date.now() : "cached"}`;
   if (!options.force && cachedBundle && cacheKey === `${tenantId}:cached`) {
     return cachedBundle;
   }
@@ -108,13 +109,20 @@ export async function loadLabContractEngineBundle(currentUser, options = {}) {
     opsPayload.orderLines = orderLines;
   }
 
-  const registry = readLabContractRegistry(tenantId);
+  const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
+  const registry = readLabContractRegistry(scopeTenantId ? homeTenantId : tenantId);
+  const scopedContracts = scopeTenantId
+    ? registry.contracts.filter(
+        (c) => str(c.distributorId) === scopeTenantId || str(c.tenantId) === scopeTenantId
+      )
+    : registry.contracts;
   const distributors = new Set(
     (foundation?.tenants || []).map((t) => str(t.id)).filter(Boolean)
   );
   distributors.add(tenantId);
+  if (scopeTenantId) distributors.add(scopeTenantId);
 
-  const model = buildLabContractModel(registry.contracts, opsPayload, distributors);
+  const model = buildLabContractModel(scopedContracts, opsPayload, distributors);
 
   cachedBundle = {
     tenantId,

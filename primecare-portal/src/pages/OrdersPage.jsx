@@ -18,6 +18,15 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2 } from "lucide-react";
+import { ROLES } from "@/config/roles";
+import {
+  filterRowsByTenant,
+  rowTenantId,
+} from "@/distributor/distributorOsEngine.js";
+
+function str(v) {
+  return String(v ?? "").trim();
+}
 
 function orderStatusSuccessMessage(nextStatus) {
   switch (nextStatus) {
@@ -53,8 +62,13 @@ function orderStatusBadgeClass(statusRaw) {
   return "border-blue-200 bg-blue-50 text-blue-950 shadow-sm font-semibold";
 }
 
-export default function OrdersPage() {
+export default function OrdersPage({
+  currentUser = null,
+  distributorScope = null,
+  embedded = false,
+}) {
   const [orders, setOrders] = useState([]);
+  const [allOrders, setAllOrders] = useState([]);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [details, setDetails] = useState(null);
   const [search, setSearch] = useState("");
@@ -71,6 +85,21 @@ export default function OrdersPage() {
     loadOrders();
   }, []);
 
+  useEffect(() => {
+    if (distributorScope?.tenantId) {
+      setOrders(
+        filterRowsByTenant(allOrders, distributorScope.tenantId, { tenantKey: rowTenantId })
+      );
+      return;
+    }
+    if (currentUser?.role === ROLES.EXECUTIVE || currentUser?.role === ROLES.ADMIN) {
+      const homeId = str(currentUser?.tenantId || currentUser?.tenant_id);
+      setOrders(homeId ? filterRowsByTenant(allOrders, homeId, { tenantKey: rowTenantId }) : allOrders);
+      return;
+    }
+    setOrders(allOrders);
+  }, [allOrders, distributorScope?.tenantId, currentUser?.role, currentUser?.tenantId]);
+
   async function loadOrders(options = {}) {
     const silent = Boolean(options?.silent);
     try {
@@ -82,7 +111,18 @@ export default function OrdersPage() {
       const result = res?.data || res || {};
       const rows = Array.isArray(result?.orders) ? result.orders : [];
       console.log("SUPABASE ORDERS MAPPED:", rows);
-      setOrders(rows);
+      setAllOrders(rows);
+      if (distributorScope?.tenantId) {
+        setOrders(filterRowsByTenant(rows, distributorScope.tenantId, { tenantKey: rowTenantId }));
+      } else if (
+        currentUser?.role === ROLES.EXECUTIVE ||
+        currentUser?.role === ROLES.ADMIN
+      ) {
+        const homeId = str(currentUser?.tenantId || currentUser?.tenant_id);
+        setOrders(homeId ? filterRowsByTenant(rows, homeId, { tenantKey: rowTenantId }) : rows);
+      } else {
+        setOrders(rows);
+      }
     } catch (err) {
       console.warn("OrdersPage loadOrders:", err);
       setOrders([]);
@@ -273,13 +313,17 @@ export default function OrdersPage() {
   }, [orders, search, status]);
 
   return (
-    <div className="space-y-5">
-      <div className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Orders Monitor</h1>
-        <p className="text-sm text-slate-500">
-          Track all lab orders, inspect line items, and update order status.
-        </p>
-      </div>
+    <div className={embedded ? "space-y-4" : "space-y-5"}>
+      {!embedded ? (
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight">Orders Monitor</h1>
+          <p className="text-sm text-slate-500">
+            {distributorScope?.tenantId
+              ? `Orders for ${distributorScope.tenantName || "selected distributor"} labs only.`
+              : "PrimeCare HQ orders — use Distributor OS for distributor tenants."}
+          </p>
+        </div>
+      ) : null}
 
       {error ? (
         <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">

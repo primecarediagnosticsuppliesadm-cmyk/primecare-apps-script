@@ -21,6 +21,7 @@ import { validateFounderStrategyModule } from "@/predator/validators/founderStra
 import { validateTenantFoundationModule } from "@/predator/validators/tenantFoundationValidator.js";
 import { validateDistributorWorkspaceModule } from "@/predator/validators/distributorWorkspaceValidator.js";
 import { validateDistributorProvisioningModule } from "@/predator/validators/distributorProvisioningValidator.js";
+import { validateDistributorOsModule } from "@/predator/validators/distributorOsValidator.js";
 import { validateCommissionEngineModule } from "@/predator/validators/commissionEngineValidator.js";
 import { validateLabContractEngineModule } from "@/predator/validators/labContractEngineValidator.js";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
@@ -404,6 +405,12 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
       result = await validateDistributorProvisioningModule({
         ctx,
         currentUser,
+        rendered: snapshot,
+      });
+      break;
+    case "Distributor OS":
+      result = await validateDistributorOsModule({
+        ctx,
         rendered: snapshot,
       });
       break;

@@ -13,6 +13,7 @@ import FounderNavigationPage from "./pages/FounderNavigationPage";
 import FounderStrategyPage from "./pages/FounderStrategyPage";
 import TenantManagementPage from "./pages/TenantManagementPage";
 import DistributorManagementPage from "./pages/DistributorManagementPage";
+import DistributorOsPage from "./pages/DistributorOsPage";
 import DistributorProvisioningPage from "./pages/DistributorProvisioningPage";
 import CommissionEnginePage from "./pages/CommissionEnginePage";
 import LabContractManagementPage from "./pages/LabContractManagementPage";
@@ -179,6 +180,14 @@ export default function PrimeCareWebPortal({
 
       case "orders":
         return <OrdersPage currentUser={currentUser} />;
+      case "distributorOs":
+        return (
+          <DistributorOsPage
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+            authToken={authToken}
+          />
+        );
 
       case "risk":
         return (
@@ -320,6 +329,14 @@ export default function PrimeCareWebPortal({
 
       case "orders":
         return <OrdersPage currentUser={currentUser} />;
+      case "distributorOs":
+        return (
+          <DistributorOsPage
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+            authToken={authToken}
+          />
+        );
 
       case "risk":
         return (

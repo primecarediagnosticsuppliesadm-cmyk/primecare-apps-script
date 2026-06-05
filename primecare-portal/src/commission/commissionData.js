@@ -16,6 +16,14 @@ import {
   approveAllPending,
   recordMonthlyPayout,
 } from "@/commission/commissionStore.js";
+import { getLabsCredit } from "@/api/primecareSupabaseApi.js";
+import {
+  collectDistributorLabIds,
+  filterRowsByDistributorLabs,
+  filterRowsByTenant,
+  rowTenantId,
+} from "@/distributor/distributorOsEngine.js";
+import { labIdKey } from "@/utils/labId.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -42,14 +50,45 @@ export async function fetchOrderLinesRaw() {
  * Load ops data + compute commissions + merge ledger.
  */
 export async function loadCommissionEngineBundle(currentUser, options = {}) {
-  const tenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
+  const scopeTenantId = str(options.scopeTenantId);
+  const tenantId = scopeTenantId || str(currentUser?.tenantId || currentUser?.tenant_id);
   const periodYmd = options.periodYmd || currentPeriodYmd();
 
-  const [opsPayload, payments, orderLines] = await Promise.all([
+  const [opsPayload, payments, orderLines, labsRes] = await Promise.all([
     loadOperationsCommandCenterData(currentUser, { force: options.force }),
     fetchPaymentsRaw(),
     fetchOrderLinesRaw().catch(() => []),
+    scopeTenantId ? getLabsCredit() : Promise.resolve(null),
   ]);
+
+  let effectivePayments = payments;
+  if (scopeTenantId && opsPayload) {
+    const rawLabs = Array.isArray(labsRes?.data)
+      ? labsRes.data
+      : Array.isArray(labsRes?.data?.labs)
+        ? labsRes.data.labs
+        : [];
+    const scopedLabs = filterRowsByTenant(rawLabs, scopeTenantId, { tenantKey: rowTenantId });
+    const labIds = collectDistributorLabIds(scopedLabs, scopeTenantId);
+    opsPayload.collections = filterRowsByDistributorLabs(
+      opsPayload.collections || [],
+      labIds,
+      "labId"
+    );
+    opsPayload.orders = filterRowsByDistributorLabs(
+      opsPayload.orders || [],
+      labIds,
+      "labId"
+    );
+    opsPayload.visits = filterRowsByDistributorLabs(
+      opsPayload.visits || [],
+      labIds,
+      "labId"
+    );
+    effectivePayments = (payments || []).filter((p) =>
+      labIds.has(labIdKey(p.lab_id ?? p.labId))
+    );
+  }
 
   let phaseId = DEFAULT_COMMISSION_PHASE_ID;
   try {
@@ -65,7 +104,7 @@ export async function loadCommissionEngineBundle(currentUser, options = {}) {
     visits: opsPayload.visits || [],
     orders: opsPayload.orders || [],
     orderLines,
-    payments,
+    payments: effectivePayments,
     periodYmd,
   });
 

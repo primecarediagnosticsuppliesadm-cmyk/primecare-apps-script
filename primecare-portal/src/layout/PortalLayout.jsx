@@ -28,6 +28,7 @@ const ICONS = {
   founderStrategy: Target,
   tenantManagement: Building,
   distributorManagement: Briefcase,
+  distributorOs: Building2,
   distributorProvisioning: ClipboardList,
   commissionEngine: Coins,
   labContractEngine: FileText,
