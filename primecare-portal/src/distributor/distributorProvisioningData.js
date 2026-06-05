@@ -7,6 +7,8 @@ import {
   syncLocalDistributorsToSupabase,
   fetchDatabaseTenants as fetchDurableTenants,
   updateDistributorStatusInSupabase,
+  patchDurableTenantMetadata,
+  buildCatalogFlagRegistryDebug,
   PERSISTENCE_STATUS,
 } from "@/tenant/durableTenantStore.js";
 import { fetchAgentProfilesForTenant } from "@/distributor/distributorWorkspaceData.js";
@@ -153,6 +155,7 @@ export function buildProvisioningRegistryDebug(bundle) {
     rawRows: storage.rawRows,
     loadedNames: loaded.map((d) => d.name),
     loadedNonHomeNames: loadedNonHome.map((d) => d.name),
+    catalogFlagDebug: buildCatalogFlagRegistryDebug(bundle),
     notes:
       "Durable rows live in public.tenants (Supabase). localStorage is fallback when insert/RLS fails.",
   };
@@ -392,11 +395,12 @@ export function updateDistributorAdminDetails(tenantId, admin) {
   return getRegistryTenant(tenantId);
 }
 
-export function acknowledgeProvisioningTask(tenantId, taskId) {
+export async function acknowledgeProvisioningTask(tenantId, taskId) {
   const row = getRegistryTenant(tenantId);
   if (!row) return null;
   const now = new Date().toISOString();
   const config = { ...(row.config || {}) };
+  const provisioning = { ...(row.provisioning || {}) };
 
   if (taskId === "configure_roles") {
     config.rolesConfigured = true;
@@ -412,11 +416,35 @@ export function acknowledgeProvisioningTask(tenantId, taskId) {
     config.agentProvisioned = true;
     markProvisioningMilestone(tenantId, "agent_assigned");
   }
-  if (taskId === "verify_isolation" && row.source !== "database") {
+  if (taskId === "verify_isolation") {
     config.isolationAcknowledged = true;
     markProvisioningMilestone(tenantId, "isolation_verified");
   }
 
-  upsertRegistryTenant({ ...row, config, updatedAt: now });
+  const freshRow = getRegistryTenant(tenantId) || row;
+  upsertRegistryTenant({
+    ...freshRow,
+    config,
+    provisioning: freshRow.provisioning || provisioning,
+    updatedAt: now,
+  });
+
+  const updated = getRegistryTenant(tenantId);
+  const isDurable = updated?.durable === true || updated?.source === "database";
+  if (isDurable && updated) {
+    const patchResult = await patchDurableTenantMetadata(tenantId, {
+      config: updated.config || config,
+      provisioning: updated.provisioning || provisioning,
+    });
+    if (!patchResult.ok) {
+      console.warn("[provisioning] durable metadata patch failed", patchResult.error);
+      upsertRegistryTenant({
+        ...updated,
+        lastSyncError: patchResult.error,
+        syncFailed: taskId === "load_catalog",
+      });
+    }
+  }
+
   return getRegistryTenant(tenantId);
 }

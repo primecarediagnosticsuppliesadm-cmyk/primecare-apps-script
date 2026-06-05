@@ -17,6 +17,7 @@ import {
   PERSISTENCE_STATUS,
   validateSupabaseClientForPredator,
   validatePersistenceStatusResolvesForPredator,
+  validateDurableCatalogFlagPersistsForPredator,
 } from "@/tenant/durableTenantStore.js";
 
 function finish(entries) {
@@ -260,6 +261,26 @@ export async function validateDistributorProvisioningModule({
         module: "Distributor Provisioning",
         step: "registry.local_fallback",
         actual: supabaseClientCheck.ok ? "supabase configured" : "local-only mode",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const catalogPersist = validateDurableCatalogFlagPersistsForPredator(
+      bundle,
+      resolveProvisioningModel
+    );
+    entries.push(
+      createPredatorEntry({
+        status: catalogPersist.status,
+        module: "Distributor Provisioning",
+        step: "durable_distributor_catalog_flag_persists",
+        actual: catalogPersist.actual,
+        suggestedFix:
+          catalogPersist.status === "FAIL"
+            ? "Mark load_catalog syncs metadata.config.productCatalogReady to Supabase"
+            : undefined,
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,

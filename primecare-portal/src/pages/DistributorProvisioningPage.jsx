@@ -213,6 +213,23 @@ function RegistryDebugDrawer({ debug, onClose }) {
               </ul>
             </>
           ) : null}
+          {debug.catalogFlagDebug?.length ? (
+            <>
+              <h4 className="mt-3 text-xs font-bold uppercase text-slate-500">
+                Product catalog flags
+              </h4>
+              <ul className="mt-1 space-y-1 text-[10px]">
+                {debug.catalogFlagDebug.map((row) => (
+                  <li key={row.id} className="rounded border px-2 py-1 font-mono">
+                    <p className="font-semibold text-slate-800">{row.name}</p>
+                    <p>local: {String(row.localProductCatalogReady)}</p>
+                    <p>durable: {String(row.durableProductCatalogReady)}</p>
+                    <p>merged: {String(row.mergedProductCatalogReady)}</p>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
           <div className="rounded border px-2 py-1.5">
             <dt className="font-bold text-slate-500">Tenant context</dt>
             <dd className="mt-1 space-y-0.5 font-mono text-[10px]">
@@ -491,10 +508,10 @@ export default function DistributorProvisioningPage({
     setMsg("Distributor activated (durable)");
   }
 
-  function handleAckTask(taskId) {
+  async function handleAckTask(taskId) {
     if (!model) return;
-    acknowledgeProvisioningTask(model.distributorId, taskId);
-    void applyLocalBundleUpdate(model.distributorId);
+    await acknowledgeProvisioningTask(model.distributorId, taskId);
+    await applyLocalBundleUpdate(model.distributorId);
     setMsg("Setup step recorded — readiness updated");
   }
 

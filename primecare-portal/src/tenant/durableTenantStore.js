@@ -174,6 +174,81 @@ export function findTenantNameCollision(dbTenants, registryRows, name, excludeId
   return null;
 }
 
+/** Provisioning booleans merged with OR (local true wins persistence). */
+const PROVISIONING_BOOL_FLAGS = [
+  "productCatalogReady",
+  "rolesConfigured",
+  "agentProvisioned",
+  "isolationAcknowledged",
+  "rolesAutoProvisioned",
+  "orderingEnabled",
+  "collectionsEnabled",
+];
+
+const PROVISIONING_TIMESTAMP_FIELDS = [
+  "catalogConfiguredAt",
+  "rolesConfiguredAt",
+  "adminUpdatedAt",
+  "agentProvisionedAt",
+];
+
+function pickNewerIso(a, b) {
+  const as = str(a);
+  const bs = str(b);
+  if (!as) return bs || null;
+  if (!bs) return as || null;
+  return Date.parse(as) >= Date.parse(bs) ? as : bs;
+}
+
+/**
+ * Merge local + durable provisioning config without dropping admin/territories.
+ */
+export function mergeProvisioningConfigFlags(localConfig = {}, durableConfig = {}) {
+  const merged = { ...durableConfig, ...localConfig };
+  for (const flag of PROVISIONING_BOOL_FLAGS) {
+    if (localConfig[flag] === true || durableConfig[flag] === true) {
+      merged[flag] = true;
+    }
+  }
+  for (const field of PROVISIONING_TIMESTAMP_FIELDS) {
+    const newer = pickNewerIso(localConfig[field], durableConfig[field]);
+    if (newer) merged[field] = newer;
+  }
+  return merged;
+}
+
+/**
+ * Merge provisioning timeline events by id (newer `at` wins).
+ */
+export function mergeProvisioningTimelines(localTimeline = [], durableTimeline = []) {
+  const byId = new Map();
+  for (const event of [...(durableTimeline || []), ...(localTimeline || [])]) {
+    if (!event?.id) continue;
+    const existing = byId.get(event.id);
+    if (!existing || Date.parse(event.at || 0) >= Date.parse(existing.at || 0)) {
+      byId.set(event.id, event);
+    }
+  }
+  return [...byId.values()].sort(
+    (a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0)
+  );
+}
+
+export function mergeProvisioningState(localRow = {}, durableRow = {}) {
+  const localConfig = localRow.config || {};
+  const durableConfig = durableRow.config || {};
+  const localProv = localRow.provisioning || {};
+  const durableProv = durableRow.provisioning || {};
+  return {
+    config: mergeProvisioningConfigFlags(localConfig, durableConfig),
+    provisioning: {
+      ...durableProv,
+      ...localProv,
+      timeline: mergeProvisioningTimelines(localProv.timeline, durableProv.timeline),
+    },
+  };
+}
+
 function metadataFromDraft(draft) {
   const config = { ...(draft.config || {}) };
   return {
@@ -339,6 +414,118 @@ export async function fetchDatabaseTenants() {
 }
 
 /**
+ * Patch tenants.metadata for a durable distributor (preserves admin, territories, metrics).
+ */
+export async function patchDurableTenantMetadata(tenantId, { config = {}, provisioning = {} } = {}) {
+  if (!supabase || !tenantId) {
+    return { ok: false, error: "Supabase not configured" };
+  }
+
+  let current = null;
+  const extended = await supabase
+    .from("tenants")
+    .select(EXTENDED_TENANT_SELECT)
+    .eq("id", tenantId)
+    .maybeSingle();
+
+  if (!extended.error && extended.data) {
+    current = extended.data;
+  } else {
+    const minimal = await supabase
+      .from("tenants")
+      .select(MINIMAL_TENANT_SELECT)
+      .eq("id", tenantId)
+      .maybeSingle();
+    if (minimal.error || !minimal.data) {
+      return { ok: false, error: extended.error?.message || minimal.error?.message || "Tenant not found" };
+    }
+    current = minimal.data;
+  }
+
+  const meta =
+    current.metadata && typeof current.metadata === "object" ? current.metadata : {};
+  const regShape = mapDatabaseTenantToRegistryShape(current);
+  const merged = mergeProvisioningState(
+    { config, provisioning },
+    { config: regShape?.config || meta.config || {}, provisioning: regShape?.provisioning || meta.provisioning || {} }
+  );
+
+  const metadata = {
+    ...meta,
+    config: merged.config,
+    provisioning: merged.provisioning,
+    metrics: meta.metrics || regShape?.metrics || {},
+  };
+
+  const payload = {
+    metadata,
+    updated_at: new Date().toISOString(),
+  };
+
+  let { error } = await supabase.from("tenants").update(payload).eq("id", tenantId);
+  if (error && isMissingColumnError(error)) {
+    return { ok: false, error: "metadata column not available — run durable_distributor_tenants_migration.sql" };
+  }
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, metadata };
+}
+
+/**
+ * Predator: local productCatalogReady must survive durable merge + catalog gate.
+ */
+export function validateDurableCatalogFlagPersistsForPredator(bundle, resolveModel) {
+  const registry = readTenantRegistry();
+  const flagged = registry.filter(
+    (r) => !r.isHome && r.config?.productCatalogReady === true
+  );
+  if (!flagged.length) {
+    return { status: "PASS", actual: "no local catalog flags" };
+  }
+
+  const failures = [];
+  for (const reg of flagged) {
+    const merged = (bundle?.tenants || []).find((t) => t.id === reg.id);
+    const model = resolveModel?.(bundle, reg.id);
+    const catalog = model?.checks?.find((c) => c.id === "catalog_configured");
+    if (!merged?.config?.productCatalogReady || catalog?.status !== "PASS") {
+      failures.push(reg.name || reg.id.slice(0, 8));
+    }
+  }
+
+  return {
+    status: failures.length === 0 ? "PASS" : "FAIL",
+    actual: failures.length
+      ? `catalog flag lost: ${failures.join(", ")}`
+      : `${flagged.length} catalog flag(s) persisted`,
+  };
+}
+
+/**
+ * Debug: catalog flag across local, durable, merged rows.
+ */
+export function buildCatalogFlagRegistryDebug(bundle) {
+  const registry = readTenantRegistry();
+  const dbRows = bundle?.dbFetch?.rows || [];
+  const homeId = str(bundle?.homeTenantId);
+
+  return (bundle?.tenants || [])
+    .filter((t) => t.id && t.id !== homeId && !t.isHome)
+    .map((t) => {
+      const local = registry.find((r) => r.id === t.id);
+      const db = dbRows.find((d) => d.id === t.id);
+      const dbMeta =
+        db?.metadata && typeof db.metadata === "object" ? db.metadata : {};
+      return {
+        id: t.id,
+        name: t.name,
+        localProductCatalogReady: Boolean(local?.config?.productCatalogReady),
+        durableProductCatalogReady: Boolean(dbMeta.config?.productCatalogReady),
+        mergedProductCatalogReady: Boolean(t.config?.productCatalogReady),
+      };
+    });
+}
+
+/**
  * Update tenant status in Supabase (activation).
  */
 export async function updateDistributorStatusInSupabase(tenantId, status) {
@@ -384,18 +571,21 @@ export function mergeTenantRegistrySources({
     const regShape = mapDatabaseTenantToRegistryShape(db);
     const metrics = isHome ? liveMetrics : reg.metrics || regShape?.metrics;
     const checks = isHome ? isolationChecks : reg.isolationChecks;
-    const config = {
-      ...(regShape?.config || {}),
-      ...(reg.config || {}),
-      rolesConfigured: isHome ? rolesConfigured : reg.config?.rolesConfigured,
-      productCatalogReady: isHome
-        ? Number(metrics?.products || 0) > 0
-        : reg.config?.productCatalogReady ?? regShape?.config?.productCatalogReady,
-    };
-    if (isHome && adminProfiles.length) {
-      const admin = adminProfiles.find((p) => p.role === "admin") || adminProfiles[0];
-      config.adminName = config.adminName || admin?.agent_name || "Admin";
-      config.rolesConfigured = rolesConfigured;
+    const provisionMerged = mergeProvisioningState(reg, regShape || {});
+    let config = provisionMerged.config;
+    let provisioning = provisionMerged.provisioning;
+
+    if (isHome) {
+      config = {
+        ...config,
+        rolesConfigured,
+        productCatalogReady: Number(metrics?.products || 0) > 0,
+      };
+      if (adminProfiles.length) {
+        const admin = adminProfiles.find((p) => p.role === "admin") || adminProfiles[0];
+        config.adminName = config.adminName || admin?.agent_name || "Admin";
+        config.rolesConfigured = rolesConfigured;
+      }
     }
 
     const row = mergeTenantRow(
@@ -404,6 +594,7 @@ export function mergeTenantRegistrySources({
         ...regShape,
         ...reg,
         config,
+        provisioning,
         isHome,
         durable: true,
         persistenceStatus: PERSISTENCE_STATUS.DURABLE,

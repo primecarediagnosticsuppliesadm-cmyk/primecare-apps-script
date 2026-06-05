@@ -124,6 +124,7 @@ export function mergeTenantRow(dbRow, registryRow, liveMetrics, isolationChecks)
     createdAt: dbRow?.created_at || registryRow?.createdAt || null,
     adminUser: str(config.adminName) || str(config.adminEmail) || "—",
     config,
+    provisioning: registryRow?.provisioning || {},
     metrics,
     healthBand,
     healthScore,
