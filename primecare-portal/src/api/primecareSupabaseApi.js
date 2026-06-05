@@ -468,6 +468,7 @@ export function mapLabsCreditRow(row) {
   }
 
   return {
+    tenantId: str(row.tenant_id ?? row.tenantId ?? row.Tenant_ID),
     labId: normalizeLabIdKey(row.lab_id ?? row.labId ?? row.Lab_ID),
     labName: str(row.lab_name ?? row.labName ?? row.Lab_Name),
     ownerName: str(row.owner_name ?? row.ownerName ?? row.Owner_Name),
@@ -546,6 +547,13 @@ export async function createLabWrite(payload = {}) {
   }
 
   const tenantId = str(payload.tenantId || payload.tenant_id);
+  const homeTenantId = str(payload.homeTenantId || payload.home_tenant_id);
+  const distributorContextTenantId = str(
+    payload.distributorContextTenantId ||
+      payload.selectedDistributorTenantId ||
+      payload.contextTenantId
+  );
+  const forbidHomeTenant = payload.forbidHomeTenant === true;
   const labName = str(payload.labName || payload.lab_name);
   const contactName = str(payload.contactName || payload.owner_name);
   const phone = str(payload.phone);
@@ -556,6 +564,24 @@ export async function createLabWrite(payload = {}) {
 
   if (!tenantId) {
     return { success: false, error: "Distributor is required" };
+  }
+  if (distributorContextTenantId && tenantId !== distributorContextTenantId) {
+    return {
+      success: false,
+      error: "Lab must be created under the selected distributor tenant",
+    };
+  }
+  if (
+    forbidHomeTenant &&
+    homeTenantId &&
+    tenantId === homeTenantId &&
+    distributorContextTenantId &&
+    distributorContextTenantId !== homeTenantId
+  ) {
+    return {
+      success: false,
+      error: "Cannot create lab under PrimeCare HQ while a distributor is selected",
+    };
   }
   if (!labName) {
     return { success: false, error: "Lab name is required" };

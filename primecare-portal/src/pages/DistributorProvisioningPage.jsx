@@ -12,6 +12,7 @@ import {
   syncLocalDistributorsToSupabase,
 } from "@/distributor/distributorProvisioningData.js";
 import { PERSISTENCE_STATUS } from "@/tenant/durableTenantStore.js";
+import { openLabsForDistributor } from "@/tenant/tenantFoundationStore.js";
 import { PROVISIONING_CHECK_ACTIONS } from "@/distributor/distributorProvisioningEngine.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { cn } from "@/lib/utils";
@@ -517,10 +518,27 @@ export default function DistributorProvisioningPage({
     Boolean(predatorSnapshot)
   );
 
+  function navigateToLabsForDistributor(openAddLab = false) {
+    if (!model || !bundle || !setActivePage) return;
+    openLabsForDistributor({
+      tenantId: model.distributorId,
+      tenantName: model.name,
+      homeTenantId: bundle.homeTenantId,
+      openAddLab,
+      source: "provisioning",
+      locked: true,
+    });
+    setActivePage("labs");
+  }
+
   function handleOpenAction(action) {
     if (!action) return;
     if (action.type === "edit_admin") {
       setShowEditAdmin(true);
+      return;
+    }
+    if (action.page === "labs" && setActivePage) {
+      navigateToLabsForDistributor(true);
       return;
     }
     if (action.page && setActivePage) {

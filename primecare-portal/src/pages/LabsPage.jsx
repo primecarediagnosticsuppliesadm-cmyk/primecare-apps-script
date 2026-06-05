@@ -15,10 +15,20 @@ import {
 } from "lucide-react";
 import { createLabWrite, getLabsCredit } from "@/api/primecareSupabaseApi";
 import { ROLES } from "@/config/roles";
+import { useTenantView } from "@/context/TenantViewContext.jsx";
 import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
 import { summarizeLabsCreditPortfolio } from "@/metrics/computeRiskMetrics.js";
 import { filterLabsForUser } from "@/utils/accessFilters.js";
 import { loadTenantFoundationRegistry } from "@/tenant/tenantFoundationData.js";
+import {
+  readDistributorLabContext,
+  setDistributorLabContext,
+} from "@/tenant/tenantFoundationStore.js";
+import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
+
+function str(v) {
+  return String(v ?? "").trim();
+}
 
 const EMPTY_LAB_FORM = {
   labName: "",
@@ -31,14 +41,34 @@ const EMPTY_LAB_FORM = {
   paymentTerms: "Net 30",
 };
 
-function AddLabModal({ distributors, defaultTenantId, onClose, onCreated }) {
+function AddLabModal({
+  distributors,
+  defaultTenantId,
+  defaultTenantName = "",
+  lockDistributor = false,
+  homeTenantId = "",
+  distributorContextTenantId = "",
+  isExecutive = false,
+  onClose,
+  onCreated,
+}) {
   const [form, setForm] = useState({
     ...EMPTY_LAB_FORM,
     tenantId: defaultTenantId || "",
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const showDistributorPicker = distributors.length > 1;
+
+  useEffect(() => {
+    if (defaultTenantId) {
+      setForm((prev) => ({ ...prev, tenantId: defaultTenantId }));
+    }
+  }, [defaultTenantId]);
+  const showDistributorPicker = !lockDistributor && isExecutive && distributors.length > 1;
+  const lockedDistributorName =
+    defaultTenantName ||
+    distributors.find((d) => d.id === form.tenantId)?.name ||
+    "Selected distributor";
 
   function patch(fields) {
     setForm((prev) => ({ ...prev, ...fields }));
@@ -49,7 +79,13 @@ function AddLabModal({ distributors, defaultTenantId, onClose, onCreated }) {
     setError("");
     setSaving(true);
     try {
-      const res = await createLabWrite(form);
+      const res = await createLabWrite({
+        ...form,
+        homeTenantId,
+        distributorContextTenantId: distributorContextTenantId || (lockDistributor ? form.tenantId : ""),
+        selectedDistributorTenantId: distributorContextTenantId || form.tenantId,
+        forbidHomeTenant: lockDistributor && Boolean(distributorContextTenantId || form.tenantId),
+      });
       if (!res?.success) {
         throw new Error(res?.error || "Failed to create lab");
       }
@@ -75,13 +111,30 @@ function AddLabModal({ distributors, defaultTenantId, onClose, onCreated }) {
           </Button>
         </div>
         <div className="space-y-2 text-sm">
+          {lockDistributor ? (
+            <div className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs">
+              <p className="font-semibold text-indigo-900">Creating lab under:</p>
+              <p className="text-indigo-800">{lockedDistributorName}</p>
+            </div>
+          ) : null}
           <Input
             placeholder="Lab name *"
             value={form.labName}
             onChange={(e) => patch({ labName: e.target.value })}
             required
           />
-          {showDistributorPicker ? (
+          {lockDistributor ? (
+            <label className="block text-xs text-slate-600">
+              Distributor
+              <input
+                type="text"
+                className="mt-1 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+                value={lockedDistributorName}
+                readOnly
+                aria-readonly="true"
+              />
+            </label>
+          ) : showDistributorPicker ? (
             <select
               className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
               value={form.tenantId}
@@ -216,6 +269,7 @@ function normalizeLab(lab) {
   });
 
   return {
+    tenantId: lab.tenantId || lab.tenant_id || "",
     labId: lab.labId || "",
     labName: lab.labName || "",
     ownerName: lab.ownerName || "",
@@ -260,6 +314,7 @@ function CreditBadge({ status }) {
 }
 
 export default function LabsPage({ currentUser, authToken }) {
+  const { homeTenantId, viewTenantId, readOnly, isExecutive, syncFromStorage } = useTenantView();
   const [labs, setLabs] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -268,9 +323,45 @@ export default function LabsPage({ currentUser, authToken }) {
   const [showAddLab, setShowAddLab] = useState(false);
   const [distributors, setDistributors] = useState([]);
   const [msg, setMsg] = useState("");
+  const [labContext, setLabContext] = useState(() => readDistributorLabContext());
+  const [lastCreatedLab, setLastCreatedLab] = useState(null);
 
   const canAddLab =
     currentUser?.role === ROLES.EXECUTIVE || currentUser?.role === ROLES.ADMIN;
+
+  const selectedDistributorTenantId = useMemo(() => {
+    const ctxId = str(labContext?.tenantId);
+    const viewId = str(viewTenantId);
+    const homeId = str(homeTenantId);
+    if (ctxId && ctxId !== homeId) return ctxId;
+    if (readOnly && viewId && viewId !== homeId) return viewId;
+    return "";
+  }, [labContext, viewTenantId, homeTenantId, readOnly]);
+
+  const selectedDistributorName = useMemo(() => {
+    if (labContext?.tenantName) return labContext.tenantName;
+    return distributors.find((d) => d.id === selectedDistributorTenantId)?.name || "";
+  }, [labContext, distributors, selectedDistributorTenantId]);
+
+  const lockDistributor = useMemo(() => {
+    if (currentUser?.role === ROLES.ADMIN) return true;
+    if (!selectedDistributorTenantId) return false;
+    return Boolean(labContext?.locked || readOnly);
+  }, [currentUser?.role, selectedDistributorTenantId, labContext?.locked, readOnly]);
+
+  usePredatorModuleValidation(
+    "Lab Portal",
+    currentUser,
+    {
+      labsPage: true,
+      homeTenantId,
+      selectedDistributorTenantId,
+      distributorContextLocked: lockDistributor,
+      lastCreatedLabName: lastCreatedLab?.labName || "",
+      lastCreatedTenantId: lastCreatedLab?.tenantId || "",
+    },
+    Boolean(canAddLab)
+  );
 
   const loadLabs = useCallback(async () => {
     try {
@@ -305,6 +396,17 @@ export default function LabsPage({ currentUser, authToken }) {
   }, [authToken, currentUser, loadLabs]);
 
   useEffect(() => {
+    syncFromStorage?.();
+    const ctx = readDistributorLabContext();
+    setLabContext(ctx);
+    if (ctx?.openAddLab) {
+      setShowAddLab(true);
+      setDistributorLabContext({ ...ctx, openAddLab: false });
+      setLabContext({ ...ctx, openAddLab: false });
+    }
+  }, [syncFromStorage]);
+
+  useEffect(() => {
     if (!canAddLab) return;
     async function loadDistributors() {
       try {
@@ -335,8 +437,13 @@ export default function LabsPage({ currentUser, authToken }) {
     if (currentUser?.role === ROLES.AGENT) {
       return filterLabsForUser(labs, currentUser);
     }
+    if (selectedDistributorTenantId) {
+      return labs.filter(
+        (lab) => str(lab.tenantId) === selectedDistributorTenantId
+      );
+    }
     return labs;
-  }, [labs, currentUser]);
+  }, [labs, currentUser, selectedDistributorTenantId]);
 
   const filteredLabs = useMemo(() => {
     if (creditFilter === "ALL") return visibleLabs;
@@ -370,9 +477,8 @@ export default function LabsPage({ currentUser, authToken }) {
   }
 
   const defaultTenantId =
-    currentUser?.role === ROLES.ADMIN
-      ? currentUser?.tenantId
-      : distributors[0]?.id || currentUser?.tenantId || "";
+    selectedDistributorTenantId ||
+    (currentUser?.role === ROLES.ADMIN ? currentUser?.tenantId : "");
 
   return (
     <div className="space-y-6">
@@ -382,8 +488,15 @@ export default function LabsPage({ currentUser, authToken }) {
           <p className="text-sm text-muted-foreground">
             {currentUser?.role === "agent"
               ? "Only labs assigned to this logged-in agent are visible."
-              : "Lab master, assignments, collections visibility, revenue snapshot, and credit risk."}
+              : selectedDistributorTenantId
+                ? `Showing labs for ${selectedDistributorName || "selected distributor"} only.`
+                : "Lab master, assignments, collections visibility, revenue snapshot, and credit risk."}
           </p>
+          {selectedDistributorTenantId && lockDistributor ? (
+            <p className="mt-1 text-xs font-medium text-indigo-700">
+              Distributor context: {selectedDistributorName || selectedDistributorTenantId}
+            </p>
+          ) : null}
         </div>
         {canAddLab ? (
           <Button type="button" size="sm" onClick={() => setShowAddLab(true)}>
@@ -398,9 +511,30 @@ export default function LabsPage({ currentUser, authToken }) {
         <AddLabModal
           distributors={distributors}
           defaultTenantId={defaultTenantId}
+          defaultTenantName={selectedDistributorName}
+          lockDistributor={lockDistributor && Boolean(defaultTenantId)}
+          homeTenantId={homeTenantId}
+          distributorContextTenantId={selectedDistributorTenantId}
+          isExecutive={isExecutive}
           onClose={() => setShowAddLab(false)}
           onCreated={(data) => {
-            setMsg(`Lab created · ${data?.labName || data?.labId}`);
+            setLastCreatedLab({
+              labName: data?.labName,
+              tenantId: data?.tenantId,
+              labId: data?.labId,
+            });
+            if (selectedDistributorTenantId) {
+              setDistributorLabContext({
+                tenantId: selectedDistributorTenantId,
+                tenantName: selectedDistributorName,
+                homeTenantId,
+                locked: true,
+                openAddLab: false,
+                source: labContext?.source || "labs",
+              });
+              setLabContext(readDistributorLabContext());
+            }
+            setMsg(`Lab created under ${selectedDistributorName || data?.tenantId} · ${data?.labName || data?.labId}`);
             void loadLabs();
           }}
         />

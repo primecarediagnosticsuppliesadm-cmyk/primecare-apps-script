@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, PageSkeleton } from "@/components/ux";
 import { useTenantView } from "@/context/TenantViewContext.jsx";
-import { setTenantViewContext } from "@/tenant/tenantFoundationStore.js";
+import { openLabsForDistributor, setTenantViewContext } from "@/tenant/tenantFoundationStore.js";
 import {
   loadDistributorWorkspaceBundle,
   resolveDistributorWorkspace,
@@ -113,6 +113,18 @@ export default function DistributorManagementPage({ currentUser = null, setActiv
     if (action.id === "open_tenant" && workspace?.profile.tenantId) {
       setViewTenant(workspace.profile.tenantId);
       setActivePage("tenantManagement");
+      return;
+    }
+    if (action.page === "labs" && workspace?.profile?.tenantId) {
+      openLabsForDistributor({
+        tenantId: workspace.profile.tenantId,
+        tenantName: workspace.profile.name,
+        homeTenantId: bundle?.homeTenantId || homeTenantId,
+        openAddLab: action.id === "add_lab",
+        source: "management",
+        locked: workspace.profile.tenantId !== (bundle?.homeTenantId || homeTenantId),
+      });
+      setActivePage("labs");
       return;
     }
     setActivePage(action.page);

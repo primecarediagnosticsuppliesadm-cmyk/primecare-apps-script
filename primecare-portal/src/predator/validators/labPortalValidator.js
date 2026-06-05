@@ -2,9 +2,14 @@ import { getLabRecentOrdersRead } from "@/api/primecareSupabaseApi.js";
 import { supabase } from "@/api/supabaseClient.js";
 import { getMenuForRole } from "@/config/menuConfig.js";
 import { ROLES } from "@/config/roles.js";
+import { readDistributorLabContext } from "@/tenant/tenantFoundationStore.js";
 import { labIdKey } from "@/utils/labId.js";
 import { createPredatorEntry, summarizePredatorEntries } from "@/predator/predatorSchema.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
+
+function str(v) {
+  return String(v ?? "").trim();
+}
 
 const LAB_MENU_KEYS = new Set(["labOrders", "labAccount", "notifications"]);
 const FORBIDDEN_LAB_MENU_KEYS = new Set([
@@ -25,7 +30,7 @@ const FORBIDDEN_LAB_MENU_KEYS = new Set([
  * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} params.ctx
  * @param {object|null} [params.rendered]
  */
-async function validateExecutiveLabsRegistry(ctx, entries) {
+async function validateExecutiveLabsRegistry(ctx, entries, rendered = null) {
   if (ctx.role !== ROLES.EXECUTIVE && ctx.role !== ROLES.ADMIN) {
     return;
   }
@@ -141,13 +146,112 @@ async function validateExecutiveLabsRegistry(ctx, entries) {
       userId: ctx.userId,
     })
   );
+
+  const arTenantMismatch = arRows.filter((ar) => {
+    const match = labs.find(
+      (lab) =>
+        labIdKey(lab.lab_id) === labIdKey(ar.lab_id) &&
+        str(lab.tenant_id) === str(ar.tenant_id)
+    );
+    return labIdKey(ar.lab_id) && !match;
+  });
+
+  entries.push(
+    createPredatorEntry({
+      status: arTenantMismatch.length === 0 ? "PASS" : "FAIL",
+      module: "Lab Portal",
+      step: "ar_credit_control.same_tenant_as_lab",
+      expected: "AR credit_control.tenant_id matches labs.tenant_id per lab_id",
+      actual: { mismatchCount: arTenantMismatch.length },
+      rootCauseGuess:
+        arTenantMismatch.length > 0
+          ? "AR row tenant_id diverges from labs row"
+          : "AR and labs share tenant_id",
+      severity: arTenantMismatch.length > 0 ? "critical" : "low",
+      tenantId: ctx.tenantId,
+      role: ctx.role,
+      userId: ctx.userId,
+    })
+  );
+
+  const labCtx = readDistributorLabContext();
+  const homeTenantId = str(rendered?.homeTenantId || labCtx?.homeTenantId || ctx.tenantId);
+  const selectedDistributorTenantId = str(
+    rendered?.selectedDistributorTenantId || labCtx?.tenantId
+  );
+  const lastCreatedLabName = str(rendered?.lastCreatedLabName);
+  const lastCreatedTenantId = str(rendered?.lastCreatedTenantId);
+
+  if (selectedDistributorTenantId && homeTenantId && selectedDistributorTenantId !== homeTenantId) {
+    const leakedToHome =
+      lastCreatedTenantId === homeTenantId ||
+      (lastCreatedLabName &&
+        labs.some(
+          (lab) =>
+            str(lab.lab_name) === lastCreatedLabName &&
+            str(lab.tenant_id) === homeTenantId
+        ));
+
+    entries.push(
+      createPredatorEntry({
+        status: leakedToHome ? "FAIL" : "PASS",
+        module: "Lab Portal",
+        step: "labs.no_home_tenant_leakage",
+        expected: "Distributor-context lab create must not use home tenant_id",
+        actual: {
+          selectedDistributorTenantId,
+          homeTenantId,
+          lastCreatedTenantId: lastCreatedTenantId || null,
+          lastCreatedLabName: lastCreatedLabName || null,
+        },
+        rootCauseGuess: leakedToHome
+          ? "Lab created under PrimeCare HQ instead of selected distributor"
+          : "No HQ tenant leakage detected for distributor lab context",
+        severity: leakedToHome ? "critical" : "low",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    if (lastCreatedLabName || lastCreatedTenantId) {
+      const createdUnderSelected =
+        lastCreatedTenantId === selectedDistributorTenantId ||
+        labs.some(
+          (lab) =>
+            str(lab.lab_name) === lastCreatedLabName &&
+            str(lab.tenant_id) === selectedDistributorTenantId
+        );
+
+      entries.push(
+        createPredatorEntry({
+          status: createdUnderSelected ? "PASS" : "FAIL",
+          module: "Lab Portal",
+          step: "labs.created_under_selected_distributor",
+          expected: "New lab tenant_id equals selected distributor tenant",
+          actual: {
+            selectedDistributorTenantId,
+            lastCreatedTenantId: lastCreatedTenantId || null,
+            lastCreatedLabName: lastCreatedLabName || null,
+          },
+          rootCauseGuess: createdUnderSelected
+            ? "Lab created under selected distributor tenant"
+            : "Lab tenant_id does not match selected distributor",
+          severity: createdUnderSelected ? "low" : "critical",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
+  }
 }
 
 export async function validateLabPortalModule({ ctx, rendered = null }) {
   return predatorTrace("Lab Portal", "validation.full", async () => {
     const entries = [];
 
-    await validateExecutiveLabsRegistry(ctx, entries);
+    await validateExecutiveLabsRegistry(ctx, entries, rendered);
 
     if (ctx.role !== ROLES.LAB) {
       entries.push(

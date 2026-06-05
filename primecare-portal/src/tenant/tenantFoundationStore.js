@@ -2,9 +2,12 @@
 export const TENANT_REGISTRY_STORAGE_KEY = "primecare_tenant_registry_v1";
 /** Executive read-only view context (no impersonation). */
 export const TENANT_VIEW_STORAGE_KEY = "primecare_tenant_view_v1";
+/** Distributor-scoped Add Lab flow (Launch / Management / Workspace). */
+export const DISTRIBUTOR_LAB_CONTEXT_KEY = "primecare_distributor_lab_context_v1";
 
 const REGISTRY_KEY = TENANT_REGISTRY_STORAGE_KEY;
 const VIEW_KEY = TENANT_VIEW_STORAGE_KEY;
+const LAB_CONTEXT_KEY = DISTRIBUTOR_LAB_CONTEXT_KEY;
 const MAX_REGISTRY_ROWS = 50;
 
 /** Older builds did not use a separate key; kept for one-time migration if added later. */
@@ -121,4 +124,74 @@ export function setTenantViewContext(viewTenantId, homeTenantId) {
 
 export function clearTenantViewToHome(homeTenantId) {
   setTenantViewContext(homeTenantId, homeTenantId);
+}
+
+/**
+ * @typedef {Object} DistributorLabContext
+ * @property {string} tenantId - Selected distributor tenant (not HQ).
+ * @property {string} [tenantName]
+ * @property {string} [homeTenantId]
+ * @property {boolean} [locked]
+ * @property {boolean} [openAddLab]
+ * @property {string} [source]
+ */
+
+/**
+ * @returns {DistributorLabContext|null}
+ */
+export function readDistributorLabContext() {
+  if (typeof window === "undefined") return null;
+  const raw = safeParse(window.localStorage.getItem(LAB_CONTEXT_KEY), null);
+  if (!raw?.tenantId) return null;
+  return raw;
+}
+
+/** @param {DistributorLabContext} ctx */
+export function setDistributorLabContext(ctx) {
+  if (typeof window === "undefined" || !ctx?.tenantId) return;
+  const existing = readDistributorLabContext();
+  window.localStorage.setItem(
+    LAB_CONTEXT_KEY,
+    JSON.stringify({
+      tenantId: ctx.tenantId,
+      tenantName: ctx.tenantName || existing?.tenantName || "",
+      homeTenantId: ctx.homeTenantId || existing?.homeTenantId || "",
+      locked: ctx.locked !== false,
+      openAddLab: Boolean(ctx.openAddLab),
+      source: ctx.source || existing?.source || "distributor",
+      updatedAt: new Date().toISOString(),
+    })
+  );
+}
+
+export function clearDistributorLabContext() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(LAB_CONTEXT_KEY);
+}
+
+/**
+ * Set executive view + lab context, then caller navigates to Labs page.
+ */
+export function openLabsForDistributor({
+  tenantId,
+  tenantName = "",
+  homeTenantId = "",
+  openAddLab = false,
+  source = "distributor",
+  locked = true,
+}) {
+  const id = String(tenantId || "").trim();
+  const home = String(homeTenantId || "").trim();
+  if (!id) return;
+  if (home) {
+    setTenantViewContext(id, home);
+  }
+  setDistributorLabContext({
+    tenantId: id,
+    tenantName,
+    homeTenantId: home,
+    openAddLab,
+    locked: locked && id !== home,
+    source,
+  });
 }
