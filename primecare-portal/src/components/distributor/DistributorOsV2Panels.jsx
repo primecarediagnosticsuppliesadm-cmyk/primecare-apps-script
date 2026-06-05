@@ -8,8 +8,9 @@ import {
   lifecycleStatusLabel,
   lifecycleStatusVariant,
 } from "@/distributor/distributorLifecycleEngine.js";
+import { buildDistributorStageModel } from "@/distributor/distributorStageEngine.js";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, TrendingUp } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Circle, TrendingUp, XCircle } from "lucide-react";
 
 const HEALTH_VARIANT = { Healthy: "success", Watch: "warning", Risk: "danger" };
 
@@ -253,6 +254,74 @@ export function LifecycleActionsPanel({ lifecycleStatus, onAction, busy = false 
           {lifecycleActionLabel(action)}
         </Button>
       ))}
+    </div>
+  );
+}
+
+export function DistributorStageProgressBar({
+  distributorRow = null,
+  catalogBundle = null,
+  snapshot = null,
+  onNavigateTab,
+}) {
+  const model = buildDistributorStageModel({ distributorRow, catalogBundle, snapshot });
+
+  return (
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase text-slate-500">Distributor stage</p>
+        <StatusBadge variant="neutral" label={model.currentStageLabel} />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1">
+        {model.stages.map((stage, index) => (
+          <React.Fragment key={stage.id}>
+            <div
+              className={cn(
+                "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide",
+                stage.state === "complete" && "bg-emerald-100 text-emerald-800",
+                stage.state === "current" && "bg-indigo-600 text-white",
+                stage.state === "upcoming" && "bg-slate-100 text-slate-500"
+              )}
+            >
+              {stage.label}
+            </div>
+            {index < model.stages.length - 1 ? (
+              <span
+                className={cn(
+                  "hidden h-px w-4 sm:block",
+                  stage.state === "complete" ? "bg-emerald-300" : "bg-slate-200"
+                )}
+              />
+            ) : null}
+          </React.Fragment>
+        ))}
+      </div>
+
+      <ul className="grid gap-1.5 sm:grid-cols-2">
+        {model.checklist.map((item) => (
+          <li key={item.id}>
+            <button
+              type="button"
+              onClick={() => onNavigateTab?.(item.tab)}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs transition-colors hover:bg-slate-50",
+                item.pass ? "border-emerald-200 bg-emerald-50/50" : "border-red-200 bg-red-50/40"
+              )}
+            >
+              {item.pass ? (
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+              ) : (
+                <XCircle className="h-3.5 w-3.5 shrink-0 text-red-500" />
+              )}
+              <span className={cn("font-medium", item.pass ? "text-emerald-900" : "text-red-900")}>
+                {item.label}
+              </span>
+              <Circle className="ml-auto h-2.5 w-2.5 shrink-0 text-slate-300" />
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

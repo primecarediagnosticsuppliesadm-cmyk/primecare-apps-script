@@ -14,14 +14,20 @@ import { RefreshCw, Plus } from "lucide-react";
 export default function DistributorCatalogPage({
   currentUser = null,
   distributorScope = null,
+  selectedDistributorTenantId = "",
+  distributorRow = null,
+  onCatalogChanged = null,
   embedded = false,
 }) {
-  const tenantId = distributorScope?.tenantId || "";
+  const tenantId =
+    selectedDistributorTenantId || distributorScope?.tenantId || "";
   const homeTenantId = distributorScope?.homeTenantId || currentUser?.tenantId || "";
   const [loading, setLoading] = useState(true);
   const [bundle, setBundle] = useState(null);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const rowOptions = { distributorRow: distributorRow || bundle?.distributorRow };
 
   const load = useCallback(async () => {
     if (!tenantId) {
@@ -31,7 +37,9 @@ export default function DistributorCatalogPage({
     }
     try {
       setLoading(true);
-      const data = await loadDistributorCatalogBundle(tenantId, homeTenantId);
+      const data = await loadDistributorCatalogBundle(tenantId, homeTenantId, {
+        distributorRow,
+      });
       setBundle(data);
     } catch (err) {
       console.error(err);
@@ -40,7 +48,7 @@ export default function DistributorCatalogPage({
     } finally {
       setLoading(false);
     }
-  }, [tenantId, homeTenantId]);
+  }, [tenantId, homeTenantId, distributorRow]);
 
   useEffect(() => {
     void load();
@@ -53,7 +61,7 @@ export default function DistributorCatalogPage({
       const result = await assignMasterProductsToDistributor(
         tenantId,
         productId ? [productId] : [],
-        { fallbackTenant: bundle?.registryRow }
+        rowOptions
       );
       if (!result.ok) {
         setMsg(result.error || "Assignment failed");
@@ -65,6 +73,7 @@ export default function DistributorCatalogPage({
           : `Assigned ${result.assignedCount} product(s) from HQ master catalog`
       );
       await load();
+      await onCatalogChanged?.(result);
     } catch (err) {
       setMsg(err?.message || "Assignment failed");
     } finally {
@@ -74,18 +83,24 @@ export default function DistributorCatalogPage({
 
   async function handleUnassign(productId) {
     setBusy(true);
-    const result = await unassignDistributorCatalogProduct(tenantId, productId);
+    const result = await unassignDistributorCatalogProduct(tenantId, productId, rowOptions);
     setMsg(result.ok ? "Product removed from distributor catalog" : result.error);
     await load();
+    if (result.ok) await onCatalogChanged?.(result);
     setBusy(false);
   }
 
   async function handlePriceSave(productId, sellingPrice, currentStock) {
     setBusy(true);
-    await updateDistributorCatalogItem(tenantId, productId, {
-      sellingPrice: Number(sellingPrice),
-      currentStock: Number(currentStock),
-    });
+    await updateDistributorCatalogItem(
+      tenantId,
+      productId,
+      {
+        sellingPrice: Number(sellingPrice),
+        currentStock: Number(currentStock),
+      },
+      rowOptions
+    );
     setMsg("Pricing and inventory updated");
     await load();
     setBusy(false);
@@ -109,7 +124,7 @@ export default function DistributorCatalogPage({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-xs font-semibold text-slate-700">
-            Catalog for {distributorScope?.tenantName || tenantId}
+            Catalog for {distributorScope?.tenantName || distributorRow?.name || tenantId}
           </p>
           <p className="text-[11px] text-slate-500">
             Assign from HQ master only · distributor-specific pricing and inventory

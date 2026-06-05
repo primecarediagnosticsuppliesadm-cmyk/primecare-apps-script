@@ -38,6 +38,7 @@ import DistributorCreateWizard from "@/components/distributor/DistributorCreateW
 import {
   BillingPanel,
   DashboardPanel,
+  DistributorStageProgressBar,
   LifecycleActionsPanel,
   OperationRestrictionBanner,
   PerformancePanel,
@@ -199,9 +200,10 @@ export default function DistributorOsPage({
       return;
     }
     try {
+      const distributorRow = enrichedRow || selectedRow;
       const [data, catalog] = await Promise.all([
         loadDistributorOsSnapshot(currentUser, scope.tenantId),
-        loadDistributorCatalogBundle(scope.tenantId, effectiveHomeId),
+        loadDistributorCatalogBundle(scope.tenantId, effectiveHomeId, { distributorRow }),
       ]);
       setSnapshot(data);
       setCatalogBundle(catalog);
@@ -210,7 +212,12 @@ export default function DistributorOsPage({
       setSnapshot(null);
       setCatalogBundle(null);
     }
-  }, [currentUser, scope?.tenantId, effectiveHomeId]);
+  }, [currentUser, scope?.tenantId, effectiveHomeId, enrichedRow, selectedRow]);
+
+  const handleCatalogChanged = useCallback(async () => {
+    await loadSnapshot();
+    await loadPortfolio();
+  }, [loadSnapshot, loadPortfolio]);
 
   useEffect(() => {
     const presetTab = consumeDistributorOsTabPreset();
@@ -421,6 +428,12 @@ export default function DistributorOsPage({
             />
           </div>
           {lifecycleMsg ? <p className="text-xs text-slate-600">{lifecycleMsg}</p> : null}
+          <DistributorStageProgressBar
+            distributorRow={enrichedRow || selectedRow}
+            catalogBundle={catalogBundle}
+            snapshot={snapshot}
+            onNavigateTab={changeTab}
+          />
           <OperationRestrictionBanner scope={scope} registryRow={enrichedRow} />
         </div>
       ) : (
@@ -457,6 +470,12 @@ export default function DistributorOsPage({
         {tab === "overview" ? (
           scope ? (
             <div className="space-y-3">
+              <DistributorStageProgressBar
+                distributorRow={enrichedRow || selectedRow}
+                catalogBundle={catalogBundle}
+                snapshot={snapshot}
+                onNavigateTab={changeTab}
+              />
               <PerformancePanel performance={selectedPerformance} billing={selectedBilling} />
               {selectedPerformance?.contractExpiryLabel ? (
                 <div className="flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -491,6 +510,9 @@ export default function DistributorOsPage({
             <DistributorCatalogPage
               currentUser={currentUser}
               distributorScope={scope}
+              selectedDistributorTenantId={scope.tenantId}
+              distributorRow={enrichedRow || selectedRow}
+              onCatalogChanged={handleCatalogChanged}
               embedded
             />
           ) : (

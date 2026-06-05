@@ -8,12 +8,49 @@ import {
   removeDistributorCatalogItem,
   updateDistributorCatalogPricing,
 } from "@/catalog/distributorCatalogEngine.js";
+import { markProvisioningMilestone } from "@/distributor/distributorProvisioningData.js";
 import { patchDurableTenantMetadata } from "@/tenant/durableTenantStore.js";
 import { getRegistryTenant, upsertRegistryTenant } from "@/tenant/tenantFoundationStore.js";
 import { supabase } from "@/api/supabaseClient.js";
 
 function str(v) {
   return String(v ?? "").trim();
+}
+
+/**
+ * Resolve distributor tenant from Distributor OS scope — never infer from global HQ view.
+ */
+export function resolveDistributorRow(tenantId, distributorRow = null) {
+  const id = str(tenantId);
+  if (!id) return null;
+
+  const fromRegistry = getRegistryTenant(id);
+  if (fromRegistry) return fromRegistry;
+
+  const fallback = distributorRow || null;
+  const fallbackId = str(fallback?.id ?? fallback?.tenantId);
+  if (!fallback || fallbackId !== id) return null;
+
+  const normalized = {
+    id: fallbackId,
+    tenantId: fallbackId,
+    name: fallback.name || fallback.config?.companyName || "Distributor",
+    status: fallback.status || "PENDING",
+    tenantCode: fallback.tenantCode,
+    config: { ...(fallback.config || {}) },
+    provisioning: { ...(fallback.provisioning || {}) },
+    metrics: { ...(fallback.metrics || {}) },
+    source: fallback.source || (fallback.durable ? "database" : "registry"),
+    durable: Boolean(fallback.durable || fallback.source === "database"),
+    persistenceStatus: fallback.persistenceStatus,
+    persistenceLabel: fallback.persistenceLabel,
+    lastIsolationPass: fallback.lastIsolationPass,
+    isolationChecks: fallback.isolationChecks,
+    isHome: Boolean(fallback.isHome),
+  };
+
+  upsertRegistryTenant(normalized);
+  return getRegistryTenant(id) || normalized;
 }
 
 async function syncDistributorCatalogToSupabase(distributorTenantId, items = []) {
@@ -65,13 +102,29 @@ function buildConfigPatch(row, items) {
   };
 }
 
-export async function loadDistributorCatalogBundle(distributorTenantId, homeTenantId) {
+function persistDistributorCatalog(row, config, tenantId) {
+  const now = new Date().toISOString();
+  const updated = {
+    ...row,
+    id: tenantId,
+    tenantId,
+    config,
+    updatedAt: now,
+  };
+  upsertRegistryTenant(updated);
+  return updated;
+}
+
+export async function loadDistributorCatalogBundle(
+  distributorTenantId,
+  homeTenantId,
+  options = {}
+) {
   const id = str(distributorTenantId);
   const home = str(homeTenantId);
-  const [master, row] = await Promise.all([
-    loadMasterCatalog(),
-    Promise.resolve(getRegistryTenant(id)),
-  ]);
+  const row = resolveDistributorRow(id, options.distributorRow);
+
+  const [master] = await Promise.all([loadMasterCatalog()]);
 
   const assignedItems = readDistributorCatalogItems(row?.config || {});
   const model = buildDistributorCatalogModel({
@@ -81,7 +134,7 @@ export async function loadDistributorCatalogBundle(distributorTenantId, homeTena
     homeTenantId: home,
   });
 
-  return { master, registryRow: row, ...model };
+  return { master, registryRow: row, distributorRow: row, ...model };
 }
 
 export async function assignMasterProductsToDistributor(
@@ -91,6 +144,11 @@ export async function assignMasterProductsToDistributor(
 ) {
   const id = str(distributorTenantId);
   if (!id) return { ok: false, error: "Missing distributor tenant id" };
+
+  const row = resolveDistributorRow(id, options.distributorRow || options.fallbackTenant);
+  if (!row) {
+    return { ok: false, error: "Distributor not found — select a distributor in Distributor OS" };
+  }
 
   const master = await loadMasterCatalog();
   const masterMap = new Map((master.items || []).map((p) => [str(p.productId), p]));
@@ -102,22 +160,31 @@ export async function assignMasterProductsToDistributor(
     return { ok: false, error: "No HQ master products available to assign" };
   }
 
-  let row = getRegistryTenant(id) || options.fallbackTenant;
-  if (!row) return { ok: false, error: "Distributor not found" };
-
   const existing = readDistributorCatalogItems(row.config || {});
   const items = mergeAssignedItems(existing, toAdd, id);
   const config = buildConfigPatch(row, items);
 
-  upsertRegistryTenant({ ...row, config, updatedAt: new Date().toISOString() });
+  persistDistributorCatalog(row, config, id);
+  markProvisioningMilestone(id, "catalog_configured");
 
   let durablePatchOk = true;
   if (row.durable || row.source === "database") {
+    const fresh = getRegistryTenant(id) || { ...row, config };
     const patch = await patchDurableTenantMetadata(id, {
-      config,
-      provisioning: row.provisioning || {},
+      config: fresh.config || config,
+      provisioning: fresh.provisioning || row.provisioning || {},
     });
     durablePatchOk = patch.ok;
+    if (patch.ok) {
+      upsertRegistryTenant({
+        ...fresh,
+        config: fresh.config || config,
+        syncFailed: false,
+        lastSyncError: null,
+        durable: true,
+        source: "database",
+      });
+    }
   }
 
   const sync = await syncDistributorCatalogToSupabase(id, items);
@@ -126,46 +193,61 @@ export async function assignMasterProductsToDistributor(
     ok: isCatalogAssigned(config),
     assignedCount: catalogAssignedCount(config),
     items,
+    config,
     durablePatchOk,
     supabaseSync: sync,
+    row: getRegistryTenant(id),
   };
 }
 
 export async function updateDistributorCatalogItem(
   distributorTenantId,
   productId,
-  patch = {}
+  patch = {},
+  options = {}
 ) {
   const id = str(distributorTenantId);
-  const row = getRegistryTenant(id);
+  const row = resolveDistributorRow(id, options.distributorRow);
   if (!row) return { ok: false, error: "Distributor not found" };
 
   const items = updateDistributorCatalogPricing(readDistributorCatalogItems(row.config), productId, patch);
   const config = buildConfigPatch(row, items);
-  upsertRegistryTenant({ ...row, config });
+  persistDistributorCatalog(row, config, id);
 
   if (row.durable || row.source === "database") {
     await patchDurableTenantMetadata(id, { config, provisioning: row.provisioning || {} });
   }
-  await syncDistributorCatalogToSupabase(id, items.filter((i) => str(i.productId) === str(productId)));
+  await syncDistributorCatalogToSupabase(
+    id,
+    items.filter((i) => str(i.productId) === str(productId))
+  );
 
-  return { ok: true, items, config };
+  return { ok: true, items, config, row: getRegistryTenant(id) };
 }
 
-export async function unassignDistributorCatalogProduct(distributorTenantId, productId) {
+export async function unassignDistributorCatalogProduct(
+  distributorTenantId,
+  productId,
+  options = {}
+) {
   const id = str(distributorTenantId);
-  const row = getRegistryTenant(id);
+  const row = resolveDistributorRow(id, options.distributorRow);
   if (!row) return { ok: false, error: "Distributor not found" };
 
   const items = removeDistributorCatalogItem(readDistributorCatalogItems(row.config), productId);
   const config = buildConfigPatch(row, items);
-  upsertRegistryTenant({ ...row, config });
+  persistDistributorCatalog(row, config, id);
 
   if (row.durable || row.source === "database") {
     await patchDurableTenantMetadata(id, { config, provisioning: row.provisioning || {} });
   }
 
-  return { ok: true, assignedCount: items.length, catalogAssigned: isCatalogAssigned(config) };
+  return {
+    ok: true,
+    assignedCount: items.length,
+    catalogAssigned: isCatalogAssigned(config),
+    row: getRegistryTenant(id),
+  };
 }
 
 /** Quick-assign all HQ master products (replaces legacy standard catalog enable). */
