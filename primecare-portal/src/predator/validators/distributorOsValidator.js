@@ -142,6 +142,37 @@ export async function validateDistributorOsModule({ ctx, rendered = null }) {
       })
     );
 
+    const ledgerSourceOk = billingRows.every((r) => {
+      const ledgerCount = num(r.billingLedgerCount);
+      if (ledgerCount <= 0) return true;
+      return str(r.collectedSource) === "ledger";
+    });
+    entries.push(
+      createPredatorEntry({
+        status: ledgerSourceOk ? "PASS" : "FAIL",
+        module: "Distributor OS",
+        step: "distributor_os.billing_collected_from_ledger",
+        expected: "When ledger rows exist, collected uses ledger sum not config.billingCollected",
+        actual: {
+          ledgerSourceOk,
+          rowsWithLedger: billingRows.filter((r) => num(r.billingLedgerCount) > 0).map((r) => ({
+            distributorId: r.distributorId,
+            billingLedgerCount: r.billingLedgerCount,
+            collected: r.collected,
+            collectedSource: r.collectedSource,
+          })),
+          billingLedgerLoadOk: rendered?.billingLedgerLoadOk,
+        },
+        suggestedFix: ledgerSourceOk
+          ? undefined
+          : "Ensure loadDistributorOsPortfolio passes billingLedgerTotals into buildDistributorBillingRow",
+        severity: ledgerSourceOk ? "low" : "high",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
     const revenueRollup = num(rendered?.totalRevenue);
     const perfRevenueActive = performanceRows
       .filter((r) => r.rankingEligible === true)

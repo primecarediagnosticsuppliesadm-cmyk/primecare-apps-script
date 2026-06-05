@@ -11,6 +11,7 @@ import {
   loadContractsForDistributor,
 } from "@/labContract/labContractStore.js";
 import { countContractsForDistributor } from "@/api/labContractsSupabaseApi.js";
+import { loadBillingLedgerTotalsForDistributors } from "@/api/distributorBillingSupabaseApi.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -55,20 +56,29 @@ export async function loadDistributorOsPortfolio(currentUser, options = {}) {
 
   await ensureLabContractsMigrated();
 
-  await Promise.all(
-    distributors.map(async (d) => {
-      const countRes = await countContractsForDistributor(d.id);
-      if (countRes.ok) {
-        contractCounts[d.id] = countRes.count;
-      } else {
-        const list = await loadContractsForDistributor(d.id, { homeTenantId });
-        contractCounts[d.id] = list.length;
-      }
+  const distributorIds = distributors.map((d) => d.id);
 
-      const agents = await fetchAgentProfilesForTenant(d.id);
-      agentCounts[d.id] = agents.length;
-    })
-  );
+  const [ledgerRes] = await Promise.all([
+    loadBillingLedgerTotalsForDistributors(distributorIds),
+    Promise.all(
+      distributors.map(async (d) => {
+        const countRes = await countContractsForDistributor(d.id);
+        if (countRes.ok) {
+          contractCounts[d.id] = countRes.count;
+        } else {
+          const list = await loadContractsForDistributor(d.id, { homeTenantId });
+          contractCounts[d.id] = list.length;
+        }
+
+        const agents = await fetchAgentProfilesForTenant(d.id);
+        agentCounts[d.id] = agents.length;
+      })
+    ),
+  ]);
+
+  if (!ledgerRes.ok) {
+    console.warn("[distributorOsPortfolio] billing ledger load failed:", ledgerRes.error);
+  }
 
   const portfolio = buildDistributorOsPortfolioModel({
     distributors,
@@ -77,6 +87,9 @@ export async function loadDistributorOsPortfolio(currentUser, options = {}) {
     collections,
     contractCounts,
     agentCounts,
+    billingLedgerTotals: ledgerRes.byDistributor || {},
+    billingLedgerLoadOk: ledgerRes.ok,
+    billingLedgerLoadError: ledgerRes.error || null,
     homeTenantId,
   });
 

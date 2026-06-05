@@ -155,6 +155,54 @@ export async function validateDistributorProvisioningModule({
     const isolationCheck = model.checks.find((c) => c.id === "isolation_verified");
     const labGate = model.checks.find((c) => c.id === "at_least_one_lab");
     const contractGate = model.checks.find((c) => c.id === "contract_configured");
+    const supabaseContractCount = Number(bundle.contractCounts?.[model.distributorId] ?? 0);
+    const gateMatchesSupabase =
+      (supabaseContractCount >= 1 && contractGate?.status === "PASS") ||
+      (supabaseContractCount < 1 && contractGate?.status !== "PASS");
+    entries.push(
+      createPredatorEntry({
+        status: gateMatchesSupabase ? "PASS" : "FAIL",
+        module: "Distributor Provisioning",
+        step: "contract.gate_matches_supabase",
+        expected: "contract_configured PASS iff non-terminated Supabase count >= 1",
+        actual: {
+          supabaseContractCount,
+          gateStatus: contractGate?.status,
+          gateDetail: contractGate?.detail,
+        },
+        suggestedFix: gateMatchesSupabase
+          ? undefined
+          : "Refresh provisioning bundle after contract create; verify lab_contracts row",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const tenantRow = bundle.tenants?.find((t) => t.id === model.distributorId);
+    const configBypass = tenantRow?.config?.contractConfigured === true;
+    const bypassWithoutContracts = configBypass && supabaseContractCount < 1;
+    entries.push(
+      createPredatorEntry({
+        status: bypassWithoutContracts ? "WARN" : "PASS",
+        module: "Distributor Provisioning",
+        step: "contract.config_bypass",
+        expected: "config.contractConfigured without Supabase contracts surfaces WARN, not PASS",
+        actual: {
+          contractConfigured: configBypass,
+          supabaseContractCount,
+          gateStatus: contractGate?.status,
+          bypassActive: Boolean(contractGate?.bypassActive),
+        },
+        suggestedFix: bypassWithoutContracts
+          ? "Create a non-terminated lab contract or clear config.contractConfigured"
+          : undefined,
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
     entries.push(
       createPredatorEntry({
         status: founderModelGates ? "PASS" : "FAIL",

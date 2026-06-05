@@ -16,6 +16,7 @@ import {
   resolveDistributorWorkspace,
 } from "@/distributor/distributorWorkspaceData.js";
 import { loadContractsForDistributor } from "@/labContract/labContractStore.js";
+import { countNonTerminatedContractsForDistributor } from "@/api/labContractsSupabaseApi.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -61,6 +62,7 @@ export async function loadDistributorOsSnapshot(currentUser, scopeTenantId, opti
       orders: [],
       collections: [],
       contracts: [],
+      contractNonTerminatedCount: 0,
       agents: [],
       labIds: new Set(),
     };
@@ -108,7 +110,17 @@ export async function loadDistributorOsSnapshot(currentUser, scopeTenantId, opti
     );
   }
 
-  const contracts = await loadContractsForDistributor(tenantId, { homeTenantId });
+  const [contracts, contractCountRes] = await Promise.all([
+    loadContractsForDistributor(tenantId, { homeTenantId }),
+    countNonTerminatedContractsForDistributor(tenantId),
+  ]);
+  const contractNonTerminatedCount = contractCountRes.ok
+    ? contractCountRes.count
+    : contracts.filter(
+        (c) =>
+          str(c.status).toLowerCase() !== "terminated" &&
+          str(c.status).toLowerCase() !== "expired"
+      ).length;
 
   return {
     homeTenantId: bundle.homeTenantId || homeTenantId,
@@ -118,6 +130,7 @@ export async function loadDistributorOsSnapshot(currentUser, scopeTenantId, opti
     orders,
     collections,
     contracts,
+    contractNonTerminatedCount,
     agents,
     labIds,
     registry: bundle.registry || [],

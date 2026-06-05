@@ -6,6 +6,11 @@ import { CONTRACT_STATUSES } from "@/labContract/labContractTypes.js";
 import { validateContractDates } from "@/labContract/labContractEngine.js";
 import { polishPredatorEntries } from "@/predator/predatorEntryPolish.js";
 import { ROLES } from "@/config/roles.js";
+import { supabase } from "@/api/supabaseClient.js";
+import {
+  countNonTerminatedContractsForDistributor,
+  readLabContractMigrationStatus,
+} from "@/api/labContractsSupabaseApi.js";
 
 const VALID_STATUSES = new Set(Object.values(CONTRACT_STATUSES));
 
@@ -73,6 +78,76 @@ export async function validateLabContractEngineModule({
 
     const { model } = bundle;
     const contracts = model.contracts;
+
+    entries.push(
+      createPredatorEntry({
+        status: supabase ? "PASS" : "FAIL",
+        module: "Lab Contract Engine",
+        step: "persistence.supabase_configured",
+        actual: supabase ? "client ready" : "missing VITE_SUPABASE_URL / anon key",
+        suggestedFix: supabase
+          ? undefined
+          : "Configure Supabase env vars and apply lab_contracts_migration.sql",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const migration = readLabContractMigrationStatus();
+    const pendingLocal =
+      Array.isArray(migration.localRegistryKeys) && migration.localRegistryKeys.length > 0;
+    entries.push(
+      createPredatorEntry({
+        status: migration.done || !pendingLocal ? "PASS" : "WARN",
+        module: "Lab Contract Engine",
+        step: "persistence.migration_status",
+        actual: {
+          done: migration.done,
+          localRegistryKeys: migration.localRegistryKeys?.length ?? 0,
+          summary: migration.summary,
+        },
+        suggestedFix:
+          migration.done || !pendingLocal
+            ? undefined
+            : "Open portal once to run ensureLabContractsMigrated or clear stale local registries",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const probeDistributorId = str(
+      bundle.tenantId || ctx.tenantId || contracts[0]?.distributorId
+    );
+    let supabaseNonTerminatedCount = 0;
+    let countError = null;
+    if (probeDistributorId && supabase) {
+      const countRes = await countNonTerminatedContractsForDistributor(probeDistributorId);
+      supabaseNonTerminatedCount = countRes.ok ? countRes.count : 0;
+      countError = countRes.ok ? null : countRes.error;
+    }
+    entries.push(
+      createPredatorEntry({
+        status:
+          !supabase || !probeDistributorId
+            ? "WARN"
+            : countError
+              ? "FAIL"
+              : "PASS",
+        module: "Lab Contract Engine",
+        step: "persistence.non_terminated_count",
+        expected: "Head count from public.lab_contracts for probe distributor",
+        actual: {
+          distributorId: probeDistributorId || null,
+          count: supabaseNonTerminatedCount,
+          error: countError,
+        },
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
 
     const invalidDates = contracts.filter((c) => !validateContractDates(c));
     entries.push(
@@ -308,6 +383,10 @@ export async function validateLabContractEngineModule({
 
     return finish(entries);
   });
+}
+
+function str(v) {
+  return String(v ?? "").trim();
 }
 
 function num(v) {

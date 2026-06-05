@@ -33,17 +33,74 @@ export function billingModelLabel(model) {
   return BILLING_MODEL_LABELS[model] || model || "—";
 }
 
+export const BILLING_COLLECTED_SOURCES = {
+  LEDGER: "ledger",
+  CONFIG_FALLBACK: "config_fallback",
+  CONFIG_FALLBACK_ERROR: "config_fallback_error",
+};
+
+/**
+ * Resolve collected amount — ledger sum when rows exist; config fallback otherwise.
+ * @param {object} params
+ * @param {object} params.config
+ * @param {number} [params.ledgerSum]
+ * @param {number} [params.ledgerCount]
+ * @param {boolean} [params.ledgerOk]
+ * @param {string|null} [params.lastPaymentDateFromLedger]
+ */
+export function resolveBillingCollected({
+  config = {},
+  ledgerSum = 0,
+  ledgerCount = 0,
+  ledgerOk = true,
+  lastPaymentDateFromLedger = null,
+} = {}) {
+  const configCollected = num(config.billingCollected);
+  const configLastPayment = str(config.billingLastPaymentDate || config.lastPaymentDate) || null;
+
+  if (ledgerOk && ledgerCount > 0) {
+    return {
+      collected: num(ledgerSum),
+      collectedSource: BILLING_COLLECTED_SOURCES.LEDGER,
+      lastPaymentDate: str(lastPaymentDateFromLedger) || configLastPayment || null,
+      billingLedgerCount: ledgerCount,
+    };
+  }
+
+  if (ledgerOk) {
+    return {
+      collected: configCollected,
+      collectedSource: BILLING_COLLECTED_SOURCES.CONFIG_FALLBACK,
+      lastPaymentDate: configLastPayment,
+      billingLedgerCount: 0,
+    };
+  }
+
+  return {
+    collected: configCollected,
+    collectedSource: BILLING_COLLECTED_SOURCES.CONFIG_FALLBACK_ERROR,
+    lastPaymentDate: configLastPayment,
+    billingLedgerCount: 0,
+  };
+}
+
 /**
  * @param {object} params
  * @param {object} params.config - distributor config
  * @param {number} [params.collectionsTotal] - distributor collections volume
  * @param {number} [params.activeLabs] - active lab count
+ * @param {number} [params.collected] - resolved collected (ledger or fallback)
+ * @param {string|null} [params.lastPaymentDate]
+ * @param {string} [params.collectedSource]
  */
 export function calculateDistributorBilling({
   config = {},
   collectionsTotal = 0,
   activeLabs = 0,
   labCount = 0,
+  collected: collectedOverride = null,
+  lastPaymentDate: lastPaymentDateOverride = null,
+  collectedSource = null,
 } = {}) {
   const model = str(config.billingModel || "fixed_monthly");
   const monthlyFee = num(config.monthlyPlatformFee);
@@ -68,7 +125,8 @@ export function calculateDistributorBilling({
   }
 
   const amountDue = fixedComponent + shareComponent + perLabComponent;
-  const collected = num(config.billingCollected);
+  const collected =
+    collectedOverride != null ? num(collectedOverride) : num(config.billingCollected);
   const outstanding = Math.max(0, amountDue - collected);
   const dueDate = str(config.billingDueDate) || defaultBillingDueDate(config);
   const dueDays = dueDate
@@ -99,7 +157,11 @@ export function calculateDistributorBilling({
     outstanding,
     outstandingLabel: formatInr(outstanding),
     dueDate,
-    lastPaymentDate: str(config.billingLastPaymentDate || config.lastPaymentDate) || null,
+    lastPaymentDate:
+      lastPaymentDateOverride != null
+        ? str(lastPaymentDateOverride) || null
+        : str(config.billingLastPaymentDate || config.lastPaymentDate) || null,
+    collectedSource: collectedSource || null,
     overdue,
     paymentStatus,
     breakdown: {
@@ -142,6 +204,7 @@ export function buildDistributorBillingRow(distributorRow, metrics = {}) {
     territory: distributorRow.territorySummary || "—",
     lifecycleStatus,
     ...billing,
+    billingLedgerCount: resolved.billingLedgerCount,
     billingStatusLabel: billingStatus.label,
     billingStatusVariant: billingStatus.variant,
     contractExpiryLabel: expiry.label,

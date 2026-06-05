@@ -112,7 +112,9 @@ export function buildProvisioningChecks(ctx) {
     ctx.isolationChecks?.length > 0
       ? isolationChecksPass(ctx.isolationChecks)
       : ctx.lastIsolationPass === true;
-  const contractCount = num(metrics.contracts ?? ctx.contractCount);
+  const supabaseContractCount = num(
+    ctx.supabaseContractCount ?? metrics.contracts ?? ctx.contractCount
+  );
 
   const checks = [
     {
@@ -180,14 +182,13 @@ export function buildProvisioningChecks(ctx) {
       id: "contract_configured",
       label: "Contract configured",
       required: true,
-      pass:
-        contractCount >= 1 ||
-        num(config.contractCount) >= 1 ||
-        config.contractConfigured === true,
+      pass: supabaseContractCount >= 1,
       detail:
-        contractCount >= 1 || num(config.contractCount) >= 1
-          ? `${contractCount || num(config.contractCount)} contract(s)`
-          : "Add at least one lab contract in Contracts tab",
+        supabaseContractCount >= 1
+          ? `${supabaseContractCount} non-terminated contract(s) in Supabase`
+          : config.contractConfigured === true
+            ? "Config flag set without Supabase contract — add a lab contract"
+            : "Add at least one non-terminated lab contract in Contracts tab",
     },
     {
       id: "distributor_activated",
@@ -232,6 +233,17 @@ export function buildProvisioningChecks(ctx) {
   return checks.map((c) => {
     if (c.comingSoon) {
       return { ...c, status: "WARN" };
+    }
+    if (c.id === "contract_configured") {
+      const hasSupabaseContracts = supabaseContractCount >= 1;
+      const configBypass = config.contractConfigured === true && !hasSupabaseContracts;
+      const status = hasSupabaseContracts ? "PASS" : configBypass ? "WARN" : "FAIL";
+      return {
+        ...c,
+        pass: hasSupabaseContracts,
+        status,
+        bypassActive: configBypass,
+      };
     }
     return {
       ...c,
@@ -690,6 +702,7 @@ export function buildDistributorProvisioningModel(tenant, ctx = {}) {
     lastIsolationPass: tenant.lastIsolationPass,
     agentCount: ctx.agentCount,
     contractCount: ctx.contractCount,
+    supabaseContractCount: ctx.supabaseContractCount ?? ctx.contractCount,
   });
 
   const readinessPct = computeReadinessPercent(checks);

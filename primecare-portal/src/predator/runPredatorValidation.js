@@ -25,6 +25,7 @@ import { validateDistributorOsModule } from "@/predator/validators/distributorOs
 import { validatePrimecareOsModule } from "@/predator/validators/primecareOsValidator.js";
 import { validateCommissionEngineModule } from "@/predator/validators/commissionEngineValidator.js";
 import { validateLabContractEngineModule } from "@/predator/validators/labContractEngineValidator.js";
+import { validateDistributorBillingModule } from "@/predator/validators/distributorBillingValidator.js";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import {
   primePredatorOpsPayload,
@@ -174,6 +175,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         distributorProvisioning,
         commissionEngine,
         labContractEngine,
+        distributorBilling,
       ] = await Promise.all([
         validateOperationsCommandCenterModule({
           ctx,
@@ -248,6 +250,12 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
           rendered: snapshots.labContractEngine ?? null,
           opsPayload,
         }),
+        validateDistributorBillingModule({
+          ctx,
+          currentUser,
+          rendered: snapshots.distributorBilling ?? null,
+          opsPayload,
+        }),
       ]);
 
       modules.push(
@@ -263,7 +271,8 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         storePolishedModule("Distributor Workspace", distributorWorkspace, ctx),
         storePolishedModule("Distributor Provisioning", distributorProvisioning, ctx),
         storePolishedModule("Commission Engine", commissionEngine, ctx),
-        storePolishedModule("Lab Contract Engine", labContractEngine, ctx)
+        storePolishedModule("Lab Contract Engine", labContractEngine, ctx),
+        storePolishedModule("Distributor Billing", distributorBilling, ctx)
       );
 
       clearPredatorOpsPayload();
@@ -430,6 +439,13 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
       break;
     case "Lab Contract Engine":
       result = await validateLabContractEngineModule({
+        ctx,
+        currentUser,
+        rendered: snapshot,
+      });
+      break;
+    case "Distributor Billing":
+      result = await validateDistributorBillingModule({
         ctx,
         currentUser,
         rendered: snapshot,

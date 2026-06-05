@@ -30,9 +30,38 @@ import {
   TIMELINE_LABELS,
 } from "@/distributor/distributorProvisioningEngine.js";
 import { mapTenantToDistributorRegistryRow } from "@/distributor/distributorWorkspaceEngine.js";
+import { countNonTerminatedContractsForDistributor } from "@/api/labContractsSupabaseApi.js";
+import {
+  ensureLabContractsMigrated,
+  loadContractsForDistributor,
+} from "@/labContract/labContractStore.js";
 
 function str(v) {
   return String(v ?? "").trim();
+}
+
+async function loadNonTerminatedContractCounts(tenantIds, homeTenantId) {
+  const counts = {};
+  const ids = [...new Set((tenantIds || []).map((id) => str(id)).filter(Boolean))];
+  if (!ids.length) return counts;
+
+  await ensureLabContractsMigrated();
+
+  await Promise.all(
+    ids.map(async (id) => {
+      const res = await countNonTerminatedContractsForDistributor(id);
+      if (res.ok) {
+        counts[id] = res.count;
+        return;
+      }
+      const list = await loadContractsForDistributor(id, {
+        homeTenantId,
+        nonTerminated: true,
+      });
+      counts[id] = list.length;
+    })
+  );
+  return counts;
 }
 
 export async function loadProvisioningBundle(currentUser, options = {}) {
@@ -89,6 +118,10 @@ export async function loadProvisioningBundle(currentUser, options = {}) {
 
   const distributors = allRows.map(mapTenantToDistributorRegistryRow);
   const dbFetch = await fetchDurableTenants();
+  const contractCounts = await loadNonTerminatedContractCounts(
+    allRows.map((t) => t.id),
+    homeTenantId
+  );
 
   return {
     homeTenantId,
@@ -106,6 +139,7 @@ export async function loadProvisioningBundle(currentUser, options = {}) {
     isolationChecks,
     roleCount,
     agentCount,
+    contractCounts,
   };
 }
 
@@ -235,6 +269,7 @@ export function resolveProvisioningModel(bundle, distributorId) {
 
   const isLive =
     id === bundle.homeTenantId && Boolean(bundle.opsPayload);
+  const supabaseContractCount = num(bundle.contractCounts?.[id]);
 
   return buildDistributorProvisioningModel(
     {
@@ -252,6 +287,8 @@ export function resolveProvisioningModel(bundle, distributorId) {
       isLive,
       roleCount: isLive ? bundle.roleCount : num(tenant.config?.roleCount),
       agentCount: isLive ? bundle.agentCount : num(tenant.metrics?.agents),
+      contractCount: supabaseContractCount,
+      supabaseContractCount,
     }
   );
 }

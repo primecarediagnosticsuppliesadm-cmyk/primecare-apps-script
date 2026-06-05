@@ -125,6 +125,16 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     optional: true,
   },
   {
+    id: "distributor_billing_payments",
+    table: "distributor_billing_payments",
+    label: "Distributor platform billing payments",
+    tenantColumn: "distributor_id",
+    selectColumns: ["distributor_id", "payment_type", "amount", "payment_date"],
+    allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE],
+    scope: "admin_only",
+    optional: true,
+  },
+  {
     id: "visits",
     table: "agent_visits",
     label: "Agent visits",

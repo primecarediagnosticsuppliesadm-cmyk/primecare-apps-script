@@ -316,6 +316,9 @@ export function buildDistributorOsPortfolioModel({
   collections = [],
   contractCounts = {},
   agentCounts = {},
+  billingLedgerTotals = {},
+  billingLedgerLoadOk = true,
+  billingLedgerLoadError = null,
   homeTenantId = "",
 } = {}) {
   const enriched = distributors.map((d) => enrichRegistryRowLifecycle(d));
@@ -343,7 +346,18 @@ export function buildDistributorOsPortfolioModel({
 
   const billingRows = enriched.map((d) => {
     const metrics = computeDistributorMetrics(d.id, { labs, orders, collections });
-    return buildDistributorBillingRow(d, metrics);
+    const ledger = billingLedgerTotals[d.id] || {
+      sum: 0,
+      count: 0,
+      latestPaymentDate: null,
+    };
+    return buildDistributorBillingRow(d, {
+      ...metrics,
+      billingLedgerSum: ledger.sum,
+      billingLedgerCount: ledger.count,
+      billingLedgerOk: billingLedgerLoadOk,
+      billingLastPaymentDate: ledger.latestPaymentDate,
+    });
   });
 
   const dashboard = buildPortfolioDashboard(enriched, performanceRows, billingRows);
@@ -364,5 +378,7 @@ export function buildDistributorOsPortfolioModel({
     totalRevenue,
     totalRevenueAll,
     rankingEligibleCount: rankingRows.length,
+    billingLedgerLoadOk,
+    billingLedgerLoadError,
   };
 }

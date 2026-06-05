@@ -36,7 +36,9 @@ export function buildDistributorStageChecklist({
   const metrics = distributorRow?.metrics || {};
   const labsFromSnapshot = num(snapshot?.labs?.length);
   const effectiveLabCount = labsFromSnapshot > 0 ? labsFromSnapshot : num(metrics.labs);
-  const contractCount = num(snapshot?.contracts?.length);
+  const contractCount = num(
+    snapshot?.contractNonTerminatedCount ?? snapshot?.contracts?.length
+  );
 
   const persistenceStatus = resolvePersistenceStatus(distributorRow || {});
   const durable =
@@ -61,6 +63,7 @@ export function buildDistributorStageChecklist({
     lastIsolationPass: distributorRow?.lastIsolationPass,
     isolationChecks: distributorRow?.isolationChecks,
     contractCount,
+    supabaseContractCount: contractCount,
   });
 
   const checkById = (id) => checks.find((c) => c.id === id);
@@ -68,11 +71,7 @@ export function buildDistributorStageChecklist({
     checkById("isolation_verified")?.status === "PASS" ||
     config.isolationAcknowledged === true;
   const firstLabPass = effectiveLabCount >= 1 || checkById("at_least_one_lab")?.status === "PASS";
-  const contractPass =
-    contractCount > 0 ||
-    num(config.contractCount) > 0 ||
-    config.contractConfigured === true ||
-    checkById("contract_configured")?.status === "PASS";
+  const contractPass = checkById("contract_configured")?.status === "PASS";
 
   const lifecycle = resolveDistributorLifecycleStatus(distributorRow || {});
   const activatedPass =
