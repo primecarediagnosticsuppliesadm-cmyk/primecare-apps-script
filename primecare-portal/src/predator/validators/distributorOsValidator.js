@@ -267,6 +267,22 @@ export async function validateDistributorOsModule({ ctx, rendered = null }) {
       })
     );
 
+    if (str(rendered?.tab) === "commissions") {
+      entries.push(
+        createPredatorEntry({
+          status: rendered?.commissionsReadOnly === true ? "PASS" : "FAIL",
+          module: "Distributor OS",
+          step: "commission_engine.distributor_os_read_only",
+          expected: "Commissions tab is read-only reporting",
+          actual: { commissionsReadOnly: rendered?.commissionsReadOnly === true },
+          severity: rendered?.commissionsReadOnly === true ? "low" : "high",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
+
     if (!scopeValid) return finish(entries);
 
     const lifecycleStatus = str(rendered?.lifecycleStatus);

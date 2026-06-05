@@ -2,6 +2,8 @@ import { createPredatorEntry, summarizePredatorEntries } from "@/predator/predat
 import { predatorTrace } from "@/predator/predatorTiming.js";
 import { resolvePredatorOpsPayload } from "@/predator/predatorOpsPayload.js";
 import { loadCommissionEngineBundle } from "@/commission/commissionData.js";
+import { filterDistributorRegistry } from "@/distributor/distributorOsEngine.js";
+import { loadDistributorWorkspaceBundle } from "@/distributor/distributorWorkspaceData.js";
 import { COMMISSION_PHASE_RULES } from "@/commission/commissionRules.js";
 import { polishPredatorEntries } from "@/predator/predatorEntryPolish.js";
 import { ROLES } from "@/config/roles.js";
@@ -15,6 +17,10 @@ import {
 
 const VALID_STATUS = new Set(["pending", "approved", "paid", "rejected"]);
 const PROBE_PERIOD = "2099-01";
+
+function str(v) {
+  return String(v ?? "").trim();
+}
 
 function finish(entries) {
   const polished = polishPredatorEntries(entries);
@@ -59,15 +65,27 @@ export async function validateCommissionEngineModule({
     }
 
     let bundle;
+    let distributorCount = 0;
     try {
       await resolvePredatorOpsPayload(
         currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId },
         opsPayload
       );
-      bundle = await loadCommissionEngineBundle(
-        currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId },
-        { force: false }
-      );
+      const user = currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId };
+      let scopeTenantId = str(rendered?.selectedDistributorId);
+      if (!scopeTenantId && !rendered?.embedded) {
+        const workspace = await loadDistributorWorkspaceBundle(user).catch(() => ({ registry: [] }));
+        const distributors = filterDistributorRegistry(workspace.registry || [], ctx.tenantId);
+        distributorCount = distributors.length;
+        scopeTenantId = str(distributors[0]?.id);
+      }
+      if (rendered?.embedded) {
+        scopeTenantId = str(rendered?.selectedDistributorId || scopeTenantId);
+      }
+      bundle = await loadCommissionEngineBundle(user, {
+        force: false,
+        scopeTenantId,
+      });
     } catch (err) {
       entries.push(
         createPredatorEntry({
@@ -86,6 +104,55 @@ export async function validateCommissionEngineModule({
     const model = bundle.model;
     const rule = model.rule;
     const migrationStatus = readCommissionMigrationStatus();
+
+    if (rendered?.embedded) {
+      entries.push(
+        createPredatorEntry({
+          status:
+            rendered.readOnly === true && rendered.writeEnabled === false ? "PASS" : "FAIL",
+          module: "Commission Engine",
+          step: "commission_engine.distributor_os_read_only",
+          expected: { readOnly: true, writeEnabled: false },
+          actual: { readOnly: rendered.readOnly, writeEnabled: rendered.writeEnabled },
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    } else {
+      entries.push(
+        createPredatorEntry({
+          status: rendered?.hqWriteSurfaceAvailable === true ? "PASS" : "WARN",
+          module: "Commission Engine",
+          step: "commission_engine.hq_write_surface_available",
+          expected: true,
+          actual: rendered?.hqWriteSurfaceAvailable ?? false,
+          suggestedFix:
+            rendered?.hqWriteSurfaceAvailable === true
+              ? ""
+              : "Open HQ Commission Engine with a distributor selected",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+      entries.push(
+        createPredatorEntry({
+          status: rendered?.selectedDistributorId
+            ? "PASS"
+            : distributorCount > 0
+              ? "FAIL"
+              : "WARN",
+          module: "Commission Engine",
+          step: "commission_engine.selected_distributor_required",
+          expected: "Distributor selected for HQ commission scope",
+          actual: rendered?.selectedDistributorId || bundle.tenantId || "none",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
 
     entries.push(
       createPredatorEntry({

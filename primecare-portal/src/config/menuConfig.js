@@ -14,6 +14,7 @@ const EXECUTIVE_HQ_MENU_KEYS = new Set([
   "masterCatalog",
   "inventory",
   "purchase",
+  "commissionEngine",
   "predatorDebug",
 ]);
 

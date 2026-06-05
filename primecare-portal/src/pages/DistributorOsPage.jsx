@@ -365,6 +365,7 @@ export default function DistributorOsPage({
       comparison: portfolio?.comparison || [],
       hqLeakCount: portfolio?.hqLeakCount ?? 0,
       totalRevenue: portfolio?.totalRevenue ?? 0,
+      commissionsReadOnly: tab === "commissions",
     };
     if (!scope) return base;
     return {
