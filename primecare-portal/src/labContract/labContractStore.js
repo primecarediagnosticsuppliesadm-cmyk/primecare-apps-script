@@ -1,10 +1,13 @@
 import { LAB_CONTRACT_VERSION } from "@/labContract/labContractTypes.js";
 import { supabase } from "@/api/supabaseClient.js";
 import {
+  createLabContract,
+  getContractById,
   getContractsForDistributor,
   migrateLocalContractsToSupabase,
   readLabContractMigrationStatus,
   rowToLabContract,
+  updateLabContract,
 } from "@/api/labContractsSupabaseApi.js";
 
 const REGISTRY_PREFIX = "primecare_lab_contract_registry_v1";
@@ -199,20 +202,34 @@ export function writeLabContractRegistry(tenantId, registry) {
   );
 }
 
-/** @deprecated Write path — Phase 1C */
-export function upsertLabContract(tenantId, contract) {
-  const registry = readLabContractRegistry(tenantId);
-  const idx = registry.contracts.findIndex((c) => c.id === contract.id);
-  const next = [...registry.contracts];
-  if (idx >= 0) next[idx] = contract;
-  else next.push(contract);
-  writeLabContractRegistry(tenantId, { ...registry, contracts: next });
-  return contract;
+/** Persist contract to Supabase (insert or update by id). */
+export async function upsertLabContract(tenantId, contract) {
+  if (!supabase) {
+    throw new Error("Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
+  }
+  const distributorId = str(contract.distributorId) || str(tenantId);
+  const existing = await getContractById(contract.id);
+  if (existing.ok && existing.contract) {
+    const res = await updateLabContract(contract.id, contract);
+    if (!res.ok || !res.contract) {
+      throw new Error(res.error || "Failed to update contract");
+    }
+    return res.contract;
+  }
+  const res = await createLabContract(contract, {
+    registryTenantId: str(tenantId),
+    distributorId,
+  });
+  if (!res.ok || !res.contract) {
+    throw new Error(res.error || "Failed to create contract");
+  }
+  return res.contract;
 }
 
-/** @deprecated Write path — Phase 1C; reads local only until 1C */
-export function getLabContractById(tenantId, contractId) {
-  return readLabContractRegistry(tenantId).contracts.find((c) => c.id === contractId) || null;
+/** Load single contract from Supabase by id. */
+export async function getLabContractById(_tenantId, contractId) {
+  const res = await getContractById(contractId);
+  return res.ok ? res.contract : null;
 }
 
 /** @deprecated Write path — Phase 1C */

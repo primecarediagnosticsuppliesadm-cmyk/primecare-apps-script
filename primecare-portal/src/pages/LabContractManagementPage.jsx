@@ -159,29 +159,39 @@ export default function LabContractManagementPage({
 
   async function handleCreate(e) {
     e.preventDefault();
-    const created = createLabContractDraft(
-      bundle.tenantId,
-      {
-        ...form,
-        distributorId: bundle.tenantId,
-        distributorName: form.distributorName || currentUser?.tenantName || "HQ",
-      },
-      currentUser?.name || currentUser?.email
-    );
-    setMsg(`Created ${created.contractNumber}`);
-    setShowCreate(false);
-    await load();
-    setSelectedId(created.id);
+    try {
+      const created = await createLabContractDraft(
+        bundle.tenantId,
+        {
+          ...form,
+          distributorId: bundle.tenantId,
+          distributorName: form.distributorName || currentUser?.tenantName || "HQ",
+        },
+        currentUser?.name || currentUser?.email
+      );
+      setMsg(`Created ${created.contractNumber}`);
+      setShowCreate(false);
+      await load();
+      setSelectedId(created.id);
+    } catch (err) {
+      setMsg(err?.message || "Failed to create contract");
+    }
   }
 
   async function handleSuggest() {
-    const n = suggestDraftContractsFromOps(
-      bundle.tenantId,
-      bundle.opsPayload,
-      currentUser?.tenantName || "HQ"
-    );
-    setMsg(n.length ? `Suggested ${n.length} draft contract(s)` : "No new qualification-backed drafts");
-    await load();
+    try {
+      const n = await suggestDraftContractsFromOps(
+        bundle.tenantId,
+        bundle.opsPayload,
+        currentUser?.tenantName || "HQ"
+      );
+      setMsg(
+        n.length ? `Suggested ${n.length} draft contract(s)` : "No new qualification-backed drafts"
+      );
+      await load();
+    } catch (err) {
+      setMsg(err?.message || "Failed to suggest contracts");
+    }
   }
 
   if (loading) return <PageSkeleton rows={8} />;
@@ -409,7 +419,7 @@ export default function LabContractManagementPage({
                       type="button"
                       size="sm"
                       onClick={async () => {
-                        const r = renewLabContract(bundle.tenantId, selected.id, currentUser);
+                        const r = await renewLabContract(bundle.tenantId, selected.id, currentUser);
                         setMsg(r ? "Renewed" : "Renew failed");
                         await load();
                       }}
@@ -421,7 +431,7 @@ export default function LabContractManagementPage({
                       size="sm"
                       variant="outline"
                       onClick={async () => {
-                        const r = extendLabContract(bundle.tenantId, selected.id, 90, currentUser);
+                        const r = await extendLabContract(bundle.tenantId, selected.id, 90, currentUser);
                         setMsg(r ? "Extended 90 days" : "Extend failed");
                         await load();
                       }}
@@ -433,7 +443,7 @@ export default function LabContractManagementPage({
                       size="sm"
                       variant="ghost"
                       onClick={async () => {
-                        const r = terminateLabContract(
+                        const r = await terminateLabContract(
                           bundle.tenantId,
                           selected.id,
                           currentUser,
@@ -481,8 +491,12 @@ export default function LabContractManagementPage({
                     type="button"
                     size="sm"
                     onClick={async () => {
-                      submitLabContractForReview(bundle.tenantId, selected.id, currentUser);
-                      setMsg("Submitted for review");
+                      const r = await submitLabContractForReview(
+                        bundle.tenantId,
+                        selected.id,
+                        currentUser
+                      );
+                      setMsg(r ? "Submitted for review" : "Submit failed");
                       await load();
                     }}
                   >
@@ -496,8 +510,12 @@ export default function LabContractManagementPage({
                       size="sm"
                       variant="outline"
                       onClick={async () => {
-                        approveLabContract(bundle.tenantId, selected.id, currentUser);
-                        setMsg("Approved");
+                        const r = await approveLabContract(
+                          bundle.tenantId,
+                          selected.id,
+                          currentUser
+                        );
+                        setMsg(r ? "Approved" : "Approve failed");
                         await load();
                       }}
                     >
@@ -507,14 +525,18 @@ export default function LabContractManagementPage({
                       type="button"
                       size="sm"
                       onClick={async () => {
-                      const r = activateLabContract(bundle.tenantId, selected.id, currentUser);
-                      setMsg(
-                        r
-                          ? "Activated"
-                          : "Activation blocked — complete readiness checklist"
-                      );
-                      await load();
-                    }}
+                        const r = await activateLabContract(
+                          bundle.tenantId,
+                          selected.id,
+                          currentUser
+                        );
+                        setMsg(
+                          r
+                            ? "Activated"
+                            : "Activation blocked — complete readiness checklist"
+                        );
+                        await load();
+                      }}
                     >
                       Activate
                     </Button>

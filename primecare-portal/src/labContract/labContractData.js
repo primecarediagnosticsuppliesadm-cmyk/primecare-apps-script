@@ -10,9 +10,11 @@ import {
   TIMELINE_EVENT_TYPES,
 } from "@/labContract/labContractTypes.js";
 import {
-  readLabContractRegistry,
-  upsertLabContract,
-  getLabContractById,
+  createLabContract as createLabContractRow,
+  getContractById,
+  updateLabContract as updateLabContractRow,
+} from "@/api/labContractsSupabaseApi.js";
+import {
   loadContractsForDistributor,
   loadVisibleLabContracts,
 } from "@/labContract/labContractStore.js";
@@ -95,8 +97,8 @@ async function fetchOrderLinesRaw() {
 export async function loadLabContractEngineBundle(currentUser, options = {}) {
   const scopeTenantId = str(options.scopeTenantId);
   const tenantId = scopeTenantId || str(currentUser?.tenantId || currentUser?.tenant_id);
-  const key = `${tenantId}:${scopeTenantId || "home"}:${options.force ? Date.now() : "cached"}`;
-  if (!options.force && cachedBundle && cacheKey === `${tenantId}:cached`) {
+  const cacheId = `${scopeTenantId || tenantId}:${scopeTenantId || "home"}`;
+  if (!options.force && cachedBundle && cacheKey === cacheId) {
     return cachedBundle;
   }
 
@@ -137,7 +139,7 @@ export async function loadLabContractEngineBundle(currentUser, options = {}) {
     registry,
     model,
   };
-  cacheKey = key.startsWith(tenantId) ? `${tenantId}:cached` : key;
+  cacheKey = cacheId;
   return cachedBundle;
 }
 
@@ -146,15 +148,33 @@ export function invalidateLabContractCache() {
   cacheKey = "";
 }
 
-export function createLabContractDraft(tenantId, draft, actor) {
-  const registry = readLabContractRegistry(tenantId);
+async function resolveLabContract(contractId) {
+  const res = await getContractById(contractId);
+  return res.ok ? res.contract : null;
+}
+
+async function persistLabContract(contract) {
+  if (!supabase) {
+    throw new Error("Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
+  }
+  const res = await updateLabContractRow(contract.id, contract);
+  if (!res.ok || !res.contract) {
+    throw new Error(res.error || "Failed to save contract");
+  }
+  invalidateLabContractCache();
+  return res.contract;
+}
+
+export async function createLabContractDraft(tenantId, draft, actor) {
+  const distributorId = str(draft.distributorId) || str(tenantId);
+  const existing = await loadContractsForDistributor(distributorId);
   const now = new Date().toISOString();
   const start = str(draft.startDate) || now.slice(0, 10);
   const contract = {
     id: `contract-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    contractNumber: nextContractNumber(tenantId, draft.labId, registry.contracts),
-    tenantId,
-    distributorId: str(draft.distributorId) || tenantId,
+    contractNumber: nextContractNumber(distributorId, draft.labId, existing),
+    tenantId: str(tenantId),
+    distributorId,
     distributorName: str(draft.distributorName),
     labId: labIdKey(draft.labId),
     labName: str(draft.labName),
@@ -189,13 +209,25 @@ export function createLabContractDraft(tenantId, draft, actor) {
     updatedAt: now,
   };
   const withTimeline = appendTimeline(contract, "created", actor, "Contract created");
-  upsertLabContract(tenantId, withTimeline);
+  const res = await createLabContractRow(withTimeline, {
+    registryTenantId: str(tenantId),
+    distributorId,
+  });
+  if (!res.ok || !res.contract) {
+    throw new Error(res.error || "Failed to create contract");
+  }
   invalidateLabContractCache();
-  return withTimeline;
+  return res.contract;
 }
 
-export function transitionLabContract(tenantId, contractId, nextStatus, currentUser, note = "") {
-  const contract = getLabContractById(tenantId, contractId);
+export async function transitionLabContract(
+  tenantId,
+  contractId,
+  nextStatus,
+  currentUser,
+  note = ""
+) {
+  const contract = await resolveLabContract(contractId);
   if (!contract) return null;
 
   if (!validateContractDates(contract)) return null;
@@ -215,14 +247,13 @@ export function transitionLabContract(tenantId, contractId, nextStatus, currentU
     updated = appendTimeline(updated, eventType, actor, note);
   }
 
-  upsertLabContract(tenantId, updated);
-  invalidateLabContractCache();
-  void emitContractEvent(tenantId, updated, eventType || nextStatus, currentUser, note);
-  return updated;
+  const saved = await persistLabContract(updated);
+  void emitContractEvent(tenantId, saved, eventType || nextStatus, currentUser, note);
+  return saved;
 }
 
-export function submitLabContractForReview(tenantId, contractId, currentUser) {
-  const contract = getLabContractById(tenantId, contractId);
+export async function submitLabContractForReview(tenantId, contractId, currentUser) {
+  const contract = await resolveLabContract(contractId);
   if (!contract || contract.status !== CONTRACT_STATUSES.DRAFT) return null;
   const actor = str(currentUser?.name || currentUser?.email);
   const updated = appendTimeline(
@@ -231,25 +262,23 @@ export function submitLabContractForReview(tenantId, contractId, currentUser) {
     actor,
     "Submitted for review"
   );
-  upsertLabContract(tenantId, updated);
-  invalidateLabContractCache();
-  void emitContractEvent(tenantId, updated, "submitted", currentUser, "Submitted");
-  return updated;
+  const saved = await persistLabContract(updated);
+  void emitContractEvent(tenantId, saved, "submitted", currentUser, "Submitted");
+  return saved;
 }
 
-export function approveLabContract(tenantId, contractId, currentUser) {
-  const contract = getLabContractById(tenantId, contractId);
+export async function approveLabContract(tenantId, contractId, currentUser) {
+  const contract = await resolveLabContract(contractId);
   if (!contract || contract.status !== CONTRACT_STATUSES.UNDER_REVIEW) return null;
   const actor = str(currentUser?.name || currentUser?.email);
   const updated = appendTimeline(contract, "approved", actor, "Executive approval");
-  upsertLabContract(tenantId, updated);
-  invalidateLabContractCache();
-  void emitContractEvent(tenantId, updated, "approved", currentUser, "Approved for activation");
-  return updated;
+  const saved = await persistLabContract(updated);
+  void emitContractEvent(tenantId, saved, "approved", currentUser, "Approved for activation");
+  return saved;
 }
 
-export function activateLabContract(tenantId, contractId, currentUser) {
-  const contract = getLabContractById(tenantId, contractId);
+export async function activateLabContract(tenantId, contractId, currentUser) {
+  const contract = await resolveLabContract(contractId);
   if (!contract) return null;
   const bundle = cachedBundle;
   const lookups = bundle?.model?.lookups || buildOpsLookups(bundle?.opsPayload || {});
@@ -268,8 +297,8 @@ export function activateLabContract(tenantId, contractId, currentUser) {
   );
 }
 
-export function renewLabContract(tenantId, contractId, currentUser) {
-  const contract = getLabContractById(tenantId, contractId);
+export async function renewLabContract(tenantId, contractId, currentUser) {
+  const contract = await resolveLabContract(contractId);
   if (!contract) return null;
   const actor = str(currentUser?.name || currentUser?.email);
   const newEnd = addMonths(contract.endDate || contract.startDate, 12);
@@ -280,14 +309,13 @@ export function renewLabContract(tenantId, contractId, currentUser) {
     autoRenewal: true,
   };
   updated = appendTimeline(updated, "renewed", actor, `Renewed through ${newEnd}`);
-  upsertLabContract(tenantId, updated);
-  invalidateLabContractCache();
-  void emitContractEvent(tenantId, updated, "renewed", currentUser, newEnd);
-  return updated;
+  const saved = await persistLabContract(updated);
+  void emitContractEvent(tenantId, saved, "renewed", currentUser, newEnd);
+  return saved;
 }
 
-export function extendLabContract(tenantId, contractId, days, currentUser) {
-  const contract = getLabContractById(tenantId, contractId);
+export async function extendLabContract(tenantId, contractId, days, currentUser) {
+  const contract = await resolveLabContract(contractId);
   if (!contract) return null;
   const actor = str(currentUser?.name || currentUser?.email);
   const newEnd = addDays(contract.endDate, days || 90);
@@ -297,13 +325,12 @@ export function extendLabContract(tenantId, contractId, days, currentUser) {
     actor,
     `Extended ${days || 90} days`
   );
-  upsertLabContract(tenantId, updated);
-  invalidateLabContractCache();
-  void emitContractEvent(tenantId, updated, "renewed", currentUser, `Extended to ${newEnd}`);
-  return updated;
+  const saved = await persistLabContract(updated);
+  void emitContractEvent(tenantId, saved, "renewed", currentUser, `Extended to ${newEnd}`);
+  return saved;
 }
 
-export function terminateLabContract(tenantId, contractId, currentUser, reason = "") {
+export async function terminateLabContract(tenantId, contractId, currentUser, reason = "") {
   return transitionLabContract(
     tenantId,
     contractId,
@@ -316,9 +343,9 @@ export function terminateLabContract(tenantId, contractId, currentUser, reason =
 /**
  * Suggest draft contracts from qualifications / labs (no active duplicate per lab).
  */
-export function suggestDraftContractsFromOps(tenantId, opsPayload, distributorName) {
-  const registry = readLabContractRegistry(tenantId);
-  const existingLabs = new Set(registry.contracts.map((c) => labIdKey(c.labId)));
+export async function suggestDraftContractsFromOps(tenantId, opsPayload, distributorName) {
+  const existing = await loadContractsForDistributor(tenantId);
+  const existingLabs = new Set(existing.map((c) => labIdKey(c.labId)));
   const lookups = buildOpsLookups(opsPayload);
   const drafts = [];
 
@@ -333,7 +360,7 @@ export function suggestDraftContractsFromOps(tenantId, opsPayload, distributorNa
       ? CONTRACT_TYPES.L1B_REAGENT_RENTAL
       : CONTRACT_TYPES.L1A_CONSUMABLES;
     drafts.push(
-      createLabContractDraft(
+      await createLabContractDraft(
         tenantId,
         {
           labId: lid,
