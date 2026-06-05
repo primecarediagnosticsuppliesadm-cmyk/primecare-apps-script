@@ -188,10 +188,13 @@ const PROVISIONING_BOOL_FLAGS = [
 
 const PROVISIONING_TIMESTAMP_FIELDS = [
   "catalogConfiguredAt",
+  "catalogAssignedAt",
   "rolesConfiguredAt",
   "adminUpdatedAt",
   "agentProvisionedAt",
 ];
+
+const PROVISIONING_NUMERIC_FIELDS = ["catalogAssignedCount"];
 
 const ADMIN_CONTACT_FIELDS = ["adminName", "adminEmail", "adminPhone"];
 
@@ -241,6 +244,27 @@ export function mergeProvisioningConfigFlags(localConfig = {}, durableConfig = {
   for (const field of PROVISIONING_TIMESTAMP_FIELDS) {
     const newer = pickNewerIso(localConfig[field], durableConfig[field]);
     if (newer) merged[field] = newer;
+  }
+  for (const field of PROVISIONING_NUMERIC_FIELDS) {
+    const localNum = Number(localConfig[field]);
+    const durableNum = Number(durableConfig[field]);
+    const localValid = Number.isFinite(localNum) && localNum > 0;
+    const durableValid = Number.isFinite(durableNum) && durableNum > 0;
+    if (localValid || durableValid) {
+      merged[field] = Math.max(localValid ? localNum : 0, durableValid ? durableNum : 0);
+    }
+  }
+  const localCatalogItems = Array.isArray(localConfig.distributorCatalog?.items)
+    ? localConfig.distributorCatalog.items.length
+    : 0;
+  const durableCatalogItems = Array.isArray(durableConfig.distributorCatalog?.items)
+    ? durableConfig.distributorCatalog.items.length
+    : 0;
+  if (localCatalogItems > 0 || durableCatalogItems > 0) {
+    merged.distributorCatalog =
+      localCatalogItems >= durableCatalogItems && localConfig.distributorCatalog
+        ? localConfig.distributorCatalog
+        : durableConfig.distributorCatalog;
   }
   return merged;
 }
@@ -442,6 +466,87 @@ export async function fetchDatabaseTenants() {
 }
 
 /**
+ * Fetch a single tenant row from Supabase (extended columns when available).
+ */
+export async function fetchDatabaseTenantById(tenantId) {
+  const id = str(tenantId);
+  if (!supabase || !id) return { row: null, extended: false, error: "Supabase not configured" };
+
+  const extended = await supabase
+    .from("tenants")
+    .select(EXTENDED_TENANT_SELECT)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!extended.error && extended.data) {
+    return { row: extended.data, extended: true, error: null };
+  }
+
+  const minimal = await supabase
+    .from("tenants")
+    .select(MINIMAL_TENANT_SELECT)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (minimal.error || !minimal.data) {
+    return {
+      row: null,
+      extended: false,
+      error: extended.error?.message || minimal.error?.message || "Tenant not found",
+    };
+  }
+
+  return { row: minimal.data, extended: false, error: null };
+}
+
+/**
+ * Confirm catalog flags persisted in public.tenants.metadata.config.
+ */
+export async function verifyDistributorCatalogMetadata(
+  tenantId,
+  { minCount = 1, requireAssigned = true } = {}
+) {
+  const { row, error } = await fetchDatabaseTenantById(tenantId);
+  if (!row) {
+    return {
+      ok: false,
+      found: false,
+      catalogAssigned: false,
+      catalogAssignedCount: 0,
+      error: error || "Tenant not found in Supabase",
+    };
+  }
+
+  const meta = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  const config = meta.config && typeof meta.config === "object" ? meta.config : {};
+  const catalogAssigned = config.catalogAssigned === true;
+  const catalogAssignedCount = Number(config.catalogAssignedCount || 0);
+  const itemCount = Array.isArray(config.distributorCatalog?.items)
+    ? config.distributorCatalog.items.length
+    : 0;
+  const effectiveCount = Math.max(catalogAssignedCount, itemCount);
+
+  let ok = false;
+  if (requireAssigned) {
+    const required = Math.max(1, Number(minCount) || 1);
+    ok = catalogAssigned && effectiveCount >= required;
+  } else {
+    ok = !catalogAssigned && effectiveCount === 0;
+  }
+
+  return {
+    ok,
+    found: true,
+    catalogAssigned,
+    catalogAssignedCount: effectiveCount,
+    config,
+    error: ok
+      ? null
+      : `metadata.config.catalogAssigned=${String(config.catalogAssigned)} catalogAssignedCount=${effectiveCount}`,
+  };
+}
+
+/**
  * Patch tenants.metadata for a durable distributor (preserves admin, territories, metrics).
  */
 export async function patchDurableTenantMetadata(tenantId, { config = {}, provisioning = {} } = {}) {
@@ -543,12 +648,21 @@ export function buildCatalogFlagRegistryDebug(bundle) {
       const db = dbRows.find((d) => d.id === t.id);
       const dbMeta =
         db?.metadata && typeof db.metadata === "object" ? db.metadata : {};
+      const localConfig = local?.config || {};
+      const durableConfig = dbMeta.config || {};
+      const mergedConfig = t.config || {};
       return {
         id: t.id,
         name: t.name,
-        localProductCatalogReady: Boolean(local?.config?.productCatalogReady),
-        durableProductCatalogReady: Boolean(dbMeta.config?.productCatalogReady),
-        mergedProductCatalogReady: Boolean(t.config?.productCatalogReady),
+        localProductCatalogReady: Boolean(localConfig.productCatalogReady),
+        durableProductCatalogReady: Boolean(durableConfig.productCatalogReady),
+        mergedProductCatalogReady: Boolean(mergedConfig.productCatalogReady),
+        localCatalogAssigned: Boolean(localConfig.catalogAssigned),
+        durableCatalogAssigned: Boolean(durableConfig.catalogAssigned),
+        mergedCatalogAssigned: Boolean(mergedConfig.catalogAssigned),
+        localCatalogAssignedCount: Number(localConfig.catalogAssignedCount || 0),
+        durableCatalogAssignedCount: Number(durableConfig.catalogAssignedCount || 0),
+        mergedCatalogAssignedCount: Number(mergedConfig.catalogAssignedCount || 0),
       };
     });
 }

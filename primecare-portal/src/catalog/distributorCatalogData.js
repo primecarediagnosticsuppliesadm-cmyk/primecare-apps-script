@@ -9,7 +9,12 @@ import {
   updateDistributorCatalogPricing,
 } from "@/catalog/distributorCatalogEngine.js";
 import { markProvisioningMilestone } from "@/distributor/distributorProvisioningData.js";
-import { patchDurableTenantMetadata } from "@/tenant/durableTenantStore.js";
+import {
+  fetchDatabaseTenantById,
+  PERSISTENCE_STATUS,
+  patchDurableTenantMetadata,
+  verifyDistributorCatalogMetadata,
+} from "@/tenant/durableTenantStore.js";
 import { getRegistryTenant, upsertRegistryTenant } from "@/tenant/tenantFoundationStore.js";
 import { supabase } from "@/api/supabaseClient.js";
 
@@ -17,19 +22,65 @@ function str(v) {
   return String(v ?? "").trim();
 }
 
+function isDurableScopeRow(row = null) {
+  return Boolean(row?.durable || row?.source === "database");
+}
+
+function enrichRegistryRowFromScope(fromRegistry, distributorRow) {
+  const fallbackId = str(distributorRow?.id ?? distributorRow?.tenantId);
+  if (!distributorRow || fallbackId !== str(fromRegistry?.id)) return fromRegistry;
+  if (!isDurableScopeRow(distributorRow)) return fromRegistry;
+
+  const enriched = {
+    ...fromRegistry,
+    durable: true,
+    source: "database",
+    persistenceStatus:
+      distributorRow.persistenceStatus ||
+      fromRegistry.persistenceStatus ||
+      PERSISTENCE_STATUS.DURABLE,
+    tenantCode: fromRegistry.tenantCode || distributorRow.tenantCode,
+    name: fromRegistry.name || distributorRow.name,
+    config: { ...(distributorRow.config || {}), ...(fromRegistry.config || {}) },
+    provisioning: { ...(fromRegistry.provisioning || {}), ...(distributorRow.provisioning || {}) },
+  };
+  upsertRegistryTenant(enriched);
+  return getRegistryTenant(enriched.id) || enriched;
+}
+
 /**
  * Resolve distributor tenant from Distributor OS scope — never infer from global HQ view.
  */
-export function resolveDistributorRow(tenantId, distributorRow = null) {
+export async function resolveDistributorRow(tenantId, distributorRow = null) {
   const id = str(tenantId);
   if (!id) return null;
 
   const fromRegistry = getRegistryTenant(id);
-  if (fromRegistry) return fromRegistry;
+  if (fromRegistry) {
+    return enrichRegistryRowFromScope(fromRegistry, distributorRow);
+  }
 
   const fallback = distributorRow || null;
   const fallbackId = str(fallback?.id ?? fallback?.tenantId);
-  if (!fallback || fallbackId !== id) return null;
+  if (!fallback || fallbackId !== id) {
+    const db = await fetchDatabaseTenantById(id);
+    if (!db.row) return null;
+    const normalized = {
+      id,
+      tenantId: id,
+      name: db.row.tenant_name || "Distributor",
+      status: db.row.status || "PENDING",
+      tenantCode: db.row.tenant_code,
+      config: db.row.metadata?.config || {},
+      provisioning: db.row.metadata?.provisioning || {},
+      metrics: db.row.metadata?.metrics || {},
+      source: "database",
+      durable: true,
+      persistenceStatus: PERSISTENCE_STATUS.DURABLE,
+    };
+    upsertRegistryTenant(normalized);
+    return getRegistryTenant(id) || normalized;
+  }
 
   const normalized = {
     id: fallbackId,
@@ -102,17 +153,81 @@ function buildConfigPatch(row, items) {
   };
 }
 
-function persistDistributorCatalog(row, config, tenantId) {
+function persistDistributorCatalogLocal(row, config, tenantId) {
   const now = new Date().toISOString();
   const updated = {
     ...row,
     id: tenantId,
     tenantId,
     config,
+    durable: row.durable || row.source === "database",
+    source: row.source === "database" || row.durable ? "database" : row.source || "registry",
     updatedAt: now,
   };
   upsertRegistryTenant(updated);
   return updated;
+}
+
+/**
+ * Patch public.tenants.metadata.config for durable distributors; verify persistence.
+ */
+async function persistDistributorCatalogMetadata(tenantId, row, config) {
+  if (!supabase) {
+    return { ok: true, skipped: true, reason: "supabase_not_configured" };
+  }
+
+  const db = await fetchDatabaseTenantById(tenantId);
+  if (!db.row) {
+    return { ok: true, skipped: true, reason: "tenant_not_in_supabase" };
+  }
+
+  const provisioning = row.provisioning || {};
+  const patch = await patchDurableTenantMetadata(tenantId, { config, provisioning });
+  if (!patch.ok) {
+    return {
+      ok: false,
+      skipped: false,
+      error: patch.error || "Failed to save catalog metadata to Supabase",
+      supabasePersisted: false,
+    };
+  }
+
+  const assigned = isCatalogAssigned(config);
+  const verify = await verifyDistributorCatalogMetadata(tenantId, {
+    minCount: assigned ? catalogAssignedCount(config) : 0,
+    requireAssigned: assigned,
+  });
+  if (!verify.ok) {
+    return {
+      ok: false,
+      skipped: false,
+      error:
+        verify.error ||
+        "Catalog metadata was not confirmed in Supabase after save — check RLS or metadata column",
+      supabasePersisted: false,
+      verify,
+    };
+  }
+
+  const fresh = getRegistryTenant(tenantId) || { ...row, config };
+  upsertRegistryTenant({
+    ...fresh,
+    config: patch.metadata?.config || config,
+    provisioning: patch.metadata?.provisioning || provisioning,
+    syncFailed: false,
+    lastSyncError: null,
+    durable: true,
+    source: "database",
+    persistenceStatus: PERSISTENCE_STATUS.DURABLE,
+  });
+
+  return {
+    ok: true,
+    skipped: false,
+    supabasePersisted: true,
+    metadata: patch.metadata,
+    verify,
+  };
 }
 
 export async function loadDistributorCatalogBundle(
@@ -122,7 +237,7 @@ export async function loadDistributorCatalogBundle(
 ) {
   const id = str(distributorTenantId);
   const home = str(homeTenantId);
-  const row = resolveDistributorRow(id, options.distributorRow);
+  const row = await resolveDistributorRow(id, options.distributorRow);
 
   const [master] = await Promise.all([loadMasterCatalog()]);
 
@@ -145,7 +260,7 @@ export async function assignMasterProductsToDistributor(
   const id = str(distributorTenantId);
   if (!id) return { ok: false, error: "Missing distributor tenant id" };
 
-  const row = resolveDistributorRow(id, options.distributorRow || options.fallbackTenant);
+  const row = await resolveDistributorRow(id, options.distributorRow || options.fallbackTenant);
   if (!row) {
     return { ok: false, error: "Distributor not found — select a distributor in Distributor OS" };
   }
@@ -164,39 +279,38 @@ export async function assignMasterProductsToDistributor(
   const items = mergeAssignedItems(existing, toAdd, id);
   const config = buildConfigPatch(row, items);
 
-  persistDistributorCatalog(row, config, id);
+  persistDistributorCatalogLocal(row, config, id);
   markProvisioningMilestone(id, "catalog_configured");
 
-  let durablePatchOk = true;
-  if (row.durable || row.source === "database") {
-    const fresh = getRegistryTenant(id) || { ...row, config };
-    const patch = await patchDurableTenantMetadata(id, {
-      config: fresh.config || config,
-      provisioning: fresh.provisioning || row.provisioning || {},
-    });
-    durablePatchOk = patch.ok;
-    if (patch.ok) {
-      upsertRegistryTenant({
-        ...fresh,
-        config: fresh.config || config,
-        syncFailed: false,
-        lastSyncError: null,
-        durable: true,
-        source: "database",
-      });
-    }
+  const metadataResult = await persistDistributorCatalogMetadata(id, row, config);
+  if (!metadataResult.ok) {
+    return {
+      ok: false,
+      error: metadataResult.error,
+      assignedCount: catalogAssignedCount(config),
+      items,
+      config,
+      localOnly: true,
+      supabasePersisted: false,
+      row: getRegistryTenant(id),
+    };
   }
 
   const sync = await syncDistributorCatalogToSupabase(id, items);
+  const localOk = isCatalogAssigned(config);
 
   return {
-    ok: isCatalogAssigned(config),
+    ok: localOk && (metadataResult.skipped || metadataResult.ok),
     assignedCount: catalogAssignedCount(config),
     items,
     config,
-    durablePatchOk,
+    durablePatchOk: metadataResult.ok && !metadataResult.skipped,
+    supabasePersisted: metadataResult.supabasePersisted === true,
+    supabaseSkipped: metadataResult.skipped === true,
+    supabaseVerify: metadataResult.verify || null,
     supabaseSync: sync,
     row: getRegistryTenant(id),
+    error: localOk ? null : "Catalog assignment incomplete",
   };
 }
 
@@ -207,22 +321,30 @@ export async function updateDistributorCatalogItem(
   options = {}
 ) {
   const id = str(distributorTenantId);
-  const row = resolveDistributorRow(id, options.distributorRow);
+  const row = await resolveDistributorRow(id, options.distributorRow);
   if (!row) return { ok: false, error: "Distributor not found" };
 
   const items = updateDistributorCatalogPricing(readDistributorCatalogItems(row.config), productId, patch);
   const config = buildConfigPatch(row, items);
-  persistDistributorCatalog(row, config, id);
+  persistDistributorCatalogLocal(row, config, id);
 
-  if (row.durable || row.source === "database") {
-    await patchDurableTenantMetadata(id, { config, provisioning: row.provisioning || {} });
+  const metadataResult = await persistDistributorCatalogMetadata(id, row, config);
+  if (!metadataResult.ok) {
+    return { ok: false, error: metadataResult.error, items, config, localOnly: true };
   }
+
   await syncDistributorCatalogToSupabase(
     id,
     items.filter((i) => str(i.productId) === str(productId))
   );
 
-  return { ok: true, items, config, row: getRegistryTenant(id) };
+  return {
+    ok: true,
+    items,
+    config,
+    supabasePersisted: metadataResult.supabasePersisted === true,
+    row: getRegistryTenant(id),
+  };
 }
 
 export async function unassignDistributorCatalogProduct(
@@ -231,21 +353,29 @@ export async function unassignDistributorCatalogProduct(
   options = {}
 ) {
   const id = str(distributorTenantId);
-  const row = resolveDistributorRow(id, options.distributorRow);
+  const row = await resolveDistributorRow(id, options.distributorRow);
   if (!row) return { ok: false, error: "Distributor not found" };
 
   const items = removeDistributorCatalogItem(readDistributorCatalogItems(row.config), productId);
   const config = buildConfigPatch(row, items);
-  persistDistributorCatalog(row, config, id);
+  persistDistributorCatalogLocal(row, config, id);
 
-  if (row.durable || row.source === "database") {
-    await patchDurableTenantMetadata(id, { config, provisioning: row.provisioning || {} });
+  const metadataResult = await persistDistributorCatalogMetadata(id, row, config);
+  if (!metadataResult.ok) {
+    return {
+      ok: false,
+      error: metadataResult.error,
+      assignedCount: items.length,
+      catalogAssigned: isCatalogAssigned(config),
+      localOnly: true,
+    };
   }
 
   return {
     ok: true,
     assignedCount: items.length,
     catalogAssigned: isCatalogAssigned(config),
+    supabasePersisted: metadataResult.supabasePersisted === true,
     row: getRegistryTenant(id),
   };
 }

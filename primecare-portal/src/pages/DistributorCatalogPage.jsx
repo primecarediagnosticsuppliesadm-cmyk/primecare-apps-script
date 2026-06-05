@@ -64,13 +64,23 @@ export default function DistributorCatalogPage({
         rowOptions
       );
       if (!result.ok) {
-        setMsg(result.error || "Assignment failed");
+        setMsg(
+          result.error ||
+            (result.localOnly
+              ? "Catalog saved locally but Supabase persistence failed — metadata was not updated"
+              : "Assignment failed")
+        );
         return;
       }
+      const persistedNote = result.supabasePersisted
+        ? " · saved to Supabase"
+        : result.supabaseSkipped
+          ? " · local registry only"
+          : "";
       setMsg(
-        productId
+        (productId
           ? "Product assigned from HQ master catalog"
-          : `Assigned ${result.assignedCount} product(s) from HQ master catalog`
+          : `Assigned ${result.assignedCount} product(s) from HQ master catalog`) + persistedNote
       );
       await load();
       await onCatalogChanged?.(result);
@@ -84,7 +94,11 @@ export default function DistributorCatalogPage({
   async function handleUnassign(productId) {
     setBusy(true);
     const result = await unassignDistributorCatalogProduct(tenantId, productId, rowOptions);
-    setMsg(result.ok ? "Product removed from distributor catalog" : result.error);
+    setMsg(
+      result.ok
+        ? `Product removed from distributor catalog${result.supabasePersisted ? " · saved to Supabase" : ""}`
+        : result.error || "Failed to remove product"
+    );
     await load();
     if (result.ok) await onCatalogChanged?.(result);
     setBusy(false);

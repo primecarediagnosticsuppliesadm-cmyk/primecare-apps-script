@@ -218,15 +218,15 @@ function RegistryDebugDrawer({ debug, onClose }) {
           {debug.catalogFlagDebug?.length ? (
             <>
               <h4 className="mt-3 text-xs font-bold uppercase text-slate-500">
-                Product catalog flags
+                Catalog flags (local / durable / merged)
               </h4>
               <ul className="mt-1 space-y-1 text-[10px]">
                 {debug.catalogFlagDebug.map((row) => (
                   <li key={row.id} className="rounded border px-2 py-1 font-mono">
                     <p className="font-semibold text-slate-800">{row.name}</p>
-                    <p>local: {String(row.localProductCatalogReady)}</p>
-                    <p>durable: {String(row.durableProductCatalogReady)}</p>
-                    <p>merged: {String(row.mergedProductCatalogReady)}</p>
+                    <p>productCatalogReady — local: {String(row.localProductCatalogReady)} · durable: {String(row.durableProductCatalogReady)} · merged: {String(row.mergedProductCatalogReady)}</p>
+                    <p>catalogAssigned — local: {String(row.localCatalogAssigned)} · durable: {String(row.durableCatalogAssigned)} · merged: {String(row.mergedCatalogAssigned)}</p>
+                    <p>catalogAssignedCount — local: {row.localCatalogAssignedCount} · durable: {row.durableCatalogAssignedCount} · merged: {row.mergedCatalogAssignedCount}</p>
                   </li>
                 ))}
               </ul>
