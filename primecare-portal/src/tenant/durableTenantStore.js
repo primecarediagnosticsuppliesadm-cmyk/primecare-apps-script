@@ -192,6 +192,30 @@ const PROVISIONING_TIMESTAMP_FIELDS = [
   "agentProvisionedAt",
 ];
 
+const ADMIN_CONTACT_FIELDS = ["adminName", "adminEmail", "adminPhone"];
+
+function mergeAdminContactFields(localConfig = {}, durableConfig = {}, merged = {}) {
+  const localAt = Date.parse(str(localConfig.adminUpdatedAt)) || 0;
+  const durableAt = Date.parse(str(durableConfig.adminUpdatedAt)) || 0;
+  const preferLocal = localAt >= durableAt;
+
+  for (const field of ADMIN_CONTACT_FIELDS) {
+    const localVal = str(localConfig[field]);
+    const durableVal = str(durableConfig[field]);
+    if (preferLocal) {
+      if (localVal) merged[field] = localConfig[field];
+      else if (durableVal) merged[field] = durableConfig[field];
+    } else if (durableVal) {
+      merged[field] = durableConfig[field];
+    } else if (localVal) {
+      merged[field] = localConfig[field];
+    }
+  }
+  const newerAt = pickNewerIso(localConfig.adminUpdatedAt, durableConfig.adminUpdatedAt);
+  if (newerAt) merged.adminUpdatedAt = newerAt;
+  return merged;
+}
+
 function pickNewerIso(a, b) {
   const as = str(a);
   const bs = str(b);
@@ -204,7 +228,10 @@ function pickNewerIso(a, b) {
  * Merge local + durable provisioning config without dropping admin/territories.
  */
 export function mergeProvisioningConfigFlags(localConfig = {}, durableConfig = {}) {
-  const merged = { ...durableConfig, ...localConfig };
+  const merged = mergeAdminContactFields(localConfig, durableConfig, {
+    ...durableConfig,
+    ...localConfig,
+  });
   for (const flag of PROVISIONING_BOOL_FLAGS) {
     if (localConfig[flag] === true || durableConfig[flag] === true) {
       merged[flag] = true;

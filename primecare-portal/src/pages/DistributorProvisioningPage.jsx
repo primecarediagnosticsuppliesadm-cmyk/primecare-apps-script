@@ -230,6 +230,54 @@ function RegistryDebugDrawer({ debug, onClose }) {
               </ul>
             </>
           ) : null}
+          {debug.adminGateLogic ? (
+            <div className="mt-3 rounded border border-indigo-100 bg-indigo-50 px-2 py-1.5 text-[10px]">
+              <h4 className="text-xs font-bold uppercase text-indigo-800">Admin gate logic</h4>
+              <p className="mt-1 font-mono text-indigo-900">{debug.adminGateLogic.expression}</p>
+              <p className="mt-0.5 text-indigo-800">
+                Required: {debug.adminGateLogic.required.join(", ")}
+              </p>
+              <p className="text-indigo-700">
+                Optional: {debug.adminGateLogic.optional.join(", ")}
+              </p>
+            </div>
+          ) : null}
+          {debug.adminFieldDebug?.length ? (
+            <>
+              <h4 className="mt-3 text-xs font-bold uppercase text-slate-500">Admin fields</h4>
+              <ul className="mt-1 space-y-1 text-[10px]">
+                {debug.adminFieldDebug.map((row) => (
+                  <li
+                    key={row.id}
+                    className={cn(
+                      "rounded border px-2 py-1 font-mono",
+                      row.gatePass ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"
+                    )}
+                  >
+                    <p className="font-semibold text-slate-800">{row.name}</p>
+                    <p>
+                      gate:{" "}
+                      <span className={row.gatePass ? "text-emerald-700" : "text-red-700"}>
+                        {row.gatePass ? "PASS" : `FAIL (missing ${row.gateMissing.join(", ")})`}
+                      </span>
+                    </p>
+                    <p className="mt-1 text-slate-600">local admin</p>
+                    <p>name: {row.localAdmin.name || "—"}</p>
+                    <p>email: {row.localAdmin.email || "—"}</p>
+                    <p>phone: {row.localAdmin.phone || "—"}</p>
+                    <p className="mt-1 text-slate-600">durable admin</p>
+                    <p>name: {row.durableAdmin.name || "—"}</p>
+                    <p>email: {row.durableAdmin.email || "—"}</p>
+                    <p>phone: {row.durableAdmin.phone || "—"}</p>
+                    <p className="mt-1 text-slate-600">merged admin</p>
+                    <p>name: {row.mergedAdmin.name || "—"}</p>
+                    <p>email: {row.mergedAdmin.email || "—"}</p>
+                    <p>phone: {row.mergedAdmin.phone || "—"}</p>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
           <div className="rounded border px-2 py-1.5">
             <dt className="font-bold text-slate-500">Tenant context</dt>
             <dd className="mt-1 space-y-0.5 font-mono text-[10px]">
@@ -356,7 +404,9 @@ function EditAdminModal({ profile, onClose, onSave }) {
         <h3 className="flex items-center gap-2 text-sm font-bold">
           <Pencil className="h-4 w-4" /> Edit distributor admin
         </h3>
-        <p className="mt-1 text-slate-500">Required for activation when admin user gate fails.</p>
+        <p className="mt-1 text-slate-500">
+          Required for launch: admin name and email (phone optional).
+        </p>
         <label className="mt-3 block">
           Admin name
           <input
@@ -485,12 +535,24 @@ export default function DistributorProvisioningPage({
     }
   }
 
-  function handleSaveAdmin(admin) {
-    if (!model) return;
-    updateDistributorAdminDetails(model.distributorId, admin);
+  async function handleSaveAdmin(admin) {
+    if (!model || !bundle) return;
+    const fallbackTenant = bundle.tenants.find((t) => t.id === model.distributorId);
+    const result = await updateDistributorAdminDetails(model.distributorId, admin, {
+      fallbackTenant,
+      dbRows: bundle.dbFetch?.rows,
+    });
+    if (!result?.ok) {
+      setMsg(result?.error || "Admin save failed — open Registry debug");
+      return;
+    }
     setShowEditAdmin(false);
-    void applyLocalBundleUpdate(model.distributorId);
-    setMsg("Admin saved — readiness updated");
+    await applyLocalBundleUpdate(model.distributorId);
+    setMsg(
+      result.durablePatchOk === false
+        ? "Admin saved locally — Supabase metadata sync failed (see Registry debug)"
+        : "Admin saved — readiness updated"
+    );
   }
 
   async function handleActivate() {

@@ -25,6 +25,7 @@ import {
 import {
   buildProvisioningDraft,
   buildDistributorProvisioningModel,
+  evaluateAdminUserGate,
   TIMELINE_LABELS,
 } from "@/distributor/distributorProvisioningEngine.js";
 import { mapTenantToDistributorRegistryRow } from "@/distributor/distributorWorkspaceEngine.js";
@@ -107,6 +108,60 @@ export async function loadProvisioningBundle(currentUser, options = {}) {
   };
 }
 
+function adminSnapshotFromConfig(config = {}) {
+  return {
+    name: str(config.adminName),
+    email: str(config.adminEmail),
+    phone: str(config.adminPhone),
+    updatedAt: str(config.adminUpdatedAt) || null,
+  };
+}
+
+/**
+ * Debug: admin fields across local, durable metadata, merged tenant, and gate.
+ */
+export function buildAdminFieldRegistryDebug(bundle) {
+  const registry = readTenantRegistry();
+  const dbRows = bundle?.dbFetch?.rows || [];
+  const homeId = str(bundle?.homeTenantId);
+
+  return (bundle?.tenants || [])
+    .filter((t) => t.id && t.id !== homeId && !t.isHome)
+    .map((t) => {
+      const local = registry.find((r) => r.id === t.id);
+      const db = dbRows.find((d) => d.id === t.id);
+      const dbMeta = db?.metadata && typeof db.metadata === "object" ? db.metadata : {};
+      const localAdmin = adminSnapshotFromConfig(local?.config);
+      const durableAdmin = adminSnapshotFromConfig(dbMeta.config);
+      const mergedAdmin = adminSnapshotFromConfig(t.config);
+      const gate = evaluateAdminUserGate(t.config || {});
+      return {
+        id: t.id,
+        name: t.name,
+        localAdmin,
+        durableAdmin,
+        mergedAdmin,
+        gatePass: gate.pass,
+        gateRequired: gate.requiredFields,
+        gateMissing: gate.missing,
+        gateValues: gate.values,
+      };
+    });
+}
+
+function traceAdminSaveStages(tenantId, config, dbRows = []) {
+  const local = getRegistryTenant(tenantId);
+  const db = (dbRows || []).find((d) => d.id === tenantId);
+  const dbMeta = db?.metadata && typeof db.metadata === "object" ? db.metadata : {};
+  return {
+    tenantId,
+    gate: evaluateAdminUserGate(config),
+    local: adminSnapshotFromConfig(local?.config),
+    durable: adminSnapshotFromConfig(dbMeta.config),
+    merged: adminSnapshotFromConfig(config),
+  };
+}
+
 /**
  * Registry diagnostics for Provisioning (localStorage + merge + view context).
  */
@@ -156,6 +211,12 @@ export function buildProvisioningRegistryDebug(bundle) {
     loadedNames: loaded.map((d) => d.name),
     loadedNonHomeNames: loadedNonHome.map((d) => d.name),
     catalogFlagDebug: buildCatalogFlagRegistryDebug(bundle),
+    adminFieldDebug: buildAdminFieldRegistryDebug(bundle),
+    adminGateLogic: {
+      required: ["adminName", "adminEmail"],
+      optional: ["adminPhone"],
+      expression: "pass = adminName && adminEmail",
+    },
     notes:
       "Durable rows live in public.tenants (Supabase). localStorage is fallback when insert/RLS fails.",
   };
@@ -371,9 +432,41 @@ export async function refreshProvisioningBundleState(bundle, currentUser) {
   };
 }
 
-export function updateDistributorAdminDetails(tenantId, admin) {
-  const row = getRegistryTenant(tenantId);
-  if (!row) return null;
+/**
+ * Save distributor admin to local registry and durable Supabase metadata.
+ * @param {string} tenantId
+ * @param {{ name?: string, email?: string, phone?: string }} admin
+ * @param {{ fallbackTenant?: object, dbRows?: object[] }} [options]
+ */
+export async function updateDistributorAdminDetails(tenantId, admin, options = {}) {
+  const id = str(tenantId);
+  if (!id) {
+    return { ok: false, error: "Missing tenant id" };
+  }
+
+  let row = getRegistryTenant(id);
+  const fallback = options.fallbackTenant;
+  if (!row && fallback) {
+    row = {
+      ...fallback,
+      config: { ...(fallback.config || {}) },
+      provisioning: { ...(fallback.provisioning || {}) },
+    };
+  }
+  if (!row) {
+    row = {
+      id,
+      name: fallback?.name || id,
+      status: fallback?.status || "PENDING",
+      tenantCode: fallback?.tenantCode,
+      config: {},
+      provisioning: {},
+      source: fallback?.source || "registry",
+      durable: Boolean(fallback?.durable || fallback?.source === "database"),
+      persistenceStatus: fallback?.persistenceStatus,
+    };
+  }
+
   const now = new Date().toISOString();
   const config = {
     ...(row.config || {}),
@@ -382,7 +475,11 @@ export function updateDistributorAdminDetails(tenantId, admin) {
     adminPhone: str(admin.phone),
     adminUpdatedAt: now,
   };
-  const hasAdmin = Boolean(str(config.adminEmail) && str(config.adminName));
+  const gate = evaluateAdminUserGate(config);
+  const hasAdmin = gate.pass;
+
+  console.log("[provisioning] admin save — before write", traceAdminSaveStages(id, config, options.dbRows));
+
   upsertRegistryTenant({
     ...row,
     config,
@@ -390,9 +487,65 @@ export function updateDistributorAdminDetails(tenantId, admin) {
     updatedAt: now,
   });
   if (hasAdmin) {
-    markProvisioningMilestone(tenantId, "admin_added");
+    markProvisioningMilestone(id, "admin_added");
   }
-  return getRegistryTenant(tenantId);
+
+  const fresh = getRegistryTenant(id) || { ...row, config };
+  const isDurable =
+    fresh.durable === true ||
+    fresh.source === "database" ||
+    fresh.persistenceStatus === PERSISTENCE_STATUS.DURABLE ||
+    fallback?.persistenceStatus === PERSISTENCE_STATUS.DURABLE;
+
+  let durablePatchOk = !isDurable;
+  if (isDurable) {
+    const patchResult = await patchDurableTenantMetadata(id, {
+      config: fresh.config || config,
+      provisioning: fresh.provisioning || row.provisioning || {},
+    });
+    durablePatchOk = patchResult.ok;
+    if (!patchResult.ok) {
+      console.warn("[provisioning] admin durable patch failed", patchResult.error);
+      upsertRegistryTenant({
+        ...fresh,
+        lastSyncError: patchResult.error,
+        syncFailed: true,
+      });
+    } else {
+      upsertRegistryTenant({
+        ...fresh,
+        syncFailed: false,
+        lastSyncError: null,
+        durable: true,
+        source: "database",
+        persistenceStatus: PERSISTENCE_STATUS.DURABLE,
+      });
+    }
+  }
+
+  const saved = getRegistryTenant(id);
+  console.log("[provisioning] admin save — after write", {
+    ...traceAdminSaveStages(id, saved?.config || config, options.dbRows),
+    durablePatchOk,
+    gatePass: evaluateAdminUserGate(saved?.config || config).pass,
+  });
+
+  if (!hasAdmin) {
+    return {
+      ok: false,
+      error: `Admin gate still failing — missing: ${gate.missing.join(", ")}`,
+      row: saved,
+      durablePatchOk,
+      trace: traceAdminSaveStages(id, saved?.config || config, options.dbRows),
+    };
+  }
+
+  return {
+    ok: true,
+    row: saved,
+    durablePatchOk,
+    trace: traceAdminSaveStages(id, saved?.config || config, options.dbRows),
+  };
 }
 
 export async function acknowledgeProvisioningTask(tenantId, taskId) {

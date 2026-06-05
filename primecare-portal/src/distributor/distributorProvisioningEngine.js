@@ -56,6 +56,27 @@ function str(v) {
   return String(v ?? "").trim();
 }
 
+/** Admin launch gate — requires name + email (phone optional). */
+export function evaluateAdminUserGate(config = {}) {
+  const adminName = str(config.adminName);
+  const adminEmail = str(config.adminEmail);
+  const adminPhone = str(config.adminPhone);
+  return {
+    pass: Boolean(adminName && adminEmail),
+    requiredFields: ["adminName", "adminEmail"],
+    optionalFields: ["adminPhone"],
+    values: {
+      adminName,
+      adminEmail,
+      adminPhone,
+      adminUpdatedAt: str(config.adminUpdatedAt),
+    },
+    missing: [!adminName ? "adminName" : null, !adminEmail ? "adminEmail" : null].filter(
+      Boolean
+    ),
+  };
+}
+
 function num(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -113,7 +134,7 @@ export function buildProvisioningChecks(ctx) {
       id: "admin_user",
       label: "Admin",
       required: true,
-      pass: Boolean(str(config.adminEmail) && str(config.adminName)),
+      pass: evaluateAdminUserGate(config).pass,
       detail: str(config.adminEmail) || "Add admin in launch wizard",
     },
     {
