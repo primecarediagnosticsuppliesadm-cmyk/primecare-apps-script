@@ -597,9 +597,9 @@ export function buildDistributorWorkspace({
     {
       id: "add_lab",
       label: "Add lab",
-      wired: false,
-      comingSoon: true,
-      page: null,
+      wired: canNavigateOps,
+      comingSoon: !canNavigateOps,
+      page: "labs",
     },
   ];
 

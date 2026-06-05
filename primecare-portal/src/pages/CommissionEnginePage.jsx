@@ -7,6 +7,7 @@ import {
   approveAllPendingCommissions,
   recordCommissionPayout,
 } from "@/commission/commissionData.js";
+import { hasPayoutForPeriod } from "@/commission/commissionStore.js";
 import { COMMISSION_PHASE_RULES } from "@/commission/commissionRules.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { cn } from "@/lib/utils";
@@ -108,6 +109,10 @@ export default function CommissionEnginePage({ currentUser = null }) {
 
   async function handlePayout() {
     const p = await recordCommissionPayout(bundle.tenantId, model.periodYmd, currentUser);
+    if (p?.duplicate) {
+      setMsg("Payout already recorded");
+      return;
+    }
     setMsg(p ? `Payout recorded · ${formatInr(p.totalCommission)}` : "No approved commissions to pay");
     await load();
   }
@@ -116,6 +121,7 @@ export default function CommissionEnginePage({ currentUser = null }) {
   if (!model) return <p className="p-4 text-sm text-slate-500">No commission data.</p>;
 
   const { rule, summary } = model;
+  const payoutRecorded = hasPayoutForPeriod(bundle.tenantId, model.periodYmd);
 
   return (
     <div className="mx-auto max-w-5xl space-y-3 p-3 pb-8">
@@ -185,9 +191,13 @@ export default function CommissionEnginePage({ currentUser = null }) {
             <Button type="button" size="sm" onClick={() => void handleApproveAll()}>
               <CheckCircle2 className="h-4 w-4" /> Approve all eligible
             </Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => void handlePayout()}>
-              <IndianRupee className="h-4 w-4" /> Record monthly payout
-            </Button>
+            {payoutRecorded ? (
+              <p className="text-xs font-medium text-emerald-700">Payout already recorded</p>
+            ) : (
+              <Button type="button" size="sm" variant="outline" onClick={() => void handlePayout()}>
+                <IndianRupee className="h-4 w-4" /> Record monthly payout
+              </Button>
+            )}
           </div>
         </div>
       ) : null}

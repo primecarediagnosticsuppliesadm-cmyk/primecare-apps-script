@@ -537,6 +537,105 @@ export async function getLabsCredit() {
   };
 }
 
+/**
+ * Create a lab + AR credit row for a distributor tenant.
+ */
+export async function createLabWrite(payload = {}) {
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured" };
+  }
+
+  const tenantId = str(payload.tenantId || payload.tenant_id);
+  const labName = str(payload.labName || payload.lab_name);
+  const contactName = str(payload.contactName || payload.owner_name);
+  const phone = str(payload.phone);
+  const email = str(payload.email);
+  const cityTerritory = str(payload.cityTerritory || payload.area);
+  const paymentTerms = str(payload.paymentTerms || payload.credit_terms);
+  const creditLimit = num(payload.creditLimit ?? payload.credit_limit);
+
+  if (!tenantId) {
+    return { success: false, error: "Distributor is required" };
+  }
+  if (!labName) {
+    return { success: false, error: "Lab name is required" };
+  }
+  if (!contactName) {
+    return { success: false, error: "Contact name is required" };
+  }
+  if (!phone) {
+    return { success: false, error: "Phone is required" };
+  }
+  if (!email) {
+    return { success: false, error: "Email is required" };
+  }
+  if (!cityTerritory) {
+    return { success: false, error: "City/territory is required" };
+  }
+  if (!paymentTerms) {
+    return { success: false, error: "Payment terms are required" };
+  }
+  if (!Number.isFinite(creditLimit) || creditLimit < 0) {
+    return { success: false, error: "Credit limit is required" };
+  }
+
+  const slug = labName.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 24);
+  const labId = normalizeLabIdKey(
+    payload.labId || `LAB-${slug || "lab"}-${Date.now().toString(36).slice(-4)}`
+  );
+
+  const labRow = {
+    tenant_id: tenantId,
+    lab_id: labId,
+    lab_name: labName,
+    owner_name: contactName,
+    phone,
+    area: cityTerritory,
+    credit_terms: paymentTerms,
+    status: "ACTIVE",
+  };
+
+  const { data: insertedLab, error: labErr } = await supabase
+    .from("labs")
+    .insert([labRow])
+    .select()
+    .single();
+
+  if (labErr) {
+    return { success: false, error: labErr.message || "Failed to create lab" };
+  }
+
+  const arRow = {
+    tenant_id: tenantId,
+    lab_id: labId,
+    lab_name: labName,
+    credit_limit: creditLimit,
+    outstanding: 0,
+    total_delivered: 0,
+    total_paid: 0,
+    collections_notes: `contact_email:${email}`,
+  };
+
+  const { error: arErr } = await supabase.from("ar_credit_control").insert([arRow]);
+  if (arErr) {
+    await supabase.from("labs").delete().eq("tenant_id", tenantId).eq("lab_id", labId);
+    return {
+      success: false,
+      error: arErr.message || "Lab created but credit record failed",
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      labId,
+      labName,
+      tenantId,
+      lab: insertedLab,
+    },
+  };
+}
+
 function normalizeUrgencyLabel(raw) {
   const v = String(raw || "").trim().toLowerCase();
   if (v === "critical" || v === "crit") return "Critical";

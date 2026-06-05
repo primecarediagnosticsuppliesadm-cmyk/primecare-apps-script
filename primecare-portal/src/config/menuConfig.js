@@ -20,7 +20,7 @@ export const MENU_ITEMS = [
   { key: "founderStrategy", label: "Founder Strategy", icon: "Target" },
   { key: "tenantManagement", label: "Tenant Management", icon: "Building" },
   { key: "distributorManagement", label: "Distributor Management", icon: "Briefcase" },
-  { key: "distributorProvisioning", label: "Provisioning", icon: "ClipboardList" },
+  { key: "distributorProvisioning", label: "Launch Distributor", icon: "ClipboardList" },
   { key: "commissionEngine", label: "Commission Engine", icon: "Coins" },
   { key: "labContractEngine", label: "Lab Contracts", icon: "FileText" },
   { key: "operationsCenter", label: "Operations Center", icon: "Radio" },

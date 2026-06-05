@@ -100,25 +100,25 @@ export function buildProvisioningChecks(ctx) {
   const checks = [
     {
       id: "durable_tenant",
-      label: "Durable tenant (Supabase)",
+      label: "Saved permanently",
       required: true,
       pass: isDurable,
       detail: isDurable
-        ? "Saved in public.tenants"
+        ? "Distributor saved to your account"
         : persistenceStatus === PERSISTENCE_STATUS.SYNC_FAILED
-          ? `Sync failed — ${str(ctx.lastSyncError) || "use Sync local distributors"}`
-          : "Local only — sync to Supabase before activation",
+          ? `Save failed — ${str(ctx.lastSyncError) || "tap Sync local distributors"}`
+          : "Saved on this device — sync before launch",
     },
     {
       id: "admin_user",
-      label: "Admin user",
+      label: "Admin",
       required: true,
       pass: Boolean(str(config.adminEmail) && str(config.adminName)),
-      detail: str(config.adminEmail) || "Add admin in provisioning wizard",
+      detail: str(config.adminEmail) || "Add admin in launch wizard",
     },
     {
       id: "roles_configured",
-      label: "Roles configured",
+      label: "Team access ready",
       required: false,
       readinessWeight: 2,
       pass:
@@ -156,14 +156,14 @@ export function buildProvisioningChecks(ctx) {
     },
     {
       id: "isolation_verified",
-      label: "Isolation verified",
+      label: "Security check passed",
       required: true,
       pass: isDb ? isolationPass : config.isolationAcknowledged === true,
       detail: isDb
         ? isolationPass
-          ? "RLS probes PASS"
-          : "Run isolation on HQ tenant"
-        : "Verify after Supabase provision",
+          ? "Data is isolated between distributors"
+          : "Run security check on HQ tenant"
+        : "Complete security check after saving distributor",
     },
     {
       id: "agent_assigned",
@@ -287,7 +287,7 @@ export const PROVISIONING_CHECK_ACTIONS = {
   isolation_verified: {
     page: "tenantManagement",
     section: "isolation",
-    label: "Open isolation",
+    label: "Open security",
   },
   agent_assigned: { page: "visits", label: "Open agents" },
   ordering_enabled: { page: "orders", label: "Open orders" },
@@ -303,7 +303,7 @@ export const PROVISIONING_TASK_ACTIONS = {
   verify_isolation: {
     page: "tenantManagement",
     section: "isolation",
-    label: "Open isolation",
+    label: "Open security",
   },
 };
 
@@ -318,7 +318,7 @@ export function evaluateActivationGates(checks) {
     canActivate: blockers.length === 0,
     blockers,
     optionalPending,
-    readyLabel: blockers.length === 0 ? "Ready to Activate" : "Blocked",
+    readyLabel: blockers.length === 0 ? "Ready to launch" : "Not ready to launch",
   };
 }
 
@@ -346,11 +346,11 @@ export function buildProvisioningTasks(checks) {
   const taskDefs = [
     { id: "create_admin", label: "Create admin", checkId: "admin_user" },
     { id: "users_roles", label: "Users & Roles", checkId: "users_roles", comingSoon: true },
-    { id: "load_catalog", label: "Load product catalog", checkId: "catalog_configured" },
-    { id: "create_lab", label: "Create first lab", checkId: "at_least_one_lab" },
+    { id: "load_catalog", label: "Set up product catalog", checkId: "catalog_configured" },
+    { id: "create_lab", label: "Add first lab", checkId: "at_least_one_lab" },
     { id: "assign_agent", label: "Assign first agent", checkId: "agent_assigned" },
-    { id: "verify_isolation", label: "Verify isolation", checkId: "isolation_verified" },
-    { id: "activate", label: "Activate distributor", checkId: null },
+    { id: "verify_isolation", label: "Run security check", checkId: "isolation_verified" },
+    { id: "activate", label: "Launch distributor", checkId: null },
   ];
 
   return taskDefs.map((t) => {
@@ -373,13 +373,43 @@ export function buildProvisioningTasks(checks) {
 const TIMELINE_LABELS = {
   created: "Distributor created",
   admin_added: "Admin added",
-  roles_provisioned: "Standard roles provisioned",
-  catalog_configured: "Catalog configured",
+  roles_provisioned: "Team access ready",
+  catalog_configured: "Product catalog ready",
   lab_added: "Lab added",
   agent_assigned: "Agent assigned",
-  isolation_verified: "Isolation verified",
-  activated: "Activated",
+  isolation_verified: "Security check passed",
+  activated: "Launched",
 };
+
+export const LAUNCH_FLOW_STEPS = [
+  { id: "company", label: "Company", checkId: "durable_tenant" },
+  { id: "admin", label: "Admin", checkId: "admin_user" },
+  { id: "catalog", label: "Product Catalog", checkId: "catalog_configured" },
+  { id: "security", label: "Security", checkId: "isolation_verified" },
+  { id: "launch", label: "Launch", checkId: null },
+];
+
+export function buildLaunchFlowSteps(checks, lifecycle) {
+  const activated = lifecycle === "activated";
+  let foundCurrent = false;
+  return LAUNCH_FLOW_STEPS.map((step) => {
+    let pass = false;
+    if (step.id === "launch") {
+      pass = activated;
+    } else {
+      const c = checks.find((x) => x.id === step.checkId);
+      pass = c?.status === "PASS";
+    }
+    let visual = "upcoming";
+    if (pass) {
+      visual = "complete";
+    } else if (!foundCurrent) {
+      visual = lifecycle === "blocked" && step.checkId ? "blocked" : "current";
+      foundCurrent = true;
+    }
+    return { ...step, visual, pass };
+  });
+}
 
 /**
  * Build timeline from registry + inferred milestones (ledger pattern, local store).
@@ -600,6 +630,7 @@ export function buildDistributorProvisioningModel(tenant, ctx = {}) {
   const pipeline = buildProvisioningPipeline(
     lifecycle === "configuring" ? "configured" : lifecycle
   );
+  const launchFlow = buildLaunchFlowSteps(checks, lifecycle);
   const tasks = buildProvisioningTasks(checks);
   const timeline = buildProvisioningTimeline(tenant, checks);
 
@@ -613,6 +644,7 @@ export function buildDistributorProvisioningModel(tenant, ctx = {}) {
     territories: parseTerritorySummary(tenant.config),
     lifecycle,
     pipeline,
+    launchFlow,
     checks,
     readinessPct,
     readinessDebug,

@@ -72,9 +72,9 @@ export function resolvePersistenceStatus(tenant) {
 }
 
 export function persistenceStatusLabel(status) {
-  if (status === PERSISTENCE_STATUS.DURABLE) return "Durable";
-  if (status === PERSISTENCE_STATUS.SYNC_FAILED) return "Sync failed";
-  if (status === PERSISTENCE_STATUS.LOCAL_ONLY) return "Local only";
+  if (status === PERSISTENCE_STATUS.DURABLE) return "Saved permanently";
+  if (status === PERSISTENCE_STATUS.SYNC_FAILED) return "Save failed";
+  if (status === PERSISTENCE_STATUS.LOCAL_ONLY) return "Saved on this device";
   if (status === PERSISTENCE_STATUS.UNKNOWN) return "Unknown";
   return "Unknown";
 }
@@ -87,13 +87,13 @@ export function resolvePersistenceDisplay(tenant) {
   try {
     const key = resolvePersistenceStatus(tenant);
     if (key === PERSISTENCE_STATUS.DURABLE) {
-      return { key, label: "Durable", tone: "success" };
+      return { key, label: "Saved permanently", tone: "success" };
     }
     if (key === PERSISTENCE_STATUS.SYNC_FAILED) {
-      return { key, label: "Sync failed", tone: "danger" };
+      return { key, label: "Save failed", tone: "danger" };
     }
     if (key === PERSISTENCE_STATUS.LOCAL_ONLY) {
-      return { key, label: "Local only", tone: "warn" };
+      return { key, label: "Saved on this device", tone: "warn" };
     }
     if (key === PERSISTENCE_STATUS.UNKNOWN) {
       return { key, label: "Unknown", tone: "warn" };

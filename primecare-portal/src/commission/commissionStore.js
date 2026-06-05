@@ -102,7 +102,17 @@ export function approveAllPending(tenantId, periodYmd, approvedBy) {
   return entries.filter((e) => e.status === "approved" && e.approvedAt === now);
 }
 
+export function hasPayoutForPeriod(tenantId, periodYmd) {
+  const ledger = readCommissionLedger(tenantId);
+  return ledger.payouts.some(
+    (p) => p.periodYmd === periodYmd && p.status === "paid"
+  );
+}
+
 export function recordMonthlyPayout(tenantId, periodYmd, meta = {}) {
+  if (hasPayoutForPeriod(tenantId, periodYmd)) {
+    return null;
+  }
   const ledger = readCommissionLedger(tenantId);
   const approved = ledger.entries.filter(
     (e) => e.periodYmd === periodYmd && e.status === "approved"

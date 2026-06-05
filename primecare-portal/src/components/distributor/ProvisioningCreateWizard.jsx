@@ -70,7 +70,7 @@ export default function ProvisioningCreateWizard({ onClose, onCreated }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-lg">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-bold">Create distributor</h3>
+        <h3 className="text-sm font-bold">Launch new distributor</h3>
         <Button type="button" variant="ghost" size="sm" onClick={onClose}>
           Close
         </Button>
@@ -191,7 +191,7 @@ export default function ProvisioningCreateWizard({ onClose, onCreated }) {
             Standard roles auto-provisioned: Distributor Admin, Agent, Lab User
           </p>
           <p className="mt-2 text-slate-500">
-            Saved as PENDING. Complete catalog and isolation, then activate.
+            Saved as draft. Complete product catalog and security check, then launch.
           </p>
         </div>
       ) : null}

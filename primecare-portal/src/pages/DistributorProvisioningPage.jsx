@@ -28,7 +28,7 @@ import {
   X,
 } from "lucide-react";
 
-const TABS = ["Pipeline", "Readiness", "Tasks", "Timeline"];
+const TABS = ["Launch", "Readiness", "Tasks", "Timeline"];
 const LIFECYCLE_VARIANT = {
   draft: "neutral",
   configuring: "info",
@@ -505,7 +505,7 @@ export default function DistributorProvisioningPage({
       setMsg(result.error || "Activation blocked — see gate diagnosis below");
       return;
     }
-    setMsg("Distributor activated (durable)");
+    setMsg("Distributor launched");
   }
 
   async function handleAckTask(taskId) {
@@ -577,7 +577,7 @@ export default function DistributorProvisioningPage({
             <RefreshCw className="h-4 w-4" />
           </Button>
           <Button type="button" size="sm" onClick={() => setShowWizard(true)}>
-            <Plus className="h-4 w-4" /> New
+            <Plus className="h-4 w-4" /> New distributor
           </Button>
         </div>
       </header>
@@ -594,7 +594,7 @@ export default function DistributorProvisioningPage({
               meta?.warning
                 ? `${meta.warning}${meta.error ? `: ${meta.error}` : ""}`
                 : meta?.durable
-                  ? "Distributor saved to Supabase (durable)"
+                  ? "Distributor saved permanently"
                   : "Distributor draft created"
             );
           }}
@@ -715,7 +715,7 @@ export default function DistributorProvisioningPage({
               {!model.gates.canActivate ? (
                 <>
                   <p className="mt-1 text-[10px] font-medium uppercase text-slate-500">
-                    Activation gates
+                    Launch checklist
                   </p>
                   <ActivationDiagnosis diagnosis={model.activationDiagnosis} />
                 </>
@@ -750,12 +750,11 @@ export default function DistributorProvisioningPage({
               ))}
             </div>
 
-            {tab === "Pipeline" ? (
+            {tab === "Launch" ? (
               <div className="rounded-xl border bg-white p-3">
-                <PipelineStepper pipeline={model.pipeline} />
+                <PipelineStepper pipeline={model.launchFlow || model.pipeline} />
                 <p className="mt-2 text-[10px] text-slate-500">
-                  Draft → Configured → Ready → Activated. Activation requires admin, product
-                  catalog, and isolation only.
+                  Company → Admin → Product Catalog → Security → Launch
                 </p>
               </div>
             ) : null}
@@ -857,7 +856,7 @@ export default function DistributorProvisioningPage({
                 disabled={!model.gates.canActivate || model.activated}
                 onClick={handleActivate}
               >
-                Activate distributor
+                Launch distributor
               </Button>
               {model.activated && setActivePage ? (
                 <Button
@@ -873,7 +872,7 @@ export default function DistributorProvisioningPage({
             </div>
           </section>
         ) : (
-          <p className="text-sm text-slate-500">Select a distributor to provision.</p>
+          <p className="text-sm text-slate-500">Select a distributor to launch.</p>
         )}
       </div>
     </div>

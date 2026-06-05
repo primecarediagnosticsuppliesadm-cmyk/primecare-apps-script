@@ -25,9 +25,129 @@ const FORBIDDEN_LAB_MENU_KEYS = new Set([
  * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} params.ctx
  * @param {object|null} [params.rendered]
  */
+async function validateExecutiveLabsRegistry(ctx, entries) {
+  if (ctx.role !== ROLES.EXECUTIVE && ctx.role !== ROLES.ADMIN) {
+    return;
+  }
+
+  if (!supabase) {
+    entries.push(
+      createPredatorEntry({
+        status: "WARN",
+        module: "Lab Portal",
+        step: "labs.supabase",
+        rootCauseGuess: "Supabase client unavailable for lab registry checks",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+    return;
+  }
+
+  const labsRes = await supabase
+    .from("labs")
+    .select("tenant_id, lab_id, lab_name")
+    .limit(500);
+  const labs = Array.isArray(labsRes.data) ? labsRes.data : [];
+  const missingTenant = labs.filter((row) => !String(row.tenant_id || "").trim());
+
+  entries.push(
+    createPredatorEntry({
+      status: missingTenant.length === 0 ? "PASS" : "FAIL",
+      module: "Lab Portal",
+      step: "labs.tenant_scoped",
+      expected: "Every lab row has tenant_id",
+      actual: {
+        labCount: labs.length,
+        missingTenantCount: missingTenant.length,
+      },
+      rootCauseGuess:
+        missingTenant.length > 0
+          ? "Orphan lab rows without tenant_id"
+          : "Labs are tenant-scoped",
+      suggestedFix:
+        missingTenant.length > 0
+          ? "Backfill tenant_id on labs or delete orphan rows"
+          : "",
+      severity: missingTenant.length > 0 ? "critical" : "low",
+      tenantId: ctx.tenantId,
+      role: ctx.role,
+      userId: ctx.userId,
+    })
+  );
+
+  const arRes = await supabase
+    .from("ar_credit_control")
+    .select("tenant_id, lab_id")
+    .limit(500);
+  const arRows = Array.isArray(arRes.data) ? arRes.data : [];
+  const labKeys = new Set(
+    labs.map((row) => `${String(row.tenant_id || "").trim()}:${labIdKey(row.lab_id)}`)
+  );
+  const arWithoutLab = arRows.filter((row) => {
+    const key = `${String(row.tenant_id || "").trim()}:${labIdKey(row.lab_id)}`;
+    return labIdKey(row.lab_id) && !labKeys.has(key);
+  });
+
+  entries.push(
+    createPredatorEntry({
+      status: arWithoutLab.length === 0 ? "PASS" : "FAIL",
+      module: "Lab Portal",
+      step: "labs.no_orphan_ar",
+      expected: "Every AR row maps to a labs row",
+      actual: { arCount: arRows.length, orphanArCount: arWithoutLab.length },
+      rootCauseGuess:
+        arWithoutLab.length > 0
+          ? "AR credit rows reference missing labs"
+          : "AR rows align with labs registry",
+      suggestedFix:
+        arWithoutLab.length > 0
+          ? "Create matching labs row or remove orphan AR entries"
+          : "",
+      severity: arWithoutLab.length > 0 ? "high" : "low",
+      tenantId: ctx.tenantId,
+      role: ctx.role,
+      userId: ctx.userId,
+    })
+  );
+
+  const arKeys = new Set(
+    arRows.map((row) => `${String(row.tenant_id || "").trim()}:${labIdKey(row.lab_id)}`)
+  );
+  const labsWithoutAr = labs.filter((row) => {
+    const key = `${String(row.tenant_id || "").trim()}:${labIdKey(row.lab_id)}`;
+    return labIdKey(row.lab_id) && !arKeys.has(key);
+  });
+
+  entries.push(
+    createPredatorEntry({
+      status: labsWithoutAr.length === 0 ? "PASS" : "WARN",
+      module: "Lab Portal",
+      step: "labs.no_orphan",
+      expected: "Every lab has an AR credit row",
+      actual: { labsWithoutAr: labsWithoutAr.length },
+      rootCauseGuess:
+        labsWithoutAr.length > 0
+          ? "Labs missing AR credit_control rows"
+          : "Labs paired with AR credit rows",
+      suggestedFix:
+        labsWithoutAr.length > 0
+          ? "Use Add Lab flow or backfill ar_credit_control for orphan labs"
+          : "",
+      severity: labsWithoutAr.length > 0 ? "medium" : "low",
+      tenantId: ctx.tenantId,
+      role: ctx.role,
+      userId: ctx.userId,
+    })
+  );
+}
+
 export async function validateLabPortalModule({ ctx, rendered = null }) {
   return predatorTrace("Lab Portal", "validation.full", async () => {
     const entries = [];
+
+    await validateExecutiveLabsRegistry(ctx, entries);
 
     if (ctx.role !== ROLES.LAB) {
       entries.push(

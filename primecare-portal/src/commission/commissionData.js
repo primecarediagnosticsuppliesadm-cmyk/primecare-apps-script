@@ -132,6 +132,9 @@ export async function recordCommissionPayout(tenantId, periodYmd, currentUser) {
   const payout = recordMonthlyPayout(tenantId, periodYmd, {
     recordedBy: str(currentUser?.name || currentUser?.email),
   });
+  if (!payout) {
+    return { duplicate: true };
+  }
   if (tenantId && payout) {
     void appendOperationalEvent({
       tenantId,

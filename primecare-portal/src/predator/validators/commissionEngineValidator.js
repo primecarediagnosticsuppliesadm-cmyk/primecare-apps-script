@@ -2,6 +2,11 @@ import { createPredatorEntry, summarizePredatorEntries } from "@/predator/predat
 import { predatorTrace } from "@/predator/predatorTiming.js";
 import { resolvePredatorOpsPayload } from "@/predator/predatorOpsPayload.js";
 import { loadCommissionEngineBundle } from "@/commission/commissionData.js";
+import {
+  hasPayoutForPeriod,
+  recordMonthlyPayout,
+  writeCommissionLedger,
+} from "@/commission/commissionStore.js";
 import { COMMISSION_PHASE_RULES } from "@/commission/commissionRules.js";
 import { polishPredatorEntries } from "@/predator/predatorEntryPolish.js";
 import { ROLES } from "@/config/roles.js";
@@ -150,6 +155,55 @@ export async function validateCommissionEngineModule({
         module: "Commission Engine",
         step: "activation.approved_requirements",
         actual: approvedBelowMin.length,
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const probeTenant = `__predator_payout_probe__:${ctx.tenantId || "default"}`;
+    const probePeriod = "2099-01";
+    writeCommissionLedger(probeTenant, {
+      entries: [
+        {
+          id: "probe-entry",
+          periodYmd: probePeriod,
+          status: "approved",
+          commissionAmount: 100,
+          agentKey: "probe-agent",
+        },
+      ],
+      payouts: [
+        {
+          id: `payout-${probePeriod}`,
+          periodYmd: probePeriod,
+          totalCommission: 100,
+          agentCount: 1,
+          status: "paid",
+        },
+      ],
+    });
+    const duplicateBlocked = recordMonthlyPayout(probeTenant, probePeriod, {}) === null;
+    const probeDetected = hasPayoutForPeriod(probeTenant, probePeriod);
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(`primecare_commission_ledger_v1:${probeTenant}`);
+    }
+    entries.push(
+      createPredatorEntry({
+        status: duplicateBlocked && probeDetected ? "PASS" : "FAIL",
+        module: "Commission Engine",
+        step: "payout.duplicate_guard",
+        expected: "Second payout for same tenant+period rejected",
+        actual: { duplicateBlocked, probeDetected },
+        rootCauseGuess:
+          duplicateBlocked && probeDetected
+            ? "Payout idempotency guard active"
+            : "recordMonthlyPayout allows duplicate payouts for same period",
+        suggestedFix:
+          duplicateBlocked && probeDetected
+            ? ""
+            : "Add hasPayoutForPeriod guard in commissionStore.recordMonthlyPayout",
+        severity: duplicateBlocked && probeDetected ? "low" : "critical",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,

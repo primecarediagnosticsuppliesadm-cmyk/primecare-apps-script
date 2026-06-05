@@ -151,7 +151,7 @@ export default function DistributorManagementPage({ currentUser = null, setActiv
               variant="outline"
               onClick={() => setActivePage("distributorProvisioning")}
             >
-              Provisioning
+              Launch Distributor
             </Button>
           ) : null}
           <Button type="button" variant="ghost" size="icon" onClick={() => void load()} aria-label="Refresh">

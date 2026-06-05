@@ -1,12 +1,158 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Building2, Users, MapPin, ClipboardCheck, AlertTriangle, ShieldAlert } from "lucide-react";
-import { getLabsCredit } from "@/api/primecareSupabaseApi";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Building2,
+  Users,
+  MapPin,
+  ClipboardCheck,
+  AlertTriangle,
+  ShieldAlert,
+  Plus,
+  X,
+} from "lucide-react";
+import { createLabWrite, getLabsCredit } from "@/api/primecareSupabaseApi";
 import { ROLES } from "@/config/roles";
 import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
 import { summarizeLabsCreditPortfolio } from "@/metrics/computeRiskMetrics.js";
 import { filterLabsForUser } from "@/utils/accessFilters.js";
+import { loadTenantFoundationRegistry } from "@/tenant/tenantFoundationData.js";
+
+const EMPTY_LAB_FORM = {
+  labName: "",
+  tenantId: "",
+  cityTerritory: "",
+  contactName: "",
+  phone: "",
+  email: "",
+  creditLimit: "",
+  paymentTerms: "Net 30",
+};
+
+function AddLabModal({ distributors, defaultTenantId, onClose, onCreated }) {
+  const [form, setForm] = useState({
+    ...EMPTY_LAB_FORM,
+    tenantId: defaultTenantId || "",
+  });
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const showDistributorPicker = distributors.length > 1;
+
+  function patch(fields) {
+    setForm((prev) => ({ ...prev, ...fields }));
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    setSaving(true);
+    try {
+      const res = await createLabWrite(form);
+      if (!res?.success) {
+        throw new Error(res?.error || "Failed to create lab");
+      }
+      onCreated?.(res.data);
+      onClose?.();
+    } catch (err) {
+      setError(err.message || "Failed to create lab");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <form
+        onSubmit={(e) => void handleSubmit(e)}
+        className="w-full max-w-md rounded-xl border bg-white p-4 shadow-lg"
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-slate-900">Add lab</h3>
+          <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="Close">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="space-y-2 text-sm">
+          <Input
+            placeholder="Lab name *"
+            value={form.labName}
+            onChange={(e) => patch({ labName: e.target.value })}
+            required
+          />
+          {showDistributorPicker ? (
+            <select
+              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+              value={form.tenantId}
+              onChange={(e) => patch({ tenantId: e.target.value })}
+              required
+            >
+              <option value="">Select distributor *</option>
+              {distributors.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <p className="text-xs text-slate-500">
+              Distributor: {distributors.find((d) => d.id === form.tenantId)?.name || "Current tenant"}
+            </p>
+          )}
+          <Input
+            placeholder="City / territory *"
+            value={form.cityTerritory}
+            onChange={(e) => patch({ cityTerritory: e.target.value })}
+            required
+          />
+          <Input
+            placeholder="Contact name *"
+            value={form.contactName}
+            onChange={(e) => patch({ contactName: e.target.value })}
+            required
+          />
+          <Input
+            placeholder="Phone *"
+            value={form.phone}
+            onChange={(e) => patch({ phone: e.target.value })}
+            required
+          />
+          <Input
+            placeholder="Email *"
+            type="email"
+            value={form.email}
+            onChange={(e) => patch({ email: e.target.value })}
+            required
+          />
+          <Input
+            placeholder="Credit limit (INR) *"
+            type="number"
+            min="0"
+            value={form.creditLimit}
+            onChange={(e) => patch({ creditLimit: e.target.value })}
+            required
+          />
+          <Input
+            placeholder="Payment terms *"
+            value={form.paymentTerms}
+            onChange={(e) => patch({ paymentTerms: e.target.value })}
+            required
+          />
+        </div>
+        {error ? <p className="mt-2 text-xs text-red-600">{error}</p> : null}
+        <div className="mt-4 flex justify-end gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" size="sm" disabled={saving}>
+            <Plus className="h-4 w-4" /> {saving ? "Saving…" : "Create lab"}
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
 
 function StatCard({ title, value, icon: Icon, subtitle }) {
   return (
@@ -119,45 +265,71 @@ export default function LabsPage({ currentUser, authToken }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [creditFilter, setCreditFilter] = useState("ALL");
+  const [showAddLab, setShowAddLab] = useState(false);
+  const [distributors, setDistributors] = useState([]);
+  const [msg, setMsg] = useState("");
 
-  useEffect(() => {
-    async function loadLabs() {
-      try {
-        setLoading(true);
-        setError("");
+  const canAddLab =
+    currentUser?.role === ROLES.EXECUTIVE || currentUser?.role === ROLES.ADMIN;
 
-        console.log("LabsPage currentUser:", currentUser);
-        console.log("LabsPage authToken:", authToken);
+  const loadLabs = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
 
-        const res = await getLabsCredit();
-        console.log("LabsPage getLabsCredit response:", res);
+      const res = await getLabsCredit();
 
-        if (!res?.success) {
-          throw new Error(res?.error || "Failed to load labs");
-        }
+      if (!res?.success) {
+        throw new Error(res?.error || "Failed to load labs");
+      }
 
-        const rawLabs = Array.isArray(res?.data)
-          ? res.data
-          : Array.isArray(res?.data?.labs)
+      const rawLabs = Array.isArray(res?.data)
+        ? res.data
+        : Array.isArray(res?.data?.labs)
           ? res.data.labs
           : [];
 
-        const rows = rawLabs.map(normalizeLab);
-        console.log("SUPABASE LABS:", rows);
+      const rows = rawLabs.map(normalizeLab);
+      setLabs(rows);
+      setSummary(summarizeLabsCreditPortfolio(rows));
+    } catch (err) {
+      console.error("Failed to load labs", err);
+      setError(err.message || "Failed to load labs");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-        setLabs(rows);
+  useEffect(() => {
+    void loadLabs();
+  }, [authToken, currentUser, loadLabs]);
 
-        setSummary(summarizeLabsCreditPortfolio(rows));
+  useEffect(() => {
+    if (!canAddLab) return;
+    async function loadDistributors() {
+      try {
+        const foundation = await loadTenantFoundationRegistry(currentUser, {
+          skipLiveLoad: true,
+        });
+        const homeId = foundation.homeTenantId;
+        const rows = (foundation.tenants || [])
+          .filter((t) => t.id && t.id !== homeId && !t.isHome)
+          .map((t) => ({ id: t.id, name: t.name || t.config?.companyName || t.id }));
+        if (currentUser?.role === ROLES.ADMIN && currentUser?.tenantId) {
+          const own = rows.find((d) => d.id === currentUser.tenantId);
+          setDistributors(own ? [own] : [{ id: currentUser.tenantId, name: "My distributor" }]);
+        } else {
+          setDistributors(rows);
+        }
       } catch (err) {
-        console.error("Failed to load labs", err);
-        setError(err.message || "Failed to load labs");
-      } finally {
-        setLoading(false);
+        console.warn("[LabsPage] distributor list", err);
+        if (currentUser?.tenantId) {
+          setDistributors([{ id: currentUser.tenantId, name: "Current tenant" }]);
+        }
       }
     }
-
-    loadLabs();
-  }, [authToken, currentUser]);
+    void loadDistributors();
+  }, [canAddLab, currentUser]);
 
   const visibleLabs = useMemo(() => {
     if (currentUser?.role === ROLES.AGENT) {
@@ -197,16 +369,42 @@ export default function LabsPage({ currentUser, authToken }) {
     return <div className="p-4 text-red-600">{error}</div>;
   }
 
+  const defaultTenantId =
+    currentUser?.role === ROLES.ADMIN
+      ? currentUser?.tenantId
+      : distributors[0]?.id || currentUser?.tenantId || "";
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Labs</h1>
-        <p className="text-sm text-muted-foreground">
-          {currentUser?.role === "agent"
-            ? "Only labs assigned to this logged-in agent are visible."
-            : "Lab master, assignments, collections visibility, revenue snapshot, and credit risk."}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Labs</h1>
+          <p className="text-sm text-muted-foreground">
+            {currentUser?.role === "agent"
+              ? "Only labs assigned to this logged-in agent are visible."
+              : "Lab master, assignments, collections visibility, revenue snapshot, and credit risk."}
+          </p>
+        </div>
+        {canAddLab ? (
+          <Button type="button" size="sm" onClick={() => setShowAddLab(true)}>
+            <Plus className="h-4 w-4" /> Add lab
+          </Button>
+        ) : null}
       </div>
+
+      {msg ? <p className="text-sm text-emerald-700">{msg}</p> : null}
+
+      {showAddLab ? (
+        <AddLabModal
+          distributors={distributors}
+          defaultTenantId={defaultTenantId}
+          onClose={() => setShowAddLab(false)}
+          onCreated={(data) => {
+            setMsg(`Lab created · ${data?.labName || data?.labId}`);
+            void loadLabs();
+          }}
+        />
+      ) : null}
 
       <div className="grid md:grid-cols-4 gap-4">
         <StatCard
