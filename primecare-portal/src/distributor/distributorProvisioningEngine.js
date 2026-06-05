@@ -165,14 +165,17 @@ export function buildProvisioningChecks(ctx) {
     },
     {
       id: "catalog_configured",
-      label: "Product catalog ready",
+      label: "Catalog assigned",
       required: true,
       pass:
-        config.productCatalogReady === true ||
-        (isLive && (num(metrics.products) > 0 || num(metrics.inventory) > 0)),
-      detail: config.productCatalogReady === true
-        ? "PrimeCare standard catalog enabled for this distributor"
-        : "Enable PrimeCare standard catalog for this distributor",
+        config.catalogAssigned === true ||
+        (Array.isArray(config.distributorCatalog?.items) &&
+          config.distributorCatalog.items.length > 0) ||
+        num(config.catalogAssignedCount) > 0,
+      detail:
+        config.catalogAssigned === true || num(config.catalogAssignedCount) > 0
+          ? `${num(config.catalogAssignedCount) || config.distributorCatalog?.items?.length || 0} product(s) assigned from HQ master`
+          : "Assign at least one product from HQ master catalog in Distributor OS",
     },
     {
       id: "at_least_one_lab",
@@ -310,8 +313,9 @@ export const PROVISIONING_CHECK_ACTIONS = {
   admin_user: { type: "edit_admin", label: "Edit admin" },
   users_roles: { comingSoon: true, label: "Coming soon" },
   catalog_configured: {
-    type: "use_standard_catalog",
-    label: "Use PrimeCare standard catalog",
+    page: "distributorOs",
+    tab: "catalog",
+    label: "Open catalog",
   },
   at_least_one_lab: {
     page: "distributorOs",
@@ -338,7 +342,7 @@ export const PROVISIONING_TASK_ACTIONS = {
   users_roles: { comingSoon: true, label: "Coming soon" },
   load_catalog: {
     type: "use_standard_catalog",
-    label: "Use PrimeCare standard catalog",
+    label: "Assign from HQ master catalog",
   },
   create_lab: {
     page: "distributorOs",
@@ -393,7 +397,7 @@ export function buildProvisioningTasks(checks) {
   const taskDefs = [
     { id: "create_admin", label: "Create admin", checkId: "admin_user" },
     { id: "users_roles", label: "Users & Roles", checkId: "users_roles", comingSoon: true },
-    { id: "load_catalog", label: "Use PrimeCare standard catalog", checkId: "catalog_configured" },
+    { id: "load_catalog", label: "Assign catalog from HQ master", checkId: "catalog_configured" },
     { id: "create_lab", label: "Add first lab", checkId: "at_least_one_lab" },
     { id: "assign_agent", label: "Assign first agent", checkId: "agent_assigned" },
     { id: "verify_isolation", label: "Run security check", checkId: "isolation_verified" },
@@ -419,7 +423,7 @@ const TIMELINE_LABELS = {
   created: "Distributor created",
   admin_added: "Admin added",
   roles_provisioned: "Team access ready",
-  catalog_configured: "Product catalog ready",
+  catalog_configured: "Catalog assigned",
   lab_added: "Lab added",
   agent_assigned: "Agent assigned",
   isolation_verified: "Security check passed",
@@ -732,6 +736,8 @@ export function buildDistributorProvisioningModel(tenant, ctx = {}) {
       paymentTerms: str(tenant.config?.paymentTerms),
       creditLimit: tenant.config?.creditLimit,
       commissionPct: tenant.config?.commissionPct,
+      catalogAssigned: tenant.config?.catalogAssigned === true,
+      catalogAssignedCount: num(tenant.config?.catalogAssignedCount),
     },
     isLive: ctx.isLive,
     isHome: tenant.isHome,

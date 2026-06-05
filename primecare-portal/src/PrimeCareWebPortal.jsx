@@ -23,6 +23,7 @@ import InventoryLedgerPage from "./pages/InventoryLedgerPage";
 import OrdersPage from "./pages/OrdersPage";
 import ReorderForecastPage from "./pages/ReorderForecastPage";
 import StockPage from "./pages/StockPage";
+import MasterCatalogPage from "./pages/MasterCatalogPage";
 import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
 import QualificationReviewPage from "./pages/QualificationReviewPage";
 import PredatorDebugConsole from "./pages/PredatorDebugConsole";
@@ -165,6 +166,9 @@ export default function PrimeCareWebPortal({
             authToken={authToken}
           />
         );
+
+      case "masterCatalog":
+        return <MasterCatalogPage currentUser={currentUser} />;
 
       case "inventory":
       case "stock":
@@ -314,6 +318,9 @@ export default function PrimeCareWebPortal({
             authToken={authToken}
           />
         );
+
+      case "masterCatalog":
+        return <MasterCatalogPage currentUser={currentUser} />;
 
       case "inventory":
       case "stock":

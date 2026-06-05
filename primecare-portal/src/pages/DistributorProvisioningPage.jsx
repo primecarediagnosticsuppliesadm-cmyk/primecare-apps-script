@@ -552,14 +552,14 @@ export default function DistributorProvisioningPage({
     const fallbackTenant = bundle.tenants.find((t) => t.id === model.distributorId);
     const result = await enableStandardProductCatalog(model.distributorId, { fallbackTenant });
     if (!result?.ok) {
-      setMsg(result?.error || "Failed to enable standard catalog");
+      setMsg(result?.error || "Failed to assign HQ master catalog");
       return;
     }
     await applyLocalBundleUpdate(model.distributorId);
     setMsg(
       result.durablePatchOk === false
         ? "Standard catalog saved locally — Supabase metadata sync failed"
-        : "PrimeCare standard catalog enabled — readiness updated"
+        : `Catalog assigned — ${result.assignedCount ?? 0} product(s) from HQ master`
     );
   }
 
@@ -951,8 +951,8 @@ export default function DistributorProvisioningPage({
                       ) : null}
                       {c.id === "catalog_configured" && c.status !== "PASS" ? (
                         <p className="w-full text-[10px] text-slate-500">
-                          PrimeCare standard catalog will be available to this distributor.
-                          Distributor-specific pricing/catalog can be configured later.
+                          Assign products from HQ master catalog only. Set distributor pricing and
+                          inventory in the Catalog tab.
                         </p>
                       ) : null}
                     </li>

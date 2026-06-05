@@ -37,6 +37,7 @@ const ICONS = {
   collections: Wallet,
   labAccount: Wallet,
   labs: Building2,
+  masterCatalog: Package,
   inventory: Boxes,
   orders: ShoppingCart,
   risk: AlertTriangle,

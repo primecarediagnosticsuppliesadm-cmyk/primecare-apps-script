@@ -11,6 +11,7 @@ const EXECUTIVE_HQ_MENU_KEYS = new Set([
   "tenantManagement",
   "distributorOs",
   "operationsCenter",
+  "masterCatalog",
   "inventory",
   "purchase",
   "predatorDebug",
@@ -20,6 +21,7 @@ const ADMIN_HQ_MENU_KEYS = new Set([
   "dashboard",
   "distributorOs",
   "operationsCenter",
+  "masterCatalog",
   "inventory",
   "purchase",
   "visits",
@@ -57,6 +59,7 @@ export const MENU_ITEMS = [
   { key: "labs", label: "Labs", icon: "Building2" },
 
   // Operations
+  { key: "masterCatalog", label: "Master Catalog", icon: "Package" },
   { key: "inventory", label: "Inventory", icon: "Boxes" },
   { key: "orders", label: "Orders", icon: "ShoppingCart" },
 
@@ -94,6 +97,7 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "collections",
   "labAccount",
   "labs",
+  "masterCatalog",
   "inventory",
   "orders",
   "risk",

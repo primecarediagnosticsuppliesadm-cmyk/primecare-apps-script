@@ -234,6 +234,61 @@ export async function validateDistributorOsModule({ ctx, rendered = null }) {
       })
     );
 
+    const catalogItems = Array.isArray(rendered?.catalogItems) ? rendered.catalogItems : [];
+    const catalogAssigned = Boolean(rendered?.catalogAssigned) && catalogItems.length > 0;
+    const catalogPricingValid = rendered?.catalogPricingValid !== false;
+    const catalogIsolated =
+      rendered?.catalogInventoryIsolated !== false && num(rendered?.catalogHqLeakCount) === 0;
+
+    entries.push(
+      createPredatorEntry({
+        status: catalogAssigned ? "PASS" : rendered?.tab === "launch" ? "WARN" : "FAIL",
+        module: "Distributor OS",
+        step: "distributor_catalog_assigned",
+        expected: "At least one HQ master product assigned to distributor catalog",
+        actual: {
+          scopeTenantId,
+          catalogAssigned: rendered?.catalogAssigned,
+          assignedCount: rendered?.catalogAssignedCount ?? catalogItems.length,
+        },
+        severity: catalogAssigned ? "low" : "high",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    entries.push(
+      createPredatorEntry({
+        status: catalogPricingValid || !catalogItems.length ? "PASS" : "FAIL",
+        module: "Distributor OS",
+        step: "distributor_catalog_pricing_valid",
+        expected: "All assigned catalog SKUs have valid distributor pricing",
+        actual: { pricingValid: catalogPricingValid, itemCount: catalogItems.length },
+        severity: catalogPricingValid ? "low" : "high",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    entries.push(
+      createPredatorEntry({
+        status: catalogIsolated || !catalogItems.length ? "PASS" : "FAIL",
+        module: "Distributor OS",
+        step: "distributor_inventory_isolated",
+        expected: "Distributor catalog inventory scoped to distributor tenant_id only",
+        actual: {
+          isolated: rendered?.catalogInventoryIsolated,
+          hqLeakCount: rendered?.catalogHqLeakCount ?? 0,
+        },
+        severity: catalogIsolated ? "low" : "critical",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
     const labLeak = detectHqLeakage(labs, scopeTenantId, homeTenantId);
     const orderLeak = detectHqLeakage(orders, scopeTenantId, homeTenantId);
     const collLeak = detectHqLeakage(collections, scopeTenantId, homeTenantId);

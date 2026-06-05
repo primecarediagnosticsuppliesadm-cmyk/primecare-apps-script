@@ -12,6 +12,7 @@ import {
   PERSISTENCE_STATUS,
 } from "@/tenant/durableTenantStore.js";
 import { fetchAgentProfilesForTenant } from "@/distributor/distributorWorkspaceData.js";
+import { assignAllMasterCatalogToDistributor } from "@/catalog/distributorCatalogData.js";
 import { runTenantFoundationIsolationChecks } from "@/tenant/tenantFoundationIsolation.js";
 import {
   readTenantRegistry,
@@ -555,9 +556,21 @@ export async function updateDistributorAdminDetails(tenantId, admin, options = {
 }
 
 /**
- * Enable PrimeCare standard catalog for a distributor (local + durable metadata).
+ * Assign HQ master catalog products to a distributor (replaces legacy flag-only enable).
  */
 export async function enableStandardProductCatalog(tenantId, options = {}) {
+  const assignResult = await assignAllMasterCatalogToDistributor(tenantId, options);
+  if (assignResult.ok) {
+    markProvisioningMilestone(str(tenantId), "catalog_configured");
+    return {
+      ok: true,
+      row: getRegistryTenant(tenantId),
+      durablePatchOk: assignResult.durablePatchOk,
+      assignedCount: assignResult.assignedCount,
+    };
+  }
+
+  // Fallback: metadata flag when HQ master list is empty (legacy path)
   const id = str(tenantId);
   if (!id) {
     return { ok: false, error: "Missing tenant id" };
@@ -589,9 +602,11 @@ export async function enableStandardProductCatalog(tenantId, options = {}) {
   const now = new Date().toISOString();
   const config = {
     ...(row.config || {}),
-    productCatalogReady: true,
+    catalogAssigned: false,
+    catalogAssignedCount: 0,
+    productCatalogReady: false,
     catalogConfiguredAt: now,
-    standardCatalogEnabled: true,
+    standardCatalogEnabled: false,
   };
 
   upsertRegistryTenant({
@@ -636,7 +651,7 @@ export async function enableStandardProductCatalog(tenantId, options = {}) {
 
   const saved = getRegistryTenant(id);
   return {
-    ok: Boolean(saved?.config?.productCatalogReady),
+    ok: Boolean(saved?.config?.catalogAssigned || saved?.config?.productCatalogReady),
     row: saved,
     durablePatchOk,
   };

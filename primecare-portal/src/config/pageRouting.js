@@ -6,6 +6,9 @@ import { ROLES } from "./roles";
  */
 export function normalizePageKey(page) {
   switch (page) {
+    case "master-catalog":
+    case "masterCatalog":
+      return "masterCatalog";
     case "stock":
     case "inventory-ledger":
     case "inventory-movements":

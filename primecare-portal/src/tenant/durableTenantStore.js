@@ -177,6 +177,7 @@ export function findTenantNameCollision(dbTenants, registryRows, name, excludeId
 /** Provisioning booleans merged with OR (local true wins persistence). */
 const PROVISIONING_BOOL_FLAGS = [
   "productCatalogReady",
+  "catalogAssigned",
   "rolesConfigured",
   "agentProvisioned",
   "isolationAcknowledged",

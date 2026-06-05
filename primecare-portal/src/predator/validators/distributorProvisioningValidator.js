@@ -279,8 +279,29 @@ export async function validateDistributorProvisioningModule({
         actual: catalogPersist.actual,
         suggestedFix:
           catalogPersist.status === "FAIL"
-            ? "Mark load_catalog syncs metadata.config.productCatalogReady to Supabase"
+            ? "Assign HQ master catalog products via Distributor OS Catalog tab"
             : undefined,
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const catalogCheck = model?.checks?.find((c) => c.id === "catalog_configured");
+    const catalogAssigned =
+      model?.profile?.catalogAssigned === true ||
+      Number(model?.profile?.catalogAssignedCount || 0) > 0 ||
+      catalogCheck?.status === "PASS";
+    entries.push(
+      createPredatorEntry({
+        status: catalogAssigned ? "PASS" : "FAIL",
+        module: "Distributor Provisioning",
+        step: "distributor_catalog_assigned",
+        expected: "Launch gate passes when at least one HQ product is assigned",
+        actual: {
+          catalogCheckStatus: catalogCheck?.status,
+          catalogAssignedCount: model?.profile?.catalogAssignedCount,
+        },
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,

@@ -31,6 +31,9 @@ import CollectionsPage from "@/pages/CollectionsPage.jsx";
 import LabContractManagementPage from "@/pages/LabContractManagementPage.jsx";
 import CommissionEnginePage from "@/pages/CommissionEnginePage.jsx";
 import DistributorProvisioningPage from "@/pages/DistributorProvisioningPage.jsx";
+import DistributorCatalogPage from "@/pages/DistributorCatalogPage.jsx";
+import { loadDistributorCatalogBundle } from "@/catalog/distributorCatalogData.js";
+import { isCatalogAssigned } from "@/catalog/distributorCatalogEngine.js";
 import DistributorCreateWizard from "@/components/distributor/DistributorCreateWizard.jsx";
 import {
   BillingPanel,
@@ -131,6 +134,7 @@ export default function DistributorOsPage({
   const [osContext, setOsContext] = useState(() => readDistributorOsContext());
   const [tab, setTab] = useState(() => readDistributorOsContext()?.tab || "dashboard");
   const [snapshot, setSnapshot] = useState(null);
+  const [catalogBundle, setCatalogBundle] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [lifecycleMsg, setLifecycleMsg] = useState("");
@@ -191,16 +195,22 @@ export default function DistributorOsPage({
   const loadSnapshot = useCallback(async () => {
     if (!scope?.tenantId) {
       setSnapshot(null);
+      setCatalogBundle(null);
       return;
     }
     try {
-      const data = await loadDistributorOsSnapshot(currentUser, scope.tenantId);
+      const [data, catalog] = await Promise.all([
+        loadDistributorOsSnapshot(currentUser, scope.tenantId),
+        loadDistributorCatalogBundle(scope.tenantId, effectiveHomeId),
+      ]);
       setSnapshot(data);
+      setCatalogBundle(catalog);
     } catch (err) {
       console.warn("[DistributorOs] snapshot", err);
       setSnapshot(null);
+      setCatalogBundle(null);
     }
-  }, [currentUser, scope?.tenantId]);
+  }, [currentUser, scope?.tenantId, effectiveHomeId]);
 
   useEffect(() => {
     const presetTab = consumeDistributorOsTabPreset();
@@ -227,7 +237,9 @@ export default function DistributorOsPage({
     setOsContext(readDistributorOsContext());
   }, [selectedId, selectedName, effectiveHomeId, tab]);
 
-  const catalogReady = Boolean(enrichedRow?.config?.productCatalogReady);
+  const catalogAssigned =
+    Boolean(catalogBundle?.catalogAssigned) ||
+    isCatalogAssigned(enrichedRow?.config || selectedRow?.config || {});
 
   const predatorSnapshot = useMemo(() => {
     const base = {
@@ -261,8 +273,24 @@ export default function DistributorOsPage({
       contracts: snapshot?.contracts || [],
       billing: selectedBilling,
       performance: selectedPerformance,
+      catalogAssigned: catalogBundle?.catalogAssigned ?? catalogAssigned,
+      catalogAssignedCount: catalogBundle?.assignedCount ?? 0,
+      catalogPricingValid: catalogBundle?.pricingValid ?? true,
+      catalogInventoryIsolated: catalogBundle?.inventoryIsolated ?? true,
+      catalogHqLeakCount: catalogBundle?.hqLeakCount ?? 0,
+      catalogItems: catalogBundle?.assignedItems || [],
     };
-  }, [scope, tab, snapshot, portfolio, selectedBilling, selectedPerformance, effectiveHomeId]);
+  }, [
+    scope,
+    tab,
+    snapshot,
+    portfolio,
+    selectedBilling,
+    selectedPerformance,
+    effectiveHomeId,
+    catalogBundle,
+    catalogAssigned,
+  ]);
 
   usePredatorModuleValidation("Distributor OS", currentUser, predatorSnapshot ?? {}, Boolean(portfolio));
 
@@ -437,11 +465,11 @@ export default function DistributorOsPage({
                 </div>
               ) : null}
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
-                <p className="font-semibold text-slate-900">Product catalog</p>
+                <p className="font-semibold text-slate-900">Catalog</p>
                 <p className="mt-1 text-slate-700">
-                  {catalogReady
-                    ? "Using PrimeCare standard catalog."
-                    : "Complete Launch checklist to enable catalog."}
+                  {catalogAssigned
+                    ? `Catalog assigned · ${catalogBundle?.assignedCount ?? 0} product(s) from HQ master`
+                    : "Assign at least one product from HQ master catalog in the Catalog tab."}
                 </p>
               </div>
             </div>
@@ -458,6 +486,17 @@ export default function DistributorOsPage({
           <BillingPanel billingRows={portfolio?.billingRows} onSelect={selectDistributor} />
         ) : null}
 
+        {tab === "catalog" ? (
+          scope ? (
+            <DistributorCatalogPage
+              currentUser={currentUser}
+              distributorScope={scope}
+              embedded
+            />
+          ) : (
+            <ScopeRequiredMessage tabLabel="Catalog" />
+          )
+        ) : null}
         {tab === "launch" ? (
           scope ? (
             <DistributorProvisioningPage
