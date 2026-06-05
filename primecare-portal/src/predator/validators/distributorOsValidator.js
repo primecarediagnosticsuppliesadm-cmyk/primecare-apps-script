@@ -143,16 +143,55 @@ export async function validateDistributorOsModule({ ctx, rendered = null }) {
     );
 
     const revenueRollup = num(rendered?.totalRevenue);
-    const perfRevenue = performanceRows.reduce((s, r) => s + num(r.revenue), 0);
-    const rollupOk = performanceRows.length === 0 || Math.abs(revenueRollup - perfRevenue) < 1;
+    const perfRevenueActive = performanceRows
+      .filter((r) => r.rankingEligible === true)
+      .reduce((s, r) => s + num(r.revenue), 0);
+    const rollupOk =
+      performanceRows.length === 0 || Math.abs(revenueRollup - perfRevenueActive) < 1;
     entries.push(
       createPredatorEntry({
         status: rollupOk ? "PASS" : "WARN",
         module: "Distributor OS",
         step: "distributor_os.distributor_revenue_rollup",
-        expected: "Portfolio revenue equals sum of distributor performance rows",
-        actual: { revenueRollup, perfRevenue, delta: Math.abs(revenueRollup - perfRevenue) },
+        expected: "Portfolio revenue equals sum of active, contract-valid distributor rows",
+        actual: {
+          revenueRollup,
+          perfRevenueActive,
+          delta: Math.abs(revenueRollup - perfRevenueActive),
+        },
         severity: rollupOk ? "low" : "medium",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    const topDistributor = portfolio.topDistributorByRevenue || null;
+    const topPerf = topDistributor?.distributorId
+      ? performanceRows.find((r) => r.distributorId === topDistributor.distributorId)
+      : null;
+    const topActiveOnlyOk =
+      topDistributor?.isPlaceholder === true ||
+      (topPerf?.lifecycleStatus === LIFECYCLE_STATUS.ACTIVE &&
+        topPerf?.contractExpired !== true &&
+        topPerf?.rankingEligible === true);
+    entries.push(
+      createPredatorEntry({
+        status: topActiveOnlyOk ? "PASS" : "FAIL",
+        module: "Distributor OS",
+        step: "distributor_os.top_distributor_active_only",
+        expected: "Top distributor is ACTIVE with valid contract, or placeholder when none qualify",
+        actual: {
+          topName: topDistributor?.name,
+          topDistributorId: topDistributor?.distributorId,
+          isPlaceholder: topDistributor?.isPlaceholder === true,
+          lifecycleStatus: topPerf?.lifecycleStatus || topDistributor?.lifecycleStatus,
+          rankingEligible: topPerf?.rankingEligible ?? topDistributor?.rankingEligible,
+        },
+        rootCauseGuess: topActiveOnlyOk
+          ? "Top distributor ranking uses active distributors only"
+          : "Draft or non-active distributor selected as top distributor",
+        severity: topActiveOnlyOk ? "low" : "high",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,

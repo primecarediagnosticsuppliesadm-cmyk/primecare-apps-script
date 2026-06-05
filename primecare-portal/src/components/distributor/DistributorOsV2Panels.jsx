@@ -28,10 +28,24 @@ export function DashboardPanel({ dashboard, comparison = [], onSelect }) {
         <KpiCard title="Collections" value={d.collectionsFromDistributors} />
         <KpiCard
           title="Top distributor"
-          value={d.topDistributorByRevenue?.name || "—"}
-          subtitle={d.topDistributorByRevenue?.revenueLabel}
+          value={
+            d.topDistributorByRevenue?.isPlaceholder
+              ? "No active distributor yet"
+              : d.topDistributorByRevenue?.name || "—"
+          }
+          subtitle={
+            d.topDistributorByRevenue?.isPlaceholder
+              ? undefined
+              : d.topDistributorByRevenue?.revenueLabel
+          }
         />
-        <KpiCard title="At-risk" value={d.atRiskCount} />
+        <KpiCard
+          title="At-risk"
+          value={d.atRiskCount}
+          subtitle={
+            d.setupRiskCount > 0 ? `${d.setupRiskCount} in setup` : undefined
+          }
+        />
         <KpiCard
           title="Contracts expiring"
           value={`30d: ${d.contractsExpiring30} · 60d: ${d.contractsExpiring60} · 90d: ${d.contractsExpiring90}`}

@@ -4,6 +4,7 @@
 
 import { buildDistributorBillingRow, rollupPortfolioBilling } from "@/distributor/distributorBillingEngine.js";
 import {
+  canDistributorOperate,
   contractExpiryState,
   enrichRegistryRowLifecycle,
   LIFECYCLE_STATUS,
@@ -40,6 +41,39 @@ function sumOrderValue(rows = []) {
 
 function countActiveLabs(labs = []) {
   return labs.filter((l) => str(l.status).toLowerCase() !== "inactive").length;
+}
+
+const SETUP_LIFECYCLE_STATUSES = new Set([
+  LIFECYCLE_STATUS.DRAFT,
+  LIFECYCLE_STATUS.PENDING_LAUNCH,
+]);
+
+/** Active lifecycle with a non-expired contract — eligible for top distributor and revenue rollups. */
+export function isTopDistributorEligible(row = {}) {
+  const lifecycleStatus = str(row.lifecycleStatus || resolveDistributorLifecycleStatus(row));
+  if (lifecycleStatus !== LIFECYCLE_STATUS.ACTIVE) return false;
+  if (row.contractExpired === true) return false;
+  return canDistributorOperate(lifecycleStatus, row.config || {});
+}
+
+export function isSetupRiskDistributor(row = {}) {
+  const lifecycleStatus = str(row.lifecycleStatus || resolveDistributorLifecycleStatus(row));
+  return SETUP_LIFECYCLE_STATUSES.has(lifecycleStatus);
+}
+
+export function isOperationalRiskDistributor(row = {}) {
+  const lifecycleStatus = str(row.lifecycleStatus || resolveDistributorLifecycleStatus(row));
+  return (
+    lifecycleStatus === LIFECYCLE_STATUS.SUSPENDED ||
+    row.contractExpired === true ||
+    row.healthBand === "Risk"
+  );
+}
+
+export function classifyDistributorRisk(row = {}) {
+  if (isSetupRiskDistributor(row)) return "setup";
+  if (isOperationalRiskDistributor(row)) return "operational";
+  return null;
 }
 
 /**
@@ -114,14 +148,17 @@ export function buildDistributorPerformanceRow(distributorRow, metrics = {}, ext
 }
 
 function suggestNextAction(row, metrics = {}) {
-  if (row.contractExpired) return "Renew contract";
   if (row.lifecycleStatus === LIFECYCLE_STATUS.DRAFT) return "Complete setup";
   if (row.lifecycleStatus === LIFECYCLE_STATUS.PENDING_LAUNCH) return "Launch distributor";
-  if (row.lifecycleStatus === LIFECYCLE_STATUS.SUSPENDED) return "Review suspension";
-  if (row.lifecycleStatus === LIFECYCLE_STATUS.DEACTIVATED) return "Reactivate or archive";
-  if ((metrics.labs ?? row.labs) === 0) return "Add first lab";
-  if (row.healthBand === "Risk" || num(row.healthScore) < 50) return "Review collections risk";
-  return "Monitor performance";
+  if (row.lifecycleStatus === LIFECYCLE_STATUS.SUSPENDED) return "Resolve suspension";
+  if (row.lifecycleStatus === LIFECYCLE_STATUS.DEACTIVATED) return "Historical only";
+  if (row.contractExpired) return "Renew contract";
+  if (row.lifecycleStatus === LIFECYCLE_STATUS.ACTIVE) {
+    if ((metrics.labs ?? row.labs) === 0) return "Add first lab";
+    if (row.healthBand === "Risk" || num(row.healthScore) < 50) return "Review collections risk";
+    return "Monitor performance";
+  }
+  return "Review status";
 }
 
 export function buildPortfolioDashboard(distributors = [], performanceRows = [], billingRows = []) {
@@ -131,14 +168,21 @@ export function buildPortfolioDashboard(distributors = [], performanceRows = [],
     (d) => resolveDistributorLifecycleStatus(d) === LIFECYCLE_STATUS.SUSPENDED
   ).length;
 
-  const monthlyRevenue = performanceRows.reduce((s, r) => s + num(r.revenue), 0);
-  const collectionsFromDistributors = performanceRows.reduce((s, r) => s + num(r.collections), 0);
-  const billingRollup = rollupPortfolioBilling(billingRows);
-
-  const topByRevenue = [...performanceRows].sort((a, b) => num(b.revenue) - num(a.revenue))[0] || null;
-  const atRisk = performanceRows.filter(
-    (r) => r.healthBand === "Risk" || r.contractExpired || r.lifecycleStatus === LIFECYCLE_STATUS.SUSPENDED
+  const rankingRows = performanceRows.filter((r) => isTopDistributorEligible(r));
+  const monthlyRevenue = rankingRows.reduce((s, r) => s + num(r.revenue), 0);
+  const collectionsFromDistributors = rankingRows.reduce((s, r) => s + num(r.collections), 0);
+  const billingRollup = rollupPortfolioBilling(
+    billingRows.filter((b) => {
+      const perf = performanceRows.find((r) => r.distributorId === b.distributorId);
+      return perf && isTopDistributorEligible(perf);
+    })
   );
+
+  const topByRevenue =
+    [...rankingRows].sort((a, b) => num(b.revenue) - num(a.revenue))[0] || null;
+
+  const setupRisk = performanceRows.filter((r) => isSetupRiskDistributor(r));
+  const operationalRisk = performanceRows.filter((r) => isOperationalRiskDistributor(r));
 
   const expiring30 = distributors.filter((d) => {
     const days = contractExpiryState(d.config || {}).daysLeft;
@@ -161,10 +205,34 @@ export function buildPortfolioDashboard(distributors = [], performanceRows = [],
     monthlyDistributorRevenueLabel: formatInr(monthlyRevenue),
     collectionsFromDistributors,
     topDistributorByRevenue: topByRevenue
-      ? { name: topByRevenue.name, revenue: topByRevenue.revenue, revenueLabel: topByRevenue.revenueLabel }
-      : null,
-    atRiskDistributors: atRisk,
-    atRiskCount: atRisk.length,
+      ? {
+          distributorId: topByRevenue.distributorId,
+          name: topByRevenue.name,
+          revenue: topByRevenue.revenue,
+          revenueLabel: topByRevenue.revenueLabel,
+          lifecycleStatus: topByRevenue.lifecycleStatus,
+          rankingEligible: true,
+          isPlaceholder: false,
+        }
+      : {
+          distributorId: null,
+          name: "No active distributor yet",
+          revenue: 0,
+          revenueLabel: null,
+          lifecycleStatus: null,
+          rankingEligible: false,
+          isPlaceholder: true,
+        },
+    setupRiskDistributors: setupRisk,
+    setupRiskCount: setupRisk.length,
+    operationalRiskDistributors: operationalRisk,
+    operationalRiskCount: operationalRisk.length,
+    atRiskDistributors: [
+      ...setupRisk.map((r) => ({ ...r, riskType: "setup" })),
+      ...operationalRisk.map((r) => ({ ...r, riskType: "operational" })),
+    ],
+    atRiskCount: operationalRisk.length,
+    rankingEligibleCount: rankingRows.length,
     contractsExpiring30: expiring30,
     contractsExpiring60: expiring60,
     contractsExpiring90: expiring90,
@@ -204,20 +272,27 @@ export function buildDistributorOsPortfolioModel({
   homeTenantId = "",
 } = {}) {
   const enriched = distributors.map((d) => enrichRegistryRowLifecycle(d));
-  const totalRevenue = enriched.reduce((s, d) => {
-    const m = computeDistributorMetrics(d.id, { labs, orders, collections });
-    return s + m.revenue;
-  }, 0);
 
   const performanceRows = enriched.map((d) => {
     const metrics = computeDistributorMetrics(d.id, { labs, orders, collections });
-    const revenueContributionPct = totalRevenue > 0 ? Math.round((metrics.revenue / totalRevenue) * 100) : 0;
     return buildDistributorPerformanceRow(d, metrics, {
       contracts: contractCounts[d.id] ?? 0,
       agents: agentCounts[d.id] ?? d.agents ?? 0,
-      revenueContributionPct,
+      revenueContributionPct: 0,
     });
   });
+
+  const rankingRows = performanceRows.filter((r) => isTopDistributorEligible(r));
+  const totalRevenue = rankingRows.reduce((s, r) => s + num(r.revenue), 0);
+  const totalRevenueAll = performanceRows.reduce((s, r) => s + num(r.revenue), 0);
+
+  for (const row of performanceRows) {
+    row.rankingEligible = isTopDistributorEligible(row);
+    row.revenueContributionPct =
+      row.rankingEligible && totalRevenue > 0
+        ? Math.round((num(row.revenue) / totalRevenue) * 100)
+        : 0;
+  }
 
   const billingRows = enriched.map((d) => {
     const metrics = computeDistributorMetrics(d.id, { labs, orders, collections });
@@ -240,5 +315,7 @@ export function buildDistributorOsPortfolioModel({
     comparison,
     hqLeakCount,
     totalRevenue,
+    totalRevenueAll,
+    rankingEligibleCount: rankingRows.length,
   };
 }
