@@ -1,6 +1,15 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { StatusBadge, KpiCard, KpiCardGrid } from "@/components/ux";
+import { ROLES } from "@/config/roles.js";
+import {
+  createDistributorBillingPayment,
+  listBillingPaymentsForDistributor,
+  PAYMENT_TYPE_LABELS,
+  PAYMENT_TYPES,
+  RECORDABLE_PAYMENT_TYPES,
+} from "@/api/distributorBillingSupabaseApi.js";
 import {
   allowedLifecycleTransitions,
   contractExpiryState,
@@ -133,6 +142,280 @@ export function ComparisonPanel({ rows = [], onSelect, title = "Comparison" }) {
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+function formatBillingInr(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "—";
+  return `₹${v.toLocaleString("en-IN")}`;
+}
+
+function todayYmd() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+const EMPTY_PAYMENT_FORM = {
+  amount: "",
+  paymentDate: todayYmd(),
+  paymentType: PAYMENT_TYPES.PLATFORM_FEE,
+  reference: "",
+  notes: "",
+};
+
+export function DistributorBillingDetailPanel({
+  scope,
+  billing,
+  currentUser,
+  homeTenantId,
+  onPaymentRecorded,
+  onPaymentsChange,
+}) {
+  const [payments, setPayments] = useState([]);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ ...EMPTY_PAYMENT_FORM, paymentDate: todayYmd() });
+  const [formError, setFormError] = useState("");
+  const [saveMsg, setSaveMsg] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const isExecutive = currentUser?.role === ROLES.EXECUTIVE;
+  const distributorId = scope?.tenantId;
+
+  const loadPayments = useCallback(async () => {
+    if (!distributorId) {
+      setPayments([]);
+      onPaymentsChange?.([]);
+      return;
+    }
+    setPaymentsLoading(true);
+    try {
+      const res = await listBillingPaymentsForDistributor(distributorId);
+      const rows = res.ok ? res.payments : [];
+      setPayments(rows);
+      onPaymentsChange?.(rows);
+    } catch (err) {
+      console.warn("[DistributorBilling] payment history", err);
+      setPayments([]);
+      onPaymentsChange?.([]);
+    } finally {
+      setPaymentsLoading(false);
+    }
+  }, [distributorId, onPaymentsChange]);
+
+  useEffect(() => {
+    void loadPayments();
+  }, [loadPayments]);
+
+  function updateField(key, value) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+    setFormError("");
+    setSaveMsg("");
+  }
+
+  function validateForm() {
+    const amount = Number(form.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return "Amount must be greater than zero.";
+    }
+    if (!String(form.paymentDate || "").trim()) {
+      return "Payment date is required.";
+    }
+    if (!String(form.paymentType || "").trim()) {
+      return "Payment type is required.";
+    }
+    return "";
+  }
+
+  async function handleSavePayment(event) {
+    event.preventDefault();
+    if (!isExecutive || !distributorId) return;
+
+    const validationError = validateForm();
+    if (validationError) {
+      setFormError(validationError);
+      return;
+    }
+
+    setSaving(true);
+    setFormError("");
+    setSaveMsg("");
+    try {
+      const res = await createDistributorBillingPayment(
+        {
+          id: `dbp-${distributorId}-${Date.now()}`,
+          distributorId,
+          amount: Number(form.amount),
+          paymentType: form.paymentType,
+          paymentDate: form.paymentDate,
+          reference: form.reference || null,
+          note: form.notes || null,
+        },
+        {
+          registryTenantId: homeTenantId,
+          recordedBy: currentUser?.name || currentUser?.email || "executive",
+        }
+      );
+
+      if (!res.ok) {
+        setFormError(res.error || "Failed to record payment.");
+        return;
+      }
+
+      setForm({ ...EMPTY_PAYMENT_FORM, paymentDate: todayYmd() });
+      setShowForm(false);
+      setSaveMsg("Payment recorded.");
+      await loadPayments();
+      if (onPaymentRecorded) {
+        await onPaymentRecorded();
+      }
+    } catch (err) {
+      setFormError(err?.message || "Failed to record payment.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!scope || !billing) {
+    return (
+      <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+        Select a distributor to view billing details and record payments.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">{scope.tenantName}</h3>
+          <p className="text-xs text-slate-600">
+            {billing.billingModelLabel} · Due {billing.dueDate || "—"}
+          </p>
+        </div>
+        {isExecutive ? (
+          <Button type="button" size="sm" onClick={() => setShowForm((v) => !v)}>
+            {showForm ? "Cancel" : "Record Payment"}
+          </Button>
+        ) : null}
+      </div>
+
+      <KpiCardGrid>
+        <KpiCard title="Amount due" value={billing.amountDueLabel} />
+        <KpiCard title="Collected" value={billing.collectedLabel} />
+        <KpiCard title="Outstanding" value={billing.outstandingLabel} />
+        <KpiCard title="Last payment" value={billing.lastPaymentDate || "—"} />
+      </KpiCardGrid>
+
+      {showForm && isExecutive ? (
+        <form
+          onSubmit={handleSavePayment}
+          className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4"
+        >
+          <p className="text-xs font-medium text-slate-700">Record payment</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1 text-xs text-slate-600">
+              <span>Amount (INR)</span>
+              <Input
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={form.amount}
+                onChange={(e) => updateField("amount", e.target.value)}
+                placeholder="0.00"
+                required
+              />
+            </label>
+            <label className="space-y-1 text-xs text-slate-600">
+              <span>Payment date</span>
+              <Input
+                type="date"
+                value={form.paymentDate}
+                onChange={(e) => updateField("paymentDate", e.target.value)}
+                required
+              />
+            </label>
+            <label className="space-y-1 text-xs text-slate-600">
+              <span>Payment type</span>
+              <select
+                className="flex h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm"
+                value={form.paymentType}
+                onChange={(e) => updateField("paymentType", e.target.value)}
+                required
+              >
+                {RECORDABLE_PAYMENT_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {PAYMENT_TYPE_LABELS[type] || type}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1 text-xs text-slate-600">
+              <span>Reference</span>
+              <Input
+                value={form.reference}
+                onChange={(e) => updateField("reference", e.target.value)}
+                placeholder="UTR / invoice / receipt"
+              />
+            </label>
+            <label className="space-y-1 text-xs text-slate-600 sm:col-span-2">
+              <span>Notes</span>
+              <textarea
+                className="min-h-[72px] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+                value={form.notes}
+                onChange={(e) => updateField("notes", e.target.value)}
+                placeholder="Optional context"
+              />
+            </label>
+          </div>
+          {formError ? <p className="text-xs text-red-700">{formError}</p> : null}
+          {saveMsg ? <p className="text-xs text-emerald-700">{saveMsg}</p> : null}
+          <div className="flex gap-2">
+            <Button type="submit" size="sm" disabled={saving}>
+              {saving ? "Saving…" : "Save payment"}
+            </Button>
+          </div>
+        </form>
+      ) : null}
+
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-slate-700">Payment history</p>
+        {paymentsLoading ? (
+          <p className="text-xs text-slate-500">Loading payment history…</p>
+        ) : !payments.length ? (
+          <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+            No payments recorded yet.
+          </p>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-slate-200">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b bg-slate-50 text-left text-slate-500">
+                  <th className="px-2 py-1.5">Payment date</th>
+                  <th className="px-2 py-1.5">Amount</th>
+                  <th className="px-2 py-1.5">Type</th>
+                  <th className="px-2 py-1.5">Reference</th>
+                  <th className="px-2 py-1.5">Recorded by</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payments.map((payment) => (
+                  <tr key={payment.id} className="border-b border-slate-100">
+                    <td className="px-2 py-1.5">{payment.paymentDate || "—"}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{formatBillingInr(payment.amount)}</td>
+                    <td className="px-2 py-1.5">
+                      {PAYMENT_TYPE_LABELS[payment.paymentType] || payment.paymentType}
+                    </td>
+                    <td className="px-2 py-1.5">{payment.reference || "—"}</td>
+                    <td className="px-2 py-1.5">{payment.recordedBy || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

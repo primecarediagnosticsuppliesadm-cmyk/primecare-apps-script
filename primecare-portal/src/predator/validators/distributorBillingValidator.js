@@ -45,7 +45,6 @@ export async function validateDistributorBillingModule({
   opsPayload = null,
 }) {
   void currentUser;
-  void rendered;
   void opsPayload;
 
   return predatorTrace("Distributor Billing", "validation.full", async () => {
@@ -262,6 +261,125 @@ export async function validateDistributorBillingModule({
             collectedSource: resolved.collectedSource,
             batchOk: batchRes.ok,
           },
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
+
+    const scopeTenantId = str(rendered?.scopeTenantId);
+    if (rendered?.hasRecordPaymentUi) {
+      entries.push(
+        createPredatorEntry({
+          status: supabase && tableReadable ? "PASS" : "FAIL",
+          module: "Distributor Billing",
+          step: "billing.payment_record_persists",
+          expected: "Executive Record Payment UI writes to distributor_billing_payments",
+          actual: {
+            hasRecordPaymentUi: true,
+            scopeTenantId: scopeTenantId || null,
+            supabaseReady: Boolean(supabase),
+            tableReadable,
+          },
+          suggestedFix:
+            supabase && tableReadable
+              ? undefined
+              : "Deploy distributor_billing_migration.sql and distributor_billing_payment_types_b4.sql",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    } else if (rendered?.billingTabActive && ctx.role === ROLES.EXECUTIVE) {
+      entries.push(
+        createPredatorEntry({
+          status: "WARN",
+          module: "Distributor Billing",
+          step: "billing.payment_record_persists",
+          actual: "Select a distributor on Billing tab to surface Record Payment UI",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
+
+    if (scopeTenantId && supabase && tableReadable && num(rendered?.billingPaymentHistoryCount) > 0) {
+      const uiSum = num(rendered.billingPaymentHistorySum);
+      const uiCollected = num(rendered.billingCollected);
+      const listRes = await listBillingPaymentsForDistributor(scopeTenantId);
+      const apiSum = (listRes.payments || []).reduce((s, p) => s + num(p.amount), 0);
+      const historyMatchesLedger =
+        listRes.ok &&
+        Math.abs(apiSum - uiSum) < 0.01 &&
+        Math.abs(uiSum - uiCollected) < 0.01;
+      entries.push(
+        createPredatorEntry({
+          status: historyMatchesLedger ? "PASS" : "FAIL",
+          module: "Distributor Billing",
+          step: "billing.payment_history_matches_ledger",
+          expected: "UI payment history sum matches ledger collected amount",
+          actual: {
+            scopeTenantId,
+            uiHistoryCount: num(rendered.billingPaymentHistoryCount),
+            uiHistorySum: uiSum,
+            uiCollected,
+            apiHistorySum: apiSum,
+            listOk: listRes.ok,
+          },
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    } else if (rendered?.billingTabActive && scopeTenantId) {
+      entries.push(
+        createPredatorEntry({
+          status: "WARN",
+          module: "Distributor Billing",
+          step: "billing.payment_history_matches_ledger",
+          actual: "No payment history rows yet for selected distributor",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
+
+    if (num(rendered?.billingLedgerCount) > 0) {
+      const usesLedger = rendered.billingCollectedSource === BILLING_COLLECTED_SOURCES.LEDGER;
+      const rollup = rendered?.dashboardBillingRollup;
+      const rollupOk =
+        rendered?.billingLedgerLoadOk !== false &&
+        rollup &&
+        num(rollup.totalCollected) >= num(rendered.billingCollected);
+      entries.push(
+        createPredatorEntry({
+          status: usesLedger && rollupOk ? "PASS" : usesLedger ? "WARN" : "FAIL",
+          module: "Distributor Billing",
+          step: "billing.rollup_refresh_after_payment",
+          expected: "Collected/outstanding and dashboard rollups read from ledger after payment",
+          actual: {
+            billingLedgerCount: num(rendered.billingLedgerCount),
+            billingCollectedSource: rendered.billingCollectedSource,
+            billingCollected: num(rendered.billingCollected),
+            billingOutstanding: num(rendered.billingOutstanding),
+            rollupTotalCollected: num(rollup?.totalCollected),
+            billingLedgerLoadOk: rendered?.billingLedgerLoadOk ?? true,
+          },
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    } else if (rendered?.billingTabActive && scopeTenantId) {
+      entries.push(
+        createPredatorEntry({
+          status: "WARN",
+          module: "Distributor Billing",
+          step: "billing.rollup_refresh_after_payment",
+          actual: "Record a payment to verify rollup refresh from ledger",
           tenantId: ctx.tenantId,
           role: ctx.role,
           userId: ctx.userId,

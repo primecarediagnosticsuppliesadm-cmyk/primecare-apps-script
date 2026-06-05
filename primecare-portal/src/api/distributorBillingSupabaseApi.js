@@ -9,13 +9,33 @@ export const MIGRATION_FLAG_KEY = "primecare_billing_migration_v1_done";
 
 export const PAYMENT_TYPES = {
   PLATFORM_FEE: "platform_fee",
+  REVENUE_SHARE: "revenue_share",
+  PER_LAB_FEE: "per_lab_fee",
   OPENING_BALANCE: "opening_balance",
   ADJUSTMENT: "adjustment",
   REFUND: "refund",
 };
 
+export const RECORDABLE_PAYMENT_TYPES = [
+  PAYMENT_TYPES.PLATFORM_FEE,
+  PAYMENT_TYPES.REVENUE_SHARE,
+  PAYMENT_TYPES.PER_LAB_FEE,
+  PAYMENT_TYPES.ADJUSTMENT,
+];
+
+export const PAYMENT_TYPE_LABELS = {
+  [PAYMENT_TYPES.PLATFORM_FEE]: "Platform fee",
+  [PAYMENT_TYPES.REVENUE_SHARE]: "Revenue share",
+  [PAYMENT_TYPES.PER_LAB_FEE]: "Per lab fee",
+  [PAYMENT_TYPES.OPENING_BALANCE]: "Opening balance",
+  [PAYMENT_TYPES.ADJUSTMENT]: "Adjustment",
+  [PAYMENT_TYPES.REFUND]: "Refund",
+};
+
 const COLLECTED_PAYMENT_TYPES = new Set([
   PAYMENT_TYPES.PLATFORM_FEE,
+  PAYMENT_TYPES.REVENUE_SHARE,
+  PAYMENT_TYPES.PER_LAB_FEE,
   PAYMENT_TYPES.OPENING_BALANCE,
   PAYMENT_TYPES.ADJUSTMENT,
 ]);

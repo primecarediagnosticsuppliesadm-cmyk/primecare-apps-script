@@ -188,11 +188,21 @@ export function resolveBillingHealthStatus(billing = {}, lifecycleStatus = "") {
 
 export function buildDistributorBillingRow(distributorRow, metrics = {}) {
   const config = distributorRow.config || {};
+  const resolved = resolveBillingCollected({
+    config,
+    ledgerSum: num(metrics.billingLedgerSum),
+    ledgerCount: num(metrics.billingLedgerCount),
+    ledgerOk: metrics.billingLedgerOk !== false,
+    lastPaymentDateFromLedger: metrics.billingLastPaymentDate || null,
+  });
   const billing = calculateDistributorBilling({
     config,
     collectionsTotal: num(metrics.collectionsTotal ?? distributorRow.collections),
     activeLabs: num(metrics.activeLabs),
     labCount: num(metrics.labs ?? distributorRow.labs),
+    collected: resolved.collected,
+    lastPaymentDate: resolved.lastPaymentDate,
+    collectedSource: resolved.collectedSource,
   });
   const lifecycleStatus = resolveDistributorLifecycleStatus(distributorRow);
   const expiry = contractExpiryState(config);

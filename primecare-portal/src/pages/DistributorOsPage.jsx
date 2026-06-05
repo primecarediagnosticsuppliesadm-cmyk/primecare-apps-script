@@ -38,6 +38,7 @@ import DistributorCreateWizard from "@/components/distributor/DistributorCreateW
 import {
   BillingPanel,
   DashboardPanel,
+  DistributorBillingDetailPanel,
   DistributorStageProgressBar,
   LifecycleActionsPanel,
   OperationRestrictionBanner,
@@ -180,6 +181,7 @@ export default function DistributorOsPage({
   const [showCreate, setShowCreate] = useState(false);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [lifecycleMsg, setLifecycleMsg] = useState("");
+  const [billingPayments, setBillingPayments] = useState([]);
 
   const effectiveHomeId = homeTenantId || currentUser?.tenantId || "";
   const registry = portfolio?.distributors || [];
@@ -408,7 +410,33 @@ export default function DistributorOsPage({
     catalogAssigned,
   ]);
 
+  const billingPredatorSnapshot = useMemo(() => {
+    if (tab !== "billing" || !portfolio) return null;
+    const paymentSum = billingPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    return {
+      billingTabActive: true,
+      scopeTenantId: scope?.tenantId || null,
+      isExecutive: currentUser?.role === ROLES.EXECUTIVE,
+      hasRecordPaymentUi: Boolean(scope && currentUser?.role === ROLES.EXECUTIVE),
+      billingPaymentHistoryCount: billingPayments.length,
+      billingPaymentHistorySum: paymentSum,
+      billingCollected: selectedBilling?.collected ?? null,
+      billingOutstanding: selectedBilling?.outstanding ?? null,
+      billingLedgerCount: selectedBilling?.billingLedgerCount ?? 0,
+      billingCollectedSource: selectedBilling?.collectedSource ?? null,
+      billingLastPaymentDate: selectedBilling?.lastPaymentDate ?? null,
+      dashboardBillingRollup: portfolio?.dashboard?.billingRollup || null,
+      billingLedgerLoadOk: portfolio?.billingLedgerLoadOk ?? true,
+    };
+  }, [tab, portfolio, scope, billingPayments, selectedBilling, currentUser]);
+
   usePredatorModuleValidation("Distributor OS", currentUser, predatorSnapshot ?? {}, Boolean(portfolio));
+  usePredatorModuleValidation(
+    "Distributor Billing",
+    currentUser,
+    billingPredatorSnapshot ?? {},
+    Boolean(billingPredatorSnapshot)
+  );
 
   function selectDistributor(id) {
     const row = distributors.find((d) => d.id === id);
@@ -579,7 +607,21 @@ export default function DistributorOsPage({
         ) : null}
 
         {tab === "billing" ? (
-          <BillingPanel billingRows={portfolio?.billingRows} onSelect={selectDistributor} />
+          <div className="space-y-4">
+            {scope ? (
+              <DistributorBillingDetailPanel
+                scope={scope}
+                billing={selectedBilling}
+                currentUser={currentUser}
+                homeTenantId={effectiveHomeId}
+                onPaymentRecorded={loadPortfolio}
+                onPaymentsChange={setBillingPayments}
+              />
+            ) : (
+              <ScopeRequiredMessage tabLabel="Billing (record payment)" />
+            )}
+            <BillingPanel billingRows={portfolio?.billingRows} onSelect={selectDistributor} />
+          </div>
         ) : null}
 
         {tab === "catalog" ? (
