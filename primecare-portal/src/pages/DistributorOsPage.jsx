@@ -165,6 +165,22 @@ function ScopeRequiredMessage({ tabLabel = "this tab" }) {
   );
 }
 
+function LabsTabAccessMessage({ scope, distributorName = "" }) {
+  if (!scope) {
+    return <ScopeRequiredMessage tabLabel="Labs" />;
+  }
+  if (!scope.canOperate) {
+    const name = distributorName || scope.tenantName || "This distributor";
+    const status = lifecycleStatusLabel(scope.lifecycleStatus);
+    return (
+      <p className="rounded-lg border border-dashed border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        {name} is {status}. Activate the distributor before adding labs.
+      </p>
+    );
+  }
+  return null;
+}
+
 export default function DistributorOsPage({
   currentUser = null,
   setActivePage = null,
@@ -692,19 +708,15 @@ export default function DistributorOsPage({
         ) : null}
 
         {tab === "labs" ? (
-          scope ? (
-            opsBlocked ? (
-              <ScopeRequiredMessage tabLabel="Labs (active distributor required)" />
-            ) : (
-              <LabsPage
-                currentUser={currentUser}
-                authToken={authToken}
-                distributorScope={scope}
-                embedded
-              />
-            )
+          scope?.canOperate ? (
+            <LabsPage
+              currentUser={currentUser}
+              authToken={authToken}
+              distributorScope={scope}
+              embedded
+            />
           ) : (
-            <ScopeRequiredMessage tabLabel="Labs" />
+            <LabsTabAccessMessage scope={scope} distributorName={selectedName} />
           )
         ) : null}
 
