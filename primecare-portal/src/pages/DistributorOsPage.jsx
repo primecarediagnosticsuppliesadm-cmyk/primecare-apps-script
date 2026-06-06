@@ -323,15 +323,22 @@ export default function DistributorOsPage({
       if (result?.config || result?.items) {
         setCatalogBundle((prev) => ({
           ...(prev || {}),
-          catalogAssigned: isCatalogAssigned(result.config || {}),
+          catalogAssigned:
+            result.catalogAssigned ?? isCatalogAssigned(result.config || {}),
           assignedCount: result.assignedCount ?? catalogAssignedCount(result.config || {}),
           assignedItems: result.items || prev?.assignedItems || [],
+          pricingValid: result.pricingValid ?? prev?.pricingValid,
+          hqPricingValid: result.hqPricingValid ?? prev?.hqPricingValid,
+          hqPricingMissingCount: result.hqPricingMissingCount ?? prev?.hqPricingMissingCount,
+          inventoryIsolated: result.inventoryIsolated ?? prev?.inventoryIsolated,
+          hqLeakCount: result.hqLeakCount ?? prev?.hqLeakCount,
         }));
-        return;
+      } else {
+        await loadCatalogSummary();
       }
-      await loadCatalogSummary();
+      void loadSnapshot();
     },
-    [selectedId, loadCatalogSummary]
+    [selectedId, loadCatalogSummary, loadSnapshot]
   );
 
   useEffect(() => {

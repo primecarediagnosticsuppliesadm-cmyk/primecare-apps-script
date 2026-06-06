@@ -105,9 +105,18 @@ export async function resolveDistributorRow(tenantId, distributorRow = null) {
 }
 
 async function syncDistributorCatalogToSupabase(distributorTenantId, items = []) {
-  if (!supabase || !distributorTenantId || !items.length) return { ok: false, synced: 0 };
+  if (!supabase || !distributorTenantId || !items.length) {
+    return {
+      ok: false,
+      synced: 0,
+      skipped: !supabase,
+      reason: !supabase ? "supabase_not_configured" : "no_items",
+    };
+  }
 
   let synced = 0;
+  let productError = null;
+  let inventoryError = null;
   for (const item of items) {
     const productPayload = {
       tenant_id: distributorTenantId,
@@ -129,13 +138,25 @@ async function syncDistributorCatalogToSupabase(distributorTenantId, items = [])
     const prod = await supabase.from("products").upsert(productPayload, {
       onConflict: "tenant_id,product_id",
     });
-    if (!prod.error) synced += 1;
+    if (prod.error) {
+      productError = prod.error.message || "Product sync failed";
+    } else {
+      synced += 1;
+    }
 
-    await supabase.from("inventory").upsert(invPayload, {
+    const inv = await supabase.from("inventory").upsert(invPayload, {
       onConflict: "tenant_id,product_id",
     });
+    if (inv.error) {
+      inventoryError = inv.error.message || "Inventory sync failed";
+    }
   }
-  return { ok: synced > 0, synced };
+  return {
+    ok: synced > 0 && !productError && !inventoryError,
+    synced,
+    productError,
+    inventoryError,
+  };
 }
 
 function buildConfigPatch(row, items) {
@@ -333,16 +354,16 @@ export async function updateDistributorCatalogItem(
     return { ok: false, error: metadataResult.error, items, config, localOnly: true };
   }
 
-  await syncDistributorCatalogToSupabase(
-    id,
-    items.filter((i) => str(i.productId) === str(productId))
-  );
+  const savedItems = items.filter((i) => str(i.productId) === str(productId));
+  const supabaseSync = await syncDistributorCatalogToSupabase(id, savedItems);
 
   return {
     ok: true,
     items,
     config,
+    savedItem: savedItems[0] || null,
     supabasePersisted: metadataResult.supabasePersisted === true,
+    supabaseSync,
     row: getRegistryTenant(id),
   };
 }

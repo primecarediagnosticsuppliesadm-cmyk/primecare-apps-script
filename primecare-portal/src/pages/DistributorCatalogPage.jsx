@@ -26,6 +26,10 @@ function logCatalogTiming(label, detail = {}) {
   console.debug(`[DistributorCatalog:timing] ${label}`, { at: performance.now().toFixed(1), ...detail });
 }
 
+function str(v) {
+  return String(v ?? "").trim();
+}
+
 export default function DistributorCatalogPage({
   currentUser = null,
   distributorScope = null,
@@ -86,6 +90,12 @@ export default function DistributorCatalogPage({
             config: data.registryRow?.config || data.distributorRow?.config,
             items: data.assignedItems,
             assignedCount: data.assignedCount,
+            catalogAssigned: data.catalogAssigned,
+            pricingValid: data.pricingValid,
+            hqPricingValid: data.hqPricingValid,
+            hqPricingMissingCount: data.hqPricingMissingCount,
+            inventoryIsolated: data.inventoryIsolated,
+            hqLeakCount: data.hqLeakCount,
           });
         }
         logCatalogTiming("load:done", {
@@ -96,6 +106,7 @@ export default function DistributorCatalogPage({
         console.error(err);
         setBundle(null);
         setInventoryEconomics(null);
+        setMsgTone("error");
         setMsg(err?.message || "Failed to load catalog");
       } finally {
         if (showLoading) setLoading(false);
@@ -180,9 +191,10 @@ export default function DistributorCatalogPage({
     setBusy(false);
   }
 
-  async function handlePriceSave(productId, sellingPrice, currentStock) {
+  async function handlePriceSave(productId, productName, sellingPrice, currentStock) {
     const price = Number(sellingPrice);
     const stock = Number(currentStock);
+    const productLabel = str(productName) || str(productId) || "Product";
     if (!Number.isFinite(price) || price <= 0) {
       setMsgTone("error");
       setMsg("Distributor selling price must be greater than 0.");
@@ -206,22 +218,43 @@ export default function DistributorCatalogPage({
       );
       if (!result.ok) {
         setMsgTone("error");
-        setMsg(result.error || "Failed to save catalog item.");
+        setMsg(result.error || `Failed to save ${productLabel}.`);
         return;
       }
 
-      await load({ showLoading: false, syncParent: true });
+      try {
+        await load({ showLoading: false, syncParent: true });
+      } catch (refreshErr) {
+        console.warn("[DistributorCatalog] post-save refresh failed", refreshErr);
+        setMsgTone("success");
+        setMsg(
+          `Catalog item saved — ${productLabel}. Refresh the catalog tab to see updated economics.`
+        );
+        return;
+      }
+
+      if (result.localOnly) {
+        setMsgTone("error");
+        setMsg(
+          `Catalog item saved locally — ${productLabel}. Supabase metadata was not updated.`
+        );
+        return;
+      }
+
+      const syncIssue =
+        result.supabaseSync?.productError || result.supabaseSync?.inventoryError || null;
+      if (syncIssue) {
+        setMsgTone("error");
+        setMsg(`Catalog item saved — ${productLabel}. Metadata saved; sync issue: ${syncIssue}`);
+        return;
+      }
 
       setMsgTone("success");
-      if (result.localOnly) {
-        setMsg("Catalog item saved locally. Supabase metadata was not updated.");
-      } else {
-        setMsg("Catalog item saved.");
-      }
+      setMsg(`Catalog item saved — ${productLabel}.`);
     } catch (err) {
       console.error("[DistributorCatalog] save failed", err);
       setMsgTone("error");
-      setMsg(err?.message || "Failed to save catalog item.");
+      setMsg(err?.message || `Failed to save ${productLabel}.`);
     } finally {
       setSavingProductId("");
     }
@@ -417,7 +450,7 @@ function CatalogRow({ item, busy, saving = false, onSave, onUnassign }) {
             size="sm"
             variant="outline"
             disabled={busy || saving}
-            onClick={() => void onSave(item.productId, price, stock)}
+            onClick={() => void onSave(item.productId, item.productName, price, stock)}
           >
             {saving ? "Saving…" : "Save"}
           </Button>
