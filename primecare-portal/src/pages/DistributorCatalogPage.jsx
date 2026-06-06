@@ -16,6 +16,7 @@ import {
 } from "@/catalog/distributorCatalogData.js";
 import { loadInventoryEconomicsBundle } from "@/inventory/inventoryEconomicsData.js";
 import { InventoryEconomicsSummaryPanel } from "@/components/inventory/InventoryEconomicsPanels.jsx";
+import { cn } from "@/lib/utils";
 import { RefreshCw, Plus } from "lucide-react";
 
 const DEBUG_CATALOG = import.meta.env.DEV;
@@ -40,7 +41,9 @@ export default function DistributorCatalogPage({
   const [bundle, setBundle] = useState(null);
   const [inventoryEconomics, setInventoryEconomics] = useState(null);
   const [msg, setMsg] = useState("");
+  const [msgTone, setMsgTone] = useState("neutral");
   const [busy, setBusy] = useState(false);
+  const [savingProductId, setSavingProductId] = useState("");
   const renderCountRef = useRef(0);
   const distributorRowRef = useRef(distributorRow);
   const onCatalogChangedRef = useRef(onCatalogChanged);
@@ -178,24 +181,50 @@ export default function DistributorCatalogPage({
   }
 
   async function handlePriceSave(productId, sellingPrice, currentStock) {
-    setBusy(true);
-    const result = await updateDistributorCatalogItem(
-      tenantId,
-      productId,
-      {
-        sellingPrice: Number(sellingPrice),
-        currentStock: Number(currentStock),
-      },
-      { distributorRow: distributorRowRef.current }
-    );
-    if (result.ok) {
-      setBundle((prev) => ({
-        ...(prev || {}),
-        assignedItems: result.items || prev?.assignedItems || [],
-      }));
+    const price = Number(sellingPrice);
+    const stock = Number(currentStock);
+    if (!Number.isFinite(price) || price <= 0) {
+      setMsgTone("error");
+      setMsg("Distributor selling price must be greater than 0.");
+      return;
     }
-    setMsg(result.ok ? "Pricing and inventory updated" : result.error || "Update failed");
-    setBusy(false);
+    if (!Number.isFinite(stock) || stock < 0) {
+      setMsgTone("error");
+      setMsg("Inventory must be 0 or greater.");
+      return;
+    }
+
+    setSavingProductId(productId);
+    setMsg("");
+    setMsgTone("neutral");
+    try {
+      const result = await updateDistributorCatalogItem(
+        tenantId,
+        productId,
+        { sellingPrice: price, currentStock: stock },
+        { distributorRow: distributorRowRef.current }
+      );
+      if (!result.ok) {
+        setMsgTone("error");
+        setMsg(result.error || "Failed to save catalog item.");
+        return;
+      }
+
+      await load({ showLoading: false, syncParent: true });
+
+      setMsgTone("success");
+      if (result.localOnly) {
+        setMsg("Catalog item saved locally. Supabase metadata was not updated.");
+      } else {
+        setMsg("Catalog item saved.");
+      }
+    } catch (err) {
+      console.error("[DistributorCatalog] save failed", err);
+      setMsgTone("error");
+      setMsg(err?.message || "Failed to save catalog item.");
+    } finally {
+      setSavingProductId("");
+    }
   }
 
   if (!tenantId) {
@@ -262,7 +291,19 @@ export default function DistributorCatalogPage({
         ) : null}
       </div>
 
-      {msg ? <p className="text-xs text-slate-600">{msg}</p> : null}
+      {msg ? (
+        <p
+          className={cn(
+            "rounded-md border px-2 py-1.5 text-xs",
+            msgTone === "success" && "border-emerald-200 bg-emerald-50 text-emerald-800",
+            msgTone === "error" && "border-red-200 bg-red-50 text-red-800",
+            msgTone === "neutral" && "border-slate-200 bg-slate-50 text-slate-600"
+          )}
+          role="status"
+        >
+          {msg}
+        </p>
+      ) : null}
 
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         <table className="w-full text-xs">
@@ -291,6 +332,7 @@ export default function DistributorCatalogPage({
                 key={item.productId}
                 item={item}
                 busy={busy}
+                saving={savingProductId === item.productId}
                 onSave={handlePriceSave}
                 onUnassign={handleUnassign}
               />
@@ -326,10 +368,15 @@ export default function DistributorCatalogPage({
   );
 }
 
-function CatalogRow({ item, busy, onSave, onUnassign }) {
+function CatalogRow({ item, busy, saving = false, onSave, onUnassign }) {
   const [price, setPrice] = useState(String(item.sellingPrice ?? ""));
   const [stock, setStock] = useState(String(item.currentStock ?? 0));
   const marginReady = item.marginConfigured === true;
+
+  useEffect(() => {
+    setPrice(String(item.sellingPrice ?? ""));
+    setStock(String(item.currentStock ?? 0));
+  }, [item.productId, item.sellingPrice, item.currentStock]);
 
   return (
     <tr className="border-b border-slate-100">
@@ -369,10 +416,10 @@ function CatalogRow({ item, busy, onSave, onUnassign }) {
             type="button"
             size="sm"
             variant="outline"
-            disabled={busy}
-            onClick={() => onSave(item.productId, price, stock)}
+            disabled={busy || saving}
+            onClick={() => void onSave(item.productId, price, stock)}
           >
-            Save
+            {saving ? "Saving…" : "Save"}
           </Button>
           <Button
             type="button"
