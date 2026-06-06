@@ -7,6 +7,11 @@ function str(v) {
   return String(v ?? "").trim();
 }
 
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
 const ATTENTION_SEVERITY_ORDER = { CRITICAL: 0, ATTENTION: 1, MONITORING: 2 };
 const RISK_LEVEL_RANK = { Critical: 0, High: 1, Medium: 2, Low: 3 };
 
@@ -991,6 +996,41 @@ export function buildRiskLabs(payload) {
 /**
  * @param {import('./operationsCommandCenterLoader.js').OperationsPayload} payload
  */
+export function buildInventoryEconomicsRiskCards(payload) {
+  const economics = payload.inventoryEconomics;
+  if (!economics) return [];
+  const cards = [];
+  if (num(economics.deadInventoryValue) > 0) {
+    cards.push({
+      id: "dead-inventory",
+      title: "Dead inventory detected",
+      detail: `${economics.deadInventoryValueLabel} with no movement in 120+ days`,
+      severity: "High",
+    });
+  }
+  if (num(economics.lowStockExposure) > 0) {
+    cards.push({
+      id: "low-stock-exposure",
+      title: "Low stock exposure",
+      detail: `${economics.lowStockExposure} SKU(s) below reorder point`,
+      severity: "Medium",
+    });
+  }
+  if (
+    num(economics.reorderExposure) > 0 &&
+    num(economics.totalInventoryValue) > 0 &&
+    num(economics.reorderExposure) / num(economics.totalInventoryValue) >= 0.25
+  ) {
+    cards.push({
+      id: "reorder-exposure",
+      title: "Reorder exposure above threshold",
+      detail: `${economics.reorderExposureLabel} estimated to restore low-stock SKUs`,
+      severity: "High",
+    });
+  }
+  return cards;
+}
+
 export function buildOperationsCommandCenterModel(payload) {
   const riskLabs = buildRiskLabs(payload);
   const attention = buildAttentionQueue(payload);
@@ -1001,6 +1041,8 @@ export function buildOperationsCommandCenterModel(payload) {
     attentionBySeverity: groupAttentionBySeverity(attention),
     feed: buildOperationsFeed(payload),
     inventory: buildInventoryRiskPanel(payload),
+    inventoryEconomics: payload.inventoryEconomics || null,
+    inventoryEconomicsRisks: buildInventoryEconomicsRiskCards(payload),
     agents: buildAgentOperationsPanel(payload),
     financial: buildFinancialPressurePanel(payload),
     health,

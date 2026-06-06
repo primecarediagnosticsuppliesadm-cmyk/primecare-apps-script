@@ -27,6 +27,9 @@ import { validatePrimecareOsModule } from "@/predator/validators/primecareOsVali
 import { validateCommissionEngineModule } from "@/predator/validators/commissionEngineValidator.js";
 import { validateLabContractEngineModule } from "@/predator/validators/labContractEngineValidator.js";
 import { validateDistributorBillingModule } from "@/predator/validators/distributorBillingValidator.js";
+import { validateInventoryEconomicsModule } from "@/predator/validators/inventoryEconomicsValidator.js";
+import { validateDistributorProfitabilityModule } from "@/predator/validators/distributorProfitabilityValidator.js";
+import { validateQAReadinessModule } from "@/predator/validators/qaReadinessValidator.js";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import {
   primePredatorOpsPayload,
@@ -178,6 +181,9 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         commissionEngine,
         labContractEngine,
         distributorBilling,
+        inventoryEconomics,
+        distributorProfitability,
+        qaReadiness,
       ] = await Promise.all([
         validateOperationsCommandCenterModule({
           ctx,
@@ -263,6 +269,20 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
           rendered: snapshots.distributorBilling ?? null,
           opsPayload,
         }),
+        validateInventoryEconomicsModule({
+          ctx,
+          rendered: snapshots.inventoryEconomics ?? null,
+        }),
+        validateDistributorProfitabilityModule({
+          ctx,
+          currentUser,
+          rendered: snapshots.distributorProfitability ?? null,
+        }),
+        validateQAReadinessModule({
+          ctx,
+          currentUser,
+          rendered: snapshots.qaReadiness ?? null,
+        }),
       ]);
 
       modules.push(
@@ -280,7 +300,10 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         storePolishedModule("Distributor Provisioning", distributorProvisioning, ctx),
         storePolishedModule("Commission Engine", commissionEngine, ctx),
         storePolishedModule("Lab Contract Engine", labContractEngine, ctx),
-        storePolishedModule("Distributor Billing", distributorBilling, ctx)
+        storePolishedModule("Distributor Billing", distributorBilling, ctx),
+        storePolishedModule("Inventory Economics", inventoryEconomics, ctx),
+        storePolishedModule("Distributor Profitability", distributorProfitability, ctx),
+        storePolishedModule("QA Readiness", qaReadiness, ctx)
       );
 
       clearPredatorOpsPayload();
@@ -461,6 +484,26 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
       break;
     case "Distributor Billing":
       result = await validateDistributorBillingModule({
+        ctx,
+        currentUser,
+        rendered: snapshot,
+      });
+      break;
+    case "Inventory Economics":
+      result = await validateInventoryEconomicsModule({
+        ctx,
+        rendered: snapshot,
+      });
+      break;
+    case "Distributor Profitability":
+      result = await validateDistributorProfitabilityModule({
+        ctx,
+        currentUser,
+        rendered: snapshot,
+      });
+      break;
+    case "QA Readiness":
+      result = await validateQAReadinessModule({
         ctx,
         currentUser,
         rendered: snapshot,

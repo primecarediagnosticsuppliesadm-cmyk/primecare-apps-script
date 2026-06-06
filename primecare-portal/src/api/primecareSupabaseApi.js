@@ -3186,6 +3186,7 @@ export function mapInventoryLedgerRow(row) {
   return {
     id: str(row.id ?? row.ledger_id ?? row.ledgerId),
     createdAt: str(row.created_at ?? row.createdAt ?? row.date),
+    tenantId: str(row.tenant_id ?? row.tenantId ?? row.Tenant_ID),
     productId: str(row.product_id ?? row.productId),
     productName: str(row.product_name ?? row.productName),
     movementType,
@@ -3253,6 +3254,7 @@ function mapInventoryHealthRow(row) {
   return {
     productId: str(row.product_id ?? row.productId ?? row.Product_ID),
     productName: str(row.product_name ?? row.productName ?? row.Product_Name ?? row.name),
+    tenantId: str(row.tenant_id ?? row.tenantId ?? row.Tenant_ID),
     category: str(row.category ?? row.Category),
     currentStock: num(row.current_stock ?? row.currentStock ?? row.Current_Stock),
     minStock: num(row.min_stock ?? row.minStock ?? row.Min_Stock),

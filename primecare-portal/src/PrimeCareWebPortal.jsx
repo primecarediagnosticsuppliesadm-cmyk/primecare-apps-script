@@ -30,6 +30,7 @@ import QualificationReviewPage from "./pages/QualificationReviewPage";
 import PredatorDebugConsole from "./pages/PredatorDebugConsole";
 import NotificationCenterPage from "./pages/NotificationCenterPage";
 import OperationsCommandCenter from "./pages/OperationsCommandCenter";
+import QACommandCenterPage from "./pages/QACommandCenterPage";
 
 function PlaceholderCard({ title, subtitle }) {
   return (
@@ -280,6 +281,10 @@ export default function PrimeCareWebPortal({
             currentUser={currentUser}
           />
         );
+
+      case "qaCommandCenter":
+      case "qa-command-center":
+        return <QACommandCenterPage currentUser={currentUser} />;
 
       case "tenantManagement":
         return <TenantManagementPage currentUser={currentUser} />;

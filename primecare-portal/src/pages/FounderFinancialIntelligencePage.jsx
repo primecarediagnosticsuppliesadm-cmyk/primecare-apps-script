@@ -6,6 +6,12 @@ import { buildFounderFinancialIntelligenceModel } from "@/founder/founderFinanci
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { cn } from "@/lib/utils";
 import {
+  ContractRenewalInterventionQueue,
+  ContractRenewalMetricsGrid,
+  DistributorRenewalHealthTable,
+} from "@/components/contracts/ContractRenewalIntelligencePanels.jsx";
+import { InventoryEconomicsMetricsGrid } from "@/components/inventory/InventoryEconomicsPanels.jsx";
+import {
   BarChart3,
   RefreshCw,
   IndianRupee,
@@ -13,6 +19,8 @@ import {
   Wallet,
   Building2,
   AlertTriangle,
+  FileText,
+  Package,
 } from "lucide-react";
 
 const RISK_VARIANT = {
@@ -80,6 +88,14 @@ export default function FounderFinancialIntelligencePage({ setActivePage = null,
       distributorRowCount: model.distributorEconomics?.length ?? 0,
       reconciliationValid: model.reconciliation?.valid,
       riskCount: model.risks?.length ?? 0,
+      contractRenewalPresent: Boolean(model.contractRenewal),
+      interventionQueueCount: model.contractRenewal?.interventionQueueCount ?? 0,
+      renewalHealthScore: model.contractRenewal?.renewalHealthScore ?? null,
+      inventoryEconomicsPresent: Boolean(model.inventoryEconomics),
+      inventoryHealthScore: model.inventoryEconomics?.inventoryHealthScore ?? null,
+      inventorySkuCount: model.inventoryEconomics?.skuCount ?? 0,
+      distributorProfitabilityPresent: Boolean(model.distributorProfitability),
+      profitabilityRowCount: model.distributorProfitability?.rows?.length ?? 0,
     };
   }, [model]);
 
@@ -88,6 +104,18 @@ export default function FounderFinancialIntelligencePage({ setActivePage = null,
     currentUser,
     predatorSnapshot ?? {},
     Boolean(predatorSnapshot)
+  );
+
+  usePredatorModuleValidation(
+    "Distributor Profitability",
+    currentUser,
+    predatorSnapshot?.distributorProfitabilityPresent
+      ? {
+          distributorProfitability: true,
+          profitabilityRowCount: predatorSnapshot.profitabilityRowCount,
+        }
+      : {},
+    Boolean(predatorSnapshot?.distributorProfitabilityPresent)
   );
 
   if (loading) return <PageSkeleton rows={10} />;
@@ -103,8 +131,23 @@ export default function FounderFinancialIntelligencePage({ setActivePage = null,
   }
   if (!model) return null;
 
-  const { hqSnapshot, revenueIntelligence, collectionsCash, hqObligations, distributorEconomics, risks } =
-    model;
+  const {
+    hqSnapshot,
+    revenueIntelligence,
+    contractRenewal,
+    inventoryEconomics,
+    collectionsCash,
+    hqObligations,
+    distributorEconomics,
+    distributorProfitability,
+    risks,
+  } = model;
+
+  const PROFITABILITY_VARIANT = {
+    Strong: "success",
+    Watch: "warning",
+    "At Risk": "danger",
+  };
 
   return (
     <div className="mx-auto max-w-5xl space-y-3 p-3 pb-8">
@@ -124,10 +167,15 @@ export default function FounderFinancialIntelligencePage({ setActivePage = null,
       </header>
 
       <Section title="HQ Snapshot" icon={IndianRupee}>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
           <MetricTile label="Realized revenue (MTD)" value={hqSnapshot.realizedRevenueMtdLabel} />
-          <MetricTile label="Platform billing collected" value={hqSnapshot.platformBillingCollectedLabel} />
-          <MetricTile label="Billing outstanding" value={hqSnapshot.billingOutstandingLabel} />
+          <MetricTile label="Total billing due" value={hqSnapshot.platformBillingDueLabel} />
+          <MetricTile label="Total billing collected" value={hqSnapshot.platformBillingCollectedLabel} />
+          <MetricTile label="Total billing outstanding" value={hqSnapshot.billingOutstandingLabel} />
+          <MetricTile
+            label="Billing collection rate"
+            value={hqSnapshot.billingCollectionRateLabel}
+          />
           <MetricTile label="Commission liability" value={hqSnapshot.commissionLiabilityLabel} />
           <MetricTile label="Commission paid" value={hqSnapshot.commissionPaidLabel} />
           <MetricTile label="AR outstanding" value={hqSnapshot.arOutstandingLabel} />
@@ -144,6 +192,11 @@ export default function FounderFinancialIntelligencePage({ setActivePage = null,
           <MetricTile label="Expiring in 90 days" value={String(revenueIntelligence.expiring90Count)} />
           <MetricTile label="Contract health" value={`${revenueIntelligence.contractHealthScore}%`} />
           <MetricTile label="Pipeline count" value={String(revenueIntelligence.pipelineCount)} />
+          <MetricTile label="Revenue at risk" value={revenueIntelligence.revenueAtRiskLabel} />
+          <MetricTile
+            label="Committed rev. at risk"
+            value={revenueIntelligence.committedRevenueAtRiskLabel}
+          />
         </div>
         {revenueIntelligence.topLabsByRevenue?.length > 0 ? (
           <p className="mt-2 text-[10px] text-slate-600">
@@ -151,6 +204,28 @@ export default function FounderFinancialIntelligencePage({ setActivePage = null,
             {`₹${Number(revenueIntelligence.topLabsByRevenue[0].revenue).toLocaleString("en-IN")}`})
           </p>
         ) : null}
+      </Section>
+
+      <Section title="Contract renewal intelligence" icon={FileText}>
+        <ContractRenewalMetricsGrid renewal={contractRenewal} />
+        <div className="mt-3 space-y-3">
+          <div>
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+              Renewal intervention queue
+            </p>
+            <ContractRenewalInterventionQueue queue={contractRenewal?.interventionQueue} />
+          </div>
+          <div>
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+              Distributor renewal health
+            </p>
+            <DistributorRenewalHealthTable rows={contractRenewal?.distributorRenewalHealth} />
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Inventory economics" icon={Package}>
+        <InventoryEconomicsMetricsGrid economics={inventoryEconomics} />
       </Section>
 
       <Section title="Collections & cash" icon={Wallet}>
@@ -191,6 +266,60 @@ export default function FounderFinancialIntelligencePage({ setActivePage = null,
         </div>
       </Section>
 
+      <Section title="Distributor profitability" icon={Building2}>
+        {distributorProfitability?.rows?.length === 0 ? (
+          <p className="text-xs text-slate-500">No distributors in registry.</p>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border bg-white">
+            <table className="min-w-full text-left text-[10px]">
+              <thead className="border-b bg-slate-50 text-slate-600">
+                <tr>
+                  <th className="px-2 py-1.5 font-semibold">Distributor</th>
+                  <th className="px-2 py-1.5 font-semibold">Revenue</th>
+                  <th className="px-2 py-1.5 font-semibold">Collections</th>
+                  <th className="px-2 py-1.5 font-semibold">AR out.</th>
+                  <th className="px-2 py-1.5 font-semibold">Billing coll.</th>
+                  <th className="px-2 py-1.5 font-semibold">Billing out.</th>
+                  <th className="px-2 py-1.5 font-semibold">Comm. liability</th>
+                  <th className="px-2 py-1.5 font-semibold">Inventory</th>
+                  <th className="px-2 py-1.5 font-semibold">Rev. at risk</th>
+                  <th className="px-2 py-1.5 font-semibold">Contrib. signal</th>
+                  <th className="px-2 py-1.5 font-semibold">Score</th>
+                  <th className="px-2 py-1.5 font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(distributorProfitability?.rows || []).map((row) => (
+                  <tr key={row.distributorId} className="border-b border-slate-100 last:border-0">
+                    <td className="px-2 py-1.5 font-medium text-slate-900">{row.name}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{row.revenueLabel}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{row.collectionsLabel}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{row.arOutstandingLabel}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{row.billingCollectedLabel}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{row.billingOutstandingLabel}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{row.commissionLiabilityLabel}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{row.inventoryValueLabel}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{row.revenueAtRiskLabel}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{row.contributionSignalLabel}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{row.contributionScore}</td>
+                    <td className="px-2 py-1.5">
+                      <StatusBadge
+                        variant={PROFITABILITY_VARIANT[row.status] || "neutral"}
+                        label={row.statusLabel}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="mt-2 text-[10px] text-slate-500">
+          Contribution signal = billing collected − commission liability. Operational indicator only, not
+          accounting profit.
+        </p>
+      </Section>
+
       <Section title="Distributor economics" icon={Building2}>
         {distributorEconomics.length === 0 ? (
           <p className="text-xs text-slate-500">No distributors in registry.</p>
@@ -208,6 +337,9 @@ export default function FounderFinancialIntelligencePage({ setActivePage = null,
                   <th className="px-2 py-1.5 font-semibold">Comm. liability</th>
                   <th className="px-2 py-1.5 font-semibold">Comm. paid</th>
                   <th className="px-2 py-1.5 font-semibold">Contract rev.</th>
+                  <th className="px-2 py-1.5 font-semibold">Inventory</th>
+                  <th className="px-2 py-1.5 font-semibold">Slow inv.</th>
+                  <th className="px-2 py-1.5 font-semibold">Reorder exp.</th>
                   <th className="px-2 py-1.5 font-semibold">Status</th>
                 </tr>
               </thead>
@@ -223,6 +355,9 @@ export default function FounderFinancialIntelligencePage({ setActivePage = null,
                     <td className="px-2 py-1.5 tabular-nums">{row.commissionLiabilityLabel}</td>
                     <td className="px-2 py-1.5 tabular-nums">{row.commissionPaidLabel}</td>
                     <td className="px-2 py-1.5 tabular-nums">{row.contractRevenueLabel}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{row.inventoryValueLabel}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{row.slowInventoryValueLabel}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{row.reorderExposureLabel}</td>
                     <td className="px-2 py-1.5">
                       <StatusBadge variant="neutral" label={row.status} />
                     </td>

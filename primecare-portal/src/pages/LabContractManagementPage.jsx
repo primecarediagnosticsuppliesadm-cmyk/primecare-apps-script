@@ -19,6 +19,8 @@ import {
   PAYMENT_TERMS_OPTIONS,
 } from "@/labContract/labContractTypes.js";
 import { formatContractInr } from "@/labContract/labContractEngine.js";
+import { buildContractRenewalIntelligence } from "@/contracts/contractRenewalIntelligenceEngine.js";
+import { ContractRenewalSummaryPanel } from "@/components/contracts/ContractRenewalIntelligencePanels.jsx";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { cn } from "@/lib/utils";
 import { FileText, RefreshCw, Plus, CheckCircle2 } from "lucide-react";
@@ -157,6 +159,16 @@ export default function LabContractManagementPage({
     }));
   }, [bundle]);
 
+  const renewalIntel = useMemo(
+    () =>
+      model
+        ? buildContractRenewalIntelligence(model, {
+            distributorId: distributorScope?.tenantId || "",
+          })
+        : null,
+    [model, distributorScope?.tenantId]
+  );
+
   async function handleCreate(e) {
     e.preventDefault();
     try {
@@ -227,6 +239,8 @@ export default function LabContractManagementPage({
       ) : null}
 
       {msg ? <p className="text-xs text-slate-600">{msg}</p> : null}
+
+      {embedded ? <ContractRenewalSummaryPanel renewal={renewalIntel} compact /> : null}
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
         {[

@@ -4,6 +4,7 @@ import { resolvePredatorOpsPayload } from "@/predator/predatorOpsPayload.js";
 import { loadLabContractEngineBundle } from "@/labContract/labContractData.js";
 import { CONTRACT_STATUSES } from "@/labContract/labContractTypes.js";
 import { validateContractDates } from "@/labContract/labContractEngine.js";
+import { buildContractRenewalIntelligence } from "@/contracts/contractRenewalIntelligenceEngine.js";
 import { polishPredatorEntries } from "@/predator/predatorEntryPolish.js";
 import { ROLES } from "@/config/roles.js";
 import { supabase } from "@/api/supabaseClient.js";
@@ -374,6 +375,163 @@ export async function validateLabContractEngineModule({
           step: "ui.snapshot_drift",
           expected: rendered.activeCount,
           actual: model.dashboard.activeCount,
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
+
+    const renewalIntel = buildContractRenewalIntelligence(model);
+    const activeContracts = contracts.filter((c) => c.status === CONTRACT_STATUSES.ACTIVE);
+
+    if (activeContracts.length === 0) {
+      for (const step of [
+        "contracts.expiry_loaded",
+        "contracts.revenue_at_risk",
+        "contracts.renewal_queue_present",
+        "contracts.health_score_valid",
+        "contracts.distributor_rollup_valid",
+      ]) {
+        entries.push(
+          createPredatorEntry({
+            status: "WARN",
+            module: "Lab Contract Engine",
+            step,
+            actual: "No active contracts to evaluate renewal intelligence",
+            tenantId: ctx.tenantId,
+            role: ctx.role,
+            userId: ctx.userId,
+          })
+        );
+      }
+    } else {
+      const bucketSum =
+        renewalIntel.expiring30Count +
+        renewalIntel.expiring60Count +
+        renewalIntel.expiring90Count;
+      const interventionCount = renewalIntel.interventionQueue.length;
+      const expiryLoadedOk =
+        bucketSum === interventionCount &&
+        renewalIntel.expiringIn90Total === interventionCount;
+
+      entries.push(
+        createPredatorEntry({
+          status: expiryLoadedOk ? "PASS" : "FAIL",
+          module: "Lab Contract Engine",
+          step: "contracts.expiry_loaded",
+          expected: "30/60/90 day buckets sum to intervention queue count",
+          actual: {
+            expiring30Count: renewalIntel.expiring30Count,
+            expiring60Count: renewalIntel.expiring60Count,
+            expiring90Count: renewalIntel.expiring90Count,
+            interventionCount,
+            bucketSum,
+          },
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      const queueRevenueSum = renewalIntel.interventionQueue.reduce(
+        (s, r) => s + num(r.revenueAtRisk),
+        0
+      );
+      const queueCommittedSum = renewalIntel.interventionQueue.reduce(
+        (s, r) => s + num(r.monthlyRevenue),
+        0
+      );
+      const revenueAtRiskOk =
+        Math.abs(queueRevenueSum - num(renewalIntel.revenueAtRisk)) <= 0.01 &&
+        Math.abs(queueCommittedSum - num(renewalIntel.committedRevenueAtRisk)) <= 0.01;
+
+      entries.push(
+        createPredatorEntry({
+          status: revenueAtRiskOk ? "PASS" : "FAIL",
+          module: "Lab Contract Engine",
+          step: "contracts.revenue_at_risk",
+          expected: "Portfolio revenue-at-risk matches intervention queue sums",
+          actual: {
+            revenueAtRisk: renewalIntel.revenueAtRisk,
+            queueRevenueSum,
+            committedRevenueAtRisk: renewalIntel.committedRevenueAtRisk,
+            queueCommittedSum,
+          },
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      const queuePresentOk =
+        interventionCount === 0
+          ? renewalIntel.interventionQueueCount === 0
+          : renewalIntel.interventionQueue.length === renewalIntel.interventionQueueCount;
+
+      entries.push(
+        createPredatorEntry({
+          status: queuePresentOk ? "PASS" : "FAIL",
+          module: "Lab Contract Engine",
+          step: "contracts.renewal_queue_present",
+          expected: "Intervention queue rows present when expiring contracts exist",
+          actual: {
+            interventionQueueCount: renewalIntel.interventionQueueCount,
+            queueLength: renewalIntel.interventionQueue.length,
+          },
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      const healthScoreOk =
+        num(renewalIntel.renewalHealthScore) >= 0 &&
+        num(renewalIntel.renewalHealthScore) <= 100 &&
+        renewalIntel.distributorRenewalHealth.every(
+          (r) => r.renewalHealthScore >= 0 && r.renewalHealthScore <= 100
+        );
+
+      entries.push(
+        createPredatorEntry({
+          status: healthScoreOk ? "PASS" : "FAIL",
+          module: "Lab Contract Engine",
+          step: "contracts.health_score_valid",
+          expected: "Renewal health scores are 0–100",
+          actual: {
+            portfolioHealth: renewalIntel.renewalHealthScore,
+            distributorRows: renewalIntel.distributorRenewalHealth.length,
+          },
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      const rollupRevenue = renewalIntel.distributorRenewalHealth.reduce(
+        (s, r) => s + num(r.revenueAtRisk),
+        0
+      );
+      const rollupExpiring = renewalIntel.distributorRenewalHealth.reduce(
+        (s, r) => s + num(r.expiringContracts),
+        0
+      );
+      const distributorRollupOk =
+        Math.abs(rollupRevenue - num(renewalIntel.revenueAtRisk)) <= 0.01 &&
+        rollupExpiring === interventionCount;
+
+      entries.push(
+        createPredatorEntry({
+          status: distributorRollupOk ? "PASS" : "FAIL",
+          module: "Lab Contract Engine",
+          step: "contracts.distributor_rollup_valid",
+          expected: "Per-distributor renewal rollups match portfolio totals",
+          actual: {
+            rollupRevenue,
+            portfolioRevenueAtRisk: renewalIntel.revenueAtRisk,
+            rollupExpiring,
+            interventionCount,
+          },
           tenantId: ctx.tenantId,
           role: ctx.role,
           userId: ctx.userId,

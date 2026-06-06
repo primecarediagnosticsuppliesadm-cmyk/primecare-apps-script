@@ -10,6 +10,7 @@ import {
 } from "@/api/primecareSupabaseApi.js";
 import { getNotificationEventsRead } from "@/api/notificationApi.js";
 import { listOperationalEvidence } from "@/api/operationalEvidenceApi.js";
+import { loadInventoryEconomicsBundle } from "@/inventory/inventoryEconomicsData.js";
 
 const OPS_CACHE_MS = 45_000;
 /** @type {Map<string, { at: number, data: object }>} */
@@ -53,20 +54,31 @@ export async function loadOperationsCommandCenterData(currentUser, options = {})
     return cached.data;
   }
 
-  const [dashRes, collRes, stockRes, ordersRes, reorderRes, notifyRes, poRes, qualRes, evidenceRows] =
-    await Promise.all([
-      getAdminDashboardRead(),
-      getCollectionsRead(),
-      getStockDashboard(),
-      getOrdersRead(),
-      getReorderForecastRead().catch(() => ({ data: { forecast: [] } })),
-      getNotificationEventsRead({ tenantId, limit: 60 }),
-      getPurchaseOrdersRead(),
-      getQualificationReviewRead().catch(() => ({ data: [] })),
-      tenantId && currentUser
-        ? listOperationalEvidence(tenantId, currentUser, { limit: 100 }).catch(() => [])
-        : Promise.resolve([]),
-    ]);
+  const [
+    dashRes,
+    collRes,
+    stockRes,
+    ordersRes,
+    reorderRes,
+    notifyRes,
+    poRes,
+    qualRes,
+    evidenceRows,
+    inventoryEconomicsRes,
+  ] = await Promise.all([
+    getAdminDashboardRead(),
+    getCollectionsRead(),
+    getStockDashboard(),
+    getOrdersRead(),
+    getReorderForecastRead().catch(() => ({ data: { forecast: [] } })),
+    getNotificationEventsRead({ tenantId, limit: 60 }),
+    getPurchaseOrdersRead(),
+    getQualificationReviewRead().catch(() => ({ data: [] })),
+    tenantId && currentUser
+      ? listOperationalEvidence(tenantId, currentUser, { limit: 100 }).catch(() => [])
+      : Promise.resolve([]),
+    loadInventoryEconomicsBundle(),
+  ]);
 
   const dashboard = normalizeAdminDashboardReadResult(dashRes);
   const collections = Array.isArray(collRes?.data?.collections)
@@ -101,6 +113,8 @@ export async function loadOperationsCommandCenterData(currentUser, options = {})
     visits,
     qualifications,
     evidence,
+    inventoryEconomics: inventoryEconomicsRes?.model || null,
+    inventoryEconomicsLoadOk: inventoryEconomicsRes?.ok === true,
   };
   opsPayloadCache.set(cacheKey, { at: Date.now(), data });
   return data;

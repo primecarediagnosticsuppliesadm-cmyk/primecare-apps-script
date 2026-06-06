@@ -28,4 +28,5 @@ export const PERMISSIONS = {
   qualificationReview: [ROLES.ADMIN, ROLES.EXECUTIVE],
   notifications: [ROLES.AGENT, ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.LAB],
   predatorDebug: [ROLES.ADMIN, ROLES.EXECUTIVE],
+  qaCommandCenter: [ROLES.EXECUTIVE],
 };

@@ -32,6 +32,8 @@ const PAGE_LABELS = {
   founderNavigation: "Founder Navigation",
   qualificationReview: "Qualification Review",
   distributorOs: "Distributor OS",
+  founderFinancialIntelligence: "Financial Intelligence",
+  labContracts: "Lab Contracts",
 };
 
 const QUARTER_BAR = {

@@ -14,6 +14,8 @@ import {
   unassignDistributorCatalogProduct,
   updateDistributorCatalogItem,
 } from "@/catalog/distributorCatalogData.js";
+import { loadInventoryEconomicsBundle } from "@/inventory/inventoryEconomicsData.js";
+import { InventoryEconomicsSummaryPanel } from "@/components/inventory/InventoryEconomicsPanels.jsx";
 import { RefreshCw, Plus } from "lucide-react";
 
 const DEBUG_CATALOG = import.meta.env.DEV;
@@ -60,10 +62,17 @@ export default function DistributorCatalogPage({
       logCatalogTiming("load:start", { tenantId, showLoading });
       try {
         if (showLoading) setLoading(true);
-        const data = await loadDistributorCatalogBundle(tenantId, homeTenantId, {
-          distributorRow: distributorRowRef.current,
-        });
+        const [data, inventoryRes] = await Promise.all([
+          loadDistributorCatalogBundle(tenantId, homeTenantId, {
+            distributorRow: distributorRowRef.current,
+          }),
+          loadInventoryEconomicsBundle({
+            distributorId: tenantId,
+            distributorNames: new Map([[tenantId, distributorRowRef.current?.name || tenantId]]),
+          }),
+        ]);
         setBundle(data);
+        setInventoryEconomics(inventoryRes?.model || null);
         if (syncParent && onCatalogChangedRef.current) {
           await onCatalogChangedRef.current({
             config: data.registryRow?.config || data.distributorRow?.config,
@@ -222,6 +231,8 @@ export default function DistributorCatalogPage({
           </Button>
         </div>
       </div>
+
+      {embedded ? <InventoryEconomicsSummaryPanel economics={inventoryEconomics} compact /> : null}
 
       <div className="flex flex-wrap gap-2 text-xs">
         <StatusBadge

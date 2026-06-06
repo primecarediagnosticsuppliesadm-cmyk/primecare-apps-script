@@ -41,6 +41,9 @@ export function normalizePageKey(page) {
     case "founderFinancialIntelligence":
     case "financial-intelligence":
       return "founderFinancialIntelligence";
+    case "qa-command-center":
+    case "qaCommandCenter":
+      return "qaCommandCenter";
     case "tenant-management":
     case "tenantManagement":
       return "tenantManagement";

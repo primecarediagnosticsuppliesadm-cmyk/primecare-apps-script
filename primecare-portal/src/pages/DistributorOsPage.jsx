@@ -43,6 +43,8 @@ import {
   LifecycleActionsPanel,
   OperationRestrictionBanner,
 } from "@/components/distributor/DistributorOsV2Panels.jsx";
+import { buildDistributorProfitabilityModel, findProfitabilityRow } from "@/founder/distributorProfitabilityEngine.js";
+import { loadFounderCommissionMetrics } from "@/commission/commissionData.js";
 import { cn } from "@/lib/utils";
 import { Building2, Plus, RefreshCw, AlertTriangle, Users } from "lucide-react";
 import { ROLES } from "@/config/roles";
@@ -182,6 +184,7 @@ export default function DistributorOsPage({
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [lifecycleMsg, setLifecycleMsg] = useState("");
   const [billingPayments, setBillingPayments] = useState([]);
+  const [commissionByDistributor, setCommissionByDistributor] = useState({});
 
   const effectiveHomeId = homeTenantId || currentUser?.tenantId || "";
   const registry = portfolio?.distributors || [];
@@ -238,6 +241,28 @@ export default function DistributorOsPage({
     if (!selectedId || !portfolio?.billingRows) return null;
     return portfolio.billingRows.find((r) => r.distributorId === selectedId) || null;
   }, [selectedId, portfolio]);
+
+  useEffect(() => {
+    if (!portfolio?.distributors?.length) {
+      setCommissionByDistributor({});
+      return;
+    }
+    const ids = portfolio.distributors.map((d) => d.id).filter(Boolean);
+    void loadFounderCommissionMetrics(ids, { homeTenantId: effectiveHomeId })
+      .then((res) => setCommissionByDistributor(res.ok ? res.byDistributor || {} : {}))
+      .catch(() => setCommissionByDistributor({}));
+  }, [portfolio?.distributors, effectiveHomeId]);
+
+  const profitabilitySnapshot = useMemo(() => {
+    if (!scope || !portfolio || !selectedId) return null;
+    const model = buildDistributorProfitabilityModel({
+      distributors: portfolio.distributors.filter((d) => d.id === selectedId),
+      performanceRows: portfolio.performanceRows || [],
+      billingRows: portfolio.billingRows || [],
+      commissionByDistributor,
+    });
+    return findProfitabilityRow(model, selectedId);
+  }, [scope, portfolio, selectedId, commissionByDistributor]);
 
   const loadPortfolio = useCallback(async () => {
     try {
@@ -603,6 +628,7 @@ export default function DistributorOsPage({
             dashboard={portfolio?.dashboard}
             comparison={portfolio?.comparison}
             onSelect={selectDistributor}
+            profitabilitySnapshot={profitabilitySnapshot}
           />
         ) : null}
 

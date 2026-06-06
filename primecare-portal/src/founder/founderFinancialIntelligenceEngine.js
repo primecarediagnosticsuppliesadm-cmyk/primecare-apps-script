@@ -8,9 +8,14 @@ import {
 import { buildFinancialPressurePanel } from "@/operations/operationsCommandCenterModel.js";
 import { buildLabContractModel } from "@/labContract/labContractEngine.js";
 import { CONTRACT_STATUSES } from "@/labContract/labContractTypes.js";
+import { buildContractRenewalIntelligence } from "@/contracts/contractRenewalIntelligenceEngine.js";
 import { computeFounderOperationalSignals } from "@/founder/founderPilotReadinessCompute.js";
 import { YEAR1_TARGETS } from "@/founder/founderStrategyTargets.js";
 import { resolveDistributorLifecycleStatus } from "@/distributor/distributorLifecycleEngine.js";
+import {
+  buildDistributorProfitabilityModel,
+  CONTRIBUTION_STATUS,
+} from "@/founder/distributorProfitabilityEngine.js";
 
 const RECOVERY_RATE_WARN_PCT = 60;
 const COMMISSION_LIABILITY_WARN = 10_000;
@@ -97,6 +102,9 @@ function sumPipelineValue(enriched = []) {
 
 function buildFinancialRisks({
   contractDashboard,
+  contractRenewal = null,
+  inventoryEconomics = null,
+  distributorProfitability = null,
   billingRows = [],
   commissionByDistributor = {},
   performanceRows = [],
@@ -104,7 +112,48 @@ function buildFinancialRisks({
 }) {
   const alerts = [];
 
-  if (num(contractDashboard?.expiring90Count) > 0) {
+  if (num(inventoryEconomics?.deadInventoryValue) > 0) {
+    alerts.push({
+      id: "inventory_dead_stock",
+      severity: "Medium",
+      title: "Dead inventory detected",
+      detail: `${inventoryEconomics.deadInventoryValueLabel} with no movement in 120+ days`,
+    });
+  }
+  if (num(inventoryEconomics?.lowStockExposure) > 0) {
+    alerts.push({
+      id: "inventory_low_stock",
+      severity: "Medium",
+      title: "Low stock exposure",
+      detail: `${inventoryEconomics.lowStockExposure} SKU(s) below reorder point`,
+    });
+  }
+  if (
+    num(inventoryEconomics?.reorderExposure) > 0 &&
+    num(inventoryEconomics?.totalInventoryValue) > 0 &&
+    num(inventoryEconomics.reorderExposure) / num(inventoryEconomics.totalInventoryValue) >= 0.25
+  ) {
+    alerts.push({
+      id: "inventory_reorder_exposure",
+      severity: "High",
+      title: "Reorder exposure above threshold",
+      detail: `${inventoryEconomics.reorderExposureLabel} to restore low-stock SKUs`,
+    });
+  }
+
+  if (num(contractRenewal?.interventionQueueCount) > 0) {
+    alerts.push({
+      id: "contracts_renewal_intervention",
+      severity:
+        contractRenewal.expiring30Count > 0
+          ? "High"
+          : contractRenewal.expiring60Count > 0
+            ? "High"
+            : "Medium",
+      title: "Contract renewal intervention queue",
+      detail: `${contractRenewal.interventionQueueCount} contract(s) · ${contractRenewal.revenueAtRiskLabel} revenue at risk`,
+    });
+  } else if (num(contractDashboard?.expiring90Count) > 0) {
     alerts.push({
       id: "contracts_expiring_90",
       severity: "High",
@@ -155,6 +204,49 @@ function buildFinancialRisks({
       title: "Recovery rate below threshold",
       detail: `Recovery ${financialPressure.recoveryPct}% (threshold ${RECOVERY_RATE_WARN_PCT}%)`,
     });
+  }
+
+  for (const row of distributorProfitability?.rows || []) {
+    if (row.status === CONTRIBUTION_STATUS.AT_RISK) {
+      alerts.push({
+        id: `profitability_at_risk_${row.distributorId}`,
+        severity: "High",
+        title: "Distributor at risk",
+        detail: `${row.name}: score ${row.contributionScore} · ${row.mainRiskDriver}`,
+      });
+    }
+    if (num(row.contributionSignal) < 0) {
+      alerts.push({
+        id: `profitability_negative_${row.distributorId}`,
+        severity: "High",
+        title: "Negative contribution signal",
+        detail: `${row.name}: ${row.contributionSignalLabel} (operational signal, not accounting profit)`,
+      });
+    }
+    if (num(row.billingOutstanding) > num(row.billingCollected) && num(row.billingOutstanding) > 0) {
+      alerts.push({
+        id: `profitability_billing_out_${row.distributorId}`,
+        severity: "Medium",
+        title: "High billing outstanding",
+        detail: `${row.name}: ${row.billingOutstandingLabel} outstanding vs ${row.billingCollectedLabel} collected`,
+      });
+    }
+    if (num(row.commissionLiability) >= COMMISSION_LIABILITY_WARN) {
+      alerts.push({
+        id: `profitability_commission_${row.distributorId}`,
+        severity: "Medium",
+        title: "High commission liability",
+        detail: `${row.name}: ${row.commissionLiabilityLabel} commission liability`,
+      });
+    }
+    if (num(row.arOutstanding) >= AR_DISTRIBUTOR_WARN) {
+      alerts.push({
+        id: `profitability_ar_${row.distributorId}`,
+        severity: "Medium",
+        title: "High AR exposure",
+        detail: `${row.name}: ${row.arOutstandingLabel} AR outstanding`,
+      });
+    }
   }
 
   return alerts;
@@ -219,6 +311,10 @@ export function buildFounderFinancialIntelligenceModel(data) {
   const contractDashboard = contractModel.dashboard;
   const pipelineValue = sumPipelineValue(contractModel.contracts);
   const contractRevenueMap = contractRevenueByDistributor(contractModel.contracts);
+  const distributorNames = new Map(
+    (data.distributors || []).map((d) => [str(d.id), d.name || d.id])
+  );
+  const contractRenewal = buildContractRenewalIntelligence(contractModel, { distributorNames });
 
   const collectionsPayload = {
     collections: opsPayload.collections || portfolio.raw?.collections || [],
@@ -236,13 +332,27 @@ export function buildFounderFinancialIntelligenceModel(data) {
   });
   const mtdRevenue = computeMtdRevenue(orders);
 
+  const billingDue = num(billingRollup.totalDue);
+  const billingCollected = num(billingRollup.totalCollected);
+  const billingCollectionRatePct =
+    billingRollup.collectionRatePct != null
+      ? num(billingRollup.collectionRatePct)
+      : billingDue > 0
+        ? Math.round((billingCollected / billingDue) * 100)
+        : null;
+
   const hqSnapshot = {
     realizedRevenueMtd: mtdRevenue,
     realizedRevenueMtdLabel: formatInr(mtdRevenue),
-    platformBillingCollected: num(billingRollup.totalCollected),
-    platformBillingCollectedLabel: billingRollup.totalCollectedLabel || formatInr(billingRollup.totalCollected),
+    platformBillingDue: billingDue,
+    platformBillingDueLabel: billingRollup.totalDueLabel || formatInr(billingDue),
+    platformBillingCollected: billingCollected,
+    platformBillingCollectedLabel: billingRollup.totalCollectedLabel || formatInr(billingCollected),
     billingOutstanding: num(billingRollup.totalOutstanding),
     billingOutstandingLabel: billingRollup.totalOutstandingLabel || formatInr(billingRollup.totalOutstanding),
+    billingCollectionRatePct,
+    billingCollectionRateLabel:
+      billingCollectionRatePct != null ? `${billingCollectionRatePct}%` : "—",
     commissionLiability: num(commissionPortfolio.liabilityTotal),
     commissionLiabilityLabel: formatInr(commissionPortfolio.liabilityTotal),
     commissionPaid: num(commissionPortfolio.paidTotal),
@@ -267,6 +377,10 @@ export function buildFounderFinancialIntelligenceModel(data) {
     activeContracts: num(contractDashboard.activeCount),
     expiring90Count: num(contractDashboard.expiring90Count),
     contractHealthScore: num(contractDashboard.contractHealthScore),
+    revenueAtRisk: num(contractRenewal.revenueAtRisk),
+    revenueAtRiskLabel: contractRenewal.revenueAtRiskLabel,
+    committedRevenueAtRisk: num(contractRenewal.committedRevenueAtRisk),
+    committedRevenueAtRiskLabel: contractRenewal.committedRevenueAtRiskLabel,
     topLabsByRevenue: revenueMetrics.topLabsByRevenue || [],
   };
 
@@ -297,13 +411,42 @@ export function buildFounderFinancialIntelligenceModel(data) {
     netHqSpreadNote: "Billing collected minus commission outstanding (informational)",
   };
 
+  const inventoryEconomics = data.inventoryEconomics || {
+    totalInventoryValue: 0,
+    totalInventoryValueLabel: formatInr(0),
+    slowMovingInventoryValue: 0,
+    slowMovingInventoryValueLabel: formatInr(0),
+    deadInventoryValue: 0,
+    deadInventoryValueLabel: formatInr(0),
+    reorderExposure: 0,
+    reorderExposureLabel: formatInr(0),
+    inventoryHealthScore: 100,
+    inventoryHealthLabel: "100%",
+    inventoryValueByDistributor: [],
+  };
+  const inventoryByDistributor = new Map(
+    (inventoryEconomics.inventoryValueByDistributor || []).map((r) => [r.distributorId, r])
+  );
+
   const perfById = new Map(portfolio.performanceRows.map((r) => [r.distributorId, r]));
   const billingById = new Map(portfolio.billingRows.map((r) => [r.distributorId, r]));
+
+  const distributorProfitability = buildDistributorProfitabilityModel({
+    distributors: portfolio.distributors,
+    performanceRows: portfolio.performanceRows,
+    billingRows: portfolio.billingRows,
+    commissionByDistributor,
+    contractRenewal,
+    inventoryEconomics,
+    contractRevenueByDistributor: contractRevenueMap,
+    collectionsRecoveryPct: financialPressure.recoveryPct,
+  });
 
   const distributorEconomics = portfolio.distributors.map((d) => {
     const perf = perfById.get(d.id) || {};
     const billing = billingById.get(d.id) || {};
     const comm = commissionByDistributor[d.id] || {};
+    const inv = inventoryByDistributor.get(d.id) || {};
     const lifecycle = resolveDistributorLifecycleStatus(d);
     return {
       distributorId: d.id,
@@ -324,6 +467,12 @@ export function buildFounderFinancialIntelligenceModel(data) {
       commissionPaidLabel: formatInr(comm.paidTotal),
       contractRevenue: num(contractRevenueMap.get(d.id)),
       contractRevenueLabel: formatInr(contractRevenueMap.get(d.id)),
+      inventoryValue: num(inv.inventoryValue),
+      inventoryValueLabel: inv.inventoryValueLabel || formatInr(inv.inventoryValue),
+      slowInventoryValue: num(inv.slowMovingInventoryValue),
+      slowInventoryValueLabel: inv.slowMovingInventoryValueLabel || formatInr(inv.slowMovingInventoryValue),
+      reorderExposure: num(inv.reorderExposure),
+      reorderExposureLabel: inv.reorderExposureLabel || formatInr(inv.reorderExposure),
       status: perf.lifecycleLabel || lifecycle,
       billingStatusLabel: billing.billingStatusLabel || "—",
     };
@@ -331,6 +480,9 @@ export function buildFounderFinancialIntelligenceModel(data) {
 
   const risks = buildFinancialRisks({
     contractDashboard,
+    contractRenewal,
+    inventoryEconomics,
+    distributorProfitability,
     billingRows: portfolio.billingRows,
     commissionByDistributor,
     performanceRows: portfolio.performanceRows,
@@ -349,9 +501,12 @@ export function buildFounderFinancialIntelligenceModel(data) {
     loadStatus,
     hqSnapshot,
     revenueIntelligence,
+    contractRenewal,
+    inventoryEconomics,
     collectionsCash,
     hqObligations,
     distributorEconomics,
+    distributorProfitability,
     risks,
     reconciliation,
     distributorCount: distributorEconomics.length,

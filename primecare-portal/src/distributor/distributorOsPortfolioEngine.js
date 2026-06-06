@@ -39,6 +39,10 @@ function sumCollections(rows = []) {
   return rows.reduce((s, r) => s + num(r.outstandingAmount ?? r.outstanding ?? r.amount), 0);
 }
 
+function sumCollectedRevenue(rows = []) {
+  return rows.reduce((s, r) => s + num(r.totalPaid ?? r.total_paid), 0);
+}
+
 function sumOrderValue(rows = []) {
   return rows.reduce((s, r) => s + num(r.totalAmount ?? r.orderValue ?? r.amount), 0);
 }
@@ -96,6 +100,7 @@ export function computeDistributorMetrics(tenantId, { labs = [], orders = [], co
   }
 
   const collectionsTotal = sumCollections(scopedCollections);
+  const collectedRevenue = sumCollectedRevenue(scopedCollections);
   const revenue = sumOrderValue(scopedOrders);
   const activeLabs = countActiveLabs(scopedLabs);
   const collectedPlusOutstanding = collectionsTotal;
@@ -108,6 +113,7 @@ export function computeDistributorMetrics(tenantId, { labs = [], orders = [], co
     orders: scopedOrders.length,
     collections: scopedCollections.length,
     collectionsTotal,
+    collectedRevenue,
     revenue,
     outstanding: collectionsTotal,
     collectionEfficiencyPct,
@@ -355,6 +361,7 @@ export function buildDistributorOsPortfolioModel({
     };
     return buildDistributorBillingRow(d, {
       ...metrics,
+      collectedRevenue: metrics.collectedRevenue,
       billingLedgerSum: ledger.sum,
       billingLedgerCount: ledger.count,
       billingLedgerOk: billingLedgerLoadOk,

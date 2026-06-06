@@ -4,6 +4,7 @@ import { computeFounderOperationalSignals, PILOT_READINESS_TARGET } from "@/foun
 import { YEAR1_TARGETS, YEAR1_QUARTERS } from "@/founder/founderStrategyTargets.js";
 import { labIdKey } from "@/utils/labId.js";
 import { buildLabContractModel } from "@/labContract/labContractEngine.js";
+import { buildContractRenewalIntelligence } from "@/contracts/contractRenewalIntelligenceEngine.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -50,8 +51,25 @@ function inDays(iso, minDay, maxDay) {
 /**
  * Top 5 founder priorities (deterministic impact × urgency).
  */
-function buildTodayPriorities(signals, journey, collSummary) {
+function buildTodayPriorities(signals, journey, collSummary, renewalIntel = null) {
   const candidates = [];
+
+  if (renewalIntel?.interventionQueueCount > 0) {
+    candidates.push({
+      id: "contract-renewal",
+      title: "Renew expiring lab contracts",
+      impactScore: clamp(88 + Math.min(10, renewalIntel.interventionQueueCount)),
+      urgency:
+        renewalIntel.expiring30Count > 0
+          ? "Critical"
+          : renewalIntel.expiring60Count > 0
+            ? "High"
+            : "Medium",
+      outcome: `${renewalIntel.interventionQueueCount} contract(s) expiring in 90d · ${renewalIntel.revenueAtRiskLabel} at risk`,
+      page: "founderFinancialIntelligence",
+      sortKey: 89 + renewalIntel.interventionQueueCount,
+    });
+  }
 
   if (!signals.fieldScaleUnlocked && signals.pilotReadinessGap > 0) {
     candidates.push({
@@ -427,6 +445,7 @@ export function buildFounderStrategyModel(payload, tenantId, options = {}) {
     if (did) distributorIds.add(did);
   }
   const contractModel = buildLabContractModel(portfolioContracts, payload, distributorIds);
+  const contractRenewal = buildContractRenewalIntelligence(contractModel);
   const contractPipeline = contractModel.growth;
   const revenueGapWithContracts = {
     ...revenueGap,
@@ -449,10 +468,11 @@ export function buildFounderStrategyModel(payload, tenantId, options = {}) {
     version: "v1",
     signals,
     journey,
-    todayPriorities: buildTodayPriorities(signals, journey, collSummary),
+    todayPriorities: buildTodayPriorities(signals, journey, collSummary, contractRenewal),
     revenueGap: revenueGapWithContracts,
     contractPipeline,
     contractDashboard: contractModel.dashboard,
+    contractRenewal,
     commissionMetrics,
     milestoneUnlock: buildMilestoneUnlock(journey),
     flywheel,

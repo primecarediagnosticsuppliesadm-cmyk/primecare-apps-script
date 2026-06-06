@@ -10,9 +10,15 @@ import {
   sumCollectedForDistributor,
 } from "@/api/distributorBillingSupabaseApi.js";
 import {
+  amountDueMatchesBreakdown,
   BILLING_COLLECTED_SOURCES,
+  BILLING_MODELS,
+  billingConfigWarnings,
+  computeBillingComponents,
   resolveBillingCollected,
+  rollupPortfolioBilling,
 } from "@/distributor/distributorBillingEngine.js";
+import { loadDistributorOsPortfolio } from "@/distributor/distributorOsPortfolioData.js";
 import { fetchDatabaseTenants } from "@/tenant/durableTenantStore.js";
 import { TENANT_ISOLATION_TABLE_SPECS } from "@/validation/tenantIsolationManifest.js";
 
@@ -32,6 +38,88 @@ function str(v) {
 function num(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+function billingRowConfig(row = {}) {
+  return {
+    billingModel: row.billingModel,
+    monthlyPlatformFee: row.monthlyFee,
+    revenueSharePct: row.revenueSharePct,
+    perLabFee: row.perLabFee,
+  };
+}
+
+function billingRowActivity(row = {}) {
+  return {
+    collectedRevenue: row.collectedRevenue,
+    activeLabs: row.activeLabCount,
+  };
+}
+
+function recomputeMatchesRow(row = {}) {
+  const expected = computeBillingComponents(
+    row.billingModel,
+    billingRowConfig(row),
+    billingRowActivity(row)
+  );
+  const amountOk = Math.abs(num(expected.amountDue) - num(row.amountDue)) <= 0.01;
+  const fixedOk = Math.abs(num(expected.fixedComponent) - num(row.fixedComponent)) <= 0.01;
+  const shareOk = Math.abs(num(expected.shareComponent) - num(row.shareComponent)) <= 0.01;
+  const perLabOk = Math.abs(num(expected.perLabComponent) - num(row.perLabComponent)) <= 0.01;
+  return amountOk && fixedOk && shareOk && perLabOk;
+}
+
+function validateBillingModelRows(rows = [], model, step) {
+  const modelRows = rows.filter((r) => str(r.billingModel) === model);
+  if (!modelRows.length) {
+    return {
+      status: "WARN",
+      step,
+      actual: { model, rowCount: 0, note: "No distributors on this billing model" },
+    };
+  }
+
+  const configMissing = modelRows.filter(
+    (r) => billingConfigWarnings(model, billingRowConfig(r)).length > 0
+  );
+  const mathInvalid = modelRows.filter((r) => !recomputeMatchesRow(r));
+
+  if (mathInvalid.length > 0) {
+    return {
+      status: "FAIL",
+      step,
+      actual: {
+        model,
+        rowCount: modelRows.length,
+        mathInvalid: mathInvalid.map((r) => ({
+          distributorId: r.distributorId,
+          amountDue: r.amountDue,
+        })),
+      },
+      suggestedFix: "Verify computeBillingComponents matches buildDistributorBillingRow output",
+    };
+  }
+
+  if (configMissing.length > 0) {
+    return {
+      status: "WARN",
+      step,
+      actual: {
+        model,
+        rowCount: modelRows.length,
+        configMissing: configMissing.map((r) => ({
+          distributorId: r.distributorId,
+          warnings: billingConfigWarnings(model, billingRowConfig(r)),
+        })),
+      },
+    };
+  }
+
+  return {
+    status: "PASS",
+    step,
+    actual: { model, rowCount: modelRows.length, mathValid: true },
+  };
 }
 
 /**
@@ -380,6 +468,159 @@ export async function validateDistributorBillingModule({
           module: "Distributor Billing",
           step: "billing.rollup_refresh_after_payment",
           actual: "Record a payment to verify rollup refresh from ledger",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
+
+    let billingRows = Array.isArray(rendered?.billingRows) ? rendered.billingRows : [];
+    if (!billingRows.length && roleOk) {
+      try {
+        const portfolio = await loadDistributorOsPortfolio(
+          currentUser || { role: ctx.role, tenantId: ctx.tenantId, id: ctx.userId }
+        );
+        billingRows = portfolio?.billingRows || [];
+      } catch {
+        billingRows = [];
+      }
+    }
+
+    for (const [model, step] of [
+      [BILLING_MODELS.FIXED_MONTHLY, "billing.fixed_monthly_valid"],
+      [BILLING_MODELS.REVENUE_SHARE, "billing.revenue_share_valid"],
+      [BILLING_MODELS.PER_LAB, "billing.per_lab_valid"],
+      [BILLING_MODELS.HYBRID, "billing.hybrid_valid"],
+    ]) {
+      const result = validateBillingModelRows(billingRows, model, step);
+      entries.push(
+        createPredatorEntry({
+          status: result.status,
+          module: "Distributor Billing",
+          step: result.step,
+          expected: `${model}: amountDue matches authoritative formula from config + activity`,
+          actual: result.actual,
+          suggestedFix: result.suggestedFix,
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
+
+    if (!billingRows.length) {
+      entries.push(
+        createPredatorEntry({
+          status: "WARN",
+          module: "Distributor Billing",
+          step: "billing.amount_due_matches_breakdown",
+          actual: "No billing rows available for breakdown validation",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+      entries.push(
+        createPredatorEntry({
+          status: "WARN",
+          module: "Distributor Billing",
+          step: "billing.rollup_matches_rows",
+          actual: "No billing rows available for rollup validation",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    } else {
+      const breakdownInvalid = billingRows.filter((r) => !amountDueMatchesBreakdown(r));
+      entries.push(
+        createPredatorEntry({
+          status: breakdownInvalid.length === 0 ? "PASS" : "FAIL",
+          module: "Distributor Billing",
+          step: "billing.amount_due_matches_breakdown",
+          expected: "amountDue equals fixed + revenue share + per lab components",
+          actual: {
+            rowCount: billingRows.length,
+            invalid: breakdownInvalid.map((r) => ({
+              distributorId: r.distributorId,
+              amountDue: r.amountDue,
+              fixed: r.fixedComponent,
+              share: r.shareComponent,
+              perLab: r.perLabComponent,
+            })),
+          },
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+
+      const computedRollup = rollupPortfolioBilling(billingRows);
+      const renderedRollup = rendered?.dashboardBillingRollup || null;
+      const rollupMatchesRows =
+        Math.abs(num(computedRollup.totalDue) - billingRows.reduce((s, r) => s + num(r.amountDue), 0)) <=
+          0.01 &&
+        Math.abs(
+          num(computedRollup.totalCollected) -
+            billingRows.reduce((s, r) => s + num(r.collected), 0)
+        ) <= 0.01 &&
+        Math.abs(
+          num(computedRollup.totalOutstanding) -
+            billingRows.reduce((s, r) => s + num(r.outstanding), 0)
+        ) <= 0.01 &&
+        Math.abs(
+          num(computedRollup.fixedMonthlyDue) -
+            billingRows.reduce((s, r) => s + num(r.fixedComponent), 0)
+        ) <= 0.01 &&
+        Math.abs(
+          num(computedRollup.revenueShareDue) -
+            billingRows.reduce((s, r) => s + num(r.shareComponent), 0)
+        ) <= 0.01 &&
+        Math.abs(
+          num(computedRollup.perLabDue) -
+            billingRows.reduce((s, r) => s + num(r.perLabComponent), 0)
+        ) <= 0.01;
+
+      const renderedMatches =
+        !renderedRollup ||
+        (Math.abs(num(renderedRollup.totalDue) - num(computedRollup.totalDue)) <= 0.01 &&
+          Math.abs(num(renderedRollup.totalCollected) - num(computedRollup.totalCollected)) <= 0.01 &&
+          Math.abs(num(renderedRollup.totalOutstanding) - num(computedRollup.totalOutstanding)) <=
+            0.01 &&
+          Math.abs(num(renderedRollup.fixedMonthlyDue) - num(computedRollup.fixedMonthlyDue)) <= 0.01 &&
+          Math.abs(num(renderedRollup.revenueShareDue) - num(computedRollup.revenueShareDue)) <= 0.01 &&
+          Math.abs(num(renderedRollup.perLabDue) - num(computedRollup.perLabDue)) <= 0.01);
+
+      entries.push(
+        createPredatorEntry({
+          status: rollupMatchesRows && renderedMatches ? "PASS" : "FAIL",
+          module: "Distributor Billing",
+          step: "billing.rollup_matches_rows",
+          expected: "rollupPortfolioBilling totals match row sums and dashboard rollup",
+          actual: {
+            rowCount: billingRows.length,
+            rollupMatchesRows,
+            renderedMatches,
+            computed: {
+              totalDue: computedRollup.totalDue,
+              totalCollected: computedRollup.totalCollected,
+              totalOutstanding: computedRollup.totalOutstanding,
+              fixedMonthlyDue: computedRollup.fixedMonthlyDue,
+              revenueShareDue: computedRollup.revenueShareDue,
+              perLabDue: computedRollup.perLabDue,
+            },
+            rendered: renderedRollup
+              ? {
+                  totalDue: renderedRollup.totalDue,
+                  totalCollected: renderedRollup.totalCollected,
+                  totalOutstanding: renderedRollup.totalOutstanding,
+                  fixedMonthlyDue: renderedRollup.fixedMonthlyDue,
+                  revenueShareDue: renderedRollup.revenueShareDue,
+                  perLabDue: renderedRollup.perLabDue,
+                }
+              : null,
+          },
           tenantId: ctx.tenantId,
           role: ctx.role,
           userId: ctx.userId,

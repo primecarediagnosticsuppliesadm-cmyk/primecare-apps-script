@@ -568,6 +568,24 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
           )}
         </section>
 
+        {/* Inventory economics risks */}
+        {model.inventoryEconomicsRisks?.length ? (
+          <section className="rounded-lg border border-amber-200 bg-amber-50/80 p-3 shadow-sm md:col-span-2">
+            <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-amber-950">
+              <Package className="h-4 w-4" />
+              Inventory economics risks
+            </h2>
+            <ul className="space-y-1.5 text-[11px]">
+              {model.inventoryEconomicsRisks.map((card) => (
+                <li key={card.id} className="rounded-md border border-amber-100 bg-white px-2 py-1.5">
+                  <p className="font-semibold text-slate-900">{card.title}</p>
+                  <p className="text-slate-600">{card.detail}</p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
         {/* Inventory — no forecast language */}
         <section className="rounded-lg border border-slate-200 bg-card p-3 shadow-sm">
           <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">

@@ -22,12 +22,62 @@ import { buildDistributorStageModel } from "@/distributor/distributorStageEngine
 import { cn } from "@/lib/utils";
 import { AlertTriangle, CheckCircle2, Circle, TrendingUp, XCircle } from "lucide-react";
 
-export function DashboardPanel({ dashboard, comparison = [], onSelect }) {
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+const PROFITABILITY_STATUS_VARIANT = {
+  Strong: "success",
+  Watch: "warning",
+  "At Risk": "danger",
+};
+
+export function DistributorProfitabilitySnapshotPanel({ profitability }) {
+  if (!profitability) return null;
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs">
+      <p className="font-semibold text-slate-900">Profitability snapshot</p>
+      <p className="mt-0.5 text-[10px] text-slate-500">
+        Operational intelligence only — not accounting-grade P&amp;L
+      </p>
+      <dl className="mt-2 grid gap-2 sm:grid-cols-2">
+        <div>
+          <dt className="text-slate-500">Contribution signal</dt>
+          <dd className="font-medium tabular-nums">{profitability.contributionSignalLabel}</dd>
+          <dd className="text-[10px] text-slate-500">Billing collected − commission liability</dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">Contribution score</dt>
+          <dd className="font-medium tabular-nums">{profitability.contributionScore}</dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">Status</dt>
+          <dd>
+            <StatusBadge
+              variant={PROFITABILITY_STATUS_VARIANT[profitability.status] || "neutral"}
+              label={profitability.statusLabel || profitability.status}
+            />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">Main risk driver</dt>
+          <dd className="text-slate-800">{profitability.mainRiskDriver || "—"}</dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
+export function DashboardPanel({ dashboard, comparison = [], onSelect, profitabilitySnapshot = null }) {
   if (!dashboard) return null;
   const d = dashboard;
 
   return (
     <div className="space-y-4">
+      {profitabilitySnapshot ? (
+        <DistributorProfitabilitySnapshotPanel profitability={profitabilitySnapshot} />
+      ) : null}
       <KpiCardGrid>
         <KpiCard title="Total distributors" value={d.totalDistributors} />
         <KpiCard title="Active" value={d.activeDistributors} />
@@ -308,6 +358,67 @@ export function DistributorBillingDetailPanel({
         <KpiCard title="Outstanding" value={billing.outstandingLabel} />
         <KpiCard title="Last payment" value={billing.lastPaymentDate || "—"} />
       </KpiCardGrid>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs">
+        <p className="font-semibold text-slate-900">Billing calculation</p>
+        <dl className="mt-2 grid gap-1.5 sm:grid-cols-2">
+          <div>
+            <dt className="text-slate-500">Billing model</dt>
+            <dd className="font-medium text-slate-900">{billing.billingModelLabel}</dd>
+          </div>
+          <div>
+            <dt className="text-slate-500">Calculation source</dt>
+            <dd className="text-slate-800">{billing.calculationSource || "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-slate-500">Monthly fee</dt>
+            <dd className="tabular-nums">{billing.monthlyFeeLabel}</dd>
+          </div>
+          <div>
+            <dt className="text-slate-500">Revenue share %</dt>
+            <dd className="tabular-nums">
+              {billing.revenueSharePct > 0 ? `${billing.revenueSharePct}%` : "—"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-slate-500">Per lab fee</dt>
+            <dd className="tabular-nums">{billing.perLabFeeLabel}</dd>
+          </div>
+          <div>
+            <dt className="text-slate-500">Collected revenue (activity)</dt>
+            <dd className="tabular-nums">{billing.collectedRevenueLabel || "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-slate-500">Active labs</dt>
+            <dd className="tabular-nums">{billing.activeLabCount ?? "—"}</dd>
+          </div>
+        </dl>
+        <div className="mt-3 space-y-1 border-t border-slate-100 pt-2">
+          <p className="font-medium text-slate-700">Breakdown</p>
+          {num(billing.fixedComponent) > 0 ? (
+            <p className="flex justify-between text-slate-700">
+              <span>Fixed monthly</span>
+              <span className="tabular-nums">{billing.fixedComponentLabel}</span>
+            </p>
+          ) : null}
+          {num(billing.shareComponent) > 0 ? (
+            <p className="flex justify-between text-slate-700">
+              <span>Revenue share</span>
+              <span className="tabular-nums">{billing.shareComponentLabel}</span>
+            </p>
+          ) : null}
+          {num(billing.perLabComponent) > 0 ? (
+            <p className="flex justify-between text-slate-700">
+              <span>Per lab</span>
+              <span className="tabular-nums">{billing.perLabComponentLabel}</span>
+            </p>
+          ) : null}
+          <p className="flex justify-between border-t border-slate-100 pt-1 font-semibold text-slate-900">
+            <span>Total due</span>
+            <span className="tabular-nums">{billing.amountDueLabel}</span>
+          </p>
+        </div>
+      </div>
 
       {showForm && isExecutive ? (
         <form

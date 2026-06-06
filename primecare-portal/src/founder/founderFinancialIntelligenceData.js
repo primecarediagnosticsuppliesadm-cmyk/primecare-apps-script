@@ -3,6 +3,10 @@ import { loadOperationsCommandCenterData } from "@/operations/operationsCommandC
 import { loadVisibleLabContracts } from "@/labContract/labContractStore.js";
 import { loadFounderCommissionMetrics } from "@/commission/commissionData.js";
 import { filterDistributorRegistry } from "@/distributor/distributorOsEngine.js";
+import {
+  distributorNamesFromRegistry,
+  loadInventoryEconomicsBundle,
+} from "@/inventory/inventoryEconomicsData.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -25,6 +29,8 @@ export async function loadFounderFinancialIntelligenceData(currentUser, options 
 
   const distributors = filterDistributorRegistry(portfolio.bundle?.registry || portfolio.distributors || [], homeTenantId);
   const distributorIds = distributors.map((d) => d.id).filter(Boolean);
+  const distributorNames = distributorNamesFromRegistry(distributors);
+  const inventoryEconomicsRes = await loadInventoryEconomicsBundle({ distributorNames });
 
   const commissionRes = await loadFounderCommissionMetrics(distributorIds, {
     homeTenantId,
@@ -59,6 +65,13 @@ export async function loadFounderFinancialIntelligenceData(currentUser, options 
         ok: Boolean(opsPayload?.dashboard),
         error: null,
       },
+      inventory: {
+        ok: inventoryEconomicsRes.ok === true,
+        error: inventoryEconomicsRes.error || null,
+        skuCount: inventoryEconomicsRes.model?.skuCount ?? 0,
+      },
     },
+    inventoryEconomics: inventoryEconomicsRes.model,
+    inventoryEconomicsBundle: inventoryEconomicsRes,
   };
 }

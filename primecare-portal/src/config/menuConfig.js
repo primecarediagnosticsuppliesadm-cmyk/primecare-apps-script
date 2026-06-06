@@ -17,6 +17,7 @@ const EXECUTIVE_HQ_MENU_KEYS = new Set([
   "purchase",
   "commissionEngine",
   "predatorDebug",
+  "qaCommandCenter",
 ]);
 
 const ADMIN_HQ_MENU_KEYS = new Set([
@@ -83,6 +84,7 @@ export const MENU_ITEMS = [
   { key: "labOrders", label: "Lab Ordering", icon: "ClipboardCheck" },
   { key: "purchase", label: "Purchase / Reorder", icon: "PackagePlus" },
   { key: "predatorDebug", label: "Predator Debug", icon: "Brain" },
+  { key: "qaCommandCenter", label: "QA Command Center", icon: "ClipboardCheck" },
 ];
 
 const PILOT_SAFE_PAGE_KEYS = new Set([
@@ -111,6 +113,7 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "purchase",
   "reorder",
   "predatorDebug",
+  "qaCommandCenter",
 ]);
 
 export function isPageVisibleInCurrentEnvironment(pageKey) {
@@ -133,6 +136,7 @@ export function getMenuForRole(role) {
 
   const items = MENU_ITEMS.filter((item) => {
     if (item.key === "predatorDebug" && !isPredatorEnabled()) return false;
+    if (item.key === "qaCommandCenter" && normalizedRole !== ROLES.EXECUTIVE) return false;
     if (normalizedRole === ROLES.LAB && !LAB_MENU_ORDER.includes(item.key)) {
       return false;
     }
