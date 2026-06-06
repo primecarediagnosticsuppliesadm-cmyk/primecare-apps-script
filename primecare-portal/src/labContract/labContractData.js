@@ -1,4 +1,5 @@
 import { supabase } from "@/api/supabaseClient.js";
+import { getLabsCredit } from "@/api/primecareSupabaseApi.js";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import { loadTenantFoundationRegistry } from "@/tenant/tenantFoundationData.js";
 import { appendOperationalEvent } from "@/operations/operationalEventBridge.js";
@@ -102,16 +103,23 @@ export async function loadLabContractEngineBundle(currentUser, options = {}) {
     return cachedBundle;
   }
 
-  const [opsPayload, foundation, orderLines] = await Promise.all([
+  const [opsPayload, foundation, orderLines, labsRes] = await Promise.all([
     loadOperationsCommandCenterData(currentUser, { force: options.force }),
     loadTenantFoundationRegistry(currentUser, { force: options.force }).catch(() => ({
       tenants: [],
     })),
     fetchOrderLinesRaw(),
+    getLabsCredit().catch(() => ({ data: [] })),
   ]);
 
-  if (opsPayload && orderLines?.length) {
-    opsPayload.orderLines = orderLines;
+  if (opsPayload) {
+    if (orderLines?.length) {
+      opsPayload.orderLines = orderLines;
+    }
+    const creditLabs = Array.isArray(labsRes?.data) ? labsRes.data : [];
+    opsPayload.creditLabs = scopeTenantId
+      ? creditLabs.filter((lab) => str(lab.tenantId || lab.tenant_id) === scopeTenantId)
+      : creditLabs;
   }
 
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);

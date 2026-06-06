@@ -126,7 +126,7 @@ function activationBlockerMessages(contract, readiness, distributorScope) {
     else if (ch.id === "commercial_terms") blockers.push("Missing commercial terms");
     else if (ch.id === "owner") blockers.push("Missing owner");
     else if (ch.id === "distributor") blockers.push("Distributor not found in registry");
-    else if (ch.id === "lab") blockers.push("Lab not found in operational data");
+    else if (ch.id === "lab") blockers.push(ch.detail || "FAIL Lab exists");
     else blockers.push(ch.label);
   }
   if (readiness && num(readiness.score) < 100) {
@@ -734,9 +734,14 @@ export default function LabContractManagementPage({
                       {(selectedReadinessPreview?.checks || [])
                         .filter((ch) => ch.pass)
                         .map((ch) => (
-                          <li key={ch.id} className="flex items-center gap-2 text-emerald-800">
-                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                            {ch.label}
+                          <li key={ch.id} className="flex flex-col gap-0.5 text-emerald-800">
+                            <span className="flex items-center gap-2">
+                              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                              PASS {ch.label}
+                            </span>
+                            {ch.detail ? (
+                              <span className="pl-5 text-[11px] text-emerald-700">{ch.detail}</span>
+                            ) : null}
                           </li>
                         ))}
                       {(selectedReadinessPreview?.checks || []).filter((ch) => ch.pass).length ===
@@ -753,9 +758,14 @@ export default function LabContractManagementPage({
                       {(selectedReadinessPreview?.checks || [])
                         .filter((ch) => !ch.pass)
                         .map((ch) => (
-                          <li key={ch.id} className="flex items-center gap-2 text-red-800">
-                            <XCircle className="h-3.5 w-3.5 shrink-0 text-red-600" />
-                            {ch.label}
+                          <li key={ch.id} className="flex flex-col gap-0.5 text-red-800">
+                            <span className="flex items-center gap-2">
+                              <XCircle className="h-3.5 w-3.5 shrink-0 text-red-600" />
+                              FAIL {ch.label}
+                            </span>
+                            {ch.detail ? (
+                              <span className="pl-5 text-[11px] text-red-700">{ch.detail}</span>
+                            ) : null}
                           </li>
                         ))}
                       {(selectedReadinessPreview?.checks || []).filter((ch) => !ch.pass).length ===

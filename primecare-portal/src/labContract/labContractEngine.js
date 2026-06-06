@@ -62,23 +62,95 @@ function isPipelineStatus(status) {
   );
 }
 
+function normalizeLabName(name) {
+  return str(name).toLowerCase().replace(/\s+/g, " ");
+}
+
+function registerLab(labs, row = {}) {
+  const lid = labIdKey(row.labId ?? row.lab_id ?? row.id);
+  if (!lid) return;
+  labs.set(lid, {
+    labId: lid,
+    labName: str(row.labName ?? row.lab_name ?? row.name) || lid,
+    tenantId: str(row.tenantId ?? row.tenant_id),
+  });
+}
+
+/**
+ * Resolve contract lab against ops lookups — ID first, then normalized name (readiness only).
+ */
+export function resolveContractLabMatch(contract = {}, labs = new Map()) {
+  const contractLabId = labIdKey(contract.labId);
+  const contractLabName = str(contract.labName);
+  const contractTenantId = str(contract.tenantId || contract.distributorId);
+
+  if (contractLabId && labs.has(contractLabId)) {
+    return {
+      pass: true,
+      matchBy: "id",
+      matched: labs.get(contractLabId),
+      contractLabId,
+      contractLabName,
+      contractTenantId,
+    };
+  }
+
+  const normalizedContractName = normalizeLabName(contractLabName);
+  if (normalizedContractName) {
+    for (const [, lab] of labs.entries()) {
+      const labTenantId = str(lab.tenantId);
+      if (contractTenantId && labTenantId && labTenantId !== contractTenantId) continue;
+      if (normalizeLabName(lab.labName) === normalizedContractName) {
+        return {
+          pass: true,
+          matchBy: "name",
+          matched: lab,
+          contractLabId,
+          contractLabName,
+          contractTenantId,
+        };
+      }
+    }
+  }
+
+  return {
+    pass: false,
+    matchBy: null,
+    matched: null,
+    contractLabId,
+    contractLabName,
+    contractTenantId,
+  };
+}
+
 /**
  * Build lab + distributor lookup maps from ops (memoized per payload ref).
  */
 export function buildOpsLookups(payload) {
   const labs = new Map();
   for (const l of payload?.dashboard?.labs || []) {
-    const lid = labIdKey(l.labId ?? l.lab_id ?? l.id);
-    if (!lid) continue;
-    labs.set(lid, {
-      labId: lid,
-      labName: str(l.labName ?? l.lab_name ?? l.name) || lid,
-    });
+    registerLab(labs, l);
+  }
+  for (const l of payload?.creditLabs || []) {
+    registerLab(labs, l);
   }
   for (const c of payload?.collections || []) {
     const lid = labIdKey(c.labId);
     if (!lid || labs.has(lid)) continue;
-    labs.set(lid, { labId: lid, labName: str(c.labName) || lid });
+    registerLab(labs, {
+      labId: lid,
+      labName: c.labName,
+      tenantId: c.tenantId ?? c.tenant_id,
+    });
+  }
+  for (const o of payload?.orders || []) {
+    const lid = labIdKey(o.lab_id ?? o.labId);
+    if (!lid || labs.has(lid)) continue;
+    registerLab(labs, {
+      labId: lid,
+      labName: o.labName ?? o.lab_name,
+      tenantId: o.tenantId ?? o.tenant_id,
+    });
   }
 
   const collectionsByLab = new Map();
@@ -127,8 +199,38 @@ export function computeContractReadiness(contract, { labs, distributors }) {
     weight: 20,
   });
 
-  const labOk = Boolean(contract.labId && labs.has(labIdKey(contract.labId)));
-  checks.push({ id: "lab", label: "Lab exists", pass: labOk, weight: 20 });
+  const labMatch = resolveContractLabMatch(contract, labs);
+  const labDetail = labMatch.pass
+    ? `PASS · ${labMatch.matchBy} match · ${labMatch.matched?.labName || "—"} (${labMatch.matched?.labId || "—"})`
+    : `FAIL · contract lab ${labMatch.contractLabId || "—"} "${labMatch.contractLabName || "—"}" · tenant ${labMatch.contractTenantId || "—"} · ${labs.size} lab(s) indexed`;
+  if (!labMatch.pass) {
+    console.warn("[contractReadiness] lab match failed", {
+      contractLabId: labMatch.contractLabId,
+      contractLabName: labMatch.contractLabName,
+      contractTenantId: labMatch.contractTenantId,
+      matchedLab: labMatch.matched,
+      lookupCount: labs.size,
+    });
+  } else {
+    console.info("[contractReadiness] lab match ok", {
+      contractLabId: labMatch.contractLabId,
+      contractLabName: labMatch.contractLabName,
+      contractTenantId: labMatch.contractTenantId,
+      matchedLabId: labMatch.matched?.labId,
+      matchedLabName: labMatch.matched?.labName,
+      matchedLabTenantId: labMatch.matched?.tenantId,
+      matchBy: labMatch.matchBy,
+    });
+  }
+  checks.push({
+    id: "lab",
+    label: "Lab exists",
+    detail: labDetail,
+    pass: labMatch.pass,
+    weight: 20,
+    matchBy: labMatch.matchBy,
+    matchedLab: labMatch.matched,
+  });
 
   const commercial = contract.commercial || {};
   const paymentOk = Boolean(str(commercial.paymentTerms));
