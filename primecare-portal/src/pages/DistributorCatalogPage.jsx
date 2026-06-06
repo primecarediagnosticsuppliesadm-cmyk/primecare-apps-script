@@ -38,6 +38,7 @@ export default function DistributorCatalogPage({
   const homeTenantId = distributorScope?.homeTenantId || currentUser?.tenantId || "";
   const [loading, setLoading] = useState(true);
   const [bundle, setBundle] = useState(null);
+  const [inventoryEconomics, setInventoryEconomics] = useState(null);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const renderCountRef = useRef(0);
@@ -55,6 +56,7 @@ export default function DistributorCatalogPage({
     async ({ showLoading = true, syncParent = false } = {}) => {
       if (!tenantId) {
         setBundle(null);
+        setInventoryEconomics(null);
         setLoading(false);
         return;
       }
@@ -69,6 +71,9 @@ export default function DistributorCatalogPage({
           loadInventoryEconomicsBundle({
             distributorId: tenantId,
             distributorNames: new Map([[tenantId, distributorRowRef.current?.name || tenantId]]),
+          }).catch((err) => {
+            console.warn("[DistributorCatalog] inventory economics load failed", err);
+            return { ok: false, model: null };
           }),
         ]);
         setBundle(data);
@@ -87,6 +92,7 @@ export default function DistributorCatalogPage({
       } catch (err) {
         console.error(err);
         setBundle(null);
+        setInventoryEconomics(null);
         setMsg(err?.message || "Failed to load catalog");
       } finally {
         if (showLoading) setLoading(false);
@@ -232,7 +238,15 @@ export default function DistributorCatalogPage({
         </div>
       </div>
 
-      {embedded ? <InventoryEconomicsSummaryPanel economics={inventoryEconomics} compact /> : null}
+      {embedded ? (
+        inventoryEconomics ? (
+          <InventoryEconomicsSummaryPanel economics={inventoryEconomics} compact />
+        ) : (
+          <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+            Inventory economics unavailable.
+          </div>
+        )
+      ) : null}
 
       <div className="flex flex-wrap gap-2 text-xs">
         <StatusBadge
