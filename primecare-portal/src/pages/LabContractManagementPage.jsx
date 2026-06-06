@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, PageSkeleton } from "@/components/ux";
+import { getLabsCredit } from "@/api/primecareSupabaseApi.js";
 import {
   loadLabContractEngineBundle,
   createLabContractDraft,
@@ -18,7 +19,9 @@ import {
   CONTRACT_STATUSES,
   PAYMENT_TERMS_OPTIONS,
 } from "@/labContract/labContractTypes.js";
-import { formatContractInr } from "@/labContract/labContractEngine.js";
+import { buildOpsLookups, formatContractInr } from "@/labContract/labContractEngine.js";
+import { ROLES } from "@/config/roles.js";
+import { labIdKey } from "@/utils/labId.js";
 import { buildContractRenewalIntelligence } from "@/contracts/contractRenewalIntelligenceEngine.js";
 import { ContractRenewalSummaryPanel } from "@/components/contracts/ContractRenewalIntelligencePanels.jsx";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
@@ -82,6 +85,7 @@ export default function LabContractManagementPage({
 }) {
   const [loading, setLoading] = useState(true);
   const [bundle, setBundle] = useState(null);
+  const [distributorLabs, setDistributorLabs] = useState([]);
   const [tab, setTab] = useState("Dashboard");
   const [selectedId, setSelectedId] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -111,11 +115,22 @@ export default function LabContractManagementPage({
     try {
       setLoading(true);
       invalidateLabContractCache();
-      const data = await loadLabContractEngineBundle(currentUser, {
-        force: true,
-        scopeTenantId: distributorScope?.tenantId || "",
-      });
+      const scopeTenantId = distributorScope?.tenantId || "";
+      const [data, labsRes] = await Promise.all([
+        loadLabContractEngineBundle(currentUser, {
+          force: true,
+          scopeTenantId,
+        }),
+        getLabsCredit().catch(() => ({ data: [] })),
+      ]);
       setBundle(data);
+      const scopeId = String(scopeTenantId || "").trim();
+      const labs = Array.isArray(labsRes?.data) ? labsRes.data : [];
+      setDistributorLabs(
+        scopeId
+          ? labs.filter((lab) => String(lab.tenantId || "").trim() === scopeId)
+          : labs
+      );
     } catch (err) {
       console.error(err);
       setMsg(err?.message || "Failed to load contracts");
@@ -152,12 +167,38 @@ export default function LabContractManagementPage({
   );
 
   const labOptions = useMemo(() => {
-    const labs = bundle?.opsPayload?.dashboard?.labs || [];
-    return labs.map((l) => ({
-      id: l.labId ?? l.lab_id,
-      name: l.labName ?? l.lab_name ?? l.labId,
+    const byId = new Map();
+    for (const lab of distributorLabs) {
+      const id = labIdKey(lab.labId);
+      if (!id) continue;
+      byId.set(id, { id, name: lab.labName || id });
+    }
+    const lookups = buildOpsLookups(bundle?.opsPayload || {});
+    for (const lab of lookups.labs.values()) {
+      const id = labIdKey(lab.labId);
+      if (!id || byId.has(id)) continue;
+      byId.set(id, { id, name: lab.labName || id });
+    }
+    return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [bundle, distributorLabs]);
+
+  const role = String(currentUser?.role || "").toLowerCase();
+  const canCreateContract =
+    (role === ROLES.EXECUTIVE || role === ROLES.ADMIN) &&
+    (!embedded || (Boolean(distributorScope?.tenantId) && distributorScope?.canOperate !== false));
+
+  function openCreateForm() {
+    setForm((f) => ({
+      ...f,
+      distributorName: distributorScope?.tenantName || f.distributorName || "",
+      labId: "",
+      labName: "",
+      owner: currentUser?.name || currentUser?.email || f.owner || "",
+      startDate: new Date().toISOString().slice(0, 10),
+      endDate: "",
     }));
-  }, [bundle]);
+    setShowCreate(true);
+  }
 
   const renewalIntel = useMemo(
     () =>
@@ -177,7 +218,11 @@ export default function LabContractManagementPage({
         {
           ...form,
           distributorId: bundle.tenantId,
-          distributorName: form.distributorName || currentUser?.tenantName || "HQ",
+          distributorName:
+            form.distributorName ||
+            distributorScope?.tenantName ||
+            currentUser?.tenantName ||
+            "HQ",
         },
         currentUser?.name || currentUser?.email
       );
@@ -228,15 +273,40 @@ export default function LabContractManagementPage({
           </p>
         </div>
         <div className="flex gap-1">
-          <Button type="button" size="sm" variant="outline" onClick={() => setShowCreate(true)}>
-            <Plus className="h-4 w-4" /> New
-          </Button>
+          {canCreateContract ? (
+            <Button type="button" size="sm" variant="outline" onClick={openCreateForm}>
+              <Plus className="h-4 w-4" /> New
+            </Button>
+          ) : null}
           <Button type="button" variant="ghost" size="icon" onClick={() => void load()}>
             <RefreshCw className="h-4 w-4" />
           </Button>
         </div>
       </header>
-      ) : null}
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+          <div>
+            <p className="text-sm font-semibold text-slate-900">Lab contracts</p>
+            <p className="text-[10px] text-slate-500">
+              {distributorScope?.tenantName || "Selected distributor"} · create or import drafts
+            </p>
+          </div>
+          <div className="flex gap-1">
+            {canCreateContract ? (
+              <Button type="button" size="sm" onClick={openCreateForm}>
+                <Plus className="h-4 w-4" /> New Contract
+              </Button>
+            ) : (
+              <p className="text-[10px] text-amber-700">
+                Activate distributor to create contracts
+              </p>
+            )}
+            <Button type="button" variant="ghost" size="icon" onClick={() => void load()} aria-label="Refresh">
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       {msg ? <p className="text-xs text-slate-600">{msg}</p> : null}
 
@@ -290,7 +360,25 @@ export default function LabContractManagementPage({
               />
             ))
           )}
-          <Button type="button" size="sm" variant="ghost" className="w-full text-xs" onClick={() => void handleSuggest()}>
+          {canCreateContract ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="w-full text-xs"
+              onClick={openCreateForm}
+            >
+              <Plus className="mr-1 h-3.5 w-3.5" />
+              New Contract
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="w-full text-xs"
+            onClick={() => void handleSuggest()}
+          >
             Import qualification drafts
           </Button>
         </div>
@@ -641,14 +729,59 @@ export default function LabContractManagementPage({
               </select>
             </label>
             <label className="mt-2 block">
+              Start date
+              <input
+                type="date"
+                className="mt-1 w-full rounded border px-2 py-1"
+                value={form.startDate}
+                onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))}
+                required
+              />
+            </label>
+            <label className="mt-2 block">
+              End date
+              <input
+                type="date"
+                className="mt-1 w-full rounded border px-2 py-1"
+                value={form.endDate}
+                onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
+              />
+            </label>
+            <label className="mt-2 block">
               Monthly commitment (INR)
               <input
                 type="number"
+                min={0}
                 className="mt-1 w-full rounded border px-2 py-1"
                 value={form.monthlyCommitment}
                 onChange={(e) => setForm((f) => ({ ...f, monthlyCommitment: e.target.value }))}
               />
             </label>
+            <label className="mt-2 block">
+              Credit limit (INR)
+              <input
+                type="number"
+                min={0}
+                className="mt-1 w-full rounded border px-2 py-1"
+                value={form.creditLimit}
+                onChange={(e) => setForm((f) => ({ ...f, creditLimit: e.target.value }))}
+              />
+            </label>
+            <label className="mt-2 block">
+              Collection target (%)
+              <input
+                type="number"
+                min={0}
+                max={100}
+                className="mt-1 w-full rounded border px-2 py-1"
+                value={form.collectionTargetPct}
+                onChange={(e) => setForm((f) => ({ ...f, collectionTargetPct: e.target.value }))}
+              />
+            </label>
+            <p className="mt-2 text-[10px] text-slate-500">
+              Provide at least one commercial value: monthly commitment, credit limit, or collection
+              target.
+            </p>
             <div className="mt-4 flex gap-2">
               <Button type="submit" size="sm">
                 Create draft
