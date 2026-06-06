@@ -11,6 +11,7 @@ import CollectionsPage from "./pages/CollectionsPage";
 import ExecutiveControlTower from "./pages/ExecutiveControlTower";
 import FounderNavigationPage from "./pages/FounderNavigationPage";
 import FounderStrategyPage from "./pages/FounderStrategyPage";
+import FounderFinancialIntelligencePage from "./pages/FounderFinancialIntelligencePage";
 import TenantManagementPage from "./pages/TenantManagementPage";
 import DistributorManagementPage from "./pages/DistributorManagementPage";
 import DistributorOsPage from "./pages/DistributorOsPage";
@@ -267,6 +268,14 @@ export default function PrimeCareWebPortal({
       case "founderStrategy":
         return (
           <FounderStrategyPage
+            setActivePage={setActivePage}
+            currentUser={currentUser}
+          />
+        );
+
+      case "founderFinancialIntelligence":
+        return (
+          <FounderFinancialIntelligencePage
             setActivePage={setActivePage}
             currentUser={currentUser}
           />

@@ -18,6 +18,7 @@ import { validateExecutiveIntelligenceModule } from "@/predator/validators/execu
 import { validatePilotReadinessModule } from "@/predator/validators/pilotReadinessValidator.js";
 import { validateFounderNavigationModule } from "@/predator/validators/founderNavigationValidator.js";
 import { validateFounderStrategyModule } from "@/predator/validators/founderStrategyValidator.js";
+import { validateFounderFinancialIntelligenceModule } from "@/predator/validators/founderFinancialIntelligenceValidator.js";
 import { validateTenantFoundationModule } from "@/predator/validators/tenantFoundationValidator.js";
 import { validateDistributorWorkspaceModule } from "@/predator/validators/distributorWorkspaceValidator.js";
 import { validateDistributorProvisioningModule } from "@/predator/validators/distributorProvisioningValidator.js";
@@ -170,6 +171,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         pilotReadiness,
         founderNavigation,
         founderStrategy,
+        founderFinancialIntelligence,
         tenantFoundation,
         distributorWorkspace,
         distributorProvisioning,
@@ -220,6 +222,11 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
           rendered: snapshots.founderStrategy ?? null,
           opsPayload,
         }),
+        validateFounderFinancialIntelligenceModule({
+          ctx,
+          currentUser,
+          rendered: snapshots.founderFinancialIntelligence ?? null,
+        }),
         validateTenantFoundationModule({
           ctx,
           currentUser,
@@ -267,6 +274,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         storePolishedModule("Pilot Readiness", pilotReadiness, ctx),
         storePolishedModule("Founder Navigation", founderNavigation, ctx),
         storePolishedModule("Founder Strategy", founderStrategy, ctx),
+        storePolishedModule("Founder Financial Intelligence", founderFinancialIntelligence, ctx),
         storePolishedModule("Tenant Foundation", tenantFoundation, ctx),
         storePolishedModule("Distributor Workspace", distributorWorkspace, ctx),
         storePolishedModule("Distributor Provisioning", distributorProvisioning, ctx),
@@ -392,6 +400,13 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
       break;
     case "Founder Strategy":
       result = await validateFounderStrategyModule({
+        ctx,
+        currentUser,
+        rendered: snapshot,
+      });
+      break;
+    case "Founder Financial Intelligence":
+      result = await validateFounderFinancialIntelligenceModule({
         ctx,
         currentUser,
         rendered: snapshot,

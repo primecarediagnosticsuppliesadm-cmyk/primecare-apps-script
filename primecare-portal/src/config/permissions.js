@@ -4,6 +4,7 @@ export const PERMISSIONS = {
   dashboard: [ROLES.AGENT, ROLES.ADMIN, ROLES.EXECUTIVE],
   founderNavigation: [ROLES.EXECUTIVE],
   founderStrategy: [ROLES.EXECUTIVE],
+  founderFinancialIntelligence: [ROLES.EXECUTIVE],
   tenantManagement: [ROLES.EXECUTIVE],
   distributorManagement: [ROLES.EXECUTIVE],
   distributorOs: [ROLES.EXECUTIVE, ROLES.ADMIN],
