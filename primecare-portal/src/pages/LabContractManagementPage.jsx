@@ -929,7 +929,7 @@ export default function LabContractManagementPage({
                     </Button>
                   </>
                 ) : null}
-                {setActivePage ? (
+                {setActivePage && !embedded ? (
                   <Button
                     type="button"
                     size="sm"
