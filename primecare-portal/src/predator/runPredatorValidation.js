@@ -215,7 +215,12 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
           rendered: snapshots.executiveIntelligence ?? null,
           opsPayload,
         }),
-        validatePilotReadinessModule({ ctx, currentUser, opsPayload }),
+        validatePilotReadinessModule({
+          ctx,
+          currentUser,
+          rendered: snapshots.pilotReadiness ?? null,
+          opsPayload,
+        }),
         validateFounderNavigationModule({
           ctx,
           currentUser,
@@ -412,7 +417,11 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
       });
       break;
     case "Pilot Readiness":
-      result = await validatePilotReadinessModule({ ctx, currentUser });
+      result = await validatePilotReadinessModule({
+        ctx,
+        currentUser,
+        rendered: snapshot,
+      });
       break;
     case "Founder Navigation":
       result = await validateFounderNavigationModule({

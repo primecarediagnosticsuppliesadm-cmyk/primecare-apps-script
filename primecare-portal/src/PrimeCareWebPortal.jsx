@@ -31,6 +31,7 @@ import PredatorDebugConsole from "./pages/PredatorDebugConsole";
 import NotificationCenterPage from "./pages/NotificationCenterPage";
 import OperationsCommandCenter from "./pages/OperationsCommandCenter";
 import QACommandCenterPage from "./pages/QACommandCenterPage";
+import PilotReadinessPage from "./pages/PilotReadinessPage";
 
 function PlaceholderCard({ title, subtitle }) {
   return (
@@ -281,6 +282,10 @@ export default function PrimeCareWebPortal({
             currentUser={currentUser}
           />
         );
+
+      case "pilotReadiness":
+      case "pilot-readiness":
+        return <PilotReadinessPage currentUser={currentUser} />;
 
       case "qaCommandCenter":
       case "qa-command-center":

@@ -8,13 +8,166 @@ import { readOperationalLedger } from "@/operations/operationalEventLedger.js";
 import { buildUnifiedOperationsFeedRows } from "@/operations/operationalEventTimeline.js";
 import { polishPredatorEntries } from "@/predator/predatorEntryPolish.js";
 import { ROLES } from "@/config/roles.js";
+import {
+  buildPilotReadinessModel,
+  loadPilotReadinessData,
+  PILOT_READINESS_GATES,
+  readinessBandFromScore,
+  validatePilotReadinessModelConsistency,
+} from "@/readiness/pilotReadinessEngine.js";
+
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function finish(entries) {
+  const polished = polishPredatorEntries(entries);
+  return {
+    module: "Pilot Readiness",
+    summary: summarizePredatorEntries(polished),
+    entries: polished,
+  };
+}
+
+function pushCenterStep(entries, ctx, step, valid, expected, actual, empty = false) {
+  entries.push(
+    createPredatorEntry({
+      status: valid ? "PASS" : empty ? "WARN" : "FAIL",
+      module: "Pilot Readiness",
+      step,
+      expected,
+      actual: empty ? "No pilot readiness model data" : actual,
+      tenantId: ctx.tenantId,
+      role: ctx.role,
+      userId: ctx.userId,
+    })
+  );
+}
+
+async function validatePilotReadinessCenterModel({ ctx, currentUser, rendered = null, entries }) {
+  let model = rendered?.pilotReadiness || null;
+  const empty = !model;
+
+  if (!model && currentUser && ctx.role === ROLES.EXECUTIVE) {
+    try {
+      const data = await loadPilotReadinessData(currentUser);
+      model = buildPilotReadinessModel(data);
+    } catch (err) {
+      entries.push(
+        createPredatorEntry({
+          status: "WARN",
+          module: "Pilot Readiness",
+          step: "readiness.model_load",
+          actual: err?.message,
+          suggestedFix: "Open Pilot Readiness and ensure portfolio data loads.",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+      return false;
+    }
+  }
+
+  if (!model) return false;
+
+  const consistency = validatePilotReadinessModelConsistency(model);
+  const score = num(model.overallScore ?? model.readinessScore);
+  const band = model.overallBand || model.readinessBand;
+
+  pushCenterStep(
+    entries,
+    ctx,
+    "readiness.gates_loaded",
+    consistency.gatesLoaded,
+    `${PILOT_READINESS_GATES.length} readiness gates with valid status`,
+    { gateCount: model.gateBreakdown?.length ?? 0 },
+    empty
+  );
+
+  pushCenterStep(
+    entries,
+    ctx,
+    "readiness.score_valid",
+    consistency.scoreValid,
+    "Readiness score 0–100 with matching band",
+    { readinessScore: score, readinessBand: band },
+    empty
+  );
+
+  pushCenterStep(
+    entries,
+    ctx,
+    "readiness.distributor_rollup_valid",
+    consistency.distributorRollupValid,
+    "Portfolio score matches distributor rollup average",
+    {
+      overallScore: score,
+      distributorCount: model.distributors?.length ?? 0,
+    },
+    empty
+  );
+
+  pushCenterStep(
+    entries,
+    ctx,
+    "readiness.blockers_valid",
+    consistency.blockersValid,
+    "Blocking issues array present",
+    { blockerCount: model.blockers?.length ?? 0 },
+    empty
+  );
+
+  pushCenterStep(
+    entries,
+    ctx,
+    "readiness.band_valid",
+    consistency.bandValid && band === readinessBandFromScore(score),
+    "Readiness band matches score thresholds",
+    { readinessBand: band, expectedBand: readinessBandFromScore(score) },
+    empty
+  );
+
+  return true;
+}
 
 /**
- * Deterministic pilot-readiness checklist (no AI).
+ * Pilot Readiness — center model consistency (executive) + legacy ops checklist.
  */
-export async function validatePilotReadinessModule({ ctx, currentUser = null, opsPayload = null }) {
+export async function validatePilotReadinessModule({
+  ctx,
+  currentUser = null,
+  rendered = null,
+  opsPayload = null,
+}) {
   return predatorTrace("Pilot Readiness", "validation.full", async () => {
     const entries = [];
+
+    if (ctx.role !== ROLES.EXECUTIVE) {
+      entries.push(
+        createPredatorEntry({
+          status: "PASS",
+          module: "Pilot Readiness",
+          step: "role.access",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+      return finish(entries);
+    }
+
+    const centerValidated = await validatePilotReadinessCenterModel({
+      ctx,
+      currentUser,
+      rendered,
+      entries,
+    });
+
+    if (centerValidated && rendered?.pilotReadinessCenter) {
+      return finish(entries);
+    }
 
     if (!ctx.tenantId) {
       entries.push(
@@ -29,7 +182,7 @@ export async function validatePilotReadinessModule({ ctx, currentUser = null, op
           userId: ctx.userId,
         })
       );
-      return finish(entries, ctx);
+      return finish(entries);
     }
 
     entries.push(
@@ -63,7 +216,7 @@ export async function validatePilotReadinessModule({ ctx, currentUser = null, op
           userId: ctx.userId,
         })
       );
-      return finish(entries, ctx);
+      return finish(entries);
     }
 
     const collectionTenantIds = (payload.collections || [])
@@ -102,20 +255,6 @@ export async function validatePilotReadinessModule({ ctx, currentUser = null, op
         expected: "Collections AR rows available",
         actual: { count: payload.collections?.length ?? 0 },
         suggestedFix: hasCollections ? "" : "Import or sync AR data before collections pilot.",
-        tenantId: ctx.tenantId,
-        role: ctx.role,
-        userId: ctx.userId,
-      })
-    );
-
-    const hasInventory = Array.isArray(payload.inventory) && payload.inventory.length > 0;
-    entries.push(
-      createPredatorEntry({
-        status: hasInventory ? "PASS" : "INFO",
-        module: "Pilot Readiness",
-        step: "inventory.integrity",
-        actual: { count: payload.inventory?.length ?? 0 },
-        suggestedFix: hasInventory ? "" : "Optional for pilot: stock dashboard may be empty.",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,
@@ -205,7 +344,7 @@ export async function validatePilotReadinessModule({ ctx, currentUser = null, op
     );
 
     const staleRisk =
-      !payload.dashboard && !hasCollections && !hasInventory && (payload.visits || []).length === 0;
+      !payload.dashboard && !hasCollections && (payload.visits || []).length === 0;
     entries.push(
       createPredatorEntry({
         status: staleRisk ? "WARN" : "PASS",
@@ -225,29 +364,6 @@ export async function validatePilotReadinessModule({ ctx, currentUser = null, op
       })
     );
 
-    if (ctx.role === ROLES.LAB) {
-      entries.push(
-        createPredatorEntry({
-          status: "INFO",
-          module: "Pilot Readiness",
-          step: "role.lab",
-          rootCauseGuess: "Lab role uses lab portal checks separately",
-          tenantId: ctx.tenantId,
-          role: ctx.role,
-          userId: ctx.userId,
-        })
-      );
-    }
-
-    return finish(entries, ctx);
+    return finish(entries);
   });
-}
-
-function finish(entries, ctx) {
-  const polished = polishPredatorEntries(entries);
-  return {
-    module: "Pilot Readiness",
-    summary: summarizePredatorEntries(polished),
-    entries: polished,
-  };
 }
