@@ -5,7 +5,7 @@ import { loadDistributorWorkspaceBundle, resolveDistributorWorkspace } from "@/d
 import { polishPredatorEntries } from "@/predator/predatorEntryPolish.js";
 import { ROLES } from "@/config/roles.js";
 
-const VALID_STATUS = new Set(["pending", "active", "suspended"]);
+const VALID_STATUS = new Set(["pending", "active", "suspended", "draft", "deactivated"]);
 const VALID_HEALTH = new Set(["Healthy", "Watch", "Risk"]);
 const WIRED_PAGES = new Set([
   "tenantManagement",
@@ -15,6 +15,7 @@ const WIRED_PAGES = new Set([
   "qualificationReview",
   "distributorProvisioning",
   "labContractEngine",
+  "distributorOs",
 ]);
 
 /** Wired actions need a known page; disabled actions must be Coming soon. */

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, PageSkeleton } from "@/components/ux";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
+import { buildFinancialPressurePanel } from "@/operations/operationsCommandCenterModel.js";
 import { buildFounderStrategyModel } from "@/founder/founderStrategyEngine.js";
 import { loadVisibleLabContracts } from "@/labContract/labContractStore.js";
 import { loadFounderCommissionMetrics } from "@/commission/commissionData.js";
@@ -120,6 +121,11 @@ export default function FounderStrategyPage({ setActivePage = null, currentUser 
     });
   }, [payload, tenantId, portfolioContracts, commissionMetrics]);
 
+  const financialPressure = useMemo(
+    () => (payload ? buildFinancialPressurePanel(payload) : null),
+    [payload]
+  );
+
   const predatorSnapshot = useMemo(() => {
     if (!model) return null;
     return {
@@ -156,6 +162,8 @@ export default function FounderStrategyPage({ setActivePage = null, currentUser 
     todayPriorities,
     revenueGap,
     contractPipeline,
+    contractDashboard,
+    commissionMetrics: commissionPanel,
     milestoneUnlock,
     flywheel,
     ninetyDayPlan,
@@ -272,20 +280,34 @@ export default function FounderStrategyPage({ setActivePage = null, currentUser 
         </Section>
       ) : null}
 
-      {contractPipeline ? (
-        <Section title="Contract pipeline" icon={Target}>
-          <div className="grid grid-cols-3 gap-2 text-center text-xs">
+      {contractDashboard ? (
+        <Section title="Contract dashboard" icon={Target}>
+          <div className="grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-4">
             <div className="rounded-lg border bg-white p-2">
               <p className="text-slate-500">Active contracts</p>
-              <p className="text-lg font-bold tabular-nums">{contractPipeline.activeContractCount}</p>
+              <p className="text-lg font-bold tabular-nums">{contractDashboard.activeCount}</p>
+            </div>
+            <div className="rounded-lg border bg-white p-2">
+              <p className="text-slate-500">Revenue under contract</p>
+              <p className="text-sm font-bold">{contractDashboard.revenueUnderContractLabel}</p>
+            </div>
+            <div className="rounded-lg border bg-white p-2">
+              <p className="text-slate-500">Expiring in 90 days</p>
+              <p className="text-lg font-bold tabular-nums">{contractDashboard.expiring90Count}</p>
+            </div>
+            <div className="rounded-lg border bg-white p-2">
+              <p className="text-slate-500">Contract health</p>
+              <p className="text-lg font-bold tabular-nums">{contractDashboard.contractHealthScore}%</p>
+            </div>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-2 text-center text-xs">
+            <div className="rounded-lg border bg-white p-2">
+              <p className="text-slate-500">Pipeline</p>
+              <p className="text-lg font-bold tabular-nums">{contractDashboard.pipelineCount}</p>
             </div>
             <div className="rounded-lg border bg-white p-2">
               <p className="text-slate-500">Committed / mo</p>
-              <p className="text-sm font-bold">{contractPipeline.monthlyCommittedLabel}</p>
-            </div>
-            <div className="rounded-lg border bg-white p-2">
-              <p className="text-slate-500">Pipeline</p>
-              <p className="text-lg font-bold tabular-nums">{contractPipeline.pipelineCount}</p>
+              <p className="text-sm font-bold">{contractDashboard.monthlyCommittedLabel}</p>
             </div>
           </div>
           {setActivePage ? (
@@ -300,6 +322,42 @@ export default function FounderStrategyPage({ setActivePage = null, currentUser 
               }}
             >
               Distributor contracts
+              <ArrowRight className="ml-0.5 h-3 w-3" />
+            </Button>
+          ) : null}
+        </Section>
+      ) : null}
+
+      {financialPressure ? (
+        <Section title="Financial pressure" icon={AlertTriangle}>
+          <div className="grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-3">
+            <div className="rounded-lg border bg-white p-2">
+              <p className="text-slate-500">AR outstanding</p>
+              <p className="text-sm font-bold">{financialPressure.totalOutstanding}</p>
+            </div>
+            <div className="rounded-lg border bg-white p-2">
+              <p className="text-slate-500">Overdue total</p>
+              <p className="text-sm font-bold">{financialPressure.totalOverdue}</p>
+            </div>
+            <div className="rounded-lg border bg-white p-2">
+              <p className="text-slate-500">Blocked accounts</p>
+              <p className="text-lg font-bold tabular-nums">{financialPressure.blockedCount}</p>
+            </div>
+          </div>
+          {financialPressure.topDebtors?.length > 0 ? (
+            <p className="mt-2 text-[10px] text-slate-600">
+              Top debtors: {financialPressure.topDebtors.length} accounts tracked
+            </p>
+          ) : null}
+          {setActivePage ? (
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="mt-2 h-auto p-0 text-xs"
+              onClick={() => setActivePage("risk")}
+            >
+              Credit &amp; Risk
               <ArrowRight className="ml-0.5 h-3 w-3" />
             </Button>
           ) : null}

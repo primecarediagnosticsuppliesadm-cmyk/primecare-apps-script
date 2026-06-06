@@ -15,12 +15,17 @@ import {
   filterVisitsForUser,
 } from "@/utils/accessFilters.js";
 import { labIdKey } from "@/utils/labId";
+import { fetchDatabaseTenants } from "@/tenant/durableTenantStore.js";
 import { buildValidationReport, printQaValidationReport } from "@/validation/qaValidationCore.js";
 import {
   TENANT_ISOLATION_TABLE_SPECS,
   TENANT_TABLE_REQUIRED_COLUMNS,
   TENANT_TABLE_OPTIONAL_COLUMNS,
 } from "@/validation/tenantIsolationManifest.js";
+
+function str(v) {
+  return String(v ?? "").trim();
+}
 
 const PROBE_LIMITS = { quick: 40, deep: 250 };
 const PROBE_TIMEOUT_MS = { quick: 1500, deep: 4500 };
@@ -163,10 +168,105 @@ function findForeignTenants(rows, tenantColumn, profileTenantId) {
   if (!profileTenantId) return [];
   const foreign = new Set();
   for (const row of rows) {
-    const tid = String(row?.[tenantColumn] ?? "").trim();
+    const tid = str(row?.[tenantColumn]);
     if (tid && tid !== profileTenantId) foreign.add(tid);
   }
   return [...foreign];
+}
+
+/**
+ * Executive cross-distributor reads are intentional when foreign tenant_ids exist in public.tenants.
+ * @param {import('@/validation/tenantIsolationManifest.js').TenantIsolationTableSpec} spec
+ * @param {string} role
+ * @param {string|null} profileTenantId
+ * @param {string[]} foreignTenants
+ * @param {number} rowCount
+ * @param {Set<string>} registeredTenantIds
+ * @param {boolean} tenantsRegistryOk
+ */
+function resolveTenantIsolationCheck({
+  spec,
+  role,
+  profileTenantId,
+  foreignTenants,
+  rowCount,
+  registeredTenantIds,
+  tenantsRegistryOk,
+}) {
+  if (!foreignTenants.length) {
+    if (profileTenantId && rowCount > 0) {
+      return {
+        status: "pass",
+        message: `All ${rowCount} sampled row(s) match tenant ${profileTenantId}`,
+        actual: { table: spec.table, rowCount },
+      };
+    }
+    return {
+      status: "pass",
+      message: rowCount
+        ? "Rows returned (tenant column not on sample)"
+        : "No rows (empty scope)",
+      actual: { table: spec.table, rowCount },
+    };
+  }
+
+  const executiveCrossTenant =
+    role === ROLES.EXECUTIVE && spec.executiveCrossTenantReadable === true;
+
+  if (!executiveCrossTenant) {
+    return {
+      status: "fail",
+      message: `Cross-tenant leakage on ${spec.table}: foreign tenant_id [${foreignTenants.join(", ")}]`,
+      actual: {
+        table: spec.table,
+        foreignTenants,
+        rowSample: rowCount,
+        firstDivergenceLayer: "rls",
+      },
+    };
+  }
+
+  const unregistered = foreignTenants.filter((id) => !registeredTenantIds.has(id));
+
+  if (unregistered.length > 0) {
+    return {
+      status: "fail",
+      message: `Executive saw unregistered tenant_id(s) on ${spec.table}: [${unregistered.join(", ")}]`,
+      actual: {
+        table: spec.table,
+        foreignTenants,
+        unregisteredForeignTenants: unregistered,
+        rowSample: rowCount,
+        firstDivergenceLayer: "rls",
+      },
+    };
+  }
+
+  if (!tenantsRegistryOk) {
+    return {
+      status: "info",
+      message: `Executive cross-distributor visibility on ${spec.table}; tenant registry could not be verified`,
+      actual: {
+        table: spec.table,
+        foreignTenants,
+        executiveCrossTenant: true,
+        tenantsRegistryOk: false,
+        rowSample: rowCount,
+      },
+    };
+  }
+
+  return {
+    status: "pass",
+    message: `Executive cross-distributor visibility on ${spec.table}: foreign tenant_id(s) [${foreignTenants.join(", ")}] registered in public.tenants`,
+    actual: {
+      table: spec.table,
+      foreignTenants,
+      profileTenantId,
+      executiveCrossTenant: true,
+      rowSample: rowCount,
+    },
+  };
 }
 
 /**
@@ -515,6 +615,17 @@ export async function runTenantRoleIsolationValidation({
     );
   }
 
+  const registeredTenantIds = new Set();
+  let tenantsRegistryOk = false;
+  if (role === ROLES.EXECUTIVE) {
+    const { rows, error } = await fetchDatabaseTenants();
+    tenantsRegistryOk = !error;
+    for (const tenant of rows || []) {
+      const id = str(tenant.id);
+      if (id) registeredTenantIds.add(id);
+    }
+  }
+
   for (const spec of TENANT_ISOLATION_TABLE_SPECS) {
     if (spec.notificationsFoundation && shouldSkipNotificationIsolationProbes(notificationFoundationState)) {
       checks.push(
@@ -593,47 +704,25 @@ export async function runTenantRoleIsolationValidation({
       spec.tenantColumn,
       profileTenantId
     );
-    if (foreignTenants.length > 0) {
-      checks.push(
-        makeCheck(
-          `tenant.${spec.id}.isolation`,
-          `Tenant isolation: ${spec.label}`,
-          "fail",
-          `Cross-tenant leakage on ${spec.table}: foreign tenant_id [${foreignTenants.join(", ")}]`,
-          profileTenantId,
-          {
-            table: spec.table,
-            foreignTenants,
-            rowSample: probe.rows.length,
-            firstDivergenceLayer: "rls",
-          }
-        )
-      );
-    } else if (profileTenantId && probe.rows.length > 0) {
-      checks.push(
-        makeCheck(
-          `tenant.${spec.id}.isolation`,
-          `Tenant isolation: ${spec.label}`,
-          "pass",
-          `All ${probe.rows.length} sampled row(s) match tenant ${profileTenantId}`,
-          profileTenantId,
-          { table: spec.table, rowCount: probe.rows.length }
-        )
-      );
-    } else {
-      checks.push(
-        makeCheck(
-          `tenant.${spec.id}.isolation`,
-          `Tenant isolation: ${spec.label}`,
-          "pass",
-          probe.rows.length
-            ? "Rows returned (tenant column not on sample)"
-            : "No rows (empty scope)",
-          profileTenantId,
-          { table: spec.table, rowCount: probe.rows.length }
-        )
-      );
-    }
+    const isolation = resolveTenantIsolationCheck({
+      spec,
+      role,
+      profileTenantId,
+      foreignTenants,
+      rowCount: probe.rows.length,
+      registeredTenantIds,
+      tenantsRegistryOk,
+    });
+    checks.push(
+      makeCheck(
+        `tenant.${spec.id}.isolation`,
+        `Tenant isolation: ${spec.label}`,
+        isolation.status,
+        isolation.message,
+        profileTenantId,
+        isolation.actual
+      )
+    );
 
     checks.push(auditRoleScope(currentUser, probe.rows, spec));
 

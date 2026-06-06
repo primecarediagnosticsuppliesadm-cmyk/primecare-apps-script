@@ -327,18 +327,30 @@ export async function validateDistributorOsModule({ ctx, rendered = null }) {
     const catalogIsolated =
       rendered?.catalogInventoryIsolated !== false && num(rendered?.catalogHqLeakCount) === 0;
 
+    const osTab = str(rendered?.tab);
+    const catalogGateTab = osTab === "catalog" || osTab === "launch";
+    let catalogAssignedStatus = "INFO";
+    if (catalogAssigned) {
+      catalogAssignedStatus = "PASS";
+    } else if (osTab === "catalog") {
+      catalogAssignedStatus = "FAIL";
+    } else if (osTab === "launch") {
+      catalogAssignedStatus = "WARN";
+    }
     entries.push(
       createPredatorEntry({
-        status: catalogAssigned ? "PASS" : rendered?.tab === "launch" ? "WARN" : "FAIL",
+        status: catalogAssignedStatus,
         module: "Distributor OS",
         step: "distributor_catalog_assigned",
         expected: "At least one HQ master product assigned to distributor catalog",
         actual: {
           scopeTenantId,
+          tab: osTab || null,
+          catalogGateTab,
           catalogAssigned: rendered?.catalogAssigned,
           assignedCount: rendered?.catalogAssignedCount ?? catalogItems.length,
         },
-        severity: catalogAssigned ? "low" : "high",
+        severity: catalogAssigned ? "low" : catalogGateTab ? "high" : "low",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,

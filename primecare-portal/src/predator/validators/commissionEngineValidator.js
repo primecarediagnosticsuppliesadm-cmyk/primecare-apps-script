@@ -136,17 +136,34 @@ export async function validateCommissionEngineModule({
           userId: ctx.userId,
         })
       );
+      const pageOpen = rendered?.commissionEngine === true;
+      const selectedDistributorId = str(rendered?.selectedDistributorId);
+      const scopeTenantId = str(bundle.tenantId);
+      let selectedDistributorStatus = "WARN";
+      if (pageOpen) {
+        selectedDistributorStatus =
+          selectedDistributorId ? "PASS" : distributorCount > 0 ? "FAIL" : "WARN";
+      } else if (selectedDistributorId || scopeTenantId) {
+        selectedDistributorStatus = "PASS";
+      } else if (distributorCount > 0) {
+        selectedDistributorStatus = "INFO";
+      }
       entries.push(
         createPredatorEntry({
-          status: rendered?.selectedDistributorId
-            ? "PASS"
-            : distributorCount > 0
-              ? "FAIL"
-              : "WARN",
+          status: selectedDistributorStatus,
           module: "Commission Engine",
           step: "commission_engine.selected_distributor_required",
           expected: "Distributor selected for HQ commission scope",
-          actual: rendered?.selectedDistributorId || bundle.tenantId || "none",
+          actual: {
+            selectedDistributorId: selectedDistributorId || null,
+            scopeTenantId: scopeTenantId || null,
+            pageOpen,
+            distributorCount,
+          },
+          suggestedFix:
+            pageOpen && !selectedDistributorId && distributorCount > 0
+              ? "Select a distributor on HQ Commission Engine"
+              : undefined,
           tenantId: ctx.tenantId,
           role: ctx.role,
           userId: ctx.userId,
@@ -308,12 +325,13 @@ export async function validateCommissionEngineModule({
 
     let duplicateBlocked = false;
     let probeDetected = false;
+    let payoutProbeActual = { duplicateBlocked: false, probeDetected: false };
     if (supabase && ctx.tenantId) {
       const probeTenant = ctx.tenantId;
       const probeEntryId = `comm-${PROBE_PERIOD}-predator_probe`;
       await cleanupCommissionProbe(probeTenant);
 
-      await supabase.from("commission_entries").upsert(
+      const upsertRes = await supabase.from("commission_entries").upsert(
         {
           id: probeEntryId,
           distributor_id: probeTenant,
@@ -339,6 +357,16 @@ export async function validateCommissionEngineModule({
       });
       duplicateBlocked = Boolean(first.ok && second.duplicate);
       probeDetected = Boolean(first.ok);
+      payoutProbeActual = {
+        duplicateBlocked,
+        probeDetected,
+        probeTenant,
+        upsertError: upsertRes.error?.message || null,
+        firstOk: first.ok,
+        firstError: first.error || null,
+        secondDuplicate: second.duplicate,
+        secondError: second.error || null,
+      };
       await cleanupCommissionProbe(probeTenant);
     }
 
@@ -348,7 +376,7 @@ export async function validateCommissionEngineModule({
         module: "Commission Engine",
         step: "payout.duplicate_guard",
         expected: "Second payout for same tenant+period rejected",
-        actual: { duplicateBlocked, probeDetected },
+        actual: payoutProbeActual,
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,

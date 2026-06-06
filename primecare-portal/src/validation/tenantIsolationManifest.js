@@ -14,6 +14,7 @@ import { ROLES } from "@/config/roles.js";
  * @property {'tenant_wide'|'agent_scoped'|'lab_scoped'|'admin_only'} scope
  * @property {boolean} [optional] — probe failure is WARN not FAIL
  * @property {boolean} [notificationsFoundation] — skip or INFO until foundation migration + env flag
+ * @property {boolean} [executiveCrossTenantReadable] — executive may read rows for any public.tenants id
  */
 
 /** @type {TenantIsolationTableSpec[]} */
@@ -28,6 +29,7 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.AGENT, ROLES.LAB],
     scope: "agent_scoped",
     optional: false,
+    executiveCrossTenantReadable: true,
   },
   {
     id: "orders",
@@ -65,6 +67,7 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     selectColumns: ["tenant_id", "lab_id", "lab_name"],
     allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.AGENT, ROLES.LAB],
     scope: "agent_scoped",
+    executiveCrossTenantReadable: true,
   },
   {
     id: "inventory",
