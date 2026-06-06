@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { StatusBadge, PageSkeleton } from "@/components/ux";
+import { StatusBadge, PageSkeleton, usePortalToast } from "@/components/ux";
 import { getLabsCredit } from "@/api/primecareSupabaseApi.js";
 import {
   loadLabContractEngineBundle,
@@ -19,14 +19,18 @@ import {
   CONTRACT_STATUSES,
   PAYMENT_TERMS_OPTIONS,
 } from "@/labContract/labContractTypes.js";
-import { buildOpsLookups, formatContractInr } from "@/labContract/labContractEngine.js";
+import {
+  buildOpsLookups,
+  computeContractReadiness,
+  formatContractInr,
+} from "@/labContract/labContractEngine.js";
 import { ROLES } from "@/config/roles.js";
 import { labIdKey } from "@/utils/labId.js";
 import { buildContractRenewalIntelligence } from "@/contracts/contractRenewalIntelligenceEngine.js";
 import { ContractRenewalSummaryPanel } from "@/components/contracts/ContractRenewalIntelligencePanels.jsx";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { cn } from "@/lib/utils";
-import { FileText, RefreshCw, Plus, CheckCircle2 } from "lucide-react";
+import { FileText, RefreshCw, Plus, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
 
 const TABS = [
   "Dashboard",
@@ -41,6 +45,7 @@ const TABS = [
 const STATUS_VARIANT = {
   Draft: "neutral",
   "Under Review": "info",
+  Approved: "info",
   Active: "success",
   Suspended: "warning",
   Expired: "neutral",
@@ -53,7 +58,90 @@ const HEALTH_VARIANT = {
   Risk: "danger",
 };
 
+const TIMELINE_LABELS = {
+  created: "Created",
+  submitted: "Submitted",
+  approved: "Approved",
+  activated: "Activated",
+  suspended: "Suspended",
+  renewed: "Renewed",
+  expired: "Expired",
+  terminated: "Terminated",
+};
+
+function findTimelineEvent(timeline = [], type) {
+  const key = String(type || "").toLowerCase();
+  return (
+    [...(timeline || [])].reverse().find((e) => String(e.type || "").toLowerCase() === key) ||
+    null
+  );
+}
+
+function formatLifecycleWhen(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
+}
+
+/** Display status — Approved is a lifecycle milestone when under review + approved event. */
+function contractDisplayStatus(contract = {}) {
+  const approved = findTimelineEvent(contract.timeline, "approved");
+  if (contract.status === CONTRACT_STATUSES.ACTIVE) {
+    return { label: CONTRACT_STATUSES.ACTIVE, variant: STATUS_VARIANT.Active };
+  }
+  if (approved && contract.status === CONTRACT_STATUSES.UNDER_REVIEW) {
+    return { label: "Approved", variant: STATUS_VARIANT.Approved };
+  }
+  return {
+    label: contract.status || "—",
+    variant: STATUS_VARIANT[contract.status] || "neutral",
+  };
+}
+
+function contractLifecycleSummary(contract = {}) {
+  const created = findTimelineEvent(contract.timeline, "created");
+  const submitted = findTimelineEvent(contract.timeline, "submitted");
+  const approved = findTimelineEvent(contract.timeline, "approved");
+  const activated = findTimelineEvent(contract.timeline, "activated");
+  const display = contractDisplayStatus(contract);
+  return {
+    display,
+    created,
+    submitted,
+    approved,
+    activated,
+    daysRemaining:
+      contract.daysToExpiry != null ? `${contract.daysToExpiry} days` : "—",
+  };
+}
+
+function activationBlockerMessages(contract, readiness, distributorScope) {
+  const blockers = [];
+  if (distributorScope?.canOperate === false) {
+    blockers.push("Distributor inactive");
+  }
+  for (const ch of readiness?.checks || []) {
+    if (ch.pass) continue;
+    if (ch.id === "payment_terms") blockers.push("Missing payment terms");
+    else if (ch.id === "commercial_terms") blockers.push("Missing commercial terms");
+    else if (ch.id === "owner") blockers.push("Missing owner");
+    else if (ch.id === "distributor") blockers.push("Distributor not found in registry");
+    else if (ch.id === "lab") blockers.push("Lab not found in operational data");
+    else blockers.push(ch.label);
+  }
+  if (readiness && num(readiness.score) < 100) {
+    blockers.push(`Readiness below 100% (${readiness.score}%)`);
+  }
+  return [...new Set(blockers)];
+}
+
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function ContractRow({ c, selected, onSelect }) {
+  const display = contractDisplayStatus(c);
   return (
     <button
       type="button"
@@ -65,7 +153,7 @@ function ContractRow({ c, selected, onSelect }) {
     >
       <div className="flex justify-between gap-2">
         <p className="font-semibold text-slate-900">{c.contractNumber}</p>
-        <StatusBadge variant={STATUS_VARIANT[c.status] || "neutral"} label={c.status} />
+        <StatusBadge variant={display.variant} label={display.label} compact />
       </div>
       <p className="text-slate-600">
         {c.labName} · {c.contractType}
@@ -90,6 +178,8 @@ export default function LabContractManagementPage({
   const [selectedId, setSelectedId] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [msg, setMsg] = useState("");
+  const [activationBlockers, setActivationBlockers] = useState([]);
+  const { showToast } = usePortalToast();
   const [form, setForm] = useState({
     labId: "",
     labName: "",
@@ -142,6 +232,10 @@ export default function LabContractManagementPage({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    setActivationBlockers([]);
+  }, [selectedId]);
 
   const model = bundle?.model;
   const selected = useMemo(
@@ -226,12 +320,87 @@ export default function LabContractManagementPage({
         },
         currentUser?.name || currentUser?.email
       );
+      showToast("success", `Contract draft created — ${created.contractNumber}`);
       setMsg(`Created ${created.contractNumber}`);
       setShowCreate(false);
-      await load();
-      setSelectedId(created.id);
+      setActivationBlockers([]);
+      await refreshAndSelect(created.id);
     } catch (err) {
       setMsg(err?.message || "Failed to create contract");
+    }
+  }
+
+  const selectedLifecycle = useMemo(
+    () => (selected ? contractLifecycleSummary(selected) : null),
+    [selected]
+  );
+
+  const selectedReadinessPreview = useMemo(() => {
+    if (!selected || !bundle) return null;
+    const lookups = bundle.model?.lookups || buildOpsLookups(bundle.opsPayload || {});
+    const distributors = new Set(bundle.distributors || [bundle.tenantId]);
+    return (
+      selected.readiness ||
+      computeContractReadiness(selected, { labs: lookups.labs, distributors })
+    );
+  }, [selected, bundle]);
+
+  async function refreshAndSelect(contractId) {
+    await load();
+    if (contractId) setSelectedId(contractId);
+  }
+
+  async function handleSubmitReview() {
+    if (!selected) return;
+    setActivationBlockers([]);
+    const r = await submitLabContractForReview(bundle.tenantId, selected.id, currentUser);
+    if (r) {
+      showToast("success", "Contract submitted for review");
+      setMsg("Submitted for review");
+      await refreshAndSelect(r.id);
+    } else {
+      showToast("error", "Submit failed — contract must be Draft");
+      setMsg("Submit failed — contract must be Draft");
+    }
+  }
+
+  async function handleApprove() {
+    if (!selected) return;
+    setActivationBlockers([]);
+    const r = await approveLabContract(bundle.tenantId, selected.id, currentUser);
+    if (r) {
+      showToast("success", "Contract approved");
+      setMsg("Contract approved");
+      await refreshAndSelect(r.id);
+    } else {
+      showToast("error", "Approve failed — contract must be Under Review");
+      setMsg("Approve failed — contract must be Under Review");
+    }
+  }
+
+  async function handleActivate() {
+    if (!selected) return;
+    const readiness = selectedReadinessPreview;
+    const blockers = activationBlockerMessages(selected, readiness, distributorScope);
+    if (blockers.length > 0) {
+      setActivationBlockers(blockers);
+      showToast("error", "Activation blocked — see blockers below");
+      setMsg("Activation blocked — complete readiness checklist");
+      return;
+    }
+    const r = await activateLabContract(bundle.tenantId, selected.id, currentUser);
+    if (r) {
+      setActivationBlockers([]);
+      showToast("success", "Contract activated");
+      setMsg("Contract activated");
+      await refreshAndSelect(r.id);
+    } else {
+      const afterBlockers = activationBlockerMessages(selected, readiness, distributorScope);
+      setActivationBlockers(
+        afterBlockers.length ? afterBlockers : ["Activation failed — readiness or status check did not pass"]
+      );
+      showToast("error", "Activation blocked — see blockers below");
+      setMsg("Activation blocked — complete readiness checklist");
     }
   }
 
@@ -397,8 +566,8 @@ export default function LabContractManagementPage({
                 </div>
                 <div className="flex flex-wrap gap-1">
                   <StatusBadge
-                    variant={STATUS_VARIANT[selected.status] || "neutral"}
-                    label={selected.status}
+                    variant={selectedLifecycle?.display.variant || "neutral"}
+                    label={selectedLifecycle?.display.label || selected.status}
                   />
                   <StatusBadge
                     variant={HEALTH_VARIANT[selected.healthBand] || "neutral"}
@@ -407,7 +576,60 @@ export default function LabContractManagementPage({
                 </div>
               </div>
 
-              {tab === "Dashboard" || tab === "Commercial" ? (
+              {tab === "Dashboard" ? (
+                <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <div>
+                    <dt className="text-slate-500">Lifecycle status</dt>
+                    <dd className="font-medium">{selectedLifecycle?.display.label}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">Days remaining</dt>
+                    <dd>{selectedLifecycle?.daysRemaining}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">Created</dt>
+                    <dd>
+                      {selectedLifecycle?.created
+                        ? `${formatLifecycleWhen(selectedLifecycle.created.at)} · ${selectedLifecycle.created.actor || "—"}`
+                        : "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">Submitted</dt>
+                    <dd>
+                      {selectedLifecycle?.submitted
+                        ? formatLifecycleWhen(selectedLifecycle.submitted.at)
+                        : "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">Approved by</dt>
+                    <dd>{selectedLifecycle?.approved?.actor || "—"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">Approved at</dt>
+                    <dd>{formatLifecycleWhen(selectedLifecycle?.approved?.at)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">Activated by</dt>
+                    <dd>{selectedLifecycle?.activated?.actor || "—"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">Activated at</dt>
+                    <dd>{formatLifecycleWhen(selectedLifecycle?.activated?.at)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">Readiness</dt>
+                    <dd>{selected.readiness?.score ?? 0}%</dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">Revenue under contract</dt>
+                    <dd>{formatContractInr(selected.revenueUnderContract)}</dd>
+                  </div>
+                </dl>
+              ) : null}
+
+              {tab === "Commercial" ? (
                 <dl className="mt-3 grid gap-2 sm:grid-cols-2">
                   <div>
                     <dt className="text-slate-500">Distributor</dt>
@@ -490,21 +712,82 @@ export default function LabContractManagementPage({
               ) : null}
 
               {tab === "Readiness" ? (
-                <div className="mt-3">
-                  <p className="mb-2 font-semibold">Readiness {selected.readiness?.score}%</p>
-                  <ul className="space-y-1">
-                    {selected.readiness?.checks?.map((ch) => (
-                      <li key={ch.id} className="flex items-center gap-2">
-                        <CheckCircle2
-                          className={cn(
-                            "h-3.5 w-3.5",
-                            ch.pass ? "text-emerald-600" : "text-slate-300"
-                          )}
-                        />
-                        {ch.label}
-                      </li>
-                    ))}
-                  </ul>
+                <div className="mt-3 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-semibold">Readiness score</p>
+                    <StatusBadge
+                      variant={
+                        num(selectedReadinessPreview?.score) >= 100
+                          ? "success"
+                          : num(selectedReadinessPreview?.score) >= 60
+                            ? "warning"
+                            : "danger"
+                      }
+                      label={`${selectedReadinessPreview?.score ?? 0}%`}
+                    />
+                  </div>
+                  <div>
+                    <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                      Passed checks
+                    </p>
+                    <ul className="space-y-1">
+                      {(selectedReadinessPreview?.checks || [])
+                        .filter((ch) => ch.pass)
+                        .map((ch) => (
+                          <li key={ch.id} className="flex items-center gap-2 text-emerald-800">
+                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                            {ch.label}
+                          </li>
+                        ))}
+                      {(selectedReadinessPreview?.checks || []).filter((ch) => ch.pass).length ===
+                      0 ? (
+                        <li className="text-slate-500">No checks passed yet</li>
+                      ) : null}
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                      Failed checks
+                    </p>
+                    <ul className="space-y-1">
+                      {(selectedReadinessPreview?.checks || [])
+                        .filter((ch) => !ch.pass)
+                        .map((ch) => (
+                          <li key={ch.id} className="flex items-center gap-2 text-red-800">
+                            <XCircle className="h-3.5 w-3.5 shrink-0 text-red-600" />
+                            {ch.label}
+                          </li>
+                        ))}
+                      {(selectedReadinessPreview?.checks || []).filter((ch) => !ch.pass).length ===
+                      0 ? (
+                        <li className="text-slate-500">All checks passed</li>
+                      ) : null}
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                      Remaining blockers
+                    </p>
+                    <ul className="space-y-1">
+                      {activationBlockerMessages(
+                        selected,
+                        selectedReadinessPreview,
+                        distributorScope
+                      ).map((b) => (
+                        <li key={b} className="flex items-center gap-2 text-amber-900">
+                          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+                          {b}
+                        </li>
+                      ))}
+                      {activationBlockerMessages(
+                        selected,
+                        selectedReadinessPreview,
+                        distributorScope
+                      ).length === 0 ? (
+                        <li className="text-emerald-700">Ready to activate</li>
+                      ) : null}
+                    </ul>
+                  </div>
                 </div>
               ) : null}
 
@@ -565,15 +848,29 @@ export default function LabContractManagementPage({
               ) : null}
 
               {tab === "Timeline" ? (
-                <ul className="mt-3 max-h-48 space-y-1 overflow-y-auto">
+                <ul className="mt-3 max-h-64 space-y-2 overflow-y-auto">
                   {(selected.timeline || []).length === 0 ? (
                     <li className="text-slate-500">No timeline events</li>
                   ) : (
                     [...(selected.timeline || [])].reverse().map((ev, i) => (
-                      <li key={i} className="rounded border border-slate-100 px-2 py-1">
-                        <span className="font-medium capitalize">{ev.type}</span> ·{" "}
-                        {ev.at ? new Date(ev.at).toLocaleString() : ""} · {ev.actor}
-                        {ev.note ? <span className="block text-slate-500">{ev.note}</span> : null}
+                      <li
+                        key={`${ev.type}-${ev.at}-${i}`}
+                        className="rounded-lg border border-slate-100 bg-slate-50 px-2 py-2"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-slate-900">
+                            {TIMELINE_LABELS[String(ev.type || "").toLowerCase()] ||
+                              ev.type ||
+                              "Event"}
+                          </span>
+                          <span className="text-[10px] text-slate-500">
+                            {formatLifecycleWhen(ev.at)}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-slate-600">By {ev.actor || "—"}</p>
+                        {ev.note ? (
+                          <p className="mt-0.5 text-[10px] text-slate-500">{ev.note}</p>
+                        ) : null}
                       </li>
                     ))
                   )}
@@ -587,21 +884,23 @@ export default function LabContractManagementPage({
                 </p>
               ) : null}
 
+              {activationBlockers.length > 0 ? (
+                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-2 text-red-900">
+                  <p className="flex items-center gap-1 font-semibold">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    Activation blocked
+                  </p>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                    {activationBlockers.map((b) => (
+                      <li key={b}>{b}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
               <div className="mt-4 flex flex-wrap gap-2 border-t pt-3">
                 {selected.status === CONTRACT_STATUSES.DRAFT ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={async () => {
-                      const r = await submitLabContractForReview(
-                        bundle.tenantId,
-                        selected.id,
-                        currentUser
-                      );
-                      setMsg(r ? "Submitted for review" : "Submit failed");
-                      await load();
-                    }}
-                  >
+                  <Button type="button" size="sm" onClick={() => void handleSubmitReview()}>
                     Submit for review
                   </Button>
                 ) : null}
@@ -611,35 +910,11 @@ export default function LabContractManagementPage({
                       type="button"
                       size="sm"
                       variant="outline"
-                      onClick={async () => {
-                        const r = await approveLabContract(
-                          bundle.tenantId,
-                          selected.id,
-                          currentUser
-                        );
-                        setMsg(r ? "Approved" : "Approve failed");
-                        await load();
-                      }}
+                      onClick={() => void handleApprove()}
                     >
                       Approve
                     </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={async () => {
-                        const r = await activateLabContract(
-                          bundle.tenantId,
-                          selected.id,
-                          currentUser
-                        );
-                        setMsg(
-                          r
-                            ? "Activated"
-                            : "Activation blocked — complete readiness checklist"
-                        );
-                        await load();
-                      }}
-                    >
+                    <Button type="button" size="sm" onClick={() => void handleActivate()}>
                       Activate
                     </Button>
                   </>
