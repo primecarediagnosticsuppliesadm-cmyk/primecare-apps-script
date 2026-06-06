@@ -41,6 +41,19 @@ function logCatalogTiming(label, detail = {}) {
   console.debug(`[DistributorCatalog:timing] ${label}`, { at: performance.now().toFixed(1), ...detail });
 }
 
+function logCatalogState(bundle, tenantId) {
+  const config = bundle?.registryRow?.config || bundle?.distributorRow?.config || {};
+  const metadataItems = config?.distributorCatalog?.items;
+  console.info("[DistributorCatalog:state]", {
+    tenantId,
+    catalogItemCount: bundle?.assignedCount ?? bundle?.assignedItems?.length ?? 0,
+    catalogAssigned: Boolean(bundle?.catalogAssigned),
+    catalogAssignedFlag: config?.catalogAssigned === true,
+    catalogMetadataLength: Array.isArray(metadataItems) ? metadataItems.length : 0,
+    renderedProductCount: bundle?.assignedItems?.length ?? 0,
+  });
+}
+
 function str(v) {
   return String(v ?? "").trim();
 }
@@ -101,12 +114,19 @@ export default function DistributorCatalogPage({
           }),
         ]);
         setBundle(data);
+        logCatalogState(data, tenantId);
         setInventoryEconomics(inventoryRes?.model || null);
-        const diagnostics = await loadCatalogMirrorDiagnostics(
-          tenantId,
-          data.assignedItems || []
-        );
-        setMirrorDiagnostics(diagnostics);
+        let diagnostics = null;
+        try {
+          diagnostics = await loadCatalogMirrorDiagnostics(
+            tenantId,
+            data.assignedItems || []
+          );
+          setMirrorDiagnostics(diagnostics);
+        } catch (mirrorErr) {
+          console.warn("[DistributorCatalog] mirror diagnostics failed", mirrorErr);
+          setMirrorDiagnostics(null);
+        }
         if (syncParent && onCatalogChangedRef.current) {
           await onCatalogChangedRef.current({
             config: data.registryRow?.config || data.distributorRow?.config,
@@ -118,7 +138,7 @@ export default function DistributorCatalogPage({
             hqPricingMissingCount: data.hqPricingMissingCount,
             inventoryIsolated: data.inventoryIsolated,
             hqLeakCount: data.hqLeakCount,
-            catalogMirrorHealth: diagnostics,
+            ...(diagnostics ? { catalogMirrorHealth: diagnostics } : {}),
           });
         }
         logCatalogTiming("load:done", {
@@ -126,9 +146,10 @@ export default function DistributorCatalogPage({
           ms: (performance.now() - started).toFixed(1),
         });
       } catch (err) {
-        console.error(err);
+        console.error("[DistributorCatalog] load failed", err);
         setBundle(null);
         setInventoryEconomics(null);
+        setMirrorDiagnostics(null);
         setMsgTone("error");
         setMsg(err?.message || "Failed to load catalog");
       } finally {

@@ -145,20 +145,10 @@ export function buildCatalogMirrorHealth(input = {}) {
     status = CATALOG_SYNC_STATUS.METADATA_ONLY;
   }
 
-  const probeStatus = probeReady
-    ? buildCatalogMirrorHealth({
-        catalogItemsCount,
-        mirroredProductsCount,
-        mirroredInventoryCount,
-        lastAttempt: null,
-        diagnosticsLoading: false,
-      }).status
-    : null;
-
   const syncStatusConsistent =
-    !lastAttempt?.status || !probeStatus
+    !lastAttempt?.status || !probeReady
       ? true
-      : lastAttempt.status === probeStatus || lastAttempt.status === status;
+      : lastAttempt.status === status;
 
   return {
     status,
