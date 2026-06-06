@@ -12,6 +12,10 @@ import {
   blocksNewOrdersCollections,
   LIFECYCLE_STATUS,
 } from "@/distributor/distributorLifecycleEngine.js";
+import {
+  CATALOG_SYNC_STATUS,
+  LAYER_OUTCOME,
+} from "@/catalog/catalogMirrorHealth.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -395,6 +399,77 @@ export async function validateDistributorOsModule({ ctx, rendered = null }) {
         role: ctx.role,
         userId: ctx.userId,
       })
+    );
+
+    const mirror = rendered?.catalogMirrorHealth || null;
+    const mirrorEmpty = !mirror;
+    const catalogMirrorRelevant = catalogItems.length > 0 || str(rendered?.tab) === "catalog";
+
+    const pushCatalogMirrorWarn = (step, pass, expected, actual) => {
+      entries.push(
+        createPredatorEntry({
+          status: mirrorEmpty ? "INFO" : pass ? "PASS" : "WARN",
+          module: "Distributor OS",
+          step,
+          expected,
+          actual,
+          severity: pass ? "low" : "medium",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    };
+
+    pushCatalogMirrorWarn(
+      "catalog.metadata_present",
+      !mirrorEmpty && mirror?.layers?.metadata === LAYER_OUTCOME.PASS,
+      "Distributor catalog metadata present for scoped distributor",
+      {
+        scopeTenantId,
+        catalogItemsCount: mirror?.catalogItemsCount ?? catalogItems.length,
+        metadataLayer: mirror?.layers?.metadata ?? null,
+        relevant: catalogMirrorRelevant,
+      }
+    );
+
+    pushCatalogMirrorWarn(
+      "catalog.products_mirror_health",
+      !mirrorEmpty &&
+        (mirror?.layers?.products === LAYER_OUTCOME.PASS ||
+          mirror?.status === CATALOG_SYNC_STATUS.SYNCED),
+      "Products mirror healthy or fully synced",
+      {
+        status: mirror?.status ?? null,
+        productsLayer: mirror?.layers?.products ?? null,
+        mirroredProductsCount: mirror?.mirroredProductsCount ?? null,
+        catalogItemsCount: mirror?.catalogItemsCount ?? catalogItems.length,
+      }
+    );
+
+    pushCatalogMirrorWarn(
+      "catalog.inventory_mirror_health",
+      !mirrorEmpty &&
+        (mirror?.layers?.inventory === LAYER_OUTCOME.PASS ||
+          mirror?.status === CATALOG_SYNC_STATUS.SYNCED),
+      "Inventory mirror healthy or fully synced",
+      {
+        status: mirror?.status ?? null,
+        inventoryLayer: mirror?.layers?.inventory ?? null,
+        mirroredInventoryCount: mirror?.mirroredInventoryCount ?? null,
+        catalogItemsCount: mirror?.catalogItemsCount ?? catalogItems.length,
+      }
+    );
+
+    pushCatalogMirrorWarn(
+      "catalog.sync_status_consistent",
+      mirrorEmpty || mirror?.syncStatusConsistent !== false,
+      "Recorded sync status consistent with mirror probe",
+      {
+        status: mirror?.status ?? null,
+        lastSyncAttemptStatus: mirror?.lastSyncAttemptStatus ?? null,
+        syncStatusConsistent: mirror?.syncStatusConsistent ?? null,
+      }
     );
 
     entries.push(

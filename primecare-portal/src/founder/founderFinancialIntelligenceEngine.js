@@ -496,6 +496,12 @@ export function buildFounderFinancialIntelligenceModel(data) {
     commissionByDistributor,
   });
 
+  const catalogMirrorSummary = data.catalogMirrorSummary || {
+    rows: [],
+    anyNotFullySynced: false,
+    metadataOnlyDistributors: [],
+  };
+
   return {
     version: "p1",
     loadStatus,
@@ -503,6 +509,7 @@ export function buildFounderFinancialIntelligenceModel(data) {
     revenueIntelligence,
     contractRenewal,
     inventoryEconomics,
+    catalogMirrorSummary,
     collectionsCash,
     hqObligations,
     distributorEconomics,

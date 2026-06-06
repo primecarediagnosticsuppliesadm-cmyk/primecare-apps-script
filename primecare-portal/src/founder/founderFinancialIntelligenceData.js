@@ -7,6 +7,7 @@ import {
   distributorNamesFromRegistry,
   loadInventoryEconomicsBundle,
 } from "@/inventory/inventoryEconomicsData.js";
+import { buildPortfolioCatalogMirrorSummary } from "@/catalog/catalogMirrorDiagnostics.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -30,7 +31,10 @@ export async function loadFounderFinancialIntelligenceData(currentUser, options 
   const distributors = filterDistributorRegistry(portfolio.bundle?.registry || portfolio.distributors || [], homeTenantId);
   const distributorIds = distributors.map((d) => d.id).filter(Boolean);
   const distributorNames = distributorNamesFromRegistry(distributors);
-  const inventoryEconomicsRes = await loadInventoryEconomicsBundle({ distributorNames });
+  const [inventoryEconomicsRes, catalogMirrorSummary] = await Promise.all([
+    loadInventoryEconomicsBundle({ distributorNames }),
+    buildPortfolioCatalogMirrorSummary(distributors),
+  ]);
 
   const commissionRes = await loadFounderCommissionMetrics(distributorIds, {
     homeTenantId,
@@ -73,5 +77,6 @@ export async function loadFounderFinancialIntelligenceData(currentUser, options 
     },
     inventoryEconomics: inventoryEconomicsRes.model,
     inventoryEconomicsBundle: inventoryEconomicsRes,
+    catalogMirrorSummary,
   };
 }

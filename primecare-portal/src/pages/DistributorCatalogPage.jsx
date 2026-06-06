@@ -16,6 +16,21 @@ import {
 } from "@/catalog/distributorCatalogData.js";
 import { loadInventoryEconomicsBundle } from "@/inventory/inventoryEconomicsData.js";
 import { InventoryEconomicsSummaryPanel } from "@/components/inventory/InventoryEconomicsPanels.jsx";
+import {
+  CatalogMirrorDiagnosticsPanel,
+  CatalogSaveResultPanel,
+  CatalogSyncHealthBadge,
+} from "@/components/catalog/CatalogMirrorPanels.jsx";
+import {
+  buildCatalogMirrorHealth,
+  LAYER_OUTCOME,
+  parseSyncLayersFromResult,
+} from "@/catalog/catalogMirrorHealth.js";
+import {
+  loadCatalogMirrorDiagnostics,
+  probeCatalogMirrorCounts,
+  recordCatalogSyncAttempt,
+} from "@/catalog/catalogMirrorDiagnostics.js";
 import { cn } from "@/lib/utils";
 import { RefreshCw, Plus } from "lucide-react";
 
@@ -48,6 +63,8 @@ export default function DistributorCatalogPage({
   const [msgTone, setMsgTone] = useState("neutral");
   const [busy, setBusy] = useState(false);
   const [savingProductId, setSavingProductId] = useState("");
+  const [mirrorDiagnostics, setMirrorDiagnostics] = useState(null);
+  const [saveResult, setSaveResult] = useState(null);
   const renderCountRef = useRef(0);
   const distributorRowRef = useRef(distributorRow);
   const onCatalogChangedRef = useRef(onCatalogChanged);
@@ -85,6 +102,11 @@ export default function DistributorCatalogPage({
         ]);
         setBundle(data);
         setInventoryEconomics(inventoryRes?.model || null);
+        const diagnostics = await loadCatalogMirrorDiagnostics(
+          tenantId,
+          data.assignedItems || []
+        );
+        setMirrorDiagnostics(diagnostics);
         if (syncParent && onCatalogChangedRef.current) {
           await onCatalogChangedRef.current({
             config: data.registryRow?.config || data.distributorRow?.config,
@@ -96,6 +118,7 @@ export default function DistributorCatalogPage({
             hqPricingMissingCount: data.hqPricingMissingCount,
             inventoryIsolated: data.inventoryIsolated,
             hqLeakCount: data.hqLeakCount,
+            catalogMirrorHealth: diagnostics,
           });
         }
         logCatalogTiming("load:done", {
@@ -191,6 +214,56 @@ export default function DistributorCatalogPage({
     setBusy(false);
   }
 
+  async function applySaveMirrorFeedback({
+    result,
+    productId,
+    productLabel,
+    catalogItemsCount,
+    action = "save",
+  }) {
+    const layers = parseSyncLayersFromResult(result);
+    const probe = await probeCatalogMirrorCounts(tenantId, [productId]);
+    const health = buildCatalogMirrorHealth({
+      catalogItemsCount,
+      mirroredProductsCount: probe.productsCount,
+      mirroredInventoryCount: probe.inventoryCount,
+      lastAttempt: {
+        at: new Date().toISOString(),
+        status: null,
+        layers,
+      },
+    });
+    recordCatalogSyncAttempt(tenantId, {
+      result,
+      layers,
+      status: health.status,
+      catalogItemsCount,
+      mirroredProductsCount: probe.productsCount,
+      mirroredInventoryCount: probe.inventoryCount,
+      productId,
+      action,
+    });
+    const diagnostics = await loadCatalogMirrorDiagnostics(tenantId, result.items || bundle?.assignedItems || []);
+    setMirrorDiagnostics(diagnostics);
+    const tone =
+      layers.metadata === LAYER_OUTCOME.PASS &&
+      layers.products === LAYER_OUTCOME.PASS &&
+      layers.inventory === LAYER_OUTCOME.PASS
+        ? "success"
+        : layers.metadata === LAYER_OUTCOME.PASS
+          ? "warning"
+          : "error";
+    setSaveResult({ productLabel, layers, tone });
+    setMsg("");
+    setMsgTone("neutral");
+    await onCatalogChangedRef.current?.({
+      config: result.config,
+      items: result.items,
+      assignedCount: result.items?.length ?? catalogItemsCount,
+      catalogMirrorHealth: diagnostics,
+    });
+  }
+
   async function handlePriceSave(productId, productName, sellingPrice, currentStock) {
     const price = Number(sellingPrice);
     const stock = Number(currentStock);
@@ -207,6 +280,7 @@ export default function DistributorCatalogPage({
     }
 
     setSavingProductId(productId);
+    setSaveResult(null);
     setMsg("");
     setMsgTone("neutral");
     try {
@@ -217,42 +291,45 @@ export default function DistributorCatalogPage({
         { distributorRow: distributorRowRef.current }
       );
       if (!result.ok) {
-        setMsgTone("error");
+        const layers = parseSyncLayersFromResult(result);
+        setSaveResult({
+          productLabel,
+          layers: {
+            metadata: LAYER_OUTCOME.FAIL,
+            products: LAYER_OUTCOME.FAIL,
+            inventory: LAYER_OUTCOME.FAIL,
+          },
+          tone: "error",
+        });
         setMsg(result.error || `Failed to save ${productLabel}.`);
+        setMsgTone("error");
         return;
       }
 
       try {
-        await load({ showLoading: false, syncParent: true });
+        await load({ showLoading: false, syncParent: false });
       } catch (refreshErr) {
         console.warn("[DistributorCatalog] post-save refresh failed", refreshErr);
-        setMsgTone("success");
-        setMsg(
-          `Catalog item saved — ${productLabel}. Refresh the catalog tab to see updated economics.`
-        );
-        return;
       }
 
-      if (result.localOnly) {
-        setMsgTone("error");
-        setMsg(
-          `Catalog item saved locally — ${productLabel}. Supabase metadata was not updated.`
-        );
-        return;
-      }
-
-      const syncIssue =
-        result.supabaseSync?.productError || result.supabaseSync?.inventoryError || null;
-      if (syncIssue) {
-        setMsgTone("error");
-        setMsg(`Catalog item saved — ${productLabel}. Metadata saved; sync issue: ${syncIssue}`);
-        return;
-      }
-
-      setMsgTone("success");
-      setMsg(`Catalog item saved — ${productLabel}.`);
+      await applySaveMirrorFeedback({
+        result,
+        productId,
+        productLabel,
+        catalogItemsCount: result.items?.length ?? bundle?.assignedCount ?? 0,
+      });
     } catch (err) {
       console.error("[DistributorCatalog] save failed", err);
+      setSaveResult({
+        productLabel,
+        headline: `Catalog save failed — ${productLabel}.`,
+        layers: {
+          metadata: LAYER_OUTCOME.FAIL,
+          products: LAYER_OUTCOME.FAIL,
+          inventory: LAYER_OUTCOME.FAIL,
+        },
+        tone: "error",
+      });
       setMsgTone("error");
       setMsg(err?.message || `Failed to save ${productLabel}.`);
     } finally {
@@ -315,6 +392,7 @@ export default function DistributorCatalogPage({
           variant={bundle?.catalogAssigned ? "success" : "warning"}
           label={bundle?.catalogAssigned ? "Catalog assigned" : "No catalog assigned"}
         />
+        <CatalogSyncHealthBadge health={mirrorDiagnostics} />
         <StatusBadge variant="neutral" label={`${bundle?.assignedCount ?? 0} products`} />
         {bundle?.hqPricingValid === false ? (
           <StatusBadge variant="danger" label="HQ pricing not configured" />
@@ -323,6 +401,10 @@ export default function DistributorCatalogPage({
           <StatusBadge variant="danger" label="Distributor pricing invalid" />
         ) : null}
       </div>
+
+      {saveResult ? (
+        <CatalogSaveResultPanel saveResult={saveResult} tone={saveResult.tone} />
+      ) : null}
 
       {msg ? (
         <p
@@ -337,6 +419,8 @@ export default function DistributorCatalogPage({
           {msg}
         </p>
       ) : null}
+
+      <CatalogMirrorDiagnosticsPanel diagnostics={mirrorDiagnostics} />
 
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         <table className="w-full text-xs">

@@ -180,6 +180,7 @@ export default function DistributorOsPage({
   });
   const [snapshot, setSnapshot] = useState(null);
   const [catalogBundle, setCatalogBundle] = useState(null);
+  const [catalogMirrorHealth, setCatalogMirrorHealth] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [lifecycleMsg, setLifecycleMsg] = useState("");
@@ -320,6 +321,9 @@ export default function DistributorOsPage({
   const handleCatalogChanged = useCallback(
     async (result) => {
       logDistributorOsTiming("catalogChanged", { selectedId, assignedCount: result?.assignedCount });
+      if (result?.catalogMirrorHealth) {
+        setCatalogMirrorHealth(result.catalogMirrorHealth);
+      }
       if (result?.config || result?.items) {
         setCatalogBundle((prev) => ({
           ...(prev || {}),
@@ -429,6 +433,7 @@ export default function DistributorOsPage({
       catalogInventoryIsolated: catalogBundle?.inventoryIsolated ?? true,
       catalogHqLeakCount: catalogBundle?.hqLeakCount ?? 0,
       catalogItems: catalogBundle?.assignedItems || [],
+      catalogMirrorHealth: catalogMirrorHealth || null,
     };
   }, [
     scope,
@@ -440,6 +445,7 @@ export default function DistributorOsPage({
     effectiveHomeId,
     catalogBundle,
     catalogAssigned,
+    catalogMirrorHealth,
   ]);
 
   const billingPredatorSnapshot = useMemo(() => {

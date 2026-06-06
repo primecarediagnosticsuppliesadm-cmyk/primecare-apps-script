@@ -225,6 +225,19 @@ export default function FounderFinancialIntelligencePage({ setActivePage = null,
       </Section>
 
       <Section title="Inventory economics" icon={Package}>
+        {model.catalogMirrorSummary?.anyNotFullySynced ? (
+          <p className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
+            Inventory economics may be metadata-derived when distributor inventory mirror is
+            unavailable.
+            {model.catalogMirrorSummary.metadataOnlyDistributors?.length ? (
+              <>
+                {" "}
+                Metadata-only distributors:{" "}
+                {model.catalogMirrorSummary.metadataOnlyDistributors.join(", ")}.
+              </>
+            ) : null}
+          </p>
+        ) : null}
         <InventoryEconomicsMetricsGrid economics={inventoryEconomics} />
       </Section>
 
