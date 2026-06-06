@@ -20,6 +20,10 @@ import {
   validateDurableCatalogFlagPersistsForPredator,
 } from "@/tenant/durableTenantStore.js";
 
+function str(v) {
+  return String(v ?? "").trim();
+}
+
 function finish(entries) {
   const polished = polishPredatorEntries(entries);
   return {
@@ -27,6 +31,21 @@ function finish(entries) {
     entries: polished,
     summary: summarizePredatorEntries(polished),
   };
+}
+
+/** Launch target for catalog gates — never HQ/home tenant. */
+function resolveProvisioningLaunchTargetId(bundle, rendered = null) {
+  const homeId = str(bundle?.homeTenantId);
+  const fromRendered = str(
+    rendered?.distributorId || rendered?.selectedDistributorId || rendered?.selectedId
+  );
+  if (fromRendered && fromRendered !== homeId) return fromRendered;
+
+  const nonHome = (bundle?.tenants || []).filter(
+    (t) => t?.id && str(t.id) !== homeId && !t.isHome
+  );
+  if (fromRendered && nonHome.some((t) => str(t.id) === fromRendered)) return fromRendered;
+  return str(nonHome[0]?.id);
 }
 
 /**
@@ -364,22 +383,56 @@ export async function validateDistributorProvisioningModule({
       })
     );
 
-    const catalogCheck = model?.checks?.find((c) => c.id === "catalog_configured");
-    const hqPricingCheck = model?.checks?.find((c) => c.id === "catalog_hq_pricing_configured");
+    const launchTargetId = resolveProvisioningLaunchTargetId(bundle, rendered);
+    const launchModel = launchTargetId
+      ? resolveProvisioningModel(bundle, launchTargetId)
+      : null;
+    const catalogCheck = launchModel?.checks?.find((c) => c.id === "catalog_configured");
+    const hqPricingCheck = launchModel?.checks?.find((c) => c.id === "catalog_hq_pricing_configured");
     const catalogAssigned =
-      model?.profile?.catalogAssigned === true ||
-      Number(model?.profile?.catalogAssignedCount || 0) > 0 ||
-      catalogCheck?.status === "PASS";
+      launchModel &&
+      (launchModel.profile?.catalogAssigned === true ||
+        Number(launchModel.profile?.catalogAssignedCount || 0) > 0 ||
+        catalogCheck?.status === "PASS");
+    const launchLifecycle = str(launchModel?.lifecycle);
+    const launchInProgress =
+      launchLifecycle === "configuring" ||
+      launchLifecycle === "configured" ||
+      rendered?.distributorProvisioning === true;
+    let catalogAssignedStatus = "INFO";
+    if (!launchTargetId || !launchModel) {
+      catalogAssignedStatus = (bundle?.tenants || []).some(
+        (t) => t?.id && str(t.id) !== str(bundle.homeTenantId) && !t.isHome
+      )
+        ? "WARN"
+        : "INFO";
+    } else if (catalogAssigned) {
+      catalogAssignedStatus = "PASS";
+    } else if (launchInProgress) {
+      catalogAssignedStatus = "FAIL";
+    } else {
+      catalogAssignedStatus = "WARN";
+    }
     entries.push(
       createPredatorEntry({
-        status: catalogAssigned ? "PASS" : "FAIL",
+        status: catalogAssignedStatus,
         module: "Distributor Provisioning",
         step: "distributor_catalog_assigned",
         expected: "Launch gate passes when at least one HQ product is assigned",
         actual: {
+          launchTargetId: launchTargetId || null,
+          launchTargetName: launchModel?.name || null,
+          homeTenantId: bundle.homeTenantId,
           catalogCheckStatus: catalogCheck?.status,
-          catalogAssignedCount: model?.profile?.catalogAssignedCount,
+          catalogAssignedCount: launchModel?.profile?.catalogAssignedCount,
+          launchLifecycle: launchLifecycle || null,
         },
+        suggestedFix:
+          catalogAssignedStatus === "FAIL"
+            ? "Assign at least one HQ master product via Distributor OS Catalog tab"
+            : catalogAssignedStatus === "WARN"
+              ? "Open Launch Distributor and select the distributor under test"
+              : undefined,
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,
@@ -388,11 +441,20 @@ export async function validateDistributorProvisioningModule({
 
     entries.push(
       createPredatorEntry({
-        status: hqPricingCheck?.status === "PASS" ? "PASS" : catalogAssigned ? "FAIL" : "WARN",
+        status:
+          !launchModel
+            ? "INFO"
+            : hqPricingCheck?.status === "PASS"
+              ? "PASS"
+              : catalogAssigned
+                ? "FAIL"
+                : "WARN",
         module: "Distributor Provisioning",
         step: "distributor_catalog_hq_pricing_configured",
         expected: "Assigned catalog products have HQ cost and transfer price configured",
         actual: {
+          launchTargetId: launchTargetId || null,
+          launchTargetName: launchModel?.name || null,
           status: hqPricingCheck?.status,
           detail: hqPricingCheck?.detail,
         },

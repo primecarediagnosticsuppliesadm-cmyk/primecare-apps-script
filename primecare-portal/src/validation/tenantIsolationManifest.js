@@ -136,6 +136,7 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE],
     scope: "admin_only",
     optional: true,
+    executiveCrossTenantReadable: true,
   },
   {
     id: "commission_entries",

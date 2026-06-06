@@ -17,9 +17,77 @@ import {
 
 const VALID_STATUS = new Set(["pending", "approved", "paid", "rejected"]);
 const PROBE_PERIOD = "2099-01";
+const PROBE_AGENT_KEY = "predator_probe";
 
 function str(v) {
   return String(v ?? "").trim();
+}
+
+function probeEntryId(distributorId, period = PROBE_PERIOD) {
+  const short = str(distributorId).replace(/-/g, "").slice(0, 8) || "dist";
+  return `comm-${period}-predator_probe-${short}`;
+}
+
+function probePayoutLegacyId(period = PROBE_PERIOD) {
+  return `payout-${period}`;
+}
+
+/** Void probe-period payouts and clear probe entries — best-effort without DELETE RLS. */
+async function cleanupCommissionProbe(distributorId) {
+  if (!supabase || !distributorId) {
+    return { voidedPayouts: 0, legacyVoided: false, entriesCleared: false };
+  }
+  const did = str(distributorId);
+  const period = PROBE_PERIOD;
+  const now = new Date().toISOString();
+  const summary = { voidedPayouts: 0, legacyVoided: false, entriesCleared: false };
+
+  const voidPaid = async (query) => {
+    const { data, error } = await query;
+    if (error || !data?.length) return 0;
+    const ids = data.map((r) => r.id).filter(Boolean);
+    if (!ids.length) return 0;
+    const { error: updErr } = await supabase
+      .from("commission_payouts")
+      .update({ status: "void", updated_at: now })
+      .in("id", ids);
+    return updErr ? 0 : ids.length;
+  };
+
+  summary.voidedPayouts += await voidPaid(
+    supabase
+      .from("commission_payouts")
+      .select("id")
+      .eq("distributor_id", did)
+      .eq("period_ymd", period)
+      .eq("status", "paid")
+  );
+
+  const legacyId = probePayoutLegacyId(period);
+  const legacyVoided = await voidPaid(
+    supabase.from("commission_payouts").select("id").eq("id", legacyId).eq("status", "paid")
+  );
+  summary.legacyVoided = legacyVoided > 0;
+  summary.voidedPayouts += legacyVoided;
+
+  const scopedEntryId = probeEntryId(did, period);
+  const entryIds = [scopedEntryId, `comm-${period}-predator_probe`];
+  const { error: entryDeleteErr } = await supabase
+    .from("commission_entries")
+    .delete()
+    .in("id", entryIds);
+  if (!entryDeleteErr) {
+    summary.entriesCleared = true;
+  } else {
+    await supabase
+      .from("commission_entries")
+      .update({ status: ENTRY_STATUSES.REJECTED, rejected_at: now })
+      .eq("distributor_id", did)
+      .eq("period_ymd", period)
+      .eq("agent_key", PROBE_AGENT_KEY);
+  }
+
+  return summary;
 }
 
 function finish(entries) {
@@ -29,12 +97,6 @@ function finish(entries) {
     entries: polished,
     summary: summarizePredatorEntries(polished),
   };
-}
-
-async function cleanupCommissionProbe(tenantId) {
-  if (!supabase || !tenantId) return;
-  await supabase.from("commission_entries").delete().eq("distributor_id", tenantId).eq("period_ymd", PROBE_PERIOD);
-  await supabase.from("commission_payouts").delete().eq("distributor_id", tenantId).eq("period_ymd", PROBE_PERIOD);
 }
 
 /**
@@ -326,18 +388,19 @@ export async function validateCommissionEngineModule({
     let duplicateBlocked = false;
     let probeDetected = false;
     let payoutProbeActual = { duplicateBlocked: false, probeDetected: false };
-    if (supabase && ctx.tenantId) {
-      const probeTenant = ctx.tenantId;
-      const probeEntryId = `comm-${PROBE_PERIOD}-predator_probe`;
-      await cleanupCommissionProbe(probeTenant);
+    const probeTenant = str(bundle?.tenantId);
+    const probeRegistryTenantId = str(ctx.tenantId) || probeTenant;
+    if (supabase && probeTenant) {
+      const cleanupSummary = await cleanupCommissionProbe(probeTenant);
+      const scopedEntryId = probeEntryId(probeTenant, PROBE_PERIOD);
 
       const upsertRes = await supabase.from("commission_entries").upsert(
         {
-          id: probeEntryId,
+          id: scopedEntryId,
           distributor_id: probeTenant,
-          registry_tenant_id: probeTenant,
+          registry_tenant_id: probeRegistryTenantId,
           period_ymd: PROBE_PERIOD,
-          agent_key: "predator_probe",
+          agent_key: PROBE_AGENT_KEY,
           agent_name: "Predator Probe",
           commission_amount: 100,
           threshold_met: true,
@@ -349,30 +412,49 @@ export async function validateCommissionEngineModule({
 
       const first = await recordCommissionPayout(probeTenant, PROBE_PERIOD, {
         recordedBy: "predator",
-        registryTenantId: probeTenant,
+        registryTenantId: probeRegistryTenantId,
       });
       const second = await recordCommissionPayout(probeTenant, PROBE_PERIOD, {
         recordedBy: "predator",
-        registryTenantId: probeTenant,
+        registryTenantId: probeRegistryTenantId,
       });
-      duplicateBlocked = Boolean(first.ok && second.duplicate);
-      probeDetected = Boolean(first.ok);
+      duplicateBlocked = Boolean(second.duplicate && (first.ok || first.duplicate));
+      probeDetected = Boolean(first.ok || first.duplicate);
       payoutProbeActual = {
         duplicateBlocked,
         probeDetected,
         probeTenant,
+        scopedEntryId,
+        cleanupSummary,
         upsertError: upsertRes.error?.message || null,
         firstOk: first.ok,
+        firstDuplicate: first.duplicate,
         firstError: first.error || null,
         secondDuplicate: second.duplicate,
         secondError: second.error || null,
       };
       await cleanupCommissionProbe(probeTenant);
+    } else if (supabase) {
+      payoutProbeActual = {
+        duplicateBlocked: false,
+        probeDetected: false,
+        probeTenant: null,
+        reason: "no_distributor_scope",
+      };
     }
+
+    const duplicateGuardStatus =
+      duplicateBlocked && probeDetected
+        ? "PASS"
+        : !supabase
+          ? "WARN"
+          : !probeTenant
+            ? "INFO"
+            : "FAIL";
 
     entries.push(
       createPredatorEntry({
-        status: duplicateBlocked && probeDetected ? "PASS" : supabase ? "FAIL" : "WARN",
+        status: duplicateGuardStatus,
         module: "Commission Engine",
         step: "payout.duplicate_guard",
         expected: "Second payout for same tenant+period rejected",

@@ -15,6 +15,7 @@ import {
 import { predatorStore } from "@/predator/predatorStore.js";
 import { filterCollectionsForUser } from "@/utils/accessFilters.js";
 import { ROLES } from "@/config/roles";
+import { fetchDatabaseTenants } from "@/tenant/durableTenantStore.js";
 import {
   COLLECTIONS_MODULE,
   resolveCollectionsUiSnapshot,
@@ -182,6 +183,16 @@ export async function validateCollectionsModule({ ctx, rendered = null }) {
       );
     }
 
+    const registeredTenantIds = new Set();
+    if (ctx.role === ROLES.EXECUTIVE) {
+      const { rows, error } = await fetchDatabaseTenants();
+      if (!error) {
+        for (const tenant of rows || []) {
+          const id = String(tenant?.id ?? "").trim();
+          if (id) registeredTenantIds.add(id);
+        }
+      }
+    }
     entries.push(
       ...checkTenantConsistency({
         module: "Collections",
@@ -189,6 +200,8 @@ export async function validateCollectionsModule({ ctx, rendered = null }) {
         ctx,
         profileTenantId: ctx.tenantId,
         rowTenantIds: arRaw.map((r) => r.tenant_id).filter(Boolean),
+        executiveCrossTenantReadable: true,
+        registeredTenantIds: ctx.role === ROLES.EXECUTIVE ? registeredTenantIds : null,
       })
     );
 

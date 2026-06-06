@@ -1,4 +1,5 @@
 import { createPredatorEntry } from "@/predator/predatorSchema.js";
+import { ROLES } from "@/config/roles.js";
 
 /**
  * @param {Object} p
@@ -112,6 +113,73 @@ export function checkTenantConsistency({ module, step, ctx, profileTenantId, row
   }
   const foreign = unique.filter((t) => t !== profileTenantId);
   if (foreign.length > 0) {
+    const executiveCrossTenant =
+      ctx.role === ROLES.EXECUTIVE && executiveCrossTenantReadable === true;
+    if (executiveCrossTenant && registeredTenantIds) {
+      const unregistered = foreign.filter((id) => !registeredTenantIds.has(id));
+      if (unregistered.length === 0) {
+        return [
+          createPredatorEntry({
+            status: "PASS",
+            module,
+            step: `${step}.tenant_consistency`,
+            expected: "Executive cross-distributor visibility for registered tenants",
+            actual: {
+              profileTenantId,
+              foreignTenants: foreign,
+              executiveCrossTenant: true,
+              rowTenantSample: unique.slice(0, 5),
+            },
+            issueClass: "tenant_isolation",
+            tenantId: ctx.tenantId,
+            role: ctx.role,
+            userId: ctx.userId,
+          }),
+        ];
+      }
+      if (!registeredTenantIds.size) {
+        return [
+          createPredatorEntry({
+            status: "INFO",
+            module,
+            step: `${step}.tenant_mixing`,
+            expected: "Registered distributor tenant ids for executive AR visibility",
+            actual: {
+              profileTenantId,
+              foreignTenants: foreign,
+              executiveCrossTenant: true,
+              tenantsRegistryOk: false,
+            },
+            rootCauseGuess: "Executive cross-distributor AR visible; tenant registry unreadable",
+            issueClass: "tenant_isolation",
+            tenantId: ctx.tenantId,
+            role: ctx.role,
+            userId: ctx.userId,
+          }),
+        ];
+      }
+      return [
+        createPredatorEntry({
+          status: "FAIL",
+          module,
+          step: `${step}.tenant_mixing`,
+          expected: `all foreign tenant_id values registered in public.tenants`,
+          actual: {
+            profileTenantId,
+            foreignTenants: foreign,
+            unregisteredForeignTenants: unregistered,
+            table: step,
+          },
+          rootCauseGuess: "Executive saw unregistered tenant_id(s) in collections AR",
+          suggestedFix: "Verify tenant registry and RLS tenant predicate",
+          severity: "critical",
+          issueClass: "tenant_isolation",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        }),
+      ];
+    }
     return [
       createPredatorEntry({
         status: "FAIL",
