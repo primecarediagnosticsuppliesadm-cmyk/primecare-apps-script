@@ -418,6 +418,7 @@ export default function DistributorOsPage({
       performanceRows: portfolio?.performanceRows || [],
       comparison: portfolio?.comparison || [],
       hqLeakCount: portfolio?.hqLeakCount ?? 0,
+      globalHomeRows: portfolio?.hqLeakCount ?? 0,
       totalRevenue: portfolio?.totalRevenue ?? 0,
       commissionsReadOnly: tab === "commissions",
     };

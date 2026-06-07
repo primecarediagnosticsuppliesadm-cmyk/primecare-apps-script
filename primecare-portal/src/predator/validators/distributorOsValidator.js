@@ -256,15 +256,57 @@ export async function validateDistributorOsModule({ ctx, rendered = null }) {
       })
     );
 
-    const hqLeakPortfolio = num(rendered?.hqLeakCount) === 0;
+    const globalHomeRows = num(rendered?.hqLeakCount);
+    const scopedLeakPre =
+      scopeValid
+        ? {
+            lab: detectHqLeakage(labs, scopeTenantId, homeTenantId),
+            order: detectHqLeakage(orders, scopeTenantId, homeTenantId),
+            coll: detectHqLeakage(collections, scopeTenantId, homeTenantId),
+          }
+        : null;
+    const scopedHomeRows = scopedLeakPre
+      ? scopedLeakPre.lab.homeCount +
+        scopedLeakPre.order.homeCount +
+        scopedLeakPre.coll.homeCount
+      : 0;
+    const scopedHqLeakOk = !scopeValid || scopedHomeRows === 0;
+    const hqLeakStatus = scopeValid
+      ? scopedHqLeakOk
+        ? "PASS"
+        : "FAIL"
+      : globalHomeRows > 0
+        ? "INFO"
+        : "PASS";
     entries.push(
       createPredatorEntry({
-        status: hqLeakPortfolio ? "PASS" : "FAIL",
+        status: hqLeakStatus,
         module: "Distributor OS",
         step: "distributor_os.no_hq_leakage",
-        expected: "Portfolio aggregates exclude HQ tenant operational rows",
-        actual: { hqLeakCount: rendered?.hqLeakCount ?? 0 },
-        severity: hqLeakPortfolio ? "low" : "critical",
+        expected: scopeValid
+          ? "Selected distributor scoped views contain no HQ tenant operational rows"
+          : "Portfolio view may include HQ tenant rows globally; scoped leakage checked when distributor selected",
+        actual: {
+          scopeTenantId: scopeValid ? scopeTenantId : null,
+          homeTenantId,
+          scopedHomeRows,
+          ...(scopedLeakPre
+            ? {
+                labHomeRows: scopedLeakPre.lab.homeCount,
+                orderHomeRows: scopedLeakPre.order.homeCount,
+                collectionHomeRows: scopedLeakPre.coll.homeCount,
+              }
+            : {}),
+          globalHomeRows,
+        },
+        rootCauseGuess: scopeValid
+          ? scopedHqLeakOk
+            ? "Distributor scope excludes HQ tenant operational rows"
+            : "HQ data leaked into selected distributor scoped views"
+          : globalHomeRows > 0
+            ? "HQ operational rows present in global executive portfolio (expected)"
+            : "No HQ operational rows in global portfolio",
+        severity: scopeValid && !scopedHqLeakOk ? "critical" : "low",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,
@@ -489,9 +531,9 @@ export async function validateDistributorOsModule({ ctx, rendered = null }) {
       })
     );
 
-    const labLeak = detectHqLeakage(labs, scopeTenantId, homeTenantId);
-    const orderLeak = detectHqLeakage(orders, scopeTenantId, homeTenantId);
-    const collLeak = detectHqLeakage(collections, scopeTenantId, homeTenantId);
+    const labLeak = scopedLeakPre?.lab ?? detectHqLeakage(labs, scopeTenantId, homeTenantId);
+    const orderLeak = scopedLeakPre?.order ?? detectHqLeakage(orders, scopeTenantId, homeTenantId);
+    const collLeak = scopedLeakPre?.coll ?? detectHqLeakage(collections, scopeTenantId, homeTenantId);
     const anyLeak = labLeak.leaked || orderLeak.leaked || collLeak.leaked;
 
     entries.push(

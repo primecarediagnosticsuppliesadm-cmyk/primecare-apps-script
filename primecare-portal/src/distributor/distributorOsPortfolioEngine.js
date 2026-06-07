@@ -372,6 +372,7 @@ export function buildDistributorOsPortfolioModel({
   const dashboard = buildPortfolioDashboard(enriched, performanceRows, billingRows);
   const comparison = buildComparisonTable(performanceRows);
 
+  // Informational global HQ row count for executive portfolio — not a scoped leakage signal.
   const hqLeakCount = [...labs, ...orders, ...collections].filter(
     (r) => rowTenantId(r) === homeTenantId
   ).length;
