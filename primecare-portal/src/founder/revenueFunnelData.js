@@ -21,6 +21,7 @@ export async function loadRevenueFunnelData(currentUser, options = {}) {
     contracts: data.contracts || [],
     qualifications: opsPayload.qualifications || [],
     inventory: opsPayload.inventory || [],
+    catalogMirrorSummary: data.catalogMirrorSummary || null,
     loadStatus: data.loadStatus || {},
   };
 }
@@ -35,5 +36,6 @@ export function normalizeRevenueFunnelBundle(bundle = {}) {
     contracts: Array.isArray(bundle.contracts) ? bundle.contracts : [],
     qualifications: Array.isArray(bundle.qualifications) ? bundle.qualifications : [],
     inventory: Array.isArray(bundle.inventory) ? bundle.inventory : [],
+    catalogMirrorSummary: bundle.catalogMirrorSummary || null,
   };
 }

@@ -65,33 +65,136 @@ function inventoryStock(row = {}) {
   return num(row.currentStock ?? row.current_stock);
 }
 
-function buildDistributorInventoryReadiness(distributorId, inventory = [], config = {}) {
+function inventoryProductId(row = {}) {
+  return str(row.productId || row.product_id);
+}
+
+function resolveInventoryRecommendation({
+  catalogAssigned,
+  catalogItemCount,
+  inventoryRowCount,
+  inStockCount,
+  mirroredInventoryCount,
+  mirrorStatus,
+}) {
+  if (!catalogAssigned) {
+    return {
+      rootCause: "no_catalog",
+      recommendedAction: "Assign distributor catalog — Distributor OS → Catalog → assign HQ products",
+      readyToOrderReason: "No catalog assigned for distributor",
+    };
+  }
+  if (inventoryRowCount <= 0) {
+    if (mirroredInventoryCount === 0) {
+      return {
+        rootCause: "mirror_missing",
+        recommendedAction:
+          "Run inventory mirror — Distributor OS → Catalog → re-save assigned items to sync products + inventory tables",
+        readyToOrderReason:
+          "Catalog assigned but Supabase inventory rows missing (mirror not completed)",
+      };
+    }
+    if (mirrorStatus === "Metadata Only" || mirrorStatus === "Sync Failed") {
+      return {
+        rootCause: "mirror_incomplete",
+        recommendedAction:
+          "Run inventory mirror — Distributor OS → Catalog → save catalog to complete Supabase sync",
+        readyToOrderReason: `Catalog mirror status: ${mirrorStatus || "incomplete"}`,
+      };
+    }
+    return {
+      rootCause: "inventory_rows_missing",
+      recommendedAction:
+        "Run inventory mirror — Distributor OS → Catalog → sync assigned items to inventory table",
+      readyToOrderReason: "Catalog assigned but no distributor inventory rows visible",
+    };
+  }
+  if (inStockCount <= 0) {
+    return {
+      rootCause: "zero_stock",
+      recommendedAction:
+        "Create stock entries — Operations → Inventory → post stock adjustment or receive purchase order",
+      readyToOrderReason: `${inventoryRowCount} inventory row(s) tracked but none have stock on hand`,
+    };
+  }
+  return {
+    rootCause: "ready",
+    recommendedAction: null,
+    readyToOrderReason: `${inStockCount} SKU(s) in stock — inventory ready for ordering`,
+  };
+}
+
+function buildDistributorInventoryReadiness(
+  distributorId,
+  inventory = [],
+  config = {},
+  catalogMirrorRow = null
+) {
   const tenantId = str(distributorId);
   const scoped = inventory.filter((row) => inventoryRowTenantId(row) === tenantId);
   const inStock = scoped.filter((row) => inventoryStock(row) > 0);
   const catalogItems = readDistributorCatalogItems(config);
   const catalogAssigned = catalogItems.length > 0;
+  const inventoryProductIds = new Set(
+    scoped.map((row) => inventoryProductId(row)).filter(Boolean)
+  );
+  const missingItems = catalogItems
+    .filter((item) => !inventoryProductIds.has(str(item.productId)))
+    .map((item) => ({
+      productId: str(item.productId),
+      productName: str(item.productName) || str(item.productId),
+    }));
+
+  const totalStockUnits = scoped.reduce((sum, row) => sum + inventoryStock(row), 0);
+  const availableStockUnits = totalStockUnits;
+  const mirroredInventoryCount =
+    catalogMirrorRow?.mirroredInventoryCount ?? catalogMirrorRow?.probe?.inventoryCount ?? null;
+  const mirroredProductsCount =
+    catalogMirrorRow?.mirroredProductsCount ?? catalogMirrorRow?.probe?.productsCount ?? null;
+  const mirrorStatus = catalogMirrorRow?.status || null;
+
+  const recommendation = resolveInventoryRecommendation({
+    catalogAssigned,
+    catalogItemCount: catalogItems.length,
+    inventoryRowCount: scoped.length,
+    inStockCount: inStock.length,
+    mirroredInventoryCount,
+    mirrorStatus,
+  });
 
   let status = "Not ready";
-  let detail = "No inventory rows for distributor tenant";
+  let detail = recommendation.readyToOrderReason;
   if (inStock.length > 0) {
     status = "Ready";
-    detail = `${inStock.length} SKU(s) in stock`;
+    detail = `${inStock.length} SKU(s) in stock · ${totalStockUnits.toLocaleString("en-IN")} units`;
   } else if (scoped.length > 0) {
     status = "Low stock";
-    detail = `${scoped.length} SKU(s) tracked, none in stock`;
+    detail = `${scoped.length} inventory row(s), 0 in stock`;
   } else if (catalogAssigned) {
     status = "Catalog only";
-    detail = `${catalogItems.length} catalog item(s) assigned; inventory not mirrored`;
+    detail = `Catalog assigned: ${catalogItems.length} · Inventory rows: 0`;
   }
+
+  const aligned = !catalogAssigned || missingItems.length === 0;
 
   return {
     status,
     detail,
     skuCount: scoped.length,
+    inventoryRowCount: scoped.length,
     inStockCount: inStock.length,
+    totalStockUnits,
+    availableStockUnits,
     catalogAssigned,
     catalogItemCount: catalogItems.length,
+    mirroredInventoryCount,
+    mirroredProductsCount,
+    mirrorStatus,
+    missingItems,
+    aligned,
+    rootCause: recommendation.rootCause,
+    recommendedAction: recommendation.recommendedAction,
+    readyToOrderReason: recommendation.readyToOrderReason,
     ready: inStock.length > 0,
   };
 }
@@ -320,8 +423,17 @@ function buildFirstRevenueBlockers(ctx, inventory) {
   if (!inventory.ready) {
     blockers.push({
       stage: "inventory",
-      reason: inventory.detail,
-      action: "Distributor Catalog → sync inventory with stock on hand",
+      reason: inventory.readyToOrderReason || inventory.detail,
+      action:
+        inventory.recommendedAction ||
+        "Distributor OS → Catalog → sync inventory with stock on hand",
+      rootCause: inventory.rootCause || null,
+      inventorySnapshot: {
+        catalogAssigned: inventory.catalogItemCount,
+        inventoryRows: inventory.inventoryRowCount,
+        itemsInStock: inventory.inStockCount,
+        totalStockUnits: inventory.totalStockUnits,
+      },
     });
   }
   if (ctx.readyToOrderCount <= 0 && ctx.contractedCount > 0 && inventory.ready) {
@@ -368,10 +480,14 @@ function buildFirstRevenueBlockers(ctx, inventory) {
 
 function buildDistributorFunnelRow(distributor, context) {
   const distributorId = str(distributor.id);
+  const catalogMirrorRow = (context.catalogMirrorSummary?.rows || []).find(
+    (row) => str(row.distributorId) === distributorId
+  );
   const inventory = buildDistributorInventoryReadiness(
     distributorId,
     context.inventory,
-    distributor.config || {}
+    distributor.config || {},
+    catalogMirrorRow || null
   );
   const ctx = buildLabCommercialContexts({
     distributorId,
@@ -496,6 +612,13 @@ function buildDistributorFunnelRow(distributor, context) {
           : "No active contracts",
       inventoryReadiness: inventory.status,
       inventoryDetail: inventory.detail,
+      catalogAssigned: inventory.catalogItemCount,
+      inventoryRows: inventory.inventoryRowCount,
+      itemsInStock: inventory.inStockCount,
+      totalStockUnits: inventory.totalStockUnits,
+      inventoryRootCause: inventory.rootCause,
+      inventoryRecommendedAction: inventory.recommendedAction,
+      readyToOrderReason: inventory.readyToOrderReason,
       orderCount: ctx.ordersCreatedCount,
       fulfillmentCount: ctx.ordersFulfilledCount,
       arBalance: ctx.arOutstandingTotal,
@@ -518,8 +641,17 @@ export function buildRevenueFunnelModel({
   contracts = [],
   qualifications = [],
   inventory = [],
+  catalogMirrorSummary = null,
 } = {}) {
-  const context = { labs, orders, collections, contracts, qualifications, inventory };
+  const context = {
+    labs,
+    orders,
+    collections,
+    contracts,
+    qualifications,
+    inventory,
+    catalogMirrorSummary,
+  };
   const rows = distributors.map((d) => buildDistributorFunnelRow(d, context));
 
   const integrityStatuses = rows.map((r) => r.qualificationIntegrity?.status || "Healthy");
@@ -582,6 +714,37 @@ export function evaluateCommercialPathComplete(funnelRow = null) {
     blockers: funnelRow.blockers || [],
     distributorId: funnelRow.distributorId,
     name: funnelRow.name,
+  };
+}
+
+export function evaluateInventoryAlignment(funnelRow = null) {
+  if (!funnelRow) {
+    return {
+      aligned: false,
+      catalogItemCount: 0,
+      inventoryItemCount: 0,
+      missingItems: [],
+      distributorId: null,
+      distributorName: null,
+    };
+  }
+  const inv = funnelRow.inventory || {};
+  const catalogItemCount = inv.catalogItemCount || 0;
+  const inventoryItemCount = inv.inventoryRowCount ?? inv.skuCount ?? 0;
+  const missingItems = inv.missingItems || [];
+  const catalogAssigned = inv.catalogAssigned === true || catalogItemCount > 0;
+  const aligned = !catalogAssigned || (inventoryItemCount > 0 && missingItems.length === 0);
+
+  return {
+    aligned,
+    catalogItemCount,
+    inventoryItemCount,
+    missingItems,
+    distributorId: funnelRow.distributorId,
+    distributorName: funnelRow.name,
+    mirrorStatus: inv.mirrorStatus || null,
+    mirroredInventoryCount: inv.mirroredInventoryCount ?? null,
+    rootCause: inv.rootCause || null,
   };
 }
 

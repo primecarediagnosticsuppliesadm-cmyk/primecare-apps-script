@@ -6,6 +6,7 @@ import {
   buildRevenueFunnelModel,
   evaluateCommercialPathComplete,
   evaluateContractQualificationAlignment,
+  evaluateInventoryAlignment,
 } from "@/founder/revenueFunnelEngine.js";
 import {
   loadRevenueFunnelData,
@@ -112,7 +113,44 @@ export async function validateRevenueFunnelModule({
     const qualificationAlignmentPass = alignment.aligned === true;
     const contractQualGaps = alignment.contractQualificationGaps || [];
 
+    const inventoryAlignment = evaluateInventoryAlignment(focus);
+    const inventoryAlignmentPass = inventoryAlignment.aligned === true;
     const inventoryReady = focus?.inventory?.ready === true;
+    entries.push(
+      createPredatorEntry({
+        status: inventoryAlignmentPass ? "PASS" : "FAIL",
+        module: "Revenue Funnel",
+        step: "commercial_path_complete.inventory_alignment",
+        expected: "Assigned catalog items have matching distributor inventory rows",
+        actual: inventoryAlignmentPass
+          ? {
+              distributorId: inventoryAlignment.distributorId,
+              distributorName: inventoryAlignment.distributorName,
+              catalogItemCount: inventoryAlignment.catalogItemCount,
+              inventoryItemCount: inventoryAlignment.inventoryItemCount,
+            }
+          : {
+              distributorId: inventoryAlignment.distributorId,
+              distributorName: inventoryAlignment.distributorName,
+              catalogItemCount: inventoryAlignment.catalogItemCount,
+              inventoryItemCount: inventoryAlignment.inventoryItemCount,
+              missingItems: inventoryAlignment.missingItems,
+              mirrorStatus: inventoryAlignment.mirrorStatus,
+              mirroredInventoryCount: inventoryAlignment.mirroredInventoryCount,
+              rootCause: inventoryAlignment.rootCause,
+            },
+        rootCauseGuess: inventoryAlignmentPass
+          ? "Catalog and distributor inventory rows aligned"
+          : inventoryAlignment.rootCause === "mirror_missing"
+            ? "Catalog assigned locally but inventory mirror not completed in Supabase"
+            : "Catalog assigned without matching distributor inventory rows",
+        severity: inventoryAlignmentPass ? "low" : "high",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
     entries.push(
       createPredatorEntry({
         status: inventoryReady ? "PASS" : "WARN",

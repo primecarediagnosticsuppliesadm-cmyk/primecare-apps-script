@@ -249,6 +249,7 @@ export function mapStockDashboardRow(row) {
   }
 
   return {
+    tenantId: str(row.tenant_id ?? row.tenantId ?? row.Tenant_ID),
     productId,
     productName,
     category,

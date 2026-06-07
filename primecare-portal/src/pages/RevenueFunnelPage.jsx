@@ -239,11 +239,47 @@ export default function RevenueFunnelPage({ currentUser = null, setActivePage = 
           </Section>
 
           <Section title={`${focus.name} — commercial checkpoints`} icon={BarChart3}>
+            <div className="mb-2 grid grid-cols-2 gap-2 rounded-lg border bg-white p-2 shadow-sm sm:grid-cols-4">
+              <MetricTile
+                label="Catalog assigned"
+                value={String(focus.detail.catalogAssigned ?? focus.inventory?.catalogItemCount ?? 0)}
+              />
+              <MetricTile
+                label="Inventory rows"
+                value={String(focus.detail.inventoryRows ?? focus.inventory?.inventoryRowCount ?? 0)}
+              />
+              <MetricTile
+                label="Items in stock"
+                value={String(focus.detail.itemsInStock ?? focus.inventory?.inStockCount ?? 0)}
+              />
+              <MetricTile
+                label="Total stock units"
+                value={String(focus.detail.totalStockUnits ?? focus.inventory?.totalStockUnits ?? 0)}
+              />
+            </div>
+            {!focus.inventory?.ready && focus.detail.inventoryRecommendedAction ? (
+              <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50/90 p-2 text-xs text-amber-950">
+                <p className="font-semibold">Why Ready to Order = 0</p>
+                <p className="mt-0.5">{focus.detail.readyToOrderReason}</p>
+                <p className="mt-1 text-[10px] text-slate-700">
+                  Recommended: {focus.detail.inventoryRecommendedAction}
+                </p>
+                {focus.inventory?.missingItems?.length ? (
+                  <ul className="mt-1 space-y-0.5 text-[10px] text-slate-700">
+                    {focus.inventory.missingItems.map((item) => (
+                      <li key={item.productId}>
+                        Missing inventory row: {item.productName} ({item.productId})
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <MetricTile label="Qualification" value={focus.detail.qualificationStatus} />
               <MetricTile label="Contract" value={focus.detail.contractStatus} />
               <MetricTile
-                label="Inventory"
+                label="Inventory status"
                 value={focus.detail.inventoryReadiness}
                 sub={focus.detail.inventoryDetail}
               />
@@ -274,9 +310,28 @@ export default function RevenueFunnelPage({ currentUser = null, setActivePage = 
                         ))}
                       </ul>
                     ) : null}
+                    {b.inventorySnapshot ? (
+                      <p className="mt-1 text-[10px] text-slate-600">
+                        Catalog {b.inventorySnapshot.catalogAssigned} · Rows{" "}
+                        {b.inventorySnapshot.inventoryRows} · In stock{" "}
+                        {b.inventorySnapshot.itemsInStock} · Units{" "}
+                        {b.inventorySnapshot.totalStockUnits}
+                      </p>
+                    ) : null}
                     {b.action ? (
                       <div className="mt-1 flex flex-wrap items-center gap-2">
                         <p className="text-[10px] text-slate-600">{b.action}</p>
+                        {b.stage === "inventory" && setActivePage ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-[10px]"
+                            onClick={() => setActivePage("distributorOs")}
+                          >
+                            Open Distributor Catalog
+                          </Button>
+                        ) : null}
                         {b.stage === "qualification_integrity" && setActivePage ? (
                           <Button
                             type="button"
