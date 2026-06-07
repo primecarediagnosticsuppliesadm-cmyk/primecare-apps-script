@@ -38,7 +38,15 @@ function formatPct(v) {
   return `${v}%`;
 }
 
-export default function RevenueFunnelPage({ currentUser = null }) {
+function integrityVariant(status) {
+  const s = String(status || "").toLowerCase();
+  if (s === "healthy") return "success";
+  if (s === "warning") return "warning";
+  if (s === "broken") return "danger";
+  return "neutral";
+}
+
+export default function RevenueFunnelPage({ currentUser = null, setActivePage = null }) {
   const [model, setModel] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -121,7 +129,22 @@ export default function RevenueFunnelPage({ currentUser = null }) {
         </Button>
       </header>
 
-      <Section title="Portfolio rollup" icon={TrendingUp}>
+      <Section title="Executive summary" icon={TrendingUp}>
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border bg-white p-2 shadow-sm">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            Qualification integrity
+          </p>
+          <StatusBadge variant={integrityVariant(portfolio.qualificationIntegrity)} compact>
+            {portfolio.qualificationIntegrity || "Healthy"}
+          </StatusBadge>
+          {portfolio.misalignedContractCount > 0 ? (
+            <p className="text-[10px] text-red-800">
+              {portfolio.misalignedContractCount} active contract(s) missing qualification row
+            </p>
+          ) : (
+            <p className="text-[10px] text-slate-600">All contracts linked to qualifications</p>
+          )}
+        </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
           <MetricTile label="Qualified labs" value={String(portfolio.qualified)} />
           <MetricTile label="Contracted labs" value={String(portfolio.contracted)} />
@@ -241,7 +264,32 @@ export default function RevenueFunnelPage({ currentUser = null }) {
                   <li key={`${b.stage}-${b.reason}`} className="rounded-lg border border-amber-200 bg-amber-50/80 p-2">
                     <p className="font-semibold capitalize text-amber-950">{b.stage.replace(/_/g, " ")}</p>
                     <p className="mt-0.5 text-amber-900">{b.reason}</p>
-                    {b.action ? <p className="mt-1 text-[10px] text-slate-600">{b.action}</p> : null}
+                    {b.labs?.length ? (
+                      <ul className="mt-1 space-y-0.5 text-[10px] text-slate-700">
+                        {b.labs.map((lab) => (
+                          <li key={lab.labId}>
+                            {lab.labName}
+                            {lab.contractId ? ` · contract ${lab.contractId}` : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {b.action ? (
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <p className="text-[10px] text-slate-600">{b.action}</p>
+                        {b.stage === "qualification_integrity" && setActivePage ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-[10px]"
+                            onClick={() => setActivePage("qualificationReview")}
+                          >
+                            Open Qualification Review
+                          </Button>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -255,7 +303,10 @@ export default function RevenueFunnelPage({ currentUser = null }) {
                   <thead className="border-b bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-2 py-2">Lab</th>
-                      <th className="px-2 py-2">Qualification</th>
+                      <th className="px-2 py-2">Qualification status</th>
+                      <th className="px-2 py-2">Founder review</th>
+                      <th className="px-2 py-2">Pipeline stage</th>
+                      <th className="px-2 py-2">Score</th>
                       <th className="px-2 py-2">Contract</th>
                       <th className="px-2 py-2">Orders</th>
                       <th className="px-2 py-2">Fulfilled</th>
@@ -268,6 +319,11 @@ export default function RevenueFunnelPage({ currentUser = null }) {
                       <tr key={lab.labId} className="border-b last:border-0">
                         <td className="px-2 py-2 font-medium">{lab.labName}</td>
                         <td className="px-2 py-2">{lab.qualificationStatus}</td>
+                        <td className="px-2 py-2">{lab.founderReviewStatus}</td>
+                        <td className="px-2 py-2">{lab.pipelineStage}</td>
+                        <td className="px-2 py-2 tabular-nums">
+                          {lab.qualificationScore != null ? lab.qualificationScore : "—"}
+                        </td>
                         <td className="px-2 py-2">{lab.contractStatus}</td>
                         <td className="px-2 py-2 tabular-nums">{lab.orderCount}</td>
                         <td className="px-2 py-2 tabular-nums">{lab.fulfilledCount}</td>

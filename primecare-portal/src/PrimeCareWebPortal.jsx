@@ -207,7 +207,12 @@ export default function PrimeCareWebPortal({
 
       case "qualificationReview":
       case "qualification-review":
-        return <QualificationReviewPage currentUser={currentUser} />;
+        return (
+          <QualificationReviewPage
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+          />
+        );
 
       case "notifications":
       case "notification-center":
@@ -286,7 +291,9 @@ export default function PrimeCareWebPortal({
 
       case "revenueFunnel":
       case "revenue-funnel":
-        return <RevenueFunnelPage currentUser={currentUser} />;
+        return (
+          <RevenueFunnelPage currentUser={currentUser} setActivePage={setActivePage} />
+        );
 
       case "pilotReadiness":
       case "pilot-readiness":
@@ -379,7 +386,12 @@ export default function PrimeCareWebPortal({
 
       case "qualificationReview":
       case "qualification-review":
-        return <QualificationReviewPage currentUser={currentUser} />;
+        return (
+          <QualificationReviewPage
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+          />
+        );
 
       case "notifications":
       case "notification-center":

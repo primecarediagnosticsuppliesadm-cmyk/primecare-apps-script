@@ -8,7 +8,10 @@ import {
 } from "@/distributor/distributorOsEngine.js";
 import { CONTRACT_STATUSES } from "@/labContract/labContractTypes.js";
 import { labIdKey } from "@/utils/labId.js";
-import { normalizeQualificationPipelineStage } from "@/utils/qualificationPipeline.js";
+import {
+  getPipelineStageLabel,
+  normalizeQualificationPipelineStage,
+} from "@/utils/qualificationPipeline.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -129,6 +132,12 @@ function buildLabCommercialContexts({
     activeContracts.map((c) => labIdKey(c.labId || c.lab_id)).filter(Boolean)
   );
 
+  const activeContractByLab = new Map();
+  for (const c of activeContracts) {
+    const lid = labIdKey(c.labId || c.lab_id);
+    if (lid) activeContractByLab.set(lid, c);
+  }
+
   const ordersByLab = new Map();
   for (const o of scopedOrders) {
     const lid = labIdKey(o.labId || o.lab_id);
@@ -156,10 +165,18 @@ function buildLabCommercialContexts({
   const labRows = [...universe].map((labId) => {
     const labRow = scopedLabs.find((l) => labIdKey(l.labId || l.lab_id) === labId);
     const qual = qualByLab.get(labId) || null;
+    const activeContract = activeContractByLab.get(labId) || null;
     const labOrders = ordersByLab.get(labId) || [];
     const collection = collectionsByLab.get(labId) || null;
+    const hasQualificationRow = Boolean(qual);
     const qualified = qual ? isQualifiedLab(qual) : false;
     const contracted = activeContractLabs.has(labId);
+    const founderReview = qual
+      ? str(qual.founderReviewStatus || qual.founder_review_status) || "pending"
+      : null;
+    const pipelineStage = qual
+      ? normalizeQualificationPipelineStage(qual.pipelineStage || qual.pipeline_stage)
+      : null;
     const readyToOrder = contracted && inventoryReady;
     const ordered = labOrders.length > 0;
     const fulfilled = labOrders.some(isFulfilledOrder);
@@ -173,11 +190,15 @@ function buildLabCommercialContexts({
       labId,
       labName: labRow?.labName || labRow?.lab_name || collection?.labName || labId,
       qualified,
-      qualificationStatus: qual
-        ? str(qual.founderReviewStatus || qual.founder_review_status) ||
-          normalizeQualificationPipelineStage(qual.pipelineStage || qual.pipeline_stage) ||
-          "Captured"
-        : "No qualification row",
+      hasQualificationRow,
+      qualificationStatus: hasQualificationRow ? "Qualification captured" : "No qualification row",
+      founderReviewStatus: founderReview
+        ? founderReview.charAt(0).toUpperCase() + founderReview.slice(1).replace(/_/g, " ")
+        : "—",
+      pipelineStage: pipelineStage ? getPipelineStageLabel(pipelineStage) : "—",
+      qualificationScore:
+        qual?.qualificationScore ?? qual?.qualification_score ?? null,
+      contractId: activeContract?.id || activeContract?.contractId || null,
       contracted,
       contractStatus: contracted ? CONTRACT_STATUSES.ACTIVE : "No active contract",
       readyToOrder,
@@ -222,8 +243,66 @@ function stageRow(id, label, count, priorCount, blockingReason) {
   };
 }
 
+function buildQualificationIntegrity(ctx, distributorId, distributorName) {
+  const misalignedContracts = ctx.labRows
+    .filter((l) => l.contracted && !l.hasQualificationRow)
+    .map((l) => ({
+      distributorId,
+      distributorName,
+      labId: l.labId,
+      labName: l.labName,
+      contractId: l.contractId,
+    }));
+
+  const unqualifiedWithContract = ctx.labRows.filter(
+    (l) => l.contracted && l.hasQualificationRow && !l.qualified
+  );
+
+  let status = "Healthy";
+  if (misalignedContracts.length > 0) status = "Broken";
+  else if (unqualifiedWithContract.length > 0) status = "Warning";
+
+  return {
+    status,
+    misalignedContracts,
+    unqualifiedWithContract: unqualifiedWithContract.map((l) => ({
+      distributorId,
+      distributorName,
+      labId: l.labId,
+      labName: l.labName,
+      contractId: l.contractId,
+      founderReviewStatus: l.founderReviewStatus,
+      pipelineStage: l.pipelineStage,
+    })),
+    affectedLabs: [
+      ...misalignedContracts,
+      ...unqualifiedWithContract.map((l) => ({
+        distributorId,
+        distributorName,
+        labId: l.labId,
+        labName: l.labName,
+        contractId: l.contractId,
+        issue: "unqualified_with_contract",
+      })),
+    ],
+  };
+}
+
 function buildFirstRevenueBlockers(ctx, inventory) {
   const blockers = [];
+  const integrityGaps = ctx.labRows.filter((l) => l.contracted && !l.hasQualificationRow);
+  if (integrityGaps.length > 0) {
+    blockers.push({
+      stage: "qualification_integrity",
+      reason: "Active contract exists without qualification record",
+      action: "Open Qualification Review and create/approve qualification",
+      labs: integrityGaps.map((l) => ({
+        labId: l.labId,
+        labName: l.labName,
+        contractId: l.contractId,
+      })),
+    });
+  }
   if (ctx.qualifiedCount <= 0) {
     blockers.push({
       stage: "qualification",
@@ -357,6 +436,11 @@ function buildDistributorFunnelRow(distributor, context) {
   ];
 
   const blockers = buildFirstRevenueBlockers(ctx, inventory);
+  const qualificationIntegrity = buildQualificationIntegrity(
+    ctx,
+    distributorId,
+    distributor.name || distributorId
+  );
   const pathComplete =
     ctx.qualifiedCount > 0 &&
     ctx.contractedCount > 0 &&
@@ -391,9 +475,17 @@ function buildDistributorFunnelRow(distributor, context) {
     },
     labs: ctx.labRows,
     activeContractCount: ctx.activeContracts.length,
+    qualificationIntegrity,
     blockers,
     pathComplete,
     detail: {
+      qualificationIntegrity: qualificationIntegrity.status,
+      qualificationIntegrityDetail:
+        qualificationIntegrity.status === "Healthy"
+          ? "All active contracts linked to qualifications"
+          : qualificationIntegrity.misalignedContracts.length > 0
+            ? `${qualificationIntegrity.misalignedContracts.length} contract(s) without qualification row`
+            : `${qualificationIntegrity.unqualifiedWithContract.length} contracted lab(s) not yet qualified`,
       qualificationStatus:
         ctx.qualifiedCount > 0
           ? `${ctx.qualifiedCount} qualified lab(s)`
@@ -430,9 +522,21 @@ export function buildRevenueFunnelModel({
   const context = { labs, orders, collections, contracts, qualifications, inventory };
   const rows = distributors.map((d) => buildDistributorFunnelRow(d, context));
 
+  const integrityStatuses = rows.map((r) => r.qualificationIntegrity?.status || "Healthy");
+  const portfolioIntegrityStatus = integrityStatuses.includes("Broken")
+    ? "Broken"
+    : integrityStatuses.includes("Warning")
+      ? "Warning"
+      : "Healthy";
+
   const portfolio = {
     qualified: rows.reduce((s, r) => s + r.summary.qualified, 0),
     contracted: rows.reduce((s, r) => s + r.summary.contracted, 0),
+    qualificationIntegrity: portfolioIntegrityStatus,
+    misalignedContractCount: rows.reduce(
+      (s, r) => s + (r.qualificationIntegrity?.misalignedContracts?.length || 0),
+      0
+    ),
     ordered: rows.reduce((s, r) => s + r.summary.ordersCreated, 0),
     fulfilled: rows.reduce((s, r) => s + r.summary.ordersFulfilled, 0),
     arOutstanding: rows.reduce((s, r) => s + r.summary.arOutstanding, 0),
@@ -478,5 +582,38 @@ export function evaluateCommercialPathComplete(funnelRow = null) {
     blockers: funnelRow.blockers || [],
     distributorId: funnelRow.distributorId,
     name: funnelRow.name,
+  };
+}
+
+export function evaluateContractQualificationAlignment(funnelRow = null) {
+  if (!funnelRow) {
+    return {
+      aligned: false,
+      misalignedContracts: [],
+      contractQualificationGaps: [],
+      activeContractCount: 0,
+      qualifiedLabCount: 0,
+      contractRequiresQualificationPass: false,
+    };
+  }
+  const summary = funnelRow.summary || {};
+  const integrity = funnelRow.qualificationIntegrity || {};
+  const misalignedContracts = integrity.misalignedContracts || [];
+  const unqualifiedWithContract = integrity.unqualifiedWithContract || [];
+  const activeContractCount = funnelRow.activeContractCount || summary.contracted || 0;
+  const qualifiedLabCount = summary.qualified || 0;
+  const contractQualificationGaps = [
+    ...misalignedContracts.map((row) => ({ ...row, issue: "missing_qualification_row" })),
+    ...unqualifiedWithContract.map((row) => ({ ...row, issue: "not_qualified" })),
+  ];
+
+  return {
+    aligned: misalignedContracts.length === 0,
+    misalignedContracts,
+    contractQualificationGaps,
+    activeContractCount,
+    qualifiedLabCount,
+    contractRequiresQualificationPass: activeContractCount <= qualifiedLabCount,
+    qualificationIntegrity: integrity.status || "Healthy",
   };
 }

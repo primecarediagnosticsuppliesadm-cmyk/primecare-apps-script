@@ -32,7 +32,20 @@ import {
   founderReviewToVariant,
   tierLevelToVariant,
 } from "@/utils/statusTokens";
-import { Loader2, ClipboardCheck, RefreshCw, ChevronDown, ChevronUp, Search } from "lucide-react";
+import {
+  Loader2,
+  ClipboardCheck,
+  RefreshCw,
+  ChevronDown,
+  ChevronUp,
+  Search,
+  FileText,
+  ExternalLink,
+} from "lucide-react";
+import { loadVisibleLabContracts } from "@/labContract/labContractStore.js";
+import { CONTRACT_STATUSES } from "@/labContract/labContractTypes.js";
+import { enterDistributorOs } from "@/tenant/tenantFoundationStore.js";
+import { labIdKey } from "@/utils/labId.js";
 import { formatQualificationBandLabel } from "@/utils/computeQualificationScore";
 import { ROLES } from "@/config/roles";
 import {
@@ -142,6 +155,118 @@ function PipelineStageBadge({ row, compact = false }) {
     <StatusBadge variant={pipelineStageToVariant(stage)} compact={compact}>
       {row.pipelineStageLabel || getPipelineStageLabel(stage)}
     </StatusBadge>
+  );
+}
+
+const TERMINAL_CONTRACT_STATUSES = new Set([
+  CONTRACT_STATUSES.EXPIRED,
+  CONTRACT_STATUSES.TERMINATED,
+  CONTRACT_STATUSES.SUSPENDED,
+]);
+
+const CONTRACT_STATUS_RANK = {
+  [CONTRACT_STATUSES.ACTIVE]: 30,
+  [CONTRACT_STATUSES.UNDER_REVIEW]: 20,
+  [CONTRACT_STATUSES.DRAFT]: 10,
+};
+
+function formatContractExistsLabel(status) {
+  const s = String(status || "").trim();
+  if (s === CONTRACT_STATUSES.UNDER_REVIEW) return "Approved";
+  if (s === CONTRACT_STATUSES.ACTIVE) return "Active";
+  if (s === CONTRACT_STATUSES.DRAFT) return "Draft";
+  return s || "Contract";
+}
+
+function contractStatusToVariant(status) {
+  const s = String(status || "").trim();
+  if (s === CONTRACT_STATUSES.ACTIVE) return "success";
+  if (s === CONTRACT_STATUSES.UNDER_REVIEW) return "info";
+  if (s === CONTRACT_STATUSES.DRAFT) return "warning";
+  return "neutral";
+}
+
+function contractLookupKey(tenantId, labId) {
+  return `${String(tenantId || "").trim()}:${labIdKey(labId)}`;
+}
+
+function buildContractByLabLookup(contracts = []) {
+  const map = new Map();
+  for (const contract of contracts) {
+    const tenantId = String(
+      contract.distributorId || contract.tenantId || contract.tenant_id || ""
+    ).trim();
+    const labId = labIdKey(contract.labId || contract.lab_id);
+    if (!tenantId || !labId) continue;
+    if (TERMINAL_CONTRACT_STATUSES.has(String(contract.status || "").trim())) continue;
+
+    const key = contractLookupKey(tenantId, labId);
+    const existing = map.get(key);
+    const rank = CONTRACT_STATUS_RANK[String(contract.status || "").trim()] || 0;
+    const existingRank = existing
+      ? CONTRACT_STATUS_RANK[String(existing.status || "").trim()] || 0
+      : -1;
+    if (!existing || rank >= existingRank) {
+      map.set(key, contract);
+    }
+  }
+  return map;
+}
+
+function resolveLabContract(row, contractByLab) {
+  if (!row?.labId || !contractByLab?.size) return null;
+  const tenantId = String(row.tenantId || "").trim();
+  if (tenantId) {
+    const keyed = contractByLab.get(contractLookupKey(tenantId, row.labId));
+    if (keyed) return keyed;
+  }
+  for (const contract of contractByLab.values()) {
+    if (labIdKey(contract.labId || contract.lab_id) === labIdKey(row.labId)) {
+      return contract;
+    }
+  }
+  return null;
+}
+
+function ContractExistsBadge({ contract, compact = false }) {
+  if (!contract) return null;
+  const label = formatContractExistsLabel(contract.status);
+  return (
+    <StatusBadge variant={contractStatusToVariant(contract.status)} compact={compact}>
+      Contract exists · {label}
+    </StatusBadge>
+  );
+}
+
+function OpenDistributorContractButton({ row, contract, currentUser, setActivePage }) {
+  if (!contract || typeof setActivePage !== "function") return null;
+  const distributorId = String(
+    contract.distributorId || contract.tenantId || contract.tenant_id || row.tenantId || ""
+  ).trim();
+  const homeTenantId = String(
+    currentUser?.homeTenantId || currentUser?.tenantId || currentUser?.tenant_id || ""
+  ).trim();
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="h-9 rounded-lg text-xs"
+      onClick={() => {
+        if (!distributorId || !homeTenantId) return;
+        enterDistributorOs({
+          tenantId: distributorId,
+          tenantName: contract.distributorName || contract.tenantName || "",
+          homeTenantId,
+          tab: "contracts",
+        });
+        setActivePage("distributorOs");
+      }}
+    >
+      <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+      Open Distributor Contract
+    </Button>
   );
 }
 
@@ -685,6 +810,8 @@ function ReviewExpandedPanel({
   onRowSaved,
   onSaveError,
   saveMeta,
+  contract = null,
+  setActivePage = null,
 }) {
   const key = row.labId;
   const meta = saveMeta[key] || {};
@@ -703,6 +830,21 @@ function ReviewExpandedPanel({
       className="border-t border-slate-200 bg-slate-50/80 px-2.5 py-3 sm:px-3"
     >
       <div className="space-y-3">
+        {contract ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <FileText className="h-4 w-4 text-slate-500" aria-hidden />
+              <span className="text-xs font-semibold text-slate-800">Distributor contract</span>
+              <ContractExistsBadge contract={contract} />
+            </div>
+            <OpenDistributorContractButton
+              row={row}
+              contract={contract}
+              currentUser={currentUser}
+              setActivePage={setActivePage}
+            />
+          </div>
+        ) : null}
         <section aria-labelledby={`qual-heading-${key}`}>
           <h3
             id={`qual-heading-${key}`}
@@ -732,7 +874,7 @@ function ReviewExpandedPanel({
   );
 }
 
-function ReviewSummaryRow({ row, expanded, onToggleExpand }) {
+function ReviewSummaryRow({ row, expanded, onToggleExpand, contract = null }) {
   const followUp = row.nextFollowUpDate || "—";
   const prob =
     row.pipelineProbability != null ? `${row.pipelineProbability}%` : "—";
@@ -782,6 +924,7 @@ function ReviewSummaryRow({ row, expanded, onToggleExpand }) {
                 Lab OS {row.labOsFit}
               </StatusBadge>
             ) : null}
+            <ContractExistsBadge contract={contract} compact />
           </div>
         </div>
         <Button
@@ -818,6 +961,8 @@ function QualificationReviewListItem({
   onRowSaved,
   onSaveError,
   saveMeta,
+  contract = null,
+  setActivePage = null,
 }) {
   return (
     <Card className="overflow-hidden rounded-lg border-slate-200 shadow-sm">
@@ -825,6 +970,7 @@ function QualificationReviewListItem({
         row={row}
         expanded={expanded}
         onToggleExpand={onToggleExpand}
+        contract={contract}
       />
       {expanded ? (
         <ReviewExpandedPanel
@@ -833,6 +979,8 @@ function QualificationReviewListItem({
           onRowSaved={onRowSaved}
           onSaveError={onSaveError}
           saveMeta={saveMeta}
+          contract={contract}
+          setActivePage={setActivePage}
         />
       ) : null}
     </Card>
@@ -939,8 +1087,9 @@ function QualificationReviewLoading() {
   );
 }
 
-export default function QualificationReviewPage({ currentUser }) {
+export default function QualificationReviewPage({ currentUser, setActivePage = null }) {
   const [rows, setRows] = useState([]);
+  const [contracts, setContracts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -958,14 +1107,19 @@ export default function QualificationReviewPage({ currentUser }) {
     try {
       setLoading(true);
       setError("");
-      const res = await getQualificationReviewRead();
+      const [res, contractRows] = await Promise.all([
+        getQualificationReviewRead(),
+        loadVisibleLabContracts().catch(() => []),
+      ]);
       if (!res?.success) {
         throw new Error(res?.error || "Failed to load qualification reviews");
       }
       setRows(Array.isArray(res.data) ? res.data : []);
+      setContracts(Array.isArray(contractRows) ? contractRows : []);
     } catch (err) {
       setError(err?.message || "Failed to load qualification reviews");
       setRows([]);
+      setContracts([]);
     } finally {
       setLoading(false);
     }
@@ -1008,6 +1162,8 @@ export default function QualificationReviewPage({ currentUser }) {
       },
     },
   });
+
+  const contractByLab = useMemo(() => buildContractByLabLookup(contracts), [contracts]);
 
   const filteredRows = useFilteredQualificationRows(rows, {
     searchQuery,
@@ -1139,6 +1295,8 @@ export default function QualificationReviewPage({ currentUser }) {
                 onRowSaved={handleRowSaved}
                 onSaveError={(msg) => showToast("error", msg)}
                 saveMeta={saveMeta}
+                contract={resolveLabContract(row, contractByLab)}
+                setActivePage={setActivePage}
               />
             );
           })}

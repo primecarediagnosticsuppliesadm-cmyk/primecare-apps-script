@@ -5,6 +5,7 @@ import { ROLES } from "@/config/roles.js";
 import {
   buildRevenueFunnelModel,
   evaluateCommercialPathComplete,
+  evaluateContractQualificationAlignment,
 } from "@/founder/revenueFunnelEngine.js";
 import {
   loadRevenueFunnelData,
@@ -102,8 +103,14 @@ export async function validateRevenueFunnelModule({
       null;
 
     const evalResult = evaluateCommercialPathComplete(focus);
+    const alignment = evaluateContractQualificationAlignment(focus);
     const blockers = evalResult.blockers || [];
     const summary = focus?.summary || {};
+    const activeContractCount = alignment.activeContractCount;
+    const qualifiedLabCount = alignment.qualifiedLabCount;
+    const contractRequiresQualPass = alignment.contractRequiresQualificationPass === true;
+    const qualificationAlignmentPass = alignment.aligned === true;
+    const contractQualGaps = alignment.contractQualificationGaps || [];
 
     const inventoryReady = focus?.inventory?.ready === true;
     entries.push(
@@ -117,6 +124,62 @@ export async function validateRevenueFunnelModule({
           ? "Inventory ready for lab ordering"
           : focus?.inventory?.detail || "Inventory not order-ready",
         severity: inventoryReady ? "low" : "medium",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    entries.push(
+      createPredatorEntry({
+        status: contractRequiresQualPass ? "PASS" : "FAIL",
+        module: "Revenue Funnel",
+        step: "commercial_path_complete.contract_requires_qualification",
+        expected: "Every active contract originates from a qualified lab (activeContracts <= qualifiedLabs)",
+        actual: contractRequiresQualPass
+          ? {
+              activeContracts: activeContractCount,
+              qualifiedLabs: qualifiedLabCount,
+            }
+          : {
+              activeContracts: activeContractCount,
+              qualifiedLabs: qualifiedLabCount,
+              gaps: contractQualGaps.map((row) => ({
+                distributorId: row.distributorId,
+                distributorName: row.distributorName,
+                labId: row.labId,
+                labName: row.labName,
+                contractId: row.contractId,
+                issue: row.issue,
+              })),
+            },
+        rootCauseGuess: contractRequiresQualPass
+          ? "Active contract count does not exceed qualified lab count"
+          : "Contract exists without qualification or lab is not yet qualified",
+        severity: contractRequiresQualPass ? "low" : "critical",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
+    entries.push(
+      createPredatorEntry({
+        status: qualificationAlignmentPass ? "PASS" : "FAIL",
+        module: "Revenue Funnel",
+        step: "commercial_path_complete.qualification_contract_alignment",
+        expected: "Every active contract has a qualification row",
+        actual: qualificationAlignmentPass
+          ? { activeContracts: activeContractCount, aligned: true }
+          : {
+              activeContracts: activeContractCount,
+              aligned: false,
+              affectedLabs: alignment.misalignedContracts,
+            },
+        rootCauseGuess: qualificationAlignmentPass
+          ? "All active contracts linked to qualification records"
+          : "Active contract exists without qualification record",
+        severity: qualificationAlignmentPass ? "low" : "critical",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,
