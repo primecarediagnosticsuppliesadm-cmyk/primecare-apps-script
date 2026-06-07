@@ -15,8 +15,18 @@ import {
   patchDurableTenantMetadata,
   verifyDistributorCatalogMetadata,
 } from "@/tenant/durableTenantStore.js";
+import {
+  buildCatalogInventoryMirrorStatus,
+  recordCatalogSyncAttempt,
+} from "@/catalog/catalogMirrorDiagnostics.js";
+import { parseSyncLayersFromResult } from "@/catalog/catalogMirrorHealth.js";
 import { getRegistryTenant, upsertRegistryTenant } from "@/tenant/tenantFoundationStore.js";
 import { supabase } from "@/api/supabaseClient.js";
+
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
 
 function str(v) {
   return String(v ?? "").trim();
@@ -104,58 +114,117 @@ export async function resolveDistributorRow(tenantId, distributorRow = null) {
   return getRegistryTenant(id) || normalized;
 }
 
-async function syncDistributorCatalogToSupabase(distributorTenantId, items = []) {
-  if (!supabase || !distributorTenantId || !items.length) {
+/**
+ * Idempotent mirror: upsert distributor-scoped products + inventory rows.
+ * Inventory table has no product_name column — only product_id + stock fields.
+ */
+export async function syncDistributorCatalogToSupabase(distributorTenantId, items = []) {
+  const tenantId = str(distributorTenantId);
+  if (!supabase || !tenantId || !items.length) {
     return {
       ok: false,
       synced: 0,
+      productsSynced: 0,
+      inventorySynced: 0,
       skipped: !supabase,
       reason: !supabase ? "supabase_not_configured" : "no_items",
+      results: [],
     };
   }
 
-  let synced = 0;
-  let productError = null;
-  let inventoryError = null;
+  const results = [];
   for (const item of items) {
+    const productId = str(item.productId);
+    if (!productId) continue;
+
     const productPayload = {
-      tenant_id: distributorTenantId,
-      product_id: item.productId,
-      product_name: item.productName,
-      category: item.category,
-      selling_price: item.sellingPrice,
-      cost_price: item.costPrice,
+      tenant_id: tenantId,
+      product_id: productId,
+      product_name: str(item.productName) || productId,
+      category: str(item.category) || "Consumables",
+      selling_price: num(item.sellingPrice),
+      cost_price: num(item.costPrice),
       active: item.active !== false,
     };
     const invPayload = {
-      tenant_id: distributorTenantId,
-      product_id: item.productId,
-      product_name: item.productName,
-      current_stock: item.currentStock,
-      min_stock: item.minStock,
+      tenant_id: tenantId,
+      product_id: productId,
+      current_stock: num(item.currentStock),
+      min_stock: num(item.minStock),
+      reorder_qty: num(item.reorderQty ?? item.reorder_qty),
     };
 
     const prod = await supabase.from("products").upsert(productPayload, {
       onConflict: "tenant_id,product_id",
     });
-    if (prod.error) {
-      productError = prod.error.message || "Product sync failed";
-    } else {
-      synced += 1;
-    }
-
     const inv = await supabase.from("inventory").upsert(invPayload, {
       onConflict: "tenant_id,product_id",
     });
-    if (inv.error) {
-      inventoryError = inv.error.message || "Inventory sync failed";
-    }
+
+    results.push({
+      productId,
+      productName: str(item.productName) || productId,
+      productOk: !prod.error,
+      inventoryOk: !inv.error,
+      productError: prod.error?.message || null,
+      inventoryError: inv.error?.message || null,
+    });
   }
+
+  const productsSynced = results.filter((row) => row.productOk).length;
+  const inventorySynced = results.filter((row) => row.inventoryOk).length;
+  const productError = results.find((row) => row.productError)?.productError || null;
+  const inventoryError = results.find((row) => row.inventoryError)?.inventoryError || null;
+
   return {
-    ok: synced > 0 && !productError && !inventoryError,
-    synced,
+    ok: productsSynced === results.length && inventorySynced === results.length && results.length > 0,
+    synced: productsSynced,
+    productsSynced,
+    inventorySynced,
     productError,
     inventoryError,
+    results,
+  };
+}
+
+async function recordMirrorAttempt(tenantId, items, syncResult) {
+  const mirrorStatus = await buildCatalogInventoryMirrorStatus(tenantId, items);
+  const layers = parseSyncLayersFromResult({ ok: syncResult?.ok, supabaseSync: syncResult });
+  recordCatalogSyncAttempt(tenantId, {
+    result: { ok: syncResult?.ok, supabaseSync: syncResult },
+    layers,
+    status: mirrorStatus.status === "PASS" ? "Synced" : "Sync Failed",
+    catalogItemsCount: mirrorStatus.catalogCount,
+    mirroredProductsCount: mirrorStatus.productsCount,
+    mirroredInventoryCount: mirrorStatus.inventoryCount,
+    action: "mirror",
+  });
+  return mirrorStatus;
+}
+
+/** Re-run product + inventory mirror for all assigned catalog SKUs (idempotent). */
+export async function resyncDistributorCatalogMirror(distributorTenantId, options = {}) {
+  const id = str(distributorTenantId);
+  if (!id) return { ok: false, error: "Missing distributor tenant id" };
+
+  const row = await resolveDistributorRow(id, options.distributorRow);
+  if (!row) return { ok: false, error: "Distributor not found" };
+
+  const items = readDistributorCatalogItems(row.config || {});
+  if (!items.length) {
+    return { ok: false, error: "No assigned catalog items to mirror", items: [] };
+  }
+
+  const sync = await syncDistributorCatalogToSupabase(id, items);
+  const catalogInventoryMirrorStatus = await recordMirrorAttempt(id, items, sync);
+
+  return {
+    ok: sync.ok && catalogInventoryMirrorStatus.status === "PASS",
+    items,
+    supabaseSync: sync,
+    catalogInventoryMirrorStatus,
+    row: getRegistryTenant(id),
+    error: sync.ok ? null : sync.inventoryError || sync.productError || "Catalog mirror incomplete",
   };
 }
 
@@ -318,10 +387,13 @@ export async function assignMasterProductsToDistributor(
   }
 
   const sync = await syncDistributorCatalogToSupabase(id, items);
+  const catalogInventoryMirrorStatus = await recordMirrorAttempt(id, items, sync);
   const localOk = isCatalogAssigned(config);
+  const metadataOk = metadataResult.skipped || metadataResult.ok;
+  const mirrorOk = sync.ok && catalogInventoryMirrorStatus.status === "PASS";
 
   return {
-    ok: localOk && (metadataResult.skipped || metadataResult.ok),
+    ok: localOk && metadataOk && mirrorOk,
     assignedCount: catalogAssignedCount(config),
     items,
     config,
@@ -330,8 +402,17 @@ export async function assignMasterProductsToDistributor(
     supabaseSkipped: metadataResult.skipped === true,
     supabaseVerify: metadataResult.verify || null,
     supabaseSync: sync,
+    catalogInventoryMirrorStatus,
     row: getRegistryTenant(id),
-    error: localOk ? null : "Catalog assignment incomplete",
+    error: !localOk
+      ? "Catalog assignment incomplete"
+      : !metadataOk
+        ? metadataResult.error || "Catalog metadata not persisted"
+        : !mirrorOk
+          ? sync.inventoryError ||
+            sync.productError ||
+            "Product/inventory mirror incomplete — check Supabase RLS"
+          : null,
   };
 }
 
@@ -356,15 +437,23 @@ export async function updateDistributorCatalogItem(
 
   const savedItems = items.filter((i) => str(i.productId) === str(productId));
   const supabaseSync = await syncDistributorCatalogToSupabase(id, savedItems);
+  const catalogInventoryMirrorStatus = await recordMirrorAttempt(id, items, supabaseSync);
+  const mirrorOk = supabaseSync.ok && catalogInventoryMirrorStatus.status === "PASS";
 
   return {
-    ok: true,
+    ok: mirrorOk,
     items,
     config,
     savedItem: savedItems[0] || null,
     supabasePersisted: metadataResult.supabasePersisted === true,
     supabaseSync,
+    catalogInventoryMirrorStatus,
     row: getRegistryTenant(id),
+    error: mirrorOk
+      ? null
+      : supabaseSync.inventoryError ||
+        supabaseSync.productError ||
+        "Product/inventory mirror incomplete",
   };
 }
 

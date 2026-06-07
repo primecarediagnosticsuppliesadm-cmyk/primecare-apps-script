@@ -4,6 +4,7 @@ import { polishPredatorEntries } from "@/predator/predatorEntryPolish.js";
 import { ROLES } from "@/config/roles.js";
 import {
   buildRevenueFunnelModel,
+  evaluateCatalogInventoryAlignment,
   evaluateCommercialPathComplete,
   evaluateContractQualificationAlignment,
   evaluateInventoryAlignment,
@@ -113,9 +114,47 @@ export async function validateRevenueFunnelModule({
     const qualificationAlignmentPass = alignment.aligned === true;
     const contractQualGaps = alignment.contractQualificationGaps || [];
 
+    const catalogInventoryAlignment = evaluateCatalogInventoryAlignment(focus);
+    const catalogInventoryAlignmentPass = catalogInventoryAlignment.aligned === true;
     const inventoryAlignment = evaluateInventoryAlignment(focus);
     const inventoryAlignmentPass = inventoryAlignment.aligned === true;
     const inventoryReady = focus?.inventory?.ready === true;
+
+    entries.push(
+      createPredatorEntry({
+        status: catalogInventoryAlignmentPass ? "PASS" : "FAIL",
+        module: "Revenue Funnel",
+        step: "commercial_path_complete.catalog_inventory_alignment",
+        expected: "Assigned catalog items have product and inventory rows in Supabase",
+        actual: catalogInventoryAlignmentPass
+          ? {
+              distributorId: catalogInventoryAlignment.distributorId,
+              distributorName: catalogInventoryAlignment.distributorName,
+              catalogItemCount: catalogInventoryAlignment.catalogItemCount,
+              productsCount: catalogInventoryAlignment.productsCount,
+              inventoryItemCount: catalogInventoryAlignment.inventoryItemCount,
+              mirrorStatus: catalogInventoryAlignment.mirrorStatus,
+            }
+          : {
+              distributorId: catalogInventoryAlignment.distributorId,
+              distributorName: catalogInventoryAlignment.distributorName,
+              catalogItemCount: catalogInventoryAlignment.catalogItemCount,
+              productsCount: catalogInventoryAlignment.productsCount,
+              inventoryItemCount: catalogInventoryAlignment.inventoryItemCount,
+              failures: catalogInventoryAlignment.skuFailures,
+              mirrorStatus: catalogInventoryAlignment.mirrorStatus,
+              rootCause: catalogInventoryAlignment.rootCause,
+            },
+        rootCauseGuess: catalogInventoryAlignmentPass
+          ? "Catalog SKUs mirrored to products and inventory tables"
+          : "Catalog assigned but product or inventory mirror rows missing in Supabase",
+        severity: catalogInventoryAlignmentPass ? "low" : "critical",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
     entries.push(
       createPredatorEntry({
         status: inventoryAlignmentPass ? "PASS" : "FAIL",

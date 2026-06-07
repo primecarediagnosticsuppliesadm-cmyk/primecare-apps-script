@@ -147,11 +147,25 @@ function buildDistributorInventoryReadiness(
 
   const totalStockUnits = scoped.reduce((sum, row) => sum + inventoryStock(row), 0);
   const availableStockUnits = totalStockUnits;
+  const mirrorDiagnostics = catalogMirrorRow?.catalogInventoryMirrorStatus || null;
   const mirroredInventoryCount =
-    catalogMirrorRow?.mirroredInventoryCount ?? catalogMirrorRow?.probe?.inventoryCount ?? null;
+    mirrorDiagnostics?.inventoryCount ??
+    catalogMirrorRow?.mirroredInventoryCount ??
+    catalogMirrorRow?.probe?.inventoryCount ??
+    null;
   const mirroredProductsCount =
-    catalogMirrorRow?.mirroredProductsCount ?? catalogMirrorRow?.probe?.productsCount ?? null;
-  const mirrorStatus = catalogMirrorRow?.status || null;
+    mirrorDiagnostics?.productsCount ??
+    catalogMirrorRow?.mirroredProductsCount ??
+    catalogMirrorRow?.probe?.productsCount ??
+    null;
+  const mirrorStatus = mirrorDiagnostics?.status || catalogMirrorRow?.status || null;
+  const missingProductRows = mirrorDiagnostics?.missingProducts || [];
+  const missingInventoryRows = mirrorDiagnostics?.missingInventory || missingItems;
+  const catalogInventoryAligned =
+    !catalogAssigned ||
+    (mirrorDiagnostics?.status === "PASS" &&
+      missingProductRows.length === 0 &&
+      missingInventoryRows.length === 0);
 
   const recommendation = resolveInventoryRecommendation({
     catalogAssigned,
@@ -187,10 +201,16 @@ function buildDistributorInventoryReadiness(
     availableStockUnits,
     catalogAssigned,
     catalogItemCount: catalogItems.length,
+    productsCount: mirroredProductsCount ?? 0,
     mirroredInventoryCount,
     mirroredProductsCount,
     mirrorStatus,
+    catalogInventoryMirrorStatus: mirrorDiagnostics?.status || (catalogAssigned ? "FAIL" : "PASS"),
     missingItems,
+    missingProductRows,
+    missingInventoryRows,
+    skuFailures: mirrorDiagnostics?.skuFailures || [],
+    catalogInventoryAligned,
     aligned,
     rootCause: recommendation.rootCause,
     recommendedAction: recommendation.recommendedAction,
@@ -430,9 +450,15 @@ function buildFirstRevenueBlockers(ctx, inventory) {
       rootCause: inventory.rootCause || null,
       inventorySnapshot: {
         catalogAssigned: inventory.catalogItemCount,
+        products: inventory.productsCount,
         inventoryRows: inventory.inventoryRowCount,
         itemsInStock: inventory.inStockCount,
         totalStockUnits: inventory.totalStockUnits,
+        mirrorStatus: inventory.catalogInventoryMirrorStatus,
+        missingSkus: [
+          ...(inventory.missingProductRows || []).map((row) => row.productId),
+          ...(inventory.missingInventoryRows || []).map((row) => row.productId),
+        ],
       },
     });
   }
@@ -613,9 +639,11 @@ function buildDistributorFunnelRow(distributor, context) {
       inventoryReadiness: inventory.status,
       inventoryDetail: inventory.detail,
       catalogAssigned: inventory.catalogItemCount,
+      productsCount: inventory.productsCount,
       inventoryRows: inventory.inventoryRowCount,
       itemsInStock: inventory.inStockCount,
       totalStockUnits: inventory.totalStockUnits,
+      catalogInventoryMirrorStatus: inventory.catalogInventoryMirrorStatus,
       inventoryRootCause: inventory.rootCause,
       inventoryRecommendedAction: inventory.recommendedAction,
       readyToOrderReason: inventory.readyToOrderReason,
@@ -714,6 +742,54 @@ export function evaluateCommercialPathComplete(funnelRow = null) {
     blockers: funnelRow.blockers || [],
     distributorId: funnelRow.distributorId,
     name: funnelRow.name,
+  };
+}
+
+export function evaluateCatalogInventoryAlignment(funnelRow = null) {
+  if (!funnelRow) {
+    return {
+      aligned: false,
+      catalogItemCount: 0,
+      productsCount: 0,
+      inventoryItemCount: 0,
+      skuFailures: [],
+      distributorId: null,
+      distributorName: null,
+    };
+  }
+  const inv = funnelRow.inventory || {};
+  const catalogItemCount = inv.catalogItemCount || 0;
+  const productsCount = inv.mirroredProductsCount ?? inv.productsCount ?? 0;
+  const inventoryItemCount = inv.mirroredInventoryCount ?? inv.inventoryRowCount ?? inv.skuCount ?? 0;
+  const catalogAssigned = inv.catalogAssigned === true || catalogItemCount > 0;
+  const skuFailures = inv.skuFailures?.length
+    ? inv.skuFailures
+    : [
+        ...(inv.missingProductRows || []).map((row) => ({
+          sku: row.productId,
+          productName: row.productName,
+          reason: "missing_product_row",
+        })),
+        ...(inv.missingInventoryRows || []).map((row) => ({
+          sku: row.productId,
+          productName: row.productName,
+          reason: "missing_inventory_row",
+        })),
+      ];
+  const aligned =
+    !catalogAssigned ||
+    (inv.catalogInventoryMirrorStatus === "PASS" && skuFailures.length === 0);
+
+  return {
+    aligned,
+    catalogItemCount,
+    productsCount,
+    inventoryItemCount,
+    skuFailures,
+    mirrorStatus: inv.catalogInventoryMirrorStatus || null,
+    distributorId: funnelRow.distributorId,
+    distributorName: funnelRow.name,
+    rootCause: inv.rootCause || null,
   };
 }
 

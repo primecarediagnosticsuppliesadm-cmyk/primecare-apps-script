@@ -84,6 +84,90 @@ export function loadLastCatalogSyncAttempt(tenantId) {
   return readAllSyncAttempts()[id] || null;
 }
 
+function catalogSkuRow(item = {}) {
+  return {
+    productId: str(item.productId),
+    productName: str(item.productName) || str(item.productId),
+  };
+}
+
+/**
+ * Per-SKU catalog → products → inventory mirror diagnostics.
+ * @param {string} tenantId
+ * @param {object[]} [assignedItems]
+ */
+export async function buildCatalogInventoryMirrorStatus(tenantId, assignedItems = []) {
+  const id = str(tenantId);
+  const items = (assignedItems || []).map(catalogSkuRow).filter((row) => row.productId);
+  const catalogCount = items.length;
+  const empty = {
+    status: catalogCount > 0 ? "FAIL" : "PASS",
+    catalogCount,
+    productsCount: 0,
+    inventoryCount: 0,
+    missingProducts: items,
+    missingInventory: items,
+    skuFailures: items.map((row) => ({
+      sku: row.productId,
+      productName: row.productName,
+      reason: "missing_product_and_inventory",
+    })),
+    readError: null,
+  };
+
+  if (!id || !catalogCount) return empty;
+  if (!supabase) {
+    return { ...empty, readError: "Supabase not configured", skipped: true };
+  }
+
+  const productIds = items.map((row) => row.productId);
+  try {
+    const [prodRes, invRes] = await Promise.all([
+      supabase.from("products").select("product_id").eq("tenant_id", id).in("product_id", productIds),
+      supabase.from("inventory").select("product_id").eq("tenant_id", id).in("product_id", productIds),
+    ]);
+
+    const readError = prodRes.error?.message || invRes.error?.message || null;
+    const productSet = new Set((prodRes.data || []).map((row) => str(row.product_id)));
+    const inventorySet = new Set((invRes.data || []).map((row) => str(row.product_id)));
+
+    const missingProducts = items.filter((row) => !productSet.has(row.productId));
+    const missingInventory = items.filter(
+      (row) => productSet.has(row.productId) && !inventorySet.has(row.productId)
+    );
+    const skuFailures = [
+      ...missingProducts.map((row) => ({
+        sku: row.productId,
+        productName: row.productName,
+        reason: "missing_product_row",
+      })),
+      ...missingInventory.map((row) => ({
+        sku: row.productId,
+        productName: row.productName,
+        reason: "missing_inventory_row",
+      })),
+    ];
+
+    const aligned = missingProducts.length === 0 && missingInventory.length === 0;
+    return {
+      status: aligned ? "PASS" : "FAIL",
+      catalogCount,
+      productsCount: productSet.size,
+      inventoryCount: inventorySet.size,
+      missingProducts,
+      missingInventory,
+      skuFailures,
+      readError,
+      probeAt: new Date().toISOString(),
+    };
+  } catch (err) {
+    return {
+      ...empty,
+      readError: err?.message || "Mirror status probe failed",
+    };
+  }
+}
+
 /**
  * Read-only probe of mirrored row counts (RLS may hide distributor rows).
  * @param {string} tenantId
@@ -195,7 +279,10 @@ export async function buildPortfolioCatalogMirrorSummary(distributors = []) {
     const id = str(distributor.id);
     const items = readDistributorCatalogItems(distributor.config || {});
     if (!items.length) continue;
-    const diagnostics = await loadCatalogMirrorDiagnostics(id, items);
+    const [diagnostics, catalogInventoryMirrorStatus] = await Promise.all([
+      loadCatalogMirrorDiagnostics(id, items),
+      buildCatalogInventoryMirrorStatus(id, items),
+    ]);
     rows.push({
       distributorId: id,
       name: distributor.name || id,
@@ -205,6 +292,7 @@ export async function buildPortfolioCatalogMirrorSummary(distributors = []) {
       mirroredProductsCount: diagnostics.mirroredProductsCount,
       mirroredInventoryCount: diagnostics.mirroredInventoryCount,
       lastSyncAttemptAt: diagnostics.lastSyncAttemptAt,
+      catalogInventoryMirrorStatus,
     });
   }
 

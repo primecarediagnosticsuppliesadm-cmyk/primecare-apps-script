@@ -11,6 +11,7 @@ import {
 import {
   assignMasterProductsToDistributor,
   loadDistributorCatalogBundle,
+  resyncDistributorCatalogMirror,
   unassignDistributorCatalogProduct,
   updateDistributorCatalogItem,
 } from "@/catalog/distributorCatalogData.js";
@@ -163,6 +164,38 @@ export default function DistributorCatalogPage({
     void load({ showLoading: true, syncParent: true });
   }, [load]);
 
+  async function handleResyncMirror() {
+    setBusy(true);
+    setMsg("");
+    try {
+      const result = await resyncDistributorCatalogMirror(tenantId, {
+        distributorRow: distributorRowRef.current,
+      });
+      if (!result.ok) {
+        setMsgTone("error");
+        setMsg(result.error || "Inventory mirror sync failed");
+        return;
+      }
+      setMsgTone("success");
+      setMsg(
+        `Mirrored ${result.catalogInventoryMirrorStatus?.productsCount ?? 0} product(s) and ${result.catalogInventoryMirrorStatus?.inventoryCount ?? 0} inventory row(s) to Supabase`
+      );
+      await applySaveMirrorFeedback({
+        result: { ok: true, items: result.items, supabaseSync: result.supabaseSync },
+        productId: result.items?.[0]?.productId || null,
+        productLabel: "Catalog mirror resync",
+        catalogItemsCount: result.items?.length ?? 0,
+        action: "resync_mirror",
+      });
+      await onCatalogChanged?.(result);
+    } catch (err) {
+      setMsgTone("error");
+      setMsg(err?.message || "Mirror resync failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleAssign(productId = null) {
     setBusy(true);
     setMsg("");
@@ -200,6 +233,15 @@ export default function DistributorCatalogPage({
           (p) => !(result.items || []).some((i) => i.productId === p.productId)
         ),
       }));
+      await applySaveMirrorFeedback({
+        result,
+        productId: productId || result.items?.[0]?.productId || null,
+        productLabel: productId
+          ? str(productId)
+          : `All ${result.assignedCount ?? 0} catalog products`,
+        catalogItemsCount: result.assignedCount ?? result.items?.length ?? 0,
+        action: productId ? "assign_one" : "assign_all",
+      });
       await onCatalogChanged?.(result);
     } catch (err) {
       setMsg(err?.message || "Assignment failed");
@@ -391,6 +433,15 @@ export default function DistributorCatalogPage({
             onClick={() => void load({ showLoading: false })}
           >
             <RefreshCw className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy || !(bundle?.assignedCount > 0)}
+            onClick={() => void handleResyncMirror()}
+          >
+            <RefreshCw className="h-3.5 w-3.5" /> Sync inventory mirror
           </Button>
           <Button type="button" size="sm" disabled={busy} onClick={() => void handleAssign()}>
             <Plus className="h-3.5 w-3.5" /> Assign all HQ products

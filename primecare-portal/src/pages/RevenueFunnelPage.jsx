@@ -239,10 +239,27 @@ export default function RevenueFunnelPage({ currentUser = null, setActivePage = 
           </Section>
 
           <Section title={`${focus.name} — commercial checkpoints`} icon={BarChart3}>
-            <div className="mb-2 grid grid-cols-2 gap-2 rounded-lg border bg-white p-2 shadow-sm sm:grid-cols-4">
+            <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border bg-white p-2 shadow-sm">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                Mirror status
+              </p>
+              <StatusBadge
+                variant={
+                  focus.inventory?.catalogInventoryMirrorStatus === "PASS" ? "success" : "danger"
+                }
+                compact
+              >
+                {focus.inventory?.catalogInventoryMirrorStatus || "FAIL"}
+              </StatusBadge>
+            </div>
+            <div className="mb-2 grid grid-cols-2 gap-2 rounded-lg border bg-white p-2 shadow-sm sm:grid-cols-5">
               <MetricTile
                 label="Catalog assigned"
                 value={String(focus.detail.catalogAssigned ?? focus.inventory?.catalogItemCount ?? 0)}
+              />
+              <MetricTile
+                label="Products"
+                value={String(focus.detail.productsCount ?? focus.inventory?.productsCount ?? 0)}
               />
               <MetricTile
                 label="Inventory rows"
@@ -311,12 +328,18 @@ export default function RevenueFunnelPage({ currentUser = null, setActivePage = 
                       </ul>
                     ) : null}
                     {b.inventorySnapshot ? (
-                      <p className="mt-1 text-[10px] text-slate-600">
-                        Catalog {b.inventorySnapshot.catalogAssigned} · Rows{" "}
-                        {b.inventorySnapshot.inventoryRows} · In stock{" "}
-                        {b.inventorySnapshot.itemsInStock} · Units{" "}
-                        {b.inventorySnapshot.totalStockUnits}
-                      </p>
+                      <div className="mt-1 space-y-0.5 text-[10px] text-slate-600">
+                        <p>
+                          Mirror status: {b.inventorySnapshot.mirrorStatus || "FAIL"} · Catalog{" "}
+                          {b.inventorySnapshot.catalogAssigned} · Products{" "}
+                          {b.inventorySnapshot.products} · Inventory rows{" "}
+                          {b.inventorySnapshot.inventoryRows} · In stock{" "}
+                          {b.inventorySnapshot.itemsInStock}
+                        </p>
+                        {b.inventorySnapshot.missingSkus?.length ? (
+                          <p>Missing: {b.inventorySnapshot.missingSkus.join(", ")}</p>
+                        ) : null}
+                      </div>
                     ) : null}
                     {b.action ? (
                       <div className="mt-1 flex flex-wrap items-center gap-2">
