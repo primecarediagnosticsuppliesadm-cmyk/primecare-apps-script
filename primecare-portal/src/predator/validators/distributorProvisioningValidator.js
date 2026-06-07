@@ -211,6 +211,47 @@ export async function validateDistributorProvisioningModule({
       labCountsAvailable &&
       ((supabaseLabCount >= 1 && labGateTarget?.status === "PASS") ||
         (supabaseLabCount < 1 && labGateTarget?.status !== "PASS"));
+    const scopedIsolationAvailable = bundle.scopedIsolationAvailable === true;
+    const liveScopedIsolation = scopedIsolationAvailable
+      ? bundle.scopedIsolationByDistributor?.[launchTargetId || model.distributorId]
+      : null;
+    const isolationGateTarget = (launchModel || model)?.checks?.find(
+      (c) => c.id === "isolation_verified"
+    );
+    const isolationGateMatchesLiveScope =
+      scopedIsolationAvailable &&
+      (liveScopedIsolation?.pass === false
+        ? isolationGateTarget?.status === "FAIL"
+        : isolationGateTarget?.status === "PASS");
+    entries.push(
+      createPredatorEntry({
+        status: !scopedIsolationAvailable
+          ? "WARN"
+          : isolationGateMatchesLiveScope
+            ? "PASS"
+            : "FAIL",
+        module: "Distributor Provisioning",
+        step: "provisioning.isolation_gate_matches_live_scope",
+        expected:
+          "isolation_verified FAIL when scoped HQ leakage detected; PASS when live scope clean",
+        actual: {
+          distributorId: launchTargetId || model.distributorId,
+          liveScopedPass: liveScopedIsolation?.pass,
+          leakCount: liveScopedIsolation?.leakCount ?? null,
+          gateStatus: isolationGateTarget?.status,
+          gateDetail: isolationGateTarget?.detail,
+          isolationSource: isolationGateTarget?.isolationSource,
+          scopedIsolationAvailable,
+        },
+        suggestedFix: isolationGateMatchesLiveScope
+          ? undefined
+          : "Refresh provisioning bundle; resolve HQ rows in scoped labs/orders/collections",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
     entries.push(
       createPredatorEntry({
         status: !labCountsAvailable ? "WARN" : labGateMatchesSupabase ? "PASS" : "FAIL",

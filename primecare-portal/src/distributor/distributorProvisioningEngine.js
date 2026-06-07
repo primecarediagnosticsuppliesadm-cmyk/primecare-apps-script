@@ -93,6 +93,61 @@ function toCheckStatus(pass, required, pending = false) {
   return required ? "FAIL" : "WARN";
 }
 
+function resolvePersistedIsolationPass(ctx) {
+  return ctx.isolationChecks?.length > 0
+    ? isolationChecksPass(ctx.isolationChecks)
+    : ctx.lastIsolationPass === true;
+}
+
+/**
+ * Launch isolation gate — live scoped leakage overrides acknowledgement when failing.
+ */
+export function resolveIsolationVerifiedGate(ctx, config = {}, isDb = false) {
+  const scopedAvailable = ctx.scopedIsolationAvailable === true;
+  const scoped = ctx.scopedIsolation;
+  const hasLiveLeakage = scopedAvailable && scoped && scoped.pass === false;
+
+  if (hasLiveLeakage) {
+    return {
+      pass: false,
+      detail: "Run Verify isolation or resolve scoped data leakage",
+      source: "live_fail",
+    };
+  }
+
+  if (scopedAvailable && scoped?.pass) {
+    return {
+      pass: true,
+      detail: "Live scoped isolation verified",
+      source: "live",
+    };
+  }
+
+  if (isDb && resolvePersistedIsolationPass(ctx)) {
+    return {
+      pass: true,
+      detail: "Tenant separation and RLS validated",
+      source: "persisted",
+    };
+  }
+
+  if (config.isolationAcknowledged === true) {
+    return {
+      pass: true,
+      detail: "Isolation acknowledged",
+      source: "ack",
+    };
+  }
+
+  return {
+    pass: false,
+    detail: isDb
+      ? "Run Verify isolation or resolve scoped data leakage"
+      : "Acknowledge data isolation after saving distributor",
+    source: null,
+  };
+}
+
 /**
  * @param {object} ctx
  */
@@ -108,10 +163,7 @@ export function buildProvisioningChecks(ctx) {
     lastSyncError: ctx.lastSyncError,
   });
   const isDurable = persistenceStatus === PERSISTENCE_STATUS.DURABLE || isDb;
-  const isolationPass =
-    ctx.isolationChecks?.length > 0
-      ? isolationChecksPass(ctx.isolationChecks)
-      : ctx.lastIsolationPass === true;
+  const isolationGate = resolveIsolationVerifiedGate(ctx, config, isDb);
   const supabaseContractCount = num(
     ctx.supabaseContractCount ?? metrics.contracts ?? ctx.contractCount
   );
@@ -168,12 +220,9 @@ export function buildProvisioningChecks(ctx) {
       id: "isolation_verified",
       label: "Data isolation verified",
       required: true,
-      pass: isDb ? isolationPass : config.isolationAcknowledged === true,
-      detail: isDb
-        ? isolationPass
-          ? "Tenant separation and RLS validated"
-          : "Verify tenant isolation on HQ tenant management"
-        : "Acknowledge data isolation after saving distributor",
+      pass: isolationGate.pass,
+      detail: isolationGate.detail,
+      isolationSource: isolationGate.source,
     },
     {
       id: "at_least_one_lab",
@@ -712,6 +761,9 @@ export function buildDistributorProvisioningModel(tenant, ctx = {}) {
     supabaseLabCount: ctx.supabaseLabCount ?? ctx.liveLabCount,
     liveLabCount: ctx.liveLabCount ?? ctx.supabaseLabCount,
     labCountsAvailable: ctx.labCountsAvailable,
+    scopedIsolationAvailable: ctx.scopedIsolationAvailable,
+    scopedIsolation: ctx.scopedIsolation,
+    liveScopedIsolationPass: ctx.liveScopedIsolationPass,
   });
 
   const readinessPct = computeReadinessPercent(checks);

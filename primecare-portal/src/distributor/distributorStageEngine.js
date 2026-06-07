@@ -4,6 +4,7 @@
 
 import { isCatalogAssigned } from "@/catalog/distributorCatalogEngine.js";
 import { buildProvisioningChecks } from "@/distributor/distributorProvisioningEngine.js";
+import { evaluateScopedIsolationForDistributor } from "@/distributor/distributorOsEngine.js";
 import {
   LIFECYCLE_STATUS,
   resolveDistributorLifecycleStatus,
@@ -51,6 +52,19 @@ export function buildDistributorStageChecklist({
     Boolean(catalogBundle?.catalogAssigned) ||
     num(catalogBundle?.assignedCount) > 0;
 
+  const scopedIsolationAvailable = Boolean(snapshot);
+  const scopedIsolation = scopedIsolationAvailable
+    ? evaluateScopedIsolationForDistributor(
+        distributorRow?.id,
+        snapshot?.homeTenantId,
+        {
+          labs: snapshot?.labs || [],
+          orders: snapshot?.orders || [],
+          collections: snapshot?.collections || [],
+        }
+      )
+    : null;
+
   const checks = buildProvisioningChecks({
     config,
     metrics: { ...metrics, contracts: contractCount },
@@ -67,12 +81,13 @@ export function buildDistributorStageChecklist({
     supabaseLabCount: labsFromSnapshot,
     liveLabCount: labsFromSnapshot,
     labCountsAvailable,
+    scopedIsolationAvailable,
+    scopedIsolation,
+    liveScopedIsolationPass: scopedIsolation?.pass === true,
   });
 
   const checkById = (id) => checks.find((c) => c.id === id);
-  const isolationPass =
-    checkById("isolation_verified")?.status === "PASS" ||
-    config.isolationAcknowledged === true;
+  const isolationPass = checkById("isolation_verified")?.status === "PASS";
   const firstLabPass = checkById("at_least_one_lab")?.status === "PASS";
   const contractPass = checkById("contract_configured")?.status === "PASS";
 

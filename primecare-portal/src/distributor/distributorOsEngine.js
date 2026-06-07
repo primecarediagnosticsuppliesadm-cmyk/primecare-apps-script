@@ -104,6 +104,56 @@ export function detectHqLeakage(rows, distributorTenantId, homeTenantId) {
   };
 }
 
+/**
+ * Live scoped isolation — same leakage model as Pilot Readiness Foundation gate.
+ */
+export function evaluateScopedIsolationForDistributor(
+  distributorTenantId,
+  homeTenantId,
+  { labs = [], orders = [], collections = [] } = {}
+) {
+  const distributorId = str(distributorTenantId);
+  const homeId = str(homeTenantId);
+  if (!distributorId || !homeId || distributorId === homeId) {
+    return { pass: true, leakCount: 0, labLeak: 0, orderLeak: 0, collLeak: 0 };
+  }
+
+  const scopedLabs = filterRowsByTenant(labs, distributorId);
+  const scopedOrders = filterRowsByTenant(orders, distributorId);
+  const scopedCollections = filterRowsByTenant(collections, distributorId);
+  const labLeak = detectHqLeakage(scopedLabs, distributorId, homeId);
+  const orderLeak = detectHqLeakage(scopedOrders, distributorId, homeId);
+  const collLeak = detectHqLeakage(scopedCollections, distributorId, homeId);
+  const leakCount = labLeak.homeCount + orderLeak.homeCount + collLeak.homeCount;
+
+  return {
+    pass: leakCount === 0,
+    leakCount,
+    labLeak: labLeak.homeCount,
+    orderLeak: orderLeak.homeCount,
+    collLeak: collLeak.homeCount,
+  };
+}
+
+/** @returns {Record<string, ReturnType<typeof evaluateScopedIsolationForDistributor>>} */
+export function buildScopedIsolationByDistributor(
+  distributorIds = [],
+  homeTenantId,
+  opsRows = {}
+) {
+  const map = {};
+  for (const id of distributorIds) {
+    const distributorId = str(id);
+    if (!distributorId) continue;
+    map[distributorId] = evaluateScopedIsolationForDistributor(
+      distributorId,
+      homeTenantId,
+      opsRows
+    );
+  }
+  return map;
+}
+
 export function filterDistributorRegistry(registry, homeTenantId) {
   const home = str(homeTenantId);
   return (Array.isArray(registry) ? registry : []).filter(

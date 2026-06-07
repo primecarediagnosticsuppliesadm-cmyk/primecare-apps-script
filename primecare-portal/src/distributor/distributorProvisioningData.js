@@ -30,7 +30,12 @@ import {
   TIMELINE_LABELS,
 } from "@/distributor/distributorProvisioningEngine.js";
 import { mapTenantToDistributorRegistryRow } from "@/distributor/distributorWorkspaceEngine.js";
-import { getLabsCredit } from "@/api/primecareSupabaseApi.js";
+import {
+  getCollectionsRead,
+  getLabsCredit,
+  getOrdersRead,
+} from "@/api/primecareSupabaseApi.js";
+import { buildScopedIsolationByDistributor } from "@/distributor/distributorOsEngine.js";
 import { countNonTerminatedContractsForDistributor } from "@/api/labContractsSupabaseApi.js";
 import {
   ensureLabContractsMigrated,
@@ -130,13 +135,31 @@ export async function loadProvisioningBundle(currentUser, options = {}) {
 
   const distributors = allRows.map(mapTenantToDistributorRegistryRow);
   const dbFetch = await fetchDurableTenants();
-  const [contractCounts, labsRes] = await Promise.all([
+  const [contractCounts, labsRes, ordersRes, collRes] = await Promise.all([
     loadNonTerminatedContractCounts(allRows.map((t) => t.id), homeTenantId),
     getLabsCredit().catch(() => ({ success: false, data: [] })),
+    getOrdersRead().catch(() => ({ success: false, data: { orders: [] } })),
+    getCollectionsRead().catch(() => ({ success: false, data: { collections: [] } })),
   ]);
   const labCountsAvailable = labsRes?.success !== false;
   const labCountsByDistributor = labCountsAvailable
     ? buildLabCountsByDistributor(Array.isArray(labsRes?.data) ? labsRes.data : [])
+    : null;
+  const scopedIsolationAvailable =
+    labsRes?.success !== false &&
+    ordersRes?.success !== false &&
+    collRes?.success !== false;
+  const scopedOpsRows = {
+    labs: Array.isArray(labsRes?.data) ? labsRes.data : [],
+    orders: Array.isArray(ordersRes?.data?.orders) ? ordersRes.data.orders : [],
+    collections: Array.isArray(collRes?.data?.collections) ? collRes.data.collections : [],
+  };
+  const scopedIsolationByDistributor = scopedIsolationAvailable
+    ? buildScopedIsolationByDistributor(
+        allRows.map((t) => t.id).filter((id) => str(id) && str(id) !== homeTenantId),
+        homeTenantId,
+        scopedOpsRows
+      )
     : null;
 
   return {
@@ -158,6 +181,8 @@ export async function loadProvisioningBundle(currentUser, options = {}) {
     contractCounts,
     labCountsByDistributor,
     labCountsAvailable,
+    scopedIsolationByDistributor,
+    scopedIsolationAvailable,
   };
 }
 
@@ -292,6 +317,10 @@ export function resolveProvisioningModel(bundle, distributorId) {
   const supabaseLabCount = labCountsAvailable
     ? num(bundle.labCountsByDistributor?.[id])
     : undefined;
+  const scopedIsolationAvailable = bundle.scopedIsolationAvailable === true;
+  const scopedIsolation = scopedIsolationAvailable
+    ? bundle.scopedIsolationByDistributor?.[id] || null
+    : null;
 
   return buildDistributorProvisioningModel(
     {
@@ -314,6 +343,9 @@ export function resolveProvisioningModel(bundle, distributorId) {
       supabaseLabCount,
       liveLabCount: supabaseLabCount,
       labCountsAvailable,
+      scopedIsolationAvailable,
+      scopedIsolation,
+      liveScopedIsolationPass: scopedIsolation?.pass === true,
     }
   );
 }
@@ -739,6 +771,14 @@ export async function acknowledgeProvisioningTask(tenantId, taskId, options = {}
     config.agentProvisioned = true;
     markProvisioningMilestone(tenantId, "agent_assigned");
   }
+  const isolationPersist =
+    taskId === "verify_isolation"
+      ? {
+          lastIsolationPass: true,
+          lastIsolationAt: now,
+        }
+      : {};
+
   if (taskId === "verify_isolation") {
     config.isolationAcknowledged = true;
     config.isolationVerifiedAt = now;
@@ -751,6 +791,7 @@ export async function acknowledgeProvisioningTask(tenantId, taskId, options = {}
     config,
     provisioning: freshRow.provisioning || provisioning,
     updatedAt: now,
+    ...isolationPersist,
   });
 
   const updated = getRegistryTenant(tenantId);
