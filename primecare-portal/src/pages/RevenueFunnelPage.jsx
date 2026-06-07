@@ -137,9 +137,12 @@ export default function RevenueFunnelPage({ currentUser = null, setActivePage = 
           <StatusBadge variant={integrityVariant(portfolio.qualificationIntegrity)} compact>
             {portfolio.qualificationIntegrity || "Healthy"}
           </StatusBadge>
-          {portfolio.misalignedContractCount > 0 ? (
+          {portfolio.qualificationContractGapCount > 0 ? (
             <p className="text-[10px] text-red-800">
-              {portfolio.misalignedContractCount} active contract(s) missing qualification row
+              Contracts without qualification: {portfolio.qualificationContractGapCount}
+              {portfolio.misalignedContractCount > 0
+                ? ` (${portfolio.misalignedContractCount} missing qualification row)`
+                : ""}
             </p>
           ) : (
             <p className="text-[10px] text-slate-600">All contracts linked to qualifications</p>
@@ -164,6 +167,7 @@ export default function RevenueFunnelPage({ currentUser = null, setActivePage = 
                 <th className="px-2 py-2">Distributor</th>
                 <th className="px-2 py-2">Qualified</th>
                 <th className="px-2 py-2">Contracted</th>
+                <th className="px-2 py-2">Qual gap</th>
                 <th className="px-2 py-2">Ordered</th>
                 <th className="px-2 py-2">Fulfilled</th>
                 <th className="px-2 py-2">AR</th>
@@ -175,7 +179,7 @@ export default function RevenueFunnelPage({ currentUser = null, setActivePage = 
             <tbody>
               {distributors.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-2 py-4 text-center text-slate-500">
+                  <td colSpan={10} className="px-2 py-4 text-center text-slate-500">
                     No distributors in portfolio.
                   </td>
                 </tr>
@@ -197,6 +201,16 @@ export default function RevenueFunnelPage({ currentUser = null, setActivePage = 
                     </td>
                     <td className="px-2 py-2 tabular-nums">{row.summary.qualified}</td>
                     <td className="px-2 py-2 tabular-nums">{row.summary.contracted}</td>
+                    <td
+                      className={cn(
+                        "px-2 py-2 tabular-nums",
+                        (row.qualificationIntegrity?.qualificationContractGapCount || 0) > 0 &&
+                          "font-medium text-red-700"
+                      )}
+                      title="Contracts without qualification"
+                    >
+                      {row.qualificationIntegrity?.qualificationContractGapCount || 0}
+                    </td>
                     <td className="px-2 py-2 tabular-nums">{row.summary.ordersCreated}</td>
                     <td className="px-2 py-2 tabular-nums">{row.summary.ordersFulfilled}</td>
                     <td className="px-2 py-2 tabular-nums">{row.summary.arOutstandingLabel}</td>
@@ -295,6 +309,10 @@ export default function RevenueFunnelPage({ currentUser = null, setActivePage = 
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <MetricTile label="Qualification" value={focus.detail.qualificationStatus} />
               <MetricTile label="Contract" value={focus.detail.contractStatus} />
+              <MetricTile
+                label="Contracts without qualification"
+                value={String(focus.detail.qualificationContractGapCount ?? 0)}
+              />
               <MetricTile
                 label="Inventory status"
                 value={focus.detail.inventoryReadiness}

@@ -246,9 +246,18 @@ function evaluateLabsGate(distributor, metrics, qualifications = []) {
   return { id: GATE_IDS.LABS, label: "Lab Readiness", checks, status: aggregateGateStatus(checks) };
 }
 
-function evaluateContractsGate(distributor, contracts = [], renewalRow = null) {
+function evaluateContractsGate(
+  distributor,
+  contracts = [],
+  renewalRow = null,
+  qualifications = [],
+  metrics = {}
+) {
   const scoped = filterContractsByDistributor(contracts, distributor.id);
   const activeCount = scoped.filter((c) => str(c.status) === CONTRACT_STATUSES.ACTIVE).length;
+  const labIds = collectDistributorLabIds(metrics.labsRows || [], distributor.id);
+  const scopedQuals = qualificationsForDistributor(qualifications, distributor.id, labIds);
+  const qualifiedCount = scopedQuals.filter(isQualifiedLab).length;
   const criticalExpiry = scoped.some(
     (c) =>
       str(c.status) === CONTRACT_STATUSES.ACTIVE &&
@@ -269,6 +278,16 @@ function evaluateContractsGate(distributor, contracts = [], renewalRow = null) {
       renewalRow?.expiringContracts
         ? `${renewalRow.expiringContracts} expiring within 90d`
         : "No expiring contracts"
+    ),
+    makeCheck(
+      "qualification_alignment",
+      "Active contracts backed by qualified labs",
+      activeCount > qualifiedCount ? "WARN" : "PASS",
+      activeCount > qualifiedCount
+        ? `${activeCount} active contract(s) vs ${qualifiedCount} qualified lab(s)`
+        : activeCount
+          ? `${activeCount} active, ${qualifiedCount} qualified`
+          : "No active contracts"
     ),
   ];
   return { id: GATE_IDS.CONTRACTS, label: "Contract Readiness", checks, status: aggregateGateStatus(checks) };
@@ -514,7 +533,13 @@ export function buildPilotReadinessModel(data = {}) {
       evaluateFoundationGate(distributor, { labs, orders, collections, homeTenantId }),
       evaluateCatalogGate(distributor, catalogMirrorSummary),
       evaluateLabsGate(distributor, metrics, qualifications),
-      evaluateContractsGate(distributor, contractModel.contracts || contracts, renewalRow),
+      evaluateContractsGate(
+        distributor,
+        contractModel.contracts || contracts,
+        renewalRow,
+        qualifications,
+        metrics
+      ),
       evaluateBillingGate(distributor, billingRow, metrics),
       evaluateCollectionsGate(metrics, recoveryPct),
       evaluateFinancialGate(fiModel, profitabilityRow),

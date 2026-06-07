@@ -24,6 +24,10 @@ import {
   computeContractReadiness,
   formatContractInr,
 } from "@/labContract/labContractEngine.js";
+import {
+  evaluateContractActivationQualification,
+  CONTRACT_ACTIVATION_QUALIFICATION_MESSAGE,
+} from "@/labContract/labContractQualificationGate.js";
 import { ROLES } from "@/config/roles.js";
 import { labIdKey } from "@/utils/labId.js";
 import { buildContractRenewalIntelligence } from "@/contracts/contractRenewalIntelligenceEngine.js";
@@ -115,10 +119,16 @@ function contractLifecycleSummary(contract = {}) {
   };
 }
 
-function activationBlockerMessages(contract, readiness, distributorScope) {
+function activationBlockerMessages(contract, readiness, distributorScope, qualifications = []) {
   const blockers = [];
   if (distributorScope?.canOperate === false) {
     blockers.push("Distributor inactive");
+  }
+  const qualGate = evaluateContractActivationQualification(contract, qualifications, {
+    distributorId: contract?.distributorId,
+  });
+  if (!qualGate.activationAllowed) {
+    blockers.push(CONTRACT_ACTIVATION_QUALIFICATION_MESSAGE);
   }
   for (const ch of readiness?.checks || []) {
     if (ch.pass) continue;
@@ -276,6 +286,11 @@ export default function LabContractManagementPage({
     return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [bundle, distributorLabs]);
 
+  const qualifications = useMemo(
+    () => bundle?.opsPayload?.qualifications || [],
+    [bundle?.opsPayload?.qualifications]
+  );
+
   const role = String(currentUser?.role || "").toLowerCase();
   const canCreateContract =
     (role === ROLES.EXECUTIVE || role === ROLES.ADMIN) &&
@@ -381,27 +396,45 @@ export default function LabContractManagementPage({
   async function handleActivate() {
     if (!selected) return;
     const readiness = selectedReadinessPreview;
-    const blockers = activationBlockerMessages(selected, readiness, distributorScope);
+    const blockers = activationBlockerMessages(
+      selected,
+      readiness,
+      distributorScope,
+      qualifications
+    );
     if (blockers.length > 0) {
       setActivationBlockers(blockers);
       showToast("error", "Activation blocked — see blockers below");
       setMsg("Activation blocked — complete readiness checklist");
       return;
     }
-    const r = await activateLabContract(bundle.tenantId, selected.id, currentUser);
-    if (r) {
-      setActivationBlockers([]);
-      showToast("success", "Contract activated");
-      setMsg("Contract activated");
-      await refreshAndSelect(r.id);
-    } else {
-      const afterBlockers = activationBlockerMessages(selected, readiness, distributorScope);
-      setActivationBlockers(
-        afterBlockers.length ? afterBlockers : ["Activation failed — readiness or status check did not pass"]
-      );
+    try {
+      const r = await activateLabContract(bundle.tenantId, selected.id, currentUser);
+      if (r) {
+        setActivationBlockers([]);
+        showToast("success", "Contract activated");
+        setMsg("Contract activated");
+        await refreshAndSelect(r.id);
+        return;
+      }
+    } catch (err) {
+      const message = err?.message || CONTRACT_ACTIVATION_QUALIFICATION_MESSAGE;
+      setActivationBlockers([message]);
       showToast("error", "Activation blocked — see blockers below");
-      setMsg("Activation blocked — complete readiness checklist");
+      setMsg(message);
+      return;
     }
+    const afterBlockers = activationBlockerMessages(
+      selected,
+      readiness,
+      distributorScope,
+      qualifications
+    );
+    setActivationBlockers(
+      afterBlockers.length ? afterBlockers : ["Activation failed — readiness or status check did not pass"]
+    );
+    showToast("error", "Activation blocked — see blockers below");
+    setMsg("Activation blocked — complete readiness checklist");
   }
 
   async function handleSuggest() {
@@ -782,7 +815,8 @@ export default function LabContractManagementPage({
                       {activationBlockerMessages(
                         selected,
                         selectedReadinessPreview,
-                        distributorScope
+                        distributorScope,
+                        qualifications
                       ).map((b) => (
                         <li key={b} className="flex items-center gap-2 text-amber-900">
                           <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600" />
@@ -792,7 +826,8 @@ export default function LabContractManagementPage({
                       {activationBlockerMessages(
                         selected,
                         selectedReadinessPreview,
-                        distributorScope
+                        distributorScope,
+                        qualifications
                       ).length === 0 ? (
                         <li className="text-emerald-700">Ready to activate</li>
                       ) : null}

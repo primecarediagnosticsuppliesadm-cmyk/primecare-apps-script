@@ -12,6 +12,7 @@ import {
   countNonTerminatedContractsForDistributor,
   readLabContractMigrationStatus,
 } from "@/api/labContractsSupabaseApi.js";
+import { evaluateContractActivationQualification } from "@/labContract/labContractQualificationGate.js";
 
 const VALID_STATUSES = new Set(Object.values(CONTRACT_STATUSES));
 
@@ -384,6 +385,54 @@ export async function validateLabContractEngineModule({
 
     const renewalIntel = buildContractRenewalIntelligence(model);
     const activeContracts = contracts.filter((c) => c.status === CONTRACT_STATUSES.ACTIVE);
+    const qualifications = bundle.opsPayload?.qualifications || [];
+
+    if (activeContracts.length === 0) {
+      entries.push(
+        createPredatorEntry({
+          status: "WARN",
+          module: "Lab Contract Engine",
+          step: "contract_activation_requires_qualification",
+          actual: "No active contracts to evaluate qualification gate",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    } else {
+      for (const contract of activeContracts) {
+        const probe = evaluateContractActivationQualification(contract, qualifications, {
+          distributorId: contract.distributorId,
+        });
+        entries.push(
+          createPredatorEntry({
+            status: probe.activationAllowed ? "PASS" : "FAIL",
+            module: "Lab Contract Engine",
+            step: "contract_activation_requires_qualification",
+            expected:
+              "Qualification row exists, founder review approved, pipeline stage qualified",
+            actual: {
+              distributor: probe.distributor || contract.distributorName || contract.distributorId,
+              lab: probe.lab || contract.labName || contract.labId,
+              qualificationExists: probe.qualificationExists,
+              qualificationStatus: probe.qualificationStatus,
+              founderApproved: probe.founderApproved,
+              contractStatus: probe.contractStatus,
+              activationAllowed: probe.activationAllowed,
+            },
+            rootCauseGuess: probe.activationAllowed
+              ? "Active contract backed by approved qualification"
+              : probe.blockReason === "missing_qualification_row"
+                ? "Contract activated without qualification record (likely migration or legacy path)"
+                : "Qualification exists but founder approval or qualified stage missing",
+            severity: probe.activationAllowed ? "low" : "critical",
+            tenantId: ctx.tenantId,
+            role: ctx.role,
+            userId: ctx.userId,
+          })
+        );
+      }
+    }
 
     if (activeContracts.length === 0) {
       for (const step of [

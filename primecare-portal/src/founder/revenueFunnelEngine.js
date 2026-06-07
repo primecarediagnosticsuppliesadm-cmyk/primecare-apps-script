@@ -381,12 +381,16 @@ function buildQualificationIntegrity(ctx, distributorId, distributorName) {
     (l) => l.contracted && l.hasQualificationRow && !l.qualified
   );
 
+  const qualificationContractGapCount =
+    misalignedContracts.length + unqualifiedWithContract.length;
+
   let status = "Healthy";
   if (misalignedContracts.length > 0) status = "Broken";
   else if (unqualifiedWithContract.length > 0) status = "Warning";
 
   return {
     status,
+    qualificationContractGapCount,
     misalignedContracts,
     unqualifiedWithContract: unqualifiedWithContract.map((l) => ({
       distributorId,
@@ -628,6 +632,7 @@ function buildDistributorFunnelRow(distributor, context) {
           : qualificationIntegrity.misalignedContracts.length > 0
             ? `${qualificationIntegrity.misalignedContracts.length} contract(s) without qualification row`
             : `${qualificationIntegrity.unqualifiedWithContract.length} contracted lab(s) not yet qualified`,
+      qualificationContractGapCount: qualificationIntegrity.qualificationContractGapCount,
       qualificationStatus:
         ctx.qualifiedCount > 0
           ? `${ctx.qualifiedCount} qualified lab(s)`
@@ -695,6 +700,10 @@ export function buildRevenueFunnelModel({
     qualificationIntegrity: portfolioIntegrityStatus,
     misalignedContractCount: rows.reduce(
       (s, r) => s + (r.qualificationIntegrity?.misalignedContracts?.length || 0),
+      0
+    ),
+    qualificationContractGapCount: rows.reduce(
+      (s, r) => s + (r.qualificationIntegrity?.qualificationContractGapCount || 0),
       0
     ),
     ordered: rows.reduce((s, r) => s + r.summary.ordersCreated, 0),

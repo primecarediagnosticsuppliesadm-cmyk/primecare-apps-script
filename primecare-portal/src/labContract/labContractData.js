@@ -26,6 +26,12 @@ import {
   validateContractDates,
   computeContractReadiness,
 } from "@/labContract/labContractEngine.js";
+import {
+  assertContractActivationAllowed,
+  CONTRACT_ACTIVATION_QUALIFICATION_MESSAGE,
+} from "@/labContract/labContractQualificationGate.js";
+
+export { CONTRACT_ACTIVATION_QUALIFICATION_MESSAGE };
 
 function str(v) {
   return String(v ?? "").trim();
@@ -161,7 +167,19 @@ async function resolveLabContract(contractId) {
   return res.ok ? res.contract : null;
 }
 
-async function persistLabContract(contract) {
+function qualificationsFromBundle() {
+  return cachedBundle?.opsPayload?.qualifications || [];
+}
+
+function enforceActivationQualification(contract, tenantId) {
+  if (str(contract.status) !== CONTRACT_STATUSES.ACTIVE) return;
+  assertContractActivationAllowed(contract, qualificationsFromBundle(), {
+    distributorId: str(tenantId || contract.distributorId),
+  });
+}
+
+async function persistLabContract(contract, tenantId = "") {
+  enforceActivationQualification(contract, tenantId || contract.distributorId);
   if (!supabase) {
     throw new Error("Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
   }
@@ -240,6 +258,15 @@ export async function transitionLabContract(
 
   if (!validateContractDates(contract)) return null;
 
+  if (
+    nextStatus === CONTRACT_STATUSES.ACTIVE &&
+    str(contract.status) !== CONTRACT_STATUSES.ACTIVE
+  ) {
+    assertContractActivationAllowed(contract, qualificationsFromBundle(), {
+      distributorId: str(tenantId || contract.distributorId),
+    });
+  }
+
   const actor = str(currentUser?.name || currentUser?.email);
   let updated = { ...contract, status: nextStatus };
 
@@ -255,7 +282,7 @@ export async function transitionLabContract(
     updated = appendTimeline(updated, eventType, actor, note);
   }
 
-  const saved = await persistLabContract(updated);
+  const saved = await persistLabContract(updated, tenantId);
   void emitContractEvent(tenantId, saved, eventType || nextStatus, currentUser, note);
   return saved;
 }
@@ -270,7 +297,7 @@ export async function submitLabContractForReview(tenantId, contractId, currentUs
     actor,
     "Submitted for review"
   );
-  const saved = await persistLabContract(updated);
+  const saved = await persistLabContract(updated, tenantId);
   void emitContractEvent(tenantId, saved, "submitted", currentUser, "Submitted");
   return saved;
 }
@@ -280,7 +307,7 @@ export async function approveLabContract(tenantId, contractId, currentUser) {
   if (!contract || contract.status !== CONTRACT_STATUSES.UNDER_REVIEW) return null;
   const actor = str(currentUser?.name || currentUser?.email);
   const updated = appendTimeline(contract, "approved", actor, "Executive approval");
-  const saved = await persistLabContract(updated);
+  const saved = await persistLabContract(updated, tenantId);
   void emitContractEvent(tenantId, saved, "approved", currentUser, "Approved for activation");
   return saved;
 }
@@ -296,6 +323,9 @@ export async function activateLabContract(tenantId, contractId, currentUser) {
     distributors,
   });
   if (!readiness.canActivate) return null;
+  assertContractActivationAllowed(contract, qualificationsFromBundle(), {
+    distributorId: str(tenantId || contract.distributorId),
+  });
   return transitionLabContract(
     tenantId,
     contractId,
@@ -308,6 +338,9 @@ export async function activateLabContract(tenantId, contractId, currentUser) {
 export async function renewLabContract(tenantId, contractId, currentUser) {
   const contract = await resolveLabContract(contractId);
   if (!contract) return null;
+  assertContractActivationAllowed(contract, qualificationsFromBundle(), {
+    distributorId: str(tenantId || contract.distributorId),
+  });
   const actor = str(currentUser?.name || currentUser?.email);
   const newEnd = addMonths(contract.endDate || contract.startDate, 12);
   let updated = {
@@ -317,7 +350,7 @@ export async function renewLabContract(tenantId, contractId, currentUser) {
     autoRenewal: true,
   };
   updated = appendTimeline(updated, "renewed", actor, `Renewed through ${newEnd}`);
-  const saved = await persistLabContract(updated);
+  const saved = await persistLabContract(updated, tenantId);
   void emitContractEvent(tenantId, saved, "renewed", currentUser, newEnd);
   return saved;
 }
@@ -333,7 +366,7 @@ export async function extendLabContract(tenantId, contractId, days, currentUser)
     actor,
     `Extended ${days || 90} days`
   );
-  const saved = await persistLabContract(updated);
+  const saved = await persistLabContract(updated, tenantId);
   void emitContractEvent(tenantId, saved, "renewed", currentUser, `Extended to ${newEnd}`);
   return saved;
 }
