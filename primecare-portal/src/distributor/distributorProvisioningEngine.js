@@ -115,6 +115,10 @@ export function buildProvisioningChecks(ctx) {
   const supabaseContractCount = num(
     ctx.supabaseContractCount ?? metrics.contracts ?? ctx.contractCount
   );
+  const labCountsAvailable = ctx.labCountsAvailable === true;
+  const liveLabCount = num(ctx.supabaseLabCount ?? ctx.liveLabCount);
+  const registryLabCount = num(metrics.labs);
+  const effectiveLabCount = labCountsAvailable ? liveLabCount : registryLabCount;
 
   const checks = [
     {
@@ -175,8 +179,10 @@ export function buildProvisioningChecks(ctx) {
       id: "at_least_one_lab",
       label: "First lab added",
       required: true,
-      pass: num(metrics.labs) >= 1,
-      detail: `${num(metrics.labs)} lab(s) in scope`,
+      pass: effectiveLabCount >= 1,
+      detail: labCountsAvailable
+        ? `${effectiveLabCount} lab(s) in live Supabase scope`
+        : `${registryLabCount} lab(s) in registry metrics`,
     },
     {
       id: "contract_configured",
@@ -703,6 +709,9 @@ export function buildDistributorProvisioningModel(tenant, ctx = {}) {
     agentCount: ctx.agentCount,
     contractCount: ctx.contractCount,
     supabaseContractCount: ctx.supabaseContractCount ?? ctx.contractCount,
+    supabaseLabCount: ctx.supabaseLabCount ?? ctx.liveLabCount,
+    liveLabCount: ctx.liveLabCount ?? ctx.supabaseLabCount,
+    labCountsAvailable: ctx.labCountsAvailable,
   });
 
   const readinessPct = computeReadinessPercent(checks);

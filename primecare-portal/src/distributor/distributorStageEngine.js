@@ -35,7 +35,7 @@ export function buildDistributorStageChecklist({
   const config = distributorRow?.config || {};
   const metrics = distributorRow?.metrics || {};
   const labsFromSnapshot = num(snapshot?.labs?.length);
-  const effectiveLabCount = labsFromSnapshot > 0 ? labsFromSnapshot : num(metrics.labs);
+  const labCountsAvailable = Boolean(snapshot);
   const contractCount = num(
     snapshot?.contractNonTerminatedCount ?? snapshot?.contracts?.length
   );
@@ -53,7 +53,7 @@ export function buildDistributorStageChecklist({
 
   const checks = buildProvisioningChecks({
     config,
-    metrics: { ...metrics, labs: effectiveLabCount, contracts: contractCount },
+    metrics: { ...metrics, contracts: contractCount },
     status: distributorRow?.status,
     provisioningLifecycle: distributorRow?.provisioning?.lifecycle,
     isLive: false,
@@ -64,13 +64,16 @@ export function buildDistributorStageChecklist({
     isolationChecks: distributorRow?.isolationChecks,
     contractCount,
     supabaseContractCount: contractCount,
+    supabaseLabCount: labsFromSnapshot,
+    liveLabCount: labsFromSnapshot,
+    labCountsAvailable,
   });
 
   const checkById = (id) => checks.find((c) => c.id === id);
   const isolationPass =
     checkById("isolation_verified")?.status === "PASS" ||
     config.isolationAcknowledged === true;
-  const firstLabPass = effectiveLabCount >= 1 || checkById("at_least_one_lab")?.status === "PASS";
+  const firstLabPass = checkById("at_least_one_lab")?.status === "PASS";
   const contractPass = checkById("contract_configured")?.status === "PASS";
 
   const lifecycle = resolveDistributorLifecycleStatus(distributorRow || {});

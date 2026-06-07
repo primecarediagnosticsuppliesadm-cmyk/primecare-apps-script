@@ -198,6 +198,41 @@ export async function validateDistributorProvisioningModule({
       })
     );
 
+    const launchTargetId = resolveProvisioningLaunchTargetId(bundle, rendered);
+    const launchModel = launchTargetId
+      ? resolveProvisioningModel(bundle, launchTargetId)
+      : null;
+    const labGateTarget = (launchModel || model)?.checks?.find((c) => c.id === "at_least_one_lab");
+    const labCountsAvailable = bundle.labCountsAvailable === true;
+    const supabaseLabCount = labCountsAvailable
+      ? Number(bundle.labCountsByDistributor?.[launchTargetId || model.distributorId] ?? 0)
+      : null;
+    const labGateMatchesSupabase =
+      labCountsAvailable &&
+      ((supabaseLabCount >= 1 && labGateTarget?.status === "PASS") ||
+        (supabaseLabCount < 1 && labGateTarget?.status !== "PASS"));
+    entries.push(
+      createPredatorEntry({
+        status: !labCountsAvailable ? "WARN" : labGateMatchesSupabase ? "PASS" : "FAIL",
+        module: "Distributor Provisioning",
+        step: "provisioning.first_lab_matches_supabase",
+        expected: "at_least_one_lab PASS iff v_labs_credit count for distributor >= 1",
+        actual: {
+          distributorId: launchTargetId || model.distributorId,
+          supabaseLabCount,
+          gateStatus: labGateTarget?.status,
+          gateDetail: labGateTarget?.detail,
+          labCountsAvailable,
+        },
+        suggestedFix: labGateMatchesSupabase
+          ? undefined
+          : "Refresh provisioning bundle after lab create; verify v_labs_credit row tenant_id",
+        tenantId: ctx.tenantId,
+        role: ctx.role,
+        userId: ctx.userId,
+      })
+    );
+
     const tenantRow = bundle.tenants?.find((t) => t.id === model.distributorId);
     const configBypass = tenantRow?.config?.contractConfigured === true;
     const bypassWithoutContracts = configBypass && supabaseContractCount < 1;
@@ -383,10 +418,6 @@ export async function validateDistributorProvisioningModule({
       })
     );
 
-    const launchTargetId = resolveProvisioningLaunchTargetId(bundle, rendered);
-    const launchModel = launchTargetId
-      ? resolveProvisioningModel(bundle, launchTargetId)
-      : null;
     const catalogCheck = launchModel?.checks?.find((c) => c.id === "catalog_configured");
     const hqPricingCheck = launchModel?.checks?.find((c) => c.id === "catalog_hq_pricing_configured");
     const catalogAssigned =

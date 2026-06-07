@@ -30,6 +30,7 @@ import {
   TIMELINE_LABELS,
 } from "@/distributor/distributorProvisioningEngine.js";
 import { mapTenantToDistributorRegistryRow } from "@/distributor/distributorWorkspaceEngine.js";
+import { getLabsCredit } from "@/api/primecareSupabaseApi.js";
 import { countNonTerminatedContractsForDistributor } from "@/api/labContractsSupabaseApi.js";
 import {
   ensureLabContractsMigrated,
@@ -38,6 +39,17 @@ import {
 
 function str(v) {
   return String(v ?? "").trim();
+}
+
+/** Count labs per distributor tenant from v_labs_credit rows (same source as Labs tab). */
+export function buildLabCountsByDistributor(labs = []) {
+  const counts = {};
+  for (const lab of labs) {
+    const tid = str(lab.tenantId || lab.tenant_id);
+    if (!tid) continue;
+    counts[tid] = (counts[tid] || 0) + 1;
+  }
+  return counts;
 }
 
 async function loadNonTerminatedContractCounts(tenantIds, homeTenantId) {
@@ -118,10 +130,14 @@ export async function loadProvisioningBundle(currentUser, options = {}) {
 
   const distributors = allRows.map(mapTenantToDistributorRegistryRow);
   const dbFetch = await fetchDurableTenants();
-  const contractCounts = await loadNonTerminatedContractCounts(
-    allRows.map((t) => t.id),
-    homeTenantId
-  );
+  const [contractCounts, labsRes] = await Promise.all([
+    loadNonTerminatedContractCounts(allRows.map((t) => t.id), homeTenantId),
+    getLabsCredit().catch(() => ({ success: false, data: [] })),
+  ]);
+  const labCountsAvailable = labsRes?.success !== false;
+  const labCountsByDistributor = labCountsAvailable
+    ? buildLabCountsByDistributor(Array.isArray(labsRes?.data) ? labsRes.data : [])
+    : null;
 
   return {
     homeTenantId,
@@ -140,6 +156,8 @@ export async function loadProvisioningBundle(currentUser, options = {}) {
     roleCount,
     agentCount,
     contractCounts,
+    labCountsByDistributor,
+    labCountsAvailable,
   };
 }
 
@@ -270,6 +288,10 @@ export function resolveProvisioningModel(bundle, distributorId) {
   const isLive =
     id === bundle.homeTenantId && Boolean(bundle.opsPayload);
   const supabaseContractCount = num(bundle.contractCounts?.[id]);
+  const labCountsAvailable = bundle.labCountsAvailable === true;
+  const supabaseLabCount = labCountsAvailable
+    ? num(bundle.labCountsByDistributor?.[id])
+    : undefined;
 
   return buildDistributorProvisioningModel(
     {
@@ -289,6 +311,9 @@ export function resolveProvisioningModel(bundle, distributorId) {
       agentCount: isLive ? bundle.agentCount : num(tenant.metrics?.agents),
       contractCount: supabaseContractCount,
       supabaseContractCount,
+      supabaseLabCount,
+      liveLabCount: supabaseLabCount,
+      labCountsAvailable,
     }
   );
 }
