@@ -20,12 +20,16 @@ import {
   Bug,
   Bell,
   Radio,
+  TrendingUp,
 } from "lucide-react";
 
 const ICONS = {
   dashboard: LayoutDashboard,
   founderNavigation: Compass,
   founderStrategy: Target,
+  founderFinancialIntelligence: BarChart3,
+  revenueFunnel: TrendingUp,
+  pilotReadiness: Target,
   tenantManagement: Building,
   distributorManagement: Briefcase,
   distributorOs: Building2,

@@ -1,0 +1,287 @@
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { StatusBadge, PageSkeleton } from "@/components/ux";
+import {
+  buildRevenueFunnelModel,
+} from "@/founder/revenueFunnelEngine.js";
+import {
+  loadRevenueFunnelData,
+} from "@/founder/revenueFunnelData.js";
+import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
+import { cn } from "@/lib/utils";
+import { BarChart3, RefreshCw, TrendingUp, AlertTriangle } from "lucide-react";
+
+function MetricTile({ label, value, sub, className }) {
+  return (
+    <div className={cn("rounded-lg border bg-white p-2 text-center shadow-sm", className)}>
+      <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="mt-0.5 text-sm font-bold tabular-nums text-slate-900">{value}</p>
+      {sub ? <p className="mt-0.5 text-[10px] text-slate-500">{sub}</p> : null}
+    </div>
+  );
+}
+
+function Section({ title, icon: Icon, children }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+      <h2 className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-600">
+        {Icon ? <Icon className="h-3.5 w-3.5" aria-hidden /> : null}
+        {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+function formatPct(v) {
+  if (v == null) return "—";
+  return `${v}%`;
+}
+
+export default function RevenueFunnelPage({ currentUser = null }) {
+  const [model, setModel] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [selectedId, setSelectedId] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
+      const data = await loadRevenueFunnelData(currentUser);
+      const built = buildRevenueFunnelModel(data);
+      setModel(built);
+      const gunturId = built.guntur?.distributorId || "";
+      setSelectedId((prev) => prev || gunturId || built.distributors[0]?.distributorId || "");
+    } catch (err) {
+      setError(err?.message || "Failed to load revenue funnel");
+      setModel(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const selectedRow = useMemo(() => {
+    if (!model) return null;
+    return (
+      model.distributors.find((r) => r.distributorId === selectedId) ||
+      model.guntur ||
+      model.distributors[0] ||
+      null
+    );
+  }, [model, selectedId]);
+
+  const predatorSnapshot = useMemo(() => {
+    if (!model) return null;
+    return {
+      revenueFunnel: true,
+      funnel: model,
+      selectedDistributorId: selectedRow?.distributorId || null,
+      gunturDistributorId: model.guntur?.distributorId || null,
+      distributorCount: model.distributors.length,
+    };
+  }, [model, selectedRow]);
+
+  usePredatorModuleValidation("Revenue Funnel", currentUser, predatorSnapshot ?? {}, Boolean(predatorSnapshot));
+
+  if (loading) return <PageSkeleton rows={10} />;
+  if (error) {
+    return (
+      <div className="p-4 text-sm text-red-700">
+        <p>{error}</p>
+        <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => void load()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+  if (!model) return null;
+
+  const { portfolio, distributors, guntur } = model;
+  const focus = selectedRow || guntur;
+
+  return (
+    <div className="mx-auto max-w-6xl space-y-3 p-3 pb-8">
+      <header className="flex items-start justify-between gap-2">
+        <div>
+          <h1 className="flex items-center gap-2 text-lg font-bold text-slate-900">
+            <BarChart3 className="h-5 w-5 text-indigo-600" aria-hidden />
+            Revenue Funnel
+          </h1>
+          <p className="mt-0.5 text-xs text-slate-600">
+            Read-only commercial lifecycle — Qualification → Contract → Order → Fulfillment → AR → Payment.
+          </p>
+        </div>
+        <Button type="button" variant="ghost" size="icon" onClick={() => void load()} aria-label="Refresh">
+          <RefreshCw className="h-4 w-4" />
+        </Button>
+      </header>
+
+      <Section title="Portfolio rollup" icon={TrendingUp}>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+          <MetricTile label="Qualified labs" value={String(portfolio.qualified)} />
+          <MetricTile label="Contracted labs" value={String(portfolio.contracted)} />
+          <MetricTile label="Orders" value={String(portfolio.ordered)} />
+          <MetricTile label="Fulfilled" value={String(portfolio.fulfilled)} />
+          <MetricTile label="AR outstanding" value={portfolio.arOutstandingLabel} />
+          <MetricTile label="Payments" value={portfolio.paymentsReceivedLabel} />
+          <MetricTile label="Revenue collected" value={portfolio.revenueCollectedLabel} />
+        </div>
+      </Section>
+
+      <Section title="Distributor funnel" icon={BarChart3}>
+        <div className="overflow-x-auto rounded-lg border bg-white">
+          <table className="min-w-full text-left text-xs">
+            <thead className="border-b bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-2 py-2">Distributor</th>
+                <th className="px-2 py-2">Qualified</th>
+                <th className="px-2 py-2">Contracted</th>
+                <th className="px-2 py-2">Ordered</th>
+                <th className="px-2 py-2">Fulfilled</th>
+                <th className="px-2 py-2">AR</th>
+                <th className="px-2 py-2">Paid</th>
+                <th className="px-2 py-2">Revenue</th>
+                <th className="px-2 py-2">Path</th>
+              </tr>
+            </thead>
+            <tbody>
+              {distributors.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-2 py-4 text-center text-slate-500">
+                    No distributors in portfolio.
+                  </td>
+                </tr>
+              ) : (
+                distributors.map((row) => (
+                  <tr
+                    key={row.distributorId}
+                    className={cn(
+                      "cursor-pointer border-b last:border-0 hover:bg-slate-50",
+                      row.distributorId === selectedId && "bg-indigo-50/60"
+                    )}
+                    onClick={() => setSelectedId(row.distributorId)}
+                  >
+                    <td className="px-2 py-2 font-medium text-slate-900">
+                      {row.name}
+                      {guntur?.distributorId === row.distributorId ? (
+                        <span className="ml-1 text-[10px] text-indigo-600">(Guntur)</span>
+                      ) : null}
+                    </td>
+                    <td className="px-2 py-2 tabular-nums">{row.summary.qualified}</td>
+                    <td className="px-2 py-2 tabular-nums">{row.summary.contracted}</td>
+                    <td className="px-2 py-2 tabular-nums">{row.summary.ordersCreated}</td>
+                    <td className="px-2 py-2 tabular-nums">{row.summary.ordersFulfilled}</td>
+                    <td className="px-2 py-2 tabular-nums">{row.summary.arOutstandingLabel}</td>
+                    <td className="px-2 py-2 tabular-nums">{row.summary.paidLabs}</td>
+                    <td className="px-2 py-2 tabular-nums">{row.summary.revenueCollectedLabel}</td>
+                    <td className="px-2 py-2">
+                      <StatusBadge variant={row.pathComplete ? "success" : "warning"} compact>
+                        {row.pathComplete ? "Complete" : "In progress"}
+                      </StatusBadge>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Section>
+
+      {focus ? (
+        <>
+          <Section title={`Stage detail — ${focus.name}`} icon={TrendingUp}>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              {focus.stages.map((stage) => (
+                <div key={stage.id} className="rounded-lg border bg-white p-2 shadow-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold text-slate-800">{stage.label}</p>
+                    <p className="text-sm font-bold tabular-nums text-slate-900">{stage.count}</p>
+                  </div>
+                  <p className="mt-1 text-[10px] text-slate-500">
+                    Conversion {formatPct(stage.conversionPct)}
+                  </p>
+                  {stage.blockingReason ? (
+                    <p className="mt-1 text-[10px] text-amber-800">{stage.blockingReason}</p>
+                  ) : (
+                    <p className="mt-1 text-[10px] text-emerald-700">Stage active</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </Section>
+
+          <Section title={`${focus.name} — commercial checkpoints`} icon={BarChart3}>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <MetricTile label="Qualification" value={focus.detail.qualificationStatus} />
+              <MetricTile label="Contract" value={focus.detail.contractStatus} />
+              <MetricTile
+                label="Inventory"
+                value={focus.detail.inventoryReadiness}
+                sub={focus.detail.inventoryDetail}
+              />
+              <MetricTile label="Orders" value={String(focus.detail.orderCount)} sub="created" />
+              <MetricTile label="Fulfillment" value={String(focus.detail.fulfillmentCount)} sub="fulfilled orders" />
+              <MetricTile label="AR balance" value={focus.detail.arBalanceLabel} />
+              <MetricTile label="Payments" value={focus.detail.paymentBalanceLabel} />
+              <MetricTile label="Labs in scope" value={String(focus.labCount)} />
+            </div>
+          </Section>
+
+          <Section title="First revenue blockers" icon={AlertTriangle}>
+            {focus.blockers.length === 0 ? (
+              <p className="text-xs text-emerald-700">No blockers — commercial path complete for this distributor.</p>
+            ) : (
+              <ul className="space-y-2 text-xs text-slate-700">
+                {focus.blockers.map((b) => (
+                  <li key={`${b.stage}-${b.reason}`} className="rounded-lg border border-amber-200 bg-amber-50/80 p-2">
+                    <p className="font-semibold capitalize text-amber-950">{b.stage.replace(/_/g, " ")}</p>
+                    <p className="mt-0.5 text-amber-900">{b.reason}</p>
+                    {b.action ? <p className="mt-1 text-[10px] text-slate-600">{b.action}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+
+          {focus.labs.length > 0 ? (
+            <Section title="Lab-level funnel" icon={BarChart3}>
+              <div className="overflow-x-auto rounded-lg border bg-white">
+                <table className="min-w-full text-left text-xs">
+                  <thead className="border-b bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-2 py-2">Lab</th>
+                      <th className="px-2 py-2">Qualification</th>
+                      <th className="px-2 py-2">Contract</th>
+                      <th className="px-2 py-2">Orders</th>
+                      <th className="px-2 py-2">Fulfilled</th>
+                      <th className="px-2 py-2">AR</th>
+                      <th className="px-2 py-2">Paid</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {focus.labs.map((lab) => (
+                      <tr key={lab.labId} className="border-b last:border-0">
+                        <td className="px-2 py-2 font-medium">{lab.labName}</td>
+                        <td className="px-2 py-2">{lab.qualificationStatus}</td>
+                        <td className="px-2 py-2">{lab.contractStatus}</td>
+                        <td className="px-2 py-2 tabular-nums">{lab.orderCount}</td>
+                        <td className="px-2 py-2 tabular-nums">{lab.fulfilledCount}</td>
+                        <td className="px-2 py-2 tabular-nums">₹{lab.arOutstanding.toLocaleString("en-IN")}</td>
+                        <td className="px-2 py-2 tabular-nums">₹{lab.totalPaid.toLocaleString("en-IN")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Section>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  );
+}

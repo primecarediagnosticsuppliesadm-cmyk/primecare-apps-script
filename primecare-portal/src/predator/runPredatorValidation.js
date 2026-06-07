@@ -30,6 +30,7 @@ import { validateDistributorBillingModule } from "@/predator/validators/distribu
 import { validateInventoryEconomicsModule } from "@/predator/validators/inventoryEconomicsValidator.js";
 import { validateDistributorProfitabilityModule } from "@/predator/validators/distributorProfitabilityValidator.js";
 import { validateQAReadinessModule } from "@/predator/validators/qaReadinessValidator.js";
+import { validateRevenueFunnelModule } from "@/predator/validators/revenueFunnelValidator.js";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import {
   primePredatorOpsPayload,
@@ -288,6 +289,11 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
           currentUser,
           rendered: snapshots.qaReadiness ?? null,
         }),
+        validateRevenueFunnelModule({
+          ctx,
+          currentUser,
+          rendered: snapshots.revenueFunnel ?? null,
+        }),
       ]);
 
       modules.push(
@@ -308,7 +314,8 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         storePolishedModule("Distributor Billing", distributorBilling, ctx),
         storePolishedModule("Inventory Economics", inventoryEconomics, ctx),
         storePolishedModule("Distributor Profitability", distributorProfitability, ctx),
-        storePolishedModule("QA Readiness", qaReadiness, ctx)
+        storePolishedModule("QA Readiness", qaReadiness, ctx),
+        storePolishedModule("Revenue Funnel", revenueFunnel, ctx)
       );
 
       clearPredatorOpsPayload();
@@ -439,6 +446,13 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
       break;
     case "Founder Financial Intelligence":
       result = await validateFounderFinancialIntelligenceModule({
+        ctx,
+        currentUser,
+        rendered: snapshot,
+      });
+      break;
+    case "Revenue Funnel":
+      result = await validateRevenueFunnelModule({
         ctx,
         currentUser,
         rendered: snapshot,
