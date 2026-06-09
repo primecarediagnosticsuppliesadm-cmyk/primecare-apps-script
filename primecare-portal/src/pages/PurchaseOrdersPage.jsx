@@ -115,7 +115,7 @@ function buildPlaceholderAutoTriggersFromForecast(forecast) {
       urgency: urgencyUpper === "CRITICAL" ? "CRITICAL" : urgencyUpper,
       hasOpenPo: false,
       canAutoCreate: true,
-      autoTriggerReason: `Derived from Supabase reorder forecast (${f.stockHealth || urgencyRaw}). Apps Script auto-triggers API is not used in this load.`,
+      autoTriggerReason: `Forecast suggestion from Supabase reorder data (${f.stockHealth || urgencyRaw}). Review manually — automated procurement triggers are not implemented.`,
       currentStock: numberValue(f.currentStock),
       minStock: numberValue(f.minStock),
       dailyConsumption: dailyFromMonthly,
@@ -642,7 +642,7 @@ export default function PurchaseOrdersPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Purchase &amp; Reorder Operations</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Manage reorder candidates, purchase orders, stock inward, and auto-triggered procurement.
+            Manage reorder candidates, purchase orders, stock inward, and forecast-based draft PO suggestions.
           </p>
         </div>
 
@@ -698,7 +698,7 @@ export default function PurchaseOrdersPage() {
               activeTab === tab ? "bg-black text-white" : "border bg-white"
             }`}
           >
-            {tab === "triggers" && "Auto Triggers"}
+            {tab === "triggers" && "Forecast Suggestions"}
             {tab === "reorder" && "Reorder Candidates"}
             {tab === "smart" && "Smart Reorder"}
             {tab === "create" && "Create PO"}
@@ -713,9 +713,9 @@ export default function PurchaseOrdersPage() {
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-lg font-semibold">Auto Purchase Triggers</h2>
+              <h2 className="text-lg font-semibold">Reorder Forecast Suggestions</h2>
               <p className="text-sm text-slate-500">
-                Urgent SKUs detected from stock level and sales velocity.
+                Urgent SKUs from Supabase reorder forecast. Suggestions only — create draft POs manually.
               </p>
             </div>
 
@@ -759,7 +759,7 @@ export default function PurchaseOrdersPage() {
           <div className="space-y-3">
             {autoTriggers.length === 0 ? (
               <div className="rounded-xl border border-dashed p-6 text-sm text-slate-500">
-                No urgent auto purchase triggers right now.
+                No reorder forecast suggestions right now.
               </div>
             ) : (
               autoTriggers.map((item) => (

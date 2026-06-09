@@ -4188,20 +4188,20 @@ export async function getLabRecentOrdersRead(labId) {
 export async function getOrdersRead(_params = {}) {
   void _params;
   traceSupabaseRead("Orders.getOrdersRead", { table: "orders" });
-  console.log("SUPABASE URL:", import.meta.env.VITE_SUPABASE_URL);
+
+  const emptyOrders = { success: false, error: "Supabase is not configured", data: { orders: [] } };
 
   if (!supabase) {
-    return { success: true, data: { orders: [] } };
+    return emptyOrders;
   }
 
   try {
     const { data, error } = await supabase.from("orders").select("*");
 
-    console.log("SUPABASE ORDERS RAW:", data);
-    console.log("SUPABASE ORDERS ERROR:", error);
-
     if (error) {
-      return { success: true, data: { orders: [] } };
+      const message = error.message || String(error);
+      console.warn("[getOrdersRead] Supabase error:", message);
+      return { success: false, error: message, data: { orders: [] } };
     }
 
     const rawList = Array.isArray(data) ? data : [];
@@ -4218,10 +4218,11 @@ export async function getOrdersRead(_params = {}) {
       return mapOrderRow(r, labMap.get(labId) || "", idx);
     });
 
-    return { success: true, data: { orders } };
+    return { success: true, data: { orders }, error: null };
   } catch (err) {
-    console.warn("[getOrdersRead] failed:", err?.message || err);
-    return { success: true, data: { orders: [] } };
+    const message = err?.message || String(err);
+    console.warn("[getOrdersRead] failed:", message);
+    return { success: false, error: message, data: { orders: [] } };
   }
 }
 

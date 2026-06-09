@@ -85,21 +85,41 @@ export async function validatePrimecareOsModule({ ctx, rendered = null }) {
     }
 
     if (page === "orders" || rendered?.visibleOrders) {
-      const orders = Array.isArray(rendered?.visibleOrders) ? rendered.visibleOrders : [];
-      const check = rowsOnlyHq(orders, homeTenantId);
-      entries.push(
-        createPredatorEntry({
-          status: check.ok ? "PASS" : "FAIL",
-          module: "PrimeCare OS",
-          step: "primecare_os.hq_only_orders",
-          expected: "HQ Orders page shows only PrimeCare HQ tenant orders",
-          actual: { homeTenantId, orderCount: orders.length, mismatches: check.mismatches },
-          severity: check.ok ? "low" : "critical",
-          tenantId: ctx.tenantId,
-          role: ctx.role,
-          userId: ctx.userId,
-        })
-      );
+      if (rendered?.ordersReadOk === false) {
+        entries.push(
+          createPredatorEntry({
+            status: "FAIL",
+            module: "PrimeCare OS",
+            step: "primecare_os.orders_read_failed",
+            expected: "Orders API returns success with actionable error on failure",
+            actual: {
+              ordersReadError: rendered?.ordersReadError || "unknown",
+            },
+            severity: "critical",
+            suggestedFix:
+              "Fix Supabase RLS or connection for orders; verify executive_distributor_ops_rls_migration.sql is applied",
+            tenantId: ctx.tenantId,
+            role: ctx.role,
+            userId: ctx.userId,
+          })
+        );
+      } else {
+        const orders = Array.isArray(rendered?.visibleOrders) ? rendered.visibleOrders : [];
+        const check = rowsOnlyHq(orders, homeTenantId);
+        entries.push(
+          createPredatorEntry({
+            status: check.ok ? "PASS" : "FAIL",
+            module: "PrimeCare OS",
+            step: "primecare_os.hq_only_orders",
+            expected: "HQ Orders page shows only PrimeCare HQ tenant orders",
+            actual: { homeTenantId, orderCount: orders.length, mismatches: check.mismatches },
+            severity: check.ok ? "low" : "critical",
+            tenantId: ctx.tenantId,
+            role: ctx.role,
+            userId: ctx.userId,
+          })
+        );
+      }
     }
 
     if (page === "collections" || rendered?.visibleCollections) {

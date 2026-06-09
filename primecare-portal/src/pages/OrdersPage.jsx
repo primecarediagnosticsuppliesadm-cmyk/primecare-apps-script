@@ -80,6 +80,7 @@ export default function OrdersPage({
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [statusNote, setStatusNote] = useState("");
   const [error, setError] = useState("");
+  const [ordersReadOk, setOrdersReadOk] = useState(true);
   const [successMessage, setSuccessMessage] = useState("");
 
   useEffect(() => {
@@ -126,6 +127,10 @@ export default function OrdersPage({
       }
     } catch (err) {
       console.warn("OrdersPage loadOrders:", err);
+      const message = err?.message || "Failed to load orders.";
+      setError(message);
+      setOrdersReadOk(false);
+      setAllOrders([]);
       setOrders([]);
     } finally {
       if (!silent) {
@@ -320,6 +325,8 @@ export default function OrdersPage({
       primecareOs: true,
       page: "orders",
       homeTenantId: str(currentUser?.tenantId || currentUser?.tenant_id),
+      ordersReadOk,
+      ordersReadError: ordersReadOk ? null : error || null,
       visibleOrders: orders.map((o) => ({
         tenantId: o.tenantId,
         orderId: o.orderId,

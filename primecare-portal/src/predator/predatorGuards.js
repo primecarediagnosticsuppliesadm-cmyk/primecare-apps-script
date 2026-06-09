@@ -11,7 +11,8 @@ function envFlagOrDefault(name, defaultValue) {
 }
 
 /**
- * Predator Debug Layer — off in production unless explicitly enabled.
+ * Predator Debug Layer — on by default in non-production when Supabase is configured;
+ * off in production unless VITE_PREDATOR_DEBUG=true.
  * Never exposes service role or secrets.
  */
 export function isPredatorEnabled() {
@@ -19,7 +20,7 @@ export function isPredatorEnabled() {
   if (IS_PROD) {
     return envFlagOrDefault("VITE_PREDATOR_DEBUG", false);
   }
-  return envFlagOrDefault("VITE_PREDATOR_DEBUG", IS_QA || IS_DEV);
+  return envFlagOrDefault("VITE_PREDATOR_DEBUG", true);
 }
 
 /** Debug Console page: ADMIN / EXECUTIVE only, QA/dev predator enabled. */

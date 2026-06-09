@@ -74,6 +74,37 @@ export async function validateOperationsCommandCenterModule({
       };
     }
 
+    if (payload.ordersReadOk === false) {
+      entries.push(
+        createPredatorEntry({
+          status: "FAIL",
+          module: "Operations Center",
+          step: "orders.read_failed",
+          expected: "Orders read succeeds for operations payload",
+          actual: { ordersReadError: payload.ordersReadError || "unknown" },
+          rootCauseGuess: "Supabase orders query failed (RLS or connection)",
+          suggestedFix:
+            "Apply executive_distributor_ops_rls_migration.sql and verify orders SELECT policy for this role",
+          severity: "critical",
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    } else {
+      entries.push(
+        createPredatorEntry({
+          status: "PASS",
+          module: "Operations Center",
+          step: "orders.read_ok",
+          actual: { orderCount: payload.orders?.length ?? 0 },
+          tenantId: ctx.tenantId,
+          role: ctx.role,
+          userId: ctx.userId,
+        })
+      );
+    }
+
     const apiAttention = model.attention?.length ?? 0;
     const apiFeed = model.feed?.length ?? 0;
     const uiAttention = rendered?.attentionCount ?? null;

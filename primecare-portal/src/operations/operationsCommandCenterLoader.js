@@ -32,6 +32,8 @@ const EMPTY_PAYLOAD = {
   collections: [],
   inventory: [],
   orders: [],
+  ordersReadOk: true,
+  ordersReadError: null,
   reorderCandidates: [],
   purchaseOrders: [],
   notifications: [],
@@ -85,7 +87,9 @@ export async function loadOperationsCommandCenterData(currentUser, options = {})
     ? collRes.data.collections
     : [];
   const inventory = Array.isArray(stockRes?.data?.inventory) ? stockRes.data.inventory : [];
-  const orders = Array.isArray(ordersRes?.data?.orders) ? ordersRes.data.orders : [];
+  const ordersReadOk = ordersRes?.success !== false;
+  const ordersReadError = ordersRes?.error || null;
+  const orders = ordersReadOk && Array.isArray(ordersRes?.data?.orders) ? ordersRes.data.orders : [];
   const reorderCandidates = Array.isArray(reorderRes?.data?.forecast)
     ? reorderRes.data.forecast
     : [];
@@ -107,6 +111,8 @@ export async function loadOperationsCommandCenterData(currentUser, options = {})
     collections,
     inventory,
     orders,
+    ordersReadOk,
+    ordersReadError,
     reorderCandidates,
     purchaseOrders,
     notifications,

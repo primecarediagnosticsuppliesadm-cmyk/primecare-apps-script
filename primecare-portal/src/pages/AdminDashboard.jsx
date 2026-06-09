@@ -77,11 +77,7 @@ function adminDashboardSkipAppsScriptReads() {
     .toLowerCase();
   if (override === "false" || override === "0") return false;
   if (override === "true" || override === "1") return true;
-
-  const hasSupabase =
-    String(import.meta.env.VITE_SUPABASE_URL || "").trim() !== "" &&
-    String(import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim() !== "";
-  return Boolean((REQUIRE_SUPABASE_AUTH || import.meta.env.DEV) && hasSupabase);
+  return hasSupabaseDashboardConfigured();
 }
 
 function adminDashboardClientCacheEnabled() {
@@ -95,9 +91,9 @@ function hasSupabaseDashboardConfigured() {
   );
 }
 
-/** QA: single-path Supabase read → React state (no merge, no Apps Script, no cache). */
+/** Supabase-only read → React state (no Apps Script merge, no hybrid KPI overwrite). */
 function shouldUseQaDirectDashboardRead() {
-  return IS_QA && hasSupabaseDashboardConfigured();
+  return hasSupabaseDashboardConfigured() && adminDashboardSkipAppsScriptReads();
 }
 
 function clearAdminDashboardModuleCache() {
@@ -558,6 +554,8 @@ async function fetchSupabaseAdminSlice({ force = false } = {}) {
 }
 
 function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) {
+  const legacySummary = adminDashboardSkipAppsScriptReads() ? {} : summaryIn;
+  const legacyExecutive = adminDashboardSkipAppsScriptReads() ? {} : executiveIn;
   const dash = supabaseSlice.dashboardRead?.success ? supabaseSlice.dashboardRead.data : null;
 
   if (dash?.summary && dash?.executive) {
@@ -580,7 +578,7 @@ function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) 
   const stockStats =
     dash?.summary?.stockStats ||
     (supabaseSlice.stock?.success && supabaseSlice.stock?.data?.stats) ||
-    summaryIn?.stockStats ||
+    legacySummary?.stockStats ||
     EMPTY_STOCK_STATS;
 
   const labs = Array.isArray(supabaseSlice.labs?.data) ? supabaseSlice.labs.data : [];
@@ -600,19 +598,19 @@ function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) 
     recentVisits: Number(
       dash?.summary?.recentVisits ??
         dash?.summary?.recent_visits ??
-        summaryIn?.recentVisits ??
-        summaryIn?.recent_visits ??
+        legacySummary?.recentVisits ??
+        legacySummary?.recent_visits ??
         0
     ),
     totalSoldValue: Number(
       dash?.summary?.totalSoldValue ??
         dash?.summary?.total_sold_value ??
-        summaryIn?.totalSoldValue ??
-        summaryIn?.total_sold_value ??
+        legacySummary?.totalSoldValue ??
+        legacySummary?.total_sold_value ??
         0
     ),
     todayCollections: Number(
-      dash?.summary?.todayCollections ?? summaryIn?.todayCollections ?? 0
+      dash?.summary?.todayCollections ?? legacySummary?.todayCollections ?? 0
     ),
     inventorySkus: Number(
       dash?.summary?.inventorySkus ??
@@ -624,48 +622,48 @@ function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) 
 
   const executive = {
     todaysRevenue: Number(
-      dash?.executive?.todaysRevenue ?? executiveIn?.todaysRevenue ?? executiveIn?.todays_revenue ?? 0
+      dash?.executive?.todaysRevenue ?? legacyExecutive?.todaysRevenue ?? legacyExecutive?.todays_revenue ?? 0
     ),
     outstandingReceivables: Number(
       dash?.executive?.outstandingReceivables ??
         dash?.executive?.outstanding_receivables ??
-        executiveIn?.outstandingReceivables ??
-        executiveIn?.outstanding_receivables ??
+        legacyExecutive?.outstandingReceivables ??
+        legacyExecutive?.outstanding_receivables ??
         0
     ),
     labsAtCreditRisk: Number(
       dash?.executive?.labsAtCreditRisk ??
-        executiveIn?.labsAtCreditRisk ??
-        executiveIn?.labs_at_credit_risk ??
+        legacyExecutive?.labsAtCreditRisk ??
+        legacyExecutive?.labs_at_credit_risk ??
         labsCreditRiskCount
     ),
     productsNearStockout: Number(
       dash?.executive?.productsNearStockout ??
-        executiveIn?.productsNearStockout ??
-        executiveIn?.products_near_stockout ??
+        legacyExecutive?.productsNearStockout ??
+        legacyExecutive?.products_near_stockout ??
         nearStockoutDerived
     ),
     topLabsByRevenue:
       Array.isArray(dash?.executive?.topLabsByRevenue) && dash.executive.topLabsByRevenue.length
         ? dash.executive.topLabsByRevenue
-        : Array.isArray(executiveIn?.topLabsByRevenue) && executiveIn.topLabsByRevenue.length
-          ? executiveIn.topLabsByRevenue
+        : Array.isArray(legacyExecutive?.topLabsByRevenue) && legacyExecutive.topLabsByRevenue.length
+          ? legacyExecutive.topLabsByRevenue
           : topLabsDerived,
   };
 
   const topLabsSource =
     Array.isArray(dash?.executive?.topLabsByRevenue) && dash.executive.topLabsByRevenue.length
       ? "Supabase_fulfilled_order_rollup"
-      : Array.isArray(executiveIn?.topLabsByRevenue) && executiveIn.topLabsByRevenue.length
+      : Array.isArray(legacyExecutive?.topLabsByRevenue) && legacyExecutive.topLabsByRevenue.length
         ? "Apps_Script_executive_cache"
         : "v_labs_credit_revenue_sort_fallback";
 
   const appsScriptMergeFields = [
-    !dash?.summary?.stockStats && summaryIn?.stockStats ? "summary.stockStats" : null,
-    dash?.summary?.recentVisits == null && summaryIn?.recentVisits != null ? "summary.recentVisits" : null,
-    dash?.summary?.totalSoldValue == null && summaryIn?.totalSoldValue != null ? "summary.totalSoldValue" : null,
-    dash?.executive?.todaysRevenue == null && executiveIn?.todaysRevenue != null ? "executive.todaysRevenue" : null,
-    dash?.executive?.outstandingReceivables == null && executiveIn?.outstandingReceivables != null
+    !dash?.summary?.stockStats && legacySummary?.stockStats ? "summary.stockStats" : null,
+    dash?.summary?.recentVisits == null && legacySummary?.recentVisits != null ? "summary.recentVisits" : null,
+    dash?.summary?.totalSoldValue == null && legacySummary?.totalSoldValue != null ? "summary.totalSoldValue" : null,
+    dash?.executive?.todaysRevenue == null && legacyExecutive?.todaysRevenue != null ? "executive.todaysRevenue" : null,
+    dash?.executive?.outstandingReceivables == null && legacyExecutive?.outstandingReceivables != null
       ? "executive.outstandingReceivables"
       : null,
     topLabsSource === "Apps_Script_executive_cache" ? "executive.topLabsByRevenue" : null,

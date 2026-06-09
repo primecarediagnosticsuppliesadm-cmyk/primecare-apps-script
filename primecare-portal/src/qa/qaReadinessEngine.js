@@ -23,8 +23,17 @@ export const QA_COVERAGE_AREAS = [
       "Founder Strategy",
       "Founder Financial Intelligence",
       "Distributor Profitability",
-      "Pilot Readiness",
     ],
+  },
+  {
+    id: "revenueFunnel",
+    label: "Revenue Funnel",
+    modules: ["Revenue Funnel"],
+  },
+  {
+    id: "pilotReadiness",
+    label: "Pilot Readiness",
+    modules: ["Pilot Readiness"],
   },
   {
     id: "distributorOs",
@@ -40,8 +49,12 @@ export const QA_COVERAGE_AREAS = [
   { id: "billing", label: "Billing", modules: ["Distributor Billing"] },
   { id: "commissions", label: "Commissions", modules: ["Commission Engine"] },
   { id: "contracts", label: "Contracts", modules: ["Lab Contract Engine"] },
-  { id: "collections", label: "Collections", modules: ["Collections"] },
-  { id: "inventory", label: "Inventory", modules: ["Inventory Economics", "Admin Dashboard"] },
+  { id: "collections", label: "Collections / AR", modules: ["Collections", "PrimeCare OS"] },
+  {
+    id: "inventory",
+    label: "Inventory",
+    modules: ["Inventory Economics", "Admin Dashboard", "Operations Center"],
+  },
   {
     id: "purchaseReorder",
     label: "Purchase/Reorder",
@@ -72,6 +85,8 @@ const WORKFLOW_MODULES = new Set([
   "Qualification Analytics",
   "Agent Visits",
   "Collections",
+  "Revenue Funnel",
+  "Pilot Readiness",
 ]);
 
 function num(v) {
