@@ -10,6 +10,7 @@ const EXECUTIVE_HQ_MENU_KEYS = new Set([
   "founderStrategy",
   "founderFinancialIntelligence",
   "revenueFunnel",
+  "qualificationReview",
   "pilotReadiness",
   "tenantManagement",
   "distributorOs",
@@ -26,6 +27,7 @@ const ADMIN_HQ_MENU_KEYS = new Set([
   "dashboard",
   "distributorOs",
   "operationsCenter",
+  "qualificationReview",
   "masterCatalog",
   "inventory",
   "purchase",
@@ -51,6 +53,11 @@ export const MENU_ITEMS = [
   { key: "founderStrategy", label: "Founder Strategy", icon: "Target" },
   { key: "founderFinancialIntelligence", label: "Financial Intelligence", icon: "BarChart3" },
   { key: "revenueFunnel", label: "Revenue Funnel", icon: "TrendingUp" },
+  {
+    key: "qualificationReview",
+    label: "Qualification Review",
+    icon: "ClipboardCheck",
+  },
   { key: "pilotReadiness", label: "Pilot Readiness", icon: "Rocket" },
   { key: "tenantManagement", label: "Tenant Management", icon: "Building" },
   { key: "distributorManagement", label: "Distributor Management", icon: "Briefcase" },
@@ -73,11 +80,6 @@ export const MENU_ITEMS = [
 
   // Finance / Risk
   { key: "risk", label: "Credit & Risk", icon: "AlertTriangle" },
-  {
-    key: "qualificationReview",
-    label: "Qualification Review",
-    icon: "ClipboardCheck",
-  },
   { key: "notifications", label: "Activity Center", icon: "Bell" },
 
   // Performance / AI
