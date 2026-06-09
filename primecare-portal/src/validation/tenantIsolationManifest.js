@@ -77,6 +77,7 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     selectColumns: ["tenant_id", "product_id"],
     allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.AGENT],
     scope: "tenant_wide",
+    executiveCrossTenantReadable: true,
   },
   {
     id: "inventory_ledger",
@@ -126,6 +127,7 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE],
     scope: "admin_only",
     optional: true,
+    executiveCrossTenantReadable: true,
   },
   {
     id: "distributor_billing_payments",

@@ -106,18 +106,20 @@ async function probeTable(spec, mode) {
 
 /**
  * @param {string} tableName
+ * @param {string} [tenantColumn]
  */
-function schemaTenantColumnWarning(tableName) {
+function schemaTenantColumnWarning(tableName, tenantColumn = "tenant_id") {
   const known = PREDATOR_KNOWN_TABLE_COLUMNS[tableName] || [];
-  const missing = TENANT_TABLE_REQUIRED_COLUMNS.filter((c) => !known.includes(c));
+  const requiredColumns = [tenantColumn];
+  const missing = requiredColumns.filter((c) => !known.includes(c));
   if (!known.length) {
     return makeCheck(
       `schema.${tableName}.manifest`,
       `Schema manifest: ${tableName}`,
       "warn",
-      "No column manifest — cannot confirm tenant_id / timestamps in browser",
-      TENANT_TABLE_REQUIRED_COLUMNS,
-      { knownColumns: [] }
+      "No column manifest — cannot confirm tenant scope column / timestamps in browser",
+      requiredColumns,
+      { knownColumns: [], tenantColumn }
     );
   }
   if (missing.length === 0) {
@@ -125,9 +127,9 @@ function schemaTenantColumnWarning(tableName) {
       `schema.${tableName}.columns`,
       `Schema awareness: ${tableName}`,
       "pass",
-      `Manifest includes ${TENANT_TABLE_REQUIRED_COLUMNS.join(", ")}`,
-      TENANT_TABLE_REQUIRED_COLUMNS,
-      { knownColumns: known.slice(0, 12) }
+      `Manifest includes ${requiredColumns.join(", ")}`,
+      requiredColumns,
+      { knownColumns: known.slice(0, 12), tenantColumn }
     );
   }
   return makeCheck(
@@ -135,8 +137,8 @@ function schemaTenantColumnWarning(tableName) {
     `Schema awareness: ${tableName}`,
     "warn",
     `Manifest missing columns: ${missing.join(", ")} — cannot validate tenant isolation reliably`,
-    TENANT_TABLE_REQUIRED_COLUMNS,
-    { missing, knownColumns: known.slice(0, 16) }
+    requiredColumns,
+    { missing, knownColumns: known.slice(0, 16), tenantColumn }
   );
 }
 
@@ -645,7 +647,7 @@ export async function runTenantRoleIsolationValidation({
       continue;
     }
 
-    checks.push(schemaTenantColumnWarning(spec.table));
+    checks.push(schemaTenantColumnWarning(spec.table, spec.tenantColumn));
     const opt = schemaOptionalColumnsInfo(spec.table);
     if (opt) checks.push(opt);
 
