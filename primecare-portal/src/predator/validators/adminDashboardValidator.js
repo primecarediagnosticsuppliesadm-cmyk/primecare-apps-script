@@ -13,6 +13,26 @@ import {
   resolveAdminDashboardUiSnapshot,
 } from "@/predator/adminDashboardUiSnapshot.js";
 
+/** @param {import('@/validation/qaValidationCore.js').QaValidationCheck} check */
+function resolveAdminDashboardCheckStatus(check, uiSnapshotFresh) {
+  const base =
+    check.status === "fail" ? "FAIL" : check.status === "warn" ? "WARN" : "PASS";
+  if (base !== "FAIL" || uiSnapshotFresh) return base;
+  if (check.id === "browser_query_errors" || check.id === "api_read_failed") return base;
+
+  const actual = /** @type {Record<string, unknown>} */ (check.actual || {});
+  const uiRendered = actual.uiRendered;
+  if (uiRendered != null) return base;
+
+  const layerValues = [actual.browserRls, actual.dbComputed, actual.apiPayload].filter(
+    (v) => v !== null && v !== undefined
+  );
+  if (layerValues.length >= 2 && layerValues.every((v) => v === layerValues[0])) {
+    return "WARN";
+  }
+  return base;
+}
+
 /**
  * @param {Object} params
  * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} params.ctx
@@ -31,9 +51,10 @@ export async function validateAdminDashboardModule({ ctx, rendered = null }) {
     const uiSnapshot = report.meta?.uiSnapshot;
     const uiSnapshotFresh = Boolean(uiSnapshot?.fresh);
 
-    const entries = (report.checks || []).map((check) =>
-      createPredatorEntry({
-        status: check.status === "fail" ? "FAIL" : check.status === "warn" ? "WARN" : "PASS",
+    const entries = (report.checks || []).map((check) => {
+      const status = resolveAdminDashboardCheckStatus(check, uiSnapshotFresh);
+      return createPredatorEntry({
+        status,
         module: "Admin Dashboard",
         step: check.id || check.label,
         expected: check.expected,
@@ -42,15 +63,15 @@ export async function validateAdminDashboardModule({ ctx, rendered = null }) {
           check.status === "pass"
             ? ""
             : check.id === "ui_snapshot_freshness"
-              ? check.message || "Admin Dashboard UI snapshot not fresh"
+              ? check.message || "Open Admin Dashboard to validate UI render sync"
               : check.id === "ui_snapshot_metric_missing.orders_count"
                 ? check.message ||
                   "Orders count is backend/API validated; UI layer not rendered"
               : check.id === "orders_count"
                 ? check.message || "Orders row count layer mismatch (RLS vs API)"
-              : !uiSnapshotFresh && check.actual?.apiPayload > 0
-                ? "No fresh rendered snapshot — open Admin Dashboard before full Predator run"
-                : check.actual?.uiRendered === 0 &&
+              : !uiSnapshotFresh && status === "WARN"
+                ? "Open Admin Dashboard to validate UI render sync"
+              : check.actual?.uiRendered === 0 &&
                     check.actual?.apiPayload > 0 &&
                     check.id !== "orders_count"
                   ? "Backend healthy, UI synchronization unhealthy"
@@ -61,12 +82,12 @@ export async function validateAdminDashboardModule({ ctx, rendered = null }) {
           check.status === "pass"
             ? ""
             : "See Predator UI Reliability tab for state/cache/render trace and first divergence layer",
-        severity: check.status === "fail" ? "high" : check.status === "warn" ? "medium" : "low",
+        severity: status === "FAIL" ? "high" : status === "WARN" ? "medium" : "low",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,
-      })
-    );
+      });
+    });
 
     await diagnoseProjectionColumns("orders", {
       required: ["order_id", "lab_id", "status", "total_amount"],

@@ -7,7 +7,6 @@ import { normalizeLabIdKey } from "@/utils/labId.js";
 import { QA_ADMIN_DASHBOARD_SEED } from "@/validation/qaSeedExpectations.js";
 import {
   buildValidationReport,
-  checkMetricAcrossLayers,
   checkMutableMetricAcrossLayers,
   numOrNull,
   printQaValidationReport,
@@ -196,10 +195,11 @@ export async function runAdminDashboardValidation(options = {}) {
         uiRendered: uiRecentVisits,
       },
     }),
-    checkMetricAcrossLayers({
+    checkMutableMetricAcrossLayers({
       id: "inventory_skus",
-      label: "Inventory SKU count (immutable seed)",
-      expected: expected.inventorySkus,
+      label: "Inventory SKU count (mutable, executive portfolio)",
+      seedBaseline: expected.inventorySkus,
+      omitUiUnlessPresent: true,
       layers: {
         browserRls: browser.inventorySkus,
         dbComputed: browser.inventorySkus,
@@ -249,7 +249,8 @@ export async function runAdminDashboardValidation(options = {}) {
         capturedAt: uiSnapshot.capturedAt,
         apiValidatedAt: uiSnapshot.apiValidatedAt,
       },
-      message: uiSnapshot.message || "UI snapshot not available for comparison",
+      message:
+        uiSnapshot.message || "Open Admin Dashboard to validate UI render sync",
     });
   }
 

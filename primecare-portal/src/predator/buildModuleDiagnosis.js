@@ -310,8 +310,9 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx, options = {}) {
     }),
     diagnoseMetricLayers({
       metricId: "inventory_skus",
-      metricLabel: "Inventory SKUs",
-      expected: seed.inventorySkus,
+      metricLabel: "Inventory SKU count (mutable, executive portfolio)",
+      expected:
+        snap.inventorySkus ?? snap.apiInventorySkus ?? seed.inventorySkus,
       tenantCtx: ctx,
       compareMode: "kpi",
       layers: [

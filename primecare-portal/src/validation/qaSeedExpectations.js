@@ -7,6 +7,7 @@
  * browser RLS / DB rollup and fails only when DB/API/UI layers disagree.
  *
  * ordersCount mutates when QA/lab ordering tests create real orders.
+ * inventorySkus mutates when executive portfolio visibility spans HQ + distributor tenants.
  */
 export const QA_ADMIN_DASHBOARD_SEED = {
   ordersCount: 3,
@@ -17,12 +18,13 @@ export const QA_ADMIN_DASHBOARD_SEED = {
 };
 
 /** Seed keys validated against fixed QA seed (immutable after load). */
-export const QA_ADMIN_DASHBOARD_IMMUTABLE_SEED_KEYS = ["inventorySkus"];
+export const QA_ADMIN_DASHBOARD_IMMUTABLE_SEED_KEYS = [];
 
 /** Seed keys that may change during QA (visits saved, payments, fulfillment, lab orders). */
 export const QA_ADMIN_DASHBOARD_MUTABLE_SEED_KEYS = [
   "ordersCount",
   "outstandingReceivables",
   "recentVisits",
+  "inventorySkus",
   "totalSoldValue",
 ];

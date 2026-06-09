@@ -92,7 +92,15 @@ export function checkEmptyApiWhenDbHasRows({ module, step, ctx, dbRowCount, apiC
  * @param {string|null} p.profileTenantId
  * @param {string[]} p.rowTenantIds
  */
-export function checkTenantConsistency({ module, step, ctx, profileTenantId, rowTenantIds }) {
+export function checkTenantConsistency({
+  module,
+  step,
+  ctx,
+  profileTenantId,
+  rowTenantIds,
+  executiveCrossTenantReadable = false,
+  registeredTenantIds = null,
+}) {
   const unique = [...new Set((rowTenantIds || []).filter(Boolean))];
   if (!profileTenantId) {
     return [
