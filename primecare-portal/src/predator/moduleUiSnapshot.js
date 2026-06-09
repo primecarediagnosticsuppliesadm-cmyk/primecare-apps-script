@@ -4,6 +4,7 @@ export const MODULE_UI_SNAPSHOT_FRESHNESS_MS = 2 * 60 * 1000;
 
 export const COLLECTIONS_MODULE = "Collections";
 export const QUALIFICATION_REVIEW_MODULE = "Qualification Analytics";
+export const DISTRIBUTOR_OS_MODULE = "Distributor OS";
 
 /**
  * Page-observed Collections snapshot (may legitimately be zero).

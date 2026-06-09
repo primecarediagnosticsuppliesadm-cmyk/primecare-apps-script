@@ -42,6 +42,7 @@ import { predatorTrace } from "@/predator/predatorTiming.js";
 import { ADMIN_DASHBOARD_MODULE } from "@/predator/adminDashboardUiSnapshot.js";
 import {
   COLLECTIONS_MODULE,
+  DISTRIBUTOR_OS_MODULE,
   QUALIFICATION_REVIEW_MODULE,
 } from "@/predator/moduleUiSnapshot.js";
 
@@ -116,7 +117,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         ctx,
         rendered: snapshots.qualificationReview ?? storedQualificationRendered?.snapshot ?? null,
       });
-      predatorStore.setModuleReport("Qualification Review", qualification.entries, ctx);
+      predatorStore.setModuleReport(QUALIFICATION_REVIEW_MODULE, qualification.entries, ctx);
       modules.push(qualification);
 
       const agentVisits = await validateAgentVisitsModule({
@@ -185,6 +186,8 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         inventoryEconomics,
         distributorProfitability,
         qaReadiness,
+        revenueFunnel,
+        distributorOs,
       ] = await Promise.all([
         validateOperationsCommandCenterModule({
           ctx,
@@ -294,6 +297,13 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
           currentUser,
           rendered: snapshots.revenueFunnel ?? null,
         }),
+        validateDistributorOsModule({
+          ctx,
+          rendered:
+            snapshots.distributorOs ??
+            predatorStore.getModuleRenderedSnapshot(DISTRIBUTOR_OS_MODULE, ctx)?.snapshot ??
+            null,
+        }),
       ]);
 
       modules.push(
@@ -315,7 +325,8 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         storePolishedModule("Inventory Economics", inventoryEconomics, ctx),
         storePolishedModule("Distributor Profitability", distributorProfitability, ctx),
         storePolishedModule("QA Readiness", qaReadiness, ctx),
-        storePolishedModule("Revenue Funnel", revenueFunnel, ctx)
+        storePolishedModule("Revenue Funnel", revenueFunnel, ctx),
+        storePolishedModule(DISTRIBUTOR_OS_MODULE, distributorOs, ctx)
       );
 
       clearPredatorOpsPayload();
@@ -480,6 +491,14 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
       });
       break;
     case "Distributor OS":
+      if (snapshot?.distributorOs) {
+        predatorStore.setModuleRenderedSnapshot(DISTRIBUTOR_OS_MODULE, {
+          snapshot,
+          source: "Distributor OS.render",
+          capturedAt: Date.now(),
+          kpiModel: null,
+        }, ctx);
+      }
       result = await validateDistributorOsModule({
         ctx,
         rendered: snapshot,
