@@ -3,7 +3,7 @@ import { predatorStore } from "@/predator/predatorStore.js";
 export const MODULE_UI_SNAPSHOT_FRESHNESS_MS = 2 * 60 * 1000;
 
 export const COLLECTIONS_MODULE = "Collections";
-export const QUALIFICATION_REVIEW_MODULE = "Qualification Review";
+export const QUALIFICATION_REVIEW_MODULE = "Qualification Analytics";
 
 /**
  * Page-observed Collections snapshot (may legitimately be zero).
@@ -202,10 +202,10 @@ export function resolveQualificationUiSnapshot(params = {}) {
     explicitRendered: params.explicitRendered ?? null,
     isObserved: hasObservedQualificationSnapshot,
     missingMessage:
-      "Qualification Review UI snapshot not fresh; visit Qualification Review page or capture rendered snapshot",
-    expiredMessagePrefix: "Qualification Review UI snapshot expired",
+      "Qualification Analytics UI snapshot not fresh; visit Qualification Analytics page or capture rendered snapshot",
+    expiredMessagePrefix: "Qualification Analytics UI snapshot expired",
     staleZeroMessage:
-      "Qualification Review UI snapshot not fresh (stored snapshot empty); visit page after load",
+      "Qualification Analytics UI snapshot not fresh (stored snapshot empty); visit page after load",
     apiValidatedAt: params.apiValidatedAt,
   });
 }

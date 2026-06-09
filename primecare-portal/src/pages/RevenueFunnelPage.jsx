@@ -8,6 +8,10 @@ import {
   loadRevenueFunnelData,
 } from "@/founder/revenueFunnelData.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
+import {
+  enterDistributorOs,
+  presetDistributorOsLabsSubTab,
+} from "@/tenant/tenantFoundationStore.js";
 import { cn } from "@/lib/utils";
 import { BarChart3, RefreshCw, TrendingUp, AlertTriangle } from "lucide-react";
 
@@ -132,7 +136,7 @@ export default function RevenueFunnelPage({ currentUser = null, setActivePage = 
       <Section title="Executive summary" icon={TrendingUp}>
         <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border bg-white p-2 shadow-sm">
           <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-            Qualification integrity
+            Qualification status
           </p>
           <StatusBadge variant={integrityVariant(portfolio.qualificationIntegrity)} compact>
             {portfolio.qualificationIntegrity || "Healthy"}
@@ -373,15 +377,26 @@ export default function RevenueFunnelPage({ currentUser = null, setActivePage = 
                             Open Distributor Catalog
                           </Button>
                         ) : null}
-                        {b.stage === "qualification_integrity" && setActivePage ? (
+                        {(b.stage === "qualification_integrity" || b.stage === "qualification") &&
+                        setActivePage &&
+                        focus?.distributorId ? (
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
                             className="h-7 text-[10px]"
-                            onClick={() => setActivePage("qualificationReview")}
+                            onClick={() => {
+                              presetDistributorOsLabsSubTab("qualification");
+                              enterDistributorOs({
+                                tenantId: focus.distributorId,
+                                tenantName: focus.name,
+                                homeTenantId: model.homeTenantId,
+                                tab: "labs",
+                              });
+                              setActivePage("distributorOs");
+                            }}
                           >
-                            Open Qualification Review
+                            Open Distributor Qualification
                           </Button>
                         ) : null}
                       </div>
@@ -399,9 +414,8 @@ export default function RevenueFunnelPage({ currentUser = null, setActivePage = 
                   <thead className="border-b bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-2 py-2">Lab</th>
-                      <th className="px-2 py-2">Qualification status</th>
-                      <th className="px-2 py-2">Founder review</th>
-                      <th className="px-2 py-2">Pipeline stage</th>
+                      <th className="px-2 py-2">Qualification</th>
+                      <th className="px-2 py-2">Qualified pipeline</th>
                       <th className="px-2 py-2">Score</th>
                       <th className="px-2 py-2">Contract</th>
                       <th className="px-2 py-2">Orders</th>
@@ -415,7 +429,6 @@ export default function RevenueFunnelPage({ currentUser = null, setActivePage = 
                       <tr key={lab.labId} className="border-b last:border-0">
                         <td className="px-2 py-2 font-medium">{lab.labName}</td>
                         <td className="px-2 py-2">{lab.qualificationStatus}</td>
-                        <td className="px-2 py-2">{lab.founderReviewStatus}</td>
                         <td className="px-2 py-2">{lab.pipelineStage}</td>
                         <td className="px-2 py-2 tabular-nums">
                           {lab.qualificationScore != null ? lab.qualificationScore : "—"}

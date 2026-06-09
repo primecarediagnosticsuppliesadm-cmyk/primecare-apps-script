@@ -230,7 +230,14 @@ export default function ExecutiveInterventionDrawer({
                       "Pending"}
                   </span>
                   {" · "}
-                  Review: {qualification?.founder_review_status || qualification?.founderReviewStatus || "—"}
+                  Pipeline:{" "}
+                  {qualification?.pipelineStageLabel ||
+                    qualification?.pipeline_stage ||
+                    qualification?.pipelineStage ||
+                    "—"}
+                  {" · "}
+                  Legacy review:{" "}
+                  {qualification?.founder_review_status || qualification?.founderReviewStatus || "—"}
                 </p>
               )}
             </section>

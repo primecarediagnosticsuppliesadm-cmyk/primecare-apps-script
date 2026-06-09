@@ -10,7 +10,11 @@ import { resolvePersistenceDisplay } from "@/tenant/durableTenantStore.js";
 import { computeFounderOperationalSignals } from "@/founder/founderPilotReadinessCompute.js";
 import { YEAR1_TARGETS } from "@/founder/founderStrategyTargets.js";
 import { filterVisitProofEvidence } from "@/utils/operationalEvidenceUi.js";
-import { getPipelineStageLabel, normalizeQualificationPipelineStage } from "@/utils/qualificationPipeline.js";
+import {
+  getPipelineStageLabel,
+  isQualificationPipelinePending,
+  normalizeQualificationPipelineStage,
+} from "@/utils/qualificationPipeline.js";
 import { labIdKey } from "@/utils/labId.js";
 import { computeTenantHealthBand, computeTenantHealthScore } from "@/tenant/tenantFoundationEngine.js";
 import { buildContractSummaryForDistributor } from "@/labContract/labContractEngine.js";
@@ -360,7 +364,7 @@ function buildRisks(ctx) {
       id: "stale_qualification",
       title: "Stale qualification pipeline",
       detail: `${h.staleQualifications} qualification(s) need review`,
-      action: "Open Qualification Review",
+      action: "Open Distributor OS → Labs → Qualification",
       page: "qualificationReview",
       wired: true,
     });
@@ -427,10 +431,7 @@ function computeDistributorHealth(payload, registryMetrics, isLive) {
   const labs = buildLabContexts(payload);
   const inactiveLabs = labs.filter((l) => !l.active).length;
   const qualifications = payload?.qualifications || [];
-  const staleQualifications = qualifications.filter((q) => {
-    const r = str(q.founderReviewStatus || q.founder_review_status).toLowerCase();
-    return r === "pending" || r === "needs_info";
-  }).length;
+  const staleQualifications = qualifications.filter(isQualificationPipelinePending).length;
 
   const dailyRevenue = num(executive.todaysRevenue);
   const monthlyRevenue = dailyRevenue * REVENUE_DAYS;

@@ -105,7 +105,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
     modules.push(labPortal);
 
     if (isLabRole) {
-      modules.push(skippedModuleForLabRole("Qualification Review", ctx));
+      modules.push(skippedModuleForLabRole("Qualification Analytics", ctx));
       modules.push(skippedModuleForLabRole("Agent Visits", ctx));
     } else {
       const storedQualificationRendered = predatorStore.getModuleRenderedSnapshot(
@@ -364,7 +364,7 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
     case "Collections":
       result = await validateCollectionsModule({ ctx, rendered: snapshot });
       break;
-    case "Qualification Review":
+    case "Qualification Analytics":
       result = await validateQualificationModule({ ctx, rendered: snapshot });
       break;
     case "Agent Visits":

@@ -69,7 +69,7 @@ const WORKFLOW_MODULES = new Set([
   "Operations Center",
   "Operational Tasks",
   "Executive Intervention",
-  "Qualification Review",
+  "Qualification Analytics",
   "Agent Visits",
   "Collections",
 ]);

@@ -55,7 +55,7 @@ export const MENU_ITEMS = [
   { key: "revenueFunnel", label: "Revenue Funnel", icon: "TrendingUp" },
   {
     key: "qualificationReview",
-    label: "Qualification Review",
+    label: "Qualification Analytics",
     icon: "ClipboardCheck",
   },
   { key: "pilotReadiness", label: "Pilot Readiness", icon: "Rocket" },

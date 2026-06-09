@@ -1,11 +1,12 @@
 import { labIdKey } from "@/utils/labId.js";
 import {
   getPipelineStageLabel,
+  isQualificationPipelineReady,
   normalizeQualificationPipelineStage,
 } from "@/utils/qualificationPipeline.js";
 
 export const CONTRACT_ACTIVATION_QUALIFICATION_MESSAGE =
-  "Lab must complete Qualification Review before contract activation.";
+  "Lab must complete Qualification before contract activation.";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -35,8 +36,8 @@ export function resolveQualificationForContractLab(
 }
 
 /**
- * Gate contract activation on qualification integrity.
- * Requires: row exists, founder approved, pipeline stage qualified or won.
+ * Gate contract activation on distributor-owned qualification integrity.
+ * Requires: row exists, pipeline stage qualified or won.
  */
 export function evaluateContractActivationQualification(
   contract = {},
@@ -46,25 +47,24 @@ export function evaluateContractActivationQualification(
   const distributorId = str(options.distributorId || contract.distributorId || contract.tenantId);
   const qual = resolveQualificationForContractLab(contract, qualifications, distributorId);
   const qualificationExists = Boolean(qual);
-  const founderApproved =
-    str(qual?.founderReviewStatus || qual?.founder_review_status).toLowerCase() === "approved";
   const stage = normalizeQualificationPipelineStage(
     qual?.pipelineStage || qual?.pipeline_stage
   );
   const qualificationStatus = stage ? getPipelineStageLabel(stage) : null;
-  const qualificationStatusQualified = stage === "qualified" || stage === "won";
+  const pipelineQualified = qualificationExists && isQualificationPipelineReady(qual);
 
-  const activationAllowed =
-    qualificationExists && founderApproved && qualificationStatusQualified;
+  const activationAllowed = pipelineQualified;
 
   let blockReason = null;
   if (!qualificationExists) {
     blockReason = "missing_qualification_row";
-  } else if (!founderApproved) {
-    blockReason = "founder_review_not_approved";
-  } else if (!qualificationStatusQualified) {
+  } else if (!pipelineQualified) {
     blockReason = "pipeline_not_qualified";
   }
+
+  const legacyFounderReview = str(
+    qual?.founderReviewStatus || qual?.founder_review_status
+  ).toLowerCase() || null;
 
   return {
     distributor: str(contract.distributorName) || distributorId || null,
@@ -72,7 +72,7 @@ export function evaluateContractActivationQualification(
     labId: labIdKey(contract.labId),
     qualificationExists,
     qualificationStatus: qualificationStatus || (qualificationExists ? "—" : "missing"),
-    founderApproved,
+    legacyFounderReview,
     contractStatus: str(contract.status) || null,
     activationAllowed,
     blockReason,

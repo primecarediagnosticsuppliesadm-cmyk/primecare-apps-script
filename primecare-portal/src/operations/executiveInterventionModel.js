@@ -15,6 +15,7 @@ import {
   inferClusterType,
 } from "@/operations/executiveInterventionWorkflow.js";
 import { buildUnifiedOperationsFeedRows } from "@/operations/operationalEventTimeline.js";
+import { isQualificationPipelinePending } from "@/utils/qualificationPipeline.js";
 
 const SEVERITY_ORDER = { CRITICAL: 0, ATTENTION: 1, MONITORING: 2 };
 
@@ -267,10 +268,7 @@ function trendFromStatus(status) {
  */
 export function buildExecutiveHealthStrip(payload, opsModel) {
   const base = buildOperationalHealthTiles(payload, opsModel.health);
-  const pendingQual = (payload.qualifications || []).filter((q) => {
-    const r = str(q.founderReviewStatus || q.founder_review_status).toLowerCase();
-    return r === "pending" || r === "needs_info";
-  }).length;
+  const pendingQual = (payload.qualifications || []).filter(isQualificationPipelinePending).length;
 
   const qualStatus =
     pendingQual >= 5 ? "risk" : pendingQual > 0 ? "watch" : "healthy";
@@ -285,9 +283,9 @@ export function buildExecutiveHealthStrip(payload, opsModel) {
     trend: trendFromStatus(qualStatus),
     detail:
       pendingQual > 0
-        ? `${pendingQual} awaiting founder review`
+        ? `${pendingQual} labs pending qualification`
         : "Pipeline current",
-    action: "qualificationReview",
+    action: "distributorOs",
   };
 
   return base.map((t) => ({

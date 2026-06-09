@@ -409,22 +409,21 @@ export async function validateLabContractEngineModule({
             status: probe.activationAllowed ? "PASS" : "FAIL",
             module: "Lab Contract Engine",
             step: "contract_activation_requires_qualification",
-            expected:
-              "Qualification row exists, founder review approved, pipeline stage qualified",
+            expected: "Qualification row exists with pipeline stage qualified or won",
             actual: {
               distributor: probe.distributor || contract.distributorName || contract.distributorId,
               lab: probe.lab || contract.labName || contract.labId,
               qualificationExists: probe.qualificationExists,
               qualificationStatus: probe.qualificationStatus,
-              founderApproved: probe.founderApproved,
+              legacyFounderReview: probe.legacyFounderReview,
               contractStatus: probe.contractStatus,
               activationAllowed: probe.activationAllowed,
             },
             rootCauseGuess: probe.activationAllowed
-              ? "Active contract backed by approved qualification"
+              ? "Active contract backed by qualified distributor pipeline"
               : probe.blockReason === "missing_qualification_row"
                 ? "Contract activated without qualification record (likely migration or legacy path)"
-                : "Qualification exists but founder approval or qualified stage missing",
+                : "Qualification exists but pipeline is not qualified or won",
             severity: probe.activationAllowed ? "low" : "critical",
             tenantId: ctx.tenantId,
             role: ctx.role,

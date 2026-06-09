@@ -409,7 +409,7 @@ export function buildCollectionsMetricDiagnoses(snap, ctx, options = {}) {
  */
 export function buildQualificationMetricDiagnoses(snap, ctx, options = {}) {
   const uiSnapshotFresh = options.uiSnapshotFresh !== false;
-  const module = "Qualification Review";
+  const module = "Qualification Analytics";
   const uiLayer = (value) => ({
     layerId: "ui",
     label: "Rendered UI",

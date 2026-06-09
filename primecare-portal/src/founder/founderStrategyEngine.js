@@ -125,8 +125,8 @@ function buildTodayPriorities(signals, journey, collSummary, renewalIntel = null
       title: "Clear qualification pipeline",
       impactScore: 82,
       urgency: "Medium",
-      outcome: `${signals.qualificationsPending} labs awaiting founder review`,
-      page: "qualificationReview",
+      outcome: `${signals.qualificationsPending} labs pending qualification`,
+      page: "distributorOs",
       sortKey: 80,
     });
   }

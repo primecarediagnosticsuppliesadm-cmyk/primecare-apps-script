@@ -67,18 +67,27 @@ export function isAgentAllowedPipelineStage(stage) {
   return !TERMINAL_PIPELINE_STAGES.has(key);
 }
 
+/** Distributor-owned readiness: pipeline qualified or won (no HQ founder review). */
+export function isQualificationPipelineReady(qualification = {}) {
+  const stage = normalizeQualificationPipelineStage(
+    qualification.pipelineStage || qualification.pipeline_stage
+  );
+  return stage === "qualified" || stage === "won";
+}
+
+/** True when a qualification row exists but pipeline is not yet contract-ready (excludes lost). */
+export function isQualificationPipelinePending(qualification = {}) {
+  const stage = normalizeQualificationPipelineStage(
+    qualification.pipelineStage || qualification.pipeline_stage
+  );
+  if (stage === "lost") return false;
+  return !isQualificationPipelineReady(qualification);
+}
+
 /**
  * Default stage when no pipeline_stage is stored yet.
  */
 export function deriveDefaultPipelineStage(qualification = {}) {
-  const founder = String(
-    qualification.founder_review_status ?? qualification.founderReviewStatus ?? ""
-  )
-    .trim()
-    .toLowerCase();
-
-  if (founder === "rejected") return "hold";
-
   const band = String(
     qualification.qualification_band ?? qualification.qualificationBand ?? ""
   )
@@ -88,7 +97,7 @@ export function deriveDefaultPipelineStage(qualification = {}) {
     qualification.qualification_score ?? qualification.qualificationScore
   );
 
-  if (founder === "approved" || band === "hot" || (Number.isFinite(score) && score >= 70)) {
+  if (band === "hot" || (Number.isFinite(score) && score >= 70)) {
     return "qualified";
   }
 

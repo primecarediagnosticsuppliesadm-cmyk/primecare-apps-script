@@ -128,25 +128,25 @@ export function computeQualificationScore(qualification = {}) {
     reasons.push("Next follow-up date scheduled");
   }
 
-  const founderStatus = str(
-    qualification.founder_review_status ?? qualification.founderReviewStatus
+  const pipelineStage = str(
+    qualification.pipeline_stage ?? qualification.pipelineStage
   ).toLowerCase();
 
-  if (founderStatus === "approved") {
+  if (pipelineStage === "qualified" || pipelineStage === "won") {
     score += 5;
-    reasons.push("Founder review: approved");
-  } else if (founderStatus === "needs_info") {
-    score -= 15;
-    reasons.push("Founder review: needs more info (−15)");
-  } else if (founderStatus === "rejected") {
+    reasons.push("Qualification pipeline: qualified or won");
+  } else if (pipelineStage === "lost") {
     score = Math.min(score, 20);
-    reasons.push("Founder review: rejected (capped score)");
+    reasons.push("Qualification pipeline: lost (capped score)");
+  } else if (pipelineStage === "hold") {
+    score = Math.min(score, 30);
+    reasons.push("Qualification pipeline: on hold");
   }
 
   score = Math.max(0, Math.min(100, score));
 
   let qualification_band = "cold";
-  if (founderStatus === "rejected") {
+  if (pipelineStage === "lost" || pipelineStage === "hold") {
     qualification_band = "cold";
   } else if (score >= 70) {
     qualification_band = "hot";
@@ -158,7 +158,7 @@ export function computeQualificationScore(qualification = {}) {
     reasons.push("Overall score ≥ 70 → HOT band");
   } else if (qualification_band === "warm") {
     reasons.push("Overall score 40–69 → WARM band");
-  } else if (qualification_band === "cold" && founderStatus !== "rejected") {
+  } else if (qualification_band === "cold" && pipelineStage !== "lost") {
     reasons.push("Overall score below 40 → COLD band");
   }
 

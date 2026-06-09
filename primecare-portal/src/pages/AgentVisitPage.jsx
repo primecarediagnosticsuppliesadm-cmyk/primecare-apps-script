@@ -2713,7 +2713,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
                   </div>
 
                   <div>
-                    <FieldLabel>Founder review (read-only)</FieldLabel>
+                    <FieldLabel>Legacy founder review (read-only)</FieldLabel>
                     <Input
                       value={qualificationForm.founderReviewStatus || "pending"}
                       readOnly

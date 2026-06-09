@@ -5,7 +5,6 @@ import { usePredatorRenderTrace } from "@/predator/renderTrace.js";
 import { usePredatorUiSyncTrace } from "@/predator/usePredatorUiSyncTrace.js";
 import {
   getQualificationReviewRead,
-  updateQualificationFounderReviewWrite,
   updateQualificationPipelineWrite,
 } from "@/api/primecareSupabaseApi";
 import { Card } from "@/components/ui/card";
@@ -29,7 +28,6 @@ import {
 import {
   qualificationBandToVariant,
   pipelineStageToVariant,
-  founderReviewToVariant,
   tierLevelToVariant,
 } from "@/utils/statusTokens";
 import {
@@ -44,19 +42,16 @@ import {
 } from "lucide-react";
 import { loadVisibleLabContracts } from "@/labContract/labContractStore.js";
 import { CONTRACT_STATUSES } from "@/labContract/labContractTypes.js";
-import { enterDistributorOs } from "@/tenant/tenantFoundationStore.js";
 import { labIdKey } from "@/utils/labId.js";
 import { formatQualificationBandLabel } from "@/utils/computeQualificationScore";
-import { ROLES } from "@/config/roles";
 import {
   getPipelineStageLabel,
   getPipelineStageOrder,
   PIPELINE_STAGE_SELECT_OPTIONS,
 } from "@/utils/qualificationPipeline";
 
-function canEditPipeline(currentUser) {
-  const role = String(currentUser?.role || "").toLowerCase();
-  return role === ROLES.ADMIN || role === ROLES.EXECUTIVE;
+function canEditPipeline() {
+  return false;
 }
 
 const STATUS_OPTIONS = [
@@ -98,13 +93,6 @@ const SORT_OPTIONS = [
   { value: "score", label: "Score (high → low)" },
   { value: "stage", label: "Pipeline stage (funnel order)" },
   { value: "expected_value", label: "Expected value (high → low)" },
-];
-
-const REVIEW_STATUS_OPTIONS = [
-  { value: "pending", label: "Pending" },
-  { value: "approved", label: "Approved" },
-  { value: "rejected", label: "Rejected" },
-  { value: "needs_info", label: "Needs info" },
 ];
 
 function formatStatusLabel(status) {
@@ -375,7 +363,7 @@ function StickyReviewFilters({
             options={BAND_OPTIONS}
           />
           <FilterSelect
-            label="Review"
+            label="Legacy founder review"
             value={statusFilter}
             onValueChange={setStatusFilter}
             options={STATUS_OPTIONS}
@@ -727,83 +715,6 @@ function PipelineEditor({ row, currentUser, onSaved, onError, savedAt }) {
   );
 }
 
-function FounderReviewSection({ row, currentUser, onSaved, onError, savedAt }) {
-  const [status, setStatus] = useState(row.founderReviewStatus || "pending");
-  const [saving, setSaving] = useState(false);
-  const [rowError, setRowError] = useState("");
-
-  useEffect(() => {
-    setStatus(row.founderReviewStatus || "pending");
-  }, [row.founderReviewStatus, row.labId]);
-
-  async function handleSaveStatus() {
-    setRowError("");
-    setSaving(true);
-    try {
-      const res = await updateQualificationFounderReviewWrite({
-        tenantId: row.tenantId || currentUser?.tenantId,
-        labId: row.labId,
-        founderReviewStatus: status,
-        updatedBy: currentUser?.id || currentUser?.userId,
-      });
-      if (!res?.success) {
-        throw new Error(res?.error || "Failed to update review status");
-      }
-      onSaved?.(res.data);
-    } catch (err) {
-      const msg = err?.message || "Update failed";
-      setRowError(msg);
-      onError?.(msg);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-2.5">
-      <div className="flex flex-wrap items-center justify-between gap-1">
-        <div className="text-xs font-semibold text-slate-700">Founder review</div>
-        <SavedHint label="Founder review updated" at={savedAt} />
-      </div>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-        <div className="min-w-0 flex-1 space-y-1">
-          <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-            Status
-          </label>
-          <Select value={status} onValueChange={setStatus}>
-            <SelectTrigger className="h-11 rounded-lg">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {REVIEW_STATUS_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <Button
-          type="button"
-          className="h-11 w-full shrink-0 rounded-lg sm:w-auto"
-          disabled={saving || status === row.founderReviewStatus}
-          onClick={handleSaveStatus}
-        >
-          {saving ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Saving status…
-            </>
-          ) : (
-            "Save status"
-          )}
-        </Button>
-      </div>
-      {rowError ? <p className="text-sm text-red-600">{rowError}</p> : null}
-    </div>
-  );
-}
-
 function ReviewExpandedPanel({
   row,
   currentUser,
@@ -820,10 +731,6 @@ function ReviewExpandedPanel({
     onRowSaved(data, "pipeline");
   }
 
-  function handleStatusSaved(data) {
-    onRowSaved(data, "status");
-  }
-
   return (
     <div
       id={`review-detail-${key}`}
@@ -831,18 +738,10 @@ function ReviewExpandedPanel({
     >
       <div className="space-y-3">
         {contract ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <FileText className="h-4 w-4 text-slate-500" aria-hidden />
-              <span className="text-xs font-semibold text-slate-800">Distributor contract</span>
-              <ContractExistsBadge contract={contract} />
-            </div>
-            <OpenDistributorContractButton
-              row={row}
-              contract={contract}
-              currentUser={currentUser}
-              setActivePage={setActivePage}
-            />
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-2">
+            <FileText className="h-4 w-4 text-slate-500" aria-hidden />
+            <span className="text-xs font-semibold text-slate-800">Distributor contract</span>
+            <ContractExistsBadge contract={contract} />
           </div>
         ) : null}
         <section aria-labelledby={`qual-heading-${key}`}>
@@ -861,13 +760,13 @@ function ReviewExpandedPanel({
           onError={onSaveError}
           savedAt={meta.pipelineAt}
         />
-        <FounderReviewSection
-          row={row}
-          currentUser={currentUser}
-          onSaved={handleStatusSaved}
-          onError={onSaveError}
-          savedAt={meta.statusAt}
-        />
+        {row.founderReviewStatus ? (
+          <div className="rounded-lg border border-dashed border-slate-200 bg-white p-2.5 text-xs text-slate-600">
+            <span className="font-semibold text-slate-700">Legacy founder review (deprecated):</span>{" "}
+            {formatStatusLabel(row.founderReviewStatus)} — not required for contract activation.
+            Manage qualification pipeline in Distributor OS → Labs → Qualification.
+          </div>
+        ) : null}
         <NotesSection row={row} />
       </div>
     </div>
@@ -911,9 +810,6 @@ function ReviewSummaryRow({ row, expanded, onToggleExpand, contract = null }) {
           <div className="mt-1 flex flex-wrap items-center gap-1">
             <ScoreBandBadge row={row} compact />
             <PipelineStageBadge row={row} compact />
-            <StatusBadge variant={founderReviewToVariant(row.founderReviewStatus)} compact>
-              {formatStatusLabel(row.founderReviewStatus)}
-            </StatusBadge>
             {hasDisplayValue(row.reagentRentalPotential) ? (
               <StatusBadge variant={tierLevelToVariant(row.reagentRentalPotential)} compact>
                 Rental {row.reagentRentalPotential}
@@ -934,7 +830,7 @@ function ReviewSummaryRow({ row, expanded, onToggleExpand, contract = null }) {
           className="h-10 shrink-0 rounded-lg px-3 text-xs font-semibold"
           onClick={onToggleExpand}
         >
-          {expanded ? "Close" : "View / Edit"}
+          {expanded ? "Close" : "View"}
         </Button>
       </div>
 
@@ -1138,7 +1034,7 @@ export default function QualificationReviewPage({ currentUser, setActivePage = n
     [rows]
   );
 
-  usePredatorModuleValidation("Qualification Review", currentUser, predatorSnapshot, !loading);
+  usePredatorModuleValidation("Qualification Analytics", currentUser, predatorSnapshot, !loading);
 
   useEffect(() => {
     if (loading) return;
@@ -1152,7 +1048,7 @@ export default function QualificationReviewPage({ currentUser, setActivePage = n
     hasData: rows.length > 0,
   });
 
-  usePredatorUiSyncTrace("Qualification Review", {
+  usePredatorUiSyncTrace("Qualification Analytics", {
     loading,
     apiReady: !loading,
     metrics: {
@@ -1199,13 +1095,10 @@ export default function QualificationReviewPage({ currentUser, setActivePage = n
       [updated.labId]: {
         ...prev[updated.labId],
         ...(saveType === "pipeline" ? { pipelineAt: now } : {}),
-        ...(saveType === "status" ? { statusAt: now } : {}),
       },
     }));
     if (saveType === "pipeline") {
       showToast("success", "Pipeline updated successfully");
-    } else if (saveType === "status") {
-      showToast("success", "Founder review updated");
     }
   }
 
@@ -1219,10 +1112,11 @@ export default function QualificationReviewPage({ currentUser, setActivePage = n
         <div>
           <div className="flex items-center gap-2">
             <ClipboardCheck className="h-5 w-5 text-[var(--pc-brand-primary)]" />
-            <h1 className="text-xl font-semibold tracking-tight">Qualification Review</h1>
+            <h1 className="text-xl font-semibold tracking-tight">Qualification Analytics</h1>
           </div>
           <p className="mt-0.5 text-xs text-slate-500">
-            Review and update lab qualifications. Tap a row to expand one lab at a time.
+            Read-only portfolio view across distributors. Manage qualifications in Distributor OS →
+            Labs → Qualification.
           </p>
         </div>
         <Button
@@ -1273,7 +1167,7 @@ export default function QualificationReviewPage({ currentUser, setActivePage = n
 
       {filteredRows.length === 0 ? (
         <EmptyState
-          title="No qualifications to review"
+          title="No qualifications to display"
           description={
             rows.length === 0
               ? "Agents have not saved any lab qualification profiles yet."

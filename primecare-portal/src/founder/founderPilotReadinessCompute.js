@@ -6,6 +6,7 @@ import { buildExecutiveOperationalTaskModel } from "@/operations/operationalTask
 import { readOperationalLedger } from "@/operations/operationalEventLedger.js";
 import { buildUnifiedOperationsFeedRows } from "@/operations/operationalEventTimeline.js";
 import { labIdKey } from "@/utils/labId.js";
+import { isQualificationPipelinePending } from "@/utils/qualificationPipeline.js";
 
 const PILOT_READINESS_TARGET = 90;
 
@@ -254,10 +255,7 @@ export function computeFounderOperationalSignals(payload = {}, tenantId = "") {
     fieldScaleUnlocked,
     overdueInterventions,
     missingProofDrift,
-    qualificationsPending: qualifications.filter((q) => {
-      const r = str(q.founderReviewStatus || q.founder_review_status).toLowerCase();
-      return r === "pending" || r === "needs_info";
-    }).length,
+    qualificationsPending: qualifications.filter(isQualificationPipelinePending).length,
     ledgerEvents: tenantId ? readOperationalLedger(tenantId).length : 0,
     localEvidenceCount: localOnly,
     execModel,

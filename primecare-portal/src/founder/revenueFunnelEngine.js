@@ -10,6 +10,7 @@ import { CONTRACT_STATUSES } from "@/labContract/labContractTypes.js";
 import { labIdKey } from "@/utils/labId.js";
 import {
   getPipelineStageLabel,
+  isQualificationPipelineReady,
   normalizeQualificationPipelineStage,
 } from "@/utils/qualificationPipeline.js";
 
@@ -33,14 +34,7 @@ function pct(numerator, denominator) {
 }
 
 function isQualifiedLab(qualification = {}) {
-  const founder = str(
-    qualification.founderReviewStatus || qualification.founder_review_status
-  ).toLowerCase();
-  if (founder === "approved") return true;
-  const stage = normalizeQualificationPipelineStage(
-    qualification.pipelineStage || qualification.pipeline_stage
-  );
-  return stage === "qualified" || stage === "won";
+  return isQualificationPipelineReady(qualification);
 }
 
 function qualificationsForDistributor(qualifications = [], distributorId, labIds = new Set()) {
@@ -294,9 +288,6 @@ function buildLabCommercialContexts({
     const hasQualificationRow = Boolean(qual);
     const qualified = qual ? isQualifiedLab(qual) : false;
     const contracted = activeContractLabs.has(labId);
-    const founderReview = qual
-      ? str(qual.founderReviewStatus || qual.founder_review_status) || "pending"
-      : null;
     const pipelineStage = qual
       ? normalizeQualificationPipelineStage(qual.pipelineStage || qual.pipeline_stage)
       : null;
@@ -314,11 +305,13 @@ function buildLabCommercialContexts({
       labName: labRow?.labName || labRow?.lab_name || collection?.labName || labId,
       qualified,
       hasQualificationRow,
-      qualificationStatus: hasQualificationRow ? "Qualification captured" : "No qualification row",
-      founderReviewStatus: founderReview
-        ? founderReview.charAt(0).toUpperCase() + founderReview.slice(1).replace(/_/g, " ")
-        : "—",
+      qualificationStatus: hasQualificationRow
+        ? pipelineStage
+          ? getPipelineStageLabel(pipelineStage)
+          : "Qualification captured"
+        : "No qualification row",
       pipelineStage: pipelineStage ? getPipelineStageLabel(pipelineStage) : "—",
+      pipelineStageRaw: pipelineStage,
       qualificationScore:
         qual?.qualificationScore ?? qual?.qualification_score ?? null,
       contractId: activeContract?.id || activeContract?.contractId || null,
@@ -398,7 +391,6 @@ function buildQualificationIntegrity(ctx, distributorId, distributorName) {
       labId: l.labId,
       labName: l.labName,
       contractId: l.contractId,
-      founderReviewStatus: l.founderReviewStatus,
       pipelineStage: l.pipelineStage,
     })),
     affectedLabs: [
@@ -422,7 +414,7 @@ function buildFirstRevenueBlockers(ctx, inventory) {
     blockers.push({
       stage: "qualification_integrity",
       reason: "Active contract exists without qualification record",
-      action: "Open Qualification Review and create/approve qualification",
+      action: "Distributor OS → Labs → Qualification → create qualification",
       labs: integrityGaps.map((l) => ({
         labId: l.labId,
         labName: l.labName,
@@ -433,8 +425,8 @@ function buildFirstRevenueBlockers(ctx, inventory) {
   if (ctx.qualifiedCount <= 0) {
     blockers.push({
       stage: "qualification",
-      reason: "No founder-approved or qualified-stage lab qualifications",
-      action: "Open Qualification Review and approve the lab pipeline",
+      reason: "No labs at qualified or won pipeline stage",
+      action: "Distributor OS → Labs → Qualification → mark lab qualified",
     });
   }
   if (ctx.contractedCount <= 0) {

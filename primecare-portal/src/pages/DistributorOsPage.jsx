@@ -19,11 +19,13 @@ import {
   resolveDistributorLifecycleStatus,
 } from "@/distributor/distributorLifecycleEngine.js";
 import {
+  consumeDistributorOsLabsSubTabPreset,
   consumeDistributorOsTabPreset,
   enterDistributorOs,
   readDistributorOsContext,
   setDistributorOsContext,
 } from "@/tenant/tenantFoundationStore.js";
+import DistributorQualificationPanel from "@/components/distributor/DistributorQualificationPanel.jsx";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import LabsPage from "@/pages/LabsPage.jsx";
 import OrdersPage from "@/pages/OrdersPage.jsx";
@@ -194,6 +196,7 @@ export default function DistributorOsPage({
     const preset = readDistributorOsContext()?.tab || "dashboard";
     return preset === "overview" ? "dashboard" : preset;
   });
+  const [labsSubTab, setLabsSubTab] = useState("registry");
   const [snapshot, setSnapshot] = useState(null);
   const [catalogBundle, setCatalogBundle] = useState(null);
   const [catalogMirrorHealth, setCatalogMirrorHealth] = useState(null);
@@ -710,12 +713,42 @@ export default function DistributorOsPage({
 
         {tab === "labs" ? (
           scope?.canOperate ? (
-            <LabsPage
-              currentUser={currentUser}
-              authToken={authToken}
-              distributorScope={scope}
-              embedded
-            />
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={labsSubTab === "registry" ? "default" : "outline"}
+                  className="h-8 text-xs"
+                  onClick={() => setLabsSubTab("registry")}
+                >
+                  Labs registry
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={labsSubTab === "qualification" ? "default" : "outline"}
+                  className="h-8 text-xs"
+                  onClick={() => setLabsSubTab("qualification")}
+                >
+                  Qualification
+                </Button>
+              </div>
+              {labsSubTab === "qualification" ? (
+                <DistributorQualificationPanel
+                  currentUser={currentUser}
+                  distributorScope={scope}
+                  labs={snapshot?.labs || []}
+                />
+              ) : (
+                <LabsPage
+                  currentUser={currentUser}
+                  authToken={authToken}
+                  distributorScope={scope}
+                  embedded
+                />
+              )}
+            </div>
           ) : (
             <LabsTabAccessMessage scope={scope} distributorName={selectedName} />
           )

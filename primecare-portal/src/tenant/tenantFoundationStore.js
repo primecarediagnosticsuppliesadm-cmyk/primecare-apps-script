@@ -280,6 +280,22 @@ export function consumeDistributorOsTabPreset() {
   return tab || null;
 }
 
+const OS_LABS_SUBTAB_PRESET_KEY = "primecare:os:labsSubTab";
+
+/** Remember Labs sub-tab (e.g. qualification) for next Distributor OS navigation. */
+export function presetDistributorOsLabsSubTab(subTab = "registry") {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.setItem(OS_LABS_SUBTAB_PRESET_KEY, String(subTab || "registry"));
+}
+
+/** @returns {string|null} */
+export function consumeDistributorOsLabsSubTabPreset() {
+  if (typeof window === "undefined") return null;
+  const subTab = window.sessionStorage.getItem(OS_LABS_SUBTAB_PRESET_KEY);
+  window.sessionStorage.removeItem(OS_LABS_SUBTAB_PRESET_KEY);
+  return subTab || null;
+}
+
 /**
  * Enter Distributor OS for a distributor tenant (never HQ).
  */

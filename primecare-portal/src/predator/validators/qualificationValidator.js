@@ -24,12 +24,12 @@ import {
  * @param {{ rowCount?: number }|null} [params.rendered]
  */
 export async function validateQualificationModule({ ctx, rendered = null }) {
-  return predatorTrace("Qualification Review", "validation.full", async () => {
+  return predatorTrace("Qualification Analytics", "validation.full", async () => {
     const stored = predatorStore.getModuleRenderedSnapshot(QUALIFICATION_REVIEW_MODULE, ctx);
     const renderedInput = rendered ?? stored?.snapshot ?? null;
     const entries = [
       ...checkRoleAccess({
-        module: "Qualification Review",
+        module: "Qualification Analytics",
         step: "access",
         ctx,
         role: ctx.role,
@@ -41,7 +41,7 @@ export async function validateQualificationModule({ ctx, rendered = null }) {
       entries.push(
         createPredatorEntry({
           status: "WARN",
-          module: "Qualification Review",
+          module: "Qualification Analytics",
           step: "supabase.client",
           rootCauseGuess: "Supabase not configured",
           suggestedFix: "Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY",
@@ -51,7 +51,7 @@ export async function validateQualificationModule({ ctx, rendered = null }) {
         })
       );
       return {
-        module: "Qualification Review",
+        module: "Qualification Analytics",
         summary: summarizePredatorEntries(entries),
         entries,
       };
@@ -78,9 +78,9 @@ export async function validateQualificationModule({ ctx, rendered = null }) {
       entries.push(
         createPredatorEntry({
           status: "WARN",
-          module: "Qualification Review",
+          module: "Qualification Analytics",
           step: "ui_snapshot_freshness",
-          expected: "fresh rendered snapshot from Qualification Review page",
+          expected: "fresh rendered snapshot from Qualification Analytics page",
           actual: {
             reason: uiSnapshot.reason,
             source: uiSnapshot.source,
@@ -90,7 +90,7 @@ export async function validateQualificationModule({ ctx, rendered = null }) {
           },
           rootCauseGuess: uiSnapshot.message || "UI snapshot not available for comparison",
           suggestedFix:
-            "Open Qualification Review page and wait for data to load before full Predator run",
+            "Open Qualification Analytics page and wait for data to load before full Predator run",
           severity: "medium",
           tenantId: ctx.tenantId,
           role: ctx.role,
@@ -101,7 +101,7 @@ export async function validateQualificationModule({ ctx, rendered = null }) {
 
     entries.push(
       ...checkEmptyApiWhenDbHasRows({
-        module: "Qualification Review",
+        module: "Qualification Analytics",
         step: "qualification_rows",
         ctx,
         dbRowCount: dbCount,
@@ -112,7 +112,7 @@ export async function validateQualificationModule({ ctx, rendered = null }) {
 
     entries.push(
       ...checkTenantConsistency({
-        module: "Qualification Review",
+        module: "Qualification Analytics",
         step: "lab_qualifications",
         ctx,
         profileTenantId: ctx.tenantId,
@@ -124,7 +124,7 @@ export async function validateQualificationModule({ ctx, rendered = null }) {
       entries.push(
         createPredatorEntry({
           status: "FAIL",
-          module: "Qualification Review",
+          module: "Qualification Analytics",
           step: "api_read",
           actual: apiRes?.error,
           rootCauseGuess: "getQualificationReviewRead failed",
@@ -142,7 +142,7 @@ export async function validateQualificationModule({ ctx, rendered = null }) {
       entries.push(
         createPredatorEntry({
           status: "WARN",
-          module: "Qualification Review",
+          module: "Qualification Analytics",
           step: "missing_fields",
           expected: "lab name on each row",
           actual: { missingLabName, total: apiRows.length },
@@ -168,14 +168,14 @@ export async function validateQualificationModule({ ctx, rendered = null }) {
     };
     const metrics = buildQualificationMetricDiagnoses(layerSnap, ctx, { uiSnapshotFresh });
     const { diagnosis, extraEntries } = finalizeModuleDiagnosis({
-      module: "Qualification Review",
+      module: "Qualification Analytics",
       ctx,
       metrics,
     });
 
     const allEntries = [...entries, ...extraEntries];
     return {
-      module: "Qualification Review",
+      module: "Qualification Analytics",
       summary: summarizePredatorEntries(allEntries),
       entries: allEntries,
       diagnosis,

@@ -2,6 +2,11 @@ import { summarizeCollectionsList } from "@/metrics/computeReceivableMetrics.js"
 import { productsNearStockoutFromInventoryStats } from "@/metrics/computeInventoryMetrics.js";
 import { filterVisitProofEvidence } from "@/utils/operationalEvidenceUi.js";
 import { labIdKey } from "@/utils/labId.js";
+import {
+  getPipelineStageLabel,
+  isQualificationPipelinePending,
+  normalizeQualificationPipelineStage,
+} from "@/utils/qualificationPipeline.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -370,23 +375,23 @@ export function buildAttentionQueue(payload) {
   }
 
   for (const q of payload.qualifications || []) {
-    const review = str(q.founderReviewStatus || q.founder_review_status).toLowerCase();
-    if (review === "pending" || review === "needs_info") {
-      items.push(
-        makeAttentionItem({
-          id: `qual-${q.labId}`,
-          severity: review === "needs_info" ? "ATTENTION" : "MONITORING",
-          title: "Qualification pending",
-          subtitle: q.labName || q.labId,
-          explanation: `Founder review: ${review.replaceAll("_", " ")}`,
-          recommendedAction: "Complete qualification review",
-          labId: q.labId,
-          labName: q.labName,
-          action: "qualification",
-          actionLabel: "Review Qualification",
-        })
-      );
-    }
+    if (!isQualificationPipelinePending(q)) continue;
+    const stage = normalizeQualificationPipelineStage(q.pipelineStage || q.pipeline_stage);
+    const stageLabel = getPipelineStageLabel(stage);
+    items.push(
+      makeAttentionItem({
+        id: `qual-${q.labId}`,
+        severity: stage === "new" || stage === "contacted" ? "MONITORING" : "ATTENTION",
+        title: "Qualification pipeline pending",
+        subtitle: q.labName || q.labId,
+        explanation: `Pipeline not qualified · ${stageLabel}`,
+        recommendedAction: "Distributor OS → Labs → Qualification",
+        labId: q.labId,
+        labName: q.labName,
+        action: "qualification",
+        actionLabel: "Open Qualification",
+      })
+    );
   }
 
   const recentVisits = (payload.visits || [])
@@ -570,7 +575,7 @@ export function buildOperationsFeed(payload, limit = 36) {
         id: `qual-feed-${q.labId}-${q.updatedAt}`,
         kind: "qualification",
         title: "Qualification updated",
-        subtitle: `${q.qualificationBand || "Band pending"} · ${q.founderReviewStatus || "review"}`,
+        subtitle: `${q.qualificationBand || "Band pending"} · ${getPipelineStageLabel(q.pipelineStage || q.pipeline_stage)}`,
         labName: q.labName,
         labId: q.labId,
         createdAt: q.updatedAt || q.createdAt,

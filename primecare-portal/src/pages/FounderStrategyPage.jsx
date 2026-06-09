@@ -30,7 +30,7 @@ const PAGE_LABELS = {
   risk: "Credit & Risk",
   orders: "Orders",
   founderNavigation: "Founder Navigation",
-  qualificationReview: "Qualification Review",
+  qualificationReview: "Qualification Analytics",
   distributorOs: "Distributor OS",
   founderFinancialIntelligence: "Financial Intelligence",
   labContracts: "Lab Contracts",

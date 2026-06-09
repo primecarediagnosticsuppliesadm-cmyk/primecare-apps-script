@@ -38,7 +38,10 @@ import { buildQAReadinessModel } from "@/qa/qaReadinessEngine.js";
 import { loadQaDefects } from "@/qa/qaDefectRegistry.js";
 import { PERSISTENCE_STATUS } from "@/tenant/durableTenantStore.js";
 import { labIdKey } from "@/utils/labId.js";
-import { normalizeQualificationPipelineStage } from "@/utils/qualificationPipeline.js";
+import {
+  isQualificationPipelineReady,
+  normalizeQualificationPipelineStage,
+} from "@/utils/qualificationPipeline.js";
 
 export const READINESS_BAND = {
   READY: "READY FOR PILOT",
@@ -122,12 +125,7 @@ function isTenantDurable(row = {}) {
 }
 
 function isQualifiedLab(qualification = {}) {
-  const founder = str(qualification.founderReviewStatus || qualification.founder_review_status).toLowerCase();
-  if (founder === "approved") return true;
-  const stage = normalizeQualificationPipelineStage(
-    qualification.pipelineStage || qualification.pipeline_stage
-  );
-  return stage === "qualified" || stage === "won";
+  return isQualificationPipelineReady(qualification);
 }
 
 function qualificationsForDistributor(qualifications = [], distributorId, labIds = new Set()) {
@@ -219,8 +217,8 @@ function evaluateLabsGate(distributor, metrics, qualifications = []) {
   const scopedQuals = qualificationsForDistributor(qualifications, distributor.id, labIds);
   const qualifiedCount = scopedQuals.filter(isQualifiedLab).length;
   const pendingOnboarding = scopedQuals.filter((q) => {
-    const founder = str(q.founderReviewStatus || q.founder_review_status).toLowerCase();
-    return founder === "pending" || founder === "needs_info";
+    const stage = normalizeQualificationPipelineStage(q.pipelineStage || q.pipeline_stage);
+    return stage && !isQualificationPipelineReady(q) && stage !== "lost";
   }).length;
 
   const checks = [
@@ -281,7 +279,7 @@ function evaluateContractsGate(
     ),
     makeCheck(
       "qualification_alignment",
-      "Active contracts backed by qualified labs",
+      "Active contracts backed by qualified pipeline labs",
       activeCount > qualifiedCount ? "WARN" : "PASS",
       activeCount > qualifiedCount
         ? `${activeCount} active contract(s) vs ${qualifiedCount} qualified lab(s)`

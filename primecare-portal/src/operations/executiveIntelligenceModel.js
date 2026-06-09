@@ -9,6 +9,7 @@ import { loadInterventionRecords } from "@/operations/executiveInterventionState
 import { readOperationalLedger } from "@/operations/operationalEventLedger.js";
 import { buildExecutionAccountability } from "@/operations/operationalTaskWorkflow.js";
 import { buildExecutiveOperationalTaskModel } from "@/operations/operationalTaskModel.js";
+import { isQualificationPipelinePending } from "@/utils/qualificationPipeline.js";
 
 const SEVERITY_RANK = { CRITICAL: 0, ATTENTION: 1, MONITORING: 2 };
 const MAX_DRIFT = 6;
@@ -132,10 +133,7 @@ export function buildOperationalDriftSignals(payload, opsModel = {}) {
     });
   }
 
-  const pendingQual = (payload.qualifications || []).filter((q) => {
-    const r = str(q.founderReviewStatus || q.founder_review_status).toLowerCase();
-    return r === "pending" || r === "needs_info";
-  });
+  const pendingQual = (payload.qualifications || []).filter(isQualificationPipelinePending);
   if (pendingQual.length >= 3) {
     const staleQual = pendingQual.filter((q) => {
       const updated = daysSince(q.updatedAt || q.updated_at);
@@ -145,13 +143,13 @@ export function buildOperationalDriftSignals(payload, opsModel = {}) {
       drifts.push({
         id: "drift-qual-stagnation",
         type: "qualification",
-        title: "Qualification stagnation",
-        subtitle: `${staleQual.length} labs stuck in review`,
+        title: "Qualification pipeline stagnation",
+        subtitle: `${staleQual.length} labs pending qualification`,
         severity: "ATTENTION",
         firstDetected: "14d+ unchanged",
         trend: "worsening",
-        summary: "Founder review pipeline not progressing",
-        recommendedAction: "Open qualification review and clear blockers",
+        summary: "Qualification pipeline not progressing to qualified or won",
+        recommendedAction: "Distributor OS → Labs → Qualification",
       });
     }
   }
@@ -451,7 +449,7 @@ export function buildInterventionEscalationInsights(tenantId, interventionQueues
         labId: issue.labId,
         severity: "CRITICAL",
         summary: `Reopened ${reopenCount} times without stable closure`,
-        recommendedAction: "Founder review and single owner assignment",
+        recommendedAction: "Assign single owner and advance qualification pipeline",
       });
     } else if (unresolved) {
       insights.push({
