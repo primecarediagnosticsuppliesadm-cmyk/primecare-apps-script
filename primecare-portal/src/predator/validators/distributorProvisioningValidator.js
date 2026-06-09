@@ -529,6 +529,13 @@ export async function validateDistributorProvisioningModule({
           launchTargetName: launchModel?.name || null,
           status: hqPricingCheck?.status,
           detail: hqPricingCheck?.detail,
+          missingCount: hqPricingCheck?.missingSkus?.length ?? 0,
+          missingSkus: (hqPricingCheck?.missingSkus || []).map((row) => ({
+            sku: row.sku,
+            hqCost: row.hqCost,
+            transferPrice: row.transferPrice,
+            sellingPrice: row.sellingPrice,
+          })),
         },
         suggestedFix:
           hqPricingCheck?.status === "PASS"

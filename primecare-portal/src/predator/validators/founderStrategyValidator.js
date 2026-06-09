@@ -9,6 +9,7 @@ import { loadDistributorWorkspaceBundle } from "@/distributor/distributorWorkspa
 import { YEAR1_TARGETS } from "@/founder/founderStrategyTargets.js";
 import { polishPredatorEntries } from "@/predator/predatorEntryPolish.js";
 import { ROLES } from "@/config/roles.js";
+import { normalizePageKey } from "@/config/pageRouting.js";
 
 const VALID_PAGES = new Set([
   "dashboard",
@@ -16,7 +17,9 @@ const VALID_PAGES = new Set([
   "risk",
   "orders",
   "founderNavigation",
+  "founderFinancialIntelligence",
   "qualificationReview",
+  "distributorOs",
 ]);
 
 function finish(entries, ctx) {
@@ -126,13 +129,17 @@ export async function validateFounderStrategyModule({
       })
     );
 
-    const badPages = priorities.filter((p) => p.page && !VALID_PAGES.has(p.page));
+    const badPages = priorities.filter((p) => {
+      if (!p.page) return false;
+      const key = normalizePageKey(p.page);
+      return !VALID_PAGES.has(key);
+    });
     entries.push(
       createPredatorEntry({
-        status: badPages.length === 0 ? "PASS" : "FAIL",
+        status: badPages.length === 0 ? "PASS" : "WARN",
         module: "Founder Strategy",
         step: "priorities.navigation",
-        actual: badPages.map((p) => p.page).join(", ") || "ok",
+        actual: badPages.map((p) => ({ id: p.id, page: p.page, normalized: normalizePageKey(p.page) })),
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,

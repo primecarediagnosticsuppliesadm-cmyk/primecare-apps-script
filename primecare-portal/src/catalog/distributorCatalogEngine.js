@@ -149,15 +149,28 @@ export function validateDistributorCatalogPricing(items = []) {
 
 export function validateHqCatalogPricingConfigured(items = []) {
   if (!items.length) {
-    return { valid: false, invalidCount: 0, issues: ["No products assigned"], missingCount: 0 };
+    return {
+      valid: false,
+      invalidCount: 0,
+      issues: ["No products assigned"],
+      missingCount: 0,
+      missingSkus: [],
+    };
   }
   const issues = [];
+  const missingSkus = [];
   for (const item of items) {
     const normalized = normalizeDistributorCatalogItem(item);
     if (!normalized.hqPricingConfigured) {
       issues.push(
         `${normalized.productName || normalized.productId}: HQ cost/transfer price not configured`
       );
+      missingSkus.push({
+        sku: normalized.productId || normalized.productName,
+        hqCost: normalized.hqCostPrice,
+        transferPrice: normalized.hqTransferPrice,
+        sellingPrice: normalized.sellingPrice,
+      });
     }
   }
   return {
@@ -165,6 +178,7 @@ export function validateHqCatalogPricingConfigured(items = []) {
     invalidCount: issues.length,
     missingCount: issues.length,
     issues,
+    missingSkus,
   };
 }
 

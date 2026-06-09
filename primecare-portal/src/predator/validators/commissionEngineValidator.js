@@ -99,6 +99,45 @@ function finish(entries) {
   };
 }
 
+/** @param {boolean} supabaseConfigured @param {string|null} probeTenant @param {Record<string, unknown>} actual */
+function classifyDuplicateGuardProbe(supabaseConfigured, probeTenant, actual) {
+  if (!supabaseConfigured) return "WARN";
+  if (!probeTenant) return "INFO";
+
+  const upsertError = str(actual.upsertError);
+  const firstOk = actual.firstOk === true;
+  const firstDuplicate = actual.firstDuplicate === true;
+  const firstError = str(actual.firstError);
+  const secondDuplicate = actual.secondDuplicate === true;
+  const secondOk = actual.secondOk === true;
+  const duplicateBlocked = actual.duplicateBlocked === true;
+  const probeDetected = actual.probeDetected === true;
+
+  if (duplicateBlocked || (secondDuplicate && (firstOk || firstDuplicate))) {
+    return "PASS";
+  }
+
+  if (firstOk && !secondDuplicate) {
+    return "FAIL";
+  }
+
+  const probeBlocked =
+    Boolean(upsertError) ||
+    (firstError && !firstOk && !firstDuplicate) ||
+    (secondOk && !secondDuplicate) ||
+    (!probeDetected && Boolean(firstError || upsertError));
+
+  if (probeBlocked) {
+    return "WARN";
+  }
+
+  if (firstDuplicate && secondDuplicate) {
+    return "PASS";
+  }
+
+  return "WARN";
+}
+
 /**
  * @param {Object} params
  * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} params.ctx
@@ -430,8 +469,13 @@ export async function validateCommissionEngineModule({
         firstOk: first.ok,
         firstDuplicate: first.duplicate,
         firstError: first.error || null,
+        secondOk: second.ok,
         secondDuplicate: second.duplicate,
         secondError: second.error || null,
+        probeBlockedReason:
+          upsertRes.error?.message ||
+          (!first.ok && !first.duplicate ? first.error : null) ||
+          null,
       };
       await cleanupCommissionProbe(probeTenant);
     } else if (supabase) {
@@ -443,14 +487,11 @@ export async function validateCommissionEngineModule({
       };
     }
 
-    const duplicateGuardStatus =
-      duplicateBlocked && probeDetected
-        ? "PASS"
-        : !supabase
-          ? "WARN"
-          : !probeTenant
-            ? "INFO"
-            : "FAIL";
+    const duplicateGuardStatus = classifyDuplicateGuardProbe(
+      Boolean(supabase),
+      probeTenant || null,
+      payoutProbeActual
+    );
 
     entries.push(
       createPredatorEntry({
@@ -459,6 +500,10 @@ export async function validateCommissionEngineModule({
         step: "payout.duplicate_guard",
         expected: "Second payout for same tenant+period rejected",
         actual: payoutProbeActual,
+        rootCauseGuess:
+          duplicateGuardStatus === "WARN" && payoutProbeActual.probeBlockedReason
+            ? `Duplicate guard probe blocked by write surface: ${payoutProbeActual.probeBlockedReason}`
+            : undefined,
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,

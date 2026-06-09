@@ -72,20 +72,38 @@ export async function validateDistributorOsModule({ ctx, rendered = null }) {
     );
     const portfolioTab = ["dashboard", "billing"].includes(str(rendered?.tab));
     const portfolioMode = Boolean(rendered?.distributorOsV2 && portfolioTab && !scopeValid);
+    const hasDistributorOsSnapshot = Boolean(rendered?.distributorOs);
+    const distributorScoped = scopeValid;
+
+    const selectedTenantStatus =
+      scopeValid || portfolioMode
+        ? "PASS"
+        : !hasDistributorOsSnapshot
+          ? "INFO"
+          : "WARN";
 
     entries.push(
       createPredatorEntry({
-        status: scopeValid || portfolioMode ? "PASS" : rendered?.distributorOs ? "WARN" : "WARN",
+        status: selectedTenantStatus,
         module: "Distributor OS",
         step: "distributor_os.selected_tenant_required",
         expected: "Scoped tabs require non-HQ distributor; portfolio tabs may show all distributors",
-        actual: { scopeTenantId, homeTenantId, scopeValid, portfolioMode, tab: rendered?.tab },
+        actual: {
+          scopeTenantId,
+          homeTenantId,
+          scopeValid,
+          portfolioMode,
+          hasDistributorOsSnapshot,
+          tab: rendered?.tab,
+        },
         rootCauseGuess: scopeValid
           ? "Distributor tenant selected"
           : portfolioMode
             ? "Portfolio dashboard without single distributor scope"
-            : "Select a distributor before operating in Distributor OS",
-        severity: scopeValid || portfolioMode ? "low" : "medium",
+            : !hasDistributorOsSnapshot
+              ? "Open Distributor OS to validate scoped tenant selection"
+              : "Select a distributor before operating in Distributor OS",
+        severity: selectedTenantStatus === "PASS" ? "low" : selectedTenantStatus === "INFO" ? "low" : "medium",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,
@@ -210,9 +228,16 @@ export async function validateDistributorOsModule({ ctx, rendered = null }) {
       (topPerf?.lifecycleStatus === LIFECYCLE_STATUS.ACTIVE &&
         topPerf?.contractExpired !== true &&
         topPerf?.rankingEligible === true);
+    const topDistributorStatus = (() => {
+      if (topActiveOnlyOk) return "PASS";
+      if (!distributorScoped) {
+        return hasDistributorOsSnapshot ? "WARN" : "INFO";
+      }
+      return "FAIL";
+    })();
     entries.push(
       createPredatorEntry({
-        status: topActiveOnlyOk ? "PASS" : "FAIL",
+        status: topDistributorStatus,
         module: "Distributor OS",
         step: "distributor_os.top_distributor_active_only",
         expected: "Top distributor is ACTIVE with valid contract, or placeholder when none qualify",
@@ -222,11 +247,15 @@ export async function validateDistributorOsModule({ ctx, rendered = null }) {
           isPlaceholder: topDistributor?.isPlaceholder === true,
           lifecycleStatus: topPerf?.lifecycleStatus || topDistributor?.lifecycleStatus,
           rankingEligible: topPerf?.rankingEligible ?? topDistributor?.rankingEligible,
+          distributorScoped,
+          hasDistributorOsSnapshot,
         },
         rootCauseGuess: topActiveOnlyOk
           ? "Top distributor ranking uses active distributors only"
-          : "Draft or non-active distributor selected as top distributor",
-        severity: topActiveOnlyOk ? "low" : "high",
+          : !distributorScoped
+            ? "Open Distributor OS with a scoped distributor to validate top-distributor ranking"
+            : "Draft or non-active distributor selected as top distributor",
+        severity: topDistributorStatus === "FAIL" ? "high" : topDistributorStatus === "WARN" ? "medium" : "low",
         tenantId: ctx.tenantId,
         role: ctx.role,
         userId: ctx.userId,

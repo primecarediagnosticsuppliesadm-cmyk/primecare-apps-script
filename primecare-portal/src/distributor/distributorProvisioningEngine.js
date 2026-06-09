@@ -198,24 +198,22 @@ export function buildProvisioningChecks(ctx) {
           ? `${num(config.catalogAssignedCount) || config.distributorCatalog?.items?.length || 0} product(s) assigned from HQ master`
           : "Assign at least one product from HQ master catalog in Distributor OS",
     },
-    {
-      id: "catalog_hq_pricing_configured",
-      label: "HQ catalog pricing configured",
-      required: true,
-      pass: (() => {
-        const items = readDistributorCatalogItems(config);
-        if (!items.length) return false;
-        return validateHqCatalogPricingConfigured(items).valid;
-      })(),
-      detail: (() => {
-        const items = readDistributorCatalogItems(config);
-        if (!items.length) return "Assign catalog products before launch";
-        const hq = validateHqCatalogPricingConfigured(items);
-        return hq.valid
-          ? "All assigned products have HQ cost and transfer price"
-          : `${hq.missingCount} product(s) missing HQ cost/transfer price — configure in Master Catalog`;
-      })(),
-    },
+    (() => {
+      const items = readDistributorCatalogItems(config);
+      const hq = validateHqCatalogPricingConfigured(items);
+      return {
+        id: "catalog_hq_pricing_configured",
+        label: "HQ catalog pricing configured",
+        required: true,
+        pass: items.length > 0 && hq.valid,
+        detail: !items.length
+          ? "Assign catalog products before launch"
+          : hq.valid
+            ? "All assigned products have HQ cost and transfer price"
+            : `${hq.missingCount} product(s) missing HQ cost/transfer price — configure in Master Catalog`,
+        missingSkus: hq.missingSkus,
+      };
+    })(),
     {
       id: "isolation_verified",
       label: "Data isolation verified",
