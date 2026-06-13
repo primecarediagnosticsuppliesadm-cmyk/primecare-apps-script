@@ -360,6 +360,25 @@ export default function LabOrderingPage({ currentUser }) {
 
   const profileLabKey = labIdKey(labId);
 
+  const catalogSkuStats = useMemo(() => {
+    const counts = new Map();
+    for (const item of catalog) {
+      const key = String(item.productId || "")
+        .trim()
+        .toUpperCase();
+      if (!key) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    const duplicateSkus = [...counts.entries()]
+      .filter(([, count]) => count > 1)
+      .map(([sku]) => sku);
+    return {
+      catalogProductCount: catalog.length,
+      catalogUniqueSkuCount: counts.size,
+      catalogDuplicateSkus: duplicateSkus,
+    };
+  }, [catalog]);
+
   const scopedRecentOrders = useMemo(() => {
     if (!profileLabKey) return recentOrders;
     return recentOrders.filter((o) => {
@@ -385,6 +404,9 @@ export default function LabOrderingPage({ currentUser }) {
       crossLabOrderCount,
       isLabAccountView: false,
       catalogLoaded: !loadingCatalog,
+      catalogProductCount: catalogSkuStats.catalogProductCount,
+      catalogUniqueSkuCount: catalogSkuStats.catalogUniqueSkuCount,
+      catalogDuplicateSkus: catalogSkuStats.catalogDuplicateSkus,
       ordersLoaded: !loadingOrders,
       cartLineCount: cartItems.length,
       cartQtyCount: cartItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
@@ -484,13 +506,14 @@ export default function LabOrderingPage({ currentUser }) {
 
       if (supabase) {
         logSupabaseFeatureSource("LabOrdering.catalog", { api: "getLabCatalogRead" });
-        const sbRes = await getLabCatalogRead();
+        const tenantId = currentUser?.tenantId || currentUser?.tenant_id || null;
+        const sbRes = await getLabCatalogRead({ tenantId });
         if (!sbRes?.success) {
           throw new Error(sbRes?.error || "Supabase lab catalog read failed.");
         }
 
         const productsRaw = Array.isArray(sbRes?.data?.products) ? sbRes.data.products : [];
-        const products = productsRaw.map((item, index) => applyDemoPriceIfNeeded(item, index));
+        const products = productsRaw;
         console.log("SUPABASE LAB CATALOG", {
           count: products.length,
           source: sbRes?.data?.source || "supabase",
@@ -1310,7 +1333,7 @@ export default function LabOrderingPage({ currentUser }) {
                     const isOut = item.stockHealth === "OUT" || item.canOrder === false;
                     return (
                       <ProductCatalogCard
-                        key={item.productId}
+                        key={`${item.tenantId || "lab"}-${item.productId}`}
                         item={item}
                         qty={qty}
                         disabled={isOut}

@@ -307,6 +307,7 @@ export function mapLabCatalogRow(row) {
 
   return {
     productId,
+    tenantId: str(row.tenant_id ?? row.tenantId ?? row.Tenant_ID) || null,
     productName,
     category: str(row.category ?? row.Category) || "Consumables",
     brand: str(row.brand ?? row.Brand) || "PrimeCare",
@@ -342,6 +343,7 @@ export function mapLabCatalogRow(row) {
 
 async function readInventoryCatalogFallbackRows() {
   const catalogProjection = [
+    "tenant_id",
     "product_id",
     "product_name",
     "current_stock",
@@ -365,16 +367,61 @@ async function readInventoryCatalogFallbackRows() {
   );
   return supabase
     .from("inventory")
-    .select("product_id,product_name,current_stock,min_stock,reorder_qty,reorder_status");
+    .select("tenant_id,product_id,product_name,current_stock,min_stock,reorder_qty,reorder_status");
+}
+
+function normalizeLabCatalogProductId(productId) {
+  return str(productId).toUpperCase();
+}
+
+/**
+ * Prefer profile tenant match, then non-zero price, then purchasable rows.
+ * @param {ReturnType<typeof mapLabCatalogRow>} item
+ * @param {string|null} preferredTenantId
+ */
+function scoreLabCatalogDedupeRow(item, preferredTenantId) {
+  let score = 0;
+  if (preferredTenantId && str(item.tenantId) === str(preferredTenantId)) score += 100;
+  if (num(item.unitSellingPrice) > 0) score += 10;
+  if (item.canOrder) score += 1;
+  return score;
+}
+
+/**
+ * Collapse cross-tenant fan-out to one purchasable row per SKU.
+ * @param {ReturnType<typeof mapLabCatalogRow>[]} products
+ * @param {string|null} [preferredTenantId]
+ */
+export function dedupeLabCatalogProducts(products, preferredTenantId = null) {
+  const preferred = str(preferredTenantId) || null;
+  const bySku = new Map();
+
+  for (const item of products || []) {
+    const key = normalizeLabCatalogProductId(item.productId);
+    if (!key) continue;
+    const prev = bySku.get(key);
+    if (
+      !prev ||
+      scoreLabCatalogDedupeRow(item, preferred) > scoreLabCatalogDedupeRow(prev, preferred)
+    ) {
+      bySku.set(key, item);
+    }
+  }
+
+  return [...bySku.values()];
 }
 
 /**
  * Lab order catalog from Supabase. Prefers `v_lab_catalog` when present, otherwise
  * reads `inventory` directly. Shape matches legacy getLabCatalog payload.
+ * @param {{ tenantId?: string|null, preferredTenantId?: string|null }} [options]
  */
-export async function getLabCatalogRead() {
+export async function getLabCatalogRead(options = {}) {
+  const preferredTenantId =
+    str(options.tenantId ?? options.preferredTenantId) || null;
   traceSupabaseRead("LabOrdering.getLabCatalogRead", {
     tables: ["v_lab_catalog", "inventory"],
+    preferredTenantId,
   });
   if (!supabase) {
     return { success: false, error: "Supabase is not configured", data: { products: [] } };
@@ -402,10 +449,10 @@ export async function getLabCatalogRead() {
       return { success: false, error: error.message || "Supabase lab catalog read failed", data: { products: [] } };
     }
 
-    const products = (data || [])
+    const mapped = (data || [])
       .map(mapLabCatalogRow)
-      .filter((item) => item.productId)
-      .sort((a, b) => {
+      .filter((item) => item.productId);
+    const products = dedupeLabCatalogProducts(mapped, preferredTenantId).sort((a, b) => {
         if (a.canOrder !== b.canOrder) return a.canOrder ? -1 : 1;
         return a.productName.localeCompare(b.productName);
       });
@@ -413,6 +460,8 @@ export async function getLabCatalogRead() {
     console.log("SUPABASE LAB CATALOG", {
       source,
       count: products.length,
+      rawCount: mapped.length,
+      dedupedFrom: mapped.length - products.length,
       products,
     });
 

@@ -385,6 +385,67 @@ export async function validateLabPortalModule({ ctx, rendered = null }) {
       })
     );
 
+    if (rendered?.catalogLoaded) {
+        const catalogProductCount = Number(rendered.catalogProductCount ?? 0);
+        const catalogUniqueSkuCount = Number(rendered.catalogUniqueSkuCount ?? catalogProductCount);
+        const catalogDuplicateSkus = Array.isArray(rendered.catalogDuplicateSkus)
+          ? rendered.catalogDuplicateSkus
+          : [];
+        const hasDuplicates = catalogDuplicateSkus.length > 0;
+        const catalogUniqueOk =
+          catalogProductCount > 0 && catalogUniqueSkuCount === catalogProductCount && !hasDuplicates;
+
+        entries.push(
+          createPredatorEntry({
+            status: hasDuplicates ? "FAIL" : "PASS",
+            module: "Lab Portal",
+            step: "catalog_duplicate_skus",
+            expected: "One catalog card per productId",
+            actual: {
+              catalogProductCount,
+              catalogUniqueSkuCount,
+              duplicateSkus: catalogDuplicateSkus,
+            },
+            rootCauseGuess: hasDuplicates
+              ? "Lab catalog shows duplicate SKUs — check v_lab_catalog tenant join and getLabCatalogRead dedupe"
+              : "Catalog renders one row per SKU",
+            suggestedFix: hasDuplicates
+              ? "Apply lab_catalog_view_tenant_join_migration.sql and verify dedupeLabCatalogProducts in getLabCatalogRead"
+              : "",
+            severity: hasDuplicates ? "high" : "low",
+            tenantId: ctx.tenantId,
+            role: ctx.role,
+            userId: ctx.userId,
+          })
+        );
+
+        entries.push(
+          createPredatorEntry({
+            status: catalogUniqueOk ? "PASS" : catalogProductCount === 0 ? "WARN" : "FAIL",
+            module: "Lab Portal",
+            step: "catalog_unique_skus",
+            expected: "Unique SKU count equals rendered catalog count",
+            actual: {
+              catalogProductCount,
+              catalogUniqueSkuCount,
+              duplicateSkus: catalogDuplicateSkus,
+            },
+            rootCauseGuess: catalogUniqueOk
+              ? "Lab ordering catalog has unique purchasable SKUs"
+              : catalogProductCount === 0
+                ? "Catalog loaded but empty — verify lab tenant inventory/products"
+                : "Catalog card count exceeds unique SKU count",
+            suggestedFix: catalogUniqueOk
+              ? ""
+              : "Scope v_lab_catalog join to tenant_id and dedupe by productId in getLabCatalogRead",
+            severity: catalogUniqueOk ? "low" : catalogProductCount === 0 ? "medium" : "high",
+            tenantId: ctx.tenantId,
+            role: ctx.role,
+            userId: ctx.userId,
+          })
+        );
+    }
+
     if (rendered) {
       const recentCount = Number(rendered.recentOrdersCount ?? 0);
       const crossLabOrders = Number(rendered.crossLabOrderCount ?? 0);
