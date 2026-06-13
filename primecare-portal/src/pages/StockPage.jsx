@@ -53,7 +53,7 @@ export default function StockPage({ currentUser = null }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
-  const [tenantFilter, setTenantFilter] = useState("all");
+  const [tenantFilter, setTenantFilter] = useState("hq");
 
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
 
@@ -91,7 +91,7 @@ export default function StockPage({ currentUser = null }) {
   }, []);
 
   const tenantFilterOptions = useMemo(() => {
-    const options = [{ value: "all", label: "All tenants" }];
+    const options = [];
     if (homeTenantId) {
       const hqName = tenantNameById.get(homeTenantId);
       options.push({
@@ -113,8 +113,11 @@ export default function StockPage({ currentUser = null }) {
       });
     }
 
+    options.push({ value: "all", label: "All tenants" });
     return options;
   }, [data.inventory, homeTenantId, tenantNameById]);
+
+  const showPortfolioView = tenantFilter === "all";
 
   const tenantFilteredRows = useMemo(() => {
     const rows = data.inventory || [];
@@ -208,10 +211,12 @@ export default function StockPage({ currentUser = null }) {
         <h2 style={{ padding: "20px", color: "red" }}>{error}</h2>
       ) : (
         <>
-          <div style={styles.portfolioNote}>
-            Portfolio inventory: each card is one stock record per tenant. The same SKU may
-            appear under HQ and distributor tenants with separate on-hand quantities.
-          </div>
+          {showPortfolioView ? (
+            <div style={styles.portfolioNote}>
+              Portfolio inventory: each card is one stock record per tenant. The same SKU may
+              appear under HQ and distributor tenants with separate on-hand quantities.
+            </div>
+          ) : null}
 
           <div style={styles.statsRow}>
             <div style={styles.statCard}>
@@ -268,9 +273,11 @@ export default function StockPage({ currentUser = null }) {
                   style={styles.card}
                 >
                   <div style={styles.itemTitle}>{item.productName || "-"}</div>
-                  <div style={styles.tenantBadge}>
-                    {resolveTenantLabel(item.tenantId, tenantNameById, homeTenantId)}
-                  </div>
+                  {showPortfolioView ? (
+                    <div style={styles.tenantBadge}>
+                      {resolveTenantLabel(item.tenantId, tenantNameById, homeTenantId)}
+                    </div>
+                  ) : null}
                   <div style={styles.itemMeta}>
                     {item.productId || "-"} {item.category ? `• ${item.category}` : ""}
                   </div>
