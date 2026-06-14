@@ -141,7 +141,7 @@ function summarizePlaceholderTriggers(triggers) {
   };
 }
 
-export default function PurchaseOrdersPage() {
+export default function PurchaseOrdersPage({ currentUser = null }) {
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [reorderCandidates, setReorderCandidates] = useState([]);
   const [smartReorder, setSmartReorder] = useState([]);
