@@ -3620,6 +3620,58 @@ export async function createPurchaseOrderWrite(payload = {}) {
 }
 
 /**
+ * Predator/runtime contract: inventory stock mutations must scope tenant_id + product_id.
+ */
+export const INVENTORY_TENANT_SAFETY_CONTRACT = {
+  version: 1,
+  scopedFunctions: ["receivePurchaseOrderWrite", "applyLabOrderInventoryDeduction"],
+  inventoryLookupKeys: ["tenant_id", "product_id"],
+  inventoryUpdateKeys: ["tenant_id", "product_id"],
+  ledgerTenantMatchesInventory: true,
+};
+
+/**
+ * Resolve exactly one tenant-scoped inventory row before stock mutation.
+ * @returns {Promise<{ success: boolean, row?: object, tenantId?: string, productId?: string, error?: string|null }>}
+ */
+async function resolveInventoryRowForWrite(tenant_id, product_id) {
+  const tenantId = str(tenant_id);
+  const productId = str(product_id);
+  if (!tenantId) {
+    return { success: false, error: "tenant_id is required for inventory write" };
+  }
+  if (!productId) {
+    return { success: false, error: "product_id is required for inventory write" };
+  }
+
+  const sel = await supabase
+    .from("inventory")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("product_id", productId);
+
+  if (sel.error) {
+    return { success: false, error: sel.error.message };
+  }
+
+  const rows = Array.isArray(sel.data) ? sel.data : [];
+  if (rows.length === 0) {
+    return {
+      success: false,
+      error: `Inventory row not found for tenant_id=${tenantId} product_id=${productId}`,
+    };
+  }
+  if (rows.length > 1) {
+    return {
+      success: false,
+      error: `Multiple inventory rows matched tenant_id=${tenantId} product_id=${productId} (count=${rows.length})`,
+    };
+  }
+
+  return { success: true, row: rows[0], tenantId, productId, error: null };
+}
+
+/**
  * Receive purchase stock: increments inventory.current_stock, appends PURCHASE_IN ledger, updates PO.
  */
 export async function receivePurchaseOrderWrite(poId, payload = {}) {
@@ -3651,18 +3703,39 @@ export async function receivePurchaseOrderWrite(poId, payload = {}) {
     const productName = str(itemRow.product_name ?? poRow.product_name ?? productId);
     if (!productId) return { success: false, error: "Purchase order item product_id is missing", data: null };
 
-    const invSel = await supabase.from("inventory").select("*").eq("product_id", productId).limit(1);
-    if (invSel.error) return { success: false, error: invSel.error.message, data: null };
-    const inventoryRow = Array.isArray(invSel.data) && invSel.data[0];
-    if (!inventoryRow) return { success: false, error: `Inventory row not found: ${productId}`, data: null };
+    const tenantId = str(itemRow.tenant_id ?? poRow.tenant_id);
+    if (!tenantId) {
+      return {
+        success: false,
+        error: "Purchase order tenant_id is required for inventory receipt",
+        data: null,
+      };
+    }
+
+    const inventoryResolved = await resolveInventoryRowForWrite(tenantId, productId);
+    if (!inventoryResolved.success) {
+      return { success: false, error: inventoryResolved.error || "Inventory row resolution failed", data: null };
+    }
+    const inventoryRow = inventoryResolved.row;
+    const inventoryTenantId = str(inventoryRow.tenant_id ?? inventoryResolved.tenantId);
 
     const stockBefore = num(inventoryRow.current_stock ?? inventoryRow.currentStock);
     const stockAfter = stockBefore + receivedQty;
     const invUpd = await supabase
       .from("inventory")
       .update({ current_stock: stockAfter, updated_at: new Date().toISOString() })
-      .eq("product_id", productId);
+      .eq("tenant_id", inventoryTenantId)
+      .eq("product_id", productId)
+      .select("tenant_id, product_id, current_stock");
     if (invUpd.error) return { success: false, error: invUpd.error.message, data: null };
+    const updatedRows = Array.isArray(invUpd.data) ? invUpd.data : [];
+    if (updatedRows.length !== 1) {
+      return {
+        success: false,
+        error: `Inventory update expected 1 row, got ${updatedRows.length} for tenant_id=${inventoryTenantId} product_id=${productId}`,
+        data: null,
+      };
+    }
 
     const ledgerRow = {
       movement_type: "PURCHASE_IN",
@@ -3672,7 +3745,7 @@ export async function receivePurchaseOrderWrite(poId, payload = {}) {
       quantity: receivedQty,
       stock_before: stockBefore,
       stock_after: stockAfter,
-      tenant_id: str(payload.tenantId ?? payload.tenant_id) || null,
+      tenant_id: inventoryTenantId,
       created_by: str(payload.receivedBy ?? payload.createdBy ?? payload.created_by) || null,
       created_at: new Date().toISOString(),
     };
@@ -3739,16 +3812,25 @@ export async function receivePurchaseOrderWrite(poId, payload = {}) {
 /**
  * After `order_items` insert: decrement stock on the inventory table and append ledger rows.
  * Failures are logged only; the caller does not roll back the order.
+ * @returns {Promise<{ success: boolean, error?: string|null, updatedLines?: number }>}
  */
 async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenant_id, created_by }) {
-  if (!supabase) return;
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+
+  const scopedTenantId = str(tenant_id);
+  if (!scopedTenantId) {
+    const message = "tenant_id is required for inventory deduction";
+    console.warn("[applyLabOrderInventoryDeduction]", message, { order_id });
+    return { success: false, error: message };
+  }
 
   const tableName = "inventory";
-  console.log("INVENTORY TABLE TARGET", tableName);
+  console.log("INVENTORY TABLE TARGET", tableName, { tenant_id: scopedTenantId });
 
   const oid = str(order_id);
   const lines = Array.isArray(savedLineItems) ? savedLineItems : [];
   const ledgerBatch = [];
+  let updatedLines = 0;
 
   for (const line of lines) {
     const product_id = str(line.product_id ?? line.productId ?? "");
@@ -3757,33 +3839,25 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
     const qty = num(line.quantity);
     if (!product_id || qty <= 0) continue;
 
-    const sel = await supabase.from("inventory").select("*").eq("product_id", product_id).limit(1);
-
-    if (sel.error) {
+    const inventoryResolved = await resolveInventoryRowForWrite(scopedTenantId, product_id);
+    if (!inventoryResolved.success) {
       console.warn(
-        "[createOrderWrite] INVENTORY: product fetch failed — order is NOT rolled back:",
+        "[createOrderWrite] INVENTORY: row resolution failed — order is NOT rolled back:",
         product_id,
-        sel.error.message
+        inventoryResolved.error
       );
       continue;
     }
 
-    const row = Array.isArray(sel.data) && sel.data[0];
-    if (!row) {
-      console.warn(
-        "[createOrderWrite] INVENTORY: no stock row for product — order is NOT rolled back:",
-        product_id,
-        "table:",
-        tableName
-      );
-      continue;
-    }
+    const row = inventoryResolved.row;
+    const inventoryTenantId = str(row.tenant_id ?? inventoryResolved.tenantId);
 
     const stock_before = num(row.current_stock ?? row.currentStock ?? 0);
     const stock_after = Math.max(0, stock_before - qty);
 
     console.log("INVENTORY BEFORE UPDATE", {
       table: tableName,
+      tenant_id: inventoryTenantId,
       product_id,
       stock_column: "current_stock",
       stock_before,
@@ -3797,7 +3871,12 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
     };
     console.log("INVENTORY UPDATE PATCH", updatePatch);
 
-    const upd = await supabase.from("inventory").update(updatePatch).eq("product_id", product_id);
+    const upd = await supabase
+      .from("inventory")
+      .update(updatePatch)
+      .eq("tenant_id", inventoryTenantId)
+      .eq("product_id", product_id)
+      .select("tenant_id, product_id, current_stock");
 
     if (upd.error) {
       console.warn(
@@ -3813,7 +3892,18 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
       continue;
     }
 
-    console.log("INVENTORY AFTER UPDATE", { product_id, stock_after });
+    const updatedRows = Array.isArray(upd.data) ? upd.data : [];
+    if (updatedRows.length !== 1) {
+      console.warn(
+        "[createOrderWrite] INVENTORY UPDATE row count unexpected — order is NOT rolled back:",
+        product_id,
+        `expected 1, got ${updatedRows.length}`
+      );
+      continue;
+    }
+
+    updatedLines += 1;
+    console.log("INVENTORY AFTER UPDATE", { tenant_id: inventoryTenantId, product_id, stock_after });
 
     ledgerBatch.push({
       movement_type: "ORDER_OUT",
@@ -3824,13 +3914,19 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
       quantity: qty,
       stock_before,
       stock_after,
-      tenant_id,
+      tenant_id: inventoryTenantId,
       created_by,
       created_at: new Date().toISOString(),
     });
   }
 
-  if (!ledgerBatch.length) return;
+  if (!ledgerBatch.length) {
+    return {
+      success: false,
+      error: updatedLines === 0 && lines.length ? "No inventory lines updated" : null,
+      updatedLines,
+    };
+  }
 
   const led = await createInventoryLedgerWrite(ledgerBatch);
   if (!led.success) {
@@ -3838,7 +3934,10 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
       "[createOrderWrite] INVENTORY LEDGER insert failed — stock may already be updated; order is NOT rolled back:",
       led.error
     );
+    return { success: false, error: led.error || "Ledger insert failed", updatedLines };
   }
+
+  return { success: true, error: null, updatedLines };
 }
 
 /**

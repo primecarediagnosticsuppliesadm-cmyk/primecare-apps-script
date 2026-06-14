@@ -28,6 +28,7 @@ import { validateCommissionEngineModule } from "@/predator/validators/commission
 import { validateLabContractEngineModule } from "@/predator/validators/labContractEngineValidator.js";
 import { validateDistributorBillingModule } from "@/predator/validators/distributorBillingValidator.js";
 import { validateInventoryEconomicsModule } from "@/predator/validators/inventoryEconomicsValidator.js";
+import { validateInventoryTenantSafetyModule } from "@/predator/validators/inventoryTenantSafetyValidator.js";
 import { validateDistributorProfitabilityModule } from "@/predator/validators/distributorProfitabilityValidator.js";
 import { validateQAReadinessModule } from "@/predator/validators/qaReadinessValidator.js";
 import { validateRevenueFunnelModule } from "@/predator/validators/revenueFunnelValidator.js";
@@ -184,6 +185,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         labContractEngine,
         distributorBilling,
         inventoryEconomics,
+        inventoryTenantSafety,
         distributorProfitability,
         qaReadiness,
         revenueFunnel,
@@ -282,6 +284,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
           ctx,
           rendered: snapshots.inventoryEconomics ?? null,
         }),
+        validateInventoryTenantSafetyModule({ ctx }),
         validateDistributorProfitabilityModule({
           ctx,
           currentUser,
@@ -323,6 +326,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         storePolishedModule("Lab Contract Engine", labContractEngine, ctx),
         storePolishedModule("Distributor Billing", distributorBilling, ctx),
         storePolishedModule("Inventory Economics", inventoryEconomics, ctx),
+        storePolishedModule("Inventory Tenant Safety", inventoryTenantSafety, ctx),
         storePolishedModule("Distributor Profitability", distributorProfitability, ctx),
         storePolishedModule("QA Readiness", qaReadiness, ctx),
         storePolishedModule("Revenue Funnel", revenueFunnel, ctx),
@@ -536,6 +540,9 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
         ctx,
         rendered: snapshot,
       });
+      break;
+    case "Inventory Tenant Safety":
+      result = await validateInventoryTenantSafetyModule({ ctx });
       break;
     case "Distributor Profitability":
       result = await validateDistributorProfitabilityModule({

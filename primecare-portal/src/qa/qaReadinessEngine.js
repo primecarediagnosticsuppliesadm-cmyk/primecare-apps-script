@@ -53,7 +53,7 @@ export const QA_COVERAGE_AREAS = [
   {
     id: "inventory",
     label: "Inventory",
-    modules: ["Inventory Economics", "Admin Dashboard", "Operations Center"],
+    modules: ["Inventory Economics", "Inventory Tenant Safety", "Admin Dashboard", "Operations Center"],
   },
   {
     id: "purchaseReorder",
