@@ -5140,27 +5140,17 @@ function mapProfilesPlatformUserRow(row, directory = null) {
   };
 }
 
-function buildUserDirectoryIndexes(rows = []) {
+function buildUserDirectoryIndex(rows = []) {
   const byAuthUserId = new Map();
-  const byDirectoryRole = new Map();
   for (const row of rows || []) {
     const authUserId = str(row.user_code).toLowerCase();
     if (authUserId) byAuthUserId.set(authUserId, row);
-    const roleKey = str(row.role).toUpperCase();
-    if (roleKey && !byDirectoryRole.has(roleKey)) {
-      byDirectoryRole.set(roleKey, row);
-    }
   }
-  return { byAuthUserId, byDirectoryRole };
+  return byAuthUserId;
 }
 
-function resolveDirectoryRowForProfile(profile, indexes) {
-  const uid = str(profile.user_id).toLowerCase();
-  if (indexes.byAuthUserId.has(uid)) {
-    return indexes.byAuthUserId.get(uid);
-  }
-  const roleKey = directoryRoleFromPlatformRole(profile.role);
-  return indexes.byDirectoryRole.get(roleKey) || null;
+function resolveDirectoryRowForProfile(profile, byAuthUserId) {
+  return byAuthUserId.get(str(profile.user_id).toLowerCase()) || null;
 }
 
 async function syncPlatformUserDirectoryRow({
@@ -5376,9 +5366,9 @@ export async function getOperationsPlatformUsersRead(options = {}) {
           data: { users: [] },
         };
       }
-      const directoryIndexes = buildUserDirectoryIndexes(directoryRes?.data);
+      const directoryByAuthUserId = buildUserDirectoryIndex(directoryRes?.data);
       const users = (fallback.data || []).map((profile) => {
-        const directory = resolveDirectoryRowForProfile(profile, directoryIndexes);
+        const directory = resolveDirectoryRowForProfile(profile, directoryByAuthUserId);
         return mapProfilesPlatformUserRow(profile, directory);
       });
       return { success: true, data: { users } };
@@ -5386,10 +5376,10 @@ export async function getOperationsPlatformUsersRead(options = {}) {
     return { success: false, error: error.message || "Failed to load platform users", data: { users: [] } };
   }
 
-  const directoryIndexes = buildUserDirectoryIndexes(directoryRes?.data);
+  const directoryByAuthUserId = buildUserDirectoryIndex(directoryRes?.data);
 
   const users = (data || []).map((profile) => {
-    const directory = resolveDirectoryRowForProfile(profile, directoryIndexes);
+    const directory = resolveDirectoryRowForProfile(profile, directoryByAuthUserId);
     return mapProfilesPlatformUserRow(profile, directory);
   });
 

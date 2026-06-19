@@ -152,7 +152,7 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
   const [form, setForm] = useState(() => ({
     userId: initial?.userId || "",
     name: initial?.name || "",
-    email: initial?.email || "",
+    email: initial?.storedEmail ?? initial?.email ?? "",
     role: initial?.role || "admin",
     active: initial?.active !== false,
     agentId: initial?.agentId || "",
@@ -165,14 +165,23 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
     setForm({
       userId: initial?.userId || "",
       name: initial?.name || "",
-      email: initial?.email || "",
+      email: initial?.storedEmail ?? initial?.email ?? "",
       role: initial?.role || "admin",
       active: initial?.active !== false,
       agentId: initial?.agentId || "",
       labId: initial?.labId || "",
     });
     setError("");
-  }, [initial?.userId, initial?.name, initial?.email, initial?.role, initial?.active, initial?.agentId, initial?.labId]);
+  }, [
+    initial?.userId,
+    initial?.name,
+    initial?.email,
+    initial?.storedEmail,
+    initial?.role,
+    initial?.active,
+    initial?.agentId,
+    initial?.labId,
+  ]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -456,10 +465,22 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
   const filteredUsers = useMemo(
     () =>
       users.filter((u) =>
-        matchesSearch(search, [u.name, u.email, u.roleLabel, u.userId, u.agentId, u.labId])
+        matchesSearch(search, [u.name, u.email, u.roleLabel, u.userId, u.userIdShort, u.agentId, u.labId])
       ),
     [users, search]
   );
+
+  const duplicateUserNames = useMemo(() => {
+    const counts = new Map();
+    for (const user of users) {
+      const key = String(user.name || "").trim().toLowerCase();
+      if (!key) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return new Set(
+      [...counts.entries()].filter(([, count]) => count > 1).map(([name]) => name)
+    );
+  }, [users]);
 
   const filteredLabs = useMemo(
     () =>
@@ -517,8 +538,8 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
   }
 
   async function handleResetPassword(user) {
-    const email = String(user?.email || "").trim();
-    if (!email) return;
+    const email = String(user?.storedEmail ?? user?.email ?? "").trim();
+    if (!email || user?.hasStoredEmail === false) return;
     if (
       typeof window !== "undefined" &&
       !window.confirm(`Send password reset email to ${email}?`)
@@ -708,9 +729,15 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
               ) : (
                 filteredUsers.map((user) => (
                   <tr key={user.userId} className="border-b border-slate-100">
-                    <td className="px-2 py-2 font-medium text-slate-900">{user.name}</td>
                     <td className="px-2 py-2">
-                      <UserEmailCell email={user.email} />
+                      <div className="font-medium text-slate-900">{user.name}</div>
+                      {duplicateUserNames.has(String(user.name || "").trim().toLowerCase()) &&
+                      user.userIdShort ? (
+                        <div className="font-mono text-[10px] text-slate-400">{user.userIdShort}</div>
+                      ) : null}
+                    </td>
+                    <td className="px-2 py-2">
+                      <UserEmailCell email={user.hasStoredEmail !== false ? user.email : ""} />
                     </td>
                     <td className="px-2 py-2">{platformRoleLabel(user.role)}</td>
                     <td className="px-2 py-2">
@@ -742,8 +769,8 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
                           variant="outline"
                           size="sm"
                           className="h-7 px-2 text-[10px]"
-                          disabled={!user.email || resettingUserId === user.userId}
-                          title={user.email ? undefined : RESET_PASSWORD_EMAIL_MISSING}
+                          disabled={!user.hasStoredEmail || resettingUserId === user.userId}
+                          title={user.hasStoredEmail ? undefined : RESET_PASSWORD_EMAIL_MISSING}
                           onClick={() => void handleResetPassword(user)}
                         >
                           {resettingUserId === user.userId ? "Sending…" : "Reset Password"}
