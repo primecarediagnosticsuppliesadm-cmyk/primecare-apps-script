@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { PageSkeleton } from "@/components/ux";
 import { loadMasterCatalog } from "@/catalog/masterCatalogData.js";
 import { formatInr, formatMarginPct, formatPriceOrNotConfigured } from "@/catalog/masterCatalogEngine.js";
@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Package, Pencil, Plus, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Package, Pencil, Plus, Search, X } from "lucide-react";
 
 const EMPTY_ADD_FORM = {
   productId: "",
@@ -36,6 +36,49 @@ function resolveCreatedBy(currentUser) {
     currentUser?.userId ||
     currentUser?.id ||
     null
+  );
+}
+
+function matchesCatalogSearch(product, query) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return true;
+  return (
+    String(product.productId || "").toLowerCase().includes(q) ||
+    String(product.productName || "").toLowerCase().includes(q) ||
+    String(product.category || "").toLowerCase().includes(q) ||
+    String(product.preferredSupplier || "").toLowerCase().includes(q)
+  );
+}
+
+function sortCatalogItems(items, sortField, sortDir) {
+  const dir = sortDir === "desc" ? -1 : 1;
+  return [...items].sort((a, b) => {
+    const av = String(a[sortField] || "");
+    const bv = String(b[sortField] || "");
+    return av.localeCompare(bv, undefined, { sensitivity: "base" }) * dir;
+  });
+}
+
+function SortableHeader({ label, field, sortField, sortDir, onSort }) {
+  const active = sortField === field;
+  return (
+    <th className="whitespace-nowrap px-2 py-2">
+      <button
+        type="button"
+        onClick={() => onSort(field)}
+        className="inline-flex items-center gap-0.5 font-medium text-slate-500 hover:text-slate-800"
+        aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+      >
+        {label}
+        {active ? (
+          sortDir === "asc" ? (
+            <ChevronUp className="h-3 w-3" aria-hidden />
+          ) : (
+            <ChevronDown className="h-3 w-3" aria-hidden />
+          )
+        ) : null}
+      </button>
+    </th>
   );
 }
 
@@ -260,6 +303,9 @@ export default function MasterCatalogPage({ currentUser = null }) {
   const [formMode, setFormMode] = useState(null);
   const [editingProduct, setEditingProduct] = useState(null);
   const [togglingId, setTogglingId] = useState("");
+  const [search, setSearch] = useState("");
+  const [sortField, setSortField] = useState("productId");
+  const [sortDir, setSortDir] = useState("asc");
 
   const tenantId = resolveTenantId(currentUser);
 
@@ -330,9 +376,23 @@ export default function MasterCatalogPage({ currentUser = null }) {
     await load();
   }
 
-  if (loading) return <PageSkeleton rows={8} />;
-
   const items = catalog?.items || [];
+
+  const displayItems = useMemo(() => {
+    const filtered = items.filter((product) => matchesCatalogSearch(product, search));
+    return sortCatalogItems(filtered, sortField, sortDir);
+  }, [items, search, sortField, sortDir]);
+
+  function handleSort(field) {
+    if (sortField === field) {
+      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortField(field);
+    setSortDir("asc");
+  }
+
+  if (loading) return <PageSkeleton rows={8} />;
 
   return (
     <div className="mx-auto max-w-5xl space-y-3 p-3 pb-8">
@@ -370,37 +430,73 @@ export default function MasterCatalogPage({ currentUser = null }) {
         </div>
       </div>
 
+      <div className="relative">
+        <Search
+          className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+          aria-hidden
+        />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search SKU, name, category, or supplier"
+          className="h-8 pl-8 text-xs"
+          aria-label="Search master catalog"
+        />
+      </div>
+
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-xs">
+        <table className="w-full min-w-[960px] text-xs">
           <thead>
             <tr className="border-b bg-slate-50 text-left text-slate-500">
-              <th className="px-2 py-2">Product</th>
-              <th className="px-2 py-2">Status</th>
-              <th className="px-2 py-2">Category</th>
-              <th className="px-2 py-2">HQ price</th>
-              <th className="px-2 py-2">HQ cost</th>
-              <th className="px-2 py-2">Transfer price</th>
-              <th className="px-2 py-2">Margin</th>
-              <th className="px-2 py-2">HQ stock</th>
-              <th className="px-2 py-2">Actions</th>
+              <SortableHeader
+                label="Product ID"
+                field="productId"
+                sortField={sortField}
+                sortDir={sortDir}
+                onSort={handleSort}
+              />
+              <SortableHeader
+                label="Product Name"
+                field="productName"
+                sortField={sortField}
+                sortDir={sortDir}
+                onSort={handleSort}
+              />
+              <th className="whitespace-nowrap px-2 py-2">Status</th>
+              <th className="whitespace-nowrap px-2 py-2">Category</th>
+              <th className="whitespace-nowrap px-2 py-2">HQ Price</th>
+              <th className="whitespace-nowrap px-2 py-2">HQ Cost</th>
+              <th className="whitespace-nowrap px-2 py-2">Transfer Price</th>
+              <th className="whitespace-nowrap px-2 py-2">Margin</th>
+              <th className="whitespace-nowrap px-2 py-2">HQ Stock</th>
+              <th className="whitespace-nowrap px-2 py-2">Actions</th>
             </tr>
           </thead>
           <tbody>
             {items.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-2 py-6 text-center text-slate-500">
+                <td colSpan={10} className="px-2 py-6 text-center text-slate-500">
                   No master products yet. Use Add Product to create your first HQ SKU.
                 </td>
               </tr>
             ) : null}
-            {items.map((p) => (
+            {items.length > 0 && displayItems.length === 0 ? (
+              <tr>
+                <td colSpan={10} className="px-2 py-6 text-center text-slate-500">
+                  No products match your search.
+                </td>
+              </tr>
+            ) : null}
+            {displayItems.map((p) => (
               <tr
                 key={p.productId}
                 className={`border-b border-slate-100 ${p.active ? "" : "bg-slate-50/80 opacity-80"}`}
               >
+                <td className="whitespace-nowrap px-2 py-2 font-mono text-[11px] text-slate-700">
+                  {p.productId}
+                </td>
                 <td className="px-2 py-2">
-                  <div className="font-medium">{p.productName}</div>
-                  <div className="text-[10px] text-slate-500">{p.productId}</div>
+                  <div className="font-medium text-slate-900">{p.productName}</div>
                 </td>
                 <td className="px-2 py-2">
                   <Badge variant={p.active ? "default" : "secondary"}>
