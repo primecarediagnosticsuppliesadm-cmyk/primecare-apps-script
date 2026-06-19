@@ -79,6 +79,7 @@ export function resolvePlatformUserContact(row = {}) {
   return {
     name,
     displayName: name,
+    username: str(row.username),
     email: storedEmail,
     storedEmail,
     hasStoredEmail: Boolean(storedEmail),
@@ -166,6 +167,7 @@ export function mapPlatformUserRow(row = {}) {
     userId,
     name,
     displayName,
+    username: str(row.username),
     email,
     storedEmail,
     hasStoredEmail,

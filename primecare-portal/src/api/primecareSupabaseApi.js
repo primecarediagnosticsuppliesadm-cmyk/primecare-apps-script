@@ -5128,6 +5128,7 @@ function mapProfilesPlatformUserRow(row, directory = null) {
     display_name: str(row.display_name),
     agent_name: str(row.agent_name),
     user_name: str(directory?.user_name),
+    username: str(row.username),
     profile_email: profileEmail,
     phone: str(row.phone),
     role,
@@ -5140,7 +5141,7 @@ function mapProfilesPlatformUserRow(row, directory = null) {
 }
 
 const PROFILES_IDENTITY_SELECT =
-  "user_id, tenant_id, role, display_name, agent_name, agent_id, lab_id, active, created_at, email, phone";
+  "user_id, tenant_id, role, username, display_name, agent_name, agent_id, lab_id, active, created_at, email, phone";
 const PROFILES_BASE_SELECT =
   "user_id, tenant_id, role, agent_name, agent_id, lab_id, active, created_at";
 
@@ -5356,7 +5357,7 @@ export async function getOperationsPlatformUsersRead(options = {}) {
   ]);
 
   if (error) {
-    const missingIdentityColumn = /display_name|profiles.*email|column.*email|column.*phone/i.test(
+    const missingIdentityColumn = /display_name|username|profiles.*email|column.*email|column.*phone/i.test(
       error.message || ""
     );
     if (missingIdentityColumn) {
@@ -5399,6 +5400,7 @@ export async function createOperationsPlatformUserWrite(payload = {}) {
   const userId = str(payload.userId ?? payload.user_id);
   const role = str(payload.role).toLowerCase();
   const name = str(payload.displayName ?? payload.name ?? payload.agentName);
+  const username = str(payload.username).toLowerCase();
   const email = str(payload.email);
   const phone = str(payload.phone);
   const agentId = str(payload.agentId ?? payload.agent_id);
@@ -5411,8 +5413,9 @@ export async function createOperationsPlatformUserWrite(payload = {}) {
       error: "Supabase Auth user ID is required. Create the user in Supabase Auth first.",
     };
   }
+  if (!username) return { success: false, error: "Username is required" };
   if (!email) return { success: false, error: "Email is required" };
-  if (!name) return { success: false, error: "Display name is required" };
+  if (!name) return { success: false, error: "Full name is required" };
   if (!role || !["admin", "executive", "agent", "lab"].includes(role)) {
     return { success: false, error: "A valid role is required" };
   }
@@ -5421,6 +5424,7 @@ export async function createOperationsPlatformUserWrite(payload = {}) {
     user_id: userId,
     tenant_id: tenantId,
     role,
+    username,
     display_name: name || null,
     agent_name: role === "agent" ? name || null : null,
     email: email || null,
@@ -5467,11 +5471,13 @@ export async function updateOperationsPlatformUserWrite(userId, payload = {}) {
 
   const role = str(payload.role).toLowerCase();
   const name = str(payload.displayName ?? payload.name ?? payload.agentName);
+  const username = str(payload.username).toLowerCase();
   const email = str(payload.email);
   const phone = str(payload.phone);
   const patch = {
     display_name: name || null,
   };
+  if (username) patch.username = username;
   if (role === "agent") patch.agent_name = name || null;
   if (email) patch.email = email;
   if (phone) patch.phone = phone;
@@ -5785,6 +5791,28 @@ export function getPasswordResetRedirectUrl() {
     return `${window.location.origin}/reset-password`;
   }
   return undefined;
+}
+
+/** Resolve username or email to auth email for sign-in (profiles.username → profiles.email). */
+export async function resolveLoginEmailForAuth(identifier) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+
+  const loginId = str(identifier);
+  if (!loginId) return { success: false, error: "Username or email is required" };
+
+  if (loginId.includes("@")) {
+    return { success: true, email: loginId };
+  }
+
+  const { data, error } = await supabase.rpc("resolve_login_email", { identifier: loginId });
+  if (error) {
+    return { success: false, error: error.message || "Failed to resolve login identifier" };
+  }
+  const email = str(data);
+  if (!email) {
+    return { success: false, error: "Invalid username or email" };
+  }
+  return { success: true, email };
 }
 
 export async function requestPlatformUserPasswordReset(email) {

@@ -153,6 +153,7 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
   const isEdit = mode === "edit";
   const [form, setForm] = useState(() => ({
     userId: initial?.userId || "",
+    username: initial?.username || "",
     displayName: initial?.displayName ?? initial?.name ?? "",
     email: initial?.storedEmail ?? initial?.email ?? "",
     phone: initial?.phone ?? "",
@@ -167,6 +168,7 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
   useEffect(() => {
     setForm({
       userId: initial?.userId || "",
+      username: initial?.username || "",
       displayName: initial?.displayName ?? initial?.name ?? "",
       email: initial?.storedEmail ?? initial?.email ?? "",
       phone: initial?.phone ?? "",
@@ -178,6 +180,7 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
     setError("");
   }, [
     initial?.userId,
+    initial?.username,
     initial?.displayName,
     initial?.name,
     initial?.email,
@@ -219,12 +222,23 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
           </p>
         ) : null}
         <label className="block text-xs text-slate-600">
-          Supabase Auth user ID *
+          Internal user ID (UUID) *
           <Input
             className="mt-1 font-mono text-[11px]"
             value={form.userId}
             onChange={(e) => setForm((p) => ({ ...p, userId: e.target.value }))}
             readOnly={isEdit}
+            required
+          />
+        </label>
+        <label className="block text-xs text-slate-600">
+          Username *
+          <Input
+            className="mt-1 font-mono text-xs"
+            value={form.username}
+            onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
+            placeholder="e.g. qa_admin"
+            autoComplete="off"
             required
           />
         </label>
@@ -693,6 +707,7 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
         matchesSearch(search, [
           u.userId,
           u.userIdShort,
+          u.username,
           u.displayName,
           u.name,
           u.email,
@@ -966,10 +981,11 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
 
       {tab === "users" ? (
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full min-w-[720px] text-xs">
+          <table className="w-full min-w-[820px] text-xs">
             <thead>
               <tr className="border-b bg-slate-50 text-left text-slate-500">
                 <th className="px-2 py-2">User ID</th>
+                <th className="px-2 py-2">Username</th>
                 <th className="px-2 py-2">Full Name</th>
                 <th className="px-2 py-2">Email</th>
                 <th className="px-2 py-2">Role</th>
@@ -980,7 +996,7 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
             <tbody>
               {filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-2 py-6 text-center text-slate-500">
+                  <td colSpan={7} className="px-2 py-6 text-center text-slate-500">
                     {users.length === 0
                       ? "No platform users linked yet. Add a profile after creating the login in Supabase Auth."
                       : "No users match your search."}
@@ -996,6 +1012,9 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
                       >
                         {user.userIdShort || user.userId || "—"}
                       </span>
+                    </td>
+                    <td className="px-2 py-2 font-mono text-[11px] text-slate-700">
+                      {user.username || "—"}
                     </td>
                     <td className="px-2 py-2 font-medium text-slate-900">
                       {user.displayName || user.name}

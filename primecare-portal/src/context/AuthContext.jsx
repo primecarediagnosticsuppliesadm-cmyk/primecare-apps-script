@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { getCurrentUser, loginUser, logoutUser } from "@/api/primecareApi";
+import { resolveLoginEmailForAuth } from "@/api/primecareSupabaseApi.js";
 import { supabase } from "@/api/supabaseClient";
 import { ALLOW_LEGACY_APPS_SCRIPT, REQUIRE_SUPABASE_AUTH } from "@/config/environment";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
@@ -329,9 +330,16 @@ export function AuthProvider({ children }) {
 
     if (useSupabaseAuth) {
       perfMark("auth.login.start");
+      const endResolve = perfTime("auth.resolveLoginEmail");
+      const resolved = await resolveLoginEmailForAuth(loginId);
+      endResolve();
+      if (!resolved?.success || !resolved?.email) {
+        throw new Error(resolved?.error || "Invalid username or email");
+      }
+
       const endSignIn = perfTime("auth.signInWithPassword");
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: loginId,
+        email: resolved.email,
         password,
       });
       endSignIn();

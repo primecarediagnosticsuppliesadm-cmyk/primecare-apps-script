@@ -58,13 +58,14 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium">User ID</label>
+            <label className="mb-1 block text-sm font-medium">Username or Email</label>
             <input
               type="text"
               value={loginId}
               onChange={(e) => setLoginId(e.target.value)}
               className="w-full rounded-xl border px-3 py-3 text-sm outline-none focus:ring"
-              placeholder="Enter email or user ID"
+              placeholder="e.g. qa_admin or qa.admin@primecare.test"
+              autoComplete="username"
               required
             />
           </div>
