@@ -87,6 +87,9 @@ export function mapMasterCatalogRow(row = {}) {
     marginPct: hqPricingConfigured ? computeMarginPct(sellingPrice, transferPrice) : null,
     currentStock: num(row.currentStock ?? row.current_stock),
     minStock: num(row.minStock ?? row.min_stock),
+    reorderQty: num(row.reorderQty ?? row.reorder_qty),
+    unit: str(row.unit) || "",
+    preferredSupplier: str(row.preferredSupplier ?? row.preferred_supplier) || "",
     active: row.active !== false && str(row.activeFlag).toUpperCase() !== "N",
     source: str(row.source) || "hq_master",
   };

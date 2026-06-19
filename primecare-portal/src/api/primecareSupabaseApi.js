@@ -472,6 +472,312 @@ export async function getLabCatalogRead(options = {}) {
   }
 }
 
+function normalizeHqSku(productId) {
+  return str(productId).toUpperCase();
+}
+
+function validateHqProductNumericFields({
+  sellingPrice,
+  costPrice,
+  openingStock,
+  minStock,
+  reorderQty,
+  requireOpeningStock = false,
+}) {
+  if (num(sellingPrice) < 0) return "Selling price must be 0 or greater";
+  if (num(costPrice) < 0) return "Cost price must be 0 or greater";
+  if (requireOpeningStock && num(openingStock) < 0) return "Opening stock must be 0 or greater";
+  if (num(minStock) < 0) return "Minimum stock must be 0 or greater";
+  if (num(reorderQty) < 0) return "Reorder quantity must be 0 or greater";
+  return null;
+}
+
+async function hqProductExists(tenantId, productId) {
+  const sel = await supabase
+    .from("products")
+    .select("product_id")
+    .eq("tenant_id", tenantId)
+    .eq("product_id", productId)
+    .limit(1);
+  if (sel.error) return { exists: false, error: sel.error.message };
+  return { exists: Boolean(Array.isArray(sel.data) && sel.data[0]), error: null };
+}
+
+/**
+ * Create HQ master product + paired inventory row (Year-1 pilot).
+ * Payload: tenantId, productId, productName, category?, unit?, sellingPrice, costPrice?,
+ * preferredSupplier?, openingStock?, minStock?, reorderQty?, createdBy?
+ */
+export async function createHqProductWrite(payload = {}) {
+  traceSupabaseRead("MasterCatalog.createHqProductWrite", { tables: ["products", "inventory", "inventory_ledger"] });
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+
+  try {
+    const tenantId = str(payload.tenantId ?? payload.tenant_id);
+    const productId = normalizeHqSku(payload.productId ?? payload.product_id);
+    const productName = str(payload.productName ?? payload.product_name);
+
+    if (!tenantId) return { success: false, error: "tenant_id is required", data: null };
+    if (!productId) return { success: false, error: "product_id is required", data: null };
+    if (!productName) return { success: false, error: "product_name is required", data: null };
+
+    const numericError = validateHqProductNumericFields({
+      sellingPrice: payload.sellingPrice ?? payload.selling_price,
+      costPrice: payload.costPrice ?? payload.cost_price,
+      openingStock: payload.openingStock ?? payload.opening_stock,
+      minStock: payload.minStock ?? payload.min_stock,
+      reorderQty: payload.reorderQty ?? payload.reorder_qty,
+      requireOpeningStock: true,
+    });
+    if (numericError) return { success: false, error: numericError, data: null };
+
+    const dup = await hqProductExists(tenantId, productId);
+    if (dup.error) return { success: false, error: dup.error, data: null };
+    if (dup.exists) {
+      return {
+        success: false,
+        error: `Product already exists for this tenant: ${productId}`,
+        data: null,
+      };
+    }
+
+    const openingStock = num(payload.openingStock ?? payload.opening_stock);
+    const minStock = num(payload.minStock ?? payload.min_stock);
+    const reorderQty = num(payload.reorderQty ?? payload.reorder_qty);
+    const category = str(payload.category) || "Consumables";
+    const unit = str(payload.unit) || null;
+    const preferredSupplier = str(payload.preferredSupplier ?? payload.preferred_supplier) || null;
+    const createdBy = str(payload.createdBy ?? payload.created_by) || null;
+
+    const productRow = {
+      tenant_id: tenantId,
+      product_id: productId,
+      product_name: productName,
+      category,
+      unit,
+      selling_price: num(payload.sellingPrice ?? payload.selling_price),
+      cost_price: num(payload.costPrice ?? payload.cost_price),
+      preferred_supplier: preferredSupplier,
+      active: true,
+    };
+
+    const prodIns = await supabase.from("products").insert([productRow]).select();
+    if (prodIns.error) {
+      return { success: false, error: prodIns.error.message || "Product insert failed", data: null };
+    }
+
+    const invRow = {
+      tenant_id: tenantId,
+      product_id: productId,
+      current_stock: openingStock,
+      min_stock: minStock,
+      reorder_qty: reorderQty,
+      stock_in: openingStock,
+      stock_out: 0,
+      updated_at: new Date().toISOString(),
+    };
+
+    const invIns = await supabase.from("inventory").insert([invRow]).select();
+    if (invIns.error) {
+      return {
+        success: false,
+        error: invIns.error.message || "Inventory insert failed",
+        data: { product: Array.isArray(prodIns.data) ? prodIns.data[0] : prodIns.data },
+      };
+    }
+
+    if (openingStock > 0) {
+      const ledger = await createInventoryLedgerWrite([
+        {
+          movement_type: "IN",
+          product_id: productId,
+          product_name: productName,
+          order_id: `OPENING-${productId}`,
+          quantity: openingStock,
+          stock_before: 0,
+          stock_after: openingStock,
+          tenant_id: tenantId,
+          created_by: createdBy,
+          created_at: new Date().toISOString(),
+        },
+      ]);
+      if (!ledger.success) {
+        console.warn("[createHqProductWrite] opening stock ledger insert failed:", ledger.error);
+      }
+    }
+
+    return {
+      success: true,
+      data: {
+        productId,
+        product: Array.isArray(prodIns.data) ? prodIns.data[0] : prodIns.data,
+        inventory: Array.isArray(invIns.data) ? invIns.data[0] : invIns.data,
+      },
+      error: null,
+    };
+  } catch (err) {
+    console.warn("[createHqProductWrite] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: null };
+  }
+}
+
+/**
+ * Update HQ master product metadata and inventory thresholds (not current_stock).
+ */
+export async function updateHqProductWrite(productId, payload = {}) {
+  traceSupabaseRead("MasterCatalog.updateHqProductWrite", { tables: ["products", "inventory"] });
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+
+  try {
+    const tenantId = str(payload.tenantId ?? payload.tenant_id);
+    const sku = normalizeHqSku(productId ?? payload.productId ?? payload.product_id);
+    if (!tenantId) return { success: false, error: "tenant_id is required", data: null };
+    if (!sku) return { success: false, error: "product_id is required", data: null };
+
+    const productName = str(payload.productName ?? payload.product_name);
+    if (!productName) return { success: false, error: "product_name is required", data: null };
+
+    const numericError = validateHqProductNumericFields({
+      sellingPrice: payload.sellingPrice ?? payload.selling_price,
+      costPrice: payload.costPrice ?? payload.cost_price,
+      minStock: payload.minStock ?? payload.min_stock,
+      reorderQty: payload.reorderQty ?? payload.reorder_qty,
+    });
+    if (numericError) return { success: false, error: numericError, data: null };
+
+    const exists = await hqProductExists(tenantId, sku);
+    if (exists.error) return { success: false, error: exists.error, data: null };
+    if (!exists.exists) {
+      return { success: false, error: `Product not found: ${sku}`, data: null };
+    }
+
+    const productPatch = {
+      product_name: productName,
+      category: str(payload.category) || "Consumables",
+      unit: str(payload.unit) || null,
+      selling_price: num(payload.sellingPrice ?? payload.selling_price),
+      cost_price: num(payload.costPrice ?? payload.cost_price),
+      preferred_supplier: str(payload.preferredSupplier ?? payload.preferred_supplier) || null,
+    };
+
+    const prodUpd = await supabase
+      .from("products")
+      .update(productPatch)
+      .eq("tenant_id", tenantId)
+      .eq("product_id", sku)
+      .select();
+    if (prodUpd.error) return { success: false, error: prodUpd.error.message, data: null };
+
+    const invPatch = {
+      min_stock: num(payload.minStock ?? payload.min_stock),
+      reorder_qty: num(payload.reorderQty ?? payload.reorder_qty),
+      updated_at: new Date().toISOString(),
+    };
+
+    const invUpd = await supabase
+      .from("inventory")
+      .update(invPatch)
+      .eq("tenant_id", tenantId)
+      .eq("product_id", sku)
+      .select();
+    if (invUpd.error) return { success: false, error: invUpd.error.message, data: null };
+
+    return {
+      success: true,
+      data: {
+        productId: sku,
+        product: Array.isArray(prodUpd.data) ? prodUpd.data[0] : prodUpd.data,
+        inventory: Array.isArray(invUpd.data) ? invUpd.data[0] : invUpd.data,
+      },
+      error: null,
+    };
+  } catch (err) {
+    console.warn("[updateHqProductWrite] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: null };
+  }
+}
+
+/**
+ * Enable or disable HQ master product (soft delete — inventory row retained).
+ */
+export async function setHqProductActiveWrite(productId, active, payload = {}) {
+  traceSupabaseRead("MasterCatalog.setHqProductActiveWrite", { table: "products" });
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+
+  try {
+    const tenantId = str(payload.tenantId ?? payload.tenant_id);
+    const sku = normalizeHqSku(productId ?? payload.productId ?? payload.product_id);
+    if (!tenantId) return { success: false, error: "tenant_id is required", data: null };
+    if (!sku) return { success: false, error: "product_id is required", data: null };
+
+    const nextActive = active !== false && active !== "false" && active !== 0;
+
+    const upd = await supabase
+      .from("products")
+      .update({ active: nextActive })
+      .eq("tenant_id", tenantId)
+      .eq("product_id", sku)
+      .select();
+    if (upd.error) return { success: false, error: upd.error.message, data: null };
+
+    const row = Array.isArray(upd.data) ? upd.data[0] : upd.data;
+    if (!row) return { success: false, error: `Product not found: ${sku}`, data: null };
+
+    return {
+      success: true,
+      data: { productId: sku, active: nextActive, product: row },
+      error: null,
+    };
+  } catch (err) {
+    console.warn("[setHqProductActiveWrite] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: null };
+  }
+}
+
+/**
+ * Merge products-table fields (unit, preferred_supplier) into catalog rows for HQ maintenance UI.
+ */
+export async function enrichCatalogWithProductMetadata(products, tenantId) {
+  const id = str(tenantId);
+  if (!id || !supabase || !Array.isArray(products) || !products.length) {
+    return products || [];
+  }
+
+  const { data, error } = await supabase
+    .from("products")
+    .select("product_id, unit, preferred_supplier, active")
+    .eq("tenant_id", id);
+
+  if (error) {
+    console.warn("[enrichCatalogWithProductMetadata]", error.message);
+    return products;
+  }
+
+  const metaBySku = new Map(
+    (data || []).map((row) => [normalizeHqSku(row.product_id), row])
+  );
+
+  return products.map((item) => {
+    const meta = metaBySku.get(normalizeHqSku(item.productId));
+    if (!meta) return item;
+    return {
+      ...item,
+      unit: str(meta.unit) || item.unit,
+      preferredSupplier: str(meta.preferred_supplier) || item.preferredSupplier,
+      active:
+        meta.active !== false &&
+        item.active !== false &&
+        str(item.activeFlag).toUpperCase() !== "N",
+    };
+  });
+}
+
 /**
  * Read-only stock dashboard from Supabase view v_stock_dashboard.
  */
