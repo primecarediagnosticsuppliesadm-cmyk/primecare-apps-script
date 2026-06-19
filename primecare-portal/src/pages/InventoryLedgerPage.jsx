@@ -1,25 +1,35 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { getInventoryLedgerRead } from "@/api/primecareSupabaseApi";
 
-const SOURCE_LABELS = {
-  ORDER_OUT: "Lab Order Fulfillment",
-  PURCHASE_IN: "Purchase Receipt",
-  OUT: "Manual Out",
-  IN: "Manual In",
-};
+function str(v) {
+  return String(v ?? "").trim();
+}
 
-function movementLabel(type) {
-  return SOURCE_LABELS[String(type || "").toUpperCase()] || String(type || "-");
+/**
+ * @param {string} type
+ * @param {{ orderId?: string }} [row]
+ */
+function movementLabel(type, row = {}) {
+  const t = str(type).toUpperCase();
+  if (t === "PURCHASE_IN") return "Purchase Receipt";
+  if (t === "ORDER_OUT") return "Order Fulfillment";
+  if (t === "IN") {
+    const ref = str(row.orderId);
+    if (ref.startsWith("OPENING-")) return "Opening Stock";
+    return "Inventory Adjustment";
+  }
+  if (t === "OUT") return "Stock Removal";
+  return str(type) || "—";
 }
 
 function dateOnly(value) {
-  return String(value || "").slice(0, 10);
+  return str(value).slice(0, 10);
 }
 
-function formatDateTime(value) {
-  if (!value) return "-";
+function formatDate(value) {
+  if (!value) return "—";
   const d = new Date(value);
-  if (!Number.isFinite(d.getTime())) return String(value);
+  if (!Number.isFinite(d.getTime())) return str(value);
   return d.toLocaleString("en-IN", {
     day: "2-digit",
     month: "short",
@@ -29,16 +39,41 @@ function formatDateTime(value) {
   });
 }
 
-function signedQtyClass(value) {
-  if (Number(value) < 0) return "#b91c1c";
-  if (Number(value) > 0) return "#15803d";
-  return "#334155";
+function formatSignedQuantity(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n === 0) return "0";
+  return n > 0 ? `+${n}` : `${n}`;
+}
+
+function quantityColor(value) {
+  const n = Number(value);
+  if (n > 0) return "#15803d";
+  if (n < 0) return "#b91c1c";
+  return "#475569";
+}
+
+function formatReference(row) {
+  const orderId = str(row.orderId);
+  if (orderId) return orderId;
+  const refId = str(row.referenceId);
+  if (refId) return refId;
+  const refType = str(row.referenceType);
+  if (refType) return refType;
+  return "—";
+}
+
+function formatSource(row) {
+  const orderId = str(row.orderId);
+  if (orderId) return orderId;
+  const parts = [row.referenceType, row.referenceId].map(str).filter(Boolean);
+  return parts.length ? parts.join(" · ") : "—";
 }
 
 export default function InventoryLedgerPage() {
   const [movements, setMovements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [expandedKey, setExpandedKey] = useState(null);
   const [filters, setFilters] = useState({
     product: "",
     movementType: "",
@@ -48,8 +83,6 @@ export default function InventoryLedgerPage() {
   });
 
   useEffect(() => {
-    console.log("INVENTORY LEDGER MOUNTED");
-
     async function loadLedger() {
       try {
         setLoading(true);
@@ -77,30 +110,19 @@ export default function InventoryLedgerPage() {
   const filteredMovements = useMemo(() => {
     const product = filters.product.trim().toLowerCase();
     const source = filters.source.trim().toLowerCase();
-    const rows = movements.filter((m) => {
+    return movements.filter((m) => {
       const matchesProduct =
         !product ||
-        String(m.productId || "").toLowerCase().includes(product) ||
-        String(m.productName || "").toLowerCase().includes(product);
+        str(m.productId).toLowerCase().includes(product) ||
+        str(m.productName).toLowerCase().includes(product);
       const matchesType = !filters.movementType || m.movementType === filters.movementType;
       const movementDate = dateOnly(m.createdAt);
       const matchesStart = !filters.startDate || movementDate >= filters.startDate;
       const matchesEnd = !filters.endDate || movementDate <= filters.endDate;
-      const sourceText = [
-        m.orderId,
-        m.referenceType,
-        m.referenceId,
-      ].join(" ").toLowerCase();
+      const sourceText = [m.orderId, m.referenceType, m.referenceId].join(" ").toLowerCase();
       const matchesSource = !source || sourceText.includes(source);
       return matchesProduct && matchesType && matchesStart && matchesEnd && matchesSource;
     });
-
-    console.log("INVENTORY LEDGER FILTERED", {
-      filters,
-      count: rows.length,
-      rows,
-    });
-    return rows;
   }, [movements, filters]);
 
   const summary = useMemo(() => {
@@ -111,11 +133,11 @@ export default function InventoryLedgerPage() {
     for (const row of filteredMovements) {
       if (row.signedQuantity > 0) inward += row.signedQuantity;
       if (row.signedQuantity < 0) outward += Math.abs(row.signedQuantity);
-      const sku = row.productId || "-";
+      const sku = row.productId || "—";
       bySku.set(sku, (bySku.get(sku) || 0) + 1);
     }
 
-    let mostActiveSku = "-";
+    let mostActiveSku = "—";
     let maxCount = 0;
     for (const [sku, count] of bySku.entries()) {
       if (count > maxCount) {
@@ -136,6 +158,14 @@ export default function InventoryLedgerPage() {
     setFilters((prev) => ({ ...prev, [key]: value }));
   };
 
+  function rowKey(row, idx) {
+    return row.id || `${row.productId}-${row.createdAt}-${idx}`;
+  }
+
+  function toggleExpanded(key) {
+    setExpandedKey((prev) => (prev === key ? null : key));
+  }
+
   if (loading) {
     return <div style={styles.notice}>Loading inventory movements...</div>;
   }
@@ -149,22 +179,22 @@ export default function InventoryLedgerPage() {
       <div style={styles.header}>
         <div>
           <h1 style={styles.title}>Inventory Movements</h1>
-          <p style={styles.subtitle}>Read-only stock ledger visibility from Supabase.</p>
+          <p style={styles.subtitle}>Stock in and out for your tenant — what changed, when, and why.</p>
         </div>
       </div>
 
       <div style={styles.summaryGrid}>
-        <SummaryCard title="Total Movements" value={summary.totalMovements} />
-        <SummaryCard title="Total Stock Inward" value={summary.totalStockInward} />
-        <SummaryCard title="Total Stock Outward" value={summary.totalStockOutward} />
-        <SummaryCard title="Most Active SKU" value={summary.mostActiveSku} />
+        <SummaryCard title="Movements" value={summary.totalMovements} />
+        <SummaryCard title="Stock added" value={`+${summary.totalStockInward}`} valueColor="#15803d" />
+        <SummaryCard title="Stock removed" value={`-${summary.totalStockOutward}`} valueColor="#b91c1c" />
+        <SummaryCard title="Most active SKU" value={summary.mostActiveSku} />
       </div>
 
       <div style={styles.filters}>
         <input
           value={filters.product}
           onChange={(e) => setFilter("product", e.target.value)}
-          placeholder="Filter product / SKU"
+          placeholder="Search product or SKU"
           style={styles.input}
         />
         <select
@@ -175,7 +205,7 @@ export default function InventoryLedgerPage() {
           <option value="">All movement types</option>
           {movementTypes.map((type) => (
             <option key={type} value={type}>
-              {type}
+              {movementLabel(type)}
             </option>
           ))}
         </select>
@@ -184,17 +214,19 @@ export default function InventoryLedgerPage() {
           value={filters.startDate}
           onChange={(e) => setFilter("startDate", e.target.value)}
           style={styles.input}
+          aria-label="From date"
         />
         <input
           type="date"
           value={filters.endDate}
           onChange={(e) => setFilter("endDate", e.target.value)}
           style={styles.input}
+          aria-label="To date"
         />
         <input
           value={filters.source}
           onChange={(e) => setFilter("source", e.target.value)}
-          placeholder="Source transaction / reference"
+          placeholder="Reference / PO / order"
           style={styles.input}
         />
       </div>
@@ -203,52 +235,91 @@ export default function InventoryLedgerPage() {
         <table style={styles.table}>
           <thead>
             <tr>
-              <Th>Created</Th>
+              <Th style={styles.thExpand} />
+              <Th>Date</Th>
               <Th>Product</Th>
-              <Th>Movement</Th>
-              <Th>Signed Qty</Th>
-              <Th>Source</Th>
+              <Th>Movement type</Th>
+              <Th align="right">Quantity</Th>
               <Th>Reference</Th>
-              <Th>Created By</Th>
-              <Th>Stock Before</Th>
-              <Th>Stock After</Th>
+              <Th>User</Th>
             </tr>
           </thead>
           <tbody>
             {filteredMovements.length === 0 ? (
               <tr>
-                <td colSpan={9} style={styles.emptyCell}>
+                <td colSpan={7} style={styles.emptyCell}>
                   No inventory movements found.
                 </td>
               </tr>
             ) : (
-              filteredMovements.map((row, idx) => (
-                <tr key={row.id || `${row.productId}-${row.createdAt}-${idx}`}>
-                  <Td>{formatDateTime(row.createdAt)}</Td>
-                  <Td>
-                    <div style={styles.productName}>{row.productName || "-"}</div>
-                    <div style={styles.muted}>{row.productId || "-"}</div>
-                  </Td>
-                  <Td>
-                    <div style={styles.badge}>{row.movementType || "-"}</div>
-                    <div style={styles.muted}>{movementLabel(row.movementType)}</div>
-                  </Td>
-                  <Td>
-                    <span style={{ fontWeight: 700, color: signedQtyClass(row.signedQuantity) }}>
-                      {row.signedQuantity > 0 ? "+" : ""}
-                      {row.signedQuantity}
-                    </span>
-                  </Td>
-                  <Td>{row.orderId || "-"}</Td>
-                  <Td>
-                    <div>{row.referenceType || "-"}</div>
-                    <div style={styles.muted}>{row.referenceId || "-"}</div>
-                  </Td>
-                  <Td>{row.createdBy || "-"}</Td>
-                  <Td>{row.stockBefore}</Td>
-                  <Td>{row.stockAfter}</Td>
-                </tr>
-              ))
+              filteredMovements.map((row, idx) => {
+                const key = rowKey(row, idx);
+                const isExpanded = expandedKey === key;
+                return (
+                  <Fragment key={key}>
+                    <tr
+                      style={styles.dataRow}
+                      onClick={() => toggleExpanded(key)}
+                    >
+                      <Td style={styles.tdExpand}>
+                        <button
+                          type="button"
+                          style={styles.expandBtn}
+                          aria-expanded={isExpanded}
+                          aria-label={isExpanded ? "Hide details" : "Show details"}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleExpanded(key);
+                          }}
+                        >
+                          {isExpanded ? "−" : "+"}
+                        </button>
+                      </Td>
+                      <Td>{formatDate(row.createdAt)}</Td>
+                      <Td>
+                        <div style={styles.productName}>{row.productName || "—"}</div>
+                      </Td>
+                      <Td>
+                        <span style={styles.movementPill}>
+                          {movementLabel(row.movementType, row)}
+                        </span>
+                      </Td>
+                      <Td align="right">
+                        <span
+                          style={{
+                            ...styles.qty,
+                            color: quantityColor(row.signedQuantity),
+                          }}
+                        >
+                          {formatSignedQuantity(row.signedQuantity)}
+                        </span>
+                      </Td>
+                      <Td>{formatReference(row)}</Td>
+                      <Td>{row.createdBy || "—"}</Td>
+                    </tr>
+                    {isExpanded ? (
+                      <tr key={`${key}-detail`} style={styles.detailRow}>
+                        <td colSpan={7} style={styles.detailCell}>
+                          <div style={styles.detailGrid}>
+                            <DetailItem label="Stock before" value={row.stockBefore} />
+                            <DetailItem label="Stock after" value={row.stockAfter} />
+                            <DetailItem label="Source" value={formatSource(row)} />
+                            <DetailItem label="SKU" value={row.productId || "—"} mono />
+                            <DetailItem label="Movement code" value={row.movementType || "—"} mono />
+                            <DetailItem label="Ledger ID" value={row.id || "—"} mono />
+                            {row.referenceType ? (
+                              <DetailItem label="Reference type" value={row.referenceType} mono />
+                            ) : null}
+                            {row.referenceId ? (
+                              <DetailItem label="Reference ID" value={row.referenceId} mono />
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -257,21 +328,38 @@ export default function InventoryLedgerPage() {
   );
 }
 
-function SummaryCard({ title, value }) {
+function SummaryCard({ title, value, valueColor }) {
   return (
     <div style={styles.summaryCard}>
       <div style={styles.summaryTitle}>{title}</div>
-      <div style={styles.summaryValue}>{value}</div>
+      <div style={{ ...styles.summaryValue, ...(valueColor ? { color: valueColor } : {}) }}>{value}</div>
     </div>
   );
 }
 
-function Th({ children }) {
-  return <th style={styles.th}>{children}</th>;
+function DetailItem({ label, value, mono = false }) {
+  return (
+    <div style={styles.detailItem}>
+      <div style={styles.detailLabel}>{label}</div>
+      <div style={mono ? styles.detailValueMono : styles.detailValue}>{value}</div>
+    </div>
+  );
 }
 
-function Td({ children }) {
-  return <td style={styles.td}>{children}</td>;
+function Th({ children, align, style }) {
+  return (
+    <th style={{ ...styles.th, ...(align === "right" ? styles.thRight : {}), ...style }}>
+      {children}
+    </th>
+  );
+}
+
+function Td({ children, align, style }) {
+  return (
+    <td style={{ ...styles.td, ...(align === "right" ? styles.tdRight : {}), ...style }}>
+      {children}
+    </td>
+  );
 }
 
 const styles = {
@@ -282,20 +370,17 @@ const styles = {
     minHeight: "100vh",
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
     marginBottom: "16px",
   },
   title: {
     margin: 0,
-    fontSize: "24px",
+    fontSize: "22px",
     fontWeight: 700,
   },
   subtitle: {
     margin: "4px 0 0",
     color: "#64748b",
-    fontSize: "14px",
+    fontSize: "13px",
   },
   summaryGrid: {
     display: "grid",
@@ -306,76 +391,149 @@ const styles = {
   summaryCard: {
     background: "white",
     border: "1px solid #e2e8f0",
-    borderRadius: "14px",
-    padding: "16px",
+    borderRadius: "12px",
+    padding: "14px",
   },
   summaryTitle: {
-    fontSize: "12px",
+    fontSize: "11px",
     color: "#64748b",
-    marginBottom: "8px",
+    marginBottom: "6px",
+    textTransform: "uppercase",
+    letterSpacing: "0.03em",
   },
   summaryValue: {
-    fontSize: "22px",
+    fontSize: "20px",
     fontWeight: 700,
+    fontVariantNumeric: "tabular-nums",
   },
   filters: {
     display: "grid",
-    gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
     gap: "10px",
     marginBottom: "16px",
   },
   input: {
     padding: "10px 12px",
-    borderRadius: "12px",
+    borderRadius: "10px",
     border: "1px solid #cbd5e1",
-    fontSize: "14px",
+    fontSize: "13px",
     background: "white",
   },
   tableWrap: {
     overflowX: "auto",
     background: "white",
     border: "1px solid #e2e8f0",
-    borderRadius: "14px",
+    borderRadius: "12px",
   },
   table: {
     width: "100%",
+    minWidth: "680px",
     borderCollapse: "collapse",
     fontSize: "13px",
   },
   th: {
     textAlign: "left",
-    padding: "12px",
+    padding: "10px 12px",
     borderBottom: "1px solid #e2e8f0",
-    color: "#475569",
+    color: "#64748b",
     background: "#f8fafc",
+    fontSize: "11px",
+    fontWeight: 600,
+    textTransform: "uppercase",
+    letterSpacing: "0.03em",
     whiteSpace: "nowrap",
   },
+  thRight: {
+    textAlign: "right",
+  },
+  thExpand: {
+    width: "36px",
+    padding: "10px 8px",
+  },
   td: {
-    padding: "12px",
+    padding: "10px 12px",
     borderBottom: "1px solid #f1f5f9",
-    verticalAlign: "top",
-    whiteSpace: "nowrap",
+    verticalAlign: "middle",
+  },
+  tdRight: {
+    textAlign: "right",
+  },
+  tdExpand: {
+    width: "36px",
+    padding: "10px 8px",
+  },
+  dataRow: {
+    cursor: "pointer",
   },
   emptyCell: {
     padding: "24px",
     textAlign: "center",
     color: "#64748b",
   },
-  badge: {
-    display: "inline-block",
-    padding: "2px 8px",
-    borderRadius: "999px",
+  expandBtn: {
+    width: "24px",
+    height: "24px",
     border: "1px solid #cbd5e1",
-    fontSize: "12px",
-    fontWeight: 700,
+    borderRadius: "6px",
+    background: "white",
+    color: "#475569",
+    fontSize: "14px",
+    lineHeight: 1,
+    cursor: "pointer",
+    padding: 0,
   },
   productName: {
-    fontWeight: 700,
+    fontWeight: 600,
+    color: "#0f172a",
   },
-  muted: {
-    color: "#64748b",
+  movementPill: {
+    display: "inline-block",
+    padding: "3px 8px",
+    borderRadius: "999px",
+    background: "#f1f5f9",
+    color: "#334155",
     fontSize: "12px",
-    marginTop: "2px",
+    fontWeight: 600,
+    whiteSpace: "nowrap",
+  },
+  qty: {
+    fontWeight: 700,
+    fontVariantNumeric: "tabular-nums",
+    fontSize: "14px",
+  },
+  detailRow: {
+    background: "#f8fafc",
+  },
+  detailCell: {
+    padding: "10px 12px 14px 44px",
+    borderBottom: "1px solid #e2e8f0",
+  },
+  detailGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+    gap: "12px 16px",
+  },
+  detailItem: {
+    minWidth: 0,
+  },
+  detailLabel: {
+    fontSize: "10px",
+    fontWeight: 600,
+    color: "#94a3b8",
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+    marginBottom: "2px",
+  },
+  detailValue: {
+    fontSize: "13px",
+    color: "#334155",
+    wordBreak: "break-word",
+  },
+  detailValueMono: {
+    fontSize: "12px",
+    color: "#475569",
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    wordBreak: "break-all",
   },
   notice: {
     padding: "20px",
