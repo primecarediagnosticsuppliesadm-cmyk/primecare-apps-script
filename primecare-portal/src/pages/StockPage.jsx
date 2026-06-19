@@ -46,6 +46,44 @@ function resolveTenantLabel(tenantId, tenantNameById, homeTenantId) {
   return `Tenant: ${id}`;
 }
 
+function resolveTenantShortName(tenantId, tenantNameById, homeTenantId) {
+  const id = str(tenantId);
+  if (!id) return "Unknown";
+  const name = tenantNameById.get(id);
+  if (name) return name;
+  if (homeTenantId && id === homeTenantId) return "HQ";
+  return id.slice(0, 8) + "…";
+}
+
+function normalizeStockHealth(health) {
+  const value = str(health);
+  if (value === "Critical") return "Critical";
+  if (value === "Reorder") return "Reorder";
+  if (value === "Healthy") return "Healthy";
+  return value || "—";
+}
+
+function healthBadgeStyle(health) {
+  const normalized = normalizeStockHealth(health);
+  if (normalized === "Critical") {
+    return { background: "#fee2e2", color: "#b91c1c", border: "1px solid #fecaca" };
+  }
+  if (normalized === "Reorder") {
+    return { background: "#fef3c7", color: "#b45309", border: "1px solid #fde68a" };
+  }
+  if (normalized === "Healthy") {
+    return { background: "#dcfce7", color: "#15803d", border: "1px solid #bbf7d0" };
+  }
+  return { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" };
+}
+
+function HealthBadge({ health }) {
+  const label = normalizeStockHealth(health);
+  return (
+    <span style={{ ...styles.healthBadge, ...healthBadgeStyle(health) }}>{label}</span>
+  );
+}
+
 export default function StockPage({ currentUser = null }) {
   const [activeTab, setActiveTab] = useState("stock");
   const [data, setData] = useState({ stats: {}, inventory: [] });
@@ -213,7 +251,7 @@ export default function StockPage({ currentUser = null }) {
         <>
           {showPortfolioView ? (
             <div style={styles.portfolioNote}>
-              Portfolio inventory: each card is one stock record per tenant. The same SKU may
+              Portfolio inventory: each row is one stock record per tenant. The same SKU may
               appear under HQ and distributor tenants with separate on-hand quantities.
             </div>
           ) : null}
@@ -263,48 +301,48 @@ export default function StockPage({ currentUser = null }) {
             />
           </div>
 
-          <div style={styles.list}>
+          <div style={styles.tableWrap}>
             {filteredRows.length === 0 ? (
-              <div style={styles.card}>No stock items found.</div>
+              <div style={styles.emptyState}>No stock items found.</div>
             ) : (
-              filteredRows.map((item) => (
-                <div
-                  key={`${item.tenantId || "tenant"}-${item.productId}`}
-                  style={styles.card}
-                >
-                  <div style={styles.itemTitle}>{item.productName || "-"}</div>
-                  {showPortfolioView ? (
-                    <div style={styles.tenantBadge}>
-                      {resolveTenantLabel(item.tenantId, tenantNameById, homeTenantId)}
-                    </div>
-                  ) : null}
-                  <div style={styles.itemMeta}>
-                    {item.productId || "-"} {item.category ? `• ${item.category}` : ""}
-                  </div>
-
-                  <div style={styles.grid}>
-                    <div>
-                      Current Stock
-                      <div style={styles.metricValue}>{item.currentStock || 0}</div>
-                    </div>
-
-                    <div>
-                      Min Stock
-                      <div style={styles.metricValue}>{item.minStock || 0}</div>
-                    </div>
-
-                    <div>
-                      Reorder Qty
-                      <div style={styles.metricValue}>{item.reorderQty || 0}</div>
-                    </div>
-
-                    <div>
-                      Health
-                      <div style={styles.metricValue}>{item.stockHealth || "-"}</div>
-                    </div>
-                  </div>
-                </div>
-              ))
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={styles.th}>Product</th>
+                    <th style={styles.th}>SKU</th>
+                    <th style={styles.th}>Category</th>
+                    <th style={{ ...styles.th, ...styles.thNumeric }}>Current Stock</th>
+                    <th style={{ ...styles.th, ...styles.thNumeric }}>Min Stock</th>
+                    <th style={{ ...styles.th, ...styles.thNumeric }}>Reorder Qty</th>
+                    <th style={styles.th}>Health</th>
+                    {showPortfolioView ? <th style={styles.th}>Tenant</th> : null}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRows.map((item) => (
+                    <tr key={`${item.tenantId || "tenant"}-${item.productId}`} style={styles.tr}>
+                      <td style={styles.td}>
+                        <div style={styles.productName}>{item.productName || "—"}</div>
+                      </td>
+                      <td style={{ ...styles.td, ...styles.tdMono }}>{item.productId || "—"}</td>
+                      <td style={styles.td}>{item.category || "—"}</td>
+                      <td style={{ ...styles.td, ...styles.tdNumeric }}>{item.currentStock ?? 0}</td>
+                      <td style={{ ...styles.td, ...styles.tdNumeric }}>{item.minStock ?? 0}</td>
+                      <td style={{ ...styles.td, ...styles.tdNumeric }}>{item.reorderQty ?? 0}</td>
+                      <td style={styles.td}>
+                        <HealthBadge health={item.stockHealth} />
+                      </td>
+                      {showPortfolioView ? (
+                        <td style={styles.td}>
+                          <span style={styles.tenantBadge}>
+                            {resolveTenantShortName(item.tenantId, tenantNameById, homeTenantId)}
+                          </span>
+                        </td>
+                      ) : null}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
         </>
@@ -399,45 +437,79 @@ const styles = {
     border: "1px solid #cbd5e1",
     fontSize: "14px",
   },
-  list: {
-    display: "grid",
-    gap: "12px",
-  },
-  card: {
+  tableWrap: {
+    overflowX: "auto",
+    WebkitOverflowScrolling: "touch",
     background: "white",
     border: "1px solid #e2e8f0",
     borderRadius: "14px",
-    padding: "16px",
     boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
   },
-  itemTitle: {
-    fontSize: "18px",
-    fontWeight: "700",
-    marginBottom: "4px",
+  table: {
+    width: "100%",
+    minWidth: "720px",
+    borderCollapse: "collapse",
+    fontSize: "13px",
+  },
+  th: {
+    textAlign: "left",
+    padding: "10px 12px",
+    fontSize: "11px",
+    fontWeight: "600",
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: "0.03em",
+    borderBottom: "1px solid #e2e8f0",
+    background: "#f8fafc",
+    whiteSpace: "nowrap",
+  },
+  thNumeric: {
+    textAlign: "right",
+  },
+  tr: {
+    borderBottom: "1px solid #f1f5f9",
+  },
+  td: {
+    padding: "10px 12px",
+    verticalAlign: "middle",
+    color: "#0f172a",
+  },
+  tdNumeric: {
+    textAlign: "right",
+    fontVariantNumeric: "tabular-nums",
+    fontWeight: "600",
+  },
+  tdMono: {
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    fontSize: "12px",
+    color: "#475569",
+  },
+  productName: {
+    fontWeight: "600",
+    lineHeight: 1.35,
+  },
+  healthBadge: {
+    display: "inline-block",
+    padding: "3px 8px",
+    borderRadius: "999px",
+    fontSize: "11px",
+    fontWeight: "600",
+    whiteSpace: "nowrap",
+  },
+  emptyState: {
+    padding: "24px 16px",
+    textAlign: "center",
+    color: "#64748b",
+    fontSize: "14px",
   },
   tenantBadge: {
     display: "inline-block",
-    marginBottom: "8px",
     padding: "4px 8px",
     borderRadius: "999px",
     background: "#f1f5f9",
     color: "#334155",
     fontSize: "11px",
     fontWeight: "600",
-  },
-  itemMeta: {
-    fontSize: "12px",
-    color: "#64748b",
-    marginBottom: "12px",
-  },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-    gap: "12px",
-  },
-  metricValue: {
-    marginTop: "4px",
-    fontWeight: "700",
-    fontSize: "18px",
+    whiteSpace: "nowrap",
   },
 };
