@@ -5541,16 +5541,177 @@ export async function setOperationsPlatformUserActiveWrite(userId, active, optio
   return { success: true, data: mapProfilesPlatformUserRow(data) };
 }
 
-export async function getOperationsLabAssignmentsRead(options = {}) {
+export async function getOperationsDistributorsRead() {
+  traceSupabaseRead("OperationsCenter.getOperationsDistributorsRead", { table: "tenants" });
+  if (!supabase) return { success: false, error: "Supabase is not configured", data: { distributors: [] } };
+
+  const { data, error } = await supabase
+    .from("tenants")
+    .select("id, tenant_code, tenant_name, status")
+    .order("tenant_name", { ascending: true });
+
+  if (error) {
+    return { success: false, error: error.message || "Failed to load distributors", data: { distributors: [] } };
+  }
+
+  return { success: true, data: { distributors: data || [] } };
+}
+
+export async function getOperationsDistributorAssignmentsRead(options = {}) {
+  traceSupabaseRead("OperationsCenter.getOperationsDistributorAssignmentsRead", {
+    table: "agent_distributor_assignments",
+  });
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: { distributors: [] } };
+  }
+
   const tenantId = str(options.tenantId ?? options.tenant_id);
+  if (!tenantId) return { success: false, error: "Tenant is required", data: { distributors: [] } };
+
+  const [distributorsRes, assignmentsRes, labsRes] = await Promise.all([
+    getOperationsDistributorsRead(),
+    supabase
+      .from("agent_distributor_assignments")
+      .select("id, tenant_id, distributor_id, agent_user_id, agent_name, active, created_at, updated_at")
+      .eq("tenant_id", tenantId)
+      .eq("active", true),
+    getLabsCredit(),
+  ]);
+
+  if (!distributorsRes?.success) {
+    return {
+      success: false,
+      error: distributorsRes.error || "Failed to load distributors",
+      data: { distributors: [] },
+    };
+  }
+
+  const assignmentsByDistributor = new Map();
+  if (!assignmentsRes.error) {
+    for (const row of assignmentsRes.data || []) {
+      assignmentsByDistributor.set(str(row.distributor_id), row);
+    }
+  }
+
+  const labCountByDistributor = new Map();
+  for (const lab of labsRes?.data || []) {
+    const key = str(lab.tenantId);
+    if (!key) continue;
+    labCountByDistributor.set(key, (labCountByDistributor.get(key) || 0) + 1);
+  }
+
+  const distributors = (distributorsRes.data?.distributors || []).map((tenant) => {
+    const assignment = assignmentsByDistributor.get(str(tenant.id)) || null;
+    return {
+      distributorId: str(tenant.id),
+      distributorCode: str(tenant.tenant_code),
+      distributorName: str(tenant.tenant_name),
+      status: str(tenant.status) || "ACTIVE",
+      tenantId,
+      assignmentId: str(assignment?.id),
+      assignedAgentUserId: str(assignment?.agent_user_id),
+      assignedAgentName: str(assignment?.agent_name),
+      labCount: labCountByDistributor.get(str(tenant.id)) || 0,
+    };
+  });
+
+  const assignmentError = assignmentsRes.error?.message || "";
+  const missingTable = /agent_distributor_assignments|relation.*does not exist/i.test(assignmentError);
+
+  return {
+    success: true,
+    data: { distributors },
+    warning: missingTable
+      ? "Distributor assignments table not migrated yet. Run operations_center_agent_distributor_assignments_migration.sql."
+      : assignmentsRes.error
+        ? assignmentError
+        : null,
+  };
+}
+
+export async function updateDistributorAgentAssignmentWrite(payload = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+
+  const tenantId = str(payload.tenantId ?? payload.tenant_id);
+  const distributorId = str(payload.distributorId ?? payload.distributor_id);
+  const agentUserId = str(payload.agentUserId ?? payload.agent_user_id ?? payload.userId);
+  const agentName = str(payload.agentName ?? payload.agent_name);
+  const remove = payload.remove === true || (!agentUserId && !agentName);
+
+  if (!tenantId) return { success: false, error: "Tenant is required" };
+  if (!distributorId) return { success: false, error: "Distributor is required" };
+
+  if (remove) {
+    const { error } = await supabase
+      .from("agent_distributor_assignments")
+      .update({ active: false, updated_at: new Date().toISOString() })
+      .eq("tenant_id", tenantId)
+      .eq("distributor_id", distributorId)
+      .eq("active", true);
+    if (error) {
+      return { success: false, error: error.message || "Failed to remove distributor assignment" };
+    }
+    return { success: true, data: { distributorId, removed: true } };
+  }
+
+  if (!agentUserId) return { success: false, error: "Agent user id is required" };
+
+  const { data: existing, error: lookupErr } = await supabase
+    .from("agent_distributor_assignments")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("distributor_id", distributorId)
+    .eq("active", true)
+    .maybeSingle();
+
+  if (lookupErr) {
+    return { success: false, error: lookupErr.message || "Failed to look up distributor assignment" };
+  }
+
+  const row = {
+    tenant_id: tenantId,
+    distributor_id: distributorId,
+    agent_user_id: agentUserId,
+    agent_name: agentName || null,
+    active: true,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (existing?.id) {
+    const { data, error } = await supabase
+      .from("agent_distributor_assignments")
+      .update(row)
+      .eq("id", existing.id)
+      .select()
+      .single();
+    if (error) return { success: false, error: error.message || "Failed to update distributor assignment" };
+    return { success: true, data };
+  }
+
+  const { data, error } = await supabase
+    .from("agent_distributor_assignments")
+    .insert([{ ...row, created_at: new Date().toISOString() }])
+    .select()
+    .single();
+  if (error) return { success: false, error: error.message || "Failed to assign distributor agent" };
+  return { success: true, data };
+}
+
+export async function getOperationsLabAssignmentsRead(options = {}) {
+  const opsTenantId = str(options.tenantId ?? options.tenant_id);
   const res = await getLabsCredit();
   if (!res?.success) {
     return { success: false, error: res?.error || "Failed to load labs", data: { labs: [] } };
   }
 
   let labs = Array.isArray(res.data) ? res.data : [];
-  if (tenantId) {
-    labs = labs.filter((row) => str(row.tenantId ?? row.tenant_id) === tenantId);
+
+  const tenantsRes = await getOperationsDistributorsRead();
+  const tenantNameById = new Map();
+  if (tenantsRes?.success) {
+    for (const t of tenantsRes.data?.distributors || []) {
+      tenantNameById.set(str(t.id), str(t.tenant_name));
+    }
   }
 
   labs.sort((a, b) =>
@@ -5559,7 +5720,16 @@ export async function getOperationsLabAssignmentsRead(options = {}) {
     })
   );
 
-  return { success: true, data: { labs } };
+  return {
+    success: true,
+    data: {
+      labs: labs.map((lab) => ({
+        ...lab,
+        tenantName: tenantNameById.get(str(lab.tenantId)) || str(lab.tenantId),
+      })),
+      opsTenantId,
+    },
+  };
 }
 
 export async function updateLabAgentAssignmentWrite(payload = {}) {

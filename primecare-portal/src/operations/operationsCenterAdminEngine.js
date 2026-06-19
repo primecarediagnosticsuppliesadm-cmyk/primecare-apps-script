@@ -6,8 +6,9 @@ function str(v) {
 
 export const OPERATIONS_CENTER_TABS = [
   { id: "agents", label: "Agents" },
-  { id: "users", label: "Users" },
+  { id: "distributorAssignment", label: "Distributor Assignment" },
   { id: "labAssignment", label: "Lab Assignment" },
+  { id: "users", label: "Users" },
 ];
 
 export const PLATFORM_ROLE_OPTIONS = [
@@ -180,7 +181,7 @@ export function mapPlatformUserRow(row = {}) {
   };
 }
 
-export function mapLabAssignmentRow(row = {}) {
+export function mapLabAssignmentRow(row = {}, tenantNameById = new Map()) {
   const agentId = str(
     row.assignedAgentId ??
       row.assigned_agent_id ??
@@ -193,13 +194,94 @@ export function mapLabAssignmentRow(row = {}) {
       row.agentName ??
       row.agent_name
   );
+  const tenantId = str(row.tenantId ?? row.tenant_id);
+  const status = str(row.status ?? row.activeFlag) || "—";
   return {
     labId: str(row.labId ?? row.lab_id),
     labName: str(row.labName ?? row.lab_name) || str(row.labId ?? row.lab_id),
     assignedAgentId: agentId,
     assignedAgentName: agentName,
+    tenantId,
+    tenantName: str(row.tenantName ?? row.tenant_name) || tenantNameById.get(tenantId) || tenantId,
+    status,
+    active: row.active !== false && str(row.activeFlag).toLowerCase() !== "inactive",
+  };
+}
+
+export function mapDistributorAssignmentRow(row = {}, options = {}) {
+  const distributorId = str(row.distributorId ?? row.distributor_id ?? row.id);
+  const tenantNameById = options.tenantNameById || new Map();
+  const labCountByDistributor = options.labCountByDistributor || new Map();
+  return {
+    distributorId,
+    distributorCode: str(row.distributorCode ?? row.tenant_code),
+    distributorName: str(row.distributorName ?? row.tenant_name ?? row.name) || distributorId,
+    status: str(row.status) || "ACTIVE",
+    assignedAgentUserId: str(row.assignedAgentUserId ?? row.agent_user_id),
+    assignedAgentName: str(row.assignedAgentName ?? row.agent_name),
+    assignmentId: str(row.assignmentId ?? row.assignment_id ?? row.id),
+    labCount: labCountByDistributor.get(distributorId) || 0,
     tenantId: str(row.tenantId ?? row.tenant_id),
   };
+}
+
+export function countLabsByDistributor(labs = []) {
+  const counts = new Map();
+  for (const lab of labs) {
+    const key = str(lab.tenantId ?? lab.tenant_id);
+    if (!key) continue;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return counts;
+}
+
+export function enrichAgentsWithAssignmentCounts(agents = [], labs = [], distributors = []) {
+  const labCountByAgentKey = new Map();
+  const distCountByAgentKey = new Map();
+
+  for (const lab of labs) {
+    const agentKey = str(lab.assignedAgentId).toLowerCase();
+    if (!agentKey) continue;
+    labCountByAgentKey.set(agentKey, (labCountByAgentKey.get(agentKey) || 0) + 1);
+  }
+
+  for (const dist of distributors) {
+    const agentKey = str(dist.assignedAgentUserId).toLowerCase();
+    if (!agentKey) continue;
+    distCountByAgentKey.set(agentKey, (distCountByAgentKey.get(agentKey) || 0) + 1);
+  }
+
+  return agents.map((agent) => {
+    const keys = [
+      str(agent.userId).toLowerCase(),
+      str(agent.agentId).toLowerCase(),
+      str(agent.id).toLowerCase(),
+    ].filter(Boolean);
+    let assignedLabsCount = 0;
+    let assignedDistributorsCount = 0;
+    for (const key of keys) {
+      assignedLabsCount = Math.max(assignedLabsCount, labCountByAgentKey.get(key) || 0);
+      assignedDistributorsCount = Math.max(
+        assignedDistributorsCount,
+        distCountByAgentKey.get(key) || 0
+      );
+    }
+    return { ...agent, assignedLabsCount, assignedDistributorsCount };
+  });
+}
+
+export function labsForAgent(agent, labs = []) {
+  const keys = new Set(
+    [agent?.userId, agent?.agentId, agent?.id].map((v) => str(v).toLowerCase()).filter(Boolean)
+  );
+  return labs.filter((lab) => keys.has(str(lab.assignedAgentId).toLowerCase()));
+}
+
+export function distributorsForAgent(agent, distributors = []) {
+  const keys = new Set(
+    [agent?.userId, agent?.agentId, agent?.id].map((v) => str(v).toLowerCase()).filter(Boolean)
+  );
+  return distributors.filter((dist) => keys.has(str(dist.assignedAgentUserId).toLowerCase()));
 }
 
 export function agentDisplayLabel(agent) {

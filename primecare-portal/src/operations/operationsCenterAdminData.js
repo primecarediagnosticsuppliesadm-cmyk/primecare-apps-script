@@ -1,10 +1,13 @@
 import {
+  getOperationsDistributorAssignmentsRead,
   getOperationsLabAssignmentsRead,
   getOperationsOperationalAgentsRead,
   getOperationsPlatformUsersRead,
 } from "@/api/primecareSupabaseApi.js";
 import {
   deriveAgentsFromPlatformUsers,
+  enrichAgentsWithAssignmentCounts,
+  mapDistributorAssignmentRow,
   mapLabAssignmentRow,
   mapOperationsAgentRow,
   mapPlatformUserRow,
@@ -39,16 +42,25 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
       agents: [],
       users: [],
       labAssignments: [],
+      distributorAssignments: [],
     };
   }
 
-  const [usersRes, operationalAgentsRes, labsRes] = await Promise.all([
+  const [usersRes, operationalAgentsRes, labsRes, distributorsRes] = await Promise.all([
     getOperationsPlatformUsersRead({ tenantId: tid }),
     getOperationsOperationalAgentsRead({ tenantId: tid }),
     getOperationsLabAssignmentsRead({ tenantId: tid }),
+    getOperationsDistributorAssignmentsRead({ tenantId: tid }),
   ]);
 
-  const errors = [usersRes?.error, operationalAgentsRes?.error, labsRes?.error].filter(Boolean);
+  const errors = [
+    usersRes?.error,
+    operationalAgentsRes?.error,
+    labsRes?.error,
+    distributorsRes?.error,
+    distributorsRes?.warning,
+  ].filter(Boolean);
+
   const operationalAgents = (operationalAgentsRes?.data?.agents || []).map(mapOperationsAgentRow);
   const operationalByUserId = new Map();
   for (const agent of operationalAgents) {
@@ -65,17 +77,38 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
       agent_name: str(row.agent_name) || op.name,
     });
   });
+
   const profileAgents = deriveAgentsFromPlatformUsers(users);
-  const agents = mergeAgentsByAgentId(profileAgents, operationalAgents);
+  const mergedAgents = mergeAgentsByAgentId(profileAgents, operationalAgents);
+
+  const tenantNameById = new Map();
+  for (const row of distributorsRes?.data?.distributors || []) {
+    tenantNameById.set(str(row.distributorId), str(row.distributorName));
+  }
+
+  const labAssignments = (labsRes?.data?.labs || []).map((row) =>
+    mapLabAssignmentRow(row, tenantNameById)
+  );
+  const distributorAssignments = (distributorsRes?.data?.distributors || []).map((row) =>
+    mapDistributorAssignmentRow(row)
+  );
+  const agents = enrichAgentsWithAssignmentCounts(
+    mergedAgents,
+    labAssignments,
+    distributorAssignments
+  );
 
   return {
     ok:
       usersRes?.success !== false &&
       operationalAgentsRes?.success !== false &&
-      labsRes?.success !== false,
+      labsRes?.success !== false &&
+      distributorsRes?.success !== false,
     error: errors[0] || null,
+    warning: distributorsRes?.warning || null,
     agents,
     users,
-    labAssignments: (labsRes?.data?.labs || []).map(mapLabAssignmentRow),
+    labAssignments,
+    distributorAssignments,
   };
 }

@@ -8,6 +8,7 @@ import {
   createOperationsPlatformUserWrite,
   setOperationsAgentActiveWrite,
   setOperationsPlatformUserActiveWrite,
+  updateDistributorAgentAssignmentWrite,
   updateLabAgentAssignmentWrite,
   updateOperationsAgentWrite,
   updateOperationsPlatformUserWrite,
@@ -20,7 +21,8 @@ import {
   EMAIL_NOT_ADDED,
   RESET_PASSWORD_EMAIL_MISSING,
   countActiveAgents,
-  formatOpsDate,
+  distributorsForAgent,
+  labsForAgent,
   matchesSearch,
   platformRoleLabel,
 } from "@/operations/operationsCenterAdminEngine.js";
@@ -227,7 +229,7 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
           />
         </label>
         <label className="block text-xs text-slate-600">
-          Display name *
+          Full name *
           <Input
             className="mt-1"
             value={form.displayName}
@@ -314,7 +316,8 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
   );
 }
 
-function LabAssignmentModal({ lab, agents, tenantId, onClose, onSaved }) {
+function LabAssignmentModal({ lab, agents, onClose, onSaved }) {
+  const labTenantId = lab?.tenantId || "";
   const [agentId, setAgentId] = useState(lab?.assignedAgentId || "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -327,7 +330,7 @@ function LabAssignmentModal({ lab, agents, tenantId, onClose, onSaved }) {
     setError("");
     try {
       const res = await updateLabAgentAssignmentWrite({
-        tenantId,
+        tenantId: labTenantId,
         labId: lab.labId,
         agentId,
         agentName: selectedAgent?.name || lab.assignedAgentName || "",
@@ -350,7 +353,7 @@ function LabAssignmentModal({ lab, agents, tenantId, onClose, onSaved }) {
     setError("");
     try {
       const res = await updateLabAgentAssignmentWrite({
-        tenantId,
+        tenantId: labTenantId,
         labId: lab.labId,
         remove: true,
       });
@@ -370,6 +373,12 @@ function LabAssignmentModal({ lab, agents, tenantId, onClose, onSaved }) {
         {error ? <p className="text-xs text-red-600">{error}</p> : null}
         <p className="text-xs text-slate-500">
           Lab ID: <span className="font-mono">{lab.labId}</span>
+          {lab.tenantName ? (
+            <>
+              {" "}
+              · Distributor: <span>{lab.tenantName}</span>
+            </>
+          ) : null}
         </p>
         <label className="block text-xs text-slate-600">
           Assigned agent *
@@ -413,6 +422,197 @@ function LabAssignmentModal({ lab, agents, tenantId, onClose, onSaved }) {
   );
 }
 
+function DistributorAssignmentModal({ distributor, agents, tenantId, onClose, onSaved }) {
+  const profileAgents = agents.filter((a) => a.userId);
+  const [agentUserId, setAgentUserId] = useState(distributor?.assignedAgentUserId || "");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const selectedAgent = profileAgents.find((a) => a.userId === agentUserId);
+
+  async function handleAssign(e) {
+    e.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const res = await updateDistributorAgentAssignmentWrite({
+        tenantId,
+        distributorId: distributor.distributorId,
+        agentUserId,
+        agentName: selectedAgent?.name || "",
+      });
+      if (!res?.success) throw new Error(res?.error || "Failed to assign agent");
+      onSaved?.();
+      onClose?.();
+    } catch (err) {
+      setError(err?.message || "Failed to assign agent");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRemove() {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(`Remove agent assignment from ${distributor.distributorName}?`)
+    ) {
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const res = await updateDistributorAgentAssignmentWrite({
+        tenantId,
+        distributorId: distributor.distributorId,
+        remove: true,
+      });
+      if (!res?.success) throw new Error(res?.error || "Failed to remove assignment");
+      onSaved?.();
+      onClose?.();
+    } catch (err) {
+      setError(err?.message || "Failed to remove assignment");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const title = distributor?.assignedAgentUserId ? "Change agent" : "Assign agent";
+
+  return (
+    <ModalShell title={`${title} — ${distributor.distributorName}`} onClose={onClose}>
+      <form onSubmit={(e) => void handleAssign(e)} className="space-y-2 text-sm">
+        {error ? <p className="text-xs text-red-600">{error}</p> : null}
+        <p className="text-xs text-slate-500">
+          Distributor ID: <span className="font-mono">{distributor.distributorCode || distributor.distributorId}</span>
+        </p>
+        <label className="block text-xs text-slate-600">
+          Primary agent *
+          <select
+            className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+            value={agentUserId}
+            onChange={(e) => setAgentUserId(e.target.value)}
+            required
+          >
+            <option value="">Select agent…</option>
+            {profileAgents
+              .filter((a) => a.active)
+              .map((a) => (
+                <option key={a.userId} value={a.userId}>
+                  {a.name} ({a.agentId || String(a.userId || "").slice(0, 8)})
+                </option>
+              ))}
+          </select>
+        </label>
+        {profileAgents.length === 0 ? (
+          <p className="text-[11px] text-amber-700">
+            Link agent profiles in Users tab before assigning distributors.
+          </p>
+        ) : null}
+        <div className="flex flex-wrap justify-between gap-2 pt-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="text-red-700"
+            onClick={() => void handleRemove()}
+            disabled={saving || !distributor.assignedAgentUserId}
+          >
+            Remove assignment
+          </Button>
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving || profileAgents.length === 0}>
+              {saving ? "Saving…" : distributor.assignedAgentUserId ? "Change agent" : "Assign agent"}
+            </Button>
+          </div>
+        </div>
+      </form>
+    </ModalShell>
+  );
+}
+
+function AgentAssignmentsDrawer({ agent, labs, distributors, onClose }) {
+  const assignedLabs = labsForAgent(agent, labs);
+  const assignedDistributors = distributorsForAgent(agent, distributors);
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40">
+      <div className="flex h-full w-full max-w-md flex-col border-l bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900">Agent assignments</h3>
+            <p className="text-xs text-slate-500">{agent.name}</p>
+          </div>
+          <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="Close">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="flex-1 space-y-4 overflow-y-auto p-4 text-xs">
+          <section>
+            <h4 className="mb-1 font-semibold text-slate-800">Profile</h4>
+            <dl className="space-y-1 text-slate-600">
+              <div className="flex justify-between gap-2">
+                <dt>Agent ID</dt>
+                <dd className="font-mono text-slate-900">{agent.agentId || "—"}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt>Email</dt>
+                <dd className="text-slate-900">{agent.email || "—"}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt>Phone</dt>
+                <dd className="text-slate-900">{agent.phone || "—"}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt>Status</dt>
+                <dd>
+                  <StatusBadge active={agent.active} />
+                </dd>
+              </div>
+            </dl>
+          </section>
+          <section>
+            <h4 className="mb-1 font-semibold text-slate-800">
+              Distributors ({assignedDistributors.length})
+            </h4>
+            {assignedDistributors.length === 0 ? (
+              <p className="text-slate-400">No distributor assignments.</p>
+            ) : (
+              <ul className="space-y-1">
+                {assignedDistributors.map((d) => (
+                  <li key={d.distributorId} className="rounded-md border border-slate-100 px-2 py-1.5">
+                    <div className="font-medium text-slate-900">{d.distributorName}</div>
+                    <div className="font-mono text-[10px] text-slate-500">{d.distributorCode || d.distributorId}</div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          <section>
+            <h4 className="mb-1 font-semibold text-slate-800">Labs ({assignedLabs.length})</h4>
+            {assignedLabs.length === 0 ? (
+              <p className="text-slate-400">No lab assignments.</p>
+            ) : (
+              <ul className="space-y-1">
+                {assignedLabs.map((lab) => (
+                  <li key={`${lab.tenantId}-${lab.labId}`} className="rounded-md border border-slate-100 px-2 py-1.5">
+                    <div className="font-medium text-slate-900">{lab.labName}</div>
+                    <div className="text-[10px] text-slate-500">
+                      {lab.labId}
+                      {lab.tenantName ? ` · ${lab.tenantName}` : ""}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SearchInput({ value, onChange, placeholder }) {
   return (
     <div className="relative">
@@ -441,6 +641,8 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
   const [agentModal, setAgentModal] = useState(null);
   const [userModal, setUserModal] = useState(null);
   const [labModal, setLabModal] = useState(null);
+  const [distributorModal, setDistributorModal] = useState(null);
+  const [agentAssignments, setAgentAssignments] = useState(null);
   const [busyId, setBusyId] = useState("");
   const [resettingUserId, setResettingUserId] = useState("");
 
@@ -451,6 +653,7 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
       const data = await loadOperationsCenterAdminBundle(tenantId);
       setBundle(data);
       if (!data.ok && data.error) setError(data.error);
+      else if (data.warning) setError(data.warning);
     } catch (err) {
       setError(err?.message || "Failed to load operations center");
       setBundle(null);
@@ -466,12 +669,20 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
   const agents = bundle?.agents || [];
   const users = bundle?.users || [];
   const labAssignments = bundle?.labAssignments || [];
+  const distributorAssignments = bundle?.distributorAssignments || [];
   const activeAgentCount = useMemo(() => countActiveAgents(agents), [agents]);
 
   const filteredAgents = useMemo(
     () =>
       agents.filter((a) =>
-        matchesSearch(search, [a.name, a.agentId, a.email, a.phone])
+        matchesSearch(search, [
+          a.name,
+          a.agentId,
+          a.email,
+          a.phone,
+          a.assignedLabsCount,
+          a.assignedDistributorsCount,
+        ])
       ),
     [agents, search]
   );
@@ -495,9 +706,30 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
   const filteredLabs = useMemo(
     () =>
       labAssignments.filter((l) =>
-        matchesSearch(search, [l.labName, l.labId, l.assignedAgentName, l.assignedAgentId])
+        matchesSearch(search, [
+          l.labName,
+          l.labId,
+          l.tenantName,
+          l.assignedAgentName,
+          l.assignedAgentId,
+          l.status,
+        ])
       ),
     [labAssignments, search]
+  );
+
+  const filteredDistributors = useMemo(
+    () =>
+      distributorAssignments.filter((d) =>
+        matchesSearch(search, [
+          d.distributorName,
+          d.distributorCode,
+          d.distributorId,
+          d.assignedAgentName,
+          d.status,
+        ])
+      ),
+    [distributorAssignments, search]
   );
 
   async function toggleAgentActive(agent) {
@@ -580,25 +812,29 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
           Operations Center
         </h1>
         <p className="text-[11px] text-slate-600">
-          Onboard agents, manage platform users, and assign labs — no SQL required.
+          Field operations hub — agents, distributor coverage, and lab assignments.
         </p>
       </header>
 
       {error ? <p className="text-xs text-amber-700">{error}</p> : null}
       {statusMessage ? <p className="text-xs text-green-700">{statusMessage}</p> : null}
 
-      <div className="grid grid-cols-3 gap-2 text-xs">
+      <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
         <div className="rounded-lg border bg-white p-2">
           <p className="text-slate-500">Agents</p>
           <p className="text-lg font-bold tabular-nums">{activeAgentCount}</p>
         </div>
         <div className="rounded-lg border bg-white p-2">
-          <p className="text-slate-500">Platform users</p>
-          <p className="text-lg font-bold tabular-nums">{users.length}</p>
+          <p className="text-slate-500">Distributors</p>
+          <p className="text-lg font-bold tabular-nums">{distributorAssignments.length}</p>
         </div>
         <div className="rounded-lg border bg-white p-2">
           <p className="text-slate-500">Labs</p>
           <p className="text-lg font-bold tabular-nums">{labAssignments.length}</p>
+        </div>
+        <div className="rounded-lg border bg-white p-2">
+          <p className="text-slate-500">Platform users</p>
+          <p className="text-lg font-bold tabular-nums">{users.length}</p>
         </div>
       </div>
 
@@ -632,7 +868,9 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
               ? "Search agents…"
               : tab === "users"
                 ? "Search users…"
-                : "Search labs…"
+                : tab === "distributorAssignment"
+                  ? "Search distributors…"
+                  : "Search labs…"
           }
         />
         {tab === "agents" ? (
@@ -651,23 +889,24 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
 
       {tab === "agents" ? (
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full min-w-[640px] text-xs">
+          <table className="w-full min-w-[900px] text-xs">
             <thead>
               <tr className="border-b bg-slate-50 text-left text-slate-500">
-                <th className="px-2 py-2">Name</th>
+                <th className="px-2 py-2">Agent Name</th>
                 <th className="px-2 py-2">Email</th>
                 <th className="px-2 py-2">Phone</th>
+                <th className="px-2 py-2">Distributors</th>
+                <th className="px-2 py-2">Labs</th>
                 <th className="px-2 py-2">Status</th>
-                <th className="px-2 py-2">Created Date</th>
                 <th className="px-2 py-2">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredAgents.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-2 py-6 text-center text-slate-500">
+                  <td colSpan={7} className="px-2 py-6 text-center text-slate-500">
                     {agents.length === 0
-                      ? "No field agents yet. Add your first agent to start lab assignments."
+                      ? "No field agents yet. Add your first agent to start assignments."
                       : "No agents match your search."}
                   </td>
                 </tr>
@@ -680,10 +919,11 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
                     </td>
                     <td className="px-2 py-2">{agent.email || "—"}</td>
                     <td className="px-2 py-2">{agent.phone || "—"}</td>
+                    <td className="px-2 py-2 tabular-nums">{agent.assignedDistributorsCount ?? 0}</td>
+                    <td className="px-2 py-2 tabular-nums">{agent.assignedLabsCount ?? 0}</td>
                     <td className="px-2 py-2">
                       <StatusBadge active={agent.active} />
                     </td>
-                    <td className="px-2 py-2 whitespace-nowrap">{formatOpsDate(agent.createdAt)}</td>
                     <td className="px-2 py-2">
                       <div className="flex flex-wrap gap-1">
                         <Button
@@ -705,6 +945,15 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
                         >
                           {agent.active ? "Disable" : "Enable"}
                         </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-[10px]"
+                          onClick={() => setAgentAssignments(agent)}
+                        >
+                          View Assignments
+                        </Button>
                       </div>
                     </td>
                   </tr>
@@ -721,7 +970,7 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
             <thead>
               <tr className="border-b bg-slate-50 text-left text-slate-500">
                 <th className="px-2 py-2">User ID</th>
-                <th className="px-2 py-2">Display Name</th>
+                <th className="px-2 py-2">Full Name</th>
                 <th className="px-2 py-2">Email</th>
                 <th className="px-2 py-2">Role</th>
                 <th className="px-2 py-2">Status</th>
@@ -800,31 +1049,135 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
         </div>
       ) : null}
 
+      {tab === "distributorAssignment" ? (
+        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+          <table className="w-full min-w-[760px] text-xs">
+            <thead>
+              <tr className="border-b bg-slate-50 text-left text-slate-500">
+                <th className="px-2 py-2">Distributor Name</th>
+                <th className="px-2 py-2">Distributor ID</th>
+                <th className="px-2 py-2">Status</th>
+                <th className="px-2 py-2">Assigned Agent</th>
+                <th className="px-2 py-2">Lab Count</th>
+                <th className="px-2 py-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredDistributors.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-2 py-6 text-center text-slate-500">
+                    {distributorAssignments.length === 0
+                      ? "No distributors found."
+                      : "No distributors match your search."}
+                  </td>
+                </tr>
+              ) : (
+                filteredDistributors.map((dist) => (
+                  <tr key={dist.distributorId} className="border-b border-slate-100">
+                    <td className="px-2 py-2 font-medium text-slate-900">{dist.distributorName}</td>
+                    <td className="px-2 py-2 font-mono text-[11px] text-slate-700">
+                      {dist.distributorCode || dist.distributorId}
+                    </td>
+                    <td className="px-2 py-2">
+                      <Badge variant={dist.status === "ACTIVE" ? "default" : "secondary"}>
+                        {dist.status || "ACTIVE"}
+                      </Badge>
+                    </td>
+                    <td className="px-2 py-2">
+                      {dist.assignedAgentName || dist.assignedAgentUserId ? (
+                        <div>
+                          <div>{dist.assignedAgentName || "—"}</div>
+                          {dist.assignedAgentUserId ? (
+                            <div className="font-mono text-[10px] text-slate-500">
+                              {dist.assignedAgentUserId.slice(0, 8)}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <span className="text-slate-400">Unassigned</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-2 tabular-nums">{dist.labCount ?? 0}</td>
+                    <td className="px-2 py-2">
+                      <div className="flex flex-wrap gap-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-[10px]"
+                          onClick={() => setDistributorModal({ distributor: dist })}
+                        >
+                          {dist.assignedAgentUserId ? "Change Agent" : "Assign Agent"}
+                        </Button>
+                        {dist.assignedAgentUserId ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 px-2 text-[10px] text-red-700"
+                            onClick={async () => {
+                              if (
+                                typeof window !== "undefined" &&
+                                !window.confirm(
+                                  `Remove agent assignment from ${dist.distributorName}?`
+                                )
+                              ) {
+                                return;
+                              }
+                              const res = await updateDistributorAgentAssignmentWrite({
+                                tenantId,
+                                distributorId: dist.distributorId,
+                                remove: true,
+                              });
+                              if (!res?.success) {
+                                setError(res?.error || "Failed to remove assignment");
+                                return;
+                              }
+                              setStatusMessage("Distributor assignment removed");
+                              await load();
+                            }}
+                          >
+                            Remove Agent
+                          </Button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
       {tab === "labAssignment" ? (
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full min-w-[560px] text-xs">
+          <table className="w-full min-w-[760px] text-xs">
             <thead>
               <tr className="border-b bg-slate-50 text-left text-slate-500">
                 <th className="px-2 py-2">Lab Name</th>
                 <th className="px-2 py-2">Lab ID</th>
+                <th className="px-2 py-2">Distributor / Tenant</th>
                 <th className="px-2 py-2">Assigned Agent</th>
+                <th className="px-2 py-2">Status</th>
                 <th className="px-2 py-2">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredLabs.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-2 py-6 text-center text-slate-500">
+                  <td colSpan={6} className="px-2 py-6 text-center text-slate-500">
                     {labAssignments.length === 0
-                      ? "No labs found for this tenant."
+                      ? "No labs found."
                       : "No labs match your search."}
                   </td>
                 </tr>
               ) : (
                 filteredLabs.map((lab) => (
-                  <tr key={lab.labId} className="border-b border-slate-100">
+                  <tr key={`${lab.tenantId}-${lab.labId}`} className="border-b border-slate-100">
                     <td className="px-2 py-2 font-medium text-slate-900">{lab.labName}</td>
                     <td className="px-2 py-2 font-mono text-[11px] text-slate-700">{lab.labId}</td>
+                    <td className="px-2 py-2">{lab.tenantName || "—"}</td>
                     <td className="px-2 py-2">
                       {lab.assignedAgentName || lab.assignedAgentId ? (
                         <div>
@@ -840,15 +1193,51 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
                       )}
                     </td>
                     <td className="px-2 py-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-7 px-2 text-[10px]"
-                        onClick={() => setLabModal({ lab })}
-                      >
-                        {lab.assignedAgentId ? "Reassign" : "Assign Agent"}
-                      </Button>
+                      <Badge variant={lab.active !== false ? "default" : "secondary"}>
+                        {lab.status && lab.status !== "—" ? lab.status : lab.active !== false ? "Active" : "Inactive"}
+                      </Badge>
+                    </td>
+                    <td className="px-2 py-2">
+                      <div className="flex flex-wrap gap-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-[10px]"
+                          onClick={() => setLabModal({ lab })}
+                        >
+                          {lab.assignedAgentId ? "Reassign Agent" : "Assign Agent"}
+                        </Button>
+                        {lab.assignedAgentId ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 px-2 text-[10px] text-red-700"
+                            onClick={async () => {
+                              if (
+                                typeof window !== "undefined" &&
+                                !window.confirm(`Remove agent assignment from ${lab.labName}?`)
+                              ) {
+                                return;
+                              }
+                              const res = await updateLabAgentAssignmentWrite({
+                                tenantId: lab.tenantId,
+                                labId: lab.labId,
+                                remove: true,
+                              });
+                              if (!res?.success) {
+                                setError(res?.error || "Failed to remove assignment");
+                                return;
+                              }
+                              setStatusMessage("Lab assignment removed");
+                              await load();
+                            }}
+                          >
+                            Remove Assignment
+                          </Button>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -889,12 +1278,33 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
         <LabAssignmentModal
           lab={labModal.lab}
           agents={agents}
-          tenantId={tenantId}
           onClose={() => setLabModal(null)}
           onSaved={async () => {
             setStatusMessage("Lab assignment updated");
             await load();
           }}
+        />
+      ) : null}
+
+      {distributorModal ? (
+        <DistributorAssignmentModal
+          distributor={distributorModal.distributor}
+          agents={agents}
+          tenantId={tenantId}
+          onClose={() => setDistributorModal(null)}
+          onSaved={async () => {
+            setStatusMessage("Distributor assignment updated");
+            await load();
+          }}
+        />
+      ) : null}
+
+      {agentAssignments ? (
+        <AgentAssignmentsDrawer
+          agent={agentAssignments}
+          labs={labAssignments}
+          distributors={distributorAssignments}
+          onClose={() => setAgentAssignments(null)}
         />
       ) : null}
     </div>
