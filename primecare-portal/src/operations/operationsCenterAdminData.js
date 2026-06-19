@@ -58,12 +58,11 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
 
   const users = (usersRes?.data?.users || []).map((row) => {
     const op = operationalByUserId.get(str(row.user_id ?? row.userId).toLowerCase());
-    if (!op?.email) return mapPlatformUserRow(row);
+    if (!op?.name) return mapPlatformUserRow(row);
     return mapPlatformUserRow({
       ...row,
       user_name: str(row.user_name) || op.name,
       agent_name: str(row.agent_name) || op.name,
-      directory_email: str(row.directory_email) || op.email,
     });
   });
   const profileAgents = deriveAgentsFromPlatformUsers(users);

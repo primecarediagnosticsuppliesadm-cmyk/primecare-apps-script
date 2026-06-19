@@ -5123,14 +5123,13 @@ function mapUsersTableAgentRow(row) {
 function mapProfilesPlatformUserRow(row, directory = null) {
   const role = str(row.role).toLowerCase();
   const profileEmail = str(row.email);
-  const directoryEmail = str(directory?.email);
   return {
     user_id: str(row.user_id),
+    display_name: str(row.display_name),
     agent_name: str(row.agent_name),
     user_name: str(directory?.user_name),
-    email: directoryEmail || profileEmail,
     profile_email: profileEmail,
-    directory_email: directoryEmail,
+    phone: str(row.phone),
     role,
     active: row.active !== false,
     created_at: row.created_at,
@@ -5139,6 +5138,11 @@ function mapProfilesPlatformUserRow(row, directory = null) {
     lab_id: str(row.lab_id),
   };
 }
+
+const PROFILES_IDENTITY_SELECT =
+  "user_id, tenant_id, role, display_name, agent_name, agent_id, lab_id, active, created_at, email, phone";
+const PROFILES_BASE_SELECT =
+  "user_id, tenant_id, role, agent_name, agent_id, lab_id, active, created_at";
 
 function buildUserDirectoryIndex(rows = []) {
   const byAuthUserId = new Map();
@@ -5273,8 +5277,10 @@ export async function updateOperationsAgentWrite(agentRowId, payload = {}) {
   if (payload.source === "profile" || payload.userId || id.includes("-")) {
     return updateOperationsPlatformUserWrite(payload.userId || id, {
       tenantId,
-      name: str(payload.name ?? payload.userName),
+      displayName: str(payload.name ?? payload.userName),
       agentId: str(payload.agentId ?? payload.agent_id),
+      email: str(payload.email),
+      phone: str(payload.phone),
       role: "agent",
     });
   }
@@ -5340,7 +5346,7 @@ export async function getOperationsPlatformUsersRead(options = {}) {
   const [{ data, error }, directoryRes] = await Promise.all([
     supabase
       .from("profiles")
-      .select("user_id, tenant_id, role, agent_name, agent_id, lab_id, active, created_at, email")
+      .select(PROFILES_IDENTITY_SELECT)
       .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false }),
     supabase
@@ -5350,13 +5356,13 @@ export async function getOperationsPlatformUsersRead(options = {}) {
   ]);
 
   if (error) {
-    const missingEmailColumn = /email.*profiles|profiles.*email|column.*email/i.test(
+    const missingIdentityColumn = /display_name|profiles.*email|column.*email|column.*phone/i.test(
       error.message || ""
     );
-    if (missingEmailColumn) {
+    if (missingIdentityColumn) {
       const fallback = await supabase
         .from("profiles")
-        .select("user_id, tenant_id, role, agent_name, agent_id, lab_id, active, created_at")
+        .select(PROFILES_BASE_SELECT)
         .eq("tenant_id", tenantId)
         .order("created_at", { ascending: false });
       if (fallback.error) {
@@ -5392,8 +5398,9 @@ export async function createOperationsPlatformUserWrite(payload = {}) {
   const tenantId = str(payload.tenantId ?? payload.tenant_id);
   const userId = str(payload.userId ?? payload.user_id);
   const role = str(payload.role).toLowerCase();
-  const name = str(payload.name ?? payload.agentName);
+  const name = str(payload.displayName ?? payload.name ?? payload.agentName);
   const email = str(payload.email);
+  const phone = str(payload.phone);
   const agentId = str(payload.agentId ?? payload.agent_id);
   const labId = str(payload.labId ?? payload.lab_id);
 
@@ -5405,7 +5412,7 @@ export async function createOperationsPlatformUserWrite(payload = {}) {
     };
   }
   if (!email) return { success: false, error: "Email is required" };
-  if (!name) return { success: false, error: "Full name is required" };
+  if (!name) return { success: false, error: "Display name is required" };
   if (!role || !["admin", "executive", "agent", "lab"].includes(role)) {
     return { success: false, error: "A valid role is required" };
   }
@@ -5414,8 +5421,10 @@ export async function createOperationsPlatformUserWrite(payload = {}) {
     user_id: userId,
     tenant_id: tenantId,
     role,
-    agent_name: name || null,
+    display_name: name || null,
+    agent_name: role === "agent" ? name || null : null,
     email: email || null,
+    phone: phone || null,
     agent_id: role === "agent" ? agentId || null : null,
     lab_id: role === "lab" ? normalizeLabIdKey(labId) || null : null,
     active: payload.active !== false,
@@ -5457,12 +5466,15 @@ export async function updateOperationsPlatformUserWrite(userId, payload = {}) {
   if (!tenantId) return { success: false, error: "Tenant is required" };
 
   const role = str(payload.role).toLowerCase();
-  const name = str(payload.name ?? payload.agentName);
+  const name = str(payload.displayName ?? payload.name ?? payload.agentName);
   const email = str(payload.email);
+  const phone = str(payload.phone);
   const patch = {
-    agent_name: name || null,
+    display_name: name || null,
   };
+  if (role === "agent") patch.agent_name = name || null;
   if (email) patch.email = email;
+  if (phone) patch.phone = phone;
   if (payload.active !== undefined) patch.active = payload.active !== false;
   if (role && ["admin", "executive", "agent", "lab"].includes(role)) {
     patch.role = role;

@@ -151,8 +151,9 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
   const isEdit = mode === "edit";
   const [form, setForm] = useState(() => ({
     userId: initial?.userId || "",
-    name: initial?.name || "",
+    displayName: initial?.displayName ?? initial?.name ?? "",
     email: initial?.storedEmail ?? initial?.email ?? "",
+    phone: initial?.phone ?? "",
     role: initial?.role || "admin",
     active: initial?.active !== false,
     agentId: initial?.agentId || "",
@@ -164,8 +165,9 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
   useEffect(() => {
     setForm({
       userId: initial?.userId || "",
-      name: initial?.name || "",
+      displayName: initial?.displayName ?? initial?.name ?? "",
       email: initial?.storedEmail ?? initial?.email ?? "",
+      phone: initial?.phone ?? "",
       role: initial?.role || "admin",
       active: initial?.active !== false,
       agentId: initial?.agentId || "",
@@ -174,9 +176,11 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
     setError("");
   }, [
     initial?.userId,
+    initial?.displayName,
     initial?.name,
     initial?.email,
     initial?.storedEmail,
+    initial?.phone,
     initial?.role,
     initial?.active,
     initial?.agentId,
@@ -188,7 +192,7 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
     setSaving(true);
     setError("");
     try {
-      const payload = { tenantId, ...form, agentName: form.name };
+      const payload = { tenantId, ...form, name: form.displayName, agentName: form.displayName };
       const res = isEdit
         ? await updateOperationsPlatformUserWrite(form.userId, payload)
         : await createOperationsPlatformUserWrite(payload);
@@ -223,11 +227,11 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
           />
         </label>
         <label className="block text-xs text-slate-600">
-          Full name
+          Display name *
           <Input
             className="mt-1"
-            value={form.name}
-            onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+            value={form.displayName}
+            onChange={(e) => setForm((p) => ({ ...p, displayName: e.target.value }))}
             placeholder="e.g. QA Admin"
             required
           />
@@ -242,6 +246,16 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
             placeholder="qa.admin@primecare.test"
             autoComplete="off"
             required
+          />
+        </label>
+        <label className="block text-xs text-slate-600">
+          Phone
+          <Input
+            className="mt-1"
+            type="tel"
+            value={form.phone}
+            onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
+            placeholder="+91 98765 43210"
           />
         </label>
         <label className="block text-xs text-slate-600">
@@ -465,7 +479,15 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
   const filteredUsers = useMemo(
     () =>
       users.filter((u) =>
-        matchesSearch(search, [u.userId, u.userIdShort, u.name, u.email, u.roleLabel, u.role])
+        matchesSearch(search, [
+          u.userId,
+          u.userIdShort,
+          u.displayName,
+          u.name,
+          u.email,
+          u.roleLabel,
+          u.role,
+        ])
       ),
     [users, search]
   );
@@ -699,7 +721,7 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
             <thead>
               <tr className="border-b bg-slate-50 text-left text-slate-500">
                 <th className="px-2 py-2">User ID</th>
-                <th className="px-2 py-2">Name</th>
+                <th className="px-2 py-2">Display Name</th>
                 <th className="px-2 py-2">Email</th>
                 <th className="px-2 py-2">Role</th>
                 <th className="px-2 py-2">Status</th>
@@ -726,7 +748,9 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
                         {user.userIdShort || user.userId || "—"}
                       </span>
                     </td>
-                    <td className="px-2 py-2 font-medium text-slate-900">{user.name}</td>
+                    <td className="px-2 py-2 font-medium text-slate-900">
+                      {user.displayName || user.name}
+                    </td>
                     <td className="px-2 py-2">
                       <UserEmailCell email={user.hasStoredEmail !== false ? user.email : ""} />
                     </td>

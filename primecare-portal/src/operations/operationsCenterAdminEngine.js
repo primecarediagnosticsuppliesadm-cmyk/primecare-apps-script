@@ -37,35 +37,53 @@ export const EMAIL_NOT_ADDED = "Email not added";
 
 export const RESET_PASSWORD_EMAIL_MISSING = "Add email first";
 
-/** Email from app-readable tables only (public.users or public.profiles). */
-export function resolveStoredPlatformUserEmail({
-  email = "",
+/** Email stored on public.profiles (canonical for Reset Password). */
+export function resolveStoredPlatformUserEmail({ profileEmail = "" } = {}) {
+  return str(profileEmail);
+}
+
+export function resolvePlatformUserDisplayName({
+  displayName = "",
+  agentName = "",
+  directoryName = "",
   profileEmail = "",
-  directoryEmail = "",
+  role = "",
 } = {}) {
-  return str(directoryEmail) || str(profileEmail) || str(email);
+  const fromDisplay = str(displayName);
+  if (fromDisplay) return fromDisplay;
+  const fromAgent = str(agentName);
+  if (fromAgent) return fromAgent;
+  const fromDirectory = str(directoryName);
+  if (fromDirectory) return fromDirectory;
+  const fromEmail = deriveDisplayNameFromEmail(profileEmail);
+  if (fromEmail) return fromEmail;
+  const roleLabel = platformRoleLabel(role);
+  if (roleLabel && roleLabel !== "—") return roleLabel;
+  return "User";
 }
 
 export function resolvePlatformUserContact(row = {}) {
   const role = normalizePlatformRole(row.role);
-  const storedEmail = resolveStoredPlatformUserEmail({
-    email: row.email,
-    profileEmail: row.profile_email ?? row.profileEmail,
-    directoryEmail: row.directory_email ?? row.directoryEmail,
+  const profileEmail = str(row.profile_email ?? row.profileEmail ?? row.email);
+  const storedEmail = resolveStoredPlatformUserEmail({ profileEmail });
+
+  const name = resolvePlatformUserDisplayName({
+    displayName: row.display_name ?? row.displayName,
+    agentName: row.agent_name ?? row.agentName,
+    directoryName: row.user_name ?? row.directoryName ?? row.userName,
+    profileEmail,
+    role,
   });
 
-  const directoryName = str(row.user_name ?? row.directoryName ?? row.userName);
-  const agentName = str(row.agent_name ?? row.agentName ?? row.displayName ?? row.fullName);
-
-  let name = directoryName || agentName;
-  if (!name && storedEmail) name = deriveDisplayNameFromEmail(storedEmail);
-  if (!name) {
-    const roleLabel = platformRoleLabel(role);
-    if (roleLabel && roleLabel !== "—") name = roleLabel;
-  }
-  if (!name) name = "User";
-
-  return { name, email: storedEmail, storedEmail, hasStoredEmail: Boolean(storedEmail), role };
+  return {
+    name,
+    displayName: name,
+    email: storedEmail,
+    storedEmail,
+    hasStoredEmail: Boolean(storedEmail),
+    phone: str(row.phone),
+    role,
+  };
 }
 
 export function deriveDisplayNameFromEmail(email) {
@@ -76,26 +94,6 @@ export function deriveDisplayNameFromEmail(email) {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
-}
-
-export function resolvePlatformUserDisplayName({
-  agentName = "",
-  directoryName = "",
-  email = "",
-  role = "",
-  userId = "",
-} = {}) {
-  const fromDirectory = str(directoryName);
-  if (fromDirectory) return fromDirectory;
-  const fromProfile = str(agentName);
-  if (fromProfile) return fromProfile;
-  const fromEmail = deriveDisplayNameFromEmail(email);
-  if (fromEmail) return fromEmail;
-  const roleLabel = platformRoleLabel(role);
-  if (roleLabel && roleLabel !== "—") return roleLabel;
-  const id = str(userId);
-  if (id) return `User ${id.slice(0, 8)}`;
-  return "—";
 }
 
 export function directoryRoleFromPlatformRole(role) {
@@ -125,8 +123,8 @@ export function mapOperationsAgentRow(row = {}) {
     id: fromProfile ? userId : str(row.id),
     userId: userId || null,
     agentId: str(row.agent_id ?? row.agentId ?? row.user_code),
-    name: str(row.agent_name ?? row.user_name ?? row.name),
-    email: str(row.email),
+    name: str(row.display_name ?? row.displayName ?? row.agent_name ?? row.user_name ?? row.name),
+    email: str(row.profile_email ?? row.email),
     phone: str(row.phone ?? row.lab_id),
     active: row.active !== false,
     createdAt: row.created_at ?? row.createdAt ?? null,
@@ -141,9 +139,9 @@ export function platformUserToAgentRow(user = {}) {
     id: str(user.userId),
     userId: str(user.userId),
     agentId: str(user.agentId) || str(user.userId),
-    name: str(user.name),
-    email: str(user.email),
-    phone: "",
+    name: str(user.displayName ?? user.name),
+    email: str(user.storedEmail ?? user.email),
+    phone: str(user.phone),
     active: user.active !== false,
     createdAt: user.createdAt ?? null,
     tenantId: str(user.tenantId),
@@ -160,14 +158,17 @@ export function countActiveAgents(agents = []) {
 }
 
 export function mapPlatformUserRow(row = {}) {
-  const { name, email, storedEmail, hasStoredEmail, role } = resolvePlatformUserContact(row);
+  const { name, displayName, email, storedEmail, hasStoredEmail, phone, role } =
+    resolvePlatformUserContact(row);
   const userId = str(row.user_id ?? row.userId);
   return {
     userId,
     name,
+    displayName,
     email,
     storedEmail,
     hasStoredEmail,
+    phone,
     userIdShort: userId ? userId.slice(0, 8) : "",
     role,
     roleLabel: platformRoleLabel(role),
