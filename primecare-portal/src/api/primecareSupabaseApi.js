@@ -5101,3 +5101,339 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
     return { success: false, error: err?.message || String(err), data: null };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Operations Center (HQ admin) — agents, platform users, lab assignment
+// ---------------------------------------------------------------------------
+
+function mapUsersTableAgentRow(row) {
+  return {
+    id: str(row.id),
+    agentId: str(row.user_code),
+    name: str(row.user_name),
+    email: str(row.email),
+    phone: str(row.lab_id),
+    active: row.active !== false,
+    createdAt: row.created_at,
+    tenantId: str(row.tenant_id),
+  };
+}
+
+function mapProfilesPlatformUserRow(row) {
+  const role = str(row.role).toLowerCase();
+  return {
+    userId: str(row.user_id),
+    name: str(row.agent_name) || `User ${str(row.user_id).slice(0, 8)}`,
+    email: str(row.email),
+    role,
+    active: row.active !== false,
+    createdAt: row.created_at,
+    tenantId: str(row.tenant_id),
+    agentId: str(row.agent_id),
+    labId: str(row.lab_id),
+  };
+}
+
+export async function getOperationsAgentsRead(options = {}) {
+  traceSupabaseRead("OperationsCenter.getOperationsAgentsRead", { table: "users" });
+  if (!supabase) return { success: false, error: "Supabase is not configured", data: { agents: [] } };
+
+  const tenantId = str(options.tenantId ?? options.tenant_id);
+  if (!tenantId) return { success: false, error: "Tenant is required", data: { agents: [] } };
+
+  const { data, error } = await supabase
+    .from("users")
+    .select("id, tenant_id, user_code, user_name, email, lab_id, role, active, created_at")
+    .eq("tenant_id", tenantId)
+    .eq("role", "AGENT")
+    .order("user_name", { ascending: true });
+
+  if (error) {
+    return { success: false, error: error.message || "Failed to load agents", data: { agents: [] } };
+  }
+
+  return {
+    success: true,
+    data: { agents: (data || []).map(mapUsersTableAgentRow) },
+  };
+}
+
+export async function createOperationsAgentWrite(payload = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+
+  const tenantId = str(payload.tenantId ?? payload.tenant_id);
+  const agentId = str(payload.agentId ?? payload.agent_id ?? payload.userCode);
+  const name = str(payload.name ?? payload.userName);
+  const email = str(payload.email);
+  const phone = str(payload.phone);
+
+  if (!tenantId) return { success: false, error: "Tenant is required" };
+  if (!agentId) return { success: false, error: "Agent ID is required" };
+  if (!name) return { success: false, error: "Agent name is required" };
+
+  const row = {
+    tenant_id: tenantId,
+    user_code: agentId,
+    user_name: name,
+    email: email || null,
+    lab_id: phone || null,
+    role: "AGENT",
+    active: payload.active !== false,
+  };
+
+  const { data, error } = await supabase.from("users").insert([row]).select().single();
+  if (error) return { success: false, error: error.message || "Failed to create agent" };
+
+  return { success: true, data: mapUsersTableAgentRow(data) };
+}
+
+export async function updateOperationsAgentWrite(agentRowId, payload = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+
+  const id = str(agentRowId ?? payload.id);
+  const tenantId = str(payload.tenantId ?? payload.tenant_id);
+  if (!id) return { success: false, error: "Agent record id is required" };
+  if (!tenantId) return { success: false, error: "Tenant is required" };
+
+  const patch = {
+    user_name: str(payload.name ?? payload.userName),
+    email: str(payload.email) || null,
+    lab_id: str(payload.phone) || null,
+  };
+
+  const { data, error } = await supabase
+    .from("users")
+    .update(patch)
+    .eq("id", id)
+    .eq("tenant_id", tenantId)
+    .eq("role", "AGENT")
+    .select()
+    .single();
+
+  if (error) return { success: false, error: error.message || "Failed to update agent" };
+  return { success: true, data: mapUsersTableAgentRow(data) };
+}
+
+export async function setOperationsAgentActiveWrite(agentRowId, active, options = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+
+  const id = str(agentRowId);
+  const tenantId = str(options.tenantId ?? options.tenant_id);
+  if (!id || !tenantId) return { success: false, error: "Agent id and tenant are required" };
+
+  const { data, error } = await supabase
+    .from("users")
+    .update({ active: Boolean(active) })
+    .eq("id", id)
+    .eq("tenant_id", tenantId)
+    .eq("role", "AGENT")
+    .select()
+    .single();
+
+  if (error) {
+    return { success: false, error: error.message || `Failed to ${active ? "enable" : "disable"} agent` };
+  }
+  return { success: true, data: mapUsersTableAgentRow(data) };
+}
+
+export async function getOperationsPlatformUsersRead(options = {}) {
+  traceSupabaseRead("OperationsCenter.getOperationsPlatformUsersRead", { table: "profiles" });
+  if (!supabase) return { success: false, error: "Supabase is not configured", data: { users: [] } };
+
+  const tenantId = str(options.tenantId ?? options.tenant_id);
+  if (!tenantId) return { success: false, error: "Tenant is required", data: { users: [] } };
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("user_id, tenant_id, role, agent_name, agent_id, lab_id, active, created_at")
+    .eq("tenant_id", tenantId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    return { success: false, error: error.message || "Failed to load platform users", data: { users: [] } };
+  }
+
+  const users = (data || []).map(mapProfilesPlatformUserRow);
+
+  const { data: userRows } = await supabase
+    .from("users")
+    .select("email, user_name, user_code, role")
+    .eq("tenant_id", tenantId);
+
+  const emailByName = new Map();
+  for (const row of userRows || []) {
+    const email = str(row.email);
+    if (!email) continue;
+    emailByName.set(str(row.user_name).toLowerCase(), email);
+    emailByName.set(str(row.user_code).toLowerCase(), email);
+  }
+
+  const enriched = users.map((u) => {
+    if (u.email) return u;
+    const fromName = emailByName.get(str(u.name).toLowerCase());
+    const fromAgent = u.agentId ? emailByName.get(str(u.agentId).toLowerCase()) : "";
+    return { ...u, email: fromName || fromAgent || "" };
+  });
+
+  return { success: true, data: { users: enriched } };
+}
+
+export async function createOperationsPlatformUserWrite(payload = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+
+  const tenantId = str(payload.tenantId ?? payload.tenant_id);
+  const userId = str(payload.userId ?? payload.user_id);
+  const role = str(payload.role).toLowerCase();
+  const name = str(payload.name ?? payload.agentName);
+  const agentId = str(payload.agentId ?? payload.agent_id);
+  const labId = str(payload.labId ?? payload.lab_id);
+
+  if (!tenantId) return { success: false, error: "Tenant is required" };
+  if (!userId) {
+    return {
+      success: false,
+      error: "Supabase Auth user ID is required. Create the user in Supabase Auth first.",
+    };
+  }
+  if (!role || !["admin", "executive", "agent", "lab"].includes(role)) {
+    return { success: false, error: "A valid role is required" };
+  }
+
+  const row = {
+    user_id: userId,
+    tenant_id: tenantId,
+    role,
+    agent_name: name || null,
+    agent_id: role === "agent" ? agentId || null : null,
+    lab_id: role === "lab" ? normalizeLabIdKey(labId) || null : null,
+    active: payload.active !== false,
+  };
+
+  const { data, error } = await supabase.from("profiles").insert([row]).select().single();
+  if (error) return { success: false, error: error.message || "Failed to create platform user profile" };
+
+  return { success: true, data: mapProfilesPlatformUserRow(data) };
+}
+
+export async function updateOperationsPlatformUserWrite(userId, payload = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+
+  const uid = str(userId ?? payload.userId ?? payload.user_id);
+  const tenantId = str(payload.tenantId ?? payload.tenant_id);
+  if (!uid) return { success: false, error: "User id is required" };
+  if (!tenantId) return { success: false, error: "Tenant is required" };
+
+  const role = str(payload.role).toLowerCase();
+  const patch = {
+    agent_name: str(payload.name ?? payload.agentName) || null,
+  };
+  if (role && ["admin", "executive", "agent", "lab"].includes(role)) {
+    patch.role = role;
+    if (role === "agent") patch.agent_id = str(payload.agentId ?? payload.agent_id) || null;
+    if (role === "lab") patch.lab_id = normalizeLabIdKey(payload.labId ?? payload.lab_id) || null;
+  }
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .update(patch)
+    .eq("user_id", uid)
+    .eq("tenant_id", tenantId)
+    .select()
+    .single();
+
+  if (error) return { success: false, error: error.message || "Failed to update platform user" };
+  return { success: true, data: mapProfilesPlatformUserRow(data) };
+}
+
+export async function setOperationsPlatformUserActiveWrite(userId, active, options = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+
+  const uid = str(userId);
+  const tenantId = str(options.tenantId ?? options.tenant_id);
+  if (!uid || !tenantId) return { success: false, error: "User id and tenant are required" };
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({ active: Boolean(active) })
+    .eq("user_id", uid)
+    .eq("tenant_id", tenantId)
+    .select()
+    .single();
+
+  if (error) {
+    return {
+      success: false,
+      error: error.message || `Failed to ${active ? "enable" : "disable"} user`,
+    };
+  }
+  return { success: true, data: mapProfilesPlatformUserRow(data) };
+}
+
+export async function getOperationsLabAssignmentsRead(options = {}) {
+  const tenantId = str(options.tenantId ?? options.tenant_id);
+  const res = await getLabsCredit();
+  if (!res?.success) {
+    return { success: false, error: res?.error || "Failed to load labs", data: { labs: [] } };
+  }
+
+  let labs = Array.isArray(res.data) ? res.data : [];
+  if (tenantId) {
+    labs = labs.filter((row) => str(row.tenantId ?? row.tenant_id) === tenantId);
+  }
+
+  labs.sort((a, b) =>
+    str(a.labName ?? a.lab_name).localeCompare(str(b.labName ?? b.lab_name), undefined, {
+      sensitivity: "base",
+    })
+  );
+
+  return { success: true, data: { labs } };
+}
+
+export async function updateLabAgentAssignmentWrite(payload = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+
+  const tenantId = str(payload.tenantId ?? payload.tenant_id);
+  const labId = normalizeLabIdKey(payload.labId ?? payload.lab_id);
+  const agentId = str(payload.agentId ?? payload.agent_id ?? payload.assignedAgentId);
+  const agentName = str(payload.agentName ?? payload.agent_name ?? payload.assignedAgent);
+  const remove = payload.remove === true || (!agentId && !agentName);
+
+  if (!tenantId) return { success: false, error: "Tenant is required" };
+  if (!labId) return { success: false, error: "Lab ID is required" };
+
+  const patch = remove
+    ? { assigned_agent_id: null, agent_id: null, agent_name: null }
+    : {
+        assigned_agent_id: agentId || null,
+        agent_id: agentId || null,
+        agent_name: agentName || null,
+      };
+
+  if (!remove && !agentId) {
+    return { success: false, error: "Agent ID is required to assign a lab" };
+  }
+
+  const { data, error } = await supabase
+    .from("labs")
+    .update(patch)
+    .eq("tenant_id", tenantId)
+    .eq("lab_id", labId)
+    .select()
+    .single();
+
+  if (error) {
+    return { success: false, error: error.message || "Failed to update lab assignment" };
+  }
+
+  return {
+    success: true,
+    data: {
+      labId,
+      labName: str(data.lab_name),
+      assignedAgentId: str(data.assigned_agent_id ?? data.agent_id),
+      assignedAgentName: str(data.agent_name),
+      tenantId,
+    },
+  };
+}

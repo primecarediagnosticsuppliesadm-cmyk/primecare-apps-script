@@ -30,6 +30,7 @@ import QualificationReviewPage from "./pages/QualificationReviewPage";
 import PredatorDebugConsole from "./pages/PredatorDebugConsole";
 import NotificationCenterPage from "./pages/NotificationCenterPage";
 import OperationsCommandCenter from "./pages/OperationsCommandCenter";
+import OperationsCenterAdminPage from "./pages/OperationsCenterAdminPage";
 import QACommandCenterPage from "./pages/QACommandCenterPage";
 import PilotReadinessPage from "./pages/PilotReadinessPage";
 import RevenueFunnelPage from "./pages/RevenueFunnelPage";
@@ -221,6 +222,10 @@ export default function PrimeCareWebPortal({
       case "predatorDebug":
       case "predator-debug":
         return <PredatorDebugConsole currentUser={currentUser} />;
+
+      case "operationsCenter":
+      case "operations-center":
+        return <OperationsCenterAdminPage currentUser={currentUser} />;
 
       case "performance":
         return (
