@@ -149,7 +149,7 @@ function UserEmailCell({ email }) {
 
 function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
   const isEdit = mode === "edit";
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(() => ({
     userId: initial?.userId || "",
     name: initial?.name || "",
     email: initial?.email || "",
@@ -157,9 +157,22 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
     active: initial?.active !== false,
     agentId: initial?.agentId || "",
     labId: initial?.labId || "",
-  });
+  }));
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setForm({
+      userId: initial?.userId || "",
+      name: initial?.name || "",
+      email: initial?.email || "",
+      role: initial?.role || "admin",
+      active: initial?.active !== false,
+      agentId: initial?.agentId || "",
+      labId: initial?.labId || "",
+    });
+    setError("");
+  }, [initial?.userId, initial?.name, initial?.email, initial?.role, initial?.active, initial?.agentId, initial?.labId]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -218,6 +231,7 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
             value={form.email}
             onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
             placeholder="qa.admin@primecare.test"
+            autoComplete="off"
             required
           />
         </label>
@@ -817,6 +831,7 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
 
       {userModal ? (
         <UserFormModal
+          key={userModal.user?.userId || userModal.mode}
           mode={userModal.mode}
           initial={userModal.user}
           tenantId={tenantId}

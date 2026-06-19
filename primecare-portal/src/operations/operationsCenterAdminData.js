@@ -49,9 +49,25 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
   ]);
 
   const errors = [usersRes?.error, operationalAgentsRes?.error, labsRes?.error].filter(Boolean);
-  const users = (usersRes?.data?.users || []).map(mapPlatformUserRow);
-  const profileAgents = deriveAgentsFromPlatformUsers(users);
   const operationalAgents = (operationalAgentsRes?.data?.agents || []).map(mapOperationsAgentRow);
+  const operationalByUserId = new Map();
+  for (const agent of operationalAgents) {
+    const key = str(agent.userId).toLowerCase();
+    if (key) operationalByUserId.set(key, agent);
+  }
+
+  const users = (usersRes?.data?.users || []).map((row) => {
+    const op = operationalByUserId.get(str(row.user_id ?? row.userId).toLowerCase());
+    if (!op) return mapPlatformUserRow(row);
+    return mapPlatformUserRow({
+      ...row,
+      user_name: str(row.user_name) || op.name,
+      agent_name: str(row.agent_name) || op.name,
+      email: str(row.email) || op.email,
+      directory_email: str(row.directory_email) || op.email,
+    });
+  });
+  const profileAgents = deriveAgentsFromPlatformUsers(users);
   const agents = mergeAgentsByAgentId(profileAgents, operationalAgents);
 
   return {

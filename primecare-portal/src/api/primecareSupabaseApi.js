@@ -5129,6 +5129,8 @@ function mapProfilesPlatformUserRow(row, directory = null) {
     agent_name: str(row.agent_name),
     user_name: str(directory?.user_name),
     email: directoryEmail || profileEmail,
+    profile_email: profileEmail,
+    directory_email: directoryEmail,
     role,
     active: row.active !== false,
     created_at: row.created_at,
@@ -5138,13 +5140,27 @@ function mapProfilesPlatformUserRow(row, directory = null) {
   };
 }
 
-function buildUserDirectoryIndex(rows = []) {
+function buildUserDirectoryIndexes(rows = []) {
   const byAuthUserId = new Map();
+  const byDirectoryRole = new Map();
   for (const row of rows || []) {
     const authUserId = str(row.user_code).toLowerCase();
     if (authUserId) byAuthUserId.set(authUserId, row);
+    const roleKey = str(row.role).toUpperCase();
+    if (roleKey && !byDirectoryRole.has(roleKey)) {
+      byDirectoryRole.set(roleKey, row);
+    }
   }
-  return byAuthUserId;
+  return { byAuthUserId, byDirectoryRole };
+}
+
+function resolveDirectoryRowForProfile(profile, indexes) {
+  const uid = str(profile.user_id).toLowerCase();
+  if (indexes.byAuthUserId.has(uid)) {
+    return indexes.byAuthUserId.get(uid);
+  }
+  const roleKey = directoryRoleFromPlatformRole(profile.role);
+  return indexes.byDirectoryRole.get(roleKey) || null;
 }
 
 async function syncPlatformUserDirectoryRow({
@@ -5360,10 +5376,9 @@ export async function getOperationsPlatformUsersRead(options = {}) {
           data: { users: [] },
         };
       }
-      const directoryByAuthUserId = buildUserDirectoryIndex(directoryRes?.data);
+      const directoryIndexes = buildUserDirectoryIndexes(directoryRes?.data);
       const users = (fallback.data || []).map((profile) => {
-        const directory =
-          directoryByAuthUserId.get(str(profile.user_id).toLowerCase()) || null;
+        const directory = resolveDirectoryRowForProfile(profile, directoryIndexes);
         return mapProfilesPlatformUserRow(profile, directory);
       });
       return { success: true, data: { users } };
@@ -5371,11 +5386,10 @@ export async function getOperationsPlatformUsersRead(options = {}) {
     return { success: false, error: error.message || "Failed to load platform users", data: { users: [] } };
   }
 
-  const directoryByAuthUserId = buildUserDirectoryIndex(directoryRes.data);
+  const directoryIndexes = buildUserDirectoryIndexes(directoryRes?.data);
 
   const users = (data || []).map((profile) => {
-    const directory =
-      directoryByAuthUserId.get(str(profile.user_id).toLowerCase()) || null;
+    const directory = resolveDirectoryRowForProfile(profile, directoryIndexes);
     return mapProfilesPlatformUserRow(profile, directory);
   });
 

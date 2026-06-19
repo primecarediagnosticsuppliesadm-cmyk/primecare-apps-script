@@ -1,4 +1,5 @@
 import { ROLE_LABELS, ROLES } from "@/config/roles.js";
+import { IS_QA } from "@/config/environment.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -36,6 +37,55 @@ export function platformRoleLabel(role) {
 export const EMAIL_NOT_ADDED = "Email not added";
 
 export const RESET_PASSWORD_EMAIL_MISSING = "Add email first";
+
+const QA_PLATFORM_CONTACTS = {
+  admin: { name: "QA Admin", email: "qa.admin@primecare.test" },
+  executive: { name: "QA Executive", email: "qa.executive@primecare.test" },
+  agent: { name: "QA Agent One", email: "qa.agent@primecare.test" },
+  lab: { name: "QA Lab User", email: "qa.lab@primecare.test" },
+};
+
+export function resolvePlatformUserEmail({
+  email = "",
+  profileEmail = "",
+  directoryEmail = "",
+  role = "",
+  useQaFallback = IS_QA,
+} = {}) {
+  const resolved =
+    str(email) || str(directoryEmail) || str(profileEmail);
+  if (resolved) return resolved;
+  if (!useQaFallback) return "";
+  return str(QA_PLATFORM_CONTACTS[normalizePlatformRole(role)]?.email);
+}
+
+export function resolvePlatformUserContact(row = {}, options = {}) {
+  const role = normalizePlatformRole(row.role);
+  const directoryName = str(row.user_name ?? row.directoryName ?? row.userName);
+  const agentName = str(row.agent_name ?? row.agentName ?? row.displayName ?? row.fullName);
+  const profileEmail = str(row.profile_email ?? row.profileEmail);
+  const directoryEmail = str(row.directory_email ?? row.directoryEmail);
+  const email = resolvePlatformUserEmail({
+    email: row.email,
+    profileEmail,
+    directoryEmail,
+    role,
+    useQaFallback: options.useQaFallback,
+  });
+
+  let name = directoryName || agentName;
+  if (!name) name = deriveDisplayNameFromEmail(email);
+  if (!name) {
+    const roleLabel = platformRoleLabel(role);
+    if (roleLabel && roleLabel !== "—") name = roleLabel;
+  }
+  if (!name && options.useQaFallback !== false && IS_QA) {
+    name = str(QA_PLATFORM_CONTACTS[role]?.name);
+  }
+  if (!name) name = "User";
+
+  return { name, email, role };
+}
 
 export function deriveDisplayNameFromEmail(email) {
   const local = str(email).split("@")[0];
@@ -129,15 +179,7 @@ export function countActiveAgents(agents = []) {
 }
 
 export function mapPlatformUserRow(row = {}) {
-  const role = normalizePlatformRole(row.role);
-  const email = str(row.email);
-  const name = resolvePlatformUserDisplayName({
-    agentName: row.agent_name ?? row.agentName,
-    directoryName: row.user_name ?? row.directoryName,
-    email,
-    role,
-    userId: row.user_id ?? row.userId,
-  });
+  const { name, email, role } = resolvePlatformUserContact(row);
   return {
     userId: str(row.user_id ?? row.userId),
     name,
