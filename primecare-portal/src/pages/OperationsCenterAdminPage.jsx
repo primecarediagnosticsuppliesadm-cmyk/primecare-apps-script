@@ -17,7 +17,7 @@ import { loadOperationsCenterAdminBundle } from "@/operations/operationsCenterAd
 import {
   OPERATIONS_CENTER_TABS,
   PLATFORM_ROLE_OPTIONS,
-  EMAIL_UNAVAILABLE_HINT,
+  EMAIL_NOT_ADDED,
   RESET_PASSWORD_EMAIL_MISSING,
   countActiveAgents,
   formatOpsDate,
@@ -142,12 +142,9 @@ function AgentFormModal({ mode, initial, tenantId, onClose, onSaved }) {
   );
 }
 
-function UserEmailCell({ email, emailUnavailable }) {
+function UserEmailCell({ email }) {
   if (email) return <span>{email}</span>;
-  if (emailUnavailable) {
-    return <span className="text-[11px] text-slate-400">{EMAIL_UNAVAILABLE_HINT}</span>;
-  }
-  return <span className="text-slate-400">—</span>;
+  return <span className="text-slate-400">{EMAIL_NOT_ADDED}</span>;
 }
 
 function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
@@ -157,6 +154,7 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
     name: initial?.name || "",
     email: initial?.email || "",
     role: initial?.role || "admin",
+    active: initial?.active !== false,
     agentId: initial?.agentId || "",
     labId: initial?.labId || "",
   });
@@ -193,7 +191,7 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
           </p>
         ) : null}
         <label className="block text-xs text-slate-600">
-          Supabase user ID *
+          Supabase Auth user ID *
           <Input
             className="mt-1 font-mono text-[11px]"
             value={form.userId}
@@ -203,12 +201,13 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
           />
         </label>
         <label className="block text-xs text-slate-600">
-          Display name
+          Full name
           <Input
             className="mt-1"
             value={form.name}
             onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
             placeholder="e.g. QA Admin"
+            required
           />
         </label>
         <label className="block text-xs text-slate-600">
@@ -256,6 +255,15 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
             />
           </label>
         ) : null}
+        <label className="flex items-center gap-2 text-xs text-slate-600">
+          <input
+            type="checkbox"
+            className="rounded border-slate-300"
+            checked={form.active}
+            onChange={(e) => setForm((p) => ({ ...p, active: e.target.checked }))}
+          />
+          Active
+        </label>
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
             Cancel
@@ -688,7 +696,7 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
                   <tr key={user.userId} className="border-b border-slate-100">
                     <td className="px-2 py-2 font-medium text-slate-900">{user.name}</td>
                     <td className="px-2 py-2">
-                      <UserEmailCell email={user.email} emailUnavailable={user.emailUnavailable} />
+                      <UserEmailCell email={user.email} />
                     </td>
                     <td className="px-2 py-2">{platformRoleLabel(user.role)}</td>
                     <td className="px-2 py-2">

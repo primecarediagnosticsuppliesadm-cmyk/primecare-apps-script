@@ -33,11 +33,9 @@ export function platformRoleLabel(role) {
   return ROLE_LABELS[normalized] || str(role) || "—";
 }
 
-export const EMAIL_UNAVAILABLE_HINT =
-  "Email unavailable — sync user email into profiles/users";
+export const EMAIL_NOT_ADDED = "Email not added";
 
-export const RESET_PASSWORD_EMAIL_MISSING =
-  "Email missing. Add email to user profile first.";
+export const RESET_PASSWORD_EMAIL_MISSING = "Add email first";
 
 export function deriveDisplayNameFromEmail(email) {
   const local = str(email).split("@")[0];
@@ -56,10 +54,10 @@ export function resolvePlatformUserDisplayName({
   role = "",
   userId = "",
 } = {}) {
-  const fromProfile = str(agentName);
-  if (fromProfile) return fromProfile;
   const fromDirectory = str(directoryName);
   if (fromDirectory) return fromDirectory;
+  const fromProfile = str(agentName);
+  if (fromProfile) return fromProfile;
   const fromEmail = deriveDisplayNameFromEmail(email);
   if (fromEmail) return fromEmail;
   const roleLabel = platformRoleLabel(role);
@@ -144,7 +142,6 @@ export function mapPlatformUserRow(row = {}) {
     userId: str(row.user_id ?? row.userId),
     name,
     email,
-    emailUnavailable: !email,
     role,
     roleLabel: platformRoleLabel(role),
     active: row.active !== false,

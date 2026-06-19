@@ -5122,11 +5122,13 @@ function mapUsersTableAgentRow(row) {
 
 function mapProfilesPlatformUserRow(row, directory = null) {
   const role = str(row.role).toLowerCase();
+  const profileEmail = str(row.email);
+  const directoryEmail = str(directory?.email);
   return {
     user_id: str(row.user_id),
     agent_name: str(row.agent_name),
     user_name: str(directory?.user_name),
-    email: str(directory?.email),
+    email: directoryEmail || profileEmail,
     role,
     active: row.active !== false,
     created_at: row.created_at,
@@ -5332,7 +5334,7 @@ export async function getOperationsPlatformUsersRead(options = {}) {
   const [{ data, error }, directoryRes] = await Promise.all([
     supabase
       .from("profiles")
-      .select("user_id, tenant_id, role, agent_name, agent_id, lab_id, active, created_at")
+      .select("user_id, tenant_id, role, agent_name, agent_id, lab_id, active, created_at, email")
       .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false }),
     supabase
@@ -5342,6 +5344,30 @@ export async function getOperationsPlatformUsersRead(options = {}) {
   ]);
 
   if (error) {
+    const missingEmailColumn = /email.*profiles|profiles.*email|column.*email/i.test(
+      error.message || ""
+    );
+    if (missingEmailColumn) {
+      const fallback = await supabase
+        .from("profiles")
+        .select("user_id, tenant_id, role, agent_name, agent_id, lab_id, active, created_at")
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false });
+      if (fallback.error) {
+        return {
+          success: false,
+          error: fallback.error.message || "Failed to load platform users",
+          data: { users: [] },
+        };
+      }
+      const directoryByAuthUserId = buildUserDirectoryIndex(directoryRes?.data);
+      const users = (fallback.data || []).map((profile) => {
+        const directory =
+          directoryByAuthUserId.get(str(profile.user_id).toLowerCase()) || null;
+        return mapProfilesPlatformUserRow(profile, directory);
+      });
+      return { success: true, data: { users } };
+    }
     return { success: false, error: error.message || "Failed to load platform users", data: { users: [] } };
   }
 
@@ -5375,6 +5401,7 @@ export async function createOperationsPlatformUserWrite(payload = {}) {
     };
   }
   if (!email) return { success: false, error: "Email is required" };
+  if (!name) return { success: false, error: "Full name is required" };
   if (!role || !["admin", "executive", "agent", "lab"].includes(role)) {
     return { success: false, error: "A valid role is required" };
   }
@@ -5384,6 +5411,7 @@ export async function createOperationsPlatformUserWrite(payload = {}) {
     tenant_id: tenantId,
     role,
     agent_name: name || null,
+    email: email || null,
     agent_id: role === "agent" ? agentId || null : null,
     lab_id: role === "lab" ? normalizeLabIdKey(labId) || null : null,
     active: payload.active !== false,
@@ -5430,6 +5458,8 @@ export async function updateOperationsPlatformUserWrite(userId, payload = {}) {
   const patch = {
     agent_name: name || null,
   };
+  if (email) patch.email = email;
+  if (payload.active !== undefined) patch.active = payload.active !== false;
   if (role && ["admin", "executive", "agent", "lab"].includes(role)) {
     patch.role = role;
     if (role === "agent") patch.agent_id = str(payload.agentId ?? payload.agent_id) || null;
@@ -5453,7 +5483,7 @@ export async function updateOperationsPlatformUserWrite(userId, payload = {}) {
       name,
       email,
       role: role || data.role,
-      active: data.active !== false,
+      active: payload.active !== undefined ? payload.active !== false : data.active !== false,
     });
     if (!directoryRes?.success) {
       return {
@@ -5465,7 +5495,9 @@ export async function updateOperationsPlatformUserWrite(userId, payload = {}) {
 
   const directory = email
     ? { user_name: name || email.split("@")[0], email }
-    : null;
+    : name
+      ? { user_name: name, email: str(data.email) }
+      : null;
   return { success: true, data: mapProfilesPlatformUserRow(data, directory) };
 }
 
