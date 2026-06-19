@@ -48,6 +48,7 @@ import {
 } from "@/predator/schemaAwareness.js";
 import { isPerfLogEnabled, perfLog, perfTime, shouldRunDashboardKpiAudit } from "@/utils/perfLog.js";
 import { fireNotificationEvent } from "@/notifications/fireNotificationEvent.js";
+import { directoryRoleFromPlatformRole } from "@/operations/operationsCenterAdminEngine.js";
 
 export { labIdKey, normalizeLabIdKey };
 
@@ -5119,19 +5120,76 @@ function mapUsersTableAgentRow(row) {
   };
 }
 
-function mapProfilesPlatformUserRow(row) {
+function mapProfilesPlatformUserRow(row, directory = null) {
   const role = str(row.role).toLowerCase();
   return {
-    userId: str(row.user_id),
-    name: str(row.agent_name) || `User ${str(row.user_id).slice(0, 8)}`,
-    email: str(row.email),
+    user_id: str(row.user_id),
+    agent_name: str(row.agent_name),
+    user_name: str(directory?.user_name),
+    email: str(directory?.email),
     role,
     active: row.active !== false,
-    createdAt: row.created_at,
-    tenantId: str(row.tenant_id),
-    agentId: str(row.agent_id),
-    labId: str(row.lab_id),
+    created_at: row.created_at,
+    tenant_id: str(row.tenant_id),
+    agent_id: str(row.agent_id),
+    lab_id: str(row.lab_id),
   };
+}
+
+function buildUserDirectoryIndex(rows = []) {
+  const byAuthUserId = new Map();
+  for (const row of rows || []) {
+    const authUserId = str(row.user_code).toLowerCase();
+    if (authUserId) byAuthUserId.set(authUserId, row);
+  }
+  return byAuthUserId;
+}
+
+async function syncPlatformUserDirectoryRow({
+  tenantId,
+  userId,
+  name,
+  email,
+  role,
+  active = true,
+}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+
+  const tid = str(tenantId);
+  const uid = str(userId);
+  const mail = str(email);
+  if (!tid || !uid) return { success: false, error: "Tenant and user id are required" };
+  if (!mail) return { success: false, error: "Email is required" };
+
+  const row = {
+    tenant_id: tid,
+    user_code: uid,
+    user_name: str(name) || mail.split("@")[0],
+    email: mail,
+    role: directoryRoleFromPlatformRole(role),
+    active: active !== false,
+  };
+
+  const { data: existing, error: lookupErr } = await supabase
+    .from("users")
+    .select("id")
+    .eq("tenant_id", tid)
+    .eq("user_code", uid)
+    .maybeSingle();
+
+  if (lookupErr) {
+    return { success: false, error: lookupErr.message || "Failed to look up user directory row" };
+  }
+
+  if (existing?.id) {
+    const { error } = await supabase.from("users").update(row).eq("id", existing.id);
+    if (error) return { success: false, error: error.message || "Failed to update user directory row" };
+    return { success: true };
+  }
+
+  const { error } = await supabase.from("users").insert([row]);
+  if (error) return { success: false, error: error.message || "Failed to create user directory row" };
+  return { success: true };
 }
 
 export async function getOperationsOperationalAgentsRead(options = {}) {
@@ -5271,39 +5329,31 @@ export async function getOperationsPlatformUsersRead(options = {}) {
   const tenantId = str(options.tenantId ?? options.tenant_id);
   if (!tenantId) return { success: false, error: "Tenant is required", data: { users: [] } };
 
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("user_id, tenant_id, role, agent_name, agent_id, lab_id, active, created_at")
-    .eq("tenant_id", tenantId)
-    .order("created_at", { ascending: false });
+  const [{ data, error }, directoryRes] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("user_id, tenant_id, role, agent_name, agent_id, lab_id, active, created_at")
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("users")
+      .select("user_code, user_name, email, role, active")
+      .eq("tenant_id", tenantId),
+  ]);
 
   if (error) {
     return { success: false, error: error.message || "Failed to load platform users", data: { users: [] } };
   }
 
-  const users = (data || []).map(mapProfilesPlatformUserRow);
+  const directoryByAuthUserId = buildUserDirectoryIndex(directoryRes.data);
 
-  const { data: userRows } = await supabase
-    .from("users")
-    .select("email, user_name, user_code, role")
-    .eq("tenant_id", tenantId);
-
-  const emailByName = new Map();
-  for (const row of userRows || []) {
-    const email = str(row.email);
-    if (!email) continue;
-    emailByName.set(str(row.user_name).toLowerCase(), email);
-    emailByName.set(str(row.user_code).toLowerCase(), email);
-  }
-
-  const enriched = users.map((u) => {
-    if (u.email) return u;
-    const fromName = emailByName.get(str(u.name).toLowerCase());
-    const fromAgent = u.agentId ? emailByName.get(str(u.agentId).toLowerCase()) : "";
-    return { ...u, email: fromName || fromAgent || "" };
+  const users = (data || []).map((profile) => {
+    const directory =
+      directoryByAuthUserId.get(str(profile.user_id).toLowerCase()) || null;
+    return mapProfilesPlatformUserRow(profile, directory);
   });
 
-  return { success: true, data: { users: enriched } };
+  return { success: true, data: { users } };
 }
 
 export async function createOperationsPlatformUserWrite(payload = {}) {
@@ -5313,6 +5363,7 @@ export async function createOperationsPlatformUserWrite(payload = {}) {
   const userId = str(payload.userId ?? payload.user_id);
   const role = str(payload.role).toLowerCase();
   const name = str(payload.name ?? payload.agentName);
+  const email = str(payload.email);
   const agentId = str(payload.agentId ?? payload.agent_id);
   const labId = str(payload.labId ?? payload.lab_id);
 
@@ -5323,6 +5374,7 @@ export async function createOperationsPlatformUserWrite(payload = {}) {
       error: "Supabase Auth user ID is required. Create the user in Supabase Auth first.",
     };
   }
+  if (!email) return { success: false, error: "Email is required" };
   if (!role || !["admin", "executive", "agent", "lab"].includes(role)) {
     return { success: false, error: "A valid role is required" };
   }
@@ -5340,7 +5392,28 @@ export async function createOperationsPlatformUserWrite(payload = {}) {
   const { data, error } = await supabase.from("profiles").insert([row]).select().single();
   if (error) return { success: false, error: error.message || "Failed to create platform user profile" };
 
-  return { success: true, data: mapProfilesPlatformUserRow(data) };
+  const directoryRes = await syncPlatformUserDirectoryRow({
+    tenantId,
+    userId,
+    name,
+    email,
+    role,
+    active: payload.active !== false,
+  });
+  if (!directoryRes?.success) {
+    return {
+      success: false,
+      error: directoryRes.error || "Profile created but user directory sync failed",
+    };
+  }
+
+  return {
+    success: true,
+    data: mapProfilesPlatformUserRow(data, {
+      user_name: name || email.split("@")[0],
+      email,
+    }),
+  };
 }
 
 export async function updateOperationsPlatformUserWrite(userId, payload = {}) {
@@ -5352,8 +5425,10 @@ export async function updateOperationsPlatformUserWrite(userId, payload = {}) {
   if (!tenantId) return { success: false, error: "Tenant is required" };
 
   const role = str(payload.role).toLowerCase();
+  const name = str(payload.name ?? payload.agentName);
+  const email = str(payload.email);
   const patch = {
-    agent_name: str(payload.name ?? payload.agentName) || null,
+    agent_name: name || null,
   };
   if (role && ["admin", "executive", "agent", "lab"].includes(role)) {
     patch.role = role;
@@ -5370,7 +5445,28 @@ export async function updateOperationsPlatformUserWrite(userId, payload = {}) {
     .single();
 
   if (error) return { success: false, error: error.message || "Failed to update platform user" };
-  return { success: true, data: mapProfilesPlatformUserRow(data) };
+
+  if (email) {
+    const directoryRes = await syncPlatformUserDirectoryRow({
+      tenantId,
+      userId: uid,
+      name,
+      email,
+      role: role || data.role,
+      active: data.active !== false,
+    });
+    if (!directoryRes?.success) {
+      return {
+        success: false,
+        error: directoryRes.error || "Profile updated but user directory sync failed",
+      };
+    }
+  }
+
+  const directory = email
+    ? { user_name: name || email.split("@")[0], email }
+    : null;
+  return { success: true, data: mapProfilesPlatformUserRow(data, directory) };
 }
 
 export async function setOperationsPlatformUserActiveWrite(userId, active, options = {}) {
@@ -5464,4 +5560,33 @@ export async function updateLabAgentAssignmentWrite(payload = {}) {
       tenantId,
     },
   };
+}
+
+export function getPasswordResetRedirectUrl() {
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin}/reset-password`;
+  }
+  return undefined;
+}
+
+export async function requestPlatformUserPasswordReset(email) {
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured" };
+  }
+
+  const mail = str(email);
+  if (!mail) {
+    return { success: false, error: "Email is required" };
+  }
+
+  const redirectTo = getPasswordResetRedirectUrl();
+  const { error } = await supabase.auth.resetPasswordForEmail(mail, {
+    ...(redirectTo ? { redirectTo } : {}),
+  });
+
+  if (error) {
+    return { success: false, error: error.message || "Failed to send password reset email" };
+  }
+
+  return { success: true };
 }

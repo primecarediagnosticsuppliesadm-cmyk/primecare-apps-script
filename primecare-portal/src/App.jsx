@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import LoginPage from "./pages/LoginPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 import { useAuth } from "./context/AuthContext";
 import { ROLES } from "./config/roles";
 import { PERMISSIONS } from "./config/permissions";
@@ -84,6 +85,14 @@ function PortalLoadingScreen() {
 
 export default function App() {
   const { user, loading, isAuthenticated, signOut, authToken, authError } = useAuth();
+
+  const isResetPasswordRoute =
+    typeof window !== "undefined" &&
+    window.location.pathname.replace(/\/$/, "") === "/reset-password";
+
+  if (isResetPasswordRoute) {
+    return <ResetPasswordPage />;
+  }
 
   const [role, setRole] = useState(null);
   const [activePage, setActivePage] = useState(null);

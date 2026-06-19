@@ -11,11 +11,14 @@ import {
   updateLabAgentAssignmentWrite,
   updateOperationsAgentWrite,
   updateOperationsPlatformUserWrite,
+  requestPlatformUserPasswordReset,
 } from "@/api/primecareSupabaseApi.js";
 import { loadOperationsCenterAdminBundle } from "@/operations/operationsCenterAdminData.js";
 import {
   OPERATIONS_CENTER_TABS,
   PLATFORM_ROLE_OPTIONS,
+  EMAIL_UNAVAILABLE_HINT,
+  RESET_PASSWORD_EMAIL_MISSING,
   countActiveAgents,
   formatOpsDate,
   matchesSearch,
@@ -139,11 +142,20 @@ function AgentFormModal({ mode, initial, tenantId, onClose, onSaved }) {
   );
 }
 
+function UserEmailCell({ email, emailUnavailable }) {
+  if (email) return <span>{email}</span>;
+  if (emailUnavailable) {
+    return <span className="text-[11px] text-slate-400">{EMAIL_UNAVAILABLE_HINT}</span>;
+  }
+  return <span className="text-slate-400">—</span>;
+}
+
 function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
   const isEdit = mode === "edit";
   const [form, setForm] = useState({
     userId: initial?.userId || "",
     name: initial?.name || "",
+    email: initial?.email || "",
     role: initial?.role || "admin",
     agentId: initial?.agentId || "",
     labId: initial?.labId || "",
@@ -176,7 +188,8 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
         {error ? <p className="text-xs text-red-600">{error}</p> : null}
         {!isEdit ? (
           <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
-            Create the login in Supabase Auth first, then paste the user UUID below.
+            Create the login in Supabase Auth first, then link the profile with the same email used
+            in Auth.
           </p>
         ) : null}
         <label className="block text-xs text-slate-600">
@@ -195,6 +208,18 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
             className="mt-1"
             value={form.name}
             onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+            placeholder="e.g. QA Admin"
+          />
+        </label>
+        <label className="block text-xs text-slate-600">
+          Email *
+          <Input
+            className="mt-1"
+            type="email"
+            value={form.email}
+            onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+            placeholder="qa.admin@primecare.test"
+            required
           />
         </label>
         <label className="block text-xs text-slate-600">
@@ -372,6 +397,7 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
   const [userModal, setUserModal] = useState(null);
   const [labModal, setLabModal] = useState(null);
   const [busyId, setBusyId] = useState("");
+  const [resettingUserId, setResettingUserId] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -465,6 +491,29 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
       setError(err?.message || "Failed to update user");
     } finally {
       setBusyId("");
+    }
+  }
+
+  async function handleResetPassword(user) {
+    const email = String(user?.email || "").trim();
+    if (!email) return;
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(`Send password reset email to ${email}?`)
+    ) {
+      return;
+    }
+    try {
+      setResettingUserId(user.userId);
+      setStatusMessage("");
+      setError("");
+      const res = await requestPlatformUserPasswordReset(email);
+      if (!res?.success) throw new Error(res?.error || "Failed to send password reset email");
+      setStatusMessage("Password reset email sent");
+    } catch (err) {
+      setError(err?.message || "Failed to send password reset email");
+    } finally {
+      setResettingUserId("");
     }
   }
 
@@ -638,7 +687,9 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
                 filteredUsers.map((user) => (
                   <tr key={user.userId} className="border-b border-slate-100">
                     <td className="px-2 py-2 font-medium text-slate-900">{user.name}</td>
-                    <td className="px-2 py-2">{user.email || "—"}</td>
+                    <td className="px-2 py-2">
+                      <UserEmailCell email={user.email} emailUnavailable={user.emailUnavailable} />
+                    </td>
                     <td className="px-2 py-2">{platformRoleLabel(user.role)}</td>
                     <td className="px-2 py-2">
                       <StatusBadge active={user.active} />
@@ -663,6 +714,17 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
                           onClick={() => void toggleUserActive(user)}
                         >
                           {user.active ? "Disable" : "Enable"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-[10px]"
+                          disabled={!user.email || resettingUserId === user.userId}
+                          title={user.email ? undefined : RESET_PASSWORD_EMAIL_MISSING}
+                          onClick={() => void handleResetPassword(user)}
+                        >
+                          {resettingUserId === user.userId ? "Sending…" : "Reset Password"}
                         </Button>
                       </div>
                     </td>

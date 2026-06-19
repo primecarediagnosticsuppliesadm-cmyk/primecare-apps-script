@@ -33,6 +33,51 @@ export function platformRoleLabel(role) {
   return ROLE_LABELS[normalized] || str(role) || "—";
 }
 
+export const EMAIL_UNAVAILABLE_HINT =
+  "Email unavailable — sync user email into profiles/users";
+
+export const RESET_PASSWORD_EMAIL_MISSING =
+  "Email missing. Add email to user profile first.";
+
+export function deriveDisplayNameFromEmail(email) {
+  const local = str(email).split("@")[0];
+  if (!local) return "";
+  return local
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+export function resolvePlatformUserDisplayName({
+  agentName = "",
+  directoryName = "",
+  email = "",
+  role = "",
+  userId = "",
+} = {}) {
+  const fromProfile = str(agentName);
+  if (fromProfile) return fromProfile;
+  const fromDirectory = str(directoryName);
+  if (fromDirectory) return fromDirectory;
+  const fromEmail = deriveDisplayNameFromEmail(email);
+  if (fromEmail) return fromEmail;
+  const roleLabel = platformRoleLabel(role);
+  if (roleLabel && roleLabel !== "—") return roleLabel;
+  const id = str(userId);
+  if (id) return `User ${id.slice(0, 8)}`;
+  return "—";
+}
+
+export function directoryRoleFromPlatformRole(role) {
+  const normalized = normalizePlatformRole(role);
+  if (normalized === ROLES.LAB) return "LAB";
+  if (normalized === ROLES.AGENT) return "AGENT";
+  if (normalized === ROLES.ADMIN) return "ADMIN";
+  if (normalized === ROLES.EXECUTIVE) return "EXECUTIVE";
+  return str(role).toUpperCase();
+}
+
 export function formatOpsDate(value) {
   if (!value) return "—";
   const d = new Date(value);
@@ -87,10 +132,19 @@ export function countActiveAgents(agents = []) {
 
 export function mapPlatformUserRow(row = {}) {
   const role = normalizePlatformRole(row.role);
+  const email = str(row.email);
+  const name = resolvePlatformUserDisplayName({
+    agentName: row.agent_name ?? row.agentName,
+    directoryName: row.user_name ?? row.directoryName,
+    email,
+    role,
+    userId: row.user_id ?? row.userId,
+  });
   return {
     userId: str(row.user_id ?? row.userId),
-    name: str(row.agent_name ?? row.name) || `User ${str(row.user_id).slice(0, 8)}`,
-    email: str(row.email),
+    name,
+    email,
+    emailUnavailable: !email,
     role,
     roleLabel: platformRoleLabel(role),
     active: row.active !== false,
