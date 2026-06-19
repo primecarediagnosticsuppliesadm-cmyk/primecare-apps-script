@@ -5134,8 +5134,8 @@ function mapProfilesPlatformUserRow(row) {
   };
 }
 
-export async function getOperationsAgentsRead(options = {}) {
-  traceSupabaseRead("OperationsCenter.getOperationsAgentsRead", { table: "users" });
+export async function getOperationsOperationalAgentsRead(options = {}) {
+  traceSupabaseRead("OperationsCenter.getOperationsOperationalAgentsRead", { table: "users" });
   if (!supabase) return { success: false, error: "Supabase is not configured", data: { agents: [] } };
 
   const tenantId = str(options.tenantId ?? options.tenant_id);
@@ -5145,17 +5145,26 @@ export async function getOperationsAgentsRead(options = {}) {
     .from("users")
     .select("id, tenant_id, user_code, user_name, email, lab_id, role, active, created_at")
     .eq("tenant_id", tenantId)
-    .eq("role", "AGENT")
     .order("user_name", { ascending: true });
 
   if (error) {
-    return { success: false, error: error.message || "Failed to load agents", data: { agents: [] } };
+    return {
+      success: false,
+      error: error.message || "Failed to load operational agents",
+      data: { agents: [] },
+    };
   }
 
-  return {
-    success: true,
-    data: { agents: (data || []).map(mapUsersTableAgentRow) },
-  };
+  const agents = (data || [])
+    .filter((row) => str(row.role).toLowerCase() === "agent")
+    .map(mapUsersTableAgentRow);
+
+  return { success: true, data: { agents } };
+}
+
+/** @deprecated Use platform profiles via loadOperationsCenterAdminBundle */
+export async function getOperationsAgentsRead(options = {}) {
+  return getOperationsOperationalAgentsRead(options);
 }
 
 export async function createOperationsAgentWrite(payload = {}) {
@@ -5195,6 +5204,15 @@ export async function updateOperationsAgentWrite(agentRowId, payload = {}) {
   if (!id) return { success: false, error: "Agent record id is required" };
   if (!tenantId) return { success: false, error: "Tenant is required" };
 
+  if (payload.source === "profile" || payload.userId || id.includes("-")) {
+    return updateOperationsPlatformUserWrite(payload.userId || id, {
+      tenantId,
+      name: str(payload.name ?? payload.userName),
+      agentId: str(payload.agentId ?? payload.agent_id),
+      role: "agent",
+    });
+  }
+
   const patch = {
     user_name: str(payload.name ?? payload.userName),
     email: str(payload.email) || null,
@@ -5206,11 +5224,13 @@ export async function updateOperationsAgentWrite(agentRowId, payload = {}) {
     .update(patch)
     .eq("id", id)
     .eq("tenant_id", tenantId)
-    .eq("role", "AGENT")
     .select()
     .single();
 
   if (error) return { success: false, error: error.message || "Failed to update agent" };
+  if (str(data?.role).toLowerCase() !== "agent") {
+    return { success: false, error: "Record is not an agent" };
+  }
   return { success: true, data: mapUsersTableAgentRow(data) };
 }
 
@@ -5221,18 +5241,26 @@ export async function setOperationsAgentActiveWrite(agentRowId, active, options 
   const tenantId = str(options.tenantId ?? options.tenant_id);
   if (!id || !tenantId) return { success: false, error: "Agent id and tenant are required" };
 
+  if (options.source === "profile" || id.includes("-")) {
+    return setOperationsPlatformUserActiveWrite(id, active, { tenantId });
+  }
+
   const { data, error } = await supabase
     .from("users")
     .update({ active: Boolean(active) })
     .eq("id", id)
     .eq("tenant_id", tenantId)
-    .eq("role", "AGENT")
     .select()
     .single();
 
   if (error) {
     return { success: false, error: error.message || `Failed to ${active ? "enable" : "disable"} agent` };
   }
+
+  if (str(data?.role).toLowerCase() !== "agent") {
+    return { success: false, error: "Record is not an agent" };
+  }
+
   return { success: true, data: mapUsersTableAgentRow(data) };
 }
 

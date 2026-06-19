@@ -1,9 +1,10 @@
 import {
-  getOperationsAgentsRead,
   getOperationsLabAssignmentsRead,
+  getOperationsOperationalAgentsRead,
   getOperationsPlatformUsersRead,
 } from "@/api/primecareSupabaseApi.js";
 import {
+  deriveAgentsFromPlatformUsers,
   mapLabAssignmentRow,
   mapOperationsAgentRow,
   mapPlatformUserRow,
@@ -11,6 +12,22 @@ import {
 
 function str(v) {
   return String(v ?? "").trim();
+}
+
+function mergeAgentsByAgentId(profileAgents = [], operationalAgents = []) {
+  const byAgentId = new Map();
+  for (const agent of profileAgents) {
+    const key = str(agent.agentId).toLowerCase() || str(agent.id).toLowerCase();
+    if (key) byAgentId.set(key, agent);
+  }
+  for (const agent of operationalAgents) {
+    const key = str(agent.agentId).toLowerCase() || str(agent.id).toLowerCase();
+    if (!key || byAgentId.has(key)) continue;
+    byAgentId.set(key, agent);
+  }
+  return Array.from(byAgentId.values()).sort((a, b) =>
+    str(a.name).localeCompare(str(b.name), undefined, { sensitivity: "base" })
+  );
 }
 
 export async function loadOperationsCenterAdminBundle(tenantId) {
@@ -25,23 +42,26 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
     };
   }
 
-  const [agentsRes, usersRes, labsRes] = await Promise.all([
-    getOperationsAgentsRead({ tenantId: tid }),
+  const [usersRes, operationalAgentsRes, labsRes] = await Promise.all([
     getOperationsPlatformUsersRead({ tenantId: tid }),
+    getOperationsOperationalAgentsRead({ tenantId: tid }),
     getOperationsLabAssignmentsRead({ tenantId: tid }),
   ]);
 
-  const errors = [
-    agentsRes?.error,
-    usersRes?.error,
-    labsRes?.error,
-  ].filter(Boolean);
+  const errors = [usersRes?.error, operationalAgentsRes?.error, labsRes?.error].filter(Boolean);
+  const users = (usersRes?.data?.users || []).map(mapPlatformUserRow);
+  const profileAgents = deriveAgentsFromPlatformUsers(users);
+  const operationalAgents = (operationalAgentsRes?.data?.agents || []).map(mapOperationsAgentRow);
+  const agents = mergeAgentsByAgentId(profileAgents, operationalAgents);
 
   return {
-    ok: agentsRes?.success !== false && usersRes?.success !== false && labsRes?.success !== false,
+    ok:
+      usersRes?.success !== false &&
+      operationalAgentsRes?.success !== false &&
+      labsRes?.success !== false,
     error: errors[0] || null,
-    agents: (agentsRes?.data?.agents || []).map(mapOperationsAgentRow),
-    users: (usersRes?.data?.users || []).map(mapPlatformUserRow),
+    agents,
+    users,
     labAssignments: (labsRes?.data?.labs || []).map(mapLabAssignmentRow),
   };
 }

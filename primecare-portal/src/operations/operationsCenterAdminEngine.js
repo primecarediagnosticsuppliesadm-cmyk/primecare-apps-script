@@ -1,4 +1,4 @@
-import { ROLE_LABELS } from "@/config/roles.js";
+import { ROLE_LABELS, ROLES } from "@/config/roles.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -19,8 +19,13 @@ export const PLATFORM_ROLE_OPTIONS = [
 
 export function normalizePlatformRole(role) {
   const r = str(role).toLowerCase();
-  if (r === "lab user") return "lab";
+  if (r === "lab user") return ROLES.LAB;
+  if ([ROLES.AGENT, ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.LAB].includes(r)) return r;
   return PLATFORM_ROLE_OPTIONS.some((o) => o.value === r) ? r : "";
+}
+
+export function isAgentRole(role) {
+  return normalizePlatformRole(role) === ROLES.AGENT;
 }
 
 export function platformRoleLabel(role) {
@@ -40,16 +45,44 @@ export function formatOpsDate(value) {
 }
 
 export function mapOperationsAgentRow(row = {}) {
+  const userId = str(row.user_id ?? row.userId);
+  const fromProfile = Boolean(userId);
   return {
-    id: str(row.id),
-    agentId: str(row.user_code ?? row.agentId ?? row.agent_id),
-    name: str(row.user_name ?? row.name),
+    id: fromProfile ? userId : str(row.id),
+    userId: userId || null,
+    agentId: str(row.agent_id ?? row.agentId ?? row.user_code),
+    name: str(row.agent_name ?? row.user_name ?? row.name),
     email: str(row.email),
     phone: str(row.phone ?? row.lab_id),
     active: row.active !== false,
     createdAt: row.created_at ?? row.createdAt ?? null,
     tenantId: str(row.tenant_id ?? row.tenantId),
+    source: fromProfile ? "profile" : "users",
   };
+}
+
+/** Map a platform user profile row to the Agents tab shape. */
+export function platformUserToAgentRow(user = {}) {
+  return {
+    id: str(user.userId),
+    userId: str(user.userId),
+    agentId: str(user.agentId) || str(user.userId),
+    name: str(user.name),
+    email: str(user.email),
+    phone: "",
+    active: user.active !== false,
+    createdAt: user.createdAt ?? null,
+    tenantId: str(user.tenantId),
+    source: "profile",
+  };
+}
+
+export function deriveAgentsFromPlatformUsers(users = []) {
+  return users.filter((u) => isAgentRole(u.role)).map(platformUserToAgentRow);
+}
+
+export function countActiveAgents(agents = []) {
+  return agents.filter((a) => a.active !== false).length;
 }
 
 export function mapPlatformUserRow(row = {}) {

@@ -16,6 +16,7 @@ import { loadOperationsCenterAdminBundle } from "@/operations/operationsCenterAd
 import {
   OPERATIONS_CENTER_TABS,
   PLATFORM_ROLE_OPTIONS,
+  countActiveAgents,
   formatOpsDate,
   matchesSearch,
   platformRoleLabel,
@@ -65,7 +66,12 @@ function AgentFormModal({ mode, initial, tenantId, onClose, onSaved }) {
     setSaving(true);
     setError("");
     try {
-      const payload = { tenantId, ...form };
+      const payload = {
+        tenantId,
+        ...form,
+        source: initial?.source,
+        userId: initial?.userId,
+      };
       const res = isEdit
         ? await updateOperationsAgentWrite(initial.id, payload)
         : await createOperationsAgentWrite(payload);
@@ -389,6 +395,7 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
   const agents = bundle?.agents || [];
   const users = bundle?.users || [];
   const labAssignments = bundle?.labAssignments || [];
+  const activeAgentCount = useMemo(() => countActiveAgents(agents), [agents]);
 
   const filteredAgents = useMemo(
     () =>
@@ -425,7 +432,10 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
     try {
       setBusyId(agent.id);
       setStatusMessage("");
-      const res = await setOperationsAgentActiveWrite(agent.id, next, { tenantId });
+      const res = await setOperationsAgentActiveWrite(agent.id, next, {
+        tenantId,
+        source: agent.source,
+      });
       if (!res?.success) throw new Error(res?.error);
       setStatusMessage(`${agent.name} ${next ? "enabled" : "disabled"}`);
       await load();
@@ -478,7 +488,7 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
       <div className="grid grid-cols-3 gap-2 text-xs">
         <div className="rounded-lg border bg-white p-2">
           <p className="text-slate-500">Agents</p>
-          <p className="text-lg font-bold tabular-nums">{agents.length}</p>
+          <p className="text-lg font-bold tabular-nums">{activeAgentCount}</p>
         </div>
         <div className="rounded-lg border bg-white p-2">
           <p className="text-slate-500">Platform users</p>
