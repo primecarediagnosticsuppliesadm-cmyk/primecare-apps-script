@@ -465,22 +465,10 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
   const filteredUsers = useMemo(
     () =>
       users.filter((u) =>
-        matchesSearch(search, [u.name, u.email, u.roleLabel, u.userId, u.userIdShort, u.agentId, u.labId])
+        matchesSearch(search, [u.userId, u.userIdShort, u.name, u.email, u.roleLabel, u.role])
       ),
     [users, search]
   );
-
-  const duplicateUserNames = useMemo(() => {
-    const counts = new Map();
-    for (const user of users) {
-      const key = String(user.name || "").trim().toLowerCase();
-      if (!key) continue;
-      counts.set(key, (counts.get(key) || 0) + 1);
-    }
-    return new Set(
-      [...counts.entries()].filter(([, count]) => count > 1).map(([name]) => name)
-    );
-  }, [users]);
 
   const filteredLabs = useMemo(
     () =>
@@ -707,9 +695,10 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
 
       {tab === "users" ? (
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full min-w-[560px] text-xs">
+          <table className="w-full min-w-[720px] text-xs">
             <thead>
               <tr className="border-b bg-slate-50 text-left text-slate-500">
+                <th className="px-2 py-2">User ID</th>
                 <th className="px-2 py-2">Name</th>
                 <th className="px-2 py-2">Email</th>
                 <th className="px-2 py-2">Role</th>
@@ -720,7 +709,7 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
             <tbody>
               {filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-2 py-6 text-center text-slate-500">
+                  <td colSpan={6} className="px-2 py-6 text-center text-slate-500">
                     {users.length === 0
                       ? "No platform users linked yet. Add a profile after creating the login in Supabase Auth."
                       : "No users match your search."}
@@ -730,12 +719,14 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
                 filteredUsers.map((user) => (
                   <tr key={user.userId} className="border-b border-slate-100">
                     <td className="px-2 py-2">
-                      <div className="font-medium text-slate-900">{user.name}</div>
-                      {duplicateUserNames.has(String(user.name || "").trim().toLowerCase()) &&
-                      user.userIdShort ? (
-                        <div className="font-mono text-[10px] text-slate-400">{user.userIdShort}</div>
-                      ) : null}
+                      <span
+                        className="font-mono text-[10px] text-slate-500"
+                        title={user.userId || undefined}
+                      >
+                        {user.userIdShort || user.userId || "—"}
+                      </span>
                     </td>
+                    <td className="px-2 py-2 font-medium text-slate-900">{user.name}</td>
                     <td className="px-2 py-2">
                       <UserEmailCell email={user.hasStoredEmail !== false ? user.email : ""} />
                     </td>
