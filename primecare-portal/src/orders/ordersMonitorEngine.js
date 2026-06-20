@@ -197,7 +197,9 @@ export function computeOrdersKpis(orders) {
       pendingPayment += 1;
     }
 
-    totalValue += num(o.orderTotal);
+    if (status !== "cancelled") {
+      totalValue += num(o.orderTotal);
+    }
   }
 
   return {

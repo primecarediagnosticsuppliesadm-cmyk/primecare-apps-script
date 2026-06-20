@@ -411,8 +411,9 @@ export default function OrdersPage({
         <KpiCard title="Cancelled" value={kpis.cancelled} loading={loading} />
         <KpiCard title="Pending Payment" value={kpis.pendingPayment} loading={loading} />
         <KpiCard
-          title="Total Order Value"
+          title="Active Order Value"
           value={formatCurrency(kpis.totalOrderValue)}
+          subtitle="Excludes cancelled orders"
           loading={loading}
         />
       </KpiCardGrid>
