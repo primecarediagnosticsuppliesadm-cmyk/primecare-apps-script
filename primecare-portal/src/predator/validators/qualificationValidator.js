@@ -17,6 +17,7 @@ import {
   QUALIFICATION_REVIEW_MODULE,
   resolveQualificationUiSnapshot,
 } from "@/predator/moduleUiSnapshot.js";
+import { validateQualificationRevenueConsistency } from "@/predator/validators/qualificationRevenueConsistencyValidator.js";
 
 /**
  * @param {Object} params
@@ -119,6 +120,8 @@ export async function validateQualificationModule({ ctx, rendered = null }) {
         rowTenantIds: qualRaw.map((r) => r.tenant_id).filter(Boolean),
       })
     );
+
+    entries.push(...(await validateQualificationRevenueConsistency({ ctx })));
 
     if (!apiRes?.success) {
       entries.push(
