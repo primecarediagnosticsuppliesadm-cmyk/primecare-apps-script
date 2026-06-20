@@ -141,6 +141,162 @@ function summarizePlaceholderTriggers(triggers) {
   };
 }
 
+const PURCHASE_TAB_ORDER = [
+  "triggers",
+  "reorder",
+  "smart",
+  "create",
+  "receive",
+  "history",
+  "suppliers",
+];
+
+const PURCHASE_TAB_META = {
+  triggers: {
+    label: "Forecast Suggestions",
+    shortDescription: "Projected demand based on sales/stock history.",
+    help: {
+      purpose: "Review forecast-driven SKU suggestions before you place any orders.",
+      whenToUse: "Start here to see which products may run low based on recent sales and stock levels.",
+      whatNext: "Review Reorder Candidates or open Create PO to act on items you want to buy.",
+    },
+  },
+  reorder: {
+    label: "Reorder Candidates",
+    shortDescription: "Items below reorder level that may need purchase.",
+    help: {
+      purpose: "See products currently below safe stock thresholds and ready for replenishment.",
+      whenToUse: "After reviewing forecasts, confirm which SKUs need to be purchased now.",
+      whatNext: "Select a candidate to prefill Create PO, or switch to Create PO manually.",
+    },
+    nextStep: {
+      text: "When you pick items to buy, open Create PO to draft the purchase order.",
+      actionLabel: "Create PO",
+      tab: "create",
+    },
+  },
+  smart: {
+    label: "Smart Reorder",
+    shortDescription: "System-suggested PO quantities.",
+    help: {
+      purpose: "View velocity-based quantity suggestions derived from recent consumption.",
+      whenToUse: "When you want data-backed order quantities beyond basic reorder levels.",
+      whatNext: 'Use "Use in PO" on a row, or switch to Create PO with the suggested quantities.',
+    },
+  },
+  create: {
+    label: "Create PO",
+    shortDescription: "Create a purchase order for supplier stock.",
+    help: {
+      purpose: "Enter or confirm purchase order details—product, quantity, cost, and supplier.",
+      whenToUse: "When you are ready to order stock from a supplier.",
+      whatNext: "After the PO is created, go to Receive Stock when goods arrive from the supplier.",
+    },
+    nextStep: {
+      text: "Once the supplier ships goods, record the delivery in Receive Stock.",
+      actionLabel: "Receive Stock",
+      tab: "receive",
+    },
+  },
+  receive: {
+    label: "Receive Stock",
+    shortDescription: "Record goods received and increase inventory.",
+    help: {
+      purpose: "Log inbound goods against an open PO and increase on-hand inventory.",
+      whenToUse: "When a supplier delivery arrives and stock needs to be added to inventory.",
+      whatNext:
+        "Check Purchase Orders for updated status. Stock increases also appear under Inventory → Movements.",
+    },
+    nextStep: {
+      text: "After receiving, confirm PO status in Purchase Orders or verify stock in Inventory Movements.",
+      actionLabel: "Purchase Orders",
+      tab: "history",
+    },
+  },
+  history: {
+    label: "Purchase Orders",
+    shortDescription: "Track open, received, and completed POs.",
+    help: {
+      purpose: "Monitor all purchase orders and their fulfillment progress.",
+      whenToUse: "To follow up on open orders, partial receipts, or completed PO history.",
+      whatNext: 'Use "Prefill Receive Form" when an order is ready to be received.',
+    },
+  },
+  suppliers: {
+    label: "Suppliers",
+    shortDescription: "Manage supplier details.",
+    help: {
+      purpose: "View supplier activity, open PO counts, and order history by vendor.",
+      whenToUse: "When comparing suppliers or checking who fulfills your purchase orders.",
+      whatNext: "Return to Reorder Candidates or Create PO to place new orders.",
+    },
+  },
+};
+
+function ProcurementWorkflowGuide() {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 shadow-sm">
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        Procurement flow
+      </div>
+      <p className="mt-1 leading-relaxed">
+        Forecast → Reorder candidates → Create PO → Receive stock → Track purchase orders.
+      </p>
+      <p className="mt-1 text-xs text-slate-500">
+        Smart Reorder and Suppliers support the same workflow with suggested quantities and vendor
+        context.
+      </p>
+    </div>
+  );
+}
+
+function TabHelpPanel({ help }) {
+  if (!help) return null;
+
+  return (
+    <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        About this step
+      </div>
+      <dl className="mt-3 space-y-3">
+        <div>
+          <dt className="font-medium text-slate-800">What this is for</dt>
+          <dd className="mt-0.5 text-slate-600">{help.purpose}</dd>
+        </div>
+        <div>
+          <dt className="font-medium text-slate-800">When to use it</dt>
+          <dd className="mt-0.5 text-slate-600">{help.whenToUse}</dd>
+        </div>
+        <div>
+          <dt className="font-medium text-slate-800">What happens next</dt>
+          <dd className="mt-0.5 text-slate-600">{help.whatNext}</dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
+function NextStepHint({ nextStep, onGoToTab }) {
+  if (!nextStep) return null;
+
+  return (
+    <div className="mb-4 flex flex-col gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-blue-900">
+        <span className="font-medium">Next step:</span> {nextStep.text}
+      </p>
+      {nextStep.actionLabel && nextStep.tab && onGoToTab ? (
+        <button
+          type="button"
+          onClick={() => onGoToTab(nextStep.tab)}
+          className="shrink-0 rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100"
+        >
+          Go to {nextStep.actionLabel}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export default function PurchaseOrdersPage({ currentUser = null }) {
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [reorderCandidates, setReorderCandidates] = useState([]);
@@ -688,34 +844,45 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
         </div>
       </div>
 
+      <ProcurementWorkflowGuide />
+
       <div className="flex gap-2 overflow-x-auto pb-1">
-        {["triggers", "reorder", "smart", "create", "receive", "history", "suppliers"].map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => setActiveTab(tab)}
-            className={`rounded-xl px-4 py-2 text-sm font-medium ${
-              activeTab === tab ? "bg-black text-white" : "border bg-white"
-            }`}
-          >
-            {tab === "triggers" && "Forecast Suggestions"}
-            {tab === "reorder" && "Reorder Candidates"}
-            {tab === "smart" && "Smart Reorder"}
-            {tab === "create" && "Create PO"}
-            {tab === "receive" && "Receive Stock"}
-            {tab === "history" && "Purchase Orders"}
-            {tab === "suppliers" && "Suppliers"}
-          </button>
-        ))}
+        {PURCHASE_TAB_ORDER.map((tab) => {
+          const meta = PURCHASE_TAB_META[tab];
+          const isActive = activeTab === tab;
+          return (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              aria-current={isActive ? "page" : undefined}
+              className={`flex min-w-[9.5rem] shrink-0 flex-col items-start rounded-xl px-4 py-2.5 text-left text-sm transition ${
+                isActive
+                  ? "bg-black text-white shadow-md ring-2 ring-black ring-offset-2"
+                  : "border bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              <span className="font-medium leading-tight">{meta.label}</span>
+              <span
+                className={`mt-1 line-clamp-2 text-xs leading-snug ${
+                  isActive ? "text-slate-300" : "text-slate-500"
+                }`}
+              >
+                {meta.shortDescription}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {activeTab === "triggers" && (
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
+          <TabHelpPanel help={PURCHASE_TAB_META.triggers.help} />
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-lg font-semibold">Reorder Forecast Suggestions</h2>
               <p className="text-sm text-slate-500">
-                Urgent SKUs from Supabase reorder forecast. Suggestions only — create draft POs manually.
+                {PURCHASE_TAB_META.triggers.shortDescription}
               </p>
             </div>
 
@@ -826,10 +993,16 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
       {activeTab === "reorder" && (
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
+          <TabHelpPanel help={PURCHASE_TAB_META.reorder.help} />
+          <NextStepHint
+            nextStep={PURCHASE_TAB_META.reorder.nextStep}
+            onGoToTab={setActiveTab}
+          />
           <div className="mb-4">
             <h2 className="text-lg font-semibold">Reorder Candidates</h2>
             <p className="text-sm text-slate-500">
-              Products below safe stock level. Tap a candidate to prefill purchase order form.
+              {PURCHASE_TAB_META.reorder.shortDescription} Tap a candidate to prefill the purchase
+              order form.
             </p>
           </div>
 
@@ -877,10 +1050,11 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
       {activeTab === "smart" && (
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
+          <TabHelpPanel help={PURCHASE_TAB_META.smart.help} />
           <div className="mb-4">
             <h2 className="text-lg font-semibold">Smart Procurement Insights</h2>
             <p className="text-sm text-slate-500">
-              Velocity-based reorder intelligence using recent order-line consumption.
+              {PURCHASE_TAB_META.smart.shortDescription} Based on recent order-line consumption.
             </p>
           </div>
 
@@ -951,8 +1125,16 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
       {activeTab === "create" && (
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
+          <TabHelpPanel help={PURCHASE_TAB_META.create.help} />
+          <NextStepHint
+            nextStep={PURCHASE_TAB_META.create.nextStep}
+            onGoToTab={setActiveTab}
+          />
           <div className="mb-4">
             <h2 className="text-lg font-semibold">Create Purchase Order</h2>
+            <p className="text-sm text-slate-500">
+              {PURCHASE_TAB_META.create.shortDescription}
+            </p>
           </div>
 
           {selectedCandidate ? (
@@ -1023,8 +1205,16 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
       {activeTab === "receive" && (
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
+          <TabHelpPanel help={PURCHASE_TAB_META.receive.help} />
+          <NextStepHint
+            nextStep={PURCHASE_TAB_META.receive.nextStep}
+            onGoToTab={setActiveTab}
+          />
           <div className="mb-4">
             <h2 className="text-lg font-semibold">Goods Receipt / Stock Inward</h2>
+            <p className="text-sm text-slate-500">
+              {PURCHASE_TAB_META.receive.shortDescription}
+            </p>
           </div>
 
           {selectedPurchaseOrder ? (
@@ -1101,9 +1291,13 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
       {activeTab === "history" && (
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
+          <TabHelpPanel help={PURCHASE_TAB_META.history.help} />
           <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="text-lg font-semibold">Purchase Orders</h2>
+              <p className="text-sm text-slate-500">
+                {PURCHASE_TAB_META.history.shortDescription}
+              </p>
             </div>
 
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -1164,8 +1358,12 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
       {activeTab === "suppliers" && (
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
+          <TabHelpPanel help={PURCHASE_TAB_META.suppliers.help} />
           <div className="mb-4">
             <h2 className="text-lg font-semibold">Supplier Dashboard</h2>
+            <p className="text-sm text-slate-500">
+              {PURCHASE_TAB_META.suppliers.shortDescription}
+            </p>
           </div>
 
           {supplierSummary ? (
