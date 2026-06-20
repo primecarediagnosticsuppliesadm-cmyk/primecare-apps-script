@@ -43,6 +43,13 @@ import {
   normalizePaymentStatusLabel,
   diagnoseOrdersReadDrift,
 } from "@/orders/ordersMonitorEngine.js";
+import {
+  extractLatestCancellationNote,
+  formatOrderPaymentLabel,
+  formatProductUnitLabel,
+  isCancelledStatus,
+  resolveCancelledByLabel,
+} from "@/utils/orderTracking.js";
 import { collectOrderRowIds } from "@/metrics/computeRevenueMetrics.js";
 
 function str(v) {
@@ -76,6 +83,14 @@ function formatDateTime(value) {
   return d.toLocaleString("en-IN", {
     dateStyle: "medium",
     timeStyle: "short",
+  });
+}
+
+function orderPaymentLabel(order) {
+  return formatOrderPaymentLabel({
+    orderStatus: order.orderStatus,
+    paymentStatus: order.paymentStatus,
+    invoiceStatus: order.invoiceStatus,
   });
 }
 
@@ -327,6 +342,32 @@ export default function OrdersPage({
 
   const selectedOrderSummary = details?.order;
 
+  const selectedOrderUx = useMemo(() => {
+    if (!selectedOrderSummary) return null;
+    const orderStatus = normalizeOrderStatusLabel(selectedOrderSummary.orderStatus);
+    const cancelled = isCancelledStatus(orderStatus);
+    const lines = details?.lines || [];
+    const unitCount = lines.reduce((sum, line) => sum + Number(line.quantity || 0), 0);
+    return {
+      orderStatus,
+      cancelled,
+      paymentLabel: orderPaymentLabel(selectedOrderSummary),
+      productUnitLabel: formatProductUnitLabel(lines.length, unitCount),
+      cancellationReason: cancelled
+        ? extractLatestCancellationNote(
+            selectedOrderSummary.notes,
+            selectedOrderSummary.statusNotes
+          )
+        : "",
+      cancelledOn:
+        selectedOrderSummary.cancelledAt ||
+        selectedOrderSummary.cancelled_at ||
+        selectedOrderSummary.updatedAt ||
+        "",
+      cancelledByLabel: resolveCancelledByLabel(selectedOrderSummary.createdBy),
+    };
+  }, [selectedOrderSummary, details?.lines]);
+
   return (
     <div className={embedded ? "space-y-4" : "space-y-5"}>
       {!embedded ? (
@@ -488,13 +529,18 @@ export default function OrdersPage({
                   <tbody>
                     {filteredOrders.map((order) => {
                       const orderStatus = normalizeOrderStatusLabel(order.orderStatus);
-                      const payStatus = normalizePaymentStatusLabel(order.paymentStatus);
+                      const payStatus = orderPaymentLabel(order);
                       const isSelected = selectedOrder === order.orderId;
+                      const cancelled = isCancelledStatus(orderStatus);
                       return (
                         <tr
                           key={order.orderId}
                           className={`border-b border-slate-100 transition-colors ${
-                            isSelected ? "bg-slate-100" : "hover:bg-slate-50"
+                            isSelected
+                              ? "bg-slate-100"
+                              : cancelled
+                                ? "bg-slate-50/80 text-slate-600"
+                                : "hover:bg-slate-50"
                           }`}
                         >
                           <td className="px-2 py-2 font-mono font-medium text-slate-900">
@@ -581,17 +627,42 @@ export default function OrdersPage({
                       {normalizeOrderStatusLabel(selectedOrderSummary.orderStatus)}
                     </StatusBadge>
                     <StatusBadge
-                      variant={paymentStatusToVariant(
-                        normalizePaymentStatusLabel(selectedOrderSummary.paymentStatus)
-                      )}
+                      variant={paymentStatusToVariant(selectedOrderUx?.paymentLabel)}
                     >
-                      {normalizePaymentStatusLabel(selectedOrderSummary.paymentStatus)}
+                      {selectedOrderUx?.paymentLabel}
                     </StatusBadge>
                     <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-900">
                       {formatCurrency(selectedOrderSummary.orderTotal)}
                     </span>
                   </div>
                 </div>
+
+                {selectedOrderUx?.cancelled ? (
+                  <section className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-900">
+                    <p className="font-semibold text-red-800">Order Cancelled</p>
+                    <p className="mt-0.5 text-xs text-red-700">This order will not be fulfilled.</p>
+                    <dl className="mt-2 grid grid-cols-1 gap-1.5 text-xs">
+                      <div>
+                        <dt className="text-red-800/80">Cancelled On</dt>
+                        <dd>
+                          {selectedOrderUx.cancelledOn
+                            ? formatDateTime(selectedOrderUx.cancelledOn)
+                            : "Not captured"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-red-800/80">Reason</dt>
+                        <dd className="whitespace-pre-wrap">
+                          {selectedOrderUx.cancellationReason || "No reason captured"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-red-800/80">Cancelled By</dt>
+                        <dd>{selectedOrderUx.cancelledByLabel}</dd>
+                      </div>
+                    </dl>
+                  </section>
+                ) : null}
 
                 <section className="space-y-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -618,9 +689,16 @@ export default function OrdersPage({
                 </section>
 
                 <section className="space-y-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Items
-                  </h3>
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Items
+                    </h3>
+                    {selectedOrderUx?.productUnitLabel ? (
+                      <span className="text-[11px] text-slate-500">
+                        {selectedOrderUx.productUnitLabel}
+                      </span>
+                    ) : null}
+                  </div>
                   {details.lines?.length ? (
                     <div className="overflow-x-auto rounded-lg border border-slate-200">
                       <table className="w-full min-w-[420px] text-xs">

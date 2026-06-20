@@ -68,6 +68,63 @@ export function isCancelledStatus(rawStatus) {
   return normalizeTrackingStatus(rawStatus) === "cancelled";
 }
 
+function str(v) {
+  return String(v ?? "").trim();
+}
+
+function isPaymentPendingLabel(paymentStatus) {
+  const low = str(paymentStatus).toLowerCase();
+  return !low || low === "pending" || low === "partial" || low === "partially paid";
+}
+
+/**
+ * Lab/tracking payment label with cancelled-order clarity.
+ */
+export function formatOrderPaymentLabel({ orderStatus, paymentStatus, invoiceStatus } = {}) {
+  const base = formatPaymentState(paymentStatus, invoiceStatus);
+  if (isCancelledStatus(orderStatus) && isPaymentPendingLabel(base)) {
+    return "Payment Pending — Order Cancelled";
+  }
+  return base;
+}
+
+/**
+ * Products vs units summary for order headers.
+ */
+export function formatProductUnitLabel(productCount, unitCount) {
+  const products = Math.max(0, Number(productCount) || 0);
+  const units = Math.max(0, Number(unitCount) || 0);
+  const pLabel = products === 1 ? "1 Product" : `${products} Products`;
+  const uLabel = units === 1 ? "1 Unit" : `${units} Units`;
+  return `${pLabel} · ${uLabel}`;
+}
+
+/**
+ * Latest cancellation note from notes / status_notes (appendOrderStatusWrite format).
+ */
+export function extractLatestCancellationNote(notes = "", statusNotes = "") {
+  const combined = [str(statusNotes), str(notes)].filter(Boolean).join("\n");
+  if (!combined) return "";
+
+  const lines = combined.split("\n").map((line) => line.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    const match = line.match(/Status changed to Cancelled\s*-\s*(.+)$/i);
+    if (match?.[1]) return str(match[1]);
+    if (/status changed to cancelled/i.test(line)) return line;
+    if (i === lines.length - 1 && /cancel/i.test(line)) return line;
+  }
+  return "";
+}
+
+export function resolveCancelledByLabel(createdBy) {
+  return str(createdBy) || "Not captured";
+}
+
+export function resolveCancelledOnLabel({ cancelledAt, updatedAt } = {}) {
+  return str(cancelledAt) || str(updatedAt) || "";
+}
+
 /**
  * Build timeline step states for OrderTrackingDrawer.
  */
@@ -138,9 +195,19 @@ export function mapOrderDetailsPayload(payload) {
   const invoiceStatus = String(order.invoiceStatus || order.invoice_status || "");
 
   const itemCount = lines.reduce((sum, line) => sum + Number(line.quantity || 0), 0);
+  const productCount = lines.length;
   const orderTotal = Number(
     order.orderTotal ?? order.total_amount ?? order.totalAmount ?? order.order_total ?? 0
   );
+
+  const cancelledAt = str(order.cancelled_at ?? order.cancelledAt);
+  const statusNotes = str(order.status_notes ?? order.statusNotes);
+  const createdBy = str(order.created_by ?? order.createdBy);
+  const cancelled = isCancelledStatus(orderStatus);
+  const paymentLabel = formatOrderPaymentLabel({ orderStatus, paymentStatus, invoiceStatus });
+  const cancellationReason = cancelled
+    ? extractLatestCancellationNote(order.notes || order.order_notes, statusNotes)
+    : "";
 
   const mappedLines = lines.map((line) => {
     const quantity = Number(line.quantity || 0);
@@ -173,15 +240,31 @@ export function mapOrderDetailsPayload(payload) {
     orderStatus,
     paymentStatus,
     invoiceStatus,
-    paymentLabel: formatPaymentState(paymentStatus, invoiceStatus),
+    paymentLabel,
     orderTotal,
     itemCount,
+    productCount,
+    productUnitLabel: formatProductUnitLabel(productCount, itemCount),
     notes: order.notes || order.order_notes || "",
+    statusNotes,
+    cancelledAt,
+    createdBy,
+    cancelled,
+    cancellationReason,
+    cancelledByLabel: resolveCancelledByLabel(createdBy),
+    cancelledOnLabel: resolveCancelledOnLabel({
+      cancelledAt,
+      updatedAt: order.updated_at ?? order.updatedAt ?? order.orderDate,
+    }),
     invoiceId: order.invoiceId || order.invoice_id || "",
     lines: mappedLines,
-    fulfillmentNote: order.notes || order.fulfillment_note || order.remark || "",
-    expectedDispatch: order.expected_dispatch || order.dispatch_date || order.eta || "",
-    deliveryStatus: order.delivery_status || order.fulfillment_status || orderStatus,
+    fulfillmentNote: cancelled
+      ? "No fulfillment because order was cancelled"
+      : order.notes || order.fulfillment_note || order.remark || "",
+    expectedDispatch: cancelled ? "Not Applicable" : order.expected_dispatch || order.dispatch_date || order.eta || "",
+    deliveryStatus: cancelled
+      ? "Cancelled"
+      : order.delivery_status || order.fulfillment_status || orderStatus,
     contactPerson: order.contactPerson || order.contact_name || "",
     mobileNumber: order.mobileNumber || order.mobile_number || order.phone || "",
   };

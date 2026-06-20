@@ -4567,6 +4567,8 @@ export function mapOrderRow(row, labNameFallback = "", rowIndex = 0) {
     createdAt,
     createdBy,
     updatedAt: str(row.updated_at ?? row.updatedAt ?? ""),
+    cancelledAt: str(row.cancelled_at ?? row.cancelledAt ?? ""),
+    statusNotes: str(row.status_notes ?? row.statusNotes ?? ""),
     notes: str(row.notes ?? row.order_notes ?? row.remark ?? ""),
     mobileNumber: str(
       row.mobile_number ?? row.mobileNumber ?? row.phone ?? row.contact_phone ?? ""

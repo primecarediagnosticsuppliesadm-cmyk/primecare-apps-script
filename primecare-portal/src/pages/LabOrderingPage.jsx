@@ -50,10 +50,19 @@ import OrderProgressMini from "@/components/lab/OrderProgressMini.jsx";
 import { StatusBadge, usePortalToast } from "@/components/ux";
 import {
   fetchScopedOrderDetails,
+  formatOrderPaymentLabel,
+  isCancelledStatus,
   logOrderTrackingEvent,
   orderStatusChipVariant,
 } from "@/utils/orderTracking.js";
 import { paymentStatusToVariant } from "@/utils/statusTokens.js";
+
+function formatOrderDateShort(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso).slice(0, 10);
+  return d.toLocaleDateString("en-IN", { year: "numeric", month: "short", day: "numeric" });
+}
 
 function QuickStat({ title, value, icon: Icon }) {
   return (
@@ -628,6 +637,10 @@ export default function LabOrderingPage({ currentUser }) {
 
   async function handleTrackingDrawerAction(action, details) {
     if (action === "invoice") {
+      if (details && isCancelledStatus(details.orderStatus)) {
+        showToast("info", "No invoice available for cancelled orders.");
+        return;
+      }
       showToast("info", "Invoice PDFs will be available in a future release.");
       return;
     }
@@ -1381,12 +1394,31 @@ export default function LabOrderingPage({ currentUser }) {
                     <tbody>
                       {scopedRecentOrders.map((order) => {
                         const orderStatus = order.orderStatus || order.status || "Placed";
-                        const payment = order.paymentStatus || "Pending";
+                        const cancelled = isCancelledStatus(orderStatus);
+                        const payment = formatOrderPaymentLabel({
+                          orderStatus,
+                          paymentStatus: order.paymentStatus || "Pending",
+                          invoiceStatus: order.invoiceStatus,
+                        });
+                        const cancelledDate = formatOrderDateShort(
+                          order.cancelledAt || order.cancelled_at
+                        );
                         return (
-                          <tr key={order.orderId} className="border-b border-slate-100 last:border-0">
+                          <tr
+                            key={order.orderId}
+                            className={cn(
+                              "border-b border-slate-100 last:border-0",
+                              cancelled && "bg-slate-50/90 text-slate-600"
+                            )}
+                          >
                             <td className="px-2 py-2">
-                              <p className="font-semibold text-slate-900">{order.orderId}</p>
+                              <p className={cn("font-semibold", cancelled ? "text-slate-700" : "text-slate-900")}>
+                                {order.orderId}
+                              </p>
                               <p className="text-[10px] text-slate-500">{order.orderDate || "—"}</p>
+                              {cancelled && cancelledDate ? (
+                                <p className="text-[10px] text-red-700">Cancelled {cancelledDate}</p>
+                              ) : null}
                             </td>
                             <td className="px-2 py-2">
                               <div className="flex flex-col gap-1">
@@ -1397,7 +1429,11 @@ export default function LabOrderingPage({ currentUser }) {
                               </div>
                             </td>
                             <td className="px-2 py-2 min-w-[140px]">
-                              <OrderProgressMini status={orderStatus} />
+                              {cancelled ? (
+                                <span className="text-[10px] font-semibold text-red-700">Cancelled</span>
+                              ) : (
+                                <OrderProgressMini status={orderStatus} />
+                              )}
                             </td>
                             <td className="px-2 py-2 text-right tabular-nums font-semibold">
                               ₹{Number(order.orderTotal ?? order.total ?? 0).toLocaleString("en-IN")}
@@ -1418,8 +1454,14 @@ export default function LabOrderingPage({ currentUser }) {
                                   size="sm"
                                   variant="ghost"
                                   className="h-7 px-2 text-[10px]"
+                                  disabled={cancelled}
+                                  title={
+                                    cancelled ? "No invoice available for cancelled orders" : undefined
+                                  }
                                   onClick={() =>
-                                    showToast("info", "Invoice download coming soon.")
+                                    cancelled
+                                      ? showToast("info", "No invoice available for cancelled orders.")
+                                      : showToast("info", "Invoice download coming soon.")
                                   }
                                 >
                                   Invoice
@@ -1449,11 +1491,24 @@ export default function LabOrderingPage({ currentUser }) {
                 <div className="space-y-2 md:hidden">
                   {scopedRecentOrders.map((order) => {
                     const orderStatus = order.orderStatus || order.status || "Placed";
-                    const payment = order.paymentStatus || "Pending";
+                    const cancelled = isCancelledStatus(orderStatus);
+                    const payment = formatOrderPaymentLabel({
+                      orderStatus,
+                      paymentStatus: order.paymentStatus || "Pending",
+                      invoiceStatus: order.invoiceStatus,
+                    });
+                    const cancelledDate = formatOrderDateShort(
+                      order.cancelledAt || order.cancelled_at
+                    );
                     return (
                       <article
                         key={order.orderId}
-                        className="rounded-md border border-slate-200 px-2.5 py-2"
+                        className={cn(
+                          "rounded-md border px-2.5 py-2",
+                          cancelled
+                            ? "border-slate-200 bg-slate-50/90 opacity-90"
+                            : "border-slate-200"
+                        )}
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
@@ -1462,11 +1517,20 @@ export default function LabOrderingPage({ currentUser }) {
                               <Clock3 className="h-3 w-3 shrink-0" />
                               {order.orderDate || "—"}
                             </p>
+                            {cancelled && cancelledDate ? (
+                              <p className="mt-0.5 text-[10px] font-medium text-red-700">
+                                Cancelled {cancelledDate}
+                              </p>
+                            ) : null}
                           </div>
                           <StatusBadge variant={orderStatusChipVariant(orderStatus)}>{orderStatus}</StatusBadge>
                         </div>
                         <div className="mt-1.5">
-                          <OrderProgressMini status={orderStatus} />
+                          {cancelled ? (
+                            <span className="text-[10px] font-semibold text-red-700">Cancelled</span>
+                          ) : (
+                            <OrderProgressMini status={orderStatus} />
+                          )}
                         </div>
                         <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px]">
                           <span className="font-semibold tabular-nums">
@@ -1489,8 +1553,14 @@ export default function LabOrderingPage({ currentUser }) {
                             size="sm"
                             variant="ghost"
                             className="h-8 px-2 text-[11px]"
+                            disabled={cancelled}
+                            title={
+                              cancelled ? "No invoice available for cancelled orders" : undefined
+                            }
                             onClick={() =>
-                              showToast("info", "Invoice download coming soon.")
+                              cancelled
+                                ? showToast("info", "No invoice available for cancelled orders.")
+                                : showToast("info", "Invoice download coming soon.")
                             }
                           >
                             Invoice
