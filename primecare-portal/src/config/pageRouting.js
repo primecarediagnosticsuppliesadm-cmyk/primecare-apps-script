@@ -1,4 +1,25 @@
 import { ROLES } from "./roles";
+import { PERMISSIONS } from "./permissions";
+
+/** Friendly URL overrides (canonical page key -> pathname). */
+const PAGE_PATH_OVERRIDES = {
+  qualificationReview: "/qualification-analytics",
+  risk: "/credit-risk",
+};
+
+function pageKeyToPathSegment(pageKey) {
+  return String(pageKey || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .toLowerCase();
+}
+
+/** Canonical page key -> browser pathname (no trailing slash). */
+export const PAGE_PATHS = Object.fromEntries(
+  Object.keys(PERMISSIONS).map((key) => [
+    key,
+    PAGE_PATH_OVERRIDES[key] || `/${pageKeyToPathSegment(key)}`,
+  ])
+);
 
 /**
  * Normalize legacy / alias page keys to canonical menu keys.
@@ -22,6 +43,7 @@ export function normalizePageKey(page) {
     case "ai-insights":
       return "insights";
     case "qualification-review":
+    case "qualification-analytics":
     case "qualifications":
       return "qualificationReview";
     case "predator-debug":
@@ -72,6 +94,8 @@ export function normalizePageKey(page) {
     case "lab-ordering":
     case "ordering":
       return "labOrders";
+    case "credit-risk":
+      return "risk";
     case "payments":
     case "account":
     case "lab-account":
@@ -94,4 +118,69 @@ export function resolvePageKeyForRole(role, page) {
     if (key === "orders") return "labOrders";
   }
   return key;
+}
+
+/**
+ * Pathname for a canonical page key (falls back to kebab-case segment).
+ * @param {string} [pageKey]
+ */
+export function getPagePathForKey(pageKey) {
+  const canonical = normalizePageKey(pageKey);
+  if (!canonical) return "/";
+  return PAGE_PATHS[canonical] || `/${pageKeyToPathSegment(canonical)}`;
+}
+
+/**
+ * Resolve the first URL segment to a canonical page key, or null for root/unknown.
+ * @param {string} [pathname]
+ */
+export function resolvePageKeyFromPath(pathname) {
+  const normalizedPath = String(pathname || "")
+    .split("#")[0]
+    .split("?")[0]
+    .replace(/\/+$/, "");
+  if (!normalizedPath || normalizedPath === "/") return null;
+
+  const segment = normalizedPath.split("/").filter(Boolean)[0];
+  if (!segment) return null;
+
+  const pageKey = normalizePageKey(segment);
+  if (!pageKey || !PERMISSIONS[pageKey]) return null;
+  return pageKey;
+}
+
+/**
+ * Pick the landing page after auth: URL path when allowed, otherwise role default.
+ * @param {string} role
+ * @param {string} [pathname]
+ * @param {string} defaultPage
+ * @param {(pageKey: string) => boolean} canAccess
+ */
+export function resolveInitialPageForRole(role, pathname, defaultPage, canAccess) {
+  const fallback = resolvePageKeyForRole(role, defaultPage);
+  const fromPath = resolvePageKeyFromPath(pathname);
+  if (fromPath && canAccess(fromPath)) {
+    return resolvePageKeyForRole(role, fromPath);
+  }
+  return fallback;
+}
+
+/**
+ * Keep the browser URL aligned with the active portal page.
+ * @param {string} pageKey
+ * @param {{ replace?: boolean }} [options]
+ */
+export function syncPagePathToUrl(pageKey, { replace = false } = {}) {
+  if (typeof window === "undefined") return;
+
+  const path = getPagePathForKey(pageKey);
+  const current = window.location.pathname.replace(/\/+$/, "") || "/";
+  if (current === path) return;
+
+  const state = { primecarePage: normalizePageKey(pageKey) };
+  if (replace) {
+    window.history.replaceState(state, "", path);
+  } else {
+    window.history.pushState(state, "", path);
+  }
 }

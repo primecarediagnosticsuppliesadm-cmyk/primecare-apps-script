@@ -1,11 +1,17 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import LoginPage from "./pages/LoginPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import { useAuth } from "./context/AuthContext";
 import { ROLES } from "./config/roles";
 import { PERMISSIONS } from "./config/permissions";
 import { getDefaultPageForRole } from "./config/menuConfig";
-import { resolvePageKeyForRole } from "./config/pageRouting.js";
+import {
+  getPagePathForKey,
+  resolveInitialPageForRole,
+  resolvePageKeyForRole,
+  resolvePageKeyFromPath,
+  syncPagePathToUrl,
+} from "./config/pageRouting.js";
 import { PortalToastProvider } from "@/context/PortalToastContext";
 import { TenantViewProvider } from "@/context/TenantViewContext.jsx";
 import OperatingZoneSync from "@/components/OperatingZoneSync.jsx";
@@ -98,6 +104,24 @@ export default function App() {
   const [activePage, setActivePage] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
 
+  const navigateToPage = useCallback(
+    (pageKey, { replace = false } = {}) => {
+      if (!role) return;
+
+      const resolved = resolvePageKeyForRole(role, pageKey);
+      if (!canRoleAccessPage(role, resolved)) {
+        const fallback = getDefaultPageForRole(role);
+        setActivePage(fallback);
+        syncPagePathToUrl(fallback, { replace: true });
+        return;
+      }
+
+      setActivePage(resolved);
+      syncPagePathToUrl(resolved, { replace });
+    },
+    [role]
+  );
+
   useEffect(() => {
     if (!isAuthenticated || !user) {
       setRole(null);
@@ -146,7 +170,18 @@ export default function App() {
     setActivePage((prev) => {
       const defaultPage =
         normalizedUser.defaultPage || getDefaultPageForRole(normalizedRole);
-      if (!prev) return defaultPage;
+
+      if (!prev) {
+        const pathname =
+          typeof window !== "undefined" ? window.location.pathname : "/";
+        return resolveInitialPageForRole(
+          normalizedRole,
+          pathname,
+          defaultPage,
+          (pageKey) => canRoleAccessPage(normalizedRole, pageKey)
+        );
+      }
+
       if (canRoleAccessPage(normalizedRole, prev)) {
         return resolvePageKeyForRole(normalizedRole, prev);
       }
@@ -155,12 +190,42 @@ export default function App() {
   }, [isAuthenticated, user]);
 
   useEffect(() => {
+    if (!role || !activePage) return;
+
+    const expectedPath = getPagePathForKey(activePage);
+    const currentPath =
+      typeof window !== "undefined"
+        ? window.location.pathname.replace(/\/+$/, "") || "/"
+        : "/";
+    if (currentPath !== expectedPath) {
+      syncPagePathToUrl(activePage, { replace: true });
+    }
+  }, [role, activePage]);
+
+  useEffect(() => {
+    if (!role) return;
+
+    function handlePopState() {
+      const pathname = window.location.pathname;
+      const fromPath = resolvePageKeyFromPath(pathname);
+      if (fromPath && canRoleAccessPage(role, fromPath)) {
+        setActivePage(resolvePageKeyForRole(role, fromPath));
+        return;
+      }
+
+      const fallback = getDefaultPageForRole(role);
+      setActivePage(fallback);
+      syncPagePathToUrl(fallback, { replace: true });
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [role]);
+
+  useEffect(() => {
     function handleSetActivePage(event) {
       if (event?.detail) {
-        const next = role
-          ? resolvePageKeyForRole(role, event.detail)
-          : event.detail;
-        setActivePage(next);
+        navigateToPage(event.detail);
       }
     }
 
@@ -168,7 +233,7 @@ export default function App() {
     return () => {
       window.removeEventListener("primecare:setActivePage", handleSetActivePage);
     };
-  }, [role]);
+  }, [navigateToPage]);
 
   const pageTitle = useMemo(() => {
     if (!currentUser) return "PrimeCare Portal";
@@ -205,7 +270,7 @@ export default function App() {
         <PortalLayout
           role={role}
           activePage={activePage}
-          setActivePage={setActivePage}
+          setActivePage={navigateToPage}
         >
           <ExecutivePortalHeader
             currentUser={currentUser}
@@ -217,7 +282,7 @@ export default function App() {
             role={role}
             activePage={activePage}
             currentUser={currentUser}
-            setActivePage={setActivePage}
+            setActivePage={navigateToPage}
             authToken={authToken}
           />
         </PortalLayout>
