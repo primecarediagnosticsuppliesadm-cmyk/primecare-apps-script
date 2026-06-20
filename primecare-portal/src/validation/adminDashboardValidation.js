@@ -12,6 +12,10 @@ import {
   printQaValidationReport,
 } from "@/validation/qaValidationCore.js";
 import { resolveAdminDashboardUiSnapshot } from "@/predator/adminDashboardUiSnapshot.js";
+import {
+  hasAdminDashboardDomKpis,
+  readAdminDashboardDomKpis,
+} from "@/predator/adminDashboardDomKpis.js";
 import { predatorStore } from "@/predator/predatorStore.js";
 import { ADMIN_DASHBOARD_MODULE } from "@/predator/adminDashboardUiSnapshot.js";
 
@@ -165,15 +169,21 @@ export async function runAdminDashboardValidation(options = {}) {
   const uiExecutive = uiRendered?.executive || {};
   const uiSummary = uiRendered?.summary || {};
   const uiStock = uiSummary.stockStats || {};
+  const domKpis = readAdminDashboardDomKpis();
+  const domKpisVisible = hasAdminDashboardDomKpis();
 
-  const uiOutstanding = uiSnapshot.fresh
-    ? numOrNull(uiExecutive.outstandingReceivables)
-    : null;
+  const uiOutstanding =
+    domKpis.outstanding_receivables ??
+    (uiSnapshot.fresh ? numOrNull(uiExecutive.outstandingReceivables) : null);
   const uiRecentVisits = uiSnapshot.fresh ? numOrNull(uiSummary.recentVisits) : null;
-  const uiInventorySkus = uiSnapshot.fresh
-    ? numOrNull(uiStock.totalSkus ?? uiSummary.inventorySkus)
-    : null;
-  const uiTotalSold = uiSnapshot.fresh ? numOrNull(uiSummary.totalSoldValue) : null;
+  const uiInventorySkus =
+    domKpis.inventory_skus ??
+    (uiSnapshot.fresh
+      ? numOrNull(uiSummary.inventorySkus ?? uiStock.totalSkus)
+      : null);
+  const uiTotalSold =
+    domKpis.total_sold_value ??
+    (uiSnapshot.fresh ? numOrNull(uiSummary.totalSoldValue) : null);
 
   const apiOrdersRowCount =
     numOrNull(apiSummary.ordersRowCount) ?? apiOrdersRowCountFromTrace();
@@ -192,10 +202,15 @@ export async function runAdminDashboardValidation(options = {}) {
     });
   }
   const uiOrdersHasExplicitValue =
-    uiSnapshot.fresh &&
-    (uiRendered?.summary?.ordersCount != null || uiSummary.ordersCount != null);
+    domKpis.orders_count != null ||
+    (uiSnapshot.fresh &&
+      (uiRendered?.summary?.ordersCount != null || uiSummary.ordersCount != null));
   const uiOrdersRowCount = uiOrdersHasExplicitValue
-    ? numOrNull(uiRendered?.summary?.ordersCount ?? uiSummary.ordersCount)
+    ? numOrNull(
+        domKpis.orders_count ??
+          uiRendered?.summary?.ordersCount ??
+          uiSummary.ordersCount
+      )
     : null;
 
   const checks = [
@@ -274,7 +289,7 @@ export async function runAdminDashboardValidation(options = {}) {
     });
   }
 
-  if (!uiSnapshot.fresh) {
+  if (!uiSnapshot.fresh && !domKpisVisible) {
     checks.push({
       id: "ui_snapshot_freshness",
       label: "Admin Dashboard rendered KPI snapshot",
@@ -286,6 +301,7 @@ export async function runAdminDashboardValidation(options = {}) {
         ageMs: uiSnapshot.ageMs,
         capturedAt: uiSnapshot.capturedAt,
         apiValidatedAt: uiSnapshot.apiValidatedAt,
+        domKpisVisible,
       },
       message:
         uiSnapshot.message || "Open Admin Dashboard to validate UI render sync",
@@ -322,6 +338,8 @@ export async function runAdminDashboardValidation(options = {}) {
     browserFilters: browser.postgrestFilters,
     apiSuccess: Boolean(apiResult?.success),
     uiSnapshot,
+    domKpis,
+    domKpisVisible,
     ordersIdDiff,
     forceApi,
   };
@@ -342,10 +360,10 @@ export async function runAdminDashboardValidation(options = {}) {
     apiRecentVisits: numOrNull(apiSummary.recentVisits),
     apiInventorySkus: numOrNull(apiStock.totalSkus),
     apiTotalSold: numOrNull(apiSummary.totalSoldValue),
-    uiOutstanding: numOrNull(uiExecutive.outstandingReceivables),
-    uiRecentVisits: numOrNull(uiSummary.recentVisits),
-    uiInventorySkus: numOrNull(uiStock.totalSkus),
-    uiTotalSold: numOrNull(uiSummary.totalSoldValue),
+    uiOutstanding,
+    uiRecentVisits,
+    uiInventorySkus,
+    uiTotalSold,
   };
 
   return report;

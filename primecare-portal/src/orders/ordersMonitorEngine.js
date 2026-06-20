@@ -190,7 +190,12 @@ export function computeOrdersKpis(orders) {
     else if (status === "cancelled") cancelled += 1;
 
     const payment = normalizePaymentStatusLabel(o.paymentStatus).toLowerCase();
-    if (payment === "pending" || payment === "partial") pendingPayment += 1;
+    if (
+      status !== "cancelled" &&
+      (payment === "pending" || payment === "partial")
+    ) {
+      pendingPayment += 1;
+    }
 
     totalValue += num(o.orderTotal);
   }

@@ -34,6 +34,10 @@ import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidat
 import { usePredatorRenderTrace } from "@/predator/renderTrace.js";
 import { usePredatorUiSyncTrace } from "@/predator/usePredatorUiSyncTrace.js";
 import { recordAdminDashboardRenderedSnapshot } from "@/predator/adminDashboardUiSnapshot.js";
+import {
+  ADMIN_DASHBOARD_KPI_TEST_IDS,
+  readAdminDashboardDomKpis,
+} from "@/predator/adminDashboardDomKpis.js";
 import { adminDashboardModelFromMerge } from "@/pages/adminDashboardState.js";
 import AdminDashboardQaValidationPanel from "@/components/qa/AdminDashboardQaValidationPanel.jsx";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
@@ -758,6 +762,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   const [refreshing, setRefreshing] = useState(false);
   const [backgroundLoading, setBackgroundLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [domKpiValues, setDomKpiValues] = useState({});
   const loadGenerationRef = useRef(0);
   const loadAllInFlightRef = useRef(null);
   const dashboardBundleRef = useRef(dashboardBundle);
@@ -1189,6 +1194,17 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     hasData: dashboardHydrated,
   });
 
+  useEffect(() => {
+    if (loading || !dashboardHydrated || !displayKpis) {
+      setDomKpiValues({});
+      return;
+    }
+    const id = requestAnimationFrame(() => {
+      setDomKpiValues(readAdminDashboardDomKpis());
+    });
+    return () => cancelAnimationFrame(id);
+  }, [loading, dashboardHydrated, displayKpis]);
+
   const predatorKpiTraceReady = !loading && dashboardHydrated && Boolean(displayKpis);
 
   const kpiCardMetrics = useMemo(() => {
@@ -1197,7 +1213,8 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       outstanding_receivables: {
         api: displayKpis.outstandingReceivables,
         state: displayKpis.outstandingReceivables,
-        render: displayKpis.outstandingReceivables,
+        render:
+          domKpiValues.outstanding_receivables ?? displayKpis.outstandingReceivables,
       },
       recent_visits: {
         api: displayKpis.recentVisits,
@@ -1207,15 +1224,15 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       inventory_skus: {
         api: displayKpis.inventorySkus,
         state: displayKpis.inventorySkus,
-        render: displayKpis.inventorySkus,
+        render: domKpiValues.inventory_skus ?? displayKpis.inventorySkus,
       },
       total_sold_value: {
         api: displayKpis.totalSoldValue,
         state: displayKpis.totalSoldValue,
-        render: displayKpis.totalSoldValue,
+        render: domKpiValues.total_sold_value ?? displayKpis.totalSoldValue,
       },
     };
-  }, [predatorKpiTraceReady, displayKpis]);
+  }, [predatorKpiTraceReady, displayKpis, domKpiValues]);
 
   usePredatorUiSyncTrace("Admin Dashboard", {
     loading,
@@ -1289,6 +1306,8 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
             value={currency(displayKpis.outstandingReceivables)}
             subtitle="Outstanding collections"
             icon={Wallet}
+            dataTestId={ADMIN_DASHBOARD_KPI_TEST_IDS.outstanding_receivables}
+            kpiRawValue={displayKpis.outstandingReceivables}
           />
           <KpiCard
             title="Credit Risk Labs"
@@ -1313,6 +1332,8 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
             value={currency(displayKpis.totalSoldValue)}
             subtitle="Tracked visit-linked sales"
             icon={Users}
+            dataTestId={ADMIN_DASHBOARD_KPI_TEST_IDS.total_sold_value}
+            kpiRawValue={displayKpis.totalSoldValue}
           />
         </KpiCardGrid>
       ) : (
@@ -1342,6 +1363,8 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
               title="Total SKUs"
               value={displayKpis?.inventorySkus ?? stockStats?.totalSkus ?? 0}
               icon={Package}
+              dataTestId={ADMIN_DASHBOARD_KPI_TEST_IDS.inventory_skus}
+              kpiRawValue={displayKpis?.inventorySkus ?? stockStats?.totalSkus ?? 0}
             />
             <KpiCard
               title="Critical Items"

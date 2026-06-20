@@ -14,10 +14,10 @@ import {
 } from "@/predator/adminDashboardUiSnapshot.js";
 
 /** @param {import('@/validation/qaValidationCore.js').QaValidationCheck} check */
-function resolveAdminDashboardCheckStatus(check, uiSnapshotFresh) {
+function resolveAdminDashboardCheckStatus(check, uiSnapshotFresh, domKpisVisible = false) {
   const base =
     check.status === "fail" ? "FAIL" : check.status === "warn" ? "WARN" : "PASS";
-  if (base !== "FAIL" || uiSnapshotFresh) return base;
+  if (base !== "FAIL" || uiSnapshotFresh || domKpisVisible) return base;
   if (check.id === "browser_query_errors" || check.id === "api_read_failed") return base;
 
   const actual = /** @type {Record<string, unknown>} */ (check.actual || {});
@@ -51,9 +51,14 @@ export async function validateAdminDashboardModule({ ctx, rendered = null }) {
 
     const uiSnapshot = report.meta?.uiSnapshot;
     const uiSnapshotFresh = Boolean(uiSnapshot?.fresh);
+    const domKpisVisible = Boolean(report.meta?.domKpisVisible);
 
     const entries = (report.checks || []).map((check) => {
-      const status = resolveAdminDashboardCheckStatus(check, uiSnapshotFresh);
+      const status = resolveAdminDashboardCheckStatus(
+        check,
+        uiSnapshotFresh,
+        domKpisVisible
+      );
       return createPredatorEntry({
         status,
         module: "Admin Dashboard",

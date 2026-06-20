@@ -1,4 +1,5 @@
 import { predatorStore } from "@/predator/predatorStore.js";
+import { readAdminDashboardDomKpis } from "@/predator/adminDashboardDomKpis.js";
 
 function numOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -34,11 +35,14 @@ function uiMetricsFromRendered(rendered) {
   const executive = rendered?.executive || {};
   const summary = rendered?.summary || {};
   const stock = summary.stockStats || {};
+  const dom = readAdminDashboardDomKpis();
   return {
-    uiOutstanding: numOrNull(executive.outstandingReceivables),
+    uiOutstanding:
+      dom.outstanding_receivables ?? numOrNull(executive.outstandingReceivables),
     uiRecentVisits: numOrNull(summary.recentVisits),
-    uiInventorySkus: numOrNull(stock.totalSkus),
-    uiTotalSold: numOrNull(summary.totalSoldValue),
+    uiInventorySkus:
+      dom.inventory_skus ?? numOrNull(summary.inventorySkus ?? stock.totalSkus),
+    uiTotalSold: dom.total_sold_value ?? numOrNull(summary.totalSoldValue),
     uiTopLabsCount: Array.isArray(executive.topLabsByRevenue)
       ? executive.topLabsByRevenue.length
       : null,

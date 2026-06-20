@@ -12,6 +12,8 @@ import KpiSkeleton from "./KpiSkeleton";
  *   trend?: { direction?: 'up' | 'down' | 'flat', label?: string },
  *   loading?: boolean,
  *   className?: string,
+ *   dataTestId?: string,
+ *   kpiRawValue?: number|null,
  * }} props
  */
 export default function KpiCard({
@@ -22,6 +24,8 @@ export default function KpiCard({
   trend,
   loading = false,
   className,
+  dataTestId,
+  kpiRawValue,
 }) {
   if (loading) {
     return <KpiSkeleton className={className} />;
@@ -44,7 +48,17 @@ export default function KpiCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className={typography.kpiLabel}>{title}</div>
-          <div className={cn(typography.kpiValue, "mt-1 truncate")}>{value}</div>
+          <div
+            className={cn(typography.kpiValue, "mt-1 truncate")}
+            data-testid={dataTestId}
+            data-kpi-value={
+              kpiRawValue !== null && kpiRawValue !== undefined
+                ? String(kpiRawValue)
+                : undefined
+            }
+          >
+            {value}
+          </div>
           {subtitle ? (
             <div className={cn(typography.kpiSubtitle, "mt-1")}>{subtitle}</div>
           ) : null}
