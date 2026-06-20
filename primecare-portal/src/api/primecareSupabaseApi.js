@@ -5826,12 +5826,13 @@ export async function requestPlatformUserPasswordReset(email) {
   }
 
   const redirectTo = getPasswordResetRedirectUrl();
+
   const { error } = await supabase.auth.resetPasswordForEmail(mail, {
     ...(redirectTo ? { redirectTo } : {}),
   });
 
   if (error) {
-    return { success: false, error: error.message || "Failed to send password reset email" };
+    return { success: false, error: error.message || "Failed to send reset link" };
   }
 
   return { success: true };

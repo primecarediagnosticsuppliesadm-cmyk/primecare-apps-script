@@ -253,7 +253,7 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
           />
         </label>
         <label className="block text-xs text-slate-600">
-          Email *
+          Contact Email *
           <Input
             className="mt-1"
             type="email"
@@ -263,6 +263,9 @@ function UserFormModal({ mode, initial, tenantId, onClose, onSaved }) {
             autoComplete="off"
             required
           />
+          <span className="mt-1 block text-[11px] text-slate-500">
+            This does not change the Supabase Auth login email.
+          </span>
         </label>
         <label className="block text-xs text-slate-600">
           Phone
@@ -799,7 +802,9 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
     if (!email || user?.hasStoredEmail === false) return;
     if (
       typeof window !== "undefined" &&
-      !window.confirm(`Send password reset email to ${email}?`)
+      !window.confirm(
+        "Reset link will be sent only if this contact email matches the user's Supabase Auth login email."
+      )
     ) {
       return;
     }
@@ -808,10 +813,12 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
       setStatusMessage("");
       setError("");
       const res = await requestPlatformUserPasswordReset(email);
-      if (!res?.success) throw new Error(res?.error || "Failed to send password reset email");
-      setStatusMessage("Password reset email sent");
+      if (!res?.success) throw new Error(res?.error || "Failed to send reset link");
+      setStatusMessage(
+        "If this email exists as a Supabase Auth login, a reset link was sent."
+      );
     } catch (err) {
-      setError(err?.message || "Failed to send password reset email");
+      setError(err?.message || "Failed to send reset link");
     } finally {
       setResettingUserId("");
     }
@@ -987,7 +994,7 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
                 <th className="px-2 py-2">User ID</th>
                 <th className="px-2 py-2">Username</th>
                 <th className="px-2 py-2">Full Name</th>
-                <th className="px-2 py-2">Email</th>
+                <th className="px-2 py-2">Contact Email</th>
                 <th className="px-2 py-2">Role</th>
                 <th className="px-2 py-2">Status</th>
                 <th className="px-2 py-2">Actions</th>
@@ -1056,7 +1063,7 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
                           title={user.hasStoredEmail ? undefined : RESET_PASSWORD_EMAIL_MISSING}
                           onClick={() => void handleResetPassword(user)}
                         >
-                          {resettingUserId === user.userId ? "Sending…" : "Reset Password"}
+                          {resettingUserId === user.userId ? "Sending…" : "Send Reset Link"}
                         </Button>
                       </div>
                     </td>

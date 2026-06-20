@@ -34,9 +34,9 @@ export function platformRoleLabel(role) {
   return ROLE_LABELS[normalized] || str(role) || "—";
 }
 
-export const EMAIL_NOT_ADDED = "Email not added";
+export const EMAIL_NOT_ADDED = "Contact email not added";
 
-export const RESET_PASSWORD_EMAIL_MISSING = "Add email first";
+export const RESET_PASSWORD_EMAIL_MISSING = "Add contact email first";
 
 /** Email stored on public.profiles (canonical for Reset Password). */
 export function resolveStoredPlatformUserEmail({ profileEmail = "" } = {}) {
