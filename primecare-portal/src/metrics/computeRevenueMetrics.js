@@ -33,6 +33,16 @@ export function resolveOrderAmount(orderRow, lineTotalByOrderId) {
   return amount;
 }
 
+/** Stable order keys for Admin Dashboard row-count diagnostics (no status/tenant filtering). */
+export function collectOrderRowIds(ordersRaw) {
+  const ids = [];
+  for (const o of ordersRaw || []) {
+    const id = str(o.order_id ?? o.orderId ?? o.id);
+    if (id) ids.push(id);
+  }
+  return ids.sort();
+}
+
 export function normalizedOrderRowStatus(orderRow) {
   return str(
     orderRow?.status ??

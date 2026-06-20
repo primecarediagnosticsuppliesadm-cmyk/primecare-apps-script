@@ -1,6 +1,6 @@
 import { supabase } from "@/api/supabaseClient.js";
 import { getAdminDashboardRead } from "@/api/primecareSupabaseApi.js";
-import { computeRevenueMetrics } from "@/metrics/computeRevenueMetrics.js";
+import { computeRevenueMetrics, collectOrderRowIds } from "@/metrics/computeRevenueMetrics.js";
 import { computeReceivableMetrics } from "@/metrics/computeReceivableMetrics.js";
 import { rollupInventoryTableRows } from "@/metrics/computeInventoryMetrics.js";
 import { normalizeLabIdKey } from "@/utils/labId.js";
@@ -19,6 +19,24 @@ function apiOrdersRowCountFromTrace() {
   const traces = predatorStore.getApiExecutionsForModule(ADMIN_DASHBOARD_MODULE) || [];
   const hit = traces.find((t) => t.apiName === "getAdminDashboardRead");
   return numOrNull(hit?.detail?.orders);
+}
+
+function apiOrderIdsFromTrace() {
+  const traces = predatorStore.getApiExecutionsForModule(ADMIN_DASHBOARD_MODULE) || [];
+  const hit = traces.find((t) => t.apiName === "getAdminDashboardRead");
+  const ids = hit?.detail?.orderIds;
+  return Array.isArray(ids) ? ids : [];
+}
+
+function diffOrderIdSets(browserOrderIds = [], apiOrderIds = []) {
+  const browserSet = new Set(browserOrderIds);
+  const apiSet = new Set(apiOrderIds);
+  return {
+    browserOrderIds,
+    apiOrderIds,
+    missingFromApi: browserOrderIds.filter((id) => !apiSet.has(id)),
+    extraInApi: apiOrderIds.filter((id) => !browserSet.has(id)),
+  };
 }
 
 function localDateYmd(d = new Date()) {
@@ -49,6 +67,7 @@ async function fetchBrowserDashboardDbSnapshot() {
     return {
       errors: { client: "Supabase client not configured" },
       ordersRowCount: null,
+      orderIds: [],
       arOutstanding: null,
       visitsRowCount: null,
       inventorySkus: null,
@@ -81,6 +100,7 @@ async function fetchBrowserDashboardDbSnapshot() {
   const labsRaw = labsRes.error ? [] : labsRes.data || [];
 
   const orderItemsRaw = (orderLinesRaw || []).map(mapOrderLineToItemShape);
+  const orderIds = collectOrderRowIds(ordersRaw);
   const labNameById = new Map();
   for (const l of labsRaw) {
     const id = normalizeLabIdKey(l.lab_id ?? l.labId ?? l.id);
@@ -100,6 +120,7 @@ async function fetchBrowserDashboardDbSnapshot() {
   return {
     errors,
     ordersRowCount: ordersRaw.length,
+    orderIds,
     arOutstanding: outstandingReceivables,
     visitsRowCount: visitsRaw.length,
     inventorySkus: stockStats.totalSkus,
@@ -119,13 +140,15 @@ async function fetchBrowserDashboardDbSnapshot() {
  * @param {Object} [options]
  * @param {{ executive?: object, summary?: object }|null} [options.rendered]
  * @param {boolean} [options.printReport]
+ * @param {boolean} [options.forceApi] — bypass dashboard read cache/in-flight (default true)
  */
 export async function runAdminDashboardValidation(options = {}) {
   const { rendered = null, printReport = true } = options;
+  const forceApi = options.forceApi !== false;
   const expected = QA_ADMIN_DASHBOARD_SEED;
 
   const browser = await fetchBrowserDashboardDbSnapshot();
-  const apiResult = await getAdminDashboardRead({ force: options.forceApi === true });
+  const apiResult = await getAdminDashboardRead({ force: forceApi });
   const apiValidatedAt = Date.now();
   const api = apiResult?.success ? apiResult.data : null;
 
@@ -152,7 +175,22 @@ export async function runAdminDashboardValidation(options = {}) {
     : null;
   const uiTotalSold = uiSnapshot.fresh ? numOrNull(uiSummary.totalSoldValue) : null;
 
-  const apiOrdersRowCount = apiOrdersRowCountFromTrace();
+  const apiOrdersRowCount =
+    numOrNull(apiSummary.ordersRowCount) ?? apiOrdersRowCountFromTrace();
+  const apiOrderIds = apiOrderIdsFromTrace();
+  const ordersIdDiff = diffOrderIdSets(browser.orderIds || [], apiOrderIds);
+  if (
+    browser.ordersRowCount != null &&
+    apiOrdersRowCount != null &&
+    browser.ordersRowCount !== apiOrdersRowCount
+  ) {
+    console.warn("[AdminDashboard validation] orders count drift", {
+      browserRls: browser.ordersRowCount,
+      apiPayload: apiOrdersRowCount,
+      ...ordersIdDiff,
+      forceApi,
+    });
+  }
   const uiOrdersHasExplicitValue =
     uiSnapshot.fresh &&
     (uiRendered?.summary?.ordersCount != null || uiSummary.ordersCount != null);
@@ -284,6 +322,8 @@ export async function runAdminDashboardValidation(options = {}) {
     browserFilters: browser.postgrestFilters,
     apiSuccess: Boolean(apiResult?.success),
     uiSnapshot,
+    ordersIdDiff,
+    forceApi,
   };
 
   if (printReport) {

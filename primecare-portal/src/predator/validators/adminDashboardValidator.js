@@ -46,6 +46,7 @@ export async function validateAdminDashboardModule({ ctx, rendered = null }) {
     const report = await runAdminDashboardValidation({
       rendered: renderedInput,
       printReport: false,
+      forceApi: true,
     });
 
     const uiSnapshot = report.meta?.uiSnapshot;

@@ -15,15 +15,35 @@ import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2 } from "lucide-react";
+import {
+  KpiCard,
+  KpiCardGrid,
+  ListSkeleton,
+  StatusBadge,
+} from "@/components/ux";
+import { orderStatusToVariant, paymentStatusToVariant } from "@/utils/statusTokens";
+import { Loader2, AlertTriangle } from "lucide-react";
 import { ROLES } from "@/config/roles";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import {
   filterRowsByTenant,
   rowTenantId,
 } from "@/distributor/distributorOsEngine.js";
+import {
+  ORDER_SORT_OPTIONS,
+  DEFAULT_ORDER_SORT,
+  filterOrders,
+  sortOrders,
+  computeOrdersKpis,
+  buildLabFilterOptions,
+  formatMissingField,
+  formatItemCount,
+  normalizeOrderStatusLabel,
+  normalizePaymentStatusLabel,
+  diagnoseOrdersReadDrift,
+} from "@/orders/ordersMonitorEngine.js";
+import { collectOrderRowIds } from "@/metrics/computeRevenueMetrics.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -44,23 +64,19 @@ function orderStatusSuccessMessage(nextStatus) {
   }
 }
 
-/** Tailwind classes for stronger order-status recognition (outline Badge). */
-function orderStatusBadgeClass(statusRaw) {
-  const s = String(statusRaw || "Placed").trim();
-  if (s === "Fulfilled") {
-    return "border-emerald-300 bg-emerald-50 text-emerald-900 shadow-sm ring-1 ring-emerald-200/70 font-semibold";
-  }
-  if (s === "Processing") {
-    return "border-amber-300 bg-amber-50 text-amber-950 shadow-sm ring-1 ring-amber-200/70 font-semibold";
-  }
-  if (s === "Cancelled") {
-    return "border-red-300 bg-red-50 text-red-900 shadow-sm ring-1 ring-red-200/70 font-semibold";
-  }
-  const low = s.toLowerCase();
-  if (low === "pending" || low === "placed") {
-    return "border-slate-300 bg-slate-100 text-slate-900 shadow-sm font-semibold";
-  }
-  return "border-blue-200 bg-blue-50 text-blue-950 shadow-sm font-semibold";
+function formatCurrency(amount) {
+  return `₹${Number(amount || 0).toLocaleString("en-IN")}`;
+}
+
+function formatDateTime(value) {
+  const raw = str(value);
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (!Number.isFinite(d.getTime())) return raw;
+  return d.toLocaleString("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }
 
 export default function OrdersPage({
@@ -73,8 +89,12 @@ export default function OrdersPage({
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [details, setDetails] = useState(null);
   const [search, setSearch] = useState("");
-  /** Sentinel for "All Statuses" — not sent to Supabase while list read is unfiltered. */
   const [status, setStatus] = useState("ALL");
+  const [paymentStatus, setPaymentStatus] = useState("ALL");
+  const [labFilter, setLabFilter] = useState("ALL");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [sortKey, setSortKey] = useState(DEFAULT_ORDER_SORT);
   const [loading, setLoading] = useState(true);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
@@ -102,6 +122,16 @@ export default function OrdersPage({
     setOrders(allOrders);
   }, [allOrders, distributorScope?.tenantId, currentUser?.role, currentUser?.tenantId]);
 
+  async function probeRlsOrderRows() {
+    if (!supabase) return [];
+    const { data, error } = await supabase.from("orders").select("*");
+    if (error) {
+      console.warn("[OrdersPage] RLS probe failed:", error.message);
+      return null;
+    }
+    return Array.isArray(data) ? data : [];
+  }
+
   async function loadOrders(options = {}) {
     const silent = Boolean(options?.silent);
     try {
@@ -110,9 +140,31 @@ export default function OrdersPage({
       }
       setError("");
       const res = await getOrdersRead();
-      const result = res?.data || res || {};
-      const rows = Array.isArray(result?.orders) ? result.orders : [];
-      console.log("SUPABASE ORDERS MAPPED:", rows);
+      if (res?.success === false) {
+        throw new Error(res.error || "Failed to load orders from Supabase.");
+      }
+
+      const rows = Array.isArray(res?.data?.orders) ? res.data.orders : [];
+      setOrdersReadOk(true);
+
+      const rlsRows = await probeRlsOrderRows();
+      if (rlsRows != null) {
+        const diagnosis = diagnoseOrdersReadDrift({
+          rawRows: rlsRows,
+          mappedOrders: rows,
+          meta: res?.meta,
+        });
+        if (diagnosis.drift) {
+          console.warn("[OrdersPage] orders count drift (RLS vs API mapping)", diagnosis);
+        }
+      } else if (res?.meta?.rawRowCount != null && res.meta.rawRowCount !== rows.length) {
+        console.warn("[OrdersPage] orders count drift (raw vs mapped)", {
+          rawRowCount: res.meta.rawRowCount,
+          mappedRowCount: rows.length,
+          orderIds: res.meta.orderIds,
+        });
+      }
+
       setAllOrders(rows);
       if (distributorScope?.tenantId) {
         setOrders(filterRowsByTenant(rows, distributorScope.tenantId, { tenantKey: rowTenantId }));
@@ -139,30 +191,6 @@ export default function OrdersPage({
     }
   }
 
-  function patchOrdersListStatus(orderId, nextStatus) {
-    setOrders((prev) =>
-      (Array.isArray(prev) ? prev : []).map((o) =>
-        o.orderId === orderId ? { ...o, orderStatus: nextStatus } : o
-      )
-    );
-  }
-
-  function patchDetailsOrderStatus(orderId, nextStatus) {
-    setDetails((d) => {
-      if (!d?.order || d.order.orderId !== orderId) return d;
-      return {
-        ...d,
-        order: { ...d.order, orderStatus: nextStatus },
-      };
-    });
-  }
-
-  /** Instant status sync in list + panel before reloadOrders finishes. */
-  function applyOptimisticOrderStatus(orderId, nextStatus) {
-    patchOrdersListStatus(orderId, nextStatus);
-    patchDetailsOrderStatus(orderId, nextStatus);
-  }
-
   async function openOrder(orderId, options = {}) {
     const { preserveSuccess = false } = options;
     try {
@@ -177,12 +205,15 @@ export default function OrdersPage({
         order: result.order || null,
         lines: Array.isArray(result.lines) ? result.lines : [],
       };
-      console.log("SUPABASE ORDER DETAILS:", data);
+      if (!data.order) {
+        throw new Error(`Order ${orderId} not found or not visible under current access.`);
+      }
       setSelectedOrder(orderId);
       setDetails(data);
     } catch (err) {
       console.warn("OrdersPage openOrder:", err);
-      setDetails({ order: null, lines: [] });
+      setError(err?.message || "Failed to load order details.");
+      setDetails(null);
     } finally {
       setDetailsLoading(false);
     }
@@ -192,10 +223,6 @@ export default function OrdersPage({
     if (!selectedOrder) return;
 
     const id = selectedOrder;
-    console.log("ORDER STATUS UPDATE START", {
-      orderId: id,
-      nextStatus,
-    });
 
     try {
       setUpdatingStatus(true);
@@ -206,34 +233,20 @@ export default function OrdersPage({
 
       if (supabase) {
         logSupabaseFeatureSource("Orders.statusWrite", { api: "updateOrderStatusWrite" });
-        console.log("ORDERS STATUS SUPABASE AUTHORITATIVE", {
-          orderId: id,
-          nextStatus,
-          fallbackDisabled: true,
-        });
         const sbRes = await updateOrderStatusWrite(id, nextStatus, statusPayload);
-        if (sbRes.success) {
-          setSuccessMessage(orderStatusSuccessMessage(nextStatus));
-          setStatusNote("");
-          applyOptimisticOrderStatus(id, nextStatus);
-          console.log("ORDER STATUS UPDATE SUCCESS", {
-            orderId: id,
-            nextStatus,
-            source: "supabase",
-          });
-
-          await loadOrders({ silent: true });
-          await openOrder(id, { preserveSuccess: true });
-          setSelectedOrder(id);
-          console.log("ORDER STATUS UPDATE UI REFRESHED", { orderId: id, nextStatus });
-          invalidateAdminDashboardCaches();
-          return;
+        if (!sbRes.success) {
+          throw new Error(
+            sbRes.error ||
+              "Supabase order status update failed. Apps Script fallback is disabled when Supabase is configured."
+          );
         }
 
-        throw new Error(
-          sbRes.error ||
-            "Supabase order status update failed. Apps Script fallback is disabled when Supabase is configured."
-        );
+        setSuccessMessage(orderStatusSuccessMessage(nextStatus));
+        setStatusNote("");
+        await loadOrders({ silent: true });
+        await openOrder(id, { preserveSuccess: true });
+        invalidateAdminDashboardCaches();
+        return;
       }
 
       if (!ALLOW_LEGACY_APPS_SCRIPT) {
@@ -265,17 +278,8 @@ export default function OrdersPage({
           : orderStatusSuccessMessage(nextStatus)
       );
       setStatusNote("");
-      applyOptimisticOrderStatus(id, nextStatus);
-      console.log("ORDER STATUS UPDATE SUCCESS", {
-        orderId: id,
-        nextStatus,
-        source: "apps_script",
-      });
-
       await loadOrders({ silent: true });
       await openOrder(id, { preserveSuccess: true });
-      setSelectedOrder(id);
-      console.log("ORDER STATUS UPDATE UI REFRESHED", { orderId: id, nextStatus });
       invalidateAdminDashboardCaches();
     } catch (err) {
       setError(err.message || "Failed to update order status");
@@ -284,39 +288,21 @@ export default function OrdersPage({
     }
   }
 
+  const labOptions = useMemo(() => buildLabFilterOptions(orders), [orders]);
+
   const filteredOrders = useMemo(() => {
-    console.log("ORDERS STATE BEFORE FILTER:", orders);
+    const filtered = filterOrders(orders, {
+      search,
+      status,
+      paymentStatus,
+      labId: labFilter,
+      dateFrom,
+      dateTo,
+    });
+    return sortOrders(filtered, sortKey);
+  }, [orders, search, status, paymentStatus, labFilter, dateFrom, dateTo, sortKey]);
 
-    const q = String(search || "").trim().toLowerCase();
-
-    let list = Array.isArray(orders) ? orders : [];
-
-    if (q) {
-      list = list.filter((o) => {
-        const hay = [
-          String(o.orderId || "").toLowerCase(),
-          String(o.labId || "").toLowerCase(),
-          String(o.labName || "").toLowerCase(),
-          String(o.orderStatus || "").toLowerCase(),
-          String(o.paymentStatus || "").toLowerCase(),
-          String(o.invoiceStatus || "").toLowerCase(),
-          String(o.createdBy || "").toLowerCase(),
-          String(o.notes || "").toLowerCase(),
-        ].join(" ");
-        return hay.includes(q);
-      });
-    }
-
-    if (status !== "ALL") {
-      const st = String(status || "").toLowerCase();
-      list = list.filter(
-        (o) => String(o.orderStatus || "").toLowerCase() === st
-      );
-    }
-
-    console.log("ORDERS AFTER FILTER:", list);
-    return list;
-  }, [orders, search, status]);
+  const kpis = useMemo(() => computeOrdersKpis(orders), [orders]);
 
   usePredatorModuleValidation(
     "PrimeCare OS",
@@ -331,9 +317,15 @@ export default function OrdersPage({
         tenantId: o.tenantId,
         orderId: o.orderId,
       })),
+      ordersRowCount: orders.length,
+      orderIds: collectOrderRowIds(
+        orders.map((o) => ({ order_id: o.orderId, orderId: o.orderId }))
+      ),
     },
     !distributorScope?.tenantId && !loading
   );
+
+  const selectedOrderSummary = details?.order;
 
   return (
     <div className={embedded ? "space-y-4" : "space-y-5"}>
@@ -343,14 +335,18 @@ export default function OrdersPage({
           <p className="text-sm text-slate-500">
             {distributorScope?.tenantId
               ? `Orders for ${distributorScope.tenantName || "selected distributor"} labs only.`
-              : "PrimeCare HQ orders — use Distributor OS for distributor tenants."}
+              : "PrimeCare HQ orders — scan status, payment, and fulfillment at a glance."}
           </p>
         </div>
       ) : null}
 
       {error ? (
-        <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">
-          {error}
+        <div
+          className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+          role="alert"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{error}</span>
         </div>
       ) : null}
 
@@ -366,256 +362,391 @@ export default function OrdersPage({
         </div>
       ) : null}
 
-      <div className="grid gap-5 xl:grid-cols-[1.3fr_1fr]">
+      <KpiCardGrid columns={4} className="lg:grid-cols-4 xl:grid-cols-7">
+        <KpiCard title="Total Orders" value={kpis.totalOrders} loading={loading} />
+        <KpiCard title="Placed" value={kpis.placed} loading={loading} />
+        <KpiCard title="Processing" value={kpis.processing} loading={loading} />
+        <KpiCard title="Fulfilled" value={kpis.fulfilled} loading={loading} />
+        <KpiCard title="Cancelled" value={kpis.cancelled} loading={loading} />
+        <KpiCard title="Pending Payment" value={kpis.pendingPayment} loading={loading} />
+        <KpiCard
+          title="Total Order Value"
+          value={formatCurrency(kpis.totalOrderValue)}
+          loading={loading}
+        />
+      </KpiCardGrid>
+
+      <div className="grid gap-5 xl:grid-cols-[1.35fr_1fr]">
         <Card className="rounded-2xl shadow-sm">
-          <CardHeader>
-            <CardTitle>All Orders</CardTitle>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Orders</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-col gap-3 sm:flex-row">
+          <CardContent className="space-y-3">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               <Input
-                placeholder="Search order ID, lab name, or lab ID..."
+                placeholder="Search order ID, lab, status…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="h-11 rounded-xl"
+                className="h-9 rounded-lg text-sm lg:col-span-2"
               />
-
               <select
-                className="h-11 rounded-xl border bg-white px-3 text-sm"
+                className="h-9 rounded-lg border bg-white px-2 text-sm"
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value)}
+              >
+                {ORDER_SORT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <select
+                className="h-9 rounded-lg border bg-white px-2 text-sm"
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
               >
-                <option value="ALL">All Statuses</option>
+                <option value="ALL">All statuses</option>
                 <option value="Placed">Placed</option>
                 <option value="Processing">Processing</option>
                 <option value="Fulfilled">Fulfilled</option>
                 <option value="Cancelled">Cancelled</option>
               </select>
+              <select
+                className="h-9 rounded-lg border bg-white px-2 text-sm"
+                value={paymentStatus}
+                onChange={(e) => setPaymentStatus(e.target.value)}
+              >
+                <option value="ALL">All payments</option>
+                <option value="Pending">Pending</option>
+                <option value="Paid">Paid</option>
+                <option value="Partial">Partial</option>
+              </select>
+              <select
+                className="h-9 rounded-lg border bg-white px-2 text-sm"
+                value={labFilter}
+                onChange={(e) => setLabFilter(e.target.value)}
+              >
+                <option value="ALL">All labs</option>
+                {labOptions.map((lab) => (
+                  <option key={lab.id} value={lab.id}>
+                    {lab.name}
+                  </option>
+                ))}
+              </select>
+              <div className="flex gap-1">
+                <Input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="h-9 rounded-lg text-xs"
+                  title="From date"
+                />
+                <Input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="h-9 rounded-lg text-xs"
+                  title="To date"
+                />
+              </div>
+            </div>
+
+            <div className="text-xs text-slate-500">
+              Showing {filteredOrders.length} of {orders.length} orders
             </div>
 
             {loading ? (
-              <div className="flex items-center gap-2 text-sm text-slate-500">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading orders...
+              <ListSkeleton rows={6} />
+            ) : !ordersReadOk ? (
+              <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-4 text-sm text-red-700">
+                Orders failed to load. Check the error banner above.
               </div>
             ) : filteredOrders.length === 0 ? (
-              <div className="text-sm text-slate-500">No orders found.</div>
+              <div className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-sm text-slate-500">
+                {orders.length === 0
+                  ? "No orders visible for your tenant."
+                  : "No orders match the current filters."}
+              </div>
             ) : (
-              <div className="space-y-3">
-                {filteredOrders.map((order, idx) => (
-                  <div
-                    key={`${order.orderId}-${idx}`}
-                    className={`rounded-2xl p-4 transition-shadow ${
-                      selectedOrder === order.orderId
-                        ? "border-2 border-slate-900 bg-slate-50 shadow-lg ring-2 ring-slate-900/10"
-                        : "border border-slate-200 bg-white shadow-sm"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="font-semibold">{order.orderId}</div>
-                        <div className="text-sm text-slate-500">
-                          {order.labName} • {order.orderDate || "-"}
-                        </div>
-                        <div className="mt-1 text-xs text-slate-500">
-                          {order.labId || "-"}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        <Badge
-                          variant="outline"
-                          className={orderStatusBadgeClass(order.orderStatus)}
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <table className="w-full min-w-[760px] text-xs">
+                  <thead>
+                    <tr className="border-b bg-slate-50 text-left text-slate-500">
+                      <th className="px-2 py-2 font-medium">Order ID</th>
+                      <th className="px-2 py-2 font-medium">Lab</th>
+                      <th className="px-2 py-2 font-medium">Date</th>
+                      <th className="px-2 py-2 font-medium">Status</th>
+                      <th className="px-2 py-2 font-medium">Payment</th>
+                      <th className="px-2 py-2 font-medium text-right">Amount</th>
+                      <th className="px-2 py-2 font-medium">Items</th>
+                      <th className="px-2 py-2 font-medium" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredOrders.map((order) => {
+                      const orderStatus = normalizeOrderStatusLabel(order.orderStatus);
+                      const payStatus = normalizePaymentStatusLabel(order.paymentStatus);
+                      const isSelected = selectedOrder === order.orderId;
+                      return (
+                        <tr
+                          key={order.orderId}
+                          className={`border-b border-slate-100 transition-colors ${
+                            isSelected ? "bg-slate-100" : "hover:bg-slate-50"
+                          }`}
                         >
-                          {order.orderStatus || "Placed"}
-                        </Badge>
-                        <Badge variant="outline">
-                          {order.paymentStatus || "Pending"}
-                        </Badge>
-                        <Badge>
-                          ₹{Number(order.orderTotal || 0).toLocaleString()}
-                        </Badge>
-                      </div>
-                    </div>
-
-                    <div className="mt-3">
-                      <Button
-                        variant="outline"
-                        className="rounded-xl"
-                        disabled={updatingStatus}
-                        onClick={() => openOrder(order.orderId)}
-                      >
-                        View Details
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                          <td className="px-2 py-2 font-mono font-medium text-slate-900">
+                            {order.orderId}
+                          </td>
+                          <td className="px-2 py-2 text-slate-700">
+                            <div className="max-w-[140px] truncate" title={order.labName}>
+                              {order.labName || order.labId || "—"}
+                            </div>
+                          </td>
+                          <td className="px-2 py-2 whitespace-nowrap text-slate-600">
+                            {order.orderDate || "—"}
+                          </td>
+                          <td className="px-2 py-2">
+                            <StatusBadge
+                              variant={orderStatusToVariant(orderStatus)}
+                              compact
+                            >
+                              {orderStatus}
+                            </StatusBadge>
+                          </td>
+                          <td className="px-2 py-2">
+                            <StatusBadge variant={paymentStatusToVariant(payStatus)} compact>
+                              {payStatus}
+                            </StatusBadge>
+                          </td>
+                          <td className="px-2 py-2 text-right font-medium tabular-nums text-slate-900">
+                            {formatCurrency(order.orderTotal)}
+                          </td>
+                          <td className="px-2 py-2 text-slate-600">
+                            {formatItemCount(order.itemCount ?? 0)}
+                          </td>
+                          <td className="px-2 py-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2 text-[11px]"
+                              disabled={updatingStatus}
+                              onClick={() => openOrder(order.orderId)}
+                            >
+                              View
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </CardContent>
         </Card>
 
         <Card className="rounded-2xl shadow-sm">
-          <CardHeader>
-            <CardTitle>Order Details</CardTitle>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Order Details</CardTitle>
           </CardHeader>
           <CardContent>
             {!selectedOrder ? (
-              <div className="text-sm text-slate-500">
-                Select an order to view details.
+              <div className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-500">
+                Select an order from the list to view summary, items, and status actions.
               </div>
             ) : detailsLoading ? (
               <div className="flex items-center gap-2 text-sm text-slate-500">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Loading details...
+                Loading details…
               </div>
-            ) : details?.order ? (
+            ) : selectedOrderSummary ? (
               <div className="space-y-4">
-                <div>
-                  <div className="font-semibold">{details.order.orderId}</div>
-                  <div className="text-sm text-slate-500">
-                    {details.order.labName}
+                <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+                  <div className="font-mono text-sm font-semibold text-slate-900">
+                    {selectedOrderSummary.orderId}
                   </div>
-                </div>
-
-                <div className="text-sm space-y-1">
-                  <div>Invoice: {details.order.invoiceId || "-"}</div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-slate-600">Status:</span>
-                    <Badge
-                      variant="outline"
-                      className={`text-xs ${orderStatusBadgeClass(details.order.orderStatus)}`}
+                  <div className="mt-0.5 text-sm text-slate-600">
+                    {selectedOrderSummary.labName || selectedOrderSummary.labId}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <StatusBadge
+                      variant={orderStatusToVariant(
+                        normalizeOrderStatusLabel(selectedOrderSummary.orderStatus)
+                      )}
                     >
-                      {details.order.orderStatus || "Placed"}
-                    </Badge>
+                      {normalizeOrderStatusLabel(selectedOrderSummary.orderStatus)}
+                    </StatusBadge>
+                    <StatusBadge
+                      variant={paymentStatusToVariant(
+                        normalizePaymentStatusLabel(selectedOrderSummary.paymentStatus)
+                      )}
+                    >
+                      {normalizePaymentStatusLabel(selectedOrderSummary.paymentStatus)}
+                    </StatusBadge>
+                    <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-900">
+                      {formatCurrency(selectedOrderSummary.orderTotal)}
+                    </span>
                   </div>
-                  <div>Payment: {details.order.paymentStatus || "-"}</div>
-                  <div>
-                    Total: ₹
-                    {Number(details.order.orderTotal || 0).toLocaleString()}
-                  </div>
-                  <div>Contact: {details.order.contactPerson || "-"}</div>
-                  <div>Phone: {details.order.mobileNumber || "-"}</div>
                 </div>
 
-                <div className="space-y-2">
-                  <div className="text-sm font-medium text-slate-700">
-                    Update Status
-                  </div>
+                <section className="space-y-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Order Summary
+                  </h3>
+                  <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
+                    <dt className="text-slate-500">Order Date</dt>
+                    <dd className="text-slate-900">
+                      {selectedOrderSummary.orderDate || "Not captured"}
+                    </dd>
+                    <dt className="text-slate-500">Invoice</dt>
+                    <dd className="text-slate-900">
+                      {formatMissingField(selectedOrderSummary.invoiceId)}
+                    </dd>
+                    <dt className="text-slate-500">Contact</dt>
+                    <dd className="text-slate-900">
+                      {formatMissingField(selectedOrderSummary.contactPerson)}
+                    </dd>
+                    <dt className="text-slate-500">Phone</dt>
+                    <dd className="text-slate-900">
+                      {formatMissingField(selectedOrderSummary.mobileNumber)}
+                    </dd>
+                  </dl>
+                </section>
 
+                <section className="space-y-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Items
+                  </h3>
+                  {details.lines?.length ? (
+                    <div className="overflow-x-auto rounded-lg border border-slate-200">
+                      <table className="w-full min-w-[420px] text-xs">
+                        <thead>
+                          <tr className="border-b bg-slate-50 text-left text-slate-500">
+                            <th className="px-2 py-1.5">Product</th>
+                            <th className="px-2 py-1.5">SKU</th>
+                            <th className="px-2 py-1.5 text-right">Qty</th>
+                            <th className="px-2 py-1.5 text-right">Unit</th>
+                            <th className="px-2 py-1.5 text-right">Line total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {details.lines.map((line) => (
+                            <tr key={line.orderLineId} className="border-b border-slate-100">
+                              <td className="px-2 py-1.5 font-medium text-slate-900">
+                                {line.productName || "—"}
+                              </td>
+                              <td className="px-2 py-1.5 font-mono text-[10px] text-slate-600">
+                                {line.productId || "—"}
+                              </td>
+                              <td className="px-2 py-1.5 text-right tabular-nums">
+                                {line.quantity}
+                              </td>
+                              <td className="px-2 py-1.5 text-right tabular-nums">
+                                {formatCurrency(line.unitSellingPrice)}
+                              </td>
+                              <td className="px-2 py-1.5 text-right font-medium tabular-nums">
+                                {formatCurrency(line.netLineTotal)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-slate-500">No line items found.</div>
+                  )}
+                </section>
+
+                <section className="space-y-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Status Actions
+                  </h3>
                   <Textarea
-                    placeholder="Optional note for this status update..."
+                    placeholder="Optional note for this status update…"
                     value={statusNote}
                     onChange={(e) => setStatusNote(e.target.value)}
                     disabled={updatingStatus || detailsLoading}
-                    className="min-h-[90px] rounded-xl"
+                    className="min-h-[72px] rounded-lg text-sm"
                   />
-
                   <div className="grid grid-cols-2 gap-2">
                     <Button
                       variant="outline"
-                      className="rounded-xl"
+                      size="sm"
                       disabled={updatingStatus || detailsLoading}
                       onClick={() => handleUpdateStatus("Processing")}
                     >
                       {updatingStatus ? (
                         <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Updating...
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          Updating…
                         </>
                       ) : (
                         "Mark Processing"
                       )}
                     </Button>
-
                     <Button
                       variant="outline"
-                      className="rounded-xl"
+                      size="sm"
                       disabled={updatingStatus || detailsLoading}
                       onClick={() => handleUpdateStatus("Fulfilled")}
                     >
-                      {updatingStatus ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Updating...
-                        </>
-                      ) : (
-                        "Mark Fulfilled"
-                      )}
+                      Mark Fulfilled
                     </Button>
-
                     <Button
                       variant="outline"
-                      className="rounded-xl"
+                      size="sm"
                       disabled={updatingStatus || detailsLoading}
                       onClick={() => handleUpdateStatus("Placed")}
                     >
-                      {updatingStatus ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Updating...
-                        </>
-                      ) : (
-                        "Reset to Placed"
-                      )}
+                      Reset to Placed
                     </Button>
-
                     <Button
                       variant="outline"
-                      className="rounded-xl border-red-200 text-red-600 hover:bg-red-50"
+                      size="sm"
+                      className="border-red-200 text-red-600 hover:bg-red-50"
                       disabled={updatingStatus || detailsLoading}
                       onClick={() => handleUpdateStatus("Cancelled")}
                     >
-                      {updatingStatus ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Updating...
-                        </>
-                      ) : (
-                        "Cancel Order"
-                      )}
+                      Cancel Order
                     </Button>
                   </div>
-                </div>
+                </section>
 
-                {details.order.notes ? (
-                  <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">
-                    <div className="font-medium">Notes</div>
-                    <div className="mt-1 whitespace-pre-wrap">
-                      {details.order.notes}
+                <section className="space-y-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Activity / Notes
+                  </h3>
+                  {statusNote ? (
+                    <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                      <div className="text-xs font-medium text-amber-800">Pending status note</div>
+                      <div className="mt-1 whitespace-pre-wrap">{statusNote}</div>
                     </div>
-                  </div>
-                ) : null}
-
-                <div className="space-y-2">
-                  {details.lines?.length ? (
-                    details.lines.map((line) => (
-                      <div key={line.orderLineId} className="rounded-xl border p-3">
-                        <div className="font-medium">{line.productName}</div>
-                        <div className="text-sm text-slate-500">
-                          {line.productId} • Qty {line.quantity}
-                        </div>
-                        <div className="mt-1 text-sm text-slate-600">
-                          Unit Price: ₹
-                          {Number(line.unitSellingPrice || 0).toLocaleString()}
-                        </div>
-                        <div className="text-sm text-slate-600">
-                          Tax: ₹{Number(line.taxAmount || 0).toLocaleString()}
-                        </div>
-                        <div className="text-sm font-medium">
-                          ₹{Number(line.netLineTotal || 0).toLocaleString()}
-                        </div>
-                      </div>
-                    ))
+                  ) : null}
+                  {selectedOrderSummary.notes ? (
+                    <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                      <div className="text-xs font-medium text-slate-500">Order notes</div>
+                      <div className="mt-1 whitespace-pre-wrap">{selectedOrderSummary.notes}</div>
+                    </div>
                   ) : (
-                    <div className="text-sm text-slate-500">
-                      No line items found.
-                    </div>
+                    <div className="text-sm text-slate-500">No order notes on file.</div>
                   )}
-                </div>
+                  {formatDateTime(selectedOrderSummary.updatedAt) ? (
+                    <div className="text-xs text-slate-500">
+                      Last updated: {formatDateTime(selectedOrderSummary.updatedAt)}
+                    </div>
+                  ) : selectedOrderSummary.createdAt ? (
+                    <div className="text-xs text-slate-500">
+                      Created: {formatDateTime(selectedOrderSummary.createdAt)}
+                    </div>
+                  ) : null}
+                </section>
               </div>
             ) : (
-              <div className="text-sm text-slate-500">No details available.</div>
+              <div className="text-sm text-slate-500">No details available for this order.</div>
             )}
           </CardContent>
         </Card>

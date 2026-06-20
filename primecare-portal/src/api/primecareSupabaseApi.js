@@ -18,6 +18,7 @@ import {
 } from "@/utils/qualificationPipeline.js";
 import {
   buildOrdersByLabDateIndex,
+  collectOrderRowIds,
   computeRevenueMetrics,
   normalizedOrderRowStatus,
   orderCountsTowardDashboardRevenue,
@@ -2249,6 +2250,7 @@ export function normalizeAdminDashboardPayload(data) {
       recentVisits: num(s.recentVisits ?? s.recent_visits),
       totalSoldValue: num(s.totalSoldValue ?? s.total_sold_value),
       todayCollections: num(s.todayCollections ?? s.today_collections),
+      ordersRowCount: num(s.ordersRowCount ?? s.orders_row_count),
     },
     visits: data?.visits ?? { visits: [] },
     insights: data?.insights ?? { insights: [], recommendedActions: [] },
@@ -2300,16 +2302,43 @@ function logAdminDashboardKpiDebug(rowCounts, kpis, queryErrors) {
   console.log("[AdminDashboard KPI debug]", { rowCounts, kpis, queryErrors });
 }
 
+function recordAdminDashboardApiExecutionTrace({
+  durationMs,
+  payload,
+  rowCounts,
+  orderIds,
+  cacheHit = false,
+}) {
+  recordPredatorApiExecution({
+    module: "Admin Dashboard",
+    apiName: "getAdminDashboardRead",
+    durationMs,
+    rowsReturned:
+      num(rowCounts?.orders) + num(rowCounts?.ar) + num(rowCounts?.visits),
+    payloadBytes: estimatePayloadBytes(payload),
+    detail: {
+      orders: num(rowCounts?.orders),
+      ar: num(rowCounts?.ar),
+      visits: num(rowCounts?.visits),
+      inventory: num(rowCounts?.inventory),
+      orderIds: orderIds || [],
+      cacheHit,
+    },
+  });
+}
+
 let adminDashboardReadCache = {
   result: null,
   loadedAt: 0,
+  rowCounts: null,
+  orderIds: [],
 };
 
 /** @type {Promise<{ success: boolean, data?: object }>|null} */
 let adminDashboardReadInFlight = null;
 
 export function invalidateAdminDashboardReadCache() {
-  adminDashboardReadCache = { result: null, loadedAt: 0 };
+  adminDashboardReadCache = { result: null, loadedAt: 0, rowCounts: null, orderIds: [] };
   adminDashboardReadInFlight = null;
   perfLog("getAdminDashboardRead.cacheCleared");
   recordPredatorCacheEvent({ cacheKey: "adminDashboardRead", event: "invalidate" });
@@ -2368,7 +2397,7 @@ export async function getAdminDashboardRead(options = {}) {
   }
 
   if (!adminDashboardServerCacheEnabled()) {
-    adminDashboardReadCache = { result: null, loadedAt: 0 };
+    adminDashboardReadCache = { result: null, loadedAt: 0, rowCounts: null, orderIds: [] };
   }
 
   if (
@@ -2382,6 +2411,13 @@ export async function getAdminDashboardRead(options = {}) {
     });
     const ageMs = Date.now() - adminDashboardReadCache.loadedAt;
     const cachedData = adminDashboardReadCache.result?.data;
+    const cachedRowCounts = adminDashboardReadCache.rowCounts || {
+      orders: cachedData?.summary?.ordersRowCount ?? 0,
+      ar: 0,
+      visits: cachedData?.summary?.recentVisits ?? 0,
+      inventory: cachedData?.summary?.stockStats?.totalSkus ?? 0,
+    };
+    const cachedOrderIds = adminDashboardReadCache.orderIds || [];
     recordPredatorCacheEvent({
       cacheKey: "adminDashboardRead",
       event: "hit",
@@ -2393,14 +2429,23 @@ export async function getAdminDashboardRead(options = {}) {
         totalSkus:
           cachedData?.summary?.stockStats?.totalSkus ?? cachedData?.summary?.inventorySkus ?? 0,
         totalSoldValue: cachedData?.summary?.totalSoldValue ?? 0,
+        ordersRowCount: cachedRowCounts.orders ?? 0,
       },
     });
     recordAdminDashboardApiUiSnapshots(cachedData, "getAdminDashboardRead.cacheHit");
+    const cacheDurationMs = Math.round(performance.now() - dashboardReadT0);
     recordPredatorTiming({
       module: "Admin Dashboard",
       step: "api.getAdminDashboardRead",
-      durationMs: Math.round(performance.now() - dashboardReadT0),
-      detail: { cacheHit: true },
+      durationMs: cacheDurationMs,
+      detail: { cacheHit: true, orders: cachedRowCounts.orders ?? 0 },
+    });
+    recordAdminDashboardApiExecutionTrace({
+      durationMs: cacheDurationMs,
+      payload: cachedData,
+      rowCounts: cachedRowCounts,
+      orderIds: cachedOrderIds,
+      cacheHit: true,
     });
     return adminDashboardReadCache.result;
   }
@@ -2429,6 +2474,7 @@ export async function getAdminDashboardRead(options = {}) {
       ]);
 
     const ordersRaw = ordersRes.error ? [] : ordersRes.data || [];
+    const orderIds = collectOrderRowIds(ordersRaw);
     const arRaw = arRes.error ? [] : arRes.data || [];
     const visitsAllRaw = visitsRes.error ? [] : visitsRes.data || [];
     const invRaw = invRes.error ? [] : invRes.data || [];
@@ -2542,6 +2588,14 @@ export async function getAdminDashboardRead(options = {}) {
       recentVisits: visitsTotalCount,
       totalSoldValue: revenue.totalSoldValue,
       todayCollections,
+      ordersRowCount: ordersRaw.length,
+    };
+
+    const rowCounts = {
+      orders: ordersRaw.length,
+      ar: arRaw.length,
+      visits: visitsTotalCount,
+      inventory: invRaw.length,
     };
 
     const dashboardInsights = buildDashboardInsightsFromMetrics({
@@ -2607,7 +2661,12 @@ export async function getAdminDashboardRead(options = {}) {
       !queryErrors.length &&
       (ordersRaw.length > 0 || arRaw.length > 0 || visitsTotalCount > 0);
     if (mayCache) {
-      adminDashboardReadCache = { result, loadedAt: Date.now() };
+      adminDashboardReadCache = {
+        result,
+        loadedAt: Date.now(),
+        rowCounts,
+        orderIds,
+      };
       endTotal({ cached: true });
     } else {
       perfLog("getAdminDashboardRead.skipCache", {
@@ -2619,24 +2678,19 @@ export async function getAdminDashboardRead(options = {}) {
       });
       endTotal({ cached: false, queryErrors });
     }
+    const apiDurationMs = Math.round(performance.now() - dashboardReadT0);
     recordPredatorTiming({
       module: "Admin Dashboard",
       step: "api.getAdminDashboardRead",
-      durationMs: Math.round(performance.now() - dashboardReadT0),
-      detail: { queryErrors },
+      durationMs: apiDurationMs,
+      detail: { queryErrors, orders: ordersRaw.length, orderIds },
     });
-    recordPredatorApiExecution({
-      module: "Admin Dashboard",
-      apiName: "getAdminDashboardRead",
-      durationMs: Math.round(performance.now() - dashboardReadT0),
-      rowsReturned: ordersRaw.length + arRaw.length + visitsTotalCount,
-      payloadBytes: estimatePayloadBytes(payload),
-      detail: {
-        orders: ordersRaw.length,
-        ar: arRaw.length,
-        visits: visitsTotalCount,
-        inventory: invRaw.length,
-      },
+    recordAdminDashboardApiExecutionTrace({
+      durationMs: apiDurationMs,
+      payload,
+      rowCounts,
+      orderIds,
+      cacheHit: false,
     });
     recordAdminDashboardApiUiSnapshots(payload, "getAdminDashboardRead.fresh");
     return result;
@@ -4512,6 +4566,7 @@ export function mapOrderRow(row, labNameFallback = "", rowIndex = 0) {
     ),
     createdAt,
     createdBy,
+    updatedAt: str(row.updated_at ?? row.updatedAt ?? ""),
     notes: str(row.notes ?? row.order_notes ?? row.remark ?? ""),
     mobileNumber: str(
       row.mobile_number ?? row.mobileNumber ?? row.phone ?? row.contact_phone ?? ""
@@ -4636,6 +4691,41 @@ export async function getLabRecentOrdersRead(labId) {
   }
 }
 
+async function fetchOrderLineCounts() {
+  const counts = new Map();
+  if (!supabase) return counts;
+
+  const accumulate = (rows) => {
+    for (const line of rows || []) {
+      const oid = str(line.order_id ?? line.orderId);
+      if (oid) counts.set(oid, (counts.get(oid) || 0) + 1);
+    }
+  };
+
+  try {
+    const { data, error } = await supabase.from("order_lines").select("order_id");
+    if (!error && Array.isArray(data)) accumulate(data);
+  } catch {
+    /* optional */
+  }
+
+  try {
+    const { data, error } = await supabase.from("order_items").select("order_id");
+    if (!error && Array.isArray(data)) {
+      for (const line of data) {
+        const oid = str(line.order_id ?? line.orderId);
+        if (oid && !counts.has(oid)) {
+          counts.set(oid, (counts.get(oid) || 0) + 1);
+        }
+      }
+    }
+  } catch {
+    /* optional */
+  }
+
+  return counts;
+}
+
 /**
  * Read-only order list: bare `from("orders").select("*")` (no filters, limits, or ranges).
  * Never throws.
@@ -4668,12 +4758,32 @@ export async function getOrdersRead(_params = {}) {
       labMap = new Map();
     }
 
+    const lineCounts = await fetchOrderLineCounts();
+
     const orders = rawList.map((r, idx) => {
       const labId = str(r.lab_id ?? r.labId ?? r.lab_uuid ?? r.labUUID ?? "");
-      return mapOrderRow(r, labMap.get(labId) || "", idx);
+      const mapped = mapOrderRow(r, labMap.get(labId) || "", idx);
+      const businessId = str(r.order_id ?? r.orderId ?? mapped.orderId);
+      const uuidId = r.id != null ? str(r.id) : "";
+      const itemCount =
+        lineCounts.get(businessId) ??
+        (uuidId ? lineCounts.get(uuidId) : 0) ??
+        0;
+      return { ...mapped, itemCount };
     });
 
-    return { success: true, data: { orders }, error: null };
+    const orderIds = orders.map((o) => str(o.orderId)).filter(Boolean);
+    const meta = {
+      rawRowCount: rawList.length,
+      mappedRowCount: orders.length,
+      orderIds,
+    };
+
+    if (rawList.length !== orders.length) {
+      console.warn("[getOrdersRead] row count mismatch after mapping", meta);
+    }
+
+    return { success: true, data: { orders }, meta, error: null };
   } catch (err) {
     const message = err?.message || String(err);
     console.warn("[getOrdersRead] failed:", message);
