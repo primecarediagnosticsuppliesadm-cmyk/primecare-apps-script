@@ -404,7 +404,9 @@ CREATE VIEW public.v_lab_catalog AS
 -- Name: v_labs_credit; Type: VIEW; Schema: public; Owner: -
 --
 
-CREATE VIEW public.v_labs_credit AS
+CREATE VIEW public.v_labs_credit
+WITH (security_invoker = true)
+AS
  SELECT l.tenant_id,
     l.lab_id,
     l.lab_name,

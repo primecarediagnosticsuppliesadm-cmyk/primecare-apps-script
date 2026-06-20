@@ -1421,7 +1421,9 @@ export async function createPaymentWrite(payload = {}) {
       return { success: false, error: "amount_received must be > 0", data: null };
     }
 
-    const arSel = await supabase.from("ar_credit_control").select("*").eq("lab_id", lab_id).limit(1);
+    let arSelQuery = supabase.from("ar_credit_control").select("*").eq("lab_id", lab_id);
+    if (tenant_id) arSelQuery = arSelQuery.eq("tenant_id", tenant_id);
+    const arSel = await arSelQuery.limit(1);
 
     if (arSel.error) {
       console.warn("[createPaymentWrite] ar_credit_control select:", arSel.error.message);
@@ -1429,6 +1431,10 @@ export async function createPaymentWrite(payload = {}) {
     }
 
     const arRow = Array.isArray(arSel.data) && arSel.data[0];
+    const scoped_tenant_id = tenant_id || str(arRow?.tenant_id ?? arRow?.tenantId);
+    if (!scoped_tenant_id) {
+      return { success: false, error: "tenant_id is required for AR write", data: null };
+    }
     const old_outstanding = arRow
       ? num(
           arRow.outstanding ??
@@ -1448,7 +1454,7 @@ export async function createPaymentWrite(payload = {}) {
     const created_at = new Date().toISOString();
     const writePayload = {
       payment_id,
-      tenant_id,
+      tenant_id: scoped_tenant_id,
       order_id,
       lab_id,
       amount_received,
@@ -1479,7 +1485,11 @@ export async function createPaymentWrite(payload = {}) {
       updated_at: new Date().toISOString(),
     };
 
-    const arUpd = await supabase.from("ar_credit_control").update(arPatch).eq("lab_id", lab_id);
+    const arUpd = await supabase
+      .from("ar_credit_control")
+      .update(arPatch)
+      .eq("tenant_id", scoped_tenant_id)
+      .eq("lab_id", lab_id);
 
     if (arUpd.error) {
       console.warn(
@@ -1498,7 +1508,7 @@ export async function createPaymentWrite(payload = {}) {
         eventType: "payment_received",
         sourceModule: "collections",
         sourceId: payment_id,
-        tenantId: tenant_id,
+        tenantId: scoped_tenant_id,
         targetLabId: lab_id,
         targetRole: "admin",
         severity: "info",
@@ -1753,8 +1763,11 @@ export async function updateCollectionNotesWrite(payload = {}) {
     const note = str(payload.note);
     const next_follow_up_date = str(payload.nextFollowUp ?? payload.next_follow_up_date).slice(0, 10);
     const next_action = str(payload.nextAction ?? payload.next_action);
+    const tenant_id = str(payload.tenantId ?? payload.tenant_id) || null;
 
-    const arSel = await supabase.from("ar_credit_control").select("*").eq("lab_id", lab_id).limit(1);
+    let arSelQuery = supabase.from("ar_credit_control").select("*").eq("lab_id", lab_id);
+    if (tenant_id) arSelQuery = arSelQuery.eq("tenant_id", tenant_id);
+    const arSel = await arSelQuery.limit(1);
     if (arSel.error) {
       console.warn("[updateCollectionNotesWrite] ar_credit_control select:", arSel.error.message);
       return { success: false, error: arSel.error.message, data: null };
@@ -1763,6 +1776,11 @@ export async function updateCollectionNotesWrite(payload = {}) {
     const arRow = Array.isArray(arSel.data) && arSel.data[0];
     if (!arRow) {
       return { success: false, error: `Lab not found in ar_credit_control: ${lab_id}`, data: null };
+    }
+
+    const scoped_tenant_id = tenant_id || str(arRow.tenant_id ?? arRow.tenantId);
+    if (!scoped_tenant_id) {
+      return { success: false, error: "tenant_id is required for AR write", data: null };
     }
 
     const outstandingAmount = num(
@@ -1793,6 +1811,7 @@ export async function updateCollectionNotesWrite(payload = {}) {
     const arUpd = await supabase
       .from("ar_credit_control")
       .update(patch)
+      .eq("tenant_id", scoped_tenant_id)
       .eq("lab_id", lab_id)
       .select();
 
@@ -4442,7 +4461,11 @@ export async function createOrderWrite(payload = {}) {
       }
 
       const amt = normalizedLines.reduce((s, l) => s + num(l.total_price), 0);
-      const bump = await bumpArOutstandingForFulfillment({ lab_id, deltaAmount: amt });
+      const bump = await bumpArOutstandingForFulfillment({
+        lab_id,
+        tenant_id,
+        deltaAmount: amt,
+      });
       if (bump.success && !bump.skipped) {
         console.log("AR POSTED FOR ORDER", {
           phase: "createOrderWrite",
@@ -4918,12 +4941,22 @@ async function ledgerHasOrderOutMovement(orderId) {
   return Array.isArray(q.data) && q.data.length > 0;
 }
 
-async function bumpArOutstandingForFulfillment({ lab_id, deltaAmount }) {
+async function bumpArOutstandingForFulfillment({ lab_id, tenant_id, deltaAmount }) {
   if (!supabase || !lab_id || num(deltaAmount) <= 0) {
     return { success: true, skipped: true };
   }
   const sid = normalizeLabIdKey(lab_id);
-  const sel = await supabase.from("ar_credit_control").select("*").eq("lab_id", sid).limit(1);
+  const tid = str(tenant_id);
+  if (!tid) {
+    return { success: false, error: "tenant_id is required for AR write", skipped: true };
+  }
+
+  const sel = await supabase
+    .from("ar_credit_control")
+    .select("*")
+    .eq("tenant_id", tid)
+    .eq("lab_id", sid)
+    .limit(1);
   if (sel.error) {
     return { success: false, error: sel.error.message, skipped: true };
   }
@@ -4948,10 +4981,18 @@ async function bumpArOutstandingForFulfillment({ lab_id, deltaAmount }) {
   if (td >= 0) {
     patch.total_delivered = td + d;
   }
-  let upd = await supabase.from("ar_credit_control").update(patch).eq("lab_id", sid);
+  let upd = await supabase
+    .from("ar_credit_control")
+    .update(patch)
+    .eq("tenant_id", tid)
+    .eq("lab_id", sid);
   if (!upd.error) return { success: true, skipped: false };
   delete patch.total_delivered;
-  upd = await supabase.from("ar_credit_control").update(patch).eq("lab_id", sid);
+  upd = await supabase
+    .from("ar_credit_control")
+    .update(patch)
+    .eq("tenant_id", tid)
+    .eq("lab_id", sid);
   if (!upd.error) return { success: true, skipped: false };
   return { success: false, error: upd.error.message, skipped: true };
 }
@@ -5136,6 +5177,7 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
       if (!arDoneFlag && labId && orderAmt > 0) {
         const bump = await bumpArOutstandingForFulfillment({
           lab_id: labId,
+          tenant_id: str(orderRow.tenant_id ?? orderRow.tenantId) || null,
           deltaAmount: orderAmt,
         });
         if (bump.success && !bump.skipped) {
