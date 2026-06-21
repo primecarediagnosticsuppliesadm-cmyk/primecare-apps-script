@@ -1204,15 +1204,18 @@ export default function CollectionsPage({
           }
         }
         const summaryFromApi = payload.summary || {};
-        const scopedSummary =
-          isLabAccount || distributorScope?.tenantId
-            ? summarizeCollectionsList(rows, 0)
-            : {
-                totalOutstanding: Number(summaryFromApi.totalOutstanding ?? 0),
-                overdueCount: Number(summaryFromApi.overdueCount ?? 0),
-                highRiskCount: Number(summaryFromApi.highRiskCount ?? 0),
-                todayCollections: Number(summaryFromApi.todayCollections ?? 0),
-              };
+        const useFilteredSummary =
+          isLabAccount ||
+          distributorScope?.tenantId ||
+          currentUser?.role === ROLES.AGENT;
+        const scopedSummary = useFilteredSummary
+          ? summarizeCollectionsList(rows, Number(summaryFromApi.todayCollections ?? 0))
+          : {
+              totalOutstanding: Number(summaryFromApi.totalOutstanding ?? 0),
+              overdueCount: Number(summaryFromApi.overdueCount ?? 0),
+              highRiskCount: Number(summaryFromApi.highRiskCount ?? 0),
+              todayCollections: Number(summaryFromApi.todayCollections ?? 0),
+            };
 
         setSummary({
           totalOutstanding: Number(scopedSummary.totalOutstanding ?? 0),

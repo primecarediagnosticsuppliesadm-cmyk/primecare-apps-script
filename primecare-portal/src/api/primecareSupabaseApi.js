@@ -1189,10 +1189,21 @@ export function mapCollectionsRowFromLabsCredit(rawRow) {
     explicitStatus: explicitPaymentStatus,
   });
 
+  const arAgentId = str(rawRow.agent_id ?? rawRow.agentId ?? "");
+  const labAssignedAgentId = str(
+    rawRow.assigned_agent_id ??
+      rawRow.assignedAgentId ??
+      m.assignedAgentId ??
+      ""
+  );
+  const effectiveAgentId = arAgentId || labAssignedAgentId;
+
   return {
     labId: normalizeLabIdKey(m.labId),
     labName: m.labName,
     assignedAgent: cleanCollectionAgentName(m.assignedAgent),
+    agentId: effectiveAgentId,
+    assignedAgentId: effectiveAgentId,
     outstandingAmount,
     totalPaid,
     totalDelivered: num(rawRow.total_delivered ?? rawRow.totalDelivered ?? 0),
@@ -1282,11 +1293,17 @@ export function mapCollectionsRowFromArCredit(
     arRow.collections_notes ?? arRow.collectionsNotes ?? arRow.Collections_Notes ?? ""
   );
 
+  const arAgentId = str(arRow.agent_id ?? arRow.agentId ?? "");
+  const labAssignedAgentId = str(m?.assignedAgentId ?? "");
+  const effectiveAgentId = arAgentId || labAssignedAgentId;
+
   return {
     tenantId: str(arRow.tenant_id ?? arRow.tenantId ?? m?.tenantId ?? ""),
     labId,
     labName,
     assignedAgent,
+    agentId: effectiveAgentId,
+    assignedAgentId: effectiveAgentId,
     outstandingAmount,
     totalPaid,
     totalDelivered,

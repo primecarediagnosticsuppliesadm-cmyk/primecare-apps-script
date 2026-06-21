@@ -107,6 +107,19 @@ export function filterLabsForUser(labs = [], currentUser) {
   return [];
 }
 
+/**
+ * Agent scope for AR rows: explicit ar_credit_control.agent_id, else labs.assigned_agent_id.
+ */
+export function collectionEffectiveAgentId(item) {
+  return (
+    item?.agentId ||
+    item?.agent_id ||
+    item?.assignedAgentId ||
+    item?.assigned_agent_id ||
+    ""
+  );
+}
+
 export function filterCollectionsForUser(collections = [], currentUser) {
   if (!currentUser) return [];
 
@@ -115,7 +128,7 @@ export function filterCollectionsForUser(collections = [], currentUser) {
   if (currentUser.role === ROLES.AGENT) {
     return collections.filter((item) =>
       agentRecordMatchesUser(
-        item.agentId || item.assignedAgentId,
+        collectionEffectiveAgentId(item),
         item.assignedAgent || item.agentName || item.Agent_Name,
         currentUser
       )
