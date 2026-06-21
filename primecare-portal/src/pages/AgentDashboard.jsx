@@ -11,12 +11,12 @@ import PageSkeleton from "@/components/ux/PageSkeleton";
 import { usePortalToast } from "@/components/ux";
 import AgentLabSnapshotDrawer from "@/components/agent/AgentLabSnapshotDrawer.jsx";
 import {
-  TodayKpiStrip,
+  AgentCommandCenterKpiStrip,
+  TodaysMissionCard,
   ActionQueueCard,
-  QuickActionsBar,
   QueueEmptyState,
   TodaysRouteSection,
-  AgentPerformanceStrip,
+  AgentRecentActivitySection,
 } from "@/pages/AgentDailyWorkspaceSections.jsx";
 import { buildAgentDailyWorkspaceModel } from "@/pages/agentDailyWorkspace.js";
 import {
@@ -31,7 +31,7 @@ import {
 import { applyOperationalTaskAction } from "@/operations/operationalTaskStateStore.js";
 import { buildAgentOperationalTaskModel } from "@/operations/operationalTaskModel.js";
 import { emitTaskLedgerEvent, flushPendingOperationalEvents } from "@/operations/operationalEventBridge.js";
-import AgentOperationalTaskSection from "@/components/operational/AgentOperationalTaskSection.jsx";
+import { getNotificationEventsRead } from "@/api/notificationApi.js";
 
 const EMPTY_WORKSPACE = {
   summary: {
@@ -102,6 +102,8 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
   const [completedQueueIds] = useState(() => new Set());
   const [taskTick, setTaskTick] = useState(0);
   const [completingTaskId, setCompletingTaskId] = useState("");
+  const [activityRows, setActivityRows] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(true);
 
   const tenantId = currentUser?.tenantId || "";
   const { showToast } = usePortalToast();
@@ -151,6 +153,29 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
   useEffect(() => {
     loadWorkspace(false);
   }, [loadWorkspace]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setActivityLoading(true);
+      try {
+        const res = await getNotificationEventsRead({
+          tenantId,
+          limit: 12,
+        });
+        if (!cancelled && res?.success) {
+          setActivityRows(Array.isArray(res.data) ? res.data : []);
+        }
+      } catch {
+        if (!cancelled) setActivityRows([]);
+      } finally {
+        if (!cancelled) setActivityLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, refreshing]);
 
   useEffect(() => {
     if (!tenantId) return;
@@ -386,9 +411,22 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
     [currentUser, loadWorkspace, completingTaskId, showToast]
   );
 
+  const handleStartRoute = useCallback(() => {
+    const first = visibleQueue[0];
+    if (first) {
+      handleStartVisit(first);
+      return;
+    }
+    if (todaysRoute?.flat?.length) {
+      openLabSnapshot(todaysRoute.flat[0]);
+      return;
+    }
+    setActivePage?.("visits");
+  }, [visibleQueue, todaysRoute, handleStartVisit, openLabSnapshot, setActivePage]);
+
   if (loading) {
     return (
-      <PageSkeleton kpiCount={6} kpiColumns={3} listRows={6} className="max-w-3xl lg:max-w-none" />
+      <PageSkeleton kpiCount={3} kpiColumns={3} listRows={6} className="mx-auto w-full max-w-[1520px]" />
     );
   }
 
@@ -396,11 +434,11 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
   const topPriority = visibleQueue[0] || null;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 pb-24 lg:max-w-4xl">
+    <div className="mx-auto w-full max-w-[1520px] space-y-4 px-1 pb-24 sm:px-2 md:pb-6">
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Field execution workspace
+            Command center
           </p>
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
             {topPriority
@@ -409,8 +447,8 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
           </h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
             {hasQueue
-              ? `${visibleQueue.length} prioritized action${visibleQueue.length === 1 ? "" : "s"} · ${kpis.collectionsDue} collections due`
-              : "Queue clear — log visits or collections as you work the territory"}
+              ? `${visibleQueue.length} prioritized · ₹${Number(kpis.totalOutstanding || 0).toLocaleString("en-IN")} outstanding`
+              : "Queue clear — check collections and route for today"}
           </p>
         </div>
         <Button
@@ -431,40 +469,36 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
         </div>
       ) : null}
 
-      <TodayKpiStrip kpis={kpis} loading={false} />
-
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold">Quick actions</h2>
-        <QuickActionsBar
-          onLogVisit={() => setActivePage?.("visits")}
-          onRecordCollection={() => setActivePage?.("collections")}
-          onMyLabs={() => setActivePage?.("labs")}
-        />
-      </section>
-
-      <AgentOperationalTaskSection
-        taskModel={operationalTaskModel}
-        onTaskAction={handleOperationalTaskAction}
-        onQuickAction={handleTaskQuickAction}
+      <AgentCommandCenterKpiStrip
+        kpis={kpis}
+        actionQueue={visibleQueue}
+        loading={false}
       />
 
-      <section className="space-y-2">
+      <TodaysMissionCard
+        kpis={kpis}
+        actionQueue={visibleQueue}
+        topPriority={topPriority}
+        onStartRoute={handleStartRoute}
+        onOpenCollections={() => setActivePage?.("collections")}
+      />
+
+      <section className="space-y-1.5">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold">Priority queue</h2>
           {hasQueue ? (
-            <span className="text-xs text-muted-foreground">Highest urgency first</span>
+            <span className="text-xs text-muted-foreground">Who to work first</span>
           ) : null}
         </div>
         {hasQueue ? (
-          <ul className="space-y-2">
+          <ul className="grid gap-3 md:grid-cols-2">
             {visibleQueue.map((item) => (
-              <li key={item.id}>
+              <li key={item.id} className="min-w-0">
                 <ActionQueueCard
                   item={item}
                   onStartVisit={handleStartVisit}
                   onRecordCollection={handleRecordCollection}
                   onOpenLab={openLabSnapshot}
-                  onAddFollowUp={handleAddFollowUp}
                 />
               </li>
             ))}
@@ -474,15 +508,18 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
         )}
       </section>
 
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold">Today&apos;s route</h2>
-        <TodaysRouteSection route={todaysRoute} onOpenStop={openLabSnapshot} />
-      </section>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <section className="space-y-1.5">
+          <h2 className="text-sm font-semibold">Today&apos;s route</h2>
+          <TodaysRouteSection route={todaysRoute} onOpenStop={openLabSnapshot} />
+        </section>
 
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold">Today&apos;s performance</h2>
-        <AgentPerformanceStrip metrics={performance} />
-      </section>
+        <AgentRecentActivitySection
+          recentVisits={workspace.recentVisits}
+          notifications={activityRows}
+          loading={activityLoading}
+        />
+      </div>
 
       {(workspace.tasks || []).length > 0 ? (
         <section className="space-y-2 rounded-xl border border-dashed border-border p-3">

@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button";
 import KpiCard from "@/components/ux/KpiCard";
 import KpiCardGrid from "@/components/ux/KpiCardGrid";
 import StatusBadge from "@/components/ux/StatusBadge";
-import EmptyState from "@/components/ux/EmptyState";
 import {
   Building2,
   ClipboardCheck,
@@ -12,8 +11,6 @@ import {
   ShieldAlert,
   IndianRupee,
   MapPin,
-  Phone,
-  MessageCircle,
   ArrowRight,
   PlusCircle,
 } from "lucide-react";
@@ -21,6 +18,13 @@ import {
   priorityToBadgeVariant,
   queueTypeLabel,
 } from "@/pages/agentDailyWorkspace.js";
+import {
+  deriveAttentionReasons,
+  deriveQueueRecommendedAction,
+  formatAgentActivityNotification,
+  formatAgentActivityVisit,
+  formatAgentCurrency,
+} from "@/pages/agentUxPresentation.js";
 
 function formatCurrency(value) {
   return `₹${Number(value || 0).toLocaleString("en-IN")}`;
@@ -89,67 +93,302 @@ export const TodayKpiStrip = memo(function TodayKpiStrip({ kpis, loading }) {
   );
 });
 
+const VISIT_QUEUE_TYPES = new Set([
+  "VISIT_DUE",
+  "NO_VISIT",
+  "FOLLOW_UP_DUE",
+  "INACTIVE_LAB",
+  "QUALIFICATION_PENDING",
+  "ONBOARDING_PENDING",
+]);
+
+export const AgentCommandCenterKpiStrip = memo(function AgentCommandCenterKpiStrip({
+  kpis,
+  actionQueue = [],
+  loading,
+}) {
+  const visitsDue = (actionQueue || []).filter((item) =>
+    VISIT_QUEUE_TYPES.has(String(item.queueType || "").toUpperCase())
+  ).length;
+
+  return (
+    <KpiCardGrid columns={3}>
+      <KpiCard
+        loading={loading}
+        title="Collections Due"
+        value={kpis.collectionsDue}
+        icon={CircleDollarSign}
+        subtitle="Accounts needing payment"
+      />
+      <KpiCard
+        loading={loading}
+        title="Visits Due"
+        value={visitsDue}
+        icon={ClipboardCheck}
+        subtitle="Scheduled or overdue visits"
+      />
+      <KpiCard
+        loading={loading}
+        title="Total Outstanding"
+        value={formatCurrency(kpis.totalOutstanding)}
+        icon={IndianRupee}
+        subtitle="Across your territory"
+      />
+    </KpiCardGrid>
+  );
+});
+
+function formatActivityWhen(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  if (diffMs < 60 * 60 * 1000) return "Just now";
+  if (diffMs < 24 * 60 * 60 * 1000) {
+    return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  }
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+export const AgentRecentActivitySection = memo(function AgentRecentActivitySection({
+  recentVisits = [],
+  notifications = [],
+  loading = false,
+}) {
+  const visitItems = (recentVisits || []).slice(0, 5).map((visit) => ({
+    id: `visit-${visit.visitId || visit.id || visit.labId}-${visit.visitDate}`,
+    label: formatAgentActivityVisit(visit),
+    when: formatActivityWhen(visit.visitDate),
+    ts: visit.visitDate || "",
+  }));
+
+  const notifyItems = (notifications || []).slice(0, 5).map((row) => ({
+    id: `notify-${row.event_id || row.id || row.created_at}`,
+    label: formatAgentActivityNotification(row),
+    when: formatActivityWhen(row.created_at),
+    ts: row.created_at || "",
+  }));
+
+  const merged = [...notifyItems, ...visitItems]
+    .sort((a, b) => String(b.ts).localeCompare(String(a.ts)))
+    .slice(0, 6);
+
+  if (loading) {
+    return (
+      <div className="animate-pulse rounded-lg border border-border bg-card px-3 py-2">
+        <div className="h-3 w-24 rounded bg-muted" />
+      </div>
+    );
+  }
+
+  return (
+    <section className="space-y-1.5">
+      <h2 className="text-sm font-semibold">Recent activity</h2>
+      {merged.length === 0 ? (
+        <p className="rounded-lg border border-dashed px-3 py-2 text-center text-[11px] text-muted-foreground">
+          No recent activity yet.
+        </p>
+      ) : (
+        <ul className="divide-y divide-border rounded-lg border border-border bg-card">
+          {merged.map((item) => (
+            <li key={item.id} className="flex items-start justify-between gap-2 px-2.5 py-2">
+              <p className="min-w-0 flex-1 text-[11px] leading-snug text-foreground">{item.label}</p>
+              <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                {item.when}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+});
+
+export const TodaysMissionCard = memo(function TodaysMissionCard({
+  kpis,
+  actionQueue = [],
+  topPriority,
+  onStartRoute,
+  onOpenCollections,
+}) {
+  const labsToVisit = (actionQueue || []).filter((item) =>
+    VISIT_QUEUE_TYPES.has(String(item.queueType || "").toUpperCase())
+  ).length;
+  const collectionsDue = Number(kpis?.collectionsDue ?? 0);
+  const recoveryOpportunity = Number(kpis?.totalOutstanding ?? 0);
+
+  return (
+    <article className="rounded-xl border-2 border-[var(--pc-brand-primary)]/25 bg-gradient-to-br from-[var(--pc-brand-primary)]/8 via-card to-card p-3 shadow-sm md:p-4">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--pc-brand-primary)]">
+        Today&apos;s Mission
+      </p>
+      <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-3 text-[11px] lg:grid-cols-4">
+        <div>
+          <p className="text-muted-foreground">Labs to visit</p>
+          <p className="text-lg font-bold tabular-nums text-foreground">{labsToVisit}</p>
+        </div>
+        <div>
+          <p className="text-muted-foreground">Collections due</p>
+          <p className="text-lg font-bold tabular-nums text-foreground">{collectionsDue}</p>
+        </div>
+        <div className="col-span-2 sm:col-span-1">
+          <p className="text-muted-foreground">Expected recovery</p>
+          <p className="text-lg font-bold tabular-nums text-foreground">
+            {formatAgentCurrency(recoveryOpportunity)}
+          </p>
+        </div>
+        <div className="col-span-2">
+          <p className="text-muted-foreground">Highest priority</p>
+          <p className="truncate text-sm font-semibold text-foreground">
+            {topPriority ? topPriority.labName : "Queue clear"}
+          </p>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button type="button" size="sm" className="h-9 flex-1 rounded-lg px-3 text-xs font-semibold sm:flex-none" onClick={onStartRoute}>
+          Start Route
+          <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+        </Button>
+        <Button type="button" size="sm" variant="outline" className="h-9 rounded-lg px-3 text-xs" onClick={onOpenCollections}>
+          Open Collections
+        </Button>
+      </div>
+    </article>
+  );
+});
+
+export const AgentProgressCards = memo(function AgentProgressCards({ kpis, performance }) {
+  const collectionTarget = 10000;
+  const collectedAmount = Number(performance?.collectionsRecovered ?? 0);
+  const collectionPct = Math.min(
+    100,
+    Math.round((collectedAmount / collectionTarget) * 100) || 0
+  );
+
+  const visitTarget = 5;
+  const visitsDone = Number(kpis?.visitsCompletedToday ?? 0);
+  const visitPct = Math.min(100, Math.round((visitsDone / visitTarget) * 100) || 0);
+
+  const followUpsDue = Number(kpis?.pendingFollowUps ?? 0);
+
+  return (
+    <div className="grid gap-2 sm:grid-cols-3">
+      <article className="rounded-lg border border-border bg-card px-2.5 py-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Collection progress
+        </p>
+        <div className="mt-1 flex items-baseline justify-between gap-2">
+          <span className="text-sm font-bold tabular-nums text-foreground">
+            {formatAgentCurrency(collectedAmount)}
+          </span>
+          <span className="text-[10px] text-muted-foreground">
+            of {formatAgentCurrency(collectionTarget)} target
+          </span>
+        </div>
+        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-[var(--pc-brand-primary)] transition-all"
+            style={{ width: `${collectionPct}%` }}
+          />
+        </div>
+        <p className="mt-1 text-[10px] text-muted-foreground">{collectionPct}% complete</p>
+      </article>
+
+      <article className="rounded-lg border border-border bg-card px-2.5 py-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Visits progress
+        </p>
+        <div className="mt-1 flex items-baseline gap-1">
+          <span className="text-sm font-bold tabular-nums text-foreground">{visitsDone}</span>
+          <span className="text-[10px] text-muted-foreground">/ {visitTarget} today</span>
+        </div>
+        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-emerald-500 transition-all"
+            style={{ width: `${visitPct}%` }}
+          />
+        </div>
+      </article>
+
+      <article className="rounded-lg border border-border bg-card px-2.5 py-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Follow-ups due
+        </p>
+        <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">{followUpsDue}</p>
+        <p className="text-[10px] text-muted-foreground">
+          {followUpsDue === 0 ? "All caught up" : "Scheduled or overdue"}
+        </p>
+      </article>
+    </div>
+  );
+});
+
 export const ActionQueueCard = memo(function ActionQueueCard({
   item,
   onStartVisit,
   onRecordCollection,
   onOpenLab,
-  onAddFollowUp,
 }) {
+  const reasons = deriveAttentionReasons(item);
+  const recommended = deriveQueueRecommendedAction(item);
+  const outstanding = Number(item.outstanding || 0);
+
   return (
-    <article className="rounded-2xl border border-border bg-card p-3.5 shadow-[var(--pc-shadow-card)]">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <h3 className="truncate text-sm font-semibold text-foreground">{item.labName}</h3>
-            <StatusBadge variant={priorityToBadgeVariant(item.priority)} compact>
-              {item.priority}
-            </StatusBadge>
-            <StatusBadge variant="info" compact>
-              {queueTypeLabel(item.queueType)}
-            </StatusBadge>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">{item.reason}</p>
-        </div>
-        {item.outstanding > 0 ? (
-          <div className="shrink-0 text-right text-xs font-semibold text-foreground">
-            {formatCurrency(item.outstanding)}
+    <article className="flex h-full flex-col rounded-xl border border-border bg-card p-3 shadow-sm">
+      <div className="flex items-start justify-between gap-4">
+        <h3 className="min-w-0 flex-1 truncate text-base font-bold text-foreground md:text-lg">
+          {item.labName}
+        </h3>
+        {outstanding > 0 ? (
+          <div className="shrink-0 text-right">
+            <div className="text-2xl font-bold tabular-nums leading-none text-foreground">
+              {formatAgentCurrency(outstanding)}
+            </div>
+            <div className="mt-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              Outstanding
+            </div>
           </div>
         ) : null}
       </div>
 
-      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-        <div>
-          <dt className="inline">Overdue: </dt>
-          <dd className="inline font-medium text-foreground">{Number(item.daysOverdue || 0)}d</dd>
-        </div>
-        <div>
-          <dt className="inline">Last visit: </dt>
-          <dd className="inline font-medium text-foreground">{item.lastVisit || "—"}</dd>
-        </div>
-        <div className="col-span-2">
-          <dt className="inline">Next: </dt>
-          <dd className="inline font-medium text-foreground">{item.nextAction}</dd>
-        </div>
-        {item.qualificationLabel ? (
-          <div className="col-span-2">
-            <dt className="inline">Qualification: </dt>
-            <dd className="inline font-medium text-foreground">{item.qualificationLabel}</dd>
+      <div className="mt-2 flex flex-1 flex-col gap-2 md:grid md:grid-cols-2 md:gap-3">
+        {reasons.length > 0 ? (
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Why this is priority
+            </p>
+            <ul className="mt-1 space-y-0.5">
+              {reasons.map((reason) => (
+                <li key={reason} className="text-[11px] text-foreground">
+                  · {reason}
+                </li>
+              ))}
+            </ul>
           </div>
-        ) : null}
-      </dl>
+        ) : (
+          <div />
+        )}
 
-      <div className="mt-3 flex flex-wrap gap-1.5">
+        <div className="rounded-md bg-muted/40 px-2 py-1.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Recommended action
+          </p>
+          <p className="text-xs font-semibold text-foreground">{recommended}</p>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-1.5 border-t border-border/60 pt-2.5">
         <Button
           type="button"
           size="sm"
-          className="h-8 rounded-lg px-2.5 text-xs"
+          className="h-8 rounded-lg px-2.5 text-xs font-semibold"
           onClick={() => onStartVisit(item)}
         >
           Start Visit
           <ArrowRight className="ml-1 h-3.5 w-3.5" />
         </Button>
-        {item.queueType === "COLLECTION_DUE" || item.outstanding > 0 ? (
+        {outstanding > 0 ? (
           <Button
             type="button"
             size="sm"
@@ -157,7 +396,8 @@ export const ActionQueueCard = memo(function ActionQueueCard({
             className="h-8 rounded-lg px-2.5 text-xs"
             onClick={() => onRecordCollection(item)}
           >
-            Collection
+            <CircleDollarSign className="mr-1 h-3.5 w-3.5" />
+            Record Payment
           </Button>
         ) : null}
         <Button
@@ -168,21 +408,6 @@ export const ActionQueueCard = memo(function ActionQueueCard({
           onClick={() => onOpenLab(item)}
         >
           Open Lab
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="h-8 rounded-lg px-2.5 text-xs"
-          onClick={() => onAddFollowUp(item)}
-        >
-          Follow-Up
-        </Button>
-        <Button type="button" size="sm" variant="ghost" className="h-8 rounded-lg px-2 text-xs" disabled title="Coming soon">
-          <Phone className="h-3.5 w-3.5" />
-        </Button>
-        <Button type="button" size="sm" variant="ghost" className="h-8 rounded-lg px-2 text-xs" disabled title="Coming soon">
-          <MessageCircle className="h-3.5 w-3.5" />
         </Button>
       </div>
     </article>
@@ -340,22 +565,27 @@ export function QueueEmptyState({ type }) {
     type === "collections"
       ? {
           title: "No collections due",
-          description: "Outstanding is clear for now. Keep visits moving on risk labs.",
+          description: "Outstanding is clear for now.",
         }
       : type === "followups"
         ? {
             title: "No follow-ups pending",
-            description: "You're caught up on scheduled follow-ups for today.",
+            description: "You're caught up for today.",
           }
         : type === "visits"
           ? {
               title: "No visits planned",
-              description: "Use Start Visit when you're ready to log field activity.",
+              description: "Start a visit when you're in the field.",
             }
           : {
               title: "Queue is clear",
-              description: "No urgent actions right now. Use quick actions to log new work.",
+              description: "No urgent actions right now.",
             };
 
-  return <EmptyState title={copy.title} description={copy.description} className="py-8" />;
+  return (
+    <p className="rounded-lg border border-dashed px-3 py-2.5 text-center text-[11px] text-muted-foreground">
+      <span className="font-medium text-foreground">{copy.title}. </span>
+      {copy.description}
+    </p>
+  );
 }

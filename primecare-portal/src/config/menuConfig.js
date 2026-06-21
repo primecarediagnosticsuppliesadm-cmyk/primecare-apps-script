@@ -43,6 +43,9 @@ const ADMIN_HQ_MENU_KEYS = new Set([
 /** Lab sidebar: ordering, account, activity only. */
 const LAB_MENU_ORDER = ["labOrders", "labAccount", "notifications"];
 
+/** Agent sidebar: execution workflow only (Activity Center merged into Dashboard). */
+const AGENT_MENU_ORDER = ["dashboard", "collections", "visits", "labs"];
+
 /**
  * Central Menu Configuration for PrimeCare Portal
  * - Single source of truth for all pages
@@ -152,6 +155,9 @@ export function getMenuForRole(role) {
     if (normalizedRole === ROLES.LAB && !LAB_MENU_ORDER.includes(item.key)) {
       return false;
     }
+    if (normalizedRole === ROLES.AGENT && !AGENT_MENU_ORDER.includes(item.key)) {
+      return false;
+    }
     if (hqMenuKeys && !hqMenuKeys.has(item.key)) return false;
     return (
       PERMISSIONS[item.key]?.includes(role) && isPageVisibleInCurrentEnvironment(item.key)
@@ -161,6 +167,12 @@ export function getMenuForRole(role) {
   if (normalizedRole === ROLES.LAB) {
     return [...items].sort(
       (a, b) => LAB_MENU_ORDER.indexOf(a.key) - LAB_MENU_ORDER.indexOf(b.key)
+    );
+  }
+
+  if (normalizedRole === ROLES.AGENT) {
+    return [...items].sort(
+      (a, b) => AGENT_MENU_ORDER.indexOf(a.key) - AGENT_MENU_ORDER.indexOf(b.key)
     );
   }
 

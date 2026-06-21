@@ -151,10 +151,10 @@ function FieldLabel({ children, helper }) {
 }
 
 const STEP_PANEL_CLASS =
-  "space-y-4 rounded-2xl border border-border/60 bg-gradient-to-b from-card via-card to-[var(--pc-brand-primary)]/[0.03] p-4 shadow-sm md:max-w-3xl md:p-5";
+  "space-y-3 rounded-2xl border border-border/60 bg-gradient-to-b from-card via-card to-[var(--pc-brand-primary)]/[0.03] p-3 shadow-sm md:max-w-3xl md:p-4";
 
 const QUALIFICATION_PANEL_CLASS =
-  "space-y-4 rounded-2xl border-2 border-violet-200/80 bg-gradient-to-br from-violet-50/80 via-card to-[var(--pc-brand-primary)]/[0.04] p-4 shadow-md ring-1 ring-violet-100 md:max-w-3xl md:p-5";
+  "space-y-3 rounded-2xl border-2 border-violet-200/80 bg-gradient-to-br from-violet-50/80 via-card to-[var(--pc-brand-primary)]/[0.04] p-3 shadow-md ring-1 ring-violet-100 md:max-w-3xl md:p-4";
 
 const FIELD_INPUT_CLASS = "h-11 w-full rounded-xl border-input text-base md:max-w-xl";
 
@@ -635,8 +635,8 @@ function VisitWizardStepper({ steps, currentIndex, labSelected, onGoToStep }) {
   const qualificationIndex = steps.findIndex((s) => s.key === "qualification");
 
   return (
-    <nav aria-label="Visit wizard progress" className="-mx-1 overflow-x-auto pb-1">
-      <ol className="flex min-w-max items-center px-1">
+    <nav aria-label="Visit wizard progress" className="-mx-1 overflow-x-auto pb-0">
+      <ol className="flex min-w-max items-center gap-0 px-0.5">
         {steps.map((step, index) => {
           const StepIcon = step.icon || ClipboardCheck;
           const isActive = index === currentIndex;
@@ -652,36 +652,36 @@ function VisitWizardStepper({ steps, currentIndex, labSelected, onGoToStep }) {
                   if (!needsLab) onGoToStep(index);
                 }}
                 className={cn(
-                  "flex min-w-[4.75rem] flex-col items-center rounded-2xl px-2 py-2 text-center transition-all duration-200 sm:min-w-[5.25rem] sm:px-2.5 sm:py-2.5",
-                  "hover:scale-[1.02] disabled:hover:scale-100",
+                  "flex min-w-[3.25rem] flex-col items-center rounded-lg px-1 py-1 text-center transition-all duration-200 sm:min-w-[3.75rem] sm:px-1.5 sm:py-1",
+                  "hover:scale-[1.01] disabled:hover:scale-100",
                   isActive &&
-                    "min-w-[5.5rem] scale-[1.04] bg-[var(--pc-brand-primary)] text-white shadow-lg shadow-[var(--pc-brand-primary)]/30 ring-2 ring-[var(--pc-brand-primary)] sm:min-w-[6rem]",
+                    "min-w-[3.75rem] scale-[1.01] bg-[var(--pc-brand-primary)] text-white shadow-sm ring-1 ring-[var(--pc-brand-primary)] sm:min-w-[4rem]",
                   isComplete && !isActive && "bg-emerald-50 ring-1 ring-emerald-200/90",
                   isQualification &&
                     labSelected &&
                     !isActive &&
                     !isComplete &&
-                    "ring-2 ring-violet-300/50",
+                    "ring-1 ring-violet-300/50",
                   needsLab && "cursor-not-allowed opacity-45"
                 )}
               >
                 <span
                   className={cn(
                     "flex items-center justify-center rounded-full transition-all duration-200",
-                    isActive ? "h-11 w-11 bg-white/20 text-white" : "h-9 w-9",
+                    isActive ? "h-7 w-7 bg-white/20 text-white" : "h-6 w-6",
                     !isActive && isComplete && "bg-emerald-500 text-white",
                     !isActive && !isComplete && "bg-muted text-muted-foreground"
                   )}
                 >
                   {isComplete && !isActive ? (
-                    <Check className="h-5 w-5" strokeWidth={3} />
+                    <Check className="h-4 w-4" strokeWidth={3} />
                   ) : (
-                    <StepIcon className={cn("h-4 w-4", isActive && "h-[1.125rem] w-[1.125rem]")} />
+                    <StepIcon className={cn("h-3.5 w-3.5", isActive && "h-4 w-4")} />
                   )}
                 </span>
                 <span
                   className={cn(
-                    "mt-2 text-[10px] font-semibold leading-tight sm:text-[11px]",
+                    "mt-1 text-[9px] font-semibold leading-tight sm:text-[10px]",
                     isActive ? "text-white" : "text-slate-700"
                   )}
                 >
@@ -691,7 +691,7 @@ function VisitWizardStepper({ steps, currentIndex, labSelected, onGoToStep }) {
               {index < steps.length - 1 ? (
                 <div
                   className={cn(
-                    "mx-0.5 h-2 w-5 shrink-0 rounded-full transition-colors duration-200 sm:w-8",
+                    "mx-0.5 h-1 w-3 shrink-0 rounded-full transition-colors duration-200 sm:w-5",
                     index < currentIndex ? "bg-emerald-500" : "bg-muted/90"
                   )}
                   aria-hidden
@@ -2058,10 +2058,10 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
   return (
     <div
       className={cn(
-        "mx-auto max-w-5xl space-y-4",
+        "mx-auto max-w-3xl space-y-3",
         showMobileNav || (isReviewStep && savePhase !== "success")
-          ? "pb-[calc(6.5rem+env(safe-area-inset-bottom,0px))] md:pb-6"
-          : "pb-6"
+          ? "pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-4"
+          : "pb-4"
       )}
     >
       <header>
@@ -2124,7 +2124,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
       ) : null}
 
       <Card className="overflow-hidden rounded-2xl border-border/80 shadow-[var(--pc-shadow-card)]">
-        <CardHeader className="space-y-3 border-b border-border/50 bg-muted/20 pb-4">
+        <CardHeader className="space-y-2 border-b border-border/50 bg-muted/20 pb-3">
           <div>
             <CardTitle className="text-lg">Log field visit</CardTitle>
             <CardDescription className="text-sm">
@@ -2138,7 +2138,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
           />
         </CardHeader>
 
-        <CardContent className="space-y-4 pt-4">
+        <CardContent className="space-y-3 pt-3">
           <div ref={wizardStepAnchorRef} className="h-0 w-full scroll-mt-4" aria-hidden />
           <VisitWizardStepper
             steps={AGENT_VISIT_SECTION_STEPS}

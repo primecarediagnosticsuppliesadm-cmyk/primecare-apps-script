@@ -12,18 +12,32 @@ import {
   ShieldAlert,
   Plus,
   X,
+  IndianRupee,
+  ArrowRight,
 } from "lucide-react";
 import { createLabWrite, getLabsCredit } from "@/api/primecareSupabaseApi";
 import { ROLES } from "@/config/roles";
 import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
 import { summarizeLabsCreditPortfolio } from "@/metrics/computeRiskMetrics.js";
 import { filterLabsForUser } from "@/utils/accessFilters.js";
+import {
+  startCollectionFromWorkspaceItem,
+  startVisitFromWorkspaceItem,
+} from "@/pages/agentVisitContext.js";
+import {
+  deriveLabRecommendedAction,
+  formatAgentCurrency,
+  formatAgentShortDate,
+  formatLastVisitRelative,
+  hasDisplayValue,
+} from "@/pages/agentUxPresentation.js";
 import { loadTenantFoundationRegistry } from "@/tenant/tenantFoundationData.js";
 import {
   readDistributorLabContext,
   setDistributorLabContext,
 } from "@/tenant/tenantFoundationStore.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
+import { cn } from "@/lib/utils";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -316,14 +330,119 @@ function CreditBadge({ status }) {
   );
 }
 
+function AgentMyLabCard({ lab, onStartVisit, onRecordPayment, onOpenLab }) {
+  const outstanding = Number(lab.outstandingAmount || lab.outstanding || 0);
+  const lastVisitRelative = formatLastVisitRelative(lab.lastVisit);
+  const lastPayment = formatAgentShortDate(lab.nextFollowUp);
+  const recommended = deriveLabRecommendedAction(lab);
+  const statusLabel = hasDisplayValue(lab.status) ? lab.status : "";
+  const stageLabel = hasDisplayValue(lab.stage) ? lab.stage : "";
+
+  return (
+    <article className="flex h-full flex-col rounded-xl border border-border bg-card p-3 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-base font-bold text-slate-900">
+            {lab.labName || "Unnamed Lab"}
+          </h3>
+          {lab.area ? (
+            <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{lab.area}</p>
+          ) : null}
+        </div>
+        {outstanding > 0 ? (
+          <div className="shrink-0 text-right">
+            <p className="text-[10px] text-muted-foreground">Outstanding</p>
+            <p className="text-xl font-bold tabular-nums leading-none text-slate-900">
+              {formatAgentCurrency(outstanding)}
+            </p>
+          </div>
+        ) : (
+          <CreditBadge status={lab.creditStatus} />
+        )}
+      </div>
+
+      {(statusLabel || stageLabel || lastVisitRelative || lastPayment) ? (
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+          {statusLabel ? (
+            <span>
+              <span className="text-muted-foreground">Status </span>
+              <span className="font-medium capitalize text-foreground">{statusLabel}</span>
+            </span>
+          ) : null}
+          {stageLabel && !statusLabel ? (
+            <span>
+              <span className="text-muted-foreground">Stage </span>
+              <span className="font-medium capitalize text-foreground">{stageLabel}</span>
+            </span>
+          ) : null}
+          {lastVisitRelative ? (
+            <span>
+              <span className="text-muted-foreground">Last visit </span>
+              <span className="font-medium text-foreground">{lastVisitRelative}</span>
+            </span>
+          ) : null}
+          {lastPayment ? (
+            <span>
+              <span className="text-muted-foreground">Last collection </span>
+              <span className="font-medium text-foreground">{lastPayment}</span>
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="mt-2 flex-1 rounded-md bg-muted/40 px-2 py-1.5">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Recommended
+        </p>
+        <p className="text-xs font-semibold text-foreground">{recommended}</p>
+      </div>
+
+      <div className="mt-2.5 flex flex-wrap gap-1.5 border-t border-border/60 pt-2.5">
+        <Button
+          type="button"
+          size="sm"
+          className="h-8 rounded-lg px-2.5 text-xs font-semibold"
+          onClick={() => onStartVisit(lab)}
+        >
+          Start Visit
+          <ArrowRight className="ml-1 h-3 w-3" />
+        </Button>
+        {outstanding > 0 ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 rounded-lg px-2 text-xs"
+            onClick={() => onRecordPayment(lab)}
+          >
+            <IndianRupee className="mr-1 h-3 w-3" />
+            Record Payment
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 rounded-lg px-2 text-xs"
+          onClick={() => onOpenLab(lab)}
+        >
+          Open Lab
+        </Button>
+      </div>
+    </article>
+  );
+}
+
 export default function LabsPage({
   currentUser,
   authToken,
   distributorScope = null,
   embedded = false,
+  setActivePage,
 }) {
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
   const isExecutive = currentUser?.role === ROLES.EXECUTIVE;
+  const isAgentView = currentUser?.role === ROLES.AGENT;
   const isDistributorOs = Boolean(distributorScope?.tenantId);
   const [labs, setLabs] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -512,16 +631,27 @@ export default function LabsPage({
     : str(homeTenantId || currentUser?.tenantId);
 
   return (
-    <div className={embedded ? "space-y-4" : "space-y-6"}>
+    <div
+      className={cn(
+        embedded ? "space-y-4" : "space-y-6",
+        isAgentView && !embedded && !isDistributorOs && "mx-auto w-full max-w-[1360px]"
+      )}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          {!embedded ? <h1 className="text-2xl font-semibold tracking-tight">Labs</h1> : null}
+          {!embedded ? (
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {isAgentView ? "My Labs" : "Labs"}
+            </h1>
+          ) : null}
           <p className="text-sm text-muted-foreground">
-            {currentUser?.role === "agent"
-              ? "Only labs assigned to this logged-in agent are visible."
-              : selectedDistributorTenantId
-                ? `Showing labs for ${selectedDistributorName || "selected distributor"} only.`
-                : "PrimeCare HQ labs only — use Distributor OS for distributor tenants."}
+            {isAgentView
+              ? "Your assigned accounts — outstanding, visits, and status at a glance."
+              : currentUser?.role === "agent"
+                ? "Only labs assigned to this logged-in agent are visible."
+                : selectedDistributorTenantId
+                  ? `Showing labs for ${selectedDistributorName || "selected distributor"} only.`
+                  : "PrimeCare HQ labs only — use Distributor OS for distributor tenants."}
           </p>
           {selectedDistributorTenantId && lockDistributor ? (
             <p className="mt-1 text-xs font-medium text-indigo-700">
@@ -571,6 +701,56 @@ export default function LabsPage({
         />
       ) : null}
 
+      {isAgentView && !isDistributorOs ? (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">
+              {filteredLabs.length} lab{filteredLabs.length === 1 ? "" : "s"} in your territory
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {["ALL", "OK", "NEAR_LIMIT", "HOLD"].map((filter) => (
+                <button
+                  key={filter}
+                  type="button"
+                  onClick={() => setCreditFilter(filter)}
+                  className={`rounded-full px-2.5 py-0.5 text-[11px] border transition ${
+                    creditFilter === filter
+                      ? "bg-slate-900 text-white border-slate-900"
+                      : "bg-white text-slate-700 border-slate-200"
+                  }`}
+                >
+                  {filter === "NEAR_LIMIT" ? "Near limit" : filter === "ALL" ? "All" : filter}
+                </button>
+              ))}
+            </div>
+          </div>
+          {filteredLabs.length === 0 ? (
+            <div className="text-sm text-slate-500">No labs assigned to you yet.</div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {filteredLabs.map((lab, idx) => (
+                <AgentMyLabCard
+                  key={`${lab.labId || lab.labName}-${idx}`}
+                  lab={lab}
+                  onStartVisit={(item) => {
+                    startVisitFromWorkspaceItem(item, {
+                      visitType: "Field Visit",
+                      source: "agent_labs",
+                    });
+                    setActivePage?.("visits");
+                  }}
+                  onRecordPayment={(item) => {
+                    startCollectionFromWorkspaceItem(item);
+                    setActivePage?.("collections");
+                  }}
+                  onOpenLab={() => setActivePage?.("collections")}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <>
       <div className="grid md:grid-cols-4 gap-4">
         <StatCard
           title="Visible Labs"
@@ -768,6 +948,8 @@ export default function LabsPage({
           </div>
         </CardContent>
       </Card>
+        </>
+      )}
     </div>
   );
 }

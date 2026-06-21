@@ -99,6 +99,7 @@ export default function PrimeCareWebPortal({
           <CollectionsPage
             currentUser={currentUser}
             authToken={authToken}
+            setActivePage={setActivePage}
           />
         );
 
@@ -107,6 +108,7 @@ export default function PrimeCareWebPortal({
           <LabsPage
             currentUser={currentUser}
             authToken={authToken}
+            setActivePage={setActivePage}
           />
         );
 

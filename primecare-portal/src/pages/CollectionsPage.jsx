@@ -44,6 +44,15 @@ import {
 import { ROLES } from "@/config/roles";
 import { filterCollectionsForUser } from "@/utils/accessFilters.js";
 import { notifyAgentWorkspaceRefresh } from "@/pages/agentVisitContext.js";
+import { startVisitFromWorkspaceItem } from "@/pages/agentVisitContext.js";
+import {
+  countMediumHighRisk,
+  computeCollectionProgressPct,
+  deriveCollectionRecommendedAction,
+  formatAgentShortDate,
+  formatLastVisitRelative,
+  hasDisplayValue,
+} from "@/pages/agentUxPresentation.js";
 import EvidenceUploadField, {
   EvidenceUploadProgress,
 } from "@/components/evidence/EvidenceUploadField.jsx";
@@ -73,6 +82,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   RefreshCw,
+  CircleDollarSign,
   ChevronDown,
   ChevronUp,
   Search,
@@ -83,7 +93,10 @@ import {
   Download,
   LifeBuoy,
   ArrowRight,
+  Building2,
+  CalendarClock,
 } from "lucide-react";
+import AgentCollectionPaymentDrawer from "@/components/agent/AgentCollectionPaymentDrawer.jsx";
 
 function findCollectionByLabId(list, labId) {
   const target = labIdKey(labId);
@@ -652,6 +665,140 @@ function CollectionStatusBadges({ item, paymentLabel, creditHoldLabel }) {
   );
 }
 
+function AgentCollectionWorkQueueRow({
+  item,
+  onRecordPayment,
+  onOpenLab,
+  onScheduleFollowUp,
+}) {
+  const outstanding = Number(item.outstandingAmount || 0);
+  const totalPaid = Number(item.totalPaid || 0);
+  const creditHoldLabel = creditHoldBadgeText(item.creditHold);
+  const lastPayment = formatAgentShortDate(item.lastFollowUp || item.nextFollowUp || "");
+  const recommended = deriveCollectionRecommendedAction(item);
+  const progressPct = computeCollectionProgressPct(outstanding, totalPaid);
+  const riskLabel = String(item.riskStatus || "").trim();
+
+  return (
+    <article className="rounded-xl border border-border bg-card p-3 shadow-sm">
+      <div className="flex flex-col gap-3 md:flex-row md:items-stretch md:gap-4">
+        {/* Left: identity, recommendation, actions */}
+        <div className="flex min-w-0 flex-1 flex-col gap-2 md:max-w-[42%]">
+          <div>
+            <h3 className="truncate text-base font-bold text-slate-900">
+              {item.labName || item.labId}
+            </h3>
+            <div className="mt-1 flex flex-wrap items-center gap-1">
+              <span className="text-[10px] font-medium text-[var(--pc-brand-primary)]">
+                Assigned to you
+              </span>
+              {creditHoldLabel ? (
+                <StatusBadge variant="danger" compact>
+                  {creditHoldLabel}
+                </StatusBadge>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="rounded-md bg-muted/40 px-2 py-1.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Recommended
+            </p>
+            <p className="text-xs font-semibold text-foreground">{recommended}</p>
+          </div>
+
+          <div className="mt-auto flex flex-wrap gap-1.5">
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 rounded-lg px-2.5 text-xs font-semibold"
+              onClick={onRecordPayment}
+            >
+              <IndianRupee className="mr-1 h-3.5 w-3.5" />
+              Record Payment
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 rounded-lg px-2 text-xs"
+              onClick={onScheduleFollowUp}
+            >
+              <CalendarClock className="mr-1 h-3 w-3" />
+              Follow-Up
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 rounded-lg px-2 text-xs"
+              onClick={onOpenLab}
+            >
+              <Building2 className="mr-1 h-3 w-3" />
+              Open Lab
+            </Button>
+          </div>
+        </div>
+
+        {/* Center: metrics */}
+        <div className="flex min-w-0 flex-1 flex-col justify-center gap-2 border-border/60 md:border-x md:px-4">
+          <div className="grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-2">
+            {totalPaid > 0 ? (
+              <div className="rounded-md bg-muted/30 px-2 py-1.5">
+                <p className="text-muted-foreground">Collected</p>
+                <p className="font-semibold tabular-nums text-foreground">{formatMoney(totalPaid)}</p>
+              </div>
+            ) : null}
+            {progressPct > 0 ? (
+              <div className="rounded-md bg-muted/30 px-2 py-1.5">
+                <p className="text-muted-foreground">Progress</p>
+                <p className="font-semibold tabular-nums text-foreground">{progressPct}%</p>
+              </div>
+            ) : null}
+            {hasDisplayValue(riskLabel) ? (
+              <div className="rounded-md bg-muted/30 px-2 py-1.5">
+                <p className="text-muted-foreground">Risk</p>
+                <StatusBadge variant={collectionRiskToVariant(riskLabel)} compact>
+                  {riskLabel}
+                </StatusBadge>
+              </div>
+            ) : null}
+            {lastPayment ? (
+              <div className="rounded-md bg-muted/30 px-2 py-1.5">
+                <p className="text-muted-foreground">Last collection</p>
+                <p className="font-medium text-foreground">{lastPayment}</p>
+              </div>
+            ) : null}
+          </div>
+          {progressPct > 0 ? (
+            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-[var(--pc-brand-primary)]"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+          ) : null}
+        </div>
+
+        {/* Right: outstanding */}
+        <div className="flex shrink-0 flex-row items-center justify-between gap-2 md:w-32 md:flex-col md:items-end md:justify-center md:text-right">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground md:hidden">
+            Outstanding
+          </p>
+          <div>
+            <p className="hidden text-[10px] font-medium uppercase tracking-wide text-muted-foreground md:block">
+              Outstanding
+            </p>
+            <p className="text-2xl font-bold tabular-nums leading-none text-slate-900">
+              {formatMoney(outstanding)}
+            </p>
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 function AgentCollectionSummaryRow({
   item,
   expanded,
@@ -1189,8 +1336,21 @@ function CollectionListItem({
   onRecordPayment,
   onViewDetails,
   onAddFollowUp,
+  onOpenLab,
+  onScheduleFollowUp,
   focusSection = "",
 }) {
+  if (isAgentView) {
+    return (
+      <AgentCollectionWorkQueueRow
+        item={item}
+        onRecordPayment={onRecordPayment}
+        onOpenLab={onOpenLab}
+        onScheduleFollowUp={onScheduleFollowUp}
+      />
+    );
+  }
+
   return (
     <Card className="overflow-hidden rounded-lg border-border shadow-sm">
       <CollectionSummaryRow
@@ -1229,6 +1389,7 @@ export default function CollectionsPage({
   viewMode,
   distributorScope = null,
   embedded = false,
+  setActivePage,
 }) {
   const isLabAccount = isLabAccountViewMode(viewMode, currentUser?.role);
   const accountLabels = useMemo(() => {
@@ -1274,6 +1435,7 @@ export default function CollectionsPage({
   const [proofRemarks, setProofRemarks] = useState("");
   const [evidenceUploading, setEvidenceUploading] = useState(false);
   const [expandFocus, setExpandFocus] = useState("");
+  const [paymentDrawerLabId, setPaymentDrawerLabId] = useState("");
 
   const isAgentView = useMemo(
     () => isAgentCollectionsView(currentUser, isLabAccount),
@@ -1446,10 +1608,10 @@ export default function CollectionsPage({
     try {
       setDetailsLoading(true);
 
-      if (listMatch) {
+      if (listMatch && !options?.suppressExpand) {
         setExpandedLabId(canonicalKey);
         setSelectedCollection(listMatch);
-      } else {
+      } else if (!options?.suppressExpand) {
         setExpandedLabId(canonicalKey);
       }
 
@@ -1522,7 +1684,9 @@ export default function CollectionsPage({
         };
       }
 
-      setExpandedLabId(canonicalKey);
+      if (!options?.suppressExpand) {
+        setExpandedLabId(canonicalKey);
+      }
       setSelectedCollection(collection);
       setHistory(historyRows);
 
@@ -1588,7 +1752,7 @@ export default function CollectionsPage({
 
   async function handleSaveCollection() {
     if (isLabAccount) return;
-    const selectedLabId = expandedLabId;
+    const selectedLabId = expandedLabId || paymentDrawerLabId;
     if (!selectedLabId) return;
 
     return predatorTrace("Collections", "page.save", async () => {
@@ -1708,10 +1872,16 @@ export default function CollectionsPage({
             });
 
             await loadCollections();
-            await openCollection(selectedLabId, {
-              fromTask: !!pendingTaskContext,
-              taskContext: pendingTaskContext,
-            });
+            if (isAgentView && paymentDrawerLabId) {
+              setPaymentDrawerLabId("");
+              setSelectedCollection(null);
+              setHistory([]);
+            } else {
+              await openCollection(selectedLabId, {
+                fromTask: !!pendingTaskContext,
+                taskContext: pendingTaskContext,
+              });
+            }
             return;
           }
 
@@ -1807,21 +1977,6 @@ export default function CollectionsPage({
     });
   }
 
-  usePredatorModuleValidation(
-    "PrimeCare OS",
-    currentUser,
-    {
-      primecareOs: true,
-      page: "collections",
-      homeTenantId: str(currentUser?.tenantId || currentUser?.tenant_id),
-      visibleCollections: collections.map((c) => ({
-        tenantId: c.tenantId,
-        labId: c.labId,
-      })),
-    },
-    !distributorScope?.tenantId && !loading && !isLabAccount
-  );
-
   const filteredCollections = useMemo(() => {
     if (isLabAccount) {
       return [...collections];
@@ -1836,6 +1991,20 @@ export default function CollectionsPage({
       (a, b) => Number(b.outstandingAmount || 0) - Number(a.outstandingAmount || 0)
     );
   }, [collections, search, isLabAccount]);
+
+  const agentQueueSummary = useMemo(() => {
+    if (!isAgentView) return null;
+    const totalCollected = filteredCollections.reduce(
+      (sum, row) => sum + Number(row.totalPaid || 0),
+      0
+    );
+    return {
+      totalOutstanding: summary.totalOutstanding,
+      accountsDue: filteredCollections.length,
+      mediumHighRisk: countMediumHighRisk(filteredCollections),
+      totalCollected,
+    };
+  }, [isAgentView, filteredCollections, summary.totalOutstanding]);
 
   useEffect(() => {
     if (!isLabAccount || loading || collections.length !== 1) return;
@@ -1869,6 +2038,11 @@ export default function CollectionsPage({
 
   function openCollectionPanel(labId, focusSection = "details") {
     const key = labIdKey(labId);
+    if (isAgentView && focusSection === "payment") {
+      setPaymentDrawerLabId(key);
+      void openCollection(labId, { focusSection, suppressExpand: true });
+      return;
+    }
     if (expandedLabId === key) {
       setExpandFocus(focusSection);
       if (focusSection === "payment") {
@@ -1926,12 +2100,34 @@ export default function CollectionsPage({
     [isLabAccount, showToast]
   );
 
+  const handleScheduleFollowUp = useCallback(
+    (item) => {
+      startVisitFromWorkspaceItem(
+        {
+          labId: item.labId,
+          labName: item.labName,
+          nextAction: item.nextAction || "Schedule follow-up",
+          outstanding: item.outstandingAmount,
+          daysOverdue: item.overdueDays,
+        },
+        { visitType: "Follow-up", followUpType: "Call", source: "collections_work_queue" }
+      );
+      setActivePage?.("visits");
+    },
+    [setActivePage]
+  );
+
   if (loading) {
     return <CollectionsLoading />;
   }
 
   return (
-    <div className="space-y-3 pb-6">
+    <div
+      className={cn(
+        "space-y-3 pb-6",
+        isAgentView && !embedded && "mx-auto w-full max-w-[1360px]"
+      )}
+    >
       {!embedded ? (
         <header className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -1946,7 +2142,9 @@ export default function CollectionsPage({
                 ? `Collections for ${distributorScope.tenantName || "selected distributor"} only.`
                 : isLabAccount
                   ? "Operational financial workspace for your lab: account health, invoices, and payment activity."
-                  : "PrimeCare HQ receivables — use Distributor OS for distributor tenants."}
+                  : isAgentView
+                    ? "Who to collect from, how much is owed, and what to do next."
+                    : "PrimeCare HQ receivables — use Distributor OS for distributor tenants."}
             </p>
           </div>
           <Button
@@ -2033,6 +2231,29 @@ export default function CollectionsPage({
               icon={ShieldAlert}
             />
           </div>
+        ) : isAgentView ? (
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+            <CompactAccountKpi
+              title="Outstanding"
+              value={formatMoney(agentQueueSummary?.totalOutstanding ?? summary.totalOutstanding)}
+              icon={IndianRupee}
+            />
+            <CompactAccountKpi
+              title="Accounts due"
+              value={String(agentQueueSummary?.accountsDue ?? filteredCollections.length)}
+              icon={Wallet}
+            />
+            <CompactAccountKpi
+              title="Med/high risk"
+              value={String(agentQueueSummary?.mediumHighRisk ?? 0)}
+              icon={ShieldAlert}
+            />
+            <CompactAccountKpi
+              title="Total collected"
+              value={formatMoney(agentQueueSummary?.totalCollected ?? 0)}
+              icon={CircleDollarSign}
+            />
+          </div>
         ) : (
           <KpiCardGrid columns={4}>
             <KpiCard
@@ -2063,7 +2284,9 @@ export default function CollectionsPage({
         <div className="sticky top-0 z-20 -mx-1 border-b border-border bg-background/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/90">
           <div className="space-y-2 rounded-lg border border-border bg-card p-2 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-xs font-semibold text-slate-700">Receivables</div>
+              <div className="text-xs font-semibold text-slate-700">
+                {isAgentView ? "Work queue" : "Receivables"}
+              </div>
               <div className="text-[11px] text-muted-foreground">
                 {filteredCollections.length} of {collections.length} shown
               </div>
@@ -2093,33 +2316,60 @@ export default function CollectionsPage({
               : "Try a different search term."
           }
         />
-      ) : (
-        <div
-          className={cn(
-            isLabAccount ? "mx-auto max-w-2xl space-y-2" : isAgentView ? "space-y-1.5" : "space-y-2"
-          )}
-          role="list"
-        >
+      ) : isLabAccount ? (
+        <div className="mx-auto max-w-2xl space-y-2" role="list">
           {filteredCollections.map((item) => {
             const key = labIdKey(item.labId);
             const isExpanded = expandedLabId === key;
-            if (isLabAccount) {
-              return (
-                <LabAccountTimeline
-                  key={key}
-                  item={item}
-                  history={isExpanded ? history : []}
-                  detailsLoading={isExpanded && detailsLoading}
-                  copy={accountLabels}
-                  collectionDetails={
-                    isExpanded && labIdKey(selectedCollection?.labId) === key
-                      ? selectedCollection
-                      : item
-                  }
-                  onWorkspaceAction={handleLabWorkspaceAction}
-                />
-              );
-            }
+            return (
+              <LabAccountTimeline
+                key={key}
+                item={item}
+                history={isExpanded ? history : []}
+                detailsLoading={isExpanded && detailsLoading}
+                copy={accountLabels}
+                collectionDetails={
+                  isExpanded && labIdKey(selectedCollection?.labId) === key
+                    ? selectedCollection
+                    : item
+                }
+                onWorkspaceAction={handleLabWorkspaceAction}
+              />
+            );
+          })}
+        </div>
+      ) : isAgentView ? (
+        <div className="grid gap-3" role="list">
+          {filteredCollections.map((item) => {
+            const key = labIdKey(item.labId);
+            return (
+              <CollectionListItem
+                key={key}
+                item={item}
+                expanded={false}
+                onToggleExpand={() => {}}
+                selectedCollection={null}
+                history={[]}
+                detailsLoading={false}
+                formProps={formProps}
+                pendingTaskContext={pendingTaskContext}
+                onSave={handleSaveCollection}
+                onCompleteTask={handleCompleteLinkedTask}
+                readOnly={false}
+                copy={accountLabels}
+                isAgentView
+                onRecordPayment={() => openCollectionPanel(item.labId, "payment")}
+                onOpenLab={() => setActivePage?.("labs")}
+                onScheduleFollowUp={() => handleScheduleFollowUp(item)}
+              />
+            );
+          })}
+        </div>
+      ) : (
+        <div className="space-y-2" role="list">
+          {filteredCollections.map((item) => {
+            const key = labIdKey(item.labId);
+            const isExpanded = expandedLabId === key;
             return (
               <CollectionListItem
                 key={key}
@@ -2141,7 +2391,7 @@ export default function CollectionsPage({
                 onCompleteTask={handleCompleteLinkedTask}
                 readOnly={false}
                 copy={accountLabels}
-                isAgentView={isAgentView}
+                isAgentView={false}
                 focusSection={isExpanded ? expandFocus : ""}
                 onRecordPayment={() => openCollectionPanel(item.labId, "payment")}
                 onViewDetails={() => openCollectionPanel(item.labId, "details")}
@@ -2151,6 +2401,35 @@ export default function CollectionsPage({
           })}
         </div>
       )}
+
+      {isAgentView ? (
+        <AgentCollectionPaymentDrawer
+          open={Boolean(paymentDrawerLabId)}
+          onClose={() => {
+            setPaymentDrawerLabId("");
+            setSelectedCollection(null);
+            setHistory([]);
+          }}
+          labName={selectedCollection?.labName}
+          loading={detailsLoading && Boolean(paymentDrawerLabId)}
+        >
+          {selectedCollection && labIdKey(selectedCollection.labId) === paymentDrawerLabId ? (
+            <CollectionExpandedPanel
+              collection={selectedCollection}
+              history={history}
+              detailsLoading={false}
+              pendingTaskContext={pendingTaskContext}
+              onSave={handleSaveCollection}
+              onCompleteTask={handleCompleteLinkedTask}
+              readOnly={false}
+              copy={accountLabels}
+              focusSection="payment"
+              isAgentView
+              {...formProps}
+            />
+          ) : null}
+        </AgentCollectionPaymentDrawer>
+      ) : null}
     </div>
   );
 }
