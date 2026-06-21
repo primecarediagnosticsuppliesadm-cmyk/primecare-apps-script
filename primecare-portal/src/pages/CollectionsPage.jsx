@@ -130,6 +130,14 @@ function shouldShowPaidLabel(item) {
   return Number(item?.totalPaid || 0) > 0;
 }
 
+function deriveLastPaymentDateFromHistory(history) {
+  for (const entry of history || []) {
+    const date = str(entry.paymentDate ?? entry.payment_date ?? "");
+    if (date) return date.slice(0, 10);
+  }
+  return "";
+}
+
 /** Ignore boolean/string falsey credit-hold flags (avoids rendering a "false" badge). */
 function creditHoldBadgeText(creditHold) {
   if (creditHold == null || creditHold === false) return "";
@@ -145,6 +153,12 @@ function isAgentCollectionsView(currentUser, isLabAccount) {
   return !isLabAccount && String(currentUser?.role || "").toLowerCase() === ROLES.AGENT;
 }
 
+function isHqCreditRiskView(currentUser, isLabAccount, isAgentView) {
+  if (isLabAccount || isAgentView) return false;
+  const role = String(currentUser?.role || "").toLowerCase();
+  return role === ROLES.ADMIN || role === ROLES.EXECUTIVE;
+}
+
 function formatMoney(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "—";
@@ -157,6 +171,13 @@ function formatShortDate(value) {
   const d = new Date(`${s}T12:00:00`);
   if (Number.isNaN(d.getTime())) return s;
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function localDateYmd(d = new Date()) {
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${day}`;
 }
 
 function isLabAccountViewMode(viewMode, role) {
@@ -898,6 +919,7 @@ function CollectionSummaryRow({
   onRecordPayment,
   onViewDetails,
   onAddFollowUp,
+  lastPaymentDate = "",
 }) {
   if (isAgentView) {
     return (
@@ -919,11 +941,13 @@ function CollectionSummaryRow({
     recordPayment: "Record payment / notes",
   };
   const outstanding = Number(item.outstandingAmount || 0);
+  const totalPaid = Number(item.totalPaid || 0);
   const overdueDays = Number(item.overdueDays || 0);
   const agent = displayAgentName(item.assignedAgent);
   const paymentLabel = displayPaymentStatus(item);
   const lastFollowUp = item.lastFollowUp || item.nextFollowUp;
   const creditHoldLabel = creditHoldBadgeText(item.creditHold);
+  const lastPaymentLabel = lastPaymentDate ? formatShortDate(lastPaymentDate) : "—";
 
   return (
     <div
@@ -964,38 +988,66 @@ function CollectionSummaryRow({
             />
           </div>
         </div>
-        <div className="shrink-0 text-right">
-          <div className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
-            Outstanding
-          </div>
-          <div className="text-base font-semibold tabular-nums text-slate-900">
-            {formatMoney(outstanding)}
-          </div>
-        </div>
       </div>
 
-      <div className={cn("grid gap-x-3 gap-y-2", readOnly ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-2 sm:grid-cols-4")}>
+      <div className="grid grid-cols-3 gap-2 rounded-lg border border-border/60 bg-muted/25 px-2.5 py-2 sm:ml-8">
+        <SummaryMetric label="Outstanding">
+          <span className="font-semibold tabular-nums">{formatMoney(outstanding)}</span>
+        </SummaryMetric>
+        <SummaryMetric label="Total paid">
+          <span className="font-semibold tabular-nums">{formatMoney(totalPaid)}</span>
+        </SummaryMetric>
+        <SummaryMetric label="Last payment">{lastPaymentLabel}</SummaryMetric>
+      </div>
+
+      <div className={cn("grid gap-x-3 gap-y-2 sm:ml-8", readOnly ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-2 sm:grid-cols-4")}>
         <SummaryMetric label="Overdue days">
           {overdueDays > 0 ? <span className="text-[var(--pc-danger)]">{overdueDays}d</span> : "—"}
         </SummaryMetric>
         {readOnly ? (
           <>
             <SummaryMetric label="Status">{paymentLabel}</SummaryMetric>
-            {shouldShowPaidLabel(item) ? (
-              <SummaryMetric label="Total paid">{formatMoney(item.totalPaid)}</SummaryMetric>
-            ) : null}
           </>
         ) : (
           <>
             <SummaryMetric label="Last follow-up">{formatShortDate(lastFollowUp)}</SummaryMetric>
             <SummaryMetric label="Next follow-up">{formatShortDate(item.nextFollowUp)}</SummaryMetric>
             <SummaryMetric label="Agent">{agent || "—"}</SummaryMetric>
-            {shouldShowPaidLabel(item) ? (
-              <SummaryMetric label="Total paid">{formatMoney(item.totalPaid)}</SummaryMetric>
-            ) : null}
           </>
         )}
       </div>
+
+      {!readOnly ? (
+        <div className="flex flex-wrap gap-1.5 sm:ml-8">
+          <Button
+            type="button"
+            size="sm"
+            className="h-9 min-w-[8.5rem] rounded-lg px-3 text-xs font-semibold"
+            onClick={onRecordPayment}
+          >
+            <IndianRupee className="mr-1.5 h-3.5 w-3.5" />
+            Record Payment
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-9 rounded-lg px-3 text-xs"
+            onClick={onViewDetails}
+          >
+            View Details
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-9 rounded-lg px-2 text-xs text-muted-foreground"
+            onClick={onAddFollowUp}
+          >
+            Add Follow-up
+          </Button>
+        </div>
+      ) : null}
 
       <div className="flex justify-end sm:hidden">
         <Button
@@ -1333,6 +1385,7 @@ function CollectionListItem({
   routeStopNumber,
   recentVisits = [],
   assignedLabs = [],
+  lastPaymentDate = "",
 }) {
   if (isAgentView) {
     return (
@@ -1360,6 +1413,11 @@ function CollectionListItem({
         onRecordPayment={onRecordPayment}
         onViewDetails={onViewDetails}
         onAddFollowUp={onAddFollowUp}
+        lastPaymentDate={
+          expanded
+            ? deriveLastPaymentDateFromHistory(history) || lastPaymentDate
+            : lastPaymentDate
+        }
       />
       {expanded ? (
         <CollectionExpandedPanel
@@ -1433,10 +1491,16 @@ export default function CollectionsPage({
   const [evidenceUploading, setEvidenceUploading] = useState(false);
   const [expandFocus, setExpandFocus] = useState("");
   const [paymentDrawerLabId, setPaymentDrawerLabId] = useState("");
+  const [lastPaymentByLabId, setLastPaymentByLabId] = useState({});
 
   const isAgentView = useMemo(
     () => isAgentCollectionsView(currentUser, isLabAccount),
     [currentUser, isLabAccount]
+  );
+
+  const isHqCreditRisk = useMemo(
+    () => isHqCreditRiskView(currentUser, isLabAccount, isAgentView),
+    [currentUser, isLabAccount, isAgentView]
   );
 
   const { orderByLabId, workspace: agentWorkspace } = useAgentDailyOs(currentUser, { enabled: isAgentView });
@@ -1567,6 +1631,30 @@ export default function CollectionsPage({
         });
 
         setCollections(rows);
+
+        if (
+          !isLabAccount &&
+          String(currentUser?.role || "").toLowerCase() !== ROLES.AGENT &&
+          supabase &&
+          rows.length
+        ) {
+          const paidLabs = rows.filter((row) => Number(row.totalPaid || 0) > 0);
+          if (paidLabs.length) {
+            void (async () => {
+              const next = {};
+              await Promise.all(
+                paidLabs.map(async (row) => {
+                  const hist = await getCollectionHistoryRead(row.labId);
+                  const date = deriveLastPaymentDateFromHistory(hist?.data?.history);
+                  if (date) next[labIdKey(row.labId)] = date;
+                })
+              );
+              if (Object.keys(next).length) {
+                setLastPaymentByLabId((prev) => ({ ...prev, ...next }));
+              }
+            })();
+          }
+        }
       } catch (err) {
         console.warn("CollectionsPage loadCollections:", err);
         setLoadError(
@@ -1698,10 +1786,9 @@ export default function CollectionsPage({
       );
       setExpandFocus(options?.focusSection || "details");
 
-      if (options?.focusSection === "payment") {
-        requestAnimationFrame(() => {
-          document.getElementById(`collection-amount-${canonicalKey}`)?.focus();
-        });
+      const latestPaymentDate = deriveLastPaymentDateFromHistory(historyRows);
+      if (latestPaymentDate) {
+        setLastPaymentByLabId((prev) => ({ ...prev, [canonicalKey]: latestPaymentDate }));
       }
 
       if (options?.fromTask && options?.taskContext) {
@@ -1870,6 +1957,10 @@ export default function CollectionsPage({
               labId: selectedLabId,
             });
 
+            const paidLabKey = labIdKey(selectedLabId);
+            const paidDate = localDateYmd(new Date());
+            setLastPaymentByLabId((prev) => ({ ...prev, [paidLabKey]: paidDate }));
+
             await loadCollections();
             if (isAgentView && paymentDrawerLabId) {
               setPaymentDrawerLabId("");
@@ -2026,6 +2117,13 @@ export default function CollectionsPage({
     }
   }, [filteredCollections, expandedLabId]);
 
+  useEffect(() => {
+    if (detailsLoading || expandFocus !== "payment" || !expandedLabId) return;
+    requestAnimationFrame(() => {
+      document.getElementById(`collection-amount-${expandedLabId}`)?.focus();
+    });
+  }, [detailsLoading, expandFocus, expandedLabId]);
+
   async function toggleExpand(labId) {
     const key = labIdKey(labId);
     if (expandedLabId === key) {
@@ -2047,11 +2145,6 @@ export default function CollectionsPage({
     }
     if (expandedLabId === key) {
       setExpandFocus(focusSection);
-      if (focusSection === "payment") {
-        requestAnimationFrame(() => {
-          document.getElementById(`collection-amount-${key}`)?.focus();
-        });
-      }
       return;
     }
     void openCollection(labId, { focusSection });
@@ -2136,7 +2229,11 @@ export default function CollectionsPage({
             <div className="flex items-center gap-2">
               <Wallet className="h-5 w-5 text-[var(--pc-brand-primary)]" />
               <h1 className={typography.pageTitle}>
-                {isLabAccount ? "Payments & Account" : "Collections"}
+                {isLabAccount
+                  ? "Payments & Account"
+                  : isHqCreditRisk
+                    ? "Credit & Risk"
+                    : "Collections"}
               </h1>
             </div>
             <p className={cn(typography.pageSubtitle, "mt-0.5")}>
@@ -2146,7 +2243,9 @@ export default function CollectionsPage({
                   ? "Operational financial workspace for your lab: account health, invoices, and payment activity."
                   : isAgentView
                     ? "Who to collect from, how much is owed, and what to do next."
-                    : "PrimeCare HQ receivables — use Distributor OS for distributor tenants."}
+                    : isHqCreditRisk
+                      ? "Record lab payments, track outstanding balances, and manage follow-ups."
+                      : "PrimeCare HQ receivables — use Distributor OS for distributor tenants."}
             </p>
           </div>
           <Button
@@ -2401,6 +2500,7 @@ export default function CollectionsPage({
                 onRecordPayment={() => openCollectionPanel(item.labId, "payment")}
                 onViewDetails={() => openCollectionPanel(item.labId, "details")}
                 onAddFollowUp={() => openCollectionPanel(item.labId, "followup")}
+                lastPaymentDate={lastPaymentByLabId[key] || ""}
               />
             );
           })}
