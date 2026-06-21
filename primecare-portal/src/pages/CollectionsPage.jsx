@@ -113,6 +113,21 @@ function shouldShowPaidLabel(item) {
   return Number(item?.totalPaid || 0) > 0;
 }
 
+/** Ignore boolean/string falsey credit-hold flags (avoids rendering a "false" badge). */
+function creditHoldBadgeText(creditHold) {
+  if (creditHold == null || creditHold === false) return "";
+  const raw = String(creditHold).trim();
+  if (!raw || raw.toLowerCase() === "false" || raw === "0" || raw.toLowerCase() === "no") {
+    return "";
+  }
+  if (raw.toLowerCase() === "hold" || raw.toLowerCase() === "true") return "Credit hold";
+  return raw;
+}
+
+function isAgentCollectionsView(currentUser, isLabAccount) {
+  return !isLabAccount && String(currentUser?.role || "").toLowerCase() === ROLES.AGENT;
+}
+
 function formatMoney(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "—";
@@ -619,7 +634,146 @@ function CollectionsLoading() {
   );
 }
 
-function CollectionSummaryRow({ item, expanded, onToggleExpand, readOnly = false, copy }) {
+function CollectionStatusBadges({ item, paymentLabel, creditHoldLabel }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      <StatusBadge variant={collectionRiskToVariant(item.riskStatus)} compact>
+        {item.riskStatus || "Low"}
+      </StatusBadge>
+      <StatusBadge variant={paymentStatusToVariant(paymentLabel)} compact>
+        {paymentLabel}
+      </StatusBadge>
+      {creditHoldLabel ? (
+        <StatusBadge variant="danger" compact>
+          {creditHoldLabel}
+        </StatusBadge>
+      ) : null}
+    </div>
+  );
+}
+
+function AgentCollectionSummaryRow({
+  item,
+  expanded,
+  onToggleExpand,
+  onRecordPayment,
+  onViewDetails,
+  onAddFollowUp,
+}) {
+  const outstanding = Number(item.outstandingAmount || 0);
+  const paymentLabel = displayPaymentStatus(item);
+  const creditHoldLabel = creditHoldBadgeText(item.creditHold);
+  const totalPaid = Number(item.totalPaid || 0);
+
+  return (
+    <div
+      className={cn(
+        "flex flex-col gap-2 px-3 py-2",
+        expanded ? "bg-slate-50/80" : "bg-white"
+      )}
+    >
+      <div className="flex items-start gap-2">
+        <button
+          type="button"
+          onClick={onToggleExpand}
+          className="mt-0.5 shrink-0 rounded-md p-0.5 text-slate-500 hover:bg-slate-100"
+          aria-expanded={expanded}
+          aria-controls={`collection-detail-${labIdKey(item.labId)}`}
+          aria-label={expanded ? "Collapse collection details" : "Expand collection details"}
+        >
+          {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold text-slate-900">
+                {item.labName || item.labId}
+              </div>
+              <div className="mt-1">
+                <CollectionStatusBadges
+                  item={item}
+                  paymentLabel={paymentLabel}
+                  creditHoldLabel={creditHoldLabel}
+                />
+              </div>
+            </div>
+            <div className="shrink-0 text-right">
+              <div className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
+                Outstanding
+              </div>
+              <div className="text-lg font-bold tabular-nums text-slate-900">
+                {formatMoney(outstanding)}
+              </div>
+              {totalPaid > 0 ? (
+                <div className="text-[11px] tabular-nums text-slate-500">
+                  Paid {formatMoney(totalPaid)}
+                </div>
+              ) : null}
+            </div>
+          </div>
+          <p className="mt-1 text-[11px] font-medium text-[var(--pc-brand-primary)]">
+            Assigned to you
+          </p>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5 pl-6">
+        <Button
+          type="button"
+          size="sm"
+          className="h-9 min-w-[8.5rem] flex-1 rounded-lg px-3 text-xs font-semibold sm:flex-none"
+          onClick={onRecordPayment}
+        >
+          <IndianRupee className="mr-1.5 h-3.5 w-3.5" />
+          Record Payment
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-9 rounded-lg px-3 text-xs"
+          onClick={onViewDetails}
+        >
+          View Details
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-9 rounded-lg px-2 text-xs text-muted-foreground"
+          onClick={onAddFollowUp}
+        >
+          Add Follow-up
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function CollectionSummaryRow({
+  item,
+  expanded,
+  onToggleExpand,
+  readOnly = false,
+  copy,
+  isAgentView = false,
+  onRecordPayment,
+  onViewDetails,
+  onAddFollowUp,
+}) {
+  if (isAgentView) {
+    return (
+      <AgentCollectionSummaryRow
+        item={item}
+        expanded={expanded}
+        onToggleExpand={onToggleExpand}
+        onRecordPayment={onRecordPayment}
+        onViewDetails={onViewDetails}
+        onAddFollowUp={onAddFollowUp}
+      />
+    );
+  }
+
   const labels = copy || {
     expandDetails: "Expand collection details",
     collapseDetails: "Collapse collection details",
@@ -631,6 +785,7 @@ function CollectionSummaryRow({ item, expanded, onToggleExpand, readOnly = false
   const agent = displayAgentName(item.assignedAgent);
   const paymentLabel = displayPaymentStatus(item);
   const lastFollowUp = item.lastFollowUp || item.nextFollowUp;
+  const creditHoldLabel = creditHoldBadgeText(item.creditHold);
 
   return (
     <div
@@ -663,18 +818,12 @@ function CollectionSummaryRow({ item, expanded, onToggleExpand, readOnly = false
               <span className="text-[11px] text-slate-400">{item.area}</span>
             ) : null}
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-1">
-            <StatusBadge variant={collectionRiskToVariant(item.riskStatus)} compact>
-              {item.riskStatus || "Low"}
-            </StatusBadge>
-            <StatusBadge variant={paymentStatusToVariant(paymentLabel)} compact>
-              {paymentLabel}
-            </StatusBadge>
-            {item.creditHold ? (
-              <StatusBadge variant="danger" compact>
-                {String(item.creditHold).toUpperCase() === "HOLD" ? "Credit hold" : item.creditHold}
-              </StatusBadge>
-            ) : null}
+          <div className="mt-1">
+            <CollectionStatusBadges
+              item={item}
+              paymentLabel={paymentLabel}
+              creditHoldLabel={creditHoldLabel}
+            />
           </div>
         </div>
         <div className="shrink-0 text-right">
@@ -754,6 +903,8 @@ function CollectionExpandedPanel({
   currentUser,
   tenantId,
   collectionEvidence = [],
+  focusSection = "",
+  isAgentView = false,
 }) {
   if (detailsLoading) {
     return (
@@ -819,14 +970,22 @@ function CollectionExpandedPanel({
         </section>
 
         {!readOnly ? (
-          <section className="space-y-3 rounded-lg border border-border bg-card p-3">
-            <h3 className="text-xs font-semibold text-slate-700">Record payment & follow-up</h3>
+          <section
+            className={cn(
+              "space-y-3 rounded-lg border border-border bg-card p-3",
+              focusSection === "payment" && "ring-2 ring-[var(--pc-brand-primary)]/25"
+            )}
+          >
+            <h3 className="text-xs font-semibold text-slate-700">
+              {isAgentView ? "Record payment" : "Record payment & follow-up"}
+            </h3>
 
             <div className="space-y-2">
               <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
                 Amount collected
               </label>
               <Input
+                id={`collection-amount-${labIdKey(collection.labId)}`}
                 type="number"
                 value={amountCollected}
                 onChange={(e) => setAmountCollected(e.target.value)}
@@ -851,7 +1010,12 @@ function CollectionExpandedPanel({
               </select>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div
+              className={cn(
+                "grid gap-3 sm:grid-cols-2",
+                focusSection === "followup" && "rounded-lg ring-2 ring-[var(--pc-brand-primary)]/25"
+              )}
+            >
               <div className="space-y-2">
                 <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
                   Next follow-up date
@@ -1021,6 +1185,11 @@ function CollectionListItem({
   onCompleteTask,
   readOnly = false,
   copy = null,
+  isAgentView = false,
+  onRecordPayment,
+  onViewDetails,
+  onAddFollowUp,
+  focusSection = "",
 }) {
   return (
     <Card className="overflow-hidden rounded-lg border-border shadow-sm">
@@ -1030,6 +1199,10 @@ function CollectionListItem({
         onToggleExpand={onToggleExpand}
         readOnly={readOnly}
         copy={copy}
+        isAgentView={isAgentView}
+        onRecordPayment={onRecordPayment}
+        onViewDetails={onViewDetails}
+        onAddFollowUp={onAddFollowUp}
       />
       {expanded ? (
         <CollectionExpandedPanel
@@ -1041,6 +1214,8 @@ function CollectionListItem({
           onCompleteTask={onCompleteTask}
           readOnly={readOnly}
           copy={copy}
+          focusSection={focusSection}
+          isAgentView={isAgentView}
           {...formProps}
         />
       ) : null}
@@ -1098,6 +1273,12 @@ export default function CollectionsPage({
   const [collectionProofFile, setCollectionProofFile] = useState(null);
   const [proofRemarks, setProofRemarks] = useState("");
   const [evidenceUploading, setEvidenceUploading] = useState(false);
+  const [expandFocus, setExpandFocus] = useState("");
+
+  const isAgentView = useMemo(
+    () => isAgentCollectionsView(currentUser, isLabAccount),
+    [currentUser, isLabAccount]
+  );
 
   const tenantId =
     distributorScope?.tenantId ||
@@ -1352,6 +1533,13 @@ export default function CollectionsPage({
       setNextAction(
         options?.taskContext?.nextAction || collection?.nextAction || ""
       );
+      setExpandFocus(options?.focusSection || "details");
+
+      if (options?.focusSection === "payment") {
+        requestAnimationFrame(() => {
+          document.getElementById(`collection-amount-${canonicalKey}`)?.focus();
+        });
+      }
 
       if (options?.fromTask && options?.taskContext) {
         showToast(
@@ -1673,9 +1861,24 @@ export default function CollectionsPage({
       setExpandedLabId("");
       setSelectedCollection(null);
       setHistory([]);
+      setExpandFocus("");
       return;
     }
     await openCollection(labId);
+  }
+
+  function openCollectionPanel(labId, focusSection = "details") {
+    const key = labIdKey(labId);
+    if (expandedLabId === key) {
+      setExpandFocus(focusSection);
+      if (focusSection === "payment") {
+        requestAnimationFrame(() => {
+          document.getElementById(`collection-amount-${key}`)?.focus();
+        });
+      }
+      return;
+    }
+    void openCollection(labId, { focusSection });
   }
 
   const formProps = {
@@ -1891,7 +2094,12 @@ export default function CollectionsPage({
           }
         />
       ) : (
-        <div className={cn("space-y-2", isLabAccount ? "mx-auto max-w-2xl" : "")} role="list">
+        <div
+          className={cn(
+            isLabAccount ? "mx-auto max-w-2xl space-y-2" : isAgentView ? "space-y-1.5" : "space-y-2"
+          )}
+          role="list"
+        >
           {filteredCollections.map((item) => {
             const key = labIdKey(item.labId);
             const isExpanded = expandedLabId === key;
@@ -1933,6 +2141,11 @@ export default function CollectionsPage({
                 onCompleteTask={handleCompleteLinkedTask}
                 readOnly={false}
                 copy={accountLabels}
+                isAgentView={isAgentView}
+                focusSection={isExpanded ? expandFocus : ""}
+                onRecordPayment={() => openCollectionPanel(item.labId, "payment")}
+                onViewDetails={() => openCollectionPanel(item.labId, "details")}
+                onAddFollowUp={() => openCollectionPanel(item.labId, "followup")}
               />
             );
           })}
