@@ -4,6 +4,7 @@ import { isPageVisibleInCurrentEnvironment } from "./config/menuConfig";
 import { normalizePageKey, resolvePageKeyForRole } from "./config/pageRouting.js";
 
 import AgentDashboard from "./pages/AgentDashboard";
+import AgentPortalShell from "./components/agent/AgentPortalShell.jsx";
 import AgentVisitPage from "./pages/AgentVisitPage";
 import AdminDashboard from "./pages/AdminDashboard";
 import AIInsightsPage from "./pages/AIInsightsPage";
@@ -75,7 +76,8 @@ export default function PrimeCareWebPortal({
   }
 
   if (role === ROLES.AGENT) {
-    switch (activePage) {
+    const agentPage = (() => {
+      switch (activePage) {
       case "dashboard":
         return (
           <AgentDashboard
@@ -131,7 +133,18 @@ export default function PrimeCareWebPortal({
             subtitle="Agent-specific page is not mapped yet."
           />
         );
-    }
+      }
+    })();
+
+    return (
+      <AgentPortalShell
+        currentUser={currentUser}
+        activePage={activePage}
+        setActivePage={setActivePage}
+      >
+        {agentPage}
+      </AgentPortalShell>
+    );
   }
 
   if (role === ROLES.ADMIN) {

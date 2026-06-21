@@ -27,9 +27,6 @@ import {
 import {
   deriveLabRecommendedAction,
   formatAgentCurrency,
-  formatAgentShortDate,
-  formatLastVisitRelative,
-  hasDisplayValue,
 } from "@/pages/agentUxPresentation.js";
 import { loadTenantFoundationRegistry } from "@/tenant/tenantFoundationData.js";
 import {
@@ -37,6 +34,12 @@ import {
   setDistributorLabContext,
 } from "@/tenant/tenantFoundationStore.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
+import { useAgentDailyOs } from "@/hooks/useAgentDailyOs.js";
+import { sortByAgentRouteOrder } from "@/pages/agentOsModel.js";
+import { AgentRouteStopBadge } from "@/components/agent/AgentOsSections.jsx";
+import { AgentLabFieldStrip } from "@/components/agent/AgentFieldExecution.jsx";
+import { labIdKey } from "@/utils/labId.js";
+import StatusBadge from "@/components/ux/StatusBadge";
 import { cn } from "@/lib/utils";
 
 function str(v) {
@@ -330,23 +333,37 @@ function CreditBadge({ status }) {
   );
 }
 
-function AgentMyLabCard({ lab, onStartVisit, onRecordPayment, onOpenLab }) {
+function AgentMyLabCard({
+  lab,
+  routeStopNumber,
+  recentVisits = [],
+  assignedLabs = [],
+  onStartVisit,
+  onRecordPayment,
+  onOpenLab,
+}) {
   const outstanding = Number(lab.outstandingAmount || lab.outstanding || 0);
-  const lastVisitRelative = formatLastVisitRelative(lab.lastVisit);
-  const lastPayment = formatAgentShortDate(lab.nextFollowUp);
   const recommended = deriveLabRecommendedAction(lab);
-  const statusLabel = hasDisplayValue(lab.status) ? lab.status : "";
-  const stageLabel = hasDisplayValue(lab.stage) ? lab.stage : "";
+  const creditHold =
+    String(lab.creditHold || lab.creditStatus || "").toUpperCase() === "HOLD";
 
   return (
     <article className="flex h-full flex-col rounded-xl border border-border bg-card p-3 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
+          <div className="mb-1 flex flex-wrap items-center gap-1.5">
+            {routeStopNumber ? <AgentRouteStopBadge stopNumber={routeStopNumber} compact /> : null}
+          </div>
           <h3 className="truncate text-base font-bold text-slate-900">
             {lab.labName || "Unnamed Lab"}
           </h3>
           {lab.area ? (
             <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{lab.area}</p>
+          ) : null}
+          {creditHold ? (
+            <StatusBadge variant="danger" compact className="mt-1">
+              Credit hold
+            </StatusBadge>
           ) : null}
         </div>
         {outstanding > 0 ? (
@@ -356,43 +373,21 @@ function AgentMyLabCard({ lab, onStartVisit, onRecordPayment, onOpenLab }) {
               {formatAgentCurrency(outstanding)}
             </p>
           </div>
-        ) : (
-          <CreditBadge status={lab.creditStatus} />
-        )}
+        ) : null}
       </div>
 
-      {(statusLabel || stageLabel || lastVisitRelative || lastPayment) ? (
-        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
-          {statusLabel ? (
-            <span>
-              <span className="text-muted-foreground">Status </span>
-              <span className="font-medium capitalize text-foreground">{statusLabel}</span>
-            </span>
-          ) : null}
-          {stageLabel && !statusLabel ? (
-            <span>
-              <span className="text-muted-foreground">Stage </span>
-              <span className="font-medium capitalize text-foreground">{stageLabel}</span>
-            </span>
-          ) : null}
-          {lastVisitRelative ? (
-            <span>
-              <span className="text-muted-foreground">Last visit </span>
-              <span className="font-medium text-foreground">{lastVisitRelative}</span>
-            </span>
-          ) : null}
-          {lastPayment ? (
-            <span>
-              <span className="text-muted-foreground">Last collection </span>
-              <span className="font-medium text-foreground">{lastPayment}</span>
-            </span>
-          ) : null}
-        </div>
-      ) : null}
+      <AgentLabFieldStrip
+        lab={lab}
+        recentVisits={recentVisits}
+        assignedLabs={assignedLabs}
+        outstanding={outstanding}
+        showTargetCompare={outstanding > 0}
+        className="mt-2"
+      />
 
-      <div className="mt-2 flex-1 rounded-md bg-muted/40 px-2 py-1.5">
+      <div className="mt-2 flex-1 rounded-md border border-[var(--pc-brand-primary)]/20 bg-[var(--pc-brand-primary)]/5 px-2 py-1.5">
         <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Recommended
+          Next action
         </p>
         <p className="text-xs font-semibold text-foreground">{recommended}</p>
       </div>
@@ -412,7 +407,7 @@ function AgentMyLabCard({ lab, onStartVisit, onRecordPayment, onOpenLab }) {
             type="button"
             size="sm"
             variant="outline"
-            className="h-8 rounded-lg px-2 text-xs"
+            className="h-8 rounded-lg px-2 text-xs font-semibold"
             onClick={() => onRecordPayment(lab)}
           >
             <IndianRupee className="mr-1 h-3 w-3" />
@@ -444,6 +439,9 @@ export default function LabsPage({
   const isExecutive = currentUser?.role === ROLES.EXECUTIVE;
   const isAgentView = currentUser?.role === ROLES.AGENT;
   const isDistributorOs = Boolean(distributorScope?.tenantId);
+  const { orderByLabId, workspace: agentWorkspace } = useAgentDailyOs(currentUser, {
+    enabled: isAgentView && !isDistributorOs,
+  });
   const [labs, setLabs] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -596,11 +594,17 @@ export default function LabsPage({
   );
 
   const filteredLabs = useMemo(() => {
-    if (creditFilter === "ALL") return visibleLabs;
-    return visibleLabs.filter(
-      (lab) => (lab.creditStatus || "OK").toUpperCase() === creditFilter
-    );
-  }, [visibleLabs, creditFilter]);
+    const base =
+      creditFilter === "ALL"
+        ? visibleLabs
+        : visibleLabs.filter(
+            (lab) => (lab.creditStatus || "OK").toUpperCase() === creditFilter
+          );
+    if (isAgentView && !isDistributorOs && orderByLabId?.size) {
+      return sortByAgentRouteOrder(base, orderByLabId, (row) => labIdKey(row.labId));
+    }
+    return base;
+  }, [visibleLabs, creditFilter, isAgentView, isDistributorOs, orderByLabId]);
 
   const metrics = useMemo(() => {
     return {
@@ -732,6 +736,9 @@ export default function LabsPage({
                 <AgentMyLabCard
                   key={`${lab.labId || lab.labName}-${idx}`}
                   lab={lab}
+                  routeStopNumber={orderByLabId.get(labIdKey(lab.labId))}
+                  recentVisits={agentWorkspace?.recentVisits}
+                  assignedLabs={agentWorkspace?.assignedLabs}
                   onStartVisit={(item) => {
                     startVisitFromWorkspaceItem(item, {
                       visitType: "Field Visit",

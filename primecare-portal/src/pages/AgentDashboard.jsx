@@ -11,13 +11,18 @@ import PageSkeleton from "@/components/ux/PageSkeleton";
 import { usePortalToast } from "@/components/ux";
 import AgentLabSnapshotDrawer from "@/components/agent/AgentLabSnapshotDrawer.jsx";
 import {
-  AgentCommandCenterKpiStrip,
   TodaysMissionCard,
   ActionQueueCard,
   QueueEmptyState,
   TodaysRouteSection,
   AgentRecentActivitySection,
 } from "@/pages/AgentDailyWorkspaceSections.jsx";
+import {
+  AgentDayCompleteCard,
+  AgentTodaysProgressCard,
+} from "@/components/agent/AgentOsSections.jsx";
+import { AgentDailyChecklist } from "@/components/agent/AgentFieldExecution.jsx";
+import { buildAgentOsState } from "@/pages/agentOsModel.js";
 import { buildAgentDailyWorkspaceModel } from "@/pages/agentDailyWorkspace.js";
 import {
   recordAgentWorkspaceEvent,
@@ -194,6 +199,8 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
     () => buildAgentDailyWorkspaceModel(workspace),
     [workspace]
   );
+
+  const osState = useMemo(() => buildAgentOsState(workspace), [workspace]);
 
   const { kpis, actionQueue, todaysRoute, performance } = dailyModel;
 
@@ -424,6 +431,15 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
     setActivePage?.("visits");
   }, [visibleQueue, todaysRoute, handleStartVisit, openLabSnapshot, setActivePage]);
 
+  const handleScheduleFollowUps = useCallback(() => {
+    const first = visibleQueue[0];
+    if (first) {
+      handleAddFollowUp(first);
+      return;
+    }
+    setActivePage?.("visits");
+  }, [visibleQueue, handleAddFollowUp, setActivePage]);
+
   if (loading) {
     return (
       <PageSkeleton kpiCount={3} kpiColumns={3} listRows={6} className="mx-auto w-full max-w-[1520px]" />
@@ -442,14 +458,9 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
           </p>
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
             {topPriority
-              ? `Next: ${topPriority.labName}`
+              ? `Good morning — ${visibleQueue.length} stop${visibleQueue.length === 1 ? "" : "s"} today`
               : `Today · ${currentUser?.name || "Agent"}`}
           </h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            {hasQueue
-              ? `${visibleQueue.length} prioritized · ₹${Number(kpis.totalOutstanding || 0).toLocaleString("en-IN")} outstanding`
-              : "Queue clear — check collections and route for today"}
-          </p>
         </div>
         <Button
           type="button"
@@ -469,33 +480,48 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
         </div>
       ) : null}
 
-      <AgentCommandCenterKpiStrip
-        kpis={kpis}
-        actionQueue={visibleQueue}
-        loading={false}
-      />
+      {osState.dayComplete ? (
+        <AgentDayCompleteCard
+          osState={osState}
+          onOpenCollections={() => setActivePage?.("collections")}
+          onScheduleFollowUps={handleScheduleFollowUps}
+        />
+      ) : (
+        <TodaysMissionCard
+          kpis={kpis}
+          actionQueue={visibleQueue}
+          topPriority={topPriority}
+          topStopNumber={osState.currentStop?.stopNumber ?? 1}
+          onStartRoute={handleStartRoute}
+          onOpenCollections={() => setActivePage?.("collections")}
+        />
+      )}
 
-      <TodaysMissionCard
-        kpis={kpis}
-        actionQueue={visibleQueue}
-        topPriority={topPriority}
-        onStartRoute={handleStartRoute}
-        onOpenCollections={() => setActivePage?.("collections")}
+      <AgentTodaysProgressCard osState={osState} loading={false} />
+
+      <AgentDailyChecklist
+        osState={osState}
+        routeStops={osState.routeStops}
+        recentVisits={workspace.recentVisits}
       />
 
       <section className="space-y-1.5">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold">Priority queue</h2>
           {hasQueue ? (
-            <span className="text-xs text-muted-foreground">Who to work first</span>
+            <span className="text-xs text-muted-foreground">Follow route order</span>
           ) : null}
         </div>
         {hasQueue ? (
           <ul className="grid gap-3 md:grid-cols-2">
-            {visibleQueue.map((item) => (
+            {visibleQueue.map((item, index) => (
               <li key={item.id} className="min-w-0">
                 <ActionQueueCard
                   item={item}
+                  priorityIndex={index}
+                  routeStopNumber={osState.orderByLabId.get(String(item.labId)) ?? index + 1}
+                  recentVisits={workspace.recentVisits}
+                  assignedLabs={workspace.assignedLabs}
                   onStartVisit={handleStartVisit}
                   onRecordCollection={handleRecordCollection}
                   onOpenLab={openLabSnapshot}
@@ -511,7 +537,12 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
       <div className="grid gap-4 xl:grid-cols-2">
         <section className="space-y-1.5">
           <h2 className="text-sm font-semibold">Today&apos;s route</h2>
-          <TodaysRouteSection route={todaysRoute} onOpenStop={openLabSnapshot} />
+          <TodaysRouteSection
+            route={todaysRoute}
+            onOpenStop={openLabSnapshot}
+            recentVisits={workspace.recentVisits}
+            assignedLabs={workspace.assignedLabs}
+          />
         </section>
 
         <AgentRecentActivitySection
@@ -557,11 +588,11 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
             type="button"
             className="h-10 flex-1 rounded-xl text-xs"
             onClick={() => {
-              if (topPriority) handleStartVisit(topPriority);
+              if (topPriority) handleStartRoute();
               else setActivePage?.("visits");
             }}
           >
-            {topPriority ? "Start top visit" : "Log visit"}
+            {topPriority ? "Start My Day" : "Log visit"}
           </Button>
           <Button
             type="button"

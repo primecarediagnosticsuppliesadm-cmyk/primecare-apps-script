@@ -52,18 +52,24 @@ export function computeCollectionProgressPct(outstanding, totalPaid) {
 }
 
 /**
- * @param {Object} item Action queue or collection row
+ * Specific operational reasons for priority cards (max 3).
+ * @param {Object} item
  */
-export function deriveAttentionReasons(item) {
+export function deriveOperationalReasons(item) {
   const reasons = [];
   const outstanding = Number(item?.outstanding ?? item?.outstandingAmount ?? 0);
-  const overdueDays = Number(item?.daysOverdue ?? 0);
-  const queueType = String(item?.queueType || "").toUpperCase();
+  const overdueDays = Number(item?.overdueDays ?? item?.daysOverdue ?? 0);
   const visitDays = daysSinceVisit(item?.lastVisit);
+  const queueType = String(item?.queueType || "").toUpperCase();
+  const suggested = computeSuggestedCollectionToday(outstanding);
+
+  if (outstanding > 0 && suggested > 0) {
+    reasons.push(`Collect ${formatAgentCurrency(suggested)} today`);
+  }
 
   if (visitDays != null && visitDays >= 1) {
     reasons.push(`No visit in ${visitDays} day${visitDays === 1 ? "" : "s"}`);
-  } else if (isStaleVisit(item?.lastVisit)) {
+  } else if (isStaleVisit(item?.lastVisit) && visitDays == null) {
     reasons.push("No recent visit");
   }
 
@@ -71,32 +77,38 @@ export function deriveAttentionReasons(item) {
     reasons.push(`Outstanding balance ${formatAgentCurrency(outstanding)}`);
   }
 
-  if (
-    queueType === "COLLECTION_DUE" ||
-    (outstanding > 0 && !reasons.some((r) => r.includes("Collection")))
+  if (overdueDays > 0) {
+    reasons.push("Collection overdue");
+  } else if (
+    (queueType === "COLLECTION_DUE" || queueType === "OVERDUE_ACCOUNT") &&
+    outstanding > 0 &&
+    !reasons.includes("Collection overdue")
   ) {
-    if (outstanding > 0 || queueType === "COLLECTION_DUE") {
-      reasons.push("Collection pending");
-    }
+    reasons.push("Collection overdue");
   }
 
-  if (overdueDays > 0 && !reasons.some((r) => r.includes("overdue"))) {
-    reasons.push(`${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue`);
-  }
-
-  if (queueType === "CREDIT_RISK") {
-    reasons.push("Credit risk — account needs attention");
-  }
-  if (queueType === "FOLLOW_UP_DUE") {
+  if (queueType === "FOLLOW_UP_DUE" && reasons.length < 3) {
     reasons.push("Follow-up due today");
   }
 
   const custom = String(item?.reason || "").trim();
-  if (custom && custom !== "-" && !reasons.includes(custom)) {
+  if (
+    custom &&
+    custom !== "-" &&
+    !custom.toLowerCase().includes("visit and collect") &&
+    !reasons.includes(custom)
+  ) {
     reasons.unshift(custom);
   }
 
-  return reasons.slice(0, 3);
+  return [...new Set(reasons)].slice(0, 3);
+}
+
+/**
+ * @param {Object} item Action queue or collection row
+ */
+export function deriveAttentionReasons(item) {
+  return deriveOperationalReasons(item);
 }
 
 /**
@@ -127,6 +139,41 @@ export function deriveQueueRecommendedAction(item) {
     return "Log a field visit";
   }
   return "Start Visit";
+}
+
+const GENERIC_LAB_NAMES = new Set(["lab", "unnamed lab", "selected lab"]);
+
+export function isUsableLabName(name) {
+  const raw = String(name ?? "").trim();
+  if (!raw || !hasDisplayValue(raw)) return false;
+  return !GENERIC_LAB_NAMES.has(raw.toLowerCase());
+}
+
+/**
+ * Suggested amount to collect today (presentation only).
+ * @param {number} outstanding
+ */
+export function computeSuggestedCollectionToday(outstanding) {
+  const out = Number(outstanding || 0);
+  if (out <= 0) return 0;
+  if (out > 3000) return Math.max(500, Math.round(out * 0.45));
+  if (out > 1000) return Math.max(300, Math.round(out * 0.6));
+  return out;
+}
+
+/**
+ * Priority queue headline for agents, e.g. "Visit and collect from QA Alpha".
+ * @param {number} index 0-based
+ * @param {Object} item
+ */
+export function deriveQueuePriorityLabel(index, item) {
+  const labName = isUsableLabName(item?.labName) ? String(item.labName).trim() : "this lab";
+  const outstanding = Number(item?.outstanding ?? item?.outstandingAmount ?? 0);
+  const prefix = `${Number(index) + 1}. `;
+  if (outstanding > 0) {
+    return `${prefix}Visit and collect from ${labName}`;
+  }
+  return `${prefix}Visit ${labName}`;
 }
 
 /**
@@ -196,20 +243,41 @@ export function countMediumHighRisk(collections) {
  * @param {Object} visit
  */
 export function formatAgentActivityVisit(visit) {
-  const labName = visit?.labName || "Lab";
+  const labName = isUsableLabName(visit?.labName) ? String(visit.labName).trim() : "";
   const type = String(visit?.visitType || "visit").toLowerCase();
 
   if (type.includes("follow")) {
-    return `Follow-up scheduled for ${labName}`;
+    return labName ? `Follow-up scheduled with ${labName}` : "";
   }
   if (type.includes("collection") || type.includes("payment")) {
     const amt = Number(visit?.amountCollected ?? visit?.collectionAmount ?? 0);
-    if (amt > 0) {
+    if (labName && amt > 0) {
       return `Collected ${formatAgentCurrency(amt)} from ${labName}`;
     }
-    return `Collection visit at ${labName}`;
+    if (labName && amt <= 0) return "";
+    if (amt > 0) return `Collected ${formatAgentCurrency(amt)}`;
+    return "";
   }
-  return `Visited ${labName}`;
+  return labName ? `Visited ${labName}` : "";
+}
+
+const GENERIC_ACTIVITY_PHRASES = [
+  "field visit logged",
+  "activity recorded",
+  "collection updated",
+  "payment recorded",
+  "account update",
+  "order update",
+  "visit logged for lab",
+];
+
+export function isUsableAgentActivityLabel(label) {
+  const raw = String(label ?? "").trim();
+  if (!raw || raw === "—") return false;
+  const lower = raw.toLowerCase();
+  if (lower.includes(" for lab") || lower.endsWith(" for lab")) return false;
+  if (GENERIC_ACTIVITY_PHRASES.some((phrase) => lower === phrase)) return false;
+  return true;
 }
 
 /**
@@ -219,41 +287,39 @@ export function formatAgentActivityNotification(row) {
   const payload = row?.payload;
   if (payload && typeof payload.message === "string" && payload.message.trim()) {
     const msg = payload.message.trim();
-    if (!msg.toLowerCase().includes("visit logged for lab")) return msg;
+    if (isUsableAgentActivityLabel(msg)) return msg;
   }
 
   const eventType = String(row?.event_type || row?.eventType || "").toLowerCase();
-  const labName =
+  const labNameRaw =
     payload?.lab_name ||
     payload?.labName ||
     row?.lab_name ||
     row?.labName ||
     "";
+  const labName = isUsableLabName(labNameRaw) ? String(labNameRaw).trim() : "";
 
-  if (eventType.includes("follow") && labName) {
-    return `Follow-up scheduled for ${labName}`;
+  if (eventType.includes("follow")) {
+    return labName ? `Follow-up scheduled with ${labName}` : "";
   }
   if (eventType.includes("payment") || eventType.includes("collection")) {
     const amt = Number(payload?.amount ?? payload?.amount_received ?? 0);
     if (labName && amt > 0) {
       return `Collected ${formatAgentCurrency(amt)} from ${labName}`;
     }
-    if (labName) return `Payment recorded for ${labName}`;
+    if (labName) return "";
+    if (amt > 0) return `Collected ${formatAgentCurrency(amt)}`;
+    return "";
   }
-  if (eventType.includes("visit") && labName) {
-    return `Visited ${labName}`;
+  if (eventType.includes("visit")) {
+    return labName ? `Visited ${labName}` : "";
   }
-  if (eventType.includes("order") && eventType.includes("fulfill") && labName) {
-    return `Order fulfilled for ${labName}`;
+  if (eventType.includes("order") && eventType.includes("fulfill")) {
+    return labName ? `Order fulfilled for ${labName}` : "";
   }
-  if (eventType.includes("order") && labName) {
-    return `Order update for ${labName}`;
+  if (eventType.includes("order")) {
+    return labName ? `Order update for ${labName}` : "";
   }
 
-  const label = eventType.replace(/_/g, " ").trim();
-  if (labName && label) {
-    const pretty = label.charAt(0).toUpperCase() + label.slice(1);
-    return `${pretty} for ${labName}`;
-  }
-  return label ? label.charAt(0).toUpperCase() + label.slice(1) : "Account update";
+  return "";
 }

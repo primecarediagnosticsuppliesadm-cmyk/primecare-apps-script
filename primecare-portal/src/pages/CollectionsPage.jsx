@@ -97,6 +97,10 @@ import {
   CalendarClock,
 } from "lucide-react";
 import AgentCollectionPaymentDrawer from "@/components/agent/AgentCollectionPaymentDrawer.jsx";
+import { AgentRouteStopBadge } from "@/components/agent/AgentOsSections.jsx";
+import { AgentLabFieldStrip } from "@/components/agent/AgentFieldExecution.jsx";
+import { useAgentDailyOs } from "@/hooks/useAgentDailyOs.js";
+import { sortByAgentRouteOrder } from "@/pages/agentOsModel.js";
 
 function findCollectionByLabId(list, labId) {
   const target = labIdKey(labId);
@@ -667,6 +671,9 @@ function CollectionStatusBadges({ item, paymentLabel, creditHoldLabel }) {
 
 function AgentCollectionWorkQueueRow({
   item,
+  routeStopNumber,
+  recentVisits = [],
+  assignedLabs = [],
   onRecordPayment,
   onOpenLab,
   onScheduleFollowUp,
@@ -674,126 +681,110 @@ function AgentCollectionWorkQueueRow({
   const outstanding = Number(item.outstandingAmount || 0);
   const totalPaid = Number(item.totalPaid || 0);
   const creditHoldLabel = creditHoldBadgeText(item.creditHold);
-  const lastPayment = formatAgentShortDate(item.lastFollowUp || item.nextFollowUp || "");
   const recommended = deriveCollectionRecommendedAction(item);
   const progressPct = computeCollectionProgressPct(outstanding, totalPaid);
-  const riskLabel = String(item.riskStatus || "").trim();
 
   return (
     <article className="rounded-xl border border-border bg-card p-3 shadow-sm">
-      <div className="flex flex-col gap-3 md:flex-row md:items-stretch md:gap-4">
-        {/* Left: identity, recommendation, actions */}
-        <div className="flex min-w-0 flex-1 flex-col gap-2 md:max-w-[42%]">
-          <div>
-            <h3 className="truncate text-base font-bold text-slate-900">
-              {item.labName || item.labId}
-            </h3>
-            <div className="mt-1 flex flex-wrap items-center gap-1">
-              <span className="text-[10px] font-medium text-[var(--pc-brand-primary)]">
-                Assigned to you
-              </span>
-              {creditHoldLabel ? (
-                <StatusBadge variant="danger" compact>
-                  {creditHoldLabel}
-                </StatusBadge>
-              ) : null}
-            </div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 flex flex-wrap items-center gap-1.5">
+            {routeStopNumber ? <AgentRouteStopBadge stopNumber={routeStopNumber} compact /> : null}
           </div>
-
-          <div className="rounded-md bg-muted/40 px-2 py-1.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Recommended
-            </p>
-            <p className="text-xs font-semibold text-foreground">{recommended}</p>
-          </div>
-
-          <div className="mt-auto flex flex-wrap gap-1.5">
-            <Button
-              type="button"
-              size="sm"
-              className="h-8 rounded-lg px-2.5 text-xs font-semibold"
-              onClick={onRecordPayment}
-            >
-              <IndianRupee className="mr-1 h-3.5 w-3.5" />
-              Record Payment
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-8 rounded-lg px-2 text-xs"
-              onClick={onScheduleFollowUp}
-            >
-              <CalendarClock className="mr-1 h-3 w-3" />
-              Follow-Up
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-8 rounded-lg px-2 text-xs"
-              onClick={onOpenLab}
-            >
-              <Building2 className="mr-1 h-3 w-3" />
-              Open Lab
-            </Button>
+          <h3 className="truncate text-base font-bold text-slate-900">
+            {item.labName || item.labId}
+          </h3>
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            {creditHoldLabel ? (
+              <StatusBadge variant="danger" compact>
+                {creditHoldLabel}
+              </StatusBadge>
+            ) : null}
           </div>
         </div>
+      </div>
 
-        {/* Center: metrics */}
-        <div className="flex min-w-0 flex-1 flex-col justify-center gap-2 border-border/60 md:border-x md:px-4">
-          <div className="grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-2">
-            {totalPaid > 0 ? (
-              <div className="rounded-md bg-muted/30 px-2 py-1.5">
-                <p className="text-muted-foreground">Collected</p>
-                <p className="font-semibold tabular-nums text-foreground">{formatMoney(totalPaid)}</p>
-              </div>
-            ) : null}
-            {progressPct > 0 ? (
-              <div className="rounded-md bg-muted/30 px-2 py-1.5">
-                <p className="text-muted-foreground">Progress</p>
-                <p className="font-semibold tabular-nums text-foreground">{progressPct}%</p>
-              </div>
-            ) : null}
-            {hasDisplayValue(riskLabel) ? (
-              <div className="rounded-md bg-muted/30 px-2 py-1.5">
-                <p className="text-muted-foreground">Risk</p>
-                <StatusBadge variant={collectionRiskToVariant(riskLabel)} compact>
-                  {riskLabel}
-                </StatusBadge>
-              </div>
-            ) : null}
-            {lastPayment ? (
-              <div className="rounded-md bg-muted/30 px-2 py-1.5">
-                <p className="text-muted-foreground">Last collection</p>
-                <p className="font-medium text-foreground">{lastPayment}</p>
-              </div>
-            ) : null}
-          </div>
+      {outstanding > 0 ? (
+        <AgentLabFieldStrip
+          lab={item}
+          recentVisits={recentVisits}
+          assignedLabs={assignedLabs}
+          outstanding={outstanding}
+          className="mt-3"
+        />
+      ) : (
+        <AgentLabFieldStrip
+          lab={item}
+          recentVisits={recentVisits}
+          assignedLabs={assignedLabs}
+          showTargetCompare={false}
+          className="mt-3"
+        />
+      )}
+
+      {totalPaid > 0 || progressPct > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-3 text-[11px]">
+          {totalPaid > 0 ? (
+            <span>
+              <span className="text-muted-foreground">Collected so far </span>
+              <span className="font-semibold tabular-nums">{formatMoney(totalPaid)}</span>
+            </span>
+          ) : null}
           {progressPct > 0 ? (
-            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-[var(--pc-brand-primary)]"
-                style={{ width: `${progressPct}%` }}
-              />
-            </div>
+            <span>
+              <span className="text-muted-foreground">Progress </span>
+              <span className="font-semibold tabular-nums">{progressPct}%</span>
+            </span>
           ) : null}
         </div>
+      ) : null}
 
-        {/* Right: outstanding */}
-        <div className="flex shrink-0 flex-row items-center justify-between gap-2 md:w-32 md:flex-col md:items-end md:justify-center md:text-right">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground md:hidden">
-            Outstanding
-          </p>
-          <div>
-            <p className="hidden text-[10px] font-medium uppercase tracking-wide text-muted-foreground md:block">
-              Outstanding
-            </p>
-            <p className="text-2xl font-bold tabular-nums leading-none text-slate-900">
-              {formatMoney(outstanding)}
-            </p>
-          </div>
+      {progressPct > 0 ? (
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-[var(--pc-brand-primary)]"
+            style={{ width: `${progressPct}%` }}
+          />
         </div>
+      ) : null}
+
+      <div className="mt-2 rounded-md bg-muted/40 px-2 py-1.5">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Guidance
+        </p>
+        <p className="text-xs font-semibold text-foreground">{recommended}</p>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-1.5 border-t border-border/60 pt-2.5">
+        <Button
+          type="button"
+          size="sm"
+          className="h-9 rounded-lg px-3 text-xs font-semibold"
+          onClick={onRecordPayment}
+        >
+          <IndianRupee className="mr-1 h-3.5 w-3.5" />
+          Record Payment
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-9 rounded-lg px-2.5 text-xs"
+          onClick={onScheduleFollowUp}
+        >
+          <CalendarClock className="mr-1 h-3 w-3" />
+          Schedule Follow-Up
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-9 rounded-lg px-2.5 text-xs"
+          onClick={onOpenLab}
+        >
+          <Building2 className="mr-1 h-3 w-3" />
+          Open Lab
+        </Button>
       </div>
     </article>
   );
@@ -1339,11 +1330,17 @@ function CollectionListItem({
   onOpenLab,
   onScheduleFollowUp,
   focusSection = "",
+  routeStopNumber,
+  recentVisits = [],
+  assignedLabs = [],
 }) {
   if (isAgentView) {
     return (
       <AgentCollectionWorkQueueRow
         item={item}
+        routeStopNumber={routeStopNumber}
+        recentVisits={recentVisits}
+        assignedLabs={assignedLabs}
         onRecordPayment={onRecordPayment}
         onOpenLab={onOpenLab}
         onScheduleFollowUp={onScheduleFollowUp}
@@ -1441,6 +1438,8 @@ export default function CollectionsPage({
     () => isAgentCollectionsView(currentUser, isLabAccount),
     [currentUser, isLabAccount]
   );
+
+  const { orderByLabId, workspace: agentWorkspace } = useAgentDailyOs(currentUser, { enabled: isAgentView });
 
   const tenantId =
     distributorScope?.tenantId ||
@@ -1987,10 +1986,13 @@ export default function CollectionsPage({
         .toLowerCase()
         .includes(q)
     );
+    if (isAgentView && orderByLabId?.size) {
+      return sortByAgentRouteOrder(filtered, orderByLabId, (row) => labIdKey(row.labId));
+    }
     return [...filtered].sort(
       (a, b) => Number(b.outstandingAmount || 0) - Number(a.outstandingAmount || 0)
     );
-  }, [collections, search, isLabAccount]);
+  }, [collections, search, isLabAccount, isAgentView, orderByLabId]);
 
   const agentQueueSummary = useMemo(() => {
     if (!isAgentView) return null;
@@ -2361,6 +2363,9 @@ export default function CollectionsPage({
                 onRecordPayment={() => openCollectionPanel(item.labId, "payment")}
                 onOpenLab={() => setActivePage?.("labs")}
                 onScheduleFollowUp={() => handleScheduleFollowUp(item)}
+                routeStopNumber={orderByLabId.get(labIdKey(item.labId))}
+                recentVisits={agentWorkspace?.recentVisits}
+                assignedLabs={agentWorkspace?.assignedLabs}
               />
             );
           })}

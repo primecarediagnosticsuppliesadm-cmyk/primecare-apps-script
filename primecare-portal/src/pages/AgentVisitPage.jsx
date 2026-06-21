@@ -53,6 +53,15 @@ import {
   AGENT_PENDING_VISIT_TASK_KEY,
 } from "@/pages/agentVisitContext.js";
 import {
+  computeSuggestedCollectionToday,
+} from "@/pages/agentUxPresentation.js";
+import {
+  AgentCollectionTargetCompare,
+  AgentLabQuickActions,
+  AgentVisitObjectivePanel,
+} from "@/components/agent/AgentFieldExecution.jsx";
+import { useAgentDailyOs } from "@/hooks/useAgentDailyOs.js";
+import {
   saveAgentVisitDraft,
   loadAgentVisitDraft,
   clearAgentVisitDraft,
@@ -158,6 +167,9 @@ const QUALIFICATION_PANEL_CLASS =
 
 const FIELD_INPUT_CLASS = "h-11 w-full rounded-xl border-input text-base md:max-w-xl";
 
+const LAB_SELECT_CLASS =
+  "h-12 w-full rounded-xl border-2 border-[var(--pc-brand-primary)] bg-background px-3 text-base font-semibold shadow-sm ring-2 ring-[var(--pc-brand-primary)]/15 md:max-w-xl";
+
 const STEP_MOTION = {
   initial: { opacity: 0, x: 12 },
   animate: { opacity: 1, x: 0 },
@@ -218,6 +230,9 @@ function LabHeroCard({ lab, collection, latestVisit, form }) {
     ? "Credit hold"
     : String(collection?.riskStatus || "").trim() || "OK";
   const riskVariant = creditHold ? "danger" : outstanding > 0 ? "warning" : "success";
+  const lastOutcome = latestVisit?.labResponse
+    ? displayResponseLabel(latestVisit.labResponse)
+    : "";
 
   return (
     <div className="overflow-hidden rounded-2xl border border-[var(--pc-brand-primary)]/25 bg-gradient-to-br from-[var(--pc-brand-primary)]/10 via-card to-amber-50/40 p-4 shadow-md">
@@ -228,49 +243,42 @@ function LabHeroCard({ lab, collection, latestVisit, form }) {
         <div className="min-w-0 flex-1">
           <p className="truncate text-lg font-bold text-slate-900">{lab.labName}</p>
           <p className="text-xs text-muted-foreground">
-            {lab.area || form.area || "—"} · ID {lab.labId}
+            {lab.area || form.area || lab.phone || "Territory lab"}
           </p>
         </div>
         <StatusBadge variant={riskVariant} compact>
           {riskLabel}
         </StatusBadge>
       </div>
-      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <div className="rounded-xl bg-white/80 p-2.5 ring-1 ring-border/50">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            Outstanding
-          </p>
-          <p className="mt-0.5 text-sm font-bold text-slate-900">
-            ₹{outstanding.toLocaleString("en-IN")}
-          </p>
-        </div>
+
+      {outstanding > 0 ? (
+        <AgentCollectionTargetCompare
+          outstanding={outstanding}
+          collectionTarget={computeSuggestedCollectionToday(outstanding)}
+          className="mt-3"
+        />
+      ) : null}
+
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
         <div className="rounded-xl bg-white/80 p-2.5 ring-1 ring-border/50">
           <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
             Last visit
           </p>
           <p className="mt-0.5 text-sm font-bold text-slate-900">
-            {latestVisit?.date || "None"}
+            {latestVisit?.date || latestVisit?.visitDate || "None"}
           </p>
         </div>
-        <div className="rounded-xl bg-white/80 p-2.5 ring-1 ring-border/50">
+        <div className="rounded-xl bg-white/80 p-2.5 ring-1 ring-border/50 sm:col-span-2">
           <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            Last response
+            Last outcome
           </p>
           <p className="mt-0.5 text-xs font-semibold text-slate-900">
-            {displayResponseLabel(latestVisit?.labResponse || "")}
-          </p>
-        </div>
-        <div className="rounded-xl bg-white/80 p-2.5 ring-1 ring-border/50">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            Next follow-up
-          </p>
-          <p className="mt-0.5 text-xs font-semibold text-slate-900">
-            {latestVisit?.nextFollowUpDate
-              ? `${latestVisit.nextFollowUpType || "Call"} · ${latestVisit.nextFollowUpDate}`
-              : "Not set"}
+            {lastOutcome || "Not logged yet"}
           </p>
         </div>
       </div>
+
+      <AgentLabQuickActions lab={lab} className="mt-3" />
     </div>
   );
 }
@@ -707,13 +715,13 @@ function VisitWizardStepper({ steps, currentIndex, labSelected, onGoToStep }) {
 
 function WizardNavButtons({ currentIndex, maxIndex, onBack, onNext, nextDisabled, nextLabel = "Continue" }) {
   return (
-    <div className="mt-4 hidden gap-3 border-t border-border/70 pt-4 md:flex">
+    <div className="sticky bottom-0 z-10 -mx-1 mt-3 flex gap-3 border-t border-border/70 bg-background/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/90 md:-mx-0 md:px-0">
       <Button
         type="button"
         variant="outline"
         onClick={onBack}
         disabled={currentIndex === 0}
-        className="h-12 min-h-12 flex-1 rounded-xl text-base"
+        className="h-11 min-h-11 flex-1 rounded-xl text-base md:h-12 md:min-h-12"
       >
         <ChevronLeft className="mr-1 h-5 w-5" />
         Back
@@ -723,7 +731,7 @@ function WizardNavButtons({ currentIndex, maxIndex, onBack, onNext, nextDisabled
           type="button"
           onClick={onNext}
           disabled={nextDisabled}
-          className="h-12 min-h-12 flex-1 rounded-xl bg-[var(--pc-brand-primary)] text-base font-semibold text-white hover:opacity-95"
+          className="h-11 min-h-11 flex-1 rounded-xl bg-[var(--pc-brand-primary)] text-base font-semibold text-white hover:opacity-95 md:h-12 md:min-h-12"
         >
           {nextLabel}
           <ChevronRight className="ml-1 h-5 w-5" />
@@ -1365,6 +1373,14 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
     if (!labId) return null;
     return resolveLabByOptionValue(visibleLabs, labId);
   }, [visibleLabs, form.labId]);
+
+  const isAgentRole = String(currentUser?.role || "").toLowerCase() === "agent";
+  const { orderByLabId } = useAgentDailyOs(currentUser, { enabled: isAgentRole });
+
+  const visitRouteStop = useMemo(() => {
+    if (!selectedLab) return undefined;
+    return orderByLabId.get(labIdKey(selectedLab.labId));
+  }, [selectedLab, orderByLabId]);
 
   const hasQualificationData = useMemo(
     () => hasPersistedQualificationData(qualificationForm, qualificationLastUpdated),
@@ -2064,22 +2080,24 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
           : "pb-4"
       )}
     >
-      <header>
+      <header className="space-y-0">
         <div className="flex items-center gap-2">
           <ClipboardCheck className="h-5 w-5 text-[var(--pc-brand-primary)]" />
           <h1 className={typography.pageTitle}>Agent Visits</h1>
         </div>
-        <p className={cn(typography.pageSubtitle, "mt-0.5")}>
+        <p className={cn(typography.pageSubtitle, "mt-0.5 sm:hidden")}>
           Quick guided visit log — tap through each step, then save on review.
         </p>
       </header>
 
-      <CompactVisitKpiStrip
-        labs={visibleLabs.length}
-        todayVisits={todayVisits}
-        followUps={pendingFollowUps}
-        salesLogged={totalSalesLogged}
-      />
+      <div className="sm:hidden">
+        <CompactVisitKpiStrip
+          labs={visibleLabs.length}
+          todayVisits={todayVisits}
+          followUps={pendingFollowUps}
+          salesLogged={totalSalesLogged}
+        />
+      </div>
 
       {draftBannerVisible ? (
         <div className="flex items-center justify-between gap-2 rounded-lg border border-blue-200/80 bg-blue-50/80 px-3 py-2 text-sm text-blue-900">
@@ -2124,10 +2142,10 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
       ) : null}
 
       <Card className="overflow-hidden rounded-2xl border-border/80 shadow-[var(--pc-shadow-card)]">
-        <CardHeader className="space-y-2 border-b border-border/50 bg-muted/20 pb-3">
+        <CardHeader className="space-y-1.5 border-b border-border/50 bg-muted/20 pb-2 pt-3">
           <div>
             <CardTitle className="text-lg">Log field visit</CardTitle>
-            <CardDescription className="text-sm">
+            <CardDescription className="hidden text-sm sm:block">
               Guided workflow — save only when you reach review.
             </CardDescription>
           </div>
@@ -2138,7 +2156,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
           />
         </CardHeader>
 
-        <CardContent className="space-y-3 pt-3">
+        <CardContent className="space-y-2 pt-2">
           <div ref={wizardStepAnchorRef} className="h-0 w-full scroll-mt-4" aria-hidden />
           <VisitWizardStepper
             steps={AGENT_VISIT_SECTION_STEPS}
@@ -2171,37 +2189,17 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
             <SectionTitle
               icon={Users}
               title={currentStep.title}
-              subtitle="Pick the lab you visited today"
+              subtitle="Choose your lab first — everything else follows"
               accent
             />
 
-            <div className="grid grid-cols-1 gap-4">
-              <div>
-                <FieldLabel helper="Filled from your login">Your name</FieldLabel>
-                <Input
-                  value={form.agentName}
-                  onChange={(e) => setForm({ ...form, agentName: e.target.value })}
-                  className={FIELD_INPUT_CLASS}
-                  disabled={String(currentUser?.role || "").toLowerCase() === "agent"}
-                />
-              </div>
-
-              <div>
-                <FieldLabel helper="When did you visit?">Visit date</FieldLabel>
-                <Input
-                  type="date"
-                  value={form.visitDate}
-                  onChange={(e) => setForm({ ...form, visitDate: e.target.value })}
-                  className={FIELD_INPUT_CLASS}
-                />
-              </div>
-
-              <div>
-                <FieldLabel helper="Start typing or pick from your assigned labs">
+            <div className="grid grid-cols-1 gap-3">
+              <div className="rounded-xl border-2 border-[var(--pc-brand-primary)]/30 bg-[var(--pc-brand-primary)]/[0.04] p-3">
+                <FieldLabel helper="Required — pick from your assigned labs">
                   Which lab are you visiting today?
                 </FieldLabel>
                 <select
-                  className={cn(FIELD_INPUT_CLASS, "border border-input bg-background px-3 shadow-sm")}
+                  className={LAB_SELECT_CLASS}
                   value={form.labId ? labIdKey(form.labId) : ""}
                   onChange={(e) => handleLabChange(e.target.value)}
                 >
@@ -2213,7 +2211,39 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
                   ))}
                 </select>
               </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <FieldLabel helper="When did you visit?">Visit date</FieldLabel>
+                  <Input
+                    type="date"
+                    value={form.visitDate}
+                    onChange={(e) => setForm({ ...form, visitDate: e.target.value })}
+                    className={FIELD_INPUT_CLASS}
+                  />
+                </div>
+
+                <div>
+                  <FieldLabel helper="Filled from your login">Your name</FieldLabel>
+                  <Input
+                    value={form.agentName}
+                    onChange={(e) => setForm({ ...form, agentName: e.target.value })}
+                    className={FIELD_INPUT_CLASS}
+                    disabled={String(currentUser?.role || "").toLowerCase() === "agent"}
+                  />
+                </div>
+              </div>
             </div>
+
+            {selectedLab ? (
+              <AgentVisitObjectivePanel
+                lab={selectedLab}
+                collection={selectedLabCollection}
+                recentVisits={recentVisits}
+                assignedLabs={agentWorkspace?.assignedLabs || labs}
+                routeStopNumber={visitRouteStop}
+              />
+            ) : null}
 
             <LabHeroCard
               lab={selectedLab}

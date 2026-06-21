@@ -19,12 +19,20 @@ import {
   queueTypeLabel,
 } from "@/pages/agentDailyWorkspace.js";
 import {
-  deriveAttentionReasons,
+  deriveOperationalReasons,
+  deriveQueuePriorityLabel,
   deriveQueueRecommendedAction,
   formatAgentActivityNotification,
   formatAgentActivityVisit,
   formatAgentCurrency,
+  isUsableAgentActivityLabel,
 } from "@/pages/agentUxPresentation.js";
+import { AgentRouteStopBadge } from "@/components/agent/AgentOsSections.jsx";
+import {
+  AgentLabFieldStrip,
+  AgentLabQuickActions,
+  AgentLastVisitOutcome,
+} from "@/components/agent/AgentFieldExecution.jsx";
 
 function formatCurrency(value) {
   return `₹${Number(value || 0).toLocaleString("en-IN")}`;
@@ -156,19 +164,25 @@ export const AgentRecentActivitySection = memo(function AgentRecentActivitySecti
   notifications = [],
   loading = false,
 }) {
-  const visitItems = (recentVisits || []).slice(0, 5).map((visit) => ({
-    id: `visit-${visit.visitId || visit.id || visit.labId}-${visit.visitDate}`,
-    label: formatAgentActivityVisit(visit),
-    when: formatActivityWhen(visit.visitDate),
-    ts: visit.visitDate || "",
-  }));
+  const visitItems = (recentVisits || [])
+    .slice(0, 5)
+    .map((visit) => ({
+      id: `visit-${visit.visitId || visit.id || visit.labId}-${visit.visitDate}`,
+      label: formatAgentActivityVisit(visit),
+      when: formatActivityWhen(visit.visitDate),
+      ts: visit.visitDate || "",
+    }))
+    .filter((item) => isUsableAgentActivityLabel(item.label));
 
-  const notifyItems = (notifications || []).slice(0, 5).map((row) => ({
-    id: `notify-${row.event_id || row.id || row.created_at}`,
-    label: formatAgentActivityNotification(row),
-    when: formatActivityWhen(row.created_at),
-    ts: row.created_at || "",
-  }));
+  const notifyItems = (notifications || [])
+    .slice(0, 5)
+    .map((row) => ({
+      id: `notify-${row.event_id || row.id || row.created_at}`,
+      label: formatAgentActivityNotification(row),
+      when: formatActivityWhen(row.created_at),
+      ts: row.created_at || "",
+    }))
+    .filter((item) => isUsableAgentActivityLabel(item.label));
 
   const merged = [...notifyItems, ...visitItems]
     .sort((a, b) => String(b.ts).localeCompare(String(a.ts)))
@@ -209,6 +223,7 @@ export const TodaysMissionCard = memo(function TodaysMissionCard({
   kpis,
   actionQueue = [],
   topPriority,
+  topStopNumber = 1,
   onStartRoute,
   onOpenCollections,
 }) {
@@ -217,39 +232,74 @@ export const TodaysMissionCard = memo(function TodaysMissionCard({
   ).length;
   const collectionsDue = Number(kpis?.collectionsDue ?? 0);
   const recoveryOpportunity = Number(kpis?.totalOutstanding ?? 0);
+  const firstLabName = topPriority?.labName || "your first stop";
 
   return (
-    <article className="rounded-xl border-2 border-[var(--pc-brand-primary)]/25 bg-gradient-to-br from-[var(--pc-brand-primary)]/8 via-card to-card p-3 shadow-sm md:p-4">
-      <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--pc-brand-primary)]">
-        Today&apos;s Mission
-      </p>
-      <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-3 text-[11px] lg:grid-cols-4">
+    <article className="rounded-xl border-2 border-[var(--pc-brand-primary)]/30 bg-gradient-to-br from-[var(--pc-brand-primary)]/10 via-card to-card p-4 shadow-md md:p-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--pc-brand-primary)]">
+              Today&apos;s Mission
+            </p>
+            {topPriority ? <AgentRouteStopBadge stopNumber={topStopNumber} compact /> : null}
+          </div>
+          <h2 className="mt-1 truncate text-xl font-bold text-foreground sm:text-2xl">
+            {topPriority ? firstLabName : "Your day is clear"}
+          </h2>
+          {topPriority ? (
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Start here — {deriveQueuePriorityLabel(0, topPriority).replace(/^\d+\.\s*/, "")}
+            </p>
+          ) : (
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              No urgent stops — review collections when ready.
+            </p>
+          )}
+        </div>
+        <Button
+          type="button"
+          size="lg"
+          className="h-11 shrink-0 rounded-xl px-5 text-sm font-bold shadow-sm sm:h-12"
+          onClick={onStartRoute}
+        >
+          Start My Day
+          <ArrowRight className="ml-2 h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3 border-t border-[var(--pc-brand-primary)]/15 pt-4 sm:grid-cols-4">
         <div>
-          <p className="text-muted-foreground">Labs to visit</p>
-          <p className="text-lg font-bold tabular-nums text-foreground">{labsToVisit}</p>
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            First lab
+          </p>
+          <p className="mt-0.5 truncate text-sm font-bold text-foreground">
+            {topPriority ? topPriority.labName : "None queued"}
+          </p>
         </div>
         <div>
-          <p className="text-muted-foreground">Collections due</p>
-          <p className="text-lg font-bold tabular-nums text-foreground">{collectionsDue}</p>
-        </div>
-        <div className="col-span-2 sm:col-span-1">
-          <p className="text-muted-foreground">Expected recovery</p>
-          <p className="text-lg font-bold tabular-nums text-foreground">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Recovery opportunity
+          </p>
+          <p className="mt-0.5 text-lg font-bold tabular-nums text-foreground">
             {formatAgentCurrency(recoveryOpportunity)}
           </p>
         </div>
-        <div className="col-span-2">
-          <p className="text-muted-foreground">Highest priority</p>
-          <p className="truncate text-sm font-semibold text-foreground">
-            {topPriority ? topPriority.labName : "Queue clear"}
+        <div>
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Labs to visit
           </p>
+          <p className="mt-0.5 text-lg font-bold tabular-nums text-foreground">{labsToVisit}</p>
+        </div>
+        <div>
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Collections due
+          </p>
+          <p className="mt-0.5 text-lg font-bold tabular-nums text-foreground">{collectionsDue}</p>
         </div>
       </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Button type="button" size="sm" className="h-9 flex-1 rounded-lg px-3 text-xs font-semibold sm:flex-none" onClick={onStartRoute}>
-          Start Route
-          <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
-        </Button>
+
+      <div className="mt-3 flex flex-wrap gap-2 sm:hidden">
         <Button type="button" size="sm" variant="outline" className="h-9 rounded-lg px-3 text-xs" onClick={onOpenCollections}>
           Open Collections
         </Button>
@@ -326,23 +376,34 @@ export const AgentProgressCards = memo(function AgentProgressCards({ kpis, perfo
 
 export const ActionQueueCard = memo(function ActionQueueCard({
   item,
+  priorityIndex = 0,
+  routeStopNumber,
+  recentVisits = [],
+  assignedLabs = [],
   onStartVisit,
   onRecordCollection,
   onOpenLab,
 }) {
-  const reasons = deriveAttentionReasons(item);
+  const reasons = deriveOperationalReasons(item);
   const recommended = deriveQueueRecommendedAction(item);
   const outstanding = Number(item.outstanding || 0);
+  const priorityLabel = deriveQueuePriorityLabel(priorityIndex, item);
+  const stopNum = routeStopNumber ?? priorityIndex + 1;
 
   return (
     <article className="flex h-full flex-col rounded-xl border border-border bg-card p-3 shadow-sm">
-      <div className="flex items-start justify-between gap-4">
-        <h3 className="min-w-0 flex-1 truncate text-base font-bold text-foreground md:text-lg">
-          {item.labName}
-        </h3>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <AgentRouteStopBadge stopNumber={stopNum} compact />
+          </div>
+          <h3 className="mt-1 text-sm font-bold leading-snug text-foreground sm:text-base">
+            {priorityLabel}
+          </h3>
+        </div>
         {outstanding > 0 ? (
           <div className="shrink-0 text-right">
-            <div className="text-2xl font-bold tabular-nums leading-none text-foreground">
+            <div className="text-xl font-bold tabular-nums leading-none text-foreground">
               {formatAgentCurrency(outstanding)}
             </div>
             <div className="mt-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -352,33 +413,48 @@ export const ActionQueueCard = memo(function ActionQueueCard({
         ) : null}
       </div>
 
-      <div className="mt-2 flex flex-1 flex-col gap-2 md:grid md:grid-cols-2 md:gap-3">
-        {reasons.length > 0 ? (
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Why this is priority
-            </p>
-            <ul className="mt-1 space-y-0.5">
-              {reasons.map((reason) => (
-                <li key={reason} className="text-[11px] text-foreground">
-                  · {reason}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : (
-          <div />
-        )}
-
-        <div className="rounded-md bg-muted/40 px-2 py-1.5">
+      {reasons.length > 0 ? (
+        <div className="mt-2">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Recommended action
+            Why am I going here?
           </p>
-          <p className="text-xs font-semibold text-foreground">{recommended}</p>
+          <ul className="mt-1 space-y-0.5">
+            {reasons.map((reason) => (
+              <li key={reason} className="text-[11px] font-medium text-foreground">
+                · {reason}
+              </li>
+            ))}
+          </ul>
         </div>
+      ) : null}
+
+      {outstanding > 0 ? (
+        <AgentLabFieldStrip
+          lab={item}
+          recentVisits={recentVisits}
+          assignedLabs={assignedLabs}
+          outstanding={outstanding}
+          showTargetCompare
+          className="mt-2 border-t border-border/50 pt-2"
+        />
+      ) : (
+        <AgentLabFieldStrip
+          lab={item}
+          recentVisits={recentVisits}
+          assignedLabs={assignedLabs}
+          showTargetCompare={false}
+          className="mt-2 border-t border-border/50 pt-2"
+        />
+      )}
+
+      <div className="mt-2 rounded-md bg-muted/40 px-2 py-1.5">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Next action
+        </p>
+        <p className="text-xs font-semibold text-foreground">{recommended}</p>
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-1.5 border-t border-border/60 pt-2.5">
+      <div className="mt-auto flex flex-wrap gap-1.5 border-t border-border/60 pt-2.5">
         <Button
           type="button"
           size="sm"
@@ -480,7 +556,12 @@ export function QuickActionsBar({ onLogVisit, onRecordCollection, onMyLabs }) {
   );
 }
 
-export const TodaysRouteSection = memo(function TodaysRouteSection({ route, onOpenStop }) {
+export const TodaysRouteSection = memo(function TodaysRouteSection({
+  route,
+  onOpenStop,
+  recentVisits = [],
+  assignedLabs = [],
+}) {
   if (!route?.flat?.length) {
     return (
       <p className="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
@@ -519,12 +600,22 @@ export const TodaysRouteSection = memo(function TodaysRouteSection({ route, onOp
                 <p className="truncate text-[10px] text-muted-foreground">
                   {stop.area || "Territory"} · {queueTypeLabel(stop.queueType)}
                 </p>
+                <AgentLastVisitOutcome
+                  lab={stop}
+                  recentVisits={recentVisits}
+                  assignedLabs={assignedLabs}
+                  compact
+                  className="mt-0.5"
+                />
               </div>
-              {stop.outstanding > 0 ? (
-                <span className="shrink-0 text-[10px] font-semibold tabular-nums">
-                  {formatCurrency(stop.outstanding)}
-                </span>
-              ) : null}
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                {stop.outstanding > 0 ? (
+                  <span className="text-[10px] font-semibold tabular-nums">
+                    {formatCurrency(stop.outstanding)}
+                  </span>
+                ) : null}
+                <AgentLabQuickActions lab={stop} size="xs" />
+              </div>
             </button>
           </li>
         ))}
