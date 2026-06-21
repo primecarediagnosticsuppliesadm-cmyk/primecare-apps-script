@@ -299,6 +299,7 @@ export default function LabCollectionPanel({
           history={history}
           collectionsNotes={collection.collectionsNotes || collection.note || ""}
           openOrders={openOrders}
+          arTotalPaid={collection.totalPaid}
         />
       ) : null}
     </div>

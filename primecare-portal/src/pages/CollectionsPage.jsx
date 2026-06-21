@@ -14,6 +14,7 @@ import {
   updateCollectionNotesWrite,
 } from "@/api/primecareSupabaseApi";
 import { selectOpenOrdersForLab } from "@/collections/collectionsOpenOrders.js";
+import { loadLabPaymentHistoryForDisplay } from "@/collections/collectionsPaymentHistory.js";
 import LabCollectionPanel from "@/components/collections/LabCollectionPanel.jsx";
 import { supabase } from "@/api/supabaseClient.js";
 import {
@@ -1738,12 +1739,11 @@ export default function CollectionsPage({
       let sbHistoryOk = false;
 
       if (supabase) {
-        logSupabaseFeatureSource("Collections.history", { api: "getCollectionHistoryRead" });
-        const histRead = await getCollectionHistoryRead(canonicalLabId);
-        sbHistoryOk = Boolean(histRead?.success);
-        if (histRead?.success && Array.isArray(histRead?.data?.history)) {
-          historyRows = histRead.data.history;
-        }
+        logSupabaseFeatureSource("Collections.history", {
+          api: "loadLabPaymentHistoryForDisplay",
+        });
+        historyRows = await loadLabPaymentHistoryForDisplay(supabase, canonicalLabId);
+        sbHistoryOk = true;
 
         logSupabaseFeatureSource("Collections.details", { api: "getCollectionDetailRead" });
         const detailRead = await getCollectionDetailRead(canonicalLabId);
