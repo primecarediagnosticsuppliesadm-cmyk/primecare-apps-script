@@ -5,7 +5,7 @@ export const AGENT_VISIT_STEP_SUBTITLES = {
   stock: "Record stock feedback",
   followup: "Plan the next follow-up",
   qualification: "Help PrimeCare understand this lab better",
-  review: "Review before submitting",
+  review: "Attach proof and review before submitting",
 };
 
 /**
@@ -18,8 +18,8 @@ export const AGENT_VISIT_STEP_SUBTITLES = {
 export function getWizardMotivationMessage(stepIndex, total, labSelected, canSaveVisit, missingCount) {
   const isReview = stepIndex >= total - 1;
   if (isReview) {
-    if (canSaveVisit && missingCount === 0) return "Review before submitting";
-    return missingCount > 0 ? "Almost ready to save" : "Review before submitting";
+    if (canSaveVisit && missingCount === 0) return "Attach visit proof and review before saving";
+    return missingCount > 0 ? "Almost ready — add proof when you can" : "Attach visit proof before saving";
   }
   if (stepIndex === 0) {
     return labSelected ? "Nice — lab selected" : "Good start";

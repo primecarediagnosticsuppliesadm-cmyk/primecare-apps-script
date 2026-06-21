@@ -502,7 +502,7 @@ export const AGENT_VISIT_SECTION_STEPS = [
   { key: "stock", title: "Stock Feedback", shortTitle: "Stock", icon: Package },
   { key: "followup", title: "Follow-up", shortTitle: "Follow-up", icon: CalendarDays },
   { key: "qualification", title: "Qualification", shortTitle: "Qualify", icon: ClipboardCheck },
-  { key: "review", title: "Review & Save", shortTitle: "Review", icon: CheckCircle2 },
+  { key: "review", title: "Proof & Save", shortTitle: "Proof & Save", icon: CheckCircle2 },
 ];
 
 function assertAgentVisitSectionSteps() {
@@ -2192,6 +2192,9 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
               subtitle="Choose your lab first — everything else follows"
               accent
             />
+            <p className="text-xs text-muted-foreground">
+              You&apos;ll attach visit photo proof before saving.
+            </p>
 
             <div className="grid grid-cols-1 gap-3">
               <div className="rounded-xl border-2 border-[var(--pc-brand-primary)]/30 bg-[var(--pc-brand-primary)]/[0.04] p-3">
@@ -2813,7 +2816,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
               <SectionTitle
                 icon={CheckCircle2}
                 title={currentStep.title}
-                subtitle="Confirm details, then tap Complete Visit Log"
+                subtitle="Attach visit proof, review details, then complete the visit log"
                 accent
               />
 
@@ -2831,6 +2834,78 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
                   All required fields look good — ready to complete visit log.
                 </div>
               )}
+
+              <div className="space-y-3 rounded-xl border-2 border-[var(--pc-brand-primary)]/35 bg-gradient-to-br from-[var(--pc-brand-primary)]/[0.08] via-card to-card p-4 shadow-sm">
+                <div>
+                  <p className="text-sm font-bold text-foreground">Visit Proof</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Attach lab/front-desk/photo proof before completing the visit.
+                  </p>
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    {proofStatusLabel(visitProofFile, collectionProofFile, evidenceUploadState)}
+                  </p>
+                </div>
+                <EvidenceUploadField
+                  file={visitProofFile}
+                  onFileChange={(f) => {
+                    setVisitProofFile(f);
+                    setEvidenceUploadState((prev) => ({
+                      ...prev,
+                      visit: f ? "none" : "none",
+                      visitError: "",
+                    }));
+                  }}
+                  label="Visit photo proof"
+                  disabled={isSubmitting}
+                  hint="Capture at lab or upload from gallery"
+                  uploadStatus={
+                    visitProofFile
+                      ? evidenceUploadState.visit === "none"
+                        ? "attached"
+                        : evidenceUploadState.visit
+                      : "idle"
+                  }
+                  statusMessage={evidenceUploadState.visitError}
+                />
+                <EvidenceUploadField
+                  file={collectionProofFile}
+                  onFileChange={(f) => {
+                    setCollectionProofFile(f);
+                    setEvidenceUploadState((prev) => ({
+                      ...prev,
+                      collection: f ? "none" : "none",
+                      collectionError: "",
+                    }));
+                  }}
+                  label="Collection proof (optional)"
+                  disabled={isSubmitting}
+                  hint="Receipt, UPI screenshot, or signed slip"
+                  uploadStatus={
+                    collectionProofFile
+                      ? evidenceUploadState.collection === "none"
+                        ? "attached"
+                        : evidenceUploadState.collection
+                      : "idle"
+                  }
+                  statusMessage={evidenceUploadState.collectionError}
+                />
+                <div className="space-y-1">
+                  <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                    Proof remarks
+                  </label>
+                  <Textarea
+                    value={proofRemarks}
+                    onChange={(e) => setProofRemarks(e.target.value)}
+                    placeholder="Optional note for audit trail"
+                    className="min-h-[64px] rounded-lg text-sm"
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Proof uploads after your visit is saved — a failed photo will not cancel the visit.
+                </p>
+                <EvidenceUploadProgress uploading={evidenceUploading} message="Uploading proof…" />
+              </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <ReviewSummaryCard
@@ -2911,81 +2986,6 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
                     <p className="text-muted-foreground">Not captured (optional)</p>
                   )}
                 </ReviewSummaryCard>
-
-                <ReviewSummaryCard
-                  title="Field proof"
-                  icon={CheckCircle2}
-                  showEdit={false}
-                  missing={[]}
-                >
-                  <p className="text-xs">
-                    {proofStatusLabel(visitProofFile, collectionProofFile, evidenceUploadState)}
-                  </p>
-                </ReviewSummaryCard>
-              </div>
-
-              <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-                <p className="text-xs font-semibold text-slate-800">Field proof (optional)</p>
-                <p className="text-[10px] text-slate-500">
-                  Proof uploads after your visit is saved — a failed photo will not cancel the visit.
-                </p>
-                <EvidenceUploadField
-                  file={visitProofFile}
-                  onFileChange={(f) => {
-                    setVisitProofFile(f);
-                    setEvidenceUploadState((prev) => ({
-                      ...prev,
-                      visit: f ? "none" : "none",
-                      visitError: "",
-                    }));
-                  }}
-                  label="Visit photo proof"
-                  disabled={isSubmitting}
-                  hint="Capture at lab or upload from gallery"
-                  uploadStatus={
-                    visitProofFile
-                      ? evidenceUploadState.visit === "none"
-                        ? "attached"
-                        : evidenceUploadState.visit
-                      : "idle"
-                  }
-                  statusMessage={evidenceUploadState.visitError}
-                />
-                <EvidenceUploadField
-                  file={collectionProofFile}
-                  onFileChange={(f) => {
-                    setCollectionProofFile(f);
-                    setEvidenceUploadState((prev) => ({
-                      ...prev,
-                      collection: f ? "none" : "none",
-                      collectionError: "",
-                    }));
-                  }}
-                  label="Collection proof (optional)"
-                  disabled={isSubmitting}
-                  hint="Receipt, UPI screenshot, or signed slip"
-                  uploadStatus={
-                    collectionProofFile
-                      ? evidenceUploadState.collection === "none"
-                        ? "attached"
-                        : evidenceUploadState.collection
-                      : "idle"
-                  }
-                  statusMessage={evidenceUploadState.collectionError}
-                />
-                <div className="space-y-1">
-                  <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-                    Proof remarks
-                  </label>
-                  <Textarea
-                    value={proofRemarks}
-                    onChange={(e) => setProofRemarks(e.target.value)}
-                    placeholder="Optional note for audit trail"
-                    className="min-h-[64px] rounded-lg text-sm"
-                    disabled={isSubmitting}
-                  />
-                </div>
-                <EvidenceUploadProgress uploading={evidenceUploading} message="Uploading proof…" />
               </div>
                 </>
               )}
