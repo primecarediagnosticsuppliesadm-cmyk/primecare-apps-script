@@ -4211,6 +4211,57 @@ export async function receivePurchaseOrderWrite(poId, payload = {}) {
 }
 
 /**
+ * Ensures order lines do not exceed on-hand inventory (no backorder in Year-1 pilot).
+ * @param {string|null} tenant_id
+ * @param {Array<{ product_id?: string, productId?: string, product_name?: string, productName?: string, quantity?: number }>} lines
+ */
+async function validateOrderLinesInventoryAvailability(tenant_id, lines) {
+  const tid = str(tenant_id);
+  if (!tid) {
+    return { success: false, error: "tenant_id is required for inventory validation" };
+  }
+
+  const shortages = [];
+  for (const line of lines || []) {
+    const product_id = str(line.product_id ?? line.productId);
+    const qty = num(line.quantity);
+    if (!product_id || qty <= 0) continue;
+
+    const inventoryResolved = await resolveInventoryRowForWrite(tid, product_id);
+    if (!inventoryResolved.success) {
+      return {
+        success: false,
+        error: inventoryResolved.error || `Inventory not found for ${product_id}`,
+      };
+    }
+
+    const available = num(
+      inventoryResolved.row?.current_stock ?? inventoryResolved.row?.currentStock ?? 0
+    );
+    if (qty > available) {
+      shortages.push({
+        product_id,
+        product_name: str(line.product_name ?? line.productName) || product_id,
+        requested: qty,
+        available,
+      });
+    }
+  }
+
+  if (shortages.length) {
+    const detail = shortages
+      .map(
+        (s) =>
+          `${s.product_name}: requested ${s.requested}, available ${s.available}`
+      )
+      .join("; ");
+    return { success: false, error: `Insufficient inventory — ${detail}` };
+  }
+
+  return { success: true, error: null };
+}
+
+/**
  * After `order_items` insert: decrement stock on the inventory table and append ledger rows.
  * Failures are logged only; the caller does not roll back the order.
  * @returns {Promise<{ success: boolean, error?: string|null, updatedLines?: number }>}
@@ -4232,6 +4283,7 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
   const lines = Array.isArray(savedLineItems) ? savedLineItems : [];
   const ledgerBatch = [];
   let updatedLines = 0;
+  const stockErrors = [];
 
   for (const line of lines) {
     const product_id = str(line.product_id ?? line.productId ?? "");
@@ -4242,8 +4294,11 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
 
     const inventoryResolved = await resolveInventoryRowForWrite(scopedTenantId, product_id);
     if (!inventoryResolved.success) {
+      stockErrors.push(
+        inventoryResolved.error || `Inventory row not found for ${product_id}`
+      );
       console.warn(
-        "[createOrderWrite] INVENTORY: row resolution failed — order is NOT rolled back:",
+        "[applyLabOrderInventoryDeduction] row resolution failed:",
         product_id,
         inventoryResolved.error
       );
@@ -4254,7 +4309,20 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
     const inventoryTenantId = str(row.tenant_id ?? inventoryResolved.tenantId);
 
     const stock_before = num(row.current_stock ?? row.currentStock ?? 0);
-    const stock_after = Math.max(0, stock_before - qty);
+    if (qty > stock_before) {
+      const label = product_name_line || product_id;
+      stockErrors.push(
+        `Insufficient stock for ${label}: requested ${qty}, available ${stock_before}`
+      );
+      console.warn("[applyLabOrderInventoryDeduction] insufficient stock:", {
+        product_id,
+        requested: qty,
+        available: stock_before,
+      });
+      continue;
+    }
+
+    const stock_after = stock_before - qty;
 
     console.log("INVENTORY BEFORE UPDATE", {
       table: tableName,
@@ -4319,6 +4387,14 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
       created_by,
       created_at: new Date().toISOString(),
     });
+  }
+
+  if (stockErrors.length) {
+    return {
+      success: false,
+      error: stockErrors.join("; "),
+      updatedLines,
+    };
   }
 
   if (!ledgerBatch.length) {
@@ -4392,6 +4468,11 @@ export async function createOrderWrite(payload = {}) {
     });
 
     const total_amount = normalizedLines.reduce((s, l) => s + l.total_price, 0);
+
+    const stockCheck = await validateOrderLinesInventoryAvailability(tenant_id, normalizedLines);
+    if (!stockCheck.success) {
+      return { success: false, error: stockCheck.error || "Insufficient inventory", data: null };
+    }
 
     const writePayload = {
       order_id,
@@ -5178,6 +5259,18 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
           reason: hasLedgerOut ? "ledger_ORDER_OUT_present" : "orders.inventory_updated",
         });
       } else if (fetchedLineItems.length) {
+        const fulfillTenantId = str(orderRow.tenant_id ?? orderRow.tenantId) || null;
+        const stockCheck = await validateOrderLinesInventoryAvailability(
+          fulfillTenantId,
+          fetchedLineItems
+        );
+        if (!stockCheck.success) {
+          return {
+            success: false,
+            error: stockCheck.error || "Insufficient inventory to fulfill order",
+            data: null,
+          };
+        }
         await applyLabOrderInventoryDeduction({
           savedLineItems: fetchedLineItems,
           order_id: businessOrderId,

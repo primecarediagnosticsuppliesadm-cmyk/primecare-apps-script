@@ -56,6 +56,13 @@ import {
   orderStatusChipVariant,
 } from "@/utils/orderTracking.js";
 import { paymentStatusToVariant } from "@/utils/statusTokens.js";
+import {
+  availableStockForProduct,
+  clampOrderQuantity,
+  findCartStockViolations,
+  formatCartStockViolationMessage,
+  onlyAvailableLabel,
+} from "@/utils/labOrderingStock.js";
 
 function formatOrderDateShort(iso) {
   if (!iso) return null;
@@ -88,8 +95,10 @@ function QtyControl({
   onIncrease,
   size = "product",
   disabled = false,
+  increaseDisabled = false,
 }) {
   const isDrawer = size === "drawer";
+  const plusBlocked = disabled || increaseDisabled;
   return (
     <div
       className={cn(
@@ -120,7 +129,7 @@ function QtyControl({
       <button
         type="button"
         onClick={onIncrease}
-        disabled={disabled}
+        disabled={plusBlocked}
         className={cn(
           "flex h-full items-center justify-center text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed",
           isDrawer ? "w-7" : "w-9"
@@ -207,10 +216,12 @@ function CollapsibleSection({ title, open, onToggle, children }) {
   );
 }
 
-function ProductCatalogCard({ item, qty, onQtyChange, onAdd, disabled }) {
+function ProductCatalogCard({ item, qty, maxQty, onQtyChange, onAdd, disabled }) {
   const unitPrice = Number(item.unitSellingPrice ?? item.price ?? 0);
   const packSize = item.packSize || item.unit || item.pack || "";
   const CategoryIcon = categoryIcon(item.category);
+  const atMax = maxQty > 0 && qty >= maxQty;
+  const canAdd = !disabled && maxQty > 0;
 
   return (
     <div
@@ -239,7 +250,8 @@ function ProductCatalogCard({ item, qty, onQtyChange, onAdd, disabled }) {
         <QtyControl
           size="product"
           value={qty}
-          disabled={disabled}
+          disabled={disabled || maxQty <= 0}
+          increaseDisabled={atMax}
           onDecrease={() => onQtyChange(qty - 1)}
           onIncrease={() => onQtyChange(qty + 1)}
         />
@@ -248,11 +260,16 @@ function ProductCatalogCard({ item, qty, onQtyChange, onAdd, disabled }) {
           size="sm"
           className="h-8 shrink-0 rounded-md px-2.5 text-xs font-semibold"
           onClick={onAdd}
-          disabled={disabled}
+          disabled={!canAdd}
         >
-          {disabled ? "N/A" : "Add"}
+          {!canAdd ? "N/A" : "Add"}
         </Button>
       </div>
+      {maxQty > 0 ? (
+        <p className="mt-1 text-[10px] font-medium text-amber-700">{onlyAvailableLabel(maxQty)}</p>
+      ) : (
+        <p className="mt-1 text-[10px] font-medium text-red-700">Out of stock</p>
+      )}
     </div>
   );
 }
@@ -366,8 +383,20 @@ export default function LabOrderingPage({ currentUser }) {
   const isCreditHold = creditStatus === "HOLD";
   const isNearLimit = creditStatus === "NEAR_LIMIT";
 
-
   const profileLabKey = labIdKey(labId);
+
+  const catalogByProductId = useMemo(() => {
+    const map = new Map();
+    for (const item of catalog) {
+      map.set(String(item.productId || ""), item);
+    }
+    return map;
+  }, [catalog]);
+
+  function resolveAvailableStock(productId, fallbackItem) {
+    const catalogItem = catalogByProductId.get(String(productId || ""));
+    return availableStockForProduct(catalogItem ?? fallbackItem);
+  }
 
   const catalogSkuStats = useMemo(() => {
     const counts = new Map();
@@ -492,6 +521,60 @@ export default function LabOrderingPage({ currentUser }) {
       console.warn("[LabOrderingPage] failed to process handoff", error);
     }
   }, [cartHandoffStorageKey]);
+
+  useEffect(() => {
+    if (!catalog.length || !hydratedDraftRef.current) return;
+
+    setCartItems((prev) => {
+      if (!prev.length) return prev;
+      let changed = false;
+      const next = [];
+      for (const row of prev) {
+        const catalogItem = catalogByProductId.get(String(row.productId || ""));
+        const available = resolveAvailableStock(row.productId, row);
+        if (available <= 0) {
+          changed = true;
+          continue;
+        }
+        const qty = clampOrderQuantity(row.quantity, available);
+        if (
+          qty !== Number(row.quantity || 0) ||
+          available !== Number(row.currentStock ?? -1)
+        ) {
+          changed = true;
+        }
+        next.push({
+          ...row,
+          quantity: qty,
+          currentStock: available,
+          stockHealth: catalogItem?.stockHealth ?? row.stockHealth,
+        });
+      }
+      return changed ? next : prev;
+    });
+
+    setProductQty((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [productId, qty] of Object.entries(prev)) {
+        const available = resolveAvailableStock(productId);
+        if (available <= 0) {
+          if (next[productId] !== 1) {
+            next[productId] = 1;
+            changed = true;
+          }
+          continue;
+        }
+        const clamped = clampOrderQuantity(qty, available);
+        if (clamped !== Number(qty || 0)) {
+          next[productId] = clamped;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalog, catalogByProductId]);
 
   async function loadAccountOutstanding() {
     try {
@@ -800,17 +883,25 @@ export default function LabOrderingPage({ currentUser }) {
   );
 
   function updateProductQty(productId, nextQty) {
-    const safeQty = Math.max(1, Number(nextQty || 1));
+    const available = resolveAvailableStock(productId);
+    if (available <= 0) {
+      setErrorMessage("This product is out of stock and cannot be ordered.");
+      return;
+    }
+
+    const safeQty = clampOrderQuantity(nextQty, available);
     const inCart = cartQtyByProduct.has(String(productId || ""));
     if (inCart) {
       updateCartQty(productId, safeQty);
       return;
     }
     setProductQty((prev) => ({ ...prev, [productId]: safeQty }));
+    setErrorMessage("");
   }
 
   function addToCart(item, forcedQty) {
-    if (!item?.canOrder) {
+    const available = resolveAvailableStock(item.productId, item);
+    if (!item?.canOrder || available <= 0) {
       setErrorMessage(
         `${item.productName} is not available for ordering right now.`
       );
@@ -818,16 +909,9 @@ export default function LabOrderingPage({ currentUser }) {
     }
 
     const draftQty = Number(productQty[item.productId] || 1);
-    const qty = Math.max(1, Number(forcedQty || draftQty || 1));
-
-    if (
-      item.currentStock !== undefined &&
-      item.currentStock !== null &&
-      qty > Number(item.currentStock)
-    ) {
-      setErrorMessage(
-        `Requested quantity exceeds available stock for ${item.productName}.`
-      );
+    const qty = clampOrderQuantity(forcedQty ?? draftQty, available);
+    if (qty <= 0) {
+      setErrorMessage(`${item.productName} is out of stock.`);
       return;
     }
 
@@ -835,22 +919,15 @@ export default function LabOrderingPage({ currentUser }) {
       const existing = prev.find((row) => row.productId === item.productId);
 
       if (existing) {
-        const nextQty = existing.quantity + qty;
-
-        if (
-          item.currentStock !== undefined &&
-          item.currentStock !== null &&
-          nextQty > Number(item.currentStock)
-        ) {
-          setErrorMessage(
-            `Total cart quantity exceeds available stock for ${item.productName}.`
-          );
+        const nextQty = clampOrderQuantity(existing.quantity + qty, available);
+        if (nextQty <= 0) {
+          setErrorMessage(`${item.productName} is out of stock.`);
           return prev;
         }
 
         const nextRows = prev.map((row) =>
           row.productId === item.productId
-            ? { ...row, quantity: nextQty }
+            ? { ...row, quantity: nextQty, currentStock: available }
             : row
         );
         setProductQty((qtyPrev) => ({ ...qtyPrev, [item.productId]: nextQty }));
@@ -866,7 +943,7 @@ export default function LabOrderingPage({ currentUser }) {
           category: item.category || "",
           unitPrice: Number(item.unitSellingPrice ?? item.price ?? 0),
           quantity: qty,
-          currentStock: item.currentStock ?? null,
+          currentStock: available,
           stockHealth: item.stockHealth || "OK",
         },
       ];
@@ -878,27 +955,27 @@ export default function LabOrderingPage({ currentUser }) {
   }
 
   function updateCartQty(productId, nextQty) {
+    const available = resolveAvailableStock(productId);
+    if (available <= 0) {
+      removeFromCart(productId);
+      setErrorMessage("Removed out-of-stock item from cart.");
+      return;
+    }
+
+    const safeQty = clampOrderQuantity(nextQty, available);
+    if (safeQty <= 0) {
+      removeFromCart(productId);
+      return;
+    }
+
     setCartItems((prev) =>
       prev.map((item) => {
         if (item.productId !== productId) return item;
-
-        const safeQty = Math.max(1, Number(nextQty || 1));
-
-        if (
-          item.currentStock !== undefined &&
-          item.currentStock !== null &&
-          safeQty > Number(item.currentStock)
-        ) {
-          setErrorMessage(
-            `Requested quantity exceeds available stock for ${item.productName}.`
-          );
-          return item;
-        }
-
         setProductQty((qtyPrev) => ({ ...qtyPrev, [productId]: safeQty }));
-        return { ...item, quantity: safeQty };
+        return { ...item, quantity: safeQty, currentStock: available };
       })
     );
+    setErrorMessage("");
   }
 
   function increaseCartQty(productId) {
@@ -1009,6 +1086,12 @@ export default function LabOrderingPage({ currentUser }) {
 
     if (!cartItems.length) {
       setErrorMessage("Please add at least one item to cart.");
+      return;
+    }
+
+    const stockViolations = findCartStockViolations(cartItems, catalogByProductId);
+    if (stockViolations.length) {
+      setErrorMessage(formatCartStockViolationMessage(stockViolations));
       return;
     }
 
@@ -1343,12 +1426,14 @@ export default function LabOrderingPage({ currentUser }) {
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                   {sortedAllProducts.map((item) => {
                     const qty = cartQtyByProduct.get(String(item.productId || "")) || productQty[item.productId] || 1;
-                    const isOut = item.stockHealth === "OUT" || item.canOrder === false;
+                    const maxQty = availableStockForProduct(item);
+                    const isOut = maxQty <= 0 || item.stockHealth === "OUT" || item.canOrder === false;
                     return (
                       <ProductCatalogCard
                         key={`${item.tenantId || "lab"}-${item.productId}`}
                         item={item}
                         qty={qty}
+                        maxQty={maxQty}
                         disabled={isOut}
                         onQtyChange={(next) => updateProductQty(item.productId, next)}
                         onAdd={() => addToCart(item)}
@@ -1655,6 +1740,8 @@ export default function LabOrderingPage({ currentUser }) {
                     <div className="space-y-1.5">
                       {cartItems.map((item) => {
                         const lineTotal = Number(item.quantity) * Number(item.unitPrice);
+                        const available = resolveAvailableStock(item.productId, item);
+                        const atMax = available > 0 && Number(item.quantity) >= available;
                         return (
                           <div
                             key={item.productId}
@@ -1666,6 +1753,11 @@ export default function LabOrderingPage({ currentUser }) {
                               </p>
                               <p className="text-[10px] text-slate-500">
                                 ₹{Number(item.unitPrice).toLocaleString()} ea
+                                {available > 0 ? (
+                                  <span className="ml-1 text-amber-700">
+                                    · {onlyAvailableLabel(available)}
+                                  </span>
+                                ) : null}
                               </p>
                             </div>
                             <QtyControl
@@ -1673,6 +1765,7 @@ export default function LabOrderingPage({ currentUser }) {
                               value={item.quantity}
                               onDecrease={() => decreaseCartQty(item.productId)}
                               onIncrease={() => increaseCartQty(item.productId)}
+                              increaseDisabled={atMax || available <= 0}
                             />
                             <span className="w-14 shrink-0 text-right text-xs font-semibold tabular-nums">
                               ₹{lineTotal.toLocaleString()}
