@@ -10,8 +10,11 @@ import {
   getCollectionDetailRead,
   getCollectionHistoryRead,
   getCollectionsRead,
+  getLabRecentOrdersRead,
   updateCollectionNotesWrite,
 } from "@/api/primecareSupabaseApi";
+import { selectOpenOrdersForLab } from "@/collections/collectionsOpenOrders.js";
+import LabCollectionPanel from "@/components/collections/LabCollectionPanel.jsx";
 import { supabase } from "@/api/supabaseClient.js";
 import {
   logAppsScriptFallbackUsed,
@@ -1386,6 +1389,10 @@ function CollectionListItem({
   recentVisits = [],
   assignedLabs = [],
   lastPaymentDate = "",
+  openOrders = [],
+  ordersLoading = false,
+  paymentStatusLabel = "Pending",
+  useTabbedPanel = false,
 }) {
   if (isAgentView) {
     return (
@@ -1420,19 +1427,38 @@ function CollectionListItem({
         }
       />
       {expanded ? (
-        <CollectionExpandedPanel
-          collection={selectedCollection}
-          history={history}
-          detailsLoading={detailsLoading}
-          pendingTaskContext={pendingTaskContext}
-          onSave={onSave}
-          onCompleteTask={onCompleteTask}
-          readOnly={readOnly}
-          copy={copy}
-          focusSection={focusSection}
-          isAgentView={isAgentView}
-          {...formProps}
-        />
+        useTabbedPanel ? (
+          <LabCollectionPanel
+            collection={selectedCollection}
+            history={history}
+            openOrders={openOrders}
+            ordersLoading={ordersLoading}
+            lastPaymentDate={lastPaymentDate}
+            paymentStatusLabel={paymentStatusLabel}
+            detailsLoading={detailsLoading}
+            pendingTaskContext={pendingTaskContext}
+            onSave={onSave}
+            onCompleteTask={onCompleteTask}
+            readOnly={readOnly}
+            copy={copy}
+            focusSection={focusSection}
+            {...formProps}
+          />
+        ) : (
+          <CollectionExpandedPanel
+            collection={selectedCollection}
+            history={history}
+            detailsLoading={detailsLoading}
+            pendingTaskContext={pendingTaskContext}
+            onSave={onSave}
+            onCompleteTask={onCompleteTask}
+            readOnly={readOnly}
+            copy={copy}
+            focusSection={focusSection}
+            isAgentView={isAgentView}
+            {...formProps}
+          />
+        )
       ) : null}
     </Card>
   );
@@ -1492,6 +1518,8 @@ export default function CollectionsPage({
   const [expandFocus, setExpandFocus] = useState("");
   const [paymentDrawerLabId, setPaymentDrawerLabId] = useState("");
   const [lastPaymentByLabId, setLastPaymentByLabId] = useState({});
+  const [labOrdersByLabId, setLabOrdersByLabId] = useState({});
+  const [labOrdersLoadingByLabId, setLabOrdersLoadingByLabId] = useState({});
 
   const isAgentView = useMemo(
     () => isAgentCollectionsView(currentUser, isLabAccount),
@@ -1776,6 +1804,21 @@ export default function CollectionsPage({
       }
       setSelectedCollection(collection);
       setHistory(historyRows);
+
+      if (supabase && !isLabAccount && !isAgentView) {
+        setLabOrdersLoadingByLabId((prev) => ({ ...prev, [canonicalKey]: true }));
+        try {
+          logSupabaseFeatureSource("Collections.openOrders", { api: "getLabRecentOrdersRead" });
+          const ordersRes = await getLabRecentOrdersRead(canonicalLabId);
+          const openOrders = selectOpenOrdersForLab(ordersRes?.data?.orders || []);
+          setLabOrdersByLabId((prev) => ({ ...prev, [canonicalKey]: openOrders }));
+        } catch (orderErr) {
+          console.warn("CollectionsPage openOrders:", orderErr);
+          setLabOrdersByLabId((prev) => ({ ...prev, [canonicalKey]: [] }));
+        } finally {
+          setLabOrdersLoadingByLabId((prev) => ({ ...prev, [canonicalKey]: false }));
+        }
+      }
 
       setAmountCollected("");
       setPaymentMode("Cash");
@@ -2118,9 +2161,15 @@ export default function CollectionsPage({
   }, [filteredCollections, expandedLabId]);
 
   useEffect(() => {
-    if (detailsLoading || expandFocus !== "payment" || !expandedLabId) return;
+    if (detailsLoading || !expandedLabId) return;
     requestAnimationFrame(() => {
-      document.getElementById(`collection-amount-${expandedLabId}`)?.focus();
+      if (expandFocus === "payment") {
+        document.getElementById(`collection-amount-${expandedLabId}`)?.focus();
+      } else if (expandFocus === "followup") {
+        document
+          .getElementById(`collection-followup-date-${expandedLabId}`)
+          ?.focus();
+      }
     });
   }, [detailsLoading, expandFocus, expandedLabId]);
 
@@ -2474,6 +2523,10 @@ export default function CollectionsPage({
           {filteredCollections.map((item) => {
             const key = labIdKey(item.labId);
             const isExpanded = expandedLabId === key;
+            const rowLastPayment =
+              (isExpanded ? deriveLastPaymentDateFromHistory(history) : "") ||
+              lastPaymentByLabId[key] ||
+              "";
             return (
               <CollectionListItem
                 key={key}
@@ -2496,11 +2549,15 @@ export default function CollectionsPage({
                 readOnly={false}
                 copy={accountLabels}
                 isAgentView={false}
+                useTabbedPanel={isHqCreditRisk}
                 focusSection={isExpanded ? expandFocus : ""}
                 onRecordPayment={() => openCollectionPanel(item.labId, "payment")}
                 onViewDetails={() => openCollectionPanel(item.labId, "details")}
                 onAddFollowUp={() => openCollectionPanel(item.labId, "followup")}
-                lastPaymentDate={lastPaymentByLabId[key] || ""}
+                lastPaymentDate={rowLastPayment}
+                openOrders={labOrdersByLabId[key] || []}
+                ordersLoading={Boolean(labOrdersLoadingByLabId[key])}
+                paymentStatusLabel={displayPaymentStatus(item)}
               />
             );
           })}

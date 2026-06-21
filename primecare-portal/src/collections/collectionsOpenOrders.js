@@ -1,0 +1,57 @@
+import {
+  normalizeOrderStatusLabel,
+  normalizePaymentStatusLabel,
+} from "@/orders/ordersMonitorEngine.js";
+import { formatOrderPaymentLabel } from "@/utils/orderTracking.js";
+
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function orderTimestamp(order) {
+  const created = String(order?.createdAt ?? "").trim();
+  if (created) {
+    const t = new Date(created).getTime();
+    if (Number.isFinite(t)) return t;
+  }
+  const date = String(order?.orderDate ?? "").trim();
+  if (date) {
+    const t = new Date(`${date.slice(0, 10)}T12:00:00`).getTime();
+    if (Number.isFinite(t)) return t;
+  }
+  return 0;
+}
+
+/** True when order payment label indicates unpaid or partially paid work. */
+export function isOpenReceivableOrder(order) {
+  const status = normalizeOrderStatusLabel(order?.orderStatus).toLowerCase();
+  if (status !== "fulfilled") return false;
+
+  const paymentLabel = formatOrderPaymentLabel({
+    orderStatus: order?.orderStatus,
+    paymentStatus: order?.paymentStatus,
+    invoiceStatus: order?.invoiceStatus,
+  });
+  const pay = normalizePaymentStatusLabel(paymentLabel).toLowerCase();
+  return pay === "pending" || pay === "partial" || pay.includes("partial");
+}
+
+/** Fulfilled orders that still show payment pending (reference open orders for AR). */
+export function selectOpenOrdersForLab(orders) {
+  return (orders || [])
+    .filter(isOpenReceivableOrder)
+    .sort((a, b) => orderTimestamp(b) - orderTimestamp(a));
+}
+
+export function sumOpenOrderAmounts(openOrders) {
+  return (openOrders || []).reduce((sum, order) => sum + num(order.orderTotal), 0);
+}
+
+export function orderPaymentDisplayLabel(order) {
+  return formatOrderPaymentLabel({
+    orderStatus: order?.orderStatus,
+    paymentStatus: order?.paymentStatus,
+    invoiceStatus: order?.invoiceStatus,
+  });
+}
