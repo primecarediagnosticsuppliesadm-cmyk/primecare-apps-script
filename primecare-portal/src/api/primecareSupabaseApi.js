@@ -1092,6 +1092,10 @@ export function mapReorderCandidateRow(row) {
         row.Reorder_Qty ??
         row.suggested_reorder_qty
     ),
+    costPrice: num(row.cost_price ?? row.costPrice ?? row.unit_cost ?? row.unitCost),
+    preferredSupplier: str(
+      row.preferred_supplier ?? row.preferredSupplier ?? row.supplier ?? row.supplier_name
+    ),
   };
 }
 
