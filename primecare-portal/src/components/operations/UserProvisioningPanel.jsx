@@ -142,7 +142,7 @@ function ConfirmActionModal({
 function computeAgentLabAssignmentDiff(labAssignments, initialKeys, selectedKeys, user) {
   const assigns = [];
   const unassigns = [];
-  let reassignCount = 0;
+  const reassigns = [];
 
   const mine = [user?.userId, user?.agentId, user?.id]
     .map((v) => String(v ?? "").trim().toLowerCase())
@@ -155,9 +155,10 @@ function computeAgentLabAssignmentDiff(labAssignments, initialKeys, selectedKeys
     if (wasMine === nowMine) continue;
 
     if (nowMine) {
-      assigns.push(lab);
       const assignedId = String(lab.assignedAgentId ?? "").trim().toLowerCase();
-      if (assignedId && !mine.includes(assignedId)) reassignCount += 1;
+      const isReassign = Boolean(assignedId && !mine.includes(assignedId));
+      if (isReassign) reassigns.push(lab);
+      else assigns.push(lab);
     } else {
       unassigns.push(lab);
     }
@@ -166,8 +167,9 @@ function computeAgentLabAssignmentDiff(labAssignments, initialKeys, selectedKeys
   return {
     assigns,
     unassigns,
-    reassignCount,
-    labChanges: assigns.length + unassigns.length,
+    reassigns,
+    reassignCount: reassigns.length,
+    labChanges: assigns.length + unassigns.length + reassigns.length,
   };
 }
 
@@ -671,27 +673,6 @@ function UserAssignmentDrawer({
 
   function toggleLabSelection(lab) {
     const key = labAssignmentKey(lab);
-    const isChecked = selectedLabKeys.has(key);
-    if (isChecked && initialAssignedKeysRef.current.has(key)) {
-      onRequestConfirm?.({
-        title: `Unassign lab — ${lab.labName}`,
-        consequence: `${user.name} will lose access to this lab. Field operations for this lab may be affected until it is reassigned.`,
-        details: `Lab: ${lab.labName} (${lab.labId})\nAgent: ${user.name}`,
-        requireReason: true,
-        reasonLabel: "Reason for unassign",
-        confirmLabel: "Unassign lab",
-        destructive: true,
-        onCancel: () => {},
-        onExecute: async () => {
-          setSelectedLabKeys((prev) => {
-            const next = new Set(prev);
-            next.delete(key);
-            return next;
-          });
-        },
-      });
-      return;
-    }
     setSelectedLabKeys((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -777,6 +758,9 @@ function UserAssignmentDrawer({
     if (diff.assigns.length) {
       detailParts.push(`Assign ${diff.assigns.length} lab(s):\n${formatLabList(diff.assigns)}`);
     }
+    if (diff.reassigns.length) {
+      detailParts.push(`Reassign ${diff.reassigns.length} lab(s):\n${formatLabList(diff.reassigns)}`);
+    }
     if (diff.unassigns.length) {
       detailParts.push(`Unassign ${diff.unassigns.length} lab(s):\n${formatLabList(diff.unassigns)}`);
     }
@@ -789,10 +773,7 @@ function UserAssignmentDrawer({
       detailParts.push(`Territory: ${initialTerritory || "—"} → ${territory || "—"}`);
     }
 
-    const requireReason =
-      diff.unassigns.length > 0 ||
-      diff.assigns.length > 1 ||
-      diff.reassignCount > 0;
+    const requireReason = diff.unassigns.length > 0 || diff.reassigns.length > 0;
 
     onRequestConfirm?.({
       title: `Save assignments — ${user.name}`,
@@ -804,11 +785,6 @@ function UserAssignmentDrawer({
       requireReason,
       reasonLabel: "Reason for assignment change",
       confirmLabel: "Save assignments",
-      onCancel: () => {
-        setSelectedLabKeys(new Set(initialAssignedKeysRef.current));
-        setRole(initialRole);
-        setTerritory(initialTerritory);
-      },
       onExecute: async () => {
         setSaving(true);
         try {
