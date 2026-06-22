@@ -5,23 +5,32 @@ function str(v) {
 }
 
 export const OPERATIONS_CENTER_TABS = [
-  { id: "agents", label: "Agents" },
-  { id: "distributorAssignment", label: "Distributor Assignment" },
-  { id: "labAssignment", label: "Lab Assignment" },
-  { id: "users", label: "Users" },
+  { id: "directory", label: "User Directory" },
+  { id: "audit", label: "Access Audit" },
+  { id: "labAssignment", label: "Bulk Lab Assign" },
+  { id: "distributorAssignment", label: "Bulk Distributor Assign" },
 ];
 
 export const PLATFORM_ROLE_OPTIONS = [
-  { value: "admin", label: "Admin" },
+  { value: "admin", label: "HQ Admin" },
   { value: "executive", label: "Executive" },
   { value: "agent", label: "Agent" },
   { value: "lab", label: "Lab User" },
+  { value: "distributor_admin", label: "Distributor Admin" },
 ];
+
+const KNOWN_PLATFORM_ROLES = new Set([
+  ROLES.AGENT,
+  ROLES.ADMIN,
+  ROLES.EXECUTIVE,
+  ROLES.LAB,
+  ROLES.DISTRIBUTOR_ADMIN,
+]);
 
 export function normalizePlatformRole(role) {
   const r = str(role).toLowerCase();
   if (r === "lab user") return ROLES.LAB;
-  if ([ROLES.AGENT, ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.LAB].includes(r)) return r;
+  if (KNOWN_PLATFORM_ROLES.has(r)) return r;
   return PLATFORM_ROLE_OPTIONS.some((o) => o.value === r) ? r : "";
 }
 
@@ -104,6 +113,7 @@ export function directoryRoleFromPlatformRole(role) {
   if (normalized === ROLES.AGENT) return "AGENT";
   if (normalized === ROLES.ADMIN) return "ADMIN";
   if (normalized === ROLES.EXECUTIVE) return "EXECUTIVE";
+  if (normalized === ROLES.DISTRIBUTOR_ADMIN) return "DISTRIBUTOR_ADMIN";
   return str(role).toUpperCase();
 }
 
@@ -180,6 +190,8 @@ export function mapPlatformUserRow(row = {}) {
     tenantId: str(row.tenant_id ?? row.tenantId),
     agentId: str(row.agent_id ?? row.agentId),
     labId: str(row.lab_id ?? row.labId),
+    distributorId: str(row.distributor_id ?? row.distributorId),
+    territory: str(row.territory),
   };
 }
 

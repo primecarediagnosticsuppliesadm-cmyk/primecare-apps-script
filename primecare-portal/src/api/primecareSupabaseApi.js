@@ -5395,11 +5395,13 @@ function mapProfilesPlatformUserRow(row, directory = null) {
     tenant_id: str(row.tenant_id),
     agent_id: str(row.agent_id),
     lab_id: str(row.lab_id),
+    distributor_id: str(row.distributor_id),
+    territory: str(row.territory),
   };
 }
 
 const PROFILES_IDENTITY_SELECT =
-  "user_id, tenant_id, role, username, display_name, agent_name, agent_id, lab_id, active, created_at, email, phone";
+  "user_id, tenant_id, role, username, display_name, agent_name, agent_id, lab_id, distributor_id, territory, active, created_at, email, phone";
 const PROFILES_BASE_SELECT =
   "user_id, tenant_id, role, agent_name, agent_id, lab_id, active, created_at";
 
@@ -5615,7 +5617,7 @@ export async function getOperationsPlatformUsersRead(options = {}) {
   ]);
 
   if (error) {
-    const missingIdentityColumn = /display_name|username|profiles.*email|column.*email|column.*phone/i.test(
+    const missingIdentityColumn = /display_name|username|profiles.*email|column.*email|column.*phone|distributor_id|territory/i.test(
       error.message || ""
     );
     if (missingIdentityColumn) {
@@ -5674,7 +5676,7 @@ export async function createOperationsPlatformUserWrite(payload = {}) {
   if (!username) return { success: false, error: "Username is required" };
   if (!email) return { success: false, error: "Email is required" };
   if (!name) return { success: false, error: "Full name is required" };
-  if (!role || !["admin", "executive", "agent", "lab"].includes(role)) {
+  if (!role || !["admin", "executive", "agent", "lab", "distributor_admin"].includes(role)) {
     return { success: false, error: "A valid role is required" };
   }
 
@@ -5689,6 +5691,11 @@ export async function createOperationsPlatformUserWrite(payload = {}) {
     phone: phone || null,
     agent_id: role === "agent" ? agentId || null : null,
     lab_id: role === "lab" ? normalizeLabIdKey(labId) || null : null,
+    distributor_id:
+      role === "distributor_admin"
+        ? str(payload.distributorId ?? payload.distributor_id) || null
+        : null,
+    territory: str(payload.territory) || null,
     active: payload.active !== false,
   };
 
@@ -5740,11 +5747,15 @@ export async function updateOperationsPlatformUserWrite(userId, payload = {}) {
   if (email) patch.email = email;
   if (phone) patch.phone = phone;
   if (payload.active !== undefined) patch.active = payload.active !== false;
-  if (role && ["admin", "executive", "agent", "lab"].includes(role)) {
+  if (role && ["admin", "executive", "agent", "lab", "distributor_admin"].includes(role)) {
     patch.role = role;
     if (role === "agent") patch.agent_id = str(payload.agentId ?? payload.agent_id) || null;
     if (role === "lab") patch.lab_id = normalizeLabIdKey(payload.labId ?? payload.lab_id) || null;
+    if (role === "distributor_admin") {
+      patch.distributor_id = str(payload.distributorId ?? payload.distributor_id) || null;
+    }
   }
+  if (payload.territory !== undefined) patch.territory = str(payload.territory) || null;
 
   const { data, error } = await supabase
     .from("profiles")
@@ -6042,6 +6053,73 @@ export async function updateLabAgentAssignmentWrite(payload = {}) {
       tenantId,
     },
   };
+}
+
+export async function transferLabAssignmentWrite(payload = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+
+  const hqTenantId = str(payload.hqTenantId ?? payload.tenantId ?? payload.tenant_id);
+  const labTenantId = str(payload.labTenantId ?? payload.lab_tenant_id);
+  const labId = normalizeLabIdKey(payload.labId ?? payload.lab_id);
+  const fromAgentId = str(payload.fromAgentId ?? payload.from_agent_id);
+  const fromAgentName = str(payload.fromAgentName ?? payload.from_agent_name);
+  const toAgentId = str(payload.toAgentId ?? payload.to_agent_id ?? payload.agentId);
+  const toAgentName = str(payload.toAgentName ?? payload.to_agent_name ?? payload.agentName);
+  const reason = str(payload.reason);
+  const subjectUserId = str(payload.subjectUserId ?? payload.subject_user_id);
+
+  if (!labTenantId) return { success: false, error: "Lab tenant is required" };
+  if (!labId) return { success: false, error: "Lab ID is required" };
+  if (!toAgentId) return { success: false, error: "New agent is required" };
+
+  const assignRes = await updateLabAgentAssignmentWrite({
+    tenantId: labTenantId,
+    labId,
+    agentId: toAgentId,
+    agentName: toAgentName,
+  });
+  if (!assignRes?.success) return assignRes;
+
+  const { insertLabAssignmentHistoryWrite, insertProvisioningEventWrite } = await import(
+    "@/api/userProvisioningApi.js"
+  );
+
+  const historyRes = await insertLabAssignmentHistoryWrite({
+    hqTenantId,
+    labTenantId,
+    labId,
+    fromAgentId,
+    fromAgentName,
+    toAgentId,
+    toAgentName,
+    reason,
+  });
+  if (!historyRes?.success) {
+    return {
+      success: false,
+      error: historyRes.error || "Lab updated but history write failed",
+      data: assignRes.data,
+    };
+  }
+
+  if (subjectUserId) {
+    await insertProvisioningEventWrite({
+      tenantId: hqTenantId,
+      subjectUserId,
+      eventType: "lab_transferred",
+      payload: {
+        labId,
+        labTenantId,
+        fromAgentId,
+        fromAgentName,
+        toAgentId,
+        toAgentName,
+        reason,
+      },
+    });
+  }
+
+  return { success: true, data: assignRes.data };
 }
 
 export function getPasswordResetRedirectUrl() {

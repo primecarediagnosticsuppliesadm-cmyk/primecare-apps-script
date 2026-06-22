@@ -17,6 +17,13 @@ import {
 import { selectOpenOrdersForLab } from "@/collections/collectionsOpenOrders.js";
 import { loadLabPaymentHistoryForDisplay } from "@/collections/collectionsPaymentHistory.js";
 import LabCollectionPanel from "@/components/collections/LabCollectionPanel.jsx";
+import CollectionsCockpitHeader from "@/components/collections/CollectionsCockpitHeader.jsx";
+import CollectionsAttentionQueue from "@/components/collections/CollectionsAttentionQueue.jsx";
+import CollectionsReceivablesGrid from "@/components/collections/CollectionsReceivablesGrid.jsx";
+import {
+  buildNeedsAttentionQueue,
+  summarizeHqCockpit,
+} from "@/collections/collectionsCockpitMetrics.js";
 import { supabase } from "@/api/supabaseClient.js";
 import {
   logAppsScriptFallbackUsed,
@@ -2142,6 +2149,19 @@ export default function CollectionsPage({
     };
   }, [isAgentView, filteredCollections, summary.totalOutstanding]);
 
+  const hqCockpitMetrics = useMemo(() => {
+    if (!isHqCreditRisk) return null;
+    return summarizeHqCockpit(filteredCollections, summary);
+  }, [isHqCreditRisk, filteredCollections, summary]);
+
+  const needsAttentionQueue = useMemo(() => {
+    if (!isHqCreditRisk) return [];
+    return buildNeedsAttentionQueue(filteredCollections, {
+      lastPaymentByLabId,
+      labOrdersByLabId,
+    });
+  }, [isHqCreditRisk, filteredCollections, lastPaymentByLabId, labOrdersByLabId]);
+
   useEffect(() => {
     if (!isLabAccount || loading || collections.length !== 1) return;
     const key = labIdKey(collections[0].labId);
@@ -2404,6 +2424,8 @@ export default function CollectionsPage({
               icon={CircleDollarSign}
             />
           </div>
+        ) : isHqCreditRisk ? (
+          <CollectionsCockpitHeader metrics={hqCockpitMetrics} />
         ) : (
           <KpiCardGrid columns={4}>
             <KpiCard
@@ -2429,6 +2451,14 @@ export default function CollectionsPage({
           </KpiCardGrid>
         )}
       </div>
+
+      {isHqCreditRisk && needsAttentionQueue.length ? (
+        <CollectionsAttentionQueue
+          queue={needsAttentionQueue}
+          onRecordPayment={(labId) => openCollectionPanel(labId, "payment")}
+          onViewDetails={(labId) => openCollectionPanel(labId, "details")}
+        />
+      ) : null}
 
       {!isLabAccount ? (
         <div className="sticky top-0 z-20 -mx-1 border-b border-border bg-background/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/90">
@@ -2518,6 +2548,44 @@ export default function CollectionsPage({
             );
           })}
         </div>
+      ) : isHqCreditRisk ? (
+        <CollectionsReceivablesGrid
+          items={filteredCollections}
+          expandedLabId={expandedLabId}
+          onToggleExpand={toggleExpand}
+          lastPaymentByLabId={lastPaymentByLabId}
+          labOrdersByLabId={labOrdersByLabId}
+          getPaymentStatusLabel={displayPaymentStatus}
+          onRecordPayment={(labId) => openCollectionPanel(labId, "payment")}
+          onViewDetails={(labId) => openCollectionPanel(labId, "details")}
+          onAddFollowUp={(labId) => openCollectionPanel(labId, "followup")}
+          renderExpandedPanel={(item) => {
+            const key = labIdKey(item.labId);
+            const isExpanded = expandedLabId === key;
+            const rowLastPayment =
+              deriveLastPaymentDateFromHistory(history) || lastPaymentByLabId[key] || "";
+            return (
+              <LabCollectionPanel
+                collection={
+                  labIdKey(selectedCollection?.labId) === key ? selectedCollection : item
+                }
+                history={history}
+                openOrders={labOrdersByLabId[key] || []}
+                ordersLoading={Boolean(labOrdersLoadingByLabId[key])}
+                lastPaymentDate={rowLastPayment}
+                paymentStatusLabel={displayPaymentStatus(item)}
+                detailsLoading={detailsLoading && isExpanded}
+                pendingTaskContext={pendingTaskContext}
+                onSave={handleSaveCollection}
+                onCompleteTask={handleCompleteLinkedTask}
+                readOnly={false}
+                copy={accountLabels}
+                focusSection={expandFocus}
+                {...formProps}
+              />
+            );
+          }}
+        />
       ) : (
         <div className="space-y-2" role="list">
           {filteredCollections.map((item) => {
@@ -2549,7 +2617,7 @@ export default function CollectionsPage({
                 readOnly={false}
                 copy={accountLabels}
                 isAgentView={false}
-                useTabbedPanel={isHqCreditRisk}
+                useTabbedPanel={false}
                 focusSection={isExpanded ? expandFocus : ""}
                 onRecordPayment={() => openCollectionPanel(item.labId, "payment")}
                 onViewDetails={() => openCollectionPanel(item.labId, "details")}

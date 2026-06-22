@@ -20,15 +20,20 @@ export default function LabReceivableSummary({
   collection,
   lastPaymentDate = "",
   paymentStatusLabel = "Pending",
+  openOrdersCount = null,
   className,
 }) {
   const outstanding = Number(collection?.outstandingAmount || 0);
   const totalPaid = Number(collection?.totalPaid || 0);
+  const ordersLabel =
+    openOrdersCount === null || openOrdersCount === undefined
+      ? "—"
+      : String(openOrdersCount);
 
   return (
     <section
       className={cn(
-        "grid gap-2 rounded-lg border border-border bg-card p-3 sm:grid-cols-2 lg:grid-cols-5",
+        "grid gap-2 rounded-lg border border-border bg-card p-3 sm:grid-cols-2 lg:grid-cols-6",
         className
       )}
     >
@@ -49,6 +54,12 @@ export default function LabReceivableSummary({
           Last payment
         </p>
         <p className="text-sm font-semibold">{formatShortDate(lastPaymentDate)}</p>
+      </div>
+      <div>
+        <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          Open orders
+        </p>
+        <p className="text-sm font-semibold tabular-nums">{ordersLabel}</p>
       </div>
       <div>
         <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Risk</p>

@@ -24,3 +24,8 @@ dist-ssr
 *.sw?
 .vercel
 .env*.local
+.env.functions.local
+
+# Supabase CLI link/cache (do not commit)
+supabase/.temp/
+supabase/.branches/

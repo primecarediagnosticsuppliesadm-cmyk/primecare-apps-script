@@ -12,6 +12,7 @@ import LabReceivableSummary from "@/components/collections/LabReceivableSummary.
 import OpenOrdersTable from "@/components/collections/OpenOrdersTable.jsx";
 import PaymentCollectionContext from "@/components/collections/PaymentCollectionContext.jsx";
 import CollectionActivityTimeline from "@/components/collections/CollectionActivityTimeline.jsx";
+import CollectionActivitySummary from "@/components/collections/CollectionActivitySummary.jsx";
 
 const TABS = [
   { id: "details", label: "Details" },
@@ -169,11 +170,15 @@ export default function LabCollectionPanel({
 
       {activeTab === "details" ? (
         <div className="space-y-3">
-          <LabReceivableSummary
-            collection={collection}
-            lastPaymentDate={lastPaymentDate}
-            paymentStatusLabel={paymentStatusLabel}
-          />
+          <div>
+            <h3 className="mb-1.5 text-xs font-semibold text-slate-700">Collection snapshot</h3>
+            <LabReceivableSummary
+              collection={collection}
+              lastPaymentDate={lastPaymentDate}
+              paymentStatusLabel={paymentStatusLabel}
+              openOrdersCount={ordersLoading ? null : openOrders.length}
+            />
+          </div>
           <div>
             <h3 className="mb-1.5 text-xs font-semibold text-slate-700">
               Open orders (fulfilled, payment pending)
@@ -184,6 +189,12 @@ export default function LabCollectionPanel({
               loading={ordersLoading}
             />
           </div>
+          <CollectionActivitySummary
+            history={history}
+            collectionsNotes={collection.collectionsNotes || collection.note || ""}
+            openOrders={openOrders}
+            onViewFullActivity={() => setActiveTab("activity")}
+          />
         </div>
       ) : null}
 

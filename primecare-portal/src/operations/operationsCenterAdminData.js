@@ -4,6 +4,7 @@ import {
   getOperationsOperationalAgentsRead,
   getOperationsPlatformUsersRead,
 } from "@/api/primecareSupabaseApi.js";
+import { getUserProvisioningEventsRead } from "@/api/userProvisioningApi.js";
 import {
   deriveAgentsFromPlatformUsers,
   enrichAgentsWithAssignmentCounts,
@@ -12,6 +13,11 @@ import {
   mapOperationsAgentRow,
   mapPlatformUserRow,
 } from "@/operations/operationsCenterAdminEngine.js";
+import {
+  computeProvisioningKpis,
+  enrichDirectoryUsers,
+  mapProvisioningEventRow,
+} from "@/operations/userProvisioningEngine.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -41,16 +47,20 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
       error: "Tenant context is missing. Re-login and try again.",
       agents: [],
       users: [],
+      directoryUsers: [],
       labAssignments: [],
       distributorAssignments: [],
+      auditEvents: [],
+      kpis: computeProvisioningKpis([], []),
     };
   }
 
-  const [usersRes, operationalAgentsRes, labsRes, distributorsRes] = await Promise.all([
+  const [usersRes, operationalAgentsRes, labsRes, distributorsRes, auditRes] = await Promise.all([
     getOperationsPlatformUsersRead({ tenantId: tid }),
     getOperationsOperationalAgentsRead({ tenantId: tid }),
     getOperationsLabAssignmentsRead({ tenantId: tid }),
     getOperationsDistributorAssignmentsRead({ tenantId: tid }),
+    getUserProvisioningEventsRead({ tenantId: tid }),
   ]);
 
   const errors = [
@@ -59,6 +69,7 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
     labsRes?.error,
     distributorsRes?.error,
     distributorsRes?.warning,
+    auditRes?.error,
   ].filter(Boolean);
 
   const operationalAgents = (operationalAgentsRes?.data?.agents || []).map(mapOperationsAgentRow);
@@ -81,22 +92,39 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
   const profileAgents = deriveAgentsFromPlatformUsers(users);
   const mergedAgents = mergeAgentsByAgentId(profileAgents, operationalAgents);
 
+  const distributorAssignments = (distributorsRes?.data?.distributors || []).map((row) =>
+    mapDistributorAssignmentRow(row)
+  );
+
   const tenantNameById = new Map();
-  for (const row of distributorsRes?.data?.distributors || []) {
+  const distributorNameById = new Map();
+  for (const row of distributorAssignments) {
     tenantNameById.set(str(row.distributorId), str(row.distributorName));
+    distributorNameById.set(str(row.distributorId), str(row.distributorName));
   }
 
   const labAssignments = (labsRes?.data?.labs || []).map((row) =>
     mapLabAssignmentRow(row, tenantNameById)
   );
-  const distributorAssignments = (distributorsRes?.data?.distributors || []).map((row) =>
-    mapDistributorAssignmentRow(row)
-  );
+
   const agents = enrichAgentsWithAssignmentCounts(
     mergedAgents,
     labAssignments,
     distributorAssignments
   );
+
+  const directoryUsers = enrichDirectoryUsers(users, {
+    distributorNameById,
+    labAssignments,
+    distributorAssignments,
+  });
+
+  const userNameById = new Map(directoryUsers.map((u) => [str(u.userId), str(u.name)]));
+  const auditEvents = (auditRes?.data?.events || []).map((row) =>
+    mapProvisioningEventRow(row, userNameById)
+  );
+
+  const kpis = computeProvisioningKpis(directoryUsers, labAssignments);
 
   return {
     ok:
@@ -105,10 +133,13 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
       labsRes?.success !== false &&
       distributorsRes?.success !== false,
     error: errors[0] || null,
-    warning: distributorsRes?.warning || null,
+    warning: distributorsRes?.warning || auditRes?.error || null,
     agents,
     users,
+    directoryUsers,
     labAssignments,
     distributorAssignments,
+    auditEvents,
+    kpis,
   };
 }
