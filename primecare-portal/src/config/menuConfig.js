@@ -15,6 +15,7 @@ const EXECUTIVE_HQ_MENU_KEYS = new Set([
   "tenantManagement",
   "distributorOs",
   "operationsCenter",
+  "accessAudit",
   "masterCatalog",
   "inventory",
   "orders",
@@ -29,6 +30,7 @@ const ADMIN_HQ_MENU_KEYS = new Set([
   "dashboard",
   "distributorOs",
   "operationsCenter",
+  "accessAudit",
   "qualificationReview",
   "masterCatalog",
   "inventory",
@@ -73,6 +75,7 @@ export const MENU_ITEMS = [
   { key: "commissionEngine", label: "Commission Engine", icon: "Coins" },
   { key: "labContractEngine", label: "Lab Contracts", icon: "FileText" },
   { key: "operationsCenter", label: "Operations Center", icon: "Radio" },
+  { key: "accessAudit", label: "Access Audit", icon: "Shield" },
 
   // Field Ops
   { key: "visits", label: "Visits", icon: "ClipboardList" },
@@ -114,6 +117,7 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "commissionEngine",
   "labContractEngine",
   "operationsCenter",
+  "accessAudit",
   "visits",
   "collections",
   "labAccount",

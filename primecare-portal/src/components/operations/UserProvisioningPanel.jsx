@@ -13,6 +13,8 @@ import {
   provisionPlatformUserWrite,
   reactivatePlatformUserWrite,
   resetPlatformUserPasswordWrite,
+  writeAccessAuditUpdatedEvent,
+  insertProvisioningEventWrite,
 } from "@/api/userProvisioningApi.js";
 import {
   EMAIL_NOT_ADDED,
@@ -681,7 +683,7 @@ function UserAssignmentDrawer({
     });
   }
 
-  async function executeAgentAssignments() {
+  async function executeAgentAssignments(reason) {
     if (!agentBusinessId) {
       throw new Error("Agent ID is required on the profile before assigning labs");
     }
@@ -704,6 +706,23 @@ function UserAssignmentDrawer({
         if (!res?.success) {
           throw new Error(res?.error || `Failed to assign ${lab.labId}`);
         }
+        await writeAccessAuditUpdatedEvent({
+          tenantId,
+          subjectUserId: user.userId,
+          action: "lab_assigned",
+          reason,
+          previous: lab.assignedAgentId
+            ? { agentId: lab.assignedAgentId, agentName: lab.assignedAgentName }
+            : {},
+          next: { agentId: agentBusinessId, agentName: agentDisplayName },
+          related: {
+            labTenantId: lab.tenantId,
+            labId: lab.labId,
+            labName: lab.labName,
+            agentId: agentBusinessId,
+            agentName: agentDisplayName,
+          },
+        });
       } else {
         const res = await updateLabAgentAssignmentWrite({
           tenantId: lab.tenantId,
@@ -713,6 +732,19 @@ function UserAssignmentDrawer({
         if (!res?.success) {
           throw new Error(res?.error || `Failed to unassign ${lab.labId}`);
         }
+        await writeAccessAuditUpdatedEvent({
+          tenantId,
+          subjectUserId: user.userId,
+          action: "lab_unassigned",
+          reason,
+          previous: { agentId: agentBusinessId, agentName: agentDisplayName },
+          next: { assigned: false },
+          related: {
+            labTenantId: lab.tenantId,
+            labId: lab.labId,
+            labName: lab.labName,
+          },
+        });
       }
       labChanges += 1;
     }
@@ -728,6 +760,16 @@ function UserAssignmentDrawer({
         agentId: user.agentId,
       });
       if (!res?.success) throw new Error(res?.error || "Failed to update profile");
+      if (roleChanged) {
+        await writeAccessAuditUpdatedEvent({
+          tenantId,
+          subjectUserId: user.userId,
+          action: "role_changed",
+          reason,
+          previous: { role: initialRole },
+          next: { role },
+        });
+      }
     }
 
     return {
@@ -785,10 +827,10 @@ function UserAssignmentDrawer({
       requireReason,
       reasonLabel: "Reason for assignment change",
       confirmLabel: "Save assignments",
-      onExecute: async () => {
+      onExecute: async (reason) => {
         setSaving(true);
         try {
-          const result = await executeAgentAssignments();
+          const result = await executeAgentAssignments(reason);
           onSaved?.(result);
         } finally {
           setSaving(false);
@@ -797,7 +839,7 @@ function UserAssignmentDrawer({
     });
   }
 
-  async function executeProfileScope() {
+  async function executeProfileScope(reason) {
     const distributorChanged = distributorId !== initialDistributorId;
     const roleChanged = role !== initialRole;
     const labIdChanged = labId !== String(user?.labId ?? "").trim();
@@ -812,6 +854,37 @@ function UserAssignmentDrawer({
       agentId: user.agentId,
     });
     if (!res?.success) throw new Error(res?.error || "Failed to update");
+
+    if (roleChanged) {
+      await writeAccessAuditUpdatedEvent({
+        tenantId,
+        subjectUserId: user.userId,
+        action: "role_changed",
+        reason,
+        previous: { role: initialRole },
+        next: { role },
+      });
+    }
+    if (distributorChanged) {
+      const initialDistributorName =
+        distributors.find((d) => d.distributorId === initialDistributorId)?.distributorName || "";
+      const nextDistributorName =
+        distributors.find((d) => d.distributorId === distributorId)?.distributorName || "";
+      await writeAccessAuditUpdatedEvent({
+        tenantId,
+        subjectUserId: user.userId,
+        action: "distributor_changed",
+        reason,
+        previous: {
+          distributorId: initialDistributorId,
+          distributorName: initialDistributorName,
+        },
+        next: {
+          distributorId,
+          distributorName: nextDistributorName,
+        },
+      });
+    }
 
     return { assignedCount: 0, labChanges: 0, territoryChanged: false, roleChanged, distributorChanged, labIdChanged };
   }
@@ -871,10 +944,10 @@ function UserAssignmentDrawer({
       requireReason: false,
       confirmLabel,
       destructive: removingDistributor,
-      onExecute: async () => {
+      onExecute: async (reason) => {
         setSaving(true);
         try {
-          const result = await executeProfileScope();
+          const result = await executeProfileScope(reason);
           onSaved?.(result);
         } finally {
           setSaving(false);
@@ -1072,7 +1145,7 @@ function UserAssignmentDrawer({
   );
 }
 
-function LabAssignmentModal({ lab, agents, onClose, onSaved, onRequestConfirm }) {
+function LabAssignmentModal({ lab, agents, tenantId, onClose, onSaved, onRequestConfirm }) {
   const labTenantId = lab?.tenantId || "";
   const [agentId, setAgentId] = useState(lab?.assignedAgentId || "");
   const [error, setError] = useState("");
@@ -1080,7 +1153,7 @@ function LabAssignmentModal({ lab, agents, onClose, onSaved, onRequestConfirm })
   const selectedAgent = agents.find((a) => a.agentId === agentId);
   const previousAgentName = lab?.assignedAgentName || lab?.assignedAgentId || "Unassigned";
 
-  async function executeAssign() {
+  async function executeAssign(reason) {
     const res = await updateLabAgentAssignmentWrite({
       tenantId: labTenantId,
       labId: lab.labId,
@@ -1088,6 +1161,45 @@ function LabAssignmentModal({ lab, agents, onClose, onSaved, onRequestConfirm })
       agentName: selectedAgent?.name || "",
     });
     if (!res?.success) throw new Error(res?.error || "Failed to assign agent");
+
+    const subjectUserId = String(selectedAgent?.userId || selectedAgent?.id || "").trim();
+    const isReassignment = Boolean(lab?.assignedAgentId) && lab.assignedAgentId !== agentId;
+    if (tenantId && subjectUserId) {
+      if (isReassignment) {
+        await insertProvisioningEventWrite({
+          tenantId,
+          subjectUserId,
+          eventType: "lab_transferred",
+          payload: {
+            labId: lab.labId,
+            labName: lab.labName,
+            labTenantId,
+            fromAgentId: lab.assignedAgentId,
+            fromAgentName: previousAgentName,
+            toAgentId: agentId,
+            toAgentName: selectedAgent?.name || "",
+            reason,
+            status: "success",
+          },
+        });
+      } else {
+        await writeAccessAuditUpdatedEvent({
+          tenantId,
+          subjectUserId,
+          action: "lab_assigned",
+          reason,
+          next: { agentId, agentName: selectedAgent?.name || "" },
+          related: {
+            labTenantId,
+            labId: lab.labId,
+            labName: lab.labName,
+            agentId,
+            agentName: selectedAgent?.name || "",
+          },
+        });
+      }
+    }
+
     onSaved?.();
     onClose?.();
   }
@@ -1111,10 +1223,10 @@ function LabAssignmentModal({ lab, agents, onClose, onSaved, onRequestConfirm })
       requireReason: isReassignment,
       reasonLabel: "Reason for reassignment",
       confirmLabel: isReassignment ? "Reassign lab" : "Assign lab",
-      onExecute: async () => {
+      onExecute: async (reason) => {
         setSaving(true);
         try {
-          await executeAssign();
+          await executeAssign(reason);
         } finally {
           setSaving(false);
         }
@@ -1162,8 +1274,39 @@ function DistributorAssignmentModal({ distributor, agents, tenantId, onClose, on
   const selectedAgent = profileAgents.find((a) => a.userId === agentUserId);
   const initialAgentUserId = distributor?.assignedAgentUserId || "";
   const initialAgentName = distributor?.assignedAgentName || "—";
+  const initialAgent = profileAgents.find((a) => a.userId === initialAgentUserId);
 
-  async function executeAssign(remove = false) {
+  async function writeBulkDistributorAssignAudit(subject, { previousDistributorId, previousDistributorName, newDistributorId, newDistributorName, reason }) {
+    if (!tenantId || !subject?.userId) return;
+
+    await writeAccessAuditUpdatedEvent({
+      tenantId,
+      subjectUserId: subject.userId,
+      action: "distributor_changed",
+      reason,
+      previous: {
+        distributorId: previousDistributorId || undefined,
+        distributorName: previousDistributorName || undefined,
+      },
+      next: {
+        distributorId: newDistributorId || undefined,
+        distributorName: newDistributorName || undefined,
+      },
+      related: {
+        subjectUserId: subject.userId,
+        subjectEmail: subject.email || undefined,
+        subjectName: subject.name || undefined,
+        role: ROLES.AGENT,
+        previousDistributorId: previousDistributorId || null,
+        previousDistributorName: previousDistributorName || null,
+        newDistributorId: newDistributorId || null,
+        newDistributorName: newDistributorName || null,
+        source: "bulk_distributor_assign",
+      },
+    });
+  }
+
+  async function executeAssign(remove = false, reason) {
     const res = await updateDistributorAgentAssignmentWrite({
       tenantId,
       distributorId: distributor.distributorId,
@@ -1172,6 +1315,28 @@ function DistributorAssignmentModal({ distributor, agents, tenantId, onClose, on
       remove,
     });
     if (!res?.success) throw new Error(res?.error || "Failed to update distributor assignment");
+
+    const distributorId = distributor.distributorId;
+    const distributorName = distributor.distributorName;
+
+    if (remove) {
+      await writeBulkDistributorAssignAudit(initialAgent || { userId: initialAgentUserId, name: initialAgentName }, {
+        previousDistributorId: distributorId,
+        previousDistributorName: distributorName,
+        newDistributorId: "",
+        newDistributorName: "",
+        reason,
+      });
+    } else if (selectedAgent) {
+      await writeBulkDistributorAssignAudit(selectedAgent, {
+        previousDistributorId: "",
+        previousDistributorName: "",
+        newDistributorId: distributorId,
+        newDistributorName: distributorName,
+        reason,
+      });
+    }
+
     onSaved?.();
     onClose?.();
   }
@@ -1196,10 +1361,10 @@ function DistributorAssignmentModal({ distributor, agents, tenantId, onClose, on
         details: `Distributor: ${distributor.distributorName}\nCurrent agent: ${initialAgentName}`,
         confirmLabel: "Remove assignment",
         destructive: true,
-        onExecute: async () => {
+        onExecute: async (reason) => {
           setSaving(true);
           try {
-            await executeAssign(true);
+            await executeAssign(true, reason);
           } finally {
             setSaving(false);
           }
@@ -1217,10 +1382,10 @@ function DistributorAssignmentModal({ distributor, agents, tenantId, onClose, on
           : `Agent: ${selectedAgent?.name} (${selectedAgent?.agentId})`
       }`,
       confirmLabel: initialAgentUserId ? "Change assignment" : "Assign agent",
-      onExecute: async () => {
+      onExecute: async (reason) => {
         setSaving(true);
         try {
-          await executeAssign(false);
+          await executeAssign(false, reason);
         } finally {
           setSaving(false);
         }
@@ -1290,7 +1455,6 @@ export default function UserProvisioningPanel({
   const directoryUsers = bundle?.directoryUsers || [];
   const labAssignments = bundle?.labAssignments || [];
   const distributorAssignments = bundle?.distributorAssignments || [];
-  const auditEvents = bundle?.auditEvents || [];
   const kpis = bundle?.kpis || {};
 
   const filteredUsers = useMemo(() => {
@@ -1592,41 +1756,6 @@ export default function UserProvisioningPanel({
         </>
       ) : null}
 
-      {tab === "audit" ? (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full min-w-[760px] text-xs">
-            <thead>
-              <tr className="border-b bg-slate-50 text-left text-slate-500">
-                <th className="px-2 py-2">User</th>
-                <th className="px-2 py-2">Event</th>
-                <th className="px-2 py-2">Details</th>
-                <th className="px-2 py-2">When</th>
-              </tr>
-            </thead>
-            <tbody>
-              {auditEvents.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-2 py-6 text-center text-slate-500">
-                    No audit events yet. Apply user_provisioning_v1_migration.sql if missing.
-                  </td>
-                </tr>
-              ) : (
-                auditEvents.map((ev) => (
-                  <tr key={ev.id} className="border-b border-slate-100">
-                    <td className="px-2 py-2">{ev.subjectName}</td>
-                    <td className="px-2 py-2 capitalize">{ev.eventType.replace(/_/g, " ")}</td>
-                    <td className="px-2 py-2 font-mono text-[10px] text-slate-600">
-                      {JSON.stringify(ev.payload)}
-                    </td>
-                    <td className="px-2 py-2">{formatOpsDate(ev.createdAt)}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-
       {tab === "labAssignment" ? (
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full min-w-[760px] text-xs">
@@ -1807,6 +1936,7 @@ export default function UserProvisioningPanel({
         <LabAssignmentModal
           lab={labModal.lab}
           agents={agents}
+          tenantId={tenantId}
           onClose={() => setLabModal(null)}
           onRequestConfirm={requestConfirm}
           onSaved={async () => {

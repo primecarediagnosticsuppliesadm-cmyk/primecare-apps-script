@@ -21,6 +21,7 @@ import {
   Bug,
   Bell,
   Radio,
+  Shield,
   TrendingUp,
 } from "lucide-react";
 
@@ -38,6 +39,7 @@ const ICONS = {
   commissionEngine: Coins,
   labContractEngine: FileText,
   operationsCenter: Radio,
+  accessAudit: Shield,
   visits: ClipboardList,
   collections: Wallet,
   labAccount: Wallet,

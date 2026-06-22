@@ -52,6 +52,9 @@ export function normalizePageKey(page) {
     case "operations-center":
     case "operationsCenter":
       return "operationsCenter";
+    case "access-audit":
+    case "accessAudit":
+      return "accessAudit";
     case "founder-navigation":
     case "founderNavigation":
     case "founder-journey":

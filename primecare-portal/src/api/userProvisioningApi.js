@@ -193,6 +193,30 @@ export async function insertProvisioningEventWrite({
   return { success: true };
 }
 
+export async function writeAccessAuditUpdatedEvent({
+  tenantId,
+  subjectUserId,
+  action,
+  reason,
+  previous = {},
+  next = {},
+  related = {},
+}) {
+  return insertProvisioningEventWrite({
+    tenantId,
+    subjectUserId,
+    eventType: "updated",
+    payload: {
+      action: str(action),
+      reason: str(reason) || undefined,
+      previous,
+      next,
+      ...related,
+      status: "success",
+    },
+  });
+}
+
 export async function insertLabAssignmentHistoryWrite(row = {}) {
   if (!supabase) return { success: false, error: "Supabase is not configured" };
 

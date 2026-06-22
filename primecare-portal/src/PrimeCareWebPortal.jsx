@@ -32,6 +32,7 @@ import PredatorDebugConsole from "./pages/PredatorDebugConsole";
 import NotificationCenterPage from "./pages/NotificationCenterPage";
 import OperationsCommandCenter from "./pages/OperationsCommandCenter";
 import OperationsCenterAdminPage from "./pages/OperationsCenterAdminPage";
+import AccessAuditPage from "./pages/AccessAuditPage";
 import QACommandCenterPage from "./pages/QACommandCenterPage";
 import PilotReadinessPage from "./pages/PilotReadinessPage";
 import RevenueFunnelPage from "./pages/RevenueFunnelPage";
@@ -242,6 +243,10 @@ export default function PrimeCareWebPortal({
       case "operations-center":
         return <OperationsCenterAdminPage currentUser={currentUser} />;
 
+      case "accessAudit":
+      case "access-audit":
+        return <AccessAuditPage currentUser={currentUser} />;
+
       case "performance":
         return (
           <PlaceholderCard
@@ -361,6 +366,10 @@ export default function PrimeCareWebPortal({
             setActivePage={setActivePage}
           />
         );
+
+      case "accessAudit":
+      case "access-audit":
+        return <AccessAuditPage currentUser={currentUser} />;
 
       case "labs":
         return (

@@ -14,6 +14,7 @@ export const PERMISSIONS = {
   commissionEngine: [ROLES.EXECUTIVE],
   labContractEngine: [ROLES.ADMIN, ROLES.EXECUTIVE],
   operationsCenter: [ROLES.ADMIN, ROLES.EXECUTIVE],
+  accessAudit: [ROLES.ADMIN, ROLES.EXECUTIVE],
   visits: [ROLES.AGENT, ROLES.ADMIN],
   collections: [ROLES.AGENT, ROLES.ADMIN],
   labAccount: [ROLES.LAB],

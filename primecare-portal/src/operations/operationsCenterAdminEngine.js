@@ -6,7 +6,6 @@ function str(v) {
 
 export const OPERATIONS_CENTER_TABS = [
   { id: "directory", label: "User Directory" },
-  { id: "audit", label: "Access Audit" },
   { id: "labAssignment", label: "Bulk Lab Assign" },
   { id: "distributorAssignment", label: "Bulk Distributor Assign" },
 ];
