@@ -1430,6 +1430,7 @@ export default function UserProvisioningPanel({
   loading,
   error,
   statusMessage,
+  focusUserId = "",
   onReload,
   onError,
   onStatus,
@@ -1465,6 +1466,20 @@ export default function UserProvisioningPanel({
     });
     return sortDirectoryUsers(filtered, sortKey, sortDir);
   }, [directoryUsers, search, roleFilter, statusFilter, sortKey, sortDir]);
+
+  useEffect(() => {
+    if (!focusUserId || loading) return;
+    setTab("directory");
+    setSearch("");
+    setRoleFilter("");
+    setStatusFilter("");
+    window.setTimeout(() => {
+      document.getElementById(`hq-user-row-${focusUserId}`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 150);
+  }, [focusUserId, loading]);
 
   const filteredLabs = labAssignments;
   const filteredDistributors = distributorAssignments;
@@ -1667,7 +1682,15 @@ export default function UserProvisioningPanel({
                   </tr>
                 ) : (
                   filteredUsers.map((user) => (
-                    <tr key={user.userId} className="border-b border-slate-100">
+                    <tr
+                      key={user.userId}
+                      id={`hq-user-row-${user.userId}`}
+                      className={cn(
+                        "border-b border-slate-100",
+                        focusUserId && user.userId === focusUserId &&
+                          "bg-indigo-50/70 ring-1 ring-inset ring-indigo-300"
+                      )}
+                    >
                       <td className="px-2 py-2 font-medium text-slate-900">
                         {user.displayName || user.name}
                         {!user.loginEnabled ? (

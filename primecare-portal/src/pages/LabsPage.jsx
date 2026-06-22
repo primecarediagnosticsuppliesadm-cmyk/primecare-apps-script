@@ -41,6 +41,7 @@ import { AgentLabFieldStrip } from "@/components/agent/AgentFieldExecution.jsx";
 import { labIdKey } from "@/utils/labId.js";
 import StatusBadge from "@/components/ux/StatusBadge";
 import { cn } from "@/lib/utils";
+import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -454,6 +455,7 @@ export default function LabsPage({
     distributorScope?.tenantId ? readDistributorLabContext() : null
   );
   const [lastCreatedLab, setLastCreatedLab] = useState(null);
+  const [focusLabId, setFocusLabId] = useState("");
 
   const canAddLab =
     currentUser?.role === ROLES.EXECUTIVE || currentUser?.role === ROLES.ADMIN;
@@ -520,6 +522,21 @@ export default function LabsPage({
   useEffect(() => {
     void loadLabs();
   }, [authToken, currentUser, loadLabs]);
+
+  useEffect(() => {
+    if (loading || !labs.length) return;
+    const ctx = consumeHqNavContext("labs");
+    if (!ctx?.labId) return;
+    const targetId = labIdKey(ctx.labId);
+    setFocusLabId(targetId);
+    setCreditFilter("ALL");
+    window.setTimeout(() => {
+      document.getElementById(`hq-lab-row-${targetId}`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 150);
+  }, [loading, labs.length]);
 
   useEffect(() => {
     if (!isDistributorOs) return;
@@ -870,7 +887,12 @@ export default function LabsPage({
               filteredLabs.map((lab, idx) => (
                 <div
                   key={`${lab.labId || lab.labName}-${idx}`}
-                  className="rounded-2xl border p-4 flex flex-col gap-4"
+                  id={lab.labId ? `hq-lab-row-${labIdKey(lab.labId)}` : undefined}
+                  className={cn(
+                    "rounded-2xl border p-4 flex flex-col gap-4 transition-shadow",
+                    focusLabId && labIdKey(lab.labId) === focusLabId &&
+                      "border-indigo-400 bg-indigo-50/40 ring-2 ring-indigo-400/60"
+                  )}
                 >
                   <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                     <div>

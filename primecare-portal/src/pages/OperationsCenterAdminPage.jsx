@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { PageSkeleton } from "@/components/ux";
 import UserProvisioningPanel from "@/components/operations/UserProvisioningPanel.jsx";
 import { loadOperationsCenterAdminBundle } from "@/operations/operationsCenterAdminData.js";
+import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import { Radio } from "lucide-react";
 
 function resolveTenantId(currentUser) {
@@ -14,6 +15,7 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
   const [bundle, setBundle] = useState(null);
   const [error, setError] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
+  const [focusUserId, setFocusUserId] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -35,6 +37,12 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (loading) return;
+    const ctx = consumeHqNavContext("operationsCenter");
+    if (ctx?.userId) setFocusUserId(String(ctx.userId));
+  }, [loading]);
+
   if (loading) return <PageSkeleton rows={8} />;
 
   return (
@@ -55,6 +63,7 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
         loading={loading}
         error={error}
         statusMessage={statusMessage}
+        focusUserId={focusUserId}
         onReload={load}
         onError={setError}
         onStatus={setStatusMessage}
