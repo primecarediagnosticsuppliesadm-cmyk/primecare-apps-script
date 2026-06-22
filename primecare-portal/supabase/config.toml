@@ -71,3 +71,6 @@ enabled = false
 
 [functions.provision-platform-user]
 verify_jwt = true
+
+[functions.reset-platform-user-password]
+verify_jwt = true

@@ -11,6 +11,40 @@ function functionsBaseUrl() {
   return `${url.replace(/\/$/, "")}/functions/v1`;
 }
 
+async function invokeProvisioningFunction(functionName, payload = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+
+  const base = functionsBaseUrl();
+  if (!base) return { success: false, error: "Supabase URL is not configured" };
+
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData?.session?.access_token;
+  if (!token) return { success: false, error: "Not authenticated" };
+
+  try {
+    const res = await fetch(`${base}/${functionName}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        apikey: str(import.meta.env.VITE_SUPABASE_ANON_KEY),
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body?.success) {
+      return {
+        success: false,
+        error: body?.error || `${functionName} failed (${res.status})`,
+      };
+    }
+    return { success: true, data: body.data };
+  } catch (err) {
+    return { success: false, error: err?.message || `${functionName} request failed` };
+  }
+}
+
 /**
  * Provision a platform user via Edge Function (auth + profile + directory + audit).
  * Service role never touches the browser.
@@ -23,47 +57,35 @@ export async function provisionPlatformUserWrite(payload = {}) {
     return { success: false, error: "Invalid role for provisioning" };
   }
 
-  const base = functionsBaseUrl();
-  if (!base) return { success: false, error: "Supabase URL is not configured" };
+  return invokeProvisioningFunction("provision-platform-user", {
+    tenantId: payload.tenantId ?? payload.tenant_id,
+    displayName: payload.displayName ?? payload.name,
+    email: payload.email,
+    username: payload.username,
+    phone: payload.phone,
+    role: payload.role,
+    active: payload.active,
+    agentId: payload.agentId ?? payload.agent_id,
+    labId: payload.labId ?? payload.lab_id,
+    distributorId: payload.distributorId ?? payload.distributor_id,
+    territory: payload.territory,
+  });
+}
 
-  const { data: sessionData } = await supabase.auth.getSession();
-  const token = sessionData?.session?.access_token;
-  if (!token) return { success: false, error: "Not authenticated" };
+export async function resetPlatformUserPasswordWrite(payload = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
 
-  try {
-    const res = await fetch(`${base}/provision-platform-user`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        apikey: str(import.meta.env.VITE_SUPABASE_ANON_KEY),
-      },
-      body: JSON.stringify({
-        tenantId: payload.tenantId ?? payload.tenant_id,
-        displayName: payload.displayName ?? payload.name,
-        email: payload.email,
-        username: payload.username,
-        phone: payload.phone,
-        role: payload.role,
-        active: payload.active,
-        agentId: payload.agentId ?? payload.agent_id,
-        labId: payload.labId ?? payload.lab_id,
-        distributorId: payload.distributorId ?? payload.distributor_id,
-        territory: payload.territory,
-      }),
-    });
-
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok || !body?.success) {
-      return {
-        success: false,
-        error: body?.error || `Provision failed (${res.status})`,
-      };
-    }
-    return { success: true, data: body.data };
-  } catch (err) {
-    return { success: false, error: err?.message || "Provision request failed" };
+  const subjectUserId = str(payload.subjectUserId ?? payload.userId ?? payload.user_id);
+  const email = str(payload.email);
+  if (!subjectUserId && !email) {
+    return { success: false, error: "User id or email is required" };
   }
+
+  return invokeProvisioningFunction("reset-platform-user-password", {
+    tenantId: payload.tenantId ?? payload.tenant_id,
+    subjectUserId,
+    email: email || undefined,
+  });
 }
 
 export async function deactivatePlatformUserWrite(userId, reason) {

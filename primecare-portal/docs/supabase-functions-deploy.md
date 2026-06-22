@@ -1,8 +1,9 @@
 # Supabase Edge Functions — Deploy Guide
 
-PrimeCare HQ user provisioning uses one Edge Function:
+PrimeCare HQ user provisioning uses two Edge Functions:
 
-- `supabase/functions/provision-platform-user/index.ts`
+- `supabase/functions/provision-platform-user/index.ts` — create users (auth + profile + directory + audit)
+- `supabase/functions/reset-platform-user-password/index.ts` — admin temp-password reset (no email delivery)
 
 SQL for provisioning audit/history is **not** managed by `supabase db push`. Apply files under `supabase/sql/` manually in the Supabase SQL editor (see below).
 
@@ -15,7 +16,7 @@ SQL for provisioning audit/history is **not** managed by `supabase db push`. App
 1. **Supabase CLI** installed
 2. **Logged in** to Supabase (`supabase login`)
 3. **Project linked** from `primecare-portal/` directory
-4. **SQL migration applied** in QA before first provision test
+4. **SQL migrations applied** in QA before first provision/reset test
 5. **Secrets** in `.env.functions.local` (copy from `.env.functions.example`) — never commit secrets
 
 ### Required environment variables
@@ -24,7 +25,7 @@ SQL for provisioning audit/history is **not** managed by `supabase db push`. App
 |----------|---------|
 | `SUPABASE_URL` | Project API URL |
 | `SUPABASE_ANON_KEY` | Verify caller JWT in the function |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-side `auth.admin.createUser` and profile writes |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-side `auth.admin.createUser`, `auth.admin.updateUserById`, and profile writes |
 
 On **deployed** functions, Supabase usually injects these automatically. For **local serve**, set them in `.env.functions.local`.
 
@@ -61,13 +62,12 @@ Link stores project metadata under `supabase/.temp/` (gitignored). Do not commit
 
 ---
 
-## 3. Apply SQL migration (manual)
+## 3. Apply SQL migrations (manual)
 
-Before testing provisioning, run in **Supabase Dashboard → SQL Editor**:
+Before testing provisioning or password reset, run in **Supabase Dashboard → SQL Editor**:
 
-```
-supabase/sql/user_provisioning_v1_migration.sql
-```
+1. `supabase/sql/user_provisioning_v1_migration.sql`
+2. `supabase/sql/user_provisioning_password_reset_event_migration.sql` — adds `password_reset` to audit `event_type` CHECK
 
 Also ensure prior Operations Center migrations are applied if not already:
 
@@ -89,7 +89,10 @@ cp .env.functions.example .env.functions.local
 npm run supabase:functions:serve
 ```
 
-Function URL (local): `http://127.0.0.1:54321/functions/v1/provision-platform-user`
+Function URLs (local):
+
+- `http://127.0.0.1:54321/functions/v1/provision-platform-user`
+- `http://127.0.0.1:54321/functions/v1/reset-platform-user-password`
 
 ---
 
@@ -103,10 +106,11 @@ cd primecare-portal
 npm run supabase:functions:deploy:qa
 ```
 
-Or directly:
+Or deploy individually:
 
 ```bash
 supabase functions deploy provision-platform-user --project-ref zipuzmfkwwucbchlphcj
+supabase functions deploy reset-platform-user-password --project-ref zipuzmfkwwucbchlphcj
 ```
 
 ---
@@ -118,6 +122,9 @@ Replace placeholders with real values:
 - `<anon-key>` — Dashboard → API → anon public key
 - `<hq-admin-access-token>` — JWT from logged-in `qa.admin@primecare.test` session
 - `<hq-tenant-uuid>` — QA HQ tenant id (e.g. from profiles.tenant_id)
+- `<subject-user-uuid>` — target user's `profiles.user_id`
+
+### Provision user
 
 ```bash
 curl -i -X POST \
@@ -137,13 +144,57 @@ curl -i -X POST \
 
 Expected: `200` with `"success": true` and `userId` in response.
 
+### Reset password (admin temp password)
+
+```bash
+curl -i -X POST \
+  "https://zipuzmfkwwucbchlphcj.supabase.co/functions/v1/reset-platform-user-password" \
+  -H "Authorization: Bearer <hq-admin-access-token>" \
+  -H "apikey: <anon-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenantId": "<hq-tenant-uuid>",
+    "subjectUserId": "<subject-user-uuid>"
+  }'
+```
+
+Expected: `200` with `"success": true`, `temporaryPassword` in response (shown once).
+
+Alternative lookup by email:
+
+```json
+{ "tenantId": "<hq-tenant-uuid>", "email": "qa.test.agent1@primecare.test" }
+```
+
 ### Verify distributor_admin (login blocked)
 
-Create with `"role": "distributor_admin"` and `"distributorId": "<distributor-tenant-uuid>"`. User should appear in Operations Center directory; login must fail with role not authorized (AuthContext unchanged).
+Create with `"role": "distributor_admin"` and `"distributorId": "<distributor-tenant-uuid>"`. User should appear in Operations Center directory; login must fail with role not authorized (AuthContext unchanged). Password reset must return `400` for distributor_admin.
 
 ---
 
-## 7. List deployed functions
+## 7. QA reset password flow (UI)
+
+Use this when QA users have fake emails (e.g. `qa.test.agent1@primecare.test`) that cannot receive Supabase recovery mail.
+
+1. Apply `user_provisioning_password_reset_event_migration.sql` in QA SQL editor.
+2. Deploy both Edge Functions (`npm run supabase:functions:deploy:qa`).
+3. Log in as HQ Admin: `qa.admin@primecare.test` / `1234`.
+4. Open **Operations Center → User & Access → User Directory**.
+5. Find the target user (e.g. `qa.test.agent1@primecare.test`).
+6. Click **Reset Pwd**.
+7. Copy the temporary password from the modal (shown once). Use **Copy** button.
+8. Log out and sign in as the target user with their email + temp password.
+9. Confirm audit tab shows `password_reset` event for that user.
+
+**Notes:**
+
+- Works for fake `@primecare.test` addresses — no email delivery required.
+- `email_confirm: true` is set server-side so unconfirmed QA accounts can log in immediately.
+- Only HQ **admin** or **executive** can reset; service role never leaves the Edge Function.
+
+---
+
+## 8. List deployed functions
 
 ```bash
 supabase functions list --project-ref zipuzmfkwwucbchlphcj
@@ -156,16 +207,19 @@ supabase functions list --project-ref zipuzmfkwwucbchlphcj
 ```
 primecare-portal/
   supabase/
-    config.toml                          # CLI config (this file enables deploy)
+    config.toml                                    # CLI config (verify_jwt for both functions)
     functions/
       provision-platform-user/
-        index.ts                         # Edge Function (do not put secrets here)
+        index.ts                                   # Provision Edge Function
+      reset-platform-user-password/
+        index.ts                                   # Admin temp-password reset
     sql/
-      user_provisioning_v1_migration.sql # Apply manually
-      ...                                # Other SQL migrations
-  .env.functions.example                 # Template for local serve
-  .env.functions.local                   # Gitignored — your real keys
-  docs/supabase-functions-deploy.md      # This guide
+      user_provisioning_v1_migration.sql           # Apply manually
+      user_provisioning_password_reset_event_migration.sql
+      ...                                          # Other SQL migrations
+  .env.functions.example                           # Template for local serve
+  .env.functions.local                             # Gitignored — your real keys
+  docs/supabase-functions-deploy.md                # This guide
 ```
 
 ---
@@ -173,5 +227,8 @@ primecare-portal/
 ## Security notes
 
 - Never commit `SUPABASE_SERVICE_ROLE_KEY` or `.env.functions.local`
-- Service role is used **only** inside the Edge Function runtime, not in the Vite frontend
-- Frontend calls the function with the user's JWT via `userProvisioningApi.js`
+- Service role is used **only** inside Edge Function runtime, not in the Vite frontend
+- Frontend calls functions with the user's JWT via `userProvisioningApi.js`
+- `reset-platform-user-password` enforces caller role `admin` or `executive` before using service role
+- Temporary password is returned once in the API response; UI warns and does not persist it
+- `distributor_admin` users are directory-only; reset is blocked with a clear error

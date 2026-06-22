@@ -9,8 +9,8 @@
     "check:tenant-view": "node scripts/check-tenant-view-imports.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
-    "supabase:functions:serve": "supabase functions serve provision-platform-user --env-file .env.functions.local",
-    "supabase:functions:deploy:qa": "supabase functions deploy provision-platform-user --project-ref zipuzmfkwwucbchlphcj"
+    "supabase:functions:serve": "supabase functions serve provision-platform-user reset-platform-user-password --env-file .env.functions.local",
+    "supabase:functions:deploy:qa": "supabase functions deploy provision-platform-user reset-platform-user-password --project-ref zipuzmfkwwucbchlphcj"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.8",

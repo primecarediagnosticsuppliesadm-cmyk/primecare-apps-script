@@ -7,18 +7,17 @@ import {
   updateDistributorAgentAssignmentWrite,
   updateLabAgentAssignmentWrite,
   updateOperationsPlatformUserWrite,
-  requestPlatformUserPasswordReset,
 } from "@/api/primecareSupabaseApi.js";
 import {
   deactivatePlatformUserWrite,
   provisionPlatformUserWrite,
   reactivatePlatformUserWrite,
+  resetPlatformUserPasswordWrite,
 } from "@/api/userProvisioningApi.js";
 import {
   EMAIL_NOT_ADDED,
   OPERATIONS_CENTER_TABS,
   PLATFORM_ROLE_OPTIONS,
-  RESET_PASSWORD_EMAIL_MISSING,
   formatOpsDate,
   isAgentRole,
   labsForAgent,
@@ -34,7 +33,7 @@ import {
 } from "@/operations/userProvisioningEngine.js";
 import { ROLES } from "@/config/roles.js";
 import { cn } from "@/lib/utils";
-import { Plus, Search, X } from "lucide-react";
+import { Plus, Search, Copy, X } from "lucide-react";
 
 function StatusBadge({ active }) {
   return (
@@ -287,6 +286,53 @@ function CreateUserDrawer({ tenantId, distributors, labAssignments, onClose, onS
           </>
         )}
       </form>
+    </ModalShell>
+  );
+}
+
+function ResetPasswordResultModal({ result, onClose }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(result.temporaryPassword);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <ModalShell title={`Password reset — ${result.displayName || result.email}`} onClose={onClose}>
+      <div className="space-y-3 text-sm">
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          This temporary password is shown once. Copy it now and share it securely. It will not be
+          shown again after you close this dialog.
+        </p>
+        {result.email ? (
+          <p className="text-xs text-slate-600">
+            Login email: <span className="font-medium text-slate-900">{result.email}</span>
+          </p>
+        ) : null}
+        <div className="rounded-md border bg-slate-50 px-3 py-2">
+          <p className="text-xs text-slate-500">Temporary password</p>
+          <div className="mt-1 flex items-center gap-2">
+            <code className="flex-1 break-all font-mono text-sm text-slate-900">
+              {result.temporaryPassword}
+            </code>
+            <Button type="button" variant="outline" size="sm" onClick={() => void handleCopy()}>
+              <Copy className="mr-1 h-3.5 w-3.5" />
+              {copied ? "Copied" : "Copy"}
+            </Button>
+          </div>
+        </div>
+        <div className="flex justify-end pt-1">
+          <Button type="button" onClick={onClose}>
+            Done
+          </Button>
+        </div>
+      </div>
     </ModalShell>
   );
 }
@@ -687,6 +733,7 @@ export default function UserProvisioningPanel({
   const [transferLab, setTransferLab] = useState(null);
   const [labModal, setLabModal] = useState(null);
   const [distributorModal, setDistributorModal] = useState(null);
+  const [resetPasswordResult, setResetPasswordResult] = useState(null);
   const [resettingUserId, setResettingUserId] = useState("");
 
   const agents = bundle?.agents || [];
@@ -723,15 +770,23 @@ export default function UserProvisioningPanel({
   }
 
   async function handleResetPassword(user) {
-    const email = String(user?.storedEmail ?? user?.email ?? "").trim();
-    if (!email || user?.hasStoredEmail === false) return;
     try {
       setResettingUserId(user.userId);
-      const res = await requestPlatformUserPasswordReset(email);
-      if (!res?.success) throw new Error(res?.error || "Failed to send reset link");
-      onStatus?.("If this email exists as a Supabase Auth login, a reset link was sent.");
+      const res = await resetPlatformUserPasswordWrite({
+        tenantId,
+        subjectUserId: user.userId,
+        email: String(user?.storedEmail ?? user?.email ?? "").trim() || undefined,
+      });
+      if (!res?.success) throw new Error(res?.error || "Failed to reset password");
+      setResetPasswordResult({
+        displayName: user.name,
+        email: res.data?.email || user.storedEmail || user.email,
+        temporaryPassword: res.data?.temporaryPassword,
+      });
+      onStatus?.(`Temporary password set for ${user.name}`);
+      await onReload?.();
     } catch (err) {
-      onError?.(err?.message || "Failed to send reset link");
+      onError?.(err?.message || "Failed to reset password");
     } finally {
       setResettingUserId("");
     }
@@ -923,17 +978,16 @@ export default function UserProvisioningPanel({
                               Transfer Lab
                             </Button>
                           ) : null}
-                          {user.loginEnabled && user.hasStoredEmail !== false ? (
+                          {user.loginEnabled ? (
                             <Button
                               type="button"
                               variant="outline"
                               size="sm"
                               className="h-7 px-2 text-[10px]"
                               disabled={resettingUserId === user.userId}
-                              title={user.hasStoredEmail ? undefined : RESET_PASSWORD_EMAIL_MISSING}
                               onClick={() => void handleResetPassword(user)}
                             >
-                              Reset Pwd
+                              {resettingUserId === user.userId ? "Resetting…" : "Reset Pwd"}
                             </Button>
                           ) : null}
                         </div>
@@ -1077,6 +1131,13 @@ export default function UserProvisioningPanel({
             setCreateOpen(false);
             await onReload?.();
           }}
+        />
+      ) : null}
+
+      {resetPasswordResult ? (
+        <ResetPasswordResultModal
+          result={resetPasswordResult}
+          onClose={() => setResetPasswordResult(null)}
         />
       ) : null}
 
