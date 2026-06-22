@@ -48,6 +48,24 @@ export function sumOpenOrderAmounts(openOrders) {
   return (openOrders || []).reduce((sum, order) => sum + num(order.orderTotal), 0);
 }
 
+export function sumSelectedOpenOrderAmounts(openOrders, selectedOrderIds = []) {
+  const selected = new Set((selectedOrderIds || []).map((id) => String(id || "").trim()).filter(Boolean));
+  if (!selected.size) return 0;
+
+  return (openOrders || [])
+    .filter((order) => selected.has(String(order.orderId || "").trim()))
+    .reduce((sum, order) => sum + num(order.orderTotal), 0);
+}
+
+export function previewCollectionPaymentAmount(amountCollected, selectedRefAmount) {
+  const entered = String(amountCollected ?? "").trim();
+  if (entered !== "") {
+    return num(amountCollected);
+  }
+  const selectedTotal = num(selectedRefAmount);
+  return selectedTotal > 0 ? selectedTotal : 0;
+}
+
 export function orderPaymentDisplayLabel(order) {
   return formatOrderPaymentLabel({
     orderStatus: order?.orderStatus,

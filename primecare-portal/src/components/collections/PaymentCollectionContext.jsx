@@ -1,4 +1,8 @@
 import OpenOrdersTable from "@/components/collections/OpenOrdersTable.jsx";
+import {
+  previewCollectionPaymentAmount,
+  sumSelectedOpenOrderAmounts,
+} from "@/collections/collectionsOpenOrders.js";
 import { cn } from "@/lib/utils";
 
 function formatMoney(value) {
@@ -12,21 +16,6 @@ function num(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
-function str(v) {
-  return String(v ?? "").trim();
-}
-
-/** Preview payment for After Entry: entered amount wins; else selected ref total. */
-function previewPaymentAmount(amountCollected, selectedRefAmount) {
-  if (str(amountCollected) !== "") {
-    return num(amountCollected);
-  }
-  if (selectedRefAmount > 0) {
-    return selectedRefAmount;
-  }
-  return 0;
-}
-
 export default function PaymentCollectionContext({
   outstandingAmount = 0,
   openOrders = [],
@@ -37,10 +26,8 @@ export default function PaymentCollectionContext({
   className,
 }) {
   const outstanding = num(outstandingAmount);
-  const selectedSum = (openOrders || [])
-    .filter((o) => selectedOrderIds.includes(String(o.orderId || "")))
-    .reduce((s, o) => s + num(o.orderTotal), 0);
-  const previewAmount = previewPaymentAmount(amountCollected, selectedSum);
+  const selectedRefAmount = sumSelectedOpenOrderAmounts(openOrders, selectedOrderIds);
+  const previewAmount = previewCollectionPaymentAmount(amountCollected, selectedRefAmount);
   const remaining = Math.max(0, outstanding - previewAmount);
 
   return (
@@ -75,7 +62,7 @@ export default function PaymentCollectionContext({
         <div>
           <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Selected ref.</p>
           <p className="font-semibold tabular-nums">
-            {selectedOrderIds.length ? formatMoney(selectedSum) : "—"}
+            {selectedOrderIds.length ? formatMoney(selectedRefAmount) : "—"}
           </p>
         </div>
         <div>
