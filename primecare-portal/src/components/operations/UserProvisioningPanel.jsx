@@ -64,6 +64,119 @@ function ModalShell({ title, onClose, children, wide = false }) {
   );
 }
 
+function ConfirmActionModal({
+  title,
+  consequence,
+  details = null,
+  requireReason = false,
+  reasonLabel = "Reason",
+  reasonPlaceholder = "Required for audit trail",
+  confirmLabel = "Confirm",
+  destructive = false,
+  onConfirm,
+  onClose,
+}) {
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (requireReason && !reason.trim()) {
+      setError(`${reasonLabel} is required`);
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await onConfirm(requireReason ? reason.trim() : reason.trim() || undefined);
+      onClose?.();
+    } catch (err) {
+      setError(err?.message || "Action failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <ModalShell title={title} onClose={onClose}>
+      <form onSubmit={(e) => void handleSubmit(e)} className="space-y-3 text-sm">
+        {error ? <p className="text-xs text-red-600">{error}</p> : null}
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          {consequence}
+        </p>
+        {details ? (
+          <div className="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-700 whitespace-pre-wrap">
+            {details}
+          </div>
+        ) : null}
+        {requireReason ? (
+          <label className="block text-xs text-slate-600">
+            {reasonLabel} *
+            <Input
+              className="mt-1"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={reasonPlaceholder}
+              required
+            />
+          </label>
+        ) : null}
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            variant={destructive ? "destructive" : "default"}
+            disabled={saving || (requireReason && !reason.trim())}
+          >
+            {saving ? "Working…" : confirmLabel}
+          </Button>
+        </div>
+      </form>
+    </ModalShell>
+  );
+}
+
+function computeAgentLabAssignmentDiff(labAssignments, initialKeys, selectedKeys, user) {
+  const assigns = [];
+  const unassigns = [];
+  let reassignCount = 0;
+
+  const mine = [user?.userId, user?.agentId, user?.id]
+    .map((v) => String(v ?? "").trim().toLowerCase())
+    .filter(Boolean);
+
+  for (const lab of labAssignments) {
+    const key = labAssignmentKey(lab);
+    const wasMine = initialKeys.has(key);
+    const nowMine = selectedKeys.has(key);
+    if (wasMine === nowMine) continue;
+
+    if (nowMine) {
+      assigns.push(lab);
+      const assignedId = String(lab.assignedAgentId ?? "").trim().toLowerCase();
+      if (assignedId && !mine.includes(assignedId)) reassignCount += 1;
+    } else {
+      unassigns.push(lab);
+    }
+  }
+
+  return {
+    assigns,
+    unassigns,
+    reassignCount,
+    labChanges: assigns.length + unassigns.length,
+  };
+}
+
+function formatLabList(labs, limit = 5) {
+  const lines = labs.slice(0, limit).map((lab) => `• ${lab.labName} (${lab.labId})`);
+  if (labs.length > limit) lines.push(`• …and ${labs.length - limit} more`);
+  return lines.join("\n");
+}
+
 function SearchInput({ value, onChange, placeholder }) {
   return (
     <div className="relative min-w-[200px] flex-1">
@@ -363,9 +476,17 @@ function DeactivateUserModal({ user, onClose, onSaved }) {
     <ModalShell title={`Deactivate — ${user.name}`} onClose={onClose}>
       <form onSubmit={(e) => void handleSubmit(e)} className="space-y-2 text-sm">
         {error ? <p className="text-xs text-red-600">{error}</p> : null}
-        <p className="text-xs text-slate-600">
-          Soft deactivate only. User cannot log in while inactive. No data is deleted.
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">
+          This user will lose login access immediately. They cannot sign in until reactivated. No
+          data is deleted.
         </p>
+        <div className="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-700">
+          <p>
+            User: <span className="font-medium">{user.name}</span>
+          </p>
+          <p>Role: {platformRoleLabel(user.role)}</p>
+          {user.email ? <p>Email: {user.email}</p> : null}
+        </div>
         <label className="block text-xs text-slate-600">
           Reason *
           <Input
@@ -427,12 +548,27 @@ function TransferLabModal({ lab, agents, hqTenantId, onClose, onSaved }) {
     <ModalShell title={`Transfer Lab — ${lab.labName}`} onClose={onClose}>
       <form onSubmit={(e) => void handleSubmit(e)} className="space-y-2 text-sm">
         {error ? <p className="text-xs text-red-600">{error}</p> : null}
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          Ownership will move immediately. The previous agent loses access to this lab. Transfer is
+          recorded in lab assignment history.
+        </p>
         <div className="rounded-md bg-slate-50 px-2 py-1.5 text-xs text-slate-600">
           <p>
-            Lab: <span className="font-mono">{lab.labId}</span>
+            Lab: <span className="font-mono">{lab.labId}</span> — {lab.labName}
           </p>
           <p>
-            Current owner: {lab.assignedAgentName || lab.assignedAgentId || "Unassigned"}
+            From agent:{" "}
+            <span className="font-medium">
+              {lab.assignedAgentName || lab.assignedAgentId || "Unassigned"}
+            </span>
+          </p>
+          <p>
+            To agent:{" "}
+            <span className="font-medium">
+              {selectedAgent
+                ? `${selectedAgent.name} (${selectedAgent.agentId})`
+                : "Select below"}
+            </span>
           </p>
         </div>
         <label className="block text-xs text-slate-600">
@@ -454,19 +590,20 @@ function TransferLabModal({ lab, agents, hqTenantId, onClose, onSaved }) {
           </select>
         </label>
         <label className="block text-xs text-slate-600">
-          Reason
+          Reason *
           <Input
             className="mt-1"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="Optional"
+            placeholder="e.g. Territory realignment"
+            required
           />
         </label>
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
-          <Button type="submit" disabled={saving || !toAgentId}>
+          <Button type="submit" disabled={saving || !toAgentId || !reason.trim()}>
             {saving ? "Transferring…" : "Transfer Lab"}
           </Button>
         </div>
@@ -475,8 +612,17 @@ function TransferLabModal({ lab, agents, hqTenantId, onClose, onSaved }) {
   );
 }
 
-function UserAssignmentDrawer({ user, agents, labAssignments, distributors, tenantId, onClose, onSaved }) {
-  const role = user?.role;
+function UserAssignmentDrawer({
+  user,
+  agents,
+  labAssignments,
+  distributors,
+  tenantId,
+  onClose,
+  onSaved,
+  onRequestConfirm,
+}) {
+  const [role, setRole] = useState(user?.role || "agent");
   const agentLabs = isAgentRole(role) ? labsForAgent(user, labAssignments) : [];
   const agentDists = isAgentRole(role) ? distributorsForAgent(user, distributors) : [];
   const [error, setError] = useState("");
@@ -490,6 +636,8 @@ function UserAssignmentDrawer({ user, agents, labAssignments, distributors, tena
   const agentBusinessId = String(user?.agentId ?? "").trim();
   const agentDisplayName = String(user?.displayName ?? user?.name ?? "").trim();
   const initialTerritory = user?.territory === "—" ? "" : user?.territory || "";
+  const initialRole = user?.role || "agent";
+  const initialDistributorId = String(user?.distributorId ?? "").trim();
   const initialAssignedKeysRef = useRef(new Set());
 
   useEffect(() => {
@@ -498,7 +646,11 @@ function UserAssignmentDrawer({ user, agents, labAssignments, distributors, tena
     setSelectedLabKeys(new Set(keys));
     setLabSearch("");
     setError("");
-  }, [user?.userId, user?.agentId, labAssignments, role]);
+    setRole(user?.role || "agent");
+    setTerritory(user?.territory === "—" ? "" : user?.territory || "");
+    setLabId(user?.labId || "");
+    setDistributorId(user?.distributorId || "");
+  }, [user?.userId, user?.agentId, labAssignments, user?.role, user?.territory, user?.labId, user?.distributorId]);
 
   const filteredLabs = useMemo(() => {
     const q = labSearch.trim().toLowerCase();
@@ -507,16 +659,6 @@ function UserAssignmentDrawer({ user, agents, labAssignments, distributors, tena
       matchesSearch(q, [lab.labName, lab.labId, lab.tenantName, lab.assignedAgentName])
     );
   }, [labAssignments, labSearch]);
-
-  function toggleLabSelection(lab) {
-    const key = labAssignmentKey(lab);
-    setSelectedLabKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
 
   function labOwnedByOtherAgent(lab) {
     const assignedId = String(lab?.assignedAgentId ?? "").trim().toLowerCase();
@@ -527,93 +669,242 @@ function UserAssignmentDrawer({ user, agents, labAssignments, distributors, tena
     return !mine.includes(assignedId);
   }
 
-  async function saveAgentAssignments() {
-    setSaving(true);
-    setError("");
-    try {
-      if (!agentBusinessId) {
-        throw new Error("Agent ID is required on the profile before assigning labs");
-      }
-
-      let labChanges = 0;
-      const initialAssignedKeys = initialAssignedKeysRef.current;
-      for (const lab of labAssignments) {
-        const key = labAssignmentKey(lab);
-        const wasMine = initialAssignedKeys.has(key);
-        const nowMine = selectedLabKeys.has(key);
-        if (wasMine === nowMine) continue;
-
-        if (nowMine) {
-          const res = await updateLabAgentAssignmentWrite({
-            tenantId: lab.tenantId,
-            labId: lab.labId,
-            agentId: agentBusinessId,
-            agentName: agentDisplayName,
+  function toggleLabSelection(lab) {
+    const key = labAssignmentKey(lab);
+    const isChecked = selectedLabKeys.has(key);
+    if (isChecked && initialAssignedKeysRef.current.has(key)) {
+      onRequestConfirm?.({
+        title: `Unassign lab — ${lab.labName}`,
+        consequence: `${user.name} will lose access to this lab. Field operations for this lab may be affected until it is reassigned.`,
+        details: `Lab: ${lab.labName} (${lab.labId})\nAgent: ${user.name}`,
+        requireReason: true,
+        reasonLabel: "Reason for unassign",
+        confirmLabel: "Unassign lab",
+        destructive: true,
+        onCancel: () => {},
+        onExecute: async () => {
+          setSelectedLabKeys((prev) => {
+            const next = new Set(prev);
+            next.delete(key);
+            return next;
           });
-          if (!res?.success) {
-            throw new Error(res?.error || `Failed to assign ${lab.labId}`);
-          }
-        } else {
-          const res = await updateLabAgentAssignmentWrite({
-            tenantId: lab.tenantId,
-            labId: lab.labId,
-            remove: true,
-          });
-          if (!res?.success) {
-            throw new Error(res?.error || `Failed to unassign ${lab.labId}`);
-          }
-        }
-        labChanges += 1;
-      }
-
-      const territoryChanged = territory !== initialTerritory;
-      if (territoryChanged) {
-        const res = await updateOperationsPlatformUserWrite(user.userId, {
-          tenantId,
-          displayName: user.displayName || user.name,
-          role,
-          territory,
-          agentId: user.agentId,
-        });
-        if (!res?.success) throw new Error(res?.error || "Failed to update territory");
-      }
-
-      if (labChanges === 0 && !territoryChanged) {
-        throw new Error("No assignment changes to save");
-      }
-
-      onSaved?.({
-        assignedCount: selectedLabKeys.size,
-        labChanges,
-        territoryChanged,
+        },
       });
-    } catch (err) {
-      setError(err?.message || "Failed to save assignments");
-    } finally {
-      setSaving(false);
+      return;
     }
+    setSelectedLabKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
-  async function saveProfileScope() {
-    setSaving(true);
-    setError("");
-    try {
+  async function executeAgentAssignments() {
+    if (!agentBusinessId) {
+      throw new Error("Agent ID is required on the profile before assigning labs");
+    }
+
+    let labChanges = 0;
+    const initialAssignedKeys = initialAssignedKeysRef.current;
+    for (const lab of labAssignments) {
+      const key = labAssignmentKey(lab);
+      const wasMine = initialAssignedKeys.has(key);
+      const nowMine = selectedLabKeys.has(key);
+      if (wasMine === nowMine) continue;
+
+      if (nowMine) {
+        const res = await updateLabAgentAssignmentWrite({
+          tenantId: lab.tenantId,
+          labId: lab.labId,
+          agentId: agentBusinessId,
+          agentName: agentDisplayName,
+        });
+        if (!res?.success) {
+          throw new Error(res?.error || `Failed to assign ${lab.labId}`);
+        }
+      } else {
+        const res = await updateLabAgentAssignmentWrite({
+          tenantId: lab.tenantId,
+          labId: lab.labId,
+          remove: true,
+        });
+        if (!res?.success) {
+          throw new Error(res?.error || `Failed to unassign ${lab.labId}`);
+        }
+      }
+      labChanges += 1;
+    }
+
+    const territoryChanged = territory !== initialTerritory;
+    const roleChanged = role !== initialRole;
+    if (territoryChanged || roleChanged) {
       const res = await updateOperationsPlatformUserWrite(user.userId, {
         tenantId,
         displayName: user.displayName || user.name,
         role,
         territory,
-        labId,
-        distributorId,
         agentId: user.agentId,
       });
-      if (!res?.success) throw new Error(res?.error || "Failed to update");
-      onSaved?.({ assignedCount: 0, labChanges: 0, territoryChanged: true });
-    } catch (err) {
-      setError(err?.message || "Failed to update");
-    } finally {
-      setSaving(false);
+      if (!res?.success) throw new Error(res?.error || "Failed to update profile");
     }
+
+    return {
+      assignedCount: selectedLabKeys.size,
+      labChanges,
+      territoryChanged,
+      roleChanged,
+    };
+  }
+
+  function requestSaveAgentAssignments() {
+    setError("");
+    const diff = computeAgentLabAssignmentDiff(
+      labAssignments,
+      initialAssignedKeysRef.current,
+      selectedLabKeys,
+      user
+    );
+    const territoryChanged = territory !== initialTerritory;
+    const roleChanged = role !== initialRole;
+
+    if (diff.labChanges === 0 && !territoryChanged && !roleChanged) {
+      setError("No assignment changes to save");
+      return;
+    }
+
+    const detailParts = [];
+    if (diff.assigns.length) {
+      detailParts.push(`Assign ${diff.assigns.length} lab(s):\n${formatLabList(diff.assigns)}`);
+    }
+    if (diff.unassigns.length) {
+      detailParts.push(`Unassign ${diff.unassigns.length} lab(s):\n${formatLabList(diff.unassigns)}`);
+    }
+    if (roleChanged) {
+      detailParts.push(
+        `Role: ${platformRoleLabel(initialRole)} → ${platformRoleLabel(role)}`
+      );
+    }
+    if (territoryChanged) {
+      detailParts.push(`Territory: ${initialTerritory || "—"} → ${territory || "—"}`);
+    }
+
+    const requireReason =
+      diff.unassigns.length > 0 ||
+      diff.assigns.length > 1 ||
+      diff.reassignCount > 0;
+
+    onRequestConfirm?.({
+      title: `Save assignments — ${user.name}`,
+      consequence:
+        diff.labChanges > 0
+          ? `${diff.labChanges} lab assignment change(s) will apply immediately. Agents and field operations may be affected.`
+          : "Profile scope changes will apply immediately.",
+      details: detailParts.join("\n\n"),
+      requireReason,
+      reasonLabel: "Reason for assignment change",
+      confirmLabel: "Save assignments",
+      onCancel: () => {
+        setSelectedLabKeys(new Set(initialAssignedKeysRef.current));
+        setRole(initialRole);
+        setTerritory(initialTerritory);
+      },
+      onExecute: async () => {
+        setSaving(true);
+        try {
+          const result = await executeAgentAssignments();
+          onSaved?.(result);
+        } finally {
+          setSaving(false);
+        }
+      },
+    });
+  }
+
+  async function executeProfileScope() {
+    const distributorChanged = distributorId !== initialDistributorId;
+    const roleChanged = role !== initialRole;
+    const labIdChanged = labId !== String(user?.labId ?? "").trim();
+
+    const res = await updateOperationsPlatformUserWrite(user.userId, {
+      tenantId,
+      displayName: user.displayName || user.name,
+      role,
+      territory,
+      labId,
+      distributorId,
+      agentId: user.agentId,
+    });
+    if (!res?.success) throw new Error(res?.error || "Failed to update");
+
+    return { assignedCount: 0, labChanges: 0, territoryChanged: false, roleChanged, distributorChanged, labIdChanged };
+  }
+
+  function requestSaveProfileScope() {
+    setError("");
+    const distributorChanged = distributorId !== initialDistributorId;
+    const roleChanged = role !== initialRole;
+    const labIdChanged = labId !== String(user?.labId ?? "").trim();
+    const removingDistributor = Boolean(initialDistributorId) && !distributorId;
+
+    if (!distributorChanged && !roleChanged && !labIdChanged) {
+      setError("No scope changes to save");
+      return;
+    }
+
+    const distributorName =
+      distributors.find((d) => d.distributorId === distributorId)?.distributorName || distributorId;
+    const initialDistributorName =
+      distributors.find((d) => d.distributorId === initialDistributorId)?.distributorName ||
+      initialDistributorId ||
+      "—";
+
+    let title = `Save scope — ${user.name}`;
+    let consequence = "Profile scope will update immediately.";
+    let confirmLabel = "Save scope";
+    const detailParts = [];
+
+    if (roleChanged) {
+      detailParts.push(`Role: ${platformRoleLabel(initialRole)} → ${platformRoleLabel(role)}`);
+      consequence = "Role change may affect login permissions and menu access immediately.";
+      title = `Change role — ${user.name}`;
+      confirmLabel = "Change role";
+    }
+    if (removingDistributor) {
+      detailParts.push(`Remove distributor: ${initialDistributorName}`);
+      consequence =
+        "Distributor Admin will lose scoped distributor access in the directory until reassigned.";
+      title = `Remove distributor — ${user.name}`;
+      confirmLabel = "Remove distributor";
+    } else if (distributorChanged && role === ROLES.DISTRIBUTOR_ADMIN) {
+      detailParts.push(
+        `Distributor: ${initialDistributorName} → ${distributorName || "—"}`
+      );
+      consequence = "Distributor Admin scope will change immediately.";
+      title = `Change distributor — ${user.name}`;
+      confirmLabel = "Change distributor";
+    }
+    if (labIdChanged) {
+      detailParts.push(`Lab ID: ${user.labId || "—"} → ${labId || "—"}`);
+    }
+
+    onRequestConfirm?.({
+      title,
+      consequence,
+      details: detailParts.join("\n") || undefined,
+      requireReason: false,
+      confirmLabel,
+      destructive: removingDistributor,
+      onExecute: async () => {
+        setSaving(true);
+        try {
+          const result = await executeProfileScope();
+          onSaved?.(result);
+        } finally {
+          setSaving(false);
+        }
+      },
+    });
   }
 
   return (
@@ -626,7 +917,21 @@ function UserAssignmentDrawer({ user, agents, labAssignments, distributors, tena
           </Button>
         </div>
         {error ? <p className="mb-2 text-xs text-red-600">{error}</p> : null}
-        <p className="mb-3 text-xs text-slate-500">{platformRoleLabel(role)}</p>
+
+        <label className="mb-3 block text-xs text-slate-600">
+          Role
+          <select
+            className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+          >
+            {PLATFORM_ROLE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         {isAgentRole(role) ? (
           <div className="space-y-4 text-xs">
@@ -727,7 +1032,7 @@ function UserAssignmentDrawer({ user, agents, labAssignments, distributors, tena
               size="sm"
               className="w-full"
               disabled={saving || !agentBusinessId}
-              onClick={() => void saveAgentAssignments()}
+              onClick={() => requestSaveAgentAssignments()}
             >
               {saving ? "Saving…" : "Save assignments"}
             </Button>
@@ -749,7 +1054,7 @@ function UserAssignmentDrawer({ user, agents, labAssignments, distributors, tena
               value={distributorId}
               onChange={(e) => setDistributorId(e.target.value)}
             >
-              <option value="">Select…</option>
+              <option value="">None (remove assignment)</option>
               {distributors.map((d) => (
                 <option key={d.distributorId} value={d.distributorId}>
                   {d.distributorName}
@@ -765,51 +1070,85 @@ function UserAssignmentDrawer({ user, agents, labAssignments, distributors, tena
             size="sm"
             className="mt-4"
             disabled={saving}
-            onClick={() => void saveProfileScope()}
+            onClick={() => requestSaveProfileScope()}
           >
             {saving ? "Saving…" : "Save scope"}
           </Button>
         ) : null}
 
         {!isAgentRole(role) && role !== ROLES.LAB && role !== ROLES.DISTRIBUTOR_ADMIN ? (
-          <p className="text-xs text-slate-500">HQ roles have full tenant access — no scoped assignments.</p>
+          <div className="space-y-3 text-xs">
+            <p className="text-slate-500">HQ roles have full tenant access — no lab assignments.</p>
+            {role !== initialRole ? (
+              <Button
+                type="button"
+                size="sm"
+                disabled={saving}
+                onClick={() => requestSaveProfileScope()}
+              >
+                {saving ? "Saving…" : "Save role"}
+              </Button>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>
   );
 }
 
-function LabAssignmentModal({ lab, agents, onClose, onSaved }) {
+function LabAssignmentModal({ lab, agents, onClose, onSaved, onRequestConfirm }) {
   const labTenantId = lab?.tenantId || "";
   const [agentId, setAgentId] = useState(lab?.assignedAgentId || "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const selectedAgent = agents.find((a) => a.agentId === agentId);
+  const previousAgentName = lab?.assignedAgentName || lab?.assignedAgentId || "Unassigned";
 
-  async function handleAssign(e) {
+  async function executeAssign() {
+    const res = await updateLabAgentAssignmentWrite({
+      tenantId: labTenantId,
+      labId: lab.labId,
+      agentId,
+      agentName: selectedAgent?.name || "",
+    });
+    if (!res?.success) throw new Error(res?.error || "Failed to assign agent");
+    onSaved?.();
+    onClose?.();
+  }
+
+  function handleAssign(e) {
     e.preventDefault();
-    setSaving(true);
     setError("");
-    try {
-      const res = await updateLabAgentAssignmentWrite({
-        tenantId: labTenantId,
-        labId: lab.labId,
-        agentId,
-        agentName: selectedAgent?.name || "",
-      });
-      if (!res?.success) throw new Error(res?.error || "Failed to assign agent");
-      onSaved?.();
-      onClose?.();
-    } catch (err) {
-      setError(err?.message || "Failed to assign agent");
-    } finally {
-      setSaving(false);
-    }
+    if (!agentId) return;
+
+    const isReassignment = Boolean(lab?.assignedAgentId) && lab.assignedAgentId !== agentId;
+    onRequestConfirm?.({
+      title: isReassignment ? `Reassign lab — ${lab.labName}` : `Assign lab — ${lab.labName}`,
+      consequence: isReassignment
+        ? "Lab ownership will change immediately. The previous agent loses access to this lab."
+        : "This lab will be assigned to the selected agent immediately.",
+      details: `Lab: ${lab.labName} (${lab.labId})\n${
+        isReassignment
+          ? `From: ${previousAgentName}\nTo: ${selectedAgent?.name} (${selectedAgent?.agentId})`
+          : `Agent: ${selectedAgent?.name} (${selectedAgent?.agentId})`
+      }`,
+      requireReason: isReassignment,
+      reasonLabel: "Reason for reassignment",
+      confirmLabel: isReassignment ? "Reassign lab" : "Assign lab",
+      onExecute: async () => {
+        setSaving(true);
+        try {
+          await executeAssign();
+        } finally {
+          setSaving(false);
+        }
+      },
+    });
   }
 
   return (
     <ModalShell title={`Assign agent — ${lab.labName}`} onClose={onClose}>
-      <form onSubmit={(e) => void handleAssign(e)} className="space-y-2 text-sm">
+      <form onSubmit={handleAssign} className="space-y-2 text-sm">
         {error ? <p className="text-xs text-red-600">{error}</p> : null}
         <select
           className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
@@ -831,7 +1170,7 @@ function LabAssignmentModal({ lab, agents, onClose, onSaved }) {
             Cancel
           </Button>
           <Button type="submit" disabled={saving || !agentId}>
-            {saving ? "Saving…" : "Assign"}
+            {saving ? "Saving…" : "Continue"}
           </Button>
         </div>
       </form>
@@ -839,45 +1178,90 @@ function LabAssignmentModal({ lab, agents, onClose, onSaved }) {
   );
 }
 
-function DistributorAssignmentModal({ distributor, agents, tenantId, onClose, onSaved }) {
+function DistributorAssignmentModal({ distributor, agents, tenantId, onClose, onSaved, onRequestConfirm }) {
   const profileAgents = agents.filter((a) => a.userId);
   const [agentUserId, setAgentUserId] = useState(distributor?.assignedAgentUserId || "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const selectedAgent = profileAgents.find((a) => a.userId === agentUserId);
+  const initialAgentUserId = distributor?.assignedAgentUserId || "";
+  const initialAgentName = distributor?.assignedAgentName || "—";
 
-  async function handleAssign(e) {
+  async function executeAssign(remove = false) {
+    const res = await updateDistributorAgentAssignmentWrite({
+      tenantId,
+      distributorId: distributor.distributorId,
+      agentUserId: remove ? "" : agentUserId,
+      agentName: remove ? "" : selectedAgent?.name || "",
+      remove,
+    });
+    if (!res?.success) throw new Error(res?.error || "Failed to update distributor assignment");
+    onSaved?.();
+    onClose?.();
+  }
+
+  function handleAssign(e) {
     e.preventDefault();
-    setSaving(true);
     setError("");
-    try {
-      const res = await updateDistributorAgentAssignmentWrite({
-        tenantId,
-        distributorId: distributor.distributorId,
-        agentUserId,
-        agentName: selectedAgent?.name || "",
-      });
-      if (!res?.success) throw new Error(res?.error || "Failed to assign agent");
-      onSaved?.();
-      onClose?.();
-    } catch (err) {
-      setError(err?.message || "Failed to assign agent");
-    } finally {
-      setSaving(false);
+
+    const removing = Boolean(initialAgentUserId) && !agentUserId;
+    const changing = Boolean(agentUserId) && agentUserId !== initialAgentUserId;
+
+    if (!removing && !changing) {
+      setError("No assignment change selected");
+      return;
     }
+
+    if (removing) {
+      onRequestConfirm?.({
+        title: `Remove distributor agent — ${distributor.distributorName}`,
+        consequence:
+          "The agent will lose distributor scope in HQ directory. This does not delete the agent account.",
+        details: `Distributor: ${distributor.distributorName}\nCurrent agent: ${initialAgentName}`,
+        confirmLabel: "Remove assignment",
+        destructive: true,
+        onExecute: async () => {
+          setSaving(true);
+          try {
+            await executeAssign(true);
+          } finally {
+            setSaving(false);
+          }
+        },
+      });
+      return;
+    }
+
+    onRequestConfirm?.({
+      title: `Assign distributor — ${distributor.distributorName}`,
+      consequence: "Distributor agent assignment will update immediately for HQ operations.",
+      details: `Distributor: ${distributor.distributorName}\n${
+        initialAgentUserId
+          ? `From: ${initialAgentName}\nTo: ${selectedAgent?.name} (${selectedAgent?.agentId})`
+          : `Agent: ${selectedAgent?.name} (${selectedAgent?.agentId})`
+      }`,
+      confirmLabel: initialAgentUserId ? "Change assignment" : "Assign agent",
+      onExecute: async () => {
+        setSaving(true);
+        try {
+          await executeAssign(false);
+        } finally {
+          setSaving(false);
+        }
+      },
+    });
   }
 
   return (
     <ModalShell title={`Assign agent — ${distributor.distributorName}`} onClose={onClose}>
-      <form onSubmit={(e) => void handleAssign(e)} className="space-y-2 text-sm">
+      <form onSubmit={handleAssign} className="space-y-2 text-sm">
         {error ? <p className="text-xs text-red-600">{error}</p> : null}
         <select
           className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
           value={agentUserId}
           onChange={(e) => setAgentUserId(e.target.value)}
-          required
         >
-          <option value="">Select agent…</option>
+          <option value="">None (remove assignment)</option>
           {profileAgents
             .filter((a) => a.active)
             .map((a) => (
@@ -890,8 +1274,8 @@ function DistributorAssignmentModal({ distributor, agents, tenantId, onClose, on
           <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
-          <Button type="submit" disabled={saving || !agentUserId}>
-            {saving ? "Saving…" : "Assign"}
+          <Button type="submit" disabled={saving}>
+            {saving ? "Saving…" : "Continue"}
           </Button>
         </div>
       </form>
@@ -924,6 +1308,7 @@ export default function UserProvisioningPanel({
   const [distributorModal, setDistributorModal] = useState(null);
   const [resetPasswordResult, setResetPasswordResult] = useState(null);
   const [resettingUserId, setResettingUserId] = useState("");
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   const agents = bundle?.agents || [];
   const directoryUsers = bundle?.directoryUsers || [];
@@ -944,23 +1329,46 @@ export default function UserProvisioningPanel({
   const filteredLabs = labAssignments;
   const filteredDistributors = distributorAssignments;
 
-  async function handleReactivate(user) {
+  function requestConfirm(config) {
+    setConfirmDialog({
+      ...config,
+      onClose: () => {
+        config.onCancel?.();
+        setConfirmDialog(null);
+      },
+    });
+  }
+
+  async function executeReactivate(user) {
+    setBusyId(user.userId);
     try {
-      setBusyId(user.userId);
       const res = await reactivatePlatformUserWrite(user.userId, "Reactivated by HQ Admin");
       if (!res?.success) throw new Error(res?.error);
       onStatus?.(`${user.name} reactivated`);
       await onReload?.();
     } catch (err) {
       onError?.(err?.message || "Failed to reactivate");
+      throw err;
     } finally {
       setBusyId("");
     }
   }
 
-  async function handleResetPassword(user) {
+  function promptReactivate(user) {
+    requestConfirm({
+      title: `Reactivate — ${user.name}`,
+      consequence: "This user will regain login access immediately.",
+      details: `User: ${user.name}\nRole: ${user.roleLabel || platformRoleLabel(user.role)}${
+        user.email ? `\nEmail: ${user.email}` : ""
+      }`,
+      confirmLabel: "Reactivate",
+      onExecute: async () => executeReactivate(user),
+    });
+  }
+
+  async function executeResetPassword(user) {
+    setResettingUserId(user.userId);
     try {
-      setResettingUserId(user.userId);
       const res = await resetPlatformUserPasswordWrite({
         tenantId,
         subjectUserId: user.userId,
@@ -981,9 +1389,22 @@ export default function UserProvisioningPanel({
       onStatus?.(`Temporary password set for ${user.name}`);
     } catch (err) {
       onError?.(err?.message || "Failed to reset password");
+      throw err;
     } finally {
       setResettingUserId("");
     }
+  }
+
+  function promptResetPassword(user) {
+    requestConfirm({
+      title: `Reset password — ${user.name}`,
+      consequence:
+        "A new temporary password will be generated and shown once. The user's current password will stop working immediately.",
+      details: `User: ${user.name}${user.email ? `\nEmail: ${user.email}` : ""}`,
+      confirmLabel: "Reset password",
+      destructive: true,
+      onExecute: async () => executeResetPassword(user),
+    });
   }
 
   function toggleSort(key) {
@@ -1152,7 +1573,7 @@ export default function UserProvisioningPanel({
                               size="sm"
                               className="h-7 px-2 text-[10px]"
                               disabled={busyId === user.userId}
-                              onClick={() => void handleReactivate(user)}
+                              onClick={() => promptReactivate(user)}
                             >
                               Reactivate
                             </Button>
@@ -1179,7 +1600,7 @@ export default function UserProvisioningPanel({
                               size="sm"
                               className="h-7 px-2 text-[10px]"
                               disabled={resettingUserId === user.userId}
-                              onClick={() => void handleResetPassword(user)}
+                              onClick={() => promptResetPassword(user)}
                             >
                               {resettingUserId === user.userId ? "Resetting…" : "Reset Pwd"}
                             </Button>
@@ -1314,6 +1735,21 @@ export default function UserProvisioningPanel({
         </div>
       ) : null}
 
+      {confirmDialog ? (
+        <ConfirmActionModal
+          title={confirmDialog.title}
+          consequence={confirmDialog.consequence}
+          details={confirmDialog.details}
+          requireReason={confirmDialog.requireReason}
+          reasonLabel={confirmDialog.reasonLabel}
+          reasonPlaceholder={confirmDialog.reasonPlaceholder}
+          confirmLabel={confirmDialog.confirmLabel}
+          destructive={confirmDialog.destructive}
+          onConfirm={confirmDialog.onExecute}
+          onClose={confirmDialog.onClose}
+        />
+      ) : null}
+
       {createOpen ? (
         <CreateUserDrawer
           tenantId={tenantId}
@@ -1358,6 +1794,7 @@ export default function UserProvisioningPanel({
           distributors={distributorAssignments}
           tenantId={tenantId}
           onClose={() => setAssignmentUser(null)}
+          onRequestConfirm={requestConfirm}
           onSaved={async (result) => {
             const assignedCount = result?.assignedCount ?? 0;
             const labChanges = result?.labChanges ?? 0;
@@ -1395,6 +1832,7 @@ export default function UserProvisioningPanel({
           lab={labModal.lab}
           agents={agents}
           onClose={() => setLabModal(null)}
+          onRequestConfirm={requestConfirm}
           onSaved={async () => {
             onStatus?.("Lab assignment updated");
             setLabModal(null);
@@ -1409,6 +1847,7 @@ export default function UserProvisioningPanel({
           agents={agents}
           tenantId={tenantId}
           onClose={() => setDistributorModal(null)}
+          onRequestConfirm={requestConfirm}
           onSaved={async () => {
             onStatus?.("Distributor assignment updated");
             setDistributorModal(null);
