@@ -1,5 +1,7 @@
 import { normalizeOrderStatusLabel } from "@/orders/ordersMonitorEngine.js";
 import {
+  UNALLOCATED_AR_REF_ID,
+  computeUnallocatedArAmount,
   orderPaymentDisplayLabel,
   sumOpenOrderAmounts,
 } from "@/collections/collectionsOpenOrders.js";
@@ -30,8 +32,11 @@ export default function OpenOrdersTable({
 }) {
   const openSum = sumOpenOrderAmounts(orders);
   const outstanding = Number(outstandingAmount || 0);
-  const mismatch =
-    outstanding > 0 && openSum > 0 && Math.abs(openSum - outstanding) > 0.01;
+  const unallocatedAmount = computeUnallocatedArAmount(outstanding, orders);
+  const showUnallocatedRow = unallocatedAmount > 0.01;
+  const unallocatedSelected = selectedOrderIds.includes(UNALLOCATED_AR_REF_ID);
+  const hasOrderRows = orders.length > 0;
+  const hasAnyRows = hasOrderRows || showUnallocatedRow;
 
   if (loading) {
     return (
@@ -39,9 +44,14 @@ export default function OpenOrdersTable({
     );
   }
 
-  if (!orders.length) {
+  if (!hasAnyRows) {
     return (
-      <div className={cn("rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground", className)}>
+      <div
+        className={cn(
+          "rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground",
+          className
+        )}
+      >
         No fulfilled payment-pending orders found for this lab.
       </div>
     );
@@ -53,7 +63,7 @@ export default function OpenOrdersTable({
         <table className="w-full min-w-[520px] text-xs">
           <thead>
             <tr className="border-b bg-muted/40 text-left text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {selectable ? <th className="px-2 py-2 w-8" /> : null}
+              {selectable ? <th className="w-8 px-2 py-2" /> : null}
               <th className="px-2 py-2">Order ID</th>
               <th className="px-2 py-2">Date</th>
               <th className="px-2 py-2 text-right">Amount</th>
@@ -66,7 +76,7 @@ export default function OpenOrdersTable({
               const orderId = String(order.orderId || "");
               const selected = selectedOrderIds.includes(orderId);
               return (
-                <tr key={orderId} className="border-b border-border/60 last:border-b-0">
+                <tr key={orderId} className="border-b border-border/60">
                   {selectable ? (
                     <td className="px-2 py-2 align-middle">
                       <input
@@ -92,13 +102,43 @@ export default function OpenOrdersTable({
                 </tr>
               );
             })}
+            {showUnallocatedRow ? (
+              <tr
+                key={UNALLOCATED_AR_REF_ID}
+                className="border-b border-border/60 bg-amber-50/40 last:border-b-0"
+              >
+                {selectable ? (
+                  <td className="px-2 py-2 align-middle">
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5 rounded border-input"
+                      checked={unallocatedSelected}
+                      onChange={() => onToggleOrder?.(UNALLOCATED_AR_REF_ID)}
+                      aria-label="Reference unallocated AR balance"
+                    />
+                  </td>
+                ) : null}
+                <td className="px-2 py-2 text-slate-900">
+                  <p className="font-medium">Unallocated AR Balance</p>
+                  <p className="mt-0.5 text-[10px] font-normal text-muted-foreground">
+                    Balance exists in lab AR but is not tied to an open fulfilled order.
+                  </p>
+                </td>
+                <td className="px-2 py-2 text-slate-600">—</td>
+                <td className="px-2 py-2 text-right font-semibold tabular-nums text-amber-900">
+                  {formatMoney(unallocatedAmount)}
+                </td>
+                <td className="px-2 py-2 text-slate-700">Account balance</td>
+                <td className="px-2 py-2 text-slate-700">Pending</td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </div>
-      {mismatch ? (
+      {showUnallocatedRow ? (
         <p className="text-[11px] text-amber-800">
-          Open orders total {formatMoney(openSum)} vs outstanding {formatMoney(outstanding)}. Lab
-          AR is the source of truth; orders are reference only.
+          Open orders total {formatMoney(openSum)}; {formatMoney(unallocatedAmount)} is unallocated AR
+          balance (reference only).
         </p>
       ) : openSum > 0 && outstanding > 0 ? (
         <p className="text-[11px] text-emerald-800">

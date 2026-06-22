@@ -12,6 +12,7 @@ import {
   getCollectionsRead,
   getLabRecentOrdersRead,
   updateCollectionNotesWrite,
+  deriveCollectionPaymentStatus,
 } from "@/api/primecareSupabaseApi";
 import { selectOpenOrdersForLab } from "@/collections/collectionsOpenOrders.js";
 import { loadLabPaymentHistoryForDisplay } from "@/collections/collectionsPaymentHistory.js";
@@ -122,12 +123,11 @@ function displayAgentName(agent) {
 }
 
 function displayPaymentStatus(item) {
-  const status = String(item?.paymentStatus || "").trim();
-  const paid = Number(item?.totalPaid || 0);
-  const outstanding = Number(item?.outstandingAmount || 0);
-  if (status === "Paid" && paid <= 0 && outstanding <= 0) return "Current";
-  if (status === "Paid" && paid <= 0) return outstanding > 0 ? "Pending" : "Current";
-  return status || (outstanding > 0 ? "Pending" : "Current");
+  return deriveCollectionPaymentStatus({
+    outstandingAmount: item?.outstandingAmount,
+    totalPaid: item?.totalPaid,
+    totalDelivered: item?.totalDelivered,
+  });
 }
 
 function shouldShowPaidLabel(item) {

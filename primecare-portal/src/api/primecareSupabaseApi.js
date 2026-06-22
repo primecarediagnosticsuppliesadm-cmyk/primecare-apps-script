@@ -116,22 +116,23 @@ export function sumPaymentsForLabRows(paymentList) {
 }
 
 /**
- * Derives display payment status from AR + payment totals.
- * Avoids "Paid" when nothing was ever paid and outstanding is zero.
+ * Derives display payment status from AR totals (never persisted to ar_credit_control).
  */
 export function deriveCollectionPaymentStatus({
   outstandingAmount,
   totalPaid,
+  totalDelivered = 0,
   explicitStatus = "",
 }) {
   const outstanding = num(outstandingAmount);
   const paid = num(totalPaid);
+  const delivered = num(totalDelivered);
   const explicit = str(explicitStatus).trim();
   const explicitLower = explicit.toLowerCase();
 
   let derived;
   if (outstanding > 0) {
-    derived = paid > 0 ? "Partially Paid" : "Pending";
+    derived = paid > 0 ? "Partially Paid" : delivered > 0 ? "Pending" : "Pending";
   } else if (paid > 0) {
     derived = "Paid";
   } else {
@@ -1177,16 +1178,14 @@ export function mapCollectionsRowFromLabsCredit(rawRow) {
   const nextAction = str(
     rawRow.next_action ?? rawRow.nextAction ?? rawRow.collection_next_action ?? ""
   );
-  const explicitPaymentStatus = str(
-    rawRow.payment_status ?? rawRow.paymentStatus ?? rawRow.ar_payment_status ?? ""
-  );
 
   const outstandingAmount = m.outstandingAmount;
   const totalPaid = num(rawRow.total_paid ?? rawRow.totalPaid ?? 0);
+  const totalDelivered = num(rawRow.total_delivered ?? rawRow.totalDelivered ?? 0);
   const paymentStatus = deriveCollectionPaymentStatus({
     outstandingAmount,
     totalPaid,
-    explicitStatus: explicitPaymentStatus,
+    totalDelivered,
   });
 
   const arAgentId = str(rawRow.agent_id ?? rawRow.agentId ?? "");
@@ -1274,7 +1273,7 @@ export function mapCollectionsRowFromArCredit(
   const paymentStatus = deriveCollectionPaymentStatus({
     outstandingAmount,
     totalPaid,
-    explicitStatus: arRow.payment_status ?? arRow.paymentStatus ?? "",
+    totalDelivered,
   });
 
   const lastFollowUp = str(
@@ -1622,7 +1621,7 @@ export async function getCollectionsRead() {
             mapped.paymentStatus = deriveCollectionPaymentStatus({
               outstandingAmount: mapped.outstandingAmount,
               totalPaid: mapped.totalPaid,
-              explicitStatus: mapped.paymentStatus,
+              totalDelivered: mapped.totalDelivered,
             });
           }
           return mapped;
@@ -1804,17 +1803,8 @@ export async function updateCollectionNotesWrite(payload = {}) {
       return { success: false, error: "tenant_id is required for AR write", data: null };
     }
 
-    const outstandingAmount = num(
-      arRow.outstanding ?? arRow.outstanding_amount ?? arRow.outstandingAmount ?? arRow.balance ?? 0
-    );
-    const totalPaid = num(arRow.total_paid ?? arRow.totalPaid ?? arRow.amount_paid ?? 0);
     const patch = {
       updated_at: new Date().toISOString(),
-      payment_status: deriveCollectionPaymentStatus({
-        outstandingAmount,
-        totalPaid,
-        explicitStatus: arRow.payment_status ?? arRow.paymentStatus ?? "",
-      }),
     };
 
     if (next_follow_up_date) patch.next_follow_up_date = next_follow_up_date;

@@ -48,13 +48,34 @@ export function sumOpenOrderAmounts(openOrders) {
   return (openOrders || []).reduce((sum, order) => sum + num(order.orderTotal), 0);
 }
 
-export function sumSelectedOpenOrderAmounts(openOrders, selectedOrderIds = []) {
-  const selected = new Set((selectedOrderIds || []).map((id) => String(id || "").trim()).filter(Boolean));
+/** Synthetic reference id for AR balance not tied to an open fulfilled order. */
+export const UNALLOCATED_AR_REF_ID = "__unallocated_ar__";
+
+export function computeUnallocatedArAmount(outstandingAmount, openOrders) {
+  const outstanding = num(outstandingAmount);
+  const openTotal = sumOpenOrderAmounts(openOrders);
+  return Math.max(0, outstanding - openTotal);
+}
+
+export function sumSelectedOpenOrderAmounts(
+  openOrders,
+  selectedOrderIds = [],
+  outstandingAmount = 0
+) {
+  const selected = new Set(
+    (selectedOrderIds || []).map((id) => String(id || "").trim()).filter(Boolean)
+  );
   if (!selected.size) return 0;
 
-  return (openOrders || [])
+  let sum = (openOrders || [])
     .filter((order) => selected.has(String(order.orderId || "").trim()))
-    .reduce((sum, order) => sum + num(order.orderTotal), 0);
+    .reduce((total, order) => total + num(order.orderTotal), 0);
+
+  if (selected.has(UNALLOCATED_AR_REF_ID)) {
+    sum += computeUnallocatedArAmount(outstandingAmount, openOrders);
+  }
+
+  return sum;
 }
 
 export function previewCollectionPaymentAmount(amountCollected, selectedRefAmount) {

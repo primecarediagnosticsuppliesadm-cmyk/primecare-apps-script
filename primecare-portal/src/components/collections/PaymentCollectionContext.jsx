@@ -26,7 +26,11 @@ export default function PaymentCollectionContext({
   className,
 }) {
   const outstanding = num(outstandingAmount);
-  const selectedRefAmount = sumSelectedOpenOrderAmounts(openOrders, selectedOrderIds);
+  const selectedRefAmount = sumSelectedOpenOrderAmounts(
+    openOrders,
+    selectedOrderIds,
+    outstanding
+  );
   const previewAmount = previewCollectionPaymentAmount(amountCollected, selectedRefAmount);
   const remaining = Math.max(0, outstanding - previewAmount);
 
@@ -62,7 +66,7 @@ export default function PaymentCollectionContext({
         <div>
           <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Selected ref.</p>
           <p className="font-semibold tabular-nums">
-            {selectedOrderIds.length ? formatMoney(selectedRefAmount) : "—"}
+            {selectedRefAmount > 0 ? formatMoney(selectedRefAmount) : "—"}
           </p>
         </div>
         <div>
