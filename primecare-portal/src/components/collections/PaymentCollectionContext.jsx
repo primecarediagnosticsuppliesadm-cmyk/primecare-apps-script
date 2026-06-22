@@ -1,5 +1,4 @@
 import OpenOrdersTable from "@/components/collections/OpenOrdersTable.jsx";
-import { sumOpenOrderAmounts } from "@/collections/collectionsOpenOrders.js";
 import { cn } from "@/lib/utils";
 
 function formatMoney(value) {
@@ -11,6 +10,21 @@ function formatMoney(value) {
 function num(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+function str(v) {
+  return String(v ?? "").trim();
+}
+
+/** Preview payment for After Entry: entered amount wins; else selected ref total. */
+function previewPaymentAmount(amountCollected, selectedRefAmount) {
+  if (str(amountCollected) !== "") {
+    return num(amountCollected);
+  }
+  if (selectedRefAmount > 0) {
+    return selectedRefAmount;
+  }
+  return 0;
 }
 
 export default function PaymentCollectionContext({
@@ -26,9 +40,8 @@ export default function PaymentCollectionContext({
   const selectedSum = (openOrders || [])
     .filter((o) => selectedOrderIds.includes(String(o.orderId || "")))
     .reduce((s, o) => s + num(o.orderTotal), 0);
-  const openSum = sumOpenOrderAmounts(openOrders);
-  const entered = num(amountCollected);
-  const remaining = Math.max(0, outstanding - entered);
+  const previewAmount = previewPaymentAmount(amountCollected, selectedSum);
+  const remaining = Math.max(0, outstanding - previewAmount);
 
   return (
     <div className={cn("space-y-3", className)}>

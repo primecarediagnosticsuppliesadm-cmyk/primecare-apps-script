@@ -27,6 +27,15 @@ function normalizeTab(focusSection) {
   return "details";
 }
 
+function str(v) {
+  return String(v ?? "").trim();
+}
+
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export default function LabCollectionPanel({
   collection,
   history = [],
@@ -69,6 +78,16 @@ export default function LabCollectionPanel({
   useEffect(() => {
     setSelectedOrderIds([]);
   }, [collection?.labId]);
+
+  useEffect(() => {
+    if (str(amountCollected) !== "") return;
+    const selectedTotal = (openOrders || [])
+      .filter((o) => selectedOrderIds.includes(String(o.orderId || "")))
+      .reduce((s, o) => s + num(o.orderTotal), 0);
+    if (selectedTotal > 0) {
+      setAmountCollected(String(selectedTotal));
+    }
+  }, [selectedOrderIds, openOrders, amountCollected, setAmountCollected]);
 
   const labKey = labIdKey(collection?.labId);
 
