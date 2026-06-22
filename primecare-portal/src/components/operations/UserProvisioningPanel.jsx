@@ -307,8 +307,7 @@ function ResetPasswordResultModal({ result, onClose }) {
     <ModalShell title={`Password reset — ${result.displayName || result.email}`} onClose={onClose}>
       <div className="space-y-3 text-sm">
         <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          This temporary password is shown once. Copy it now and share it securely. It will not be
-          shown again after you close this dialog.
+          Shown once. Copy now. This password will not be shown again after you close this dialog.
         </p>
         {result.email ? (
           <p className="text-xs text-slate-600">
@@ -778,13 +777,18 @@ export default function UserProvisioningPanel({
         email: String(user?.storedEmail ?? user?.email ?? "").trim() || undefined,
       });
       if (!res?.success) throw new Error(res?.error || "Failed to reset password");
+
+      const temporaryPassword = String(res.data?.temporaryPassword ?? "").trim();
+      if (!temporaryPassword) {
+        throw new Error("Password reset succeeded but no temporary password was returned");
+      }
+
       setResetPasswordResult({
-        displayName: user.name,
+        displayName: res.data?.displayName || user.name,
         email: res.data?.email || user.storedEmail || user.email,
-        temporaryPassword: res.data?.temporaryPassword,
+        temporaryPassword,
       });
       onStatus?.(`Temporary password set for ${user.name}`);
-      await onReload?.();
     } catch (err) {
       onError?.(err?.message || "Failed to reset password");
     } finally {
@@ -1137,7 +1141,10 @@ export default function UserProvisioningPanel({
       {resetPasswordResult ? (
         <ResetPasswordResultModal
           result={resetPasswordResult}
-          onClose={() => setResetPasswordResult(null)}
+          onClose={() => {
+            setResetPasswordResult(null);
+            void onReload?.();
+          }}
         />
       ) : null}
 

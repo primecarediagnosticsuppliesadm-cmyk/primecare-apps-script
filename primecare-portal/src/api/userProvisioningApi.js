@@ -85,6 +85,27 @@ export async function resetPlatformUserPasswordWrite(payload = {}) {
     tenantId: payload.tenantId ?? payload.tenant_id,
     subjectUserId,
     email: email || undefined,
+  }).then((result) => {
+    if (!result?.success) return result;
+
+    const raw = result.data || {};
+    const data = {
+      userId: str(raw.userId ?? raw.user_id),
+      email: str(raw.email),
+      displayName: str(raw.displayName ?? raw.display_name),
+      temporaryPassword: str(
+        raw.temporaryPassword ?? raw.temporary_password ?? raw.password
+      ),
+    };
+
+    if (!data.temporaryPassword) {
+      return {
+        success: false,
+        error: "Password reset succeeded but no temporary password was returned",
+      };
+    }
+
+    return { success: true, data };
   });
 }
 
