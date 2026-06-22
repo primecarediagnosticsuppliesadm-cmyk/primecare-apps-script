@@ -205,3 +205,51 @@ export function uniqueActivityEventTypes(events = []) {
   }
   return Array.from(set).sort();
 }
+
+const MODULE_LABELS = {
+  orders: "Orders",
+  collections: "Collections",
+  payments: "Payments",
+  inventory: "Inventory",
+  purchase_orders: "Purchase Orders",
+  provisioning: "User Provisioning",
+  audit: "Access Audit",
+  agent_visits: "Visits",
+  qualification: "Qualification",
+  system: "System",
+};
+
+export function formatActivityModuleLabel(module) {
+  const key = str(module).toLowerCase();
+  return MODULE_LABELS[key] || key.replace(/_/g, " ");
+}
+
+/** Human-readable one-line sentence for timeline feed rows. */
+export function formatActivityTimelineSentence(ev = {}) {
+  const actor = str(ev.actor) || "System";
+  const entity = str(ev.entity) || "record";
+  const label = str(ev.eventLabel) || "Activity recorded";
+  const status = str(ev.status).toLowerCase();
+
+  if (status === "failure") {
+    return `${actor} attempted ${label.toLowerCase()} for ${entity} — action failed.`;
+  }
+  if (ev.module === "provisioning") {
+    return `${actor} ${label.toLowerCase()} for ${entity}.`;
+  }
+  if (ev.module === "inventory") {
+    return `${label} on ${entity} by ${actor}.`;
+  }
+  if (ev.module === "purchase_orders") {
+    return `${entity} updated — status ${str(ev.status) || "changed"}.`;
+  }
+  return `${actor}: ${label} — ${entity}.`;
+}
+
+export function activityTimelineSeverityClass(severity) {
+  const s = str(severity).toLowerCase();
+  if (s === "critical" || s === "high") return "border-l-red-500 bg-red-50/40";
+  if (s === "medium") return "border-l-amber-500 bg-amber-50/30";
+  if (s === "low") return "border-l-blue-400 bg-blue-50/20";
+  return "border-l-slate-300 bg-slate-50/50";
+}

@@ -3,6 +3,11 @@ import LoginPage from "./pages/LoginPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import { useAuth } from "./context/AuthContext";
 import { ROLES } from "./config/roles";
+import HqGlobalSearch, {
+  HqSearchTriggerButton,
+  useHqGlobalSearchShortcut,
+} from "@/components/hq/HqGlobalSearch.jsx";
+import HqHelpDrawer, { HqHelpButton } from "@/components/hq/HqHelpDrawer.jsx";
 import { PERMISSIONS } from "./config/permissions";
 import { getDefaultPageForRole } from "./config/menuConfig";
 import {
@@ -56,25 +61,60 @@ function UnauthorizedScreen({ message, onLogout }) {
   );
 }
 
-function ExecutivePortalHeader({ currentUser, pageTitle, onLogout }) {
+function ExecutivePortalHeader({ currentUser, pageTitle, onLogout, role, activePage, setActivePage }) {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const showHqChrome = role === ROLES.ADMIN || role === ROLES.EXECUTIVE;
+
+  useHqGlobalSearchShortcut(() => {
+    if (showHqChrome) setSearchOpen(true);
+  });
+
   return (
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h1 className="text-xl font-semibold">{pageTitle}</h1>
-        <p className="text-sm text-gray-500">
-          PrimeCare HQ · Logged in as <span className="font-medium">{currentUser.role}</span>
-        </p>
+    <>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl font-semibold">{pageTitle}</h1>
+          <p className="text-sm text-gray-500">
+            PrimeCare HQ · Logged in as <span className="font-medium">{currentUser.role}</span>
+          </p>
+        </div>
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          {showHqChrome ? (
+            <>
+              <HqSearchTriggerButton
+                onClick={() => setSearchOpen(true)}
+                className="min-w-0 flex-1 sm:max-w-xs md:max-w-sm"
+              />
+              <HqHelpButton onClick={() => setHelpOpen(true)} />
+            </>
+          ) : null}
+          <button
+            type="button"
+            onClick={onLogout}
+            className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
+          >
+            Logout
+          </button>
+        </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={onLogout}
-          className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
-        >
-          Logout
-        </button>
-      </div>
-    </div>
+      {showHqChrome ? (
+        <>
+          <HqGlobalSearch
+            tenantId={currentUser?.tenantId}
+            open={searchOpen}
+            onClose={() => setSearchOpen(false)}
+            setActivePage={setActivePage}
+          />
+          <HqHelpDrawer
+            pageKey={activePage}
+            open={helpOpen}
+            onClose={() => setHelpOpen(false)}
+            setActivePage={setActivePage}
+          />
+        </>
+      ) : null}
+    </>
   );
 }
 
@@ -276,6 +316,9 @@ export default function App() {
             currentUser={currentUser}
             pageTitle={pageTitle}
             onLogout={signOut}
+            role={role}
+            activePage={activePage}
+            setActivePage={navigateToPage}
           />
 
           <PrimeCareWebPortal

@@ -98,7 +98,7 @@ function AttentionRow({ item, onAction, onOpenLab }) {
             className="h-7 px-2 text-[10px]"
             onClick={() => onOpenLab(item.labId)}
           >
-            Open Lab
+            Review Lab
           </Button>
         ) : null}
         <Button
@@ -615,7 +615,7 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
             className="mt-2 h-7 w-full text-[10px]"
             onClick={() => navigateForAction("inventory")}
           >
-            View inventory
+            Review inventory
           </Button>
         </section>
 
@@ -664,7 +664,7 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
             className="mt-2 h-7 w-full text-[10px]"
             onClick={() => navigateForAction("collections")}
           >
-            View collections
+            Review collections
           </Button>
         </section>
       </div>

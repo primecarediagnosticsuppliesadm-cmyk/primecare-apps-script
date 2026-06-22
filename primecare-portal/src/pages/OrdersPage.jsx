@@ -51,6 +51,7 @@ import {
   resolveCancelledByLabel,
 } from "@/utils/orderTracking.js";
 import { collectOrderRowIds } from "@/metrics/computeRevenueMetrics.js";
+import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -94,6 +95,94 @@ function orderPaymentLabel(order) {
   });
 }
 
+function OrdersDetailEmptyState({ kpis, loading, filteredOrders, onShowPending, onShowPendingPayment, onOpenFirst }) {
+  const pending = kpis.placed + kpis.processing;
+  const suggestions = [];
+
+  if (pending > 0) {
+    suggestions.push({
+      label: `Review ${pending} pending order${pending === 1 ? "" : "s"} (Placed + Processing)`,
+      action: onShowPending,
+    });
+  }
+  if (kpis.pendingPayment > 0) {
+    suggestions.push({
+      label: `Check ${kpis.pendingPayment} order${kpis.pendingPayment === 1 ? "" : "s"} with pending payment`,
+      action: onShowPendingPayment,
+    });
+  }
+  if (kpis.cancelled > 0) {
+    suggestions.push({
+      label: `${kpis.cancelled} cancelled order${kpis.cancelled === 1 ? "" : "s"} on file — audit if disputes arise`,
+      action: () => onShowPending?.(),
+    });
+  }
+  if (filteredOrders.length > 0) {
+    suggestions.push({
+      label: `Open latest order: ${filteredOrders[0].orderId}`,
+      action: () => onOpenFirst?.(filteredOrders[0].orderId),
+    });
+  }
+  if (suggestions.length === 0) {
+    suggestions.push({
+      label: "No orders in scope — adjust filters or wait for new placements",
+      action: null,
+    });
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-slate-600">
+        Select an order from the list to review lines, payment status, and fulfillment actions.
+      </p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Pending orders</p>
+          <p className="text-xl font-bold tabular-nums text-slate-900">{loading ? "—" : pending}</p>
+          <p className="text-[11px] text-slate-500">Placed + Processing</p>
+        </div>
+        <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-800">Pending payment</p>
+          <p className="text-xl font-bold tabular-nums text-amber-950">{loading ? "—" : kpis.pendingPayment}</p>
+          <p className="text-[11px] text-amber-800/80">Excludes cancelled</p>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Cancelled</p>
+          <p className="text-xl font-bold tabular-nums text-slate-900">{loading ? "—" : kpis.cancelled}</p>
+        </div>
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 px-3 py-2.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">Active order value</p>
+          <p className="text-lg font-bold tabular-nums text-emerald-950">
+            {loading ? "—" : formatCurrency(kpis.totalOrderValue)}
+          </p>
+        </div>
+      </div>
+      <div>
+        <p className="mb-2 text-xs font-semibold text-slate-700">Suggested next actions</p>
+        <ul className="space-y-1.5">
+          {suggestions.map((item, idx) => (
+            <li key={idx}>
+              {item.action ? (
+                <button
+                  type="button"
+                  className="w-full rounded-lg border border-dashed border-slate-200 px-3 py-2 text-left text-xs text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                  onClick={item.action}
+                >
+                  {item.label}
+                </button>
+              ) : (
+                <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500">
+                  {item.label}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 export default function OrdersPage({
   currentUser = null,
   distributorScope = null,
@@ -121,6 +210,14 @@ export default function OrdersPage({
   useEffect(() => {
     loadOrders();
   }, []);
+
+  useEffect(() => {
+    if (loading || !orders.length) return;
+    const ctx = consumeHqNavContext("orders");
+    if (ctx?.orderId) {
+      void openOrder(ctx.orderId);
+    }
+  }, [loading, orders.length]);
 
   useEffect(() => {
     if (distributorScope?.tenantId) {
@@ -583,7 +680,7 @@ export default function OrdersPage({
                               disabled={updatingStatus}
                               onClick={() => openOrder(order.orderId)}
                             >
-                              View
+                              Review
                             </Button>
                           </td>
                         </tr>
@@ -602,9 +699,17 @@ export default function OrdersPage({
           </CardHeader>
           <CardContent>
             {!selectedOrder ? (
-              <div className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-500">
-                Select an order from the list to view summary, items, and status actions.
-              </div>
+              <OrdersDetailEmptyState
+                kpis={kpis}
+                loading={loading}
+                filteredOrders={filteredOrders}
+                onShowPending={() => setStatus("Placed")}
+                onShowPendingPayment={() => {
+                  setStatus("ALL");
+                  setPaymentStatus("Pending");
+                }}
+                onOpenFirst={(orderId) => void openOrder(orderId)}
+              />
             ) : detailsLoading ? (
               <div className="flex items-center gap-2 text-sm text-slate-500">
                 <Loader2 className="h-4 w-4 animate-spin" />

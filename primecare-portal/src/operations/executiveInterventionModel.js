@@ -120,7 +120,7 @@ export function buildExecutivePriorities(payload, opsModel) {
         labId: lid,
         labName: lab.labName,
         cta: "open_lab",
-        actionLabel: "Open Lab",
+        actionLabel: "Review Lab",
         source: "revenue",
       };
       row.clusterType = inferClusterType(row);

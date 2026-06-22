@@ -243,7 +243,7 @@ export function buildAttentionQueue(payload) {
           labId: c.labId,
           labName: c.labName,
           action: "lab",
-          actionLabel: "Open Lab",
+          actionLabel: "Review Lab",
         })
       );
     }

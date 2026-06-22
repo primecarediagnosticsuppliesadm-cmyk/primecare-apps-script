@@ -78,13 +78,13 @@ export default function HqPrioritiesStrip({ tenantId, setActivePage }) {
   return (
     <section
       className="rounded-2xl border border-border bg-card p-4 shadow-[var(--pc-shadow-card)] sm:p-5"
-      aria-label="Today's HQ Priorities"
+      aria-label="Today's Work"
     >
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-base font-semibold text-foreground">Today&apos;s HQ Priorities</h2>
+          <h2 className="text-base font-semibold text-foreground">Today&apos;s Work</h2>
           <p className="text-xs text-muted-foreground">
-            Actionable items across inventory, collections, orders, users, and audit.
+            What needs your attention right now — each card explains the next step.
           </p>
         </div>
         <Button
@@ -136,7 +136,8 @@ export default function HqPrioritiesStrip({ tenantId, setActivePage }) {
                   <span className="text-2xl font-bold tabular-nums text-slate-900">{card.count}</span>
                 </div>
                 <h3 className="text-sm font-semibold text-slate-900">{card.title}</h3>
-                <p className="mt-1 flex-1 text-[11px] leading-snug text-slate-600">{card.description}</p>
+                <p className="mt-1 text-[11px] font-medium leading-snug text-slate-700">{card.actionNeeded}</p>
+                <p className="mt-1 flex-1 text-[10px] leading-snug text-slate-500">{card.description}</p>
                 <Button
                   type="button"
                   size="sm"

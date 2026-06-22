@@ -70,6 +70,10 @@ export function buildHqPriorityCards(bundle = {}) {
       title: "Critical Inventory Issues",
       count: criticalInventory,
       severity: criticalInventory > 0 ? "critical" : "healthy",
+      actionNeeded:
+        criticalInventory > 0
+          ? "Restock or reorder SKUs below safety threshold before orders stall."
+          : "No stockouts flagged — monitor reorder points during peak ordering.",
       description:
         criticalInventory > 0
           ? `${criticalInventory} SKU(s) need immediate stock attention`
@@ -82,6 +86,10 @@ export function buildHqPriorityCards(bundle = {}) {
       title: "Collections Requiring Action",
       count: collectionsAction,
       severity: collectionsAction > 0 ? "attention" : "healthy",
+      actionNeeded:
+        collectionsAction > 0
+          ? "Follow up on overdue invoices, credit holds, or high-risk labs before releasing orders."
+          : "Receivables are current — spot-check high-balance labs weekly.",
       description:
         collectionsAction > 0
           ? `${collSummary.overdueCount ?? 0} overdue · credit holds and high-risk labs included`
@@ -94,6 +102,10 @@ export function buildHqPriorityCards(bundle = {}) {
       title: "Pending Orders",
       count: pendingOrders,
       severity: pendingOrders > 5 ? "attention" : pendingOrders > 0 ? "monitor" : "healthy",
+      actionNeeded:
+        pendingOrders > 0
+          ? "Advance open orders through fulfillment — check payment and stock before shipping."
+          : "Pipeline is clear — use Activity Center to watch for new placements.",
       description:
         pendingOrders > 0
           ? `${pendingOrders} order(s) awaiting fulfillment or delivery`
@@ -106,6 +118,10 @@ export function buildHqPriorityCards(bundle = {}) {
       title: "Inactive Users",
       count: inactiveUsers,
       severity: inactiveUsers > 0 ? "monitor" : "healthy",
+      actionNeeded:
+        inactiveUsers > 0
+          ? "Confirm deactivated users should remain offboarded; reactivate only when access is approved."
+          : "Directory is fully active — audit provisioning when roles change.",
       description:
         inactiveUsers > 0
           ? `${inactiveUsers} deactivated platform user(s) in directory`
@@ -118,6 +134,10 @@ export function buildHqPriorityCards(bundle = {}) {
       title: "Recent Audit Alerts",
       count: auditAlerts,
       severity: auditAlerts > 0 ? "attention" : "healthy",
+      actionNeeded:
+        auditAlerts > 0
+          ? "Investigate today's access changes — password resets, deactivations, and lab transfers."
+          : "No sensitive access events today — review Access Audit after bulk provisioning.",
       description:
         auditAlerts > 0
           ? `${auditAlerts} access change(s) logged today`

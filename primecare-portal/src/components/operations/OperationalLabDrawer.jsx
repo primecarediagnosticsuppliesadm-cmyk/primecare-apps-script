@@ -267,7 +267,7 @@ export default function OperationalLabDrawer({
               disabled={!snapshot}
               onClick={() => onAction("labs", snapshot)}
             >
-              View Lab
+              Review Lab
             </Button>
           </div>
         </div>

@@ -1416,7 +1416,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
               onClick={() => setActivePage?.("orders")}
               className="min-h-10 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted/50"
             >
-              View Orders
+              Review Orders
             </button>
           }
         >
