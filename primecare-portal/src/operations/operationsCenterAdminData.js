@@ -12,6 +12,7 @@ import {
   mapLabAssignmentRow,
   mapOperationsAgentRow,
   mapPlatformUserRow,
+  enrichLabAssignmentsWithAgentNames,
 } from "@/operations/operationsCenterAdminEngine.js";
 import {
   computeProvisioningKpis,
@@ -103,8 +104,9 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
     distributorNameById.set(str(row.distributorId), str(row.distributorName));
   }
 
-  const labAssignments = (labsRes?.data?.labs || []).map((row) =>
-    mapLabAssignmentRow(row, tenantNameById)
+  const labAssignments = enrichLabAssignmentsWithAgentNames(
+    (labsRes?.data?.labs || []).map((row) => mapLabAssignmentRow(row, tenantNameById)),
+    mergedAgents
   );
 
   const agents = enrichAgentsWithAssignmentCounts(

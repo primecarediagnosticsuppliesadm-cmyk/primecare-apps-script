@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +20,9 @@ import {
   PLATFORM_ROLE_OPTIONS,
   formatOpsDate,
   isAgentRole,
+  labAssignmentKey,
   labsForAgent,
+  matchesSearch,
   platformRoleLabel,
   distributorsForAgent,
 } from "@/operations/operationsCenterAdminEngine.js";
@@ -479,9 +481,118 @@ function UserAssignmentDrawer({ user, agents, labAssignments, distributors, tena
   const agentDists = isAgentRole(role) ? distributorsForAgent(user, distributors) : [];
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [labSearch, setLabSearch] = useState("");
+  const [selectedLabKeys, setSelectedLabKeys] = useState(() => new Set());
   const [territory, setTerritory] = useState(user?.territory === "—" ? "" : user?.territory || "");
   const [labId, setLabId] = useState(user?.labId || "");
   const [distributorId, setDistributorId] = useState(user?.distributorId || "");
+
+  const agentBusinessId = String(user?.agentId ?? "").trim();
+  const agentDisplayName = String(user?.displayName ?? user?.name ?? "").trim();
+  const initialTerritory = user?.territory === "—" ? "" : user?.territory || "";
+  const initialAssignedKeysRef = useRef(new Set());
+
+  useEffect(() => {
+    const keys = agentLabs.map((lab) => labAssignmentKey(lab));
+    initialAssignedKeysRef.current = new Set(keys);
+    setSelectedLabKeys(new Set(keys));
+    setLabSearch("");
+    setError("");
+  }, [user?.userId, user?.agentId, labAssignments, role]);
+
+  const filteredLabs = useMemo(() => {
+    const q = labSearch.trim().toLowerCase();
+    if (!q) return labAssignments;
+    return labAssignments.filter((lab) =>
+      matchesSearch(q, [lab.labName, lab.labId, lab.tenantName, lab.assignedAgentName])
+    );
+  }, [labAssignments, labSearch]);
+
+  function toggleLabSelection(lab) {
+    const key = labAssignmentKey(lab);
+    setSelectedLabKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function labOwnedByOtherAgent(lab) {
+    const assignedId = String(lab?.assignedAgentId ?? "").trim().toLowerCase();
+    if (!assignedId) return false;
+    const mine = [user?.userId, user?.agentId, user?.id]
+      .map((v) => String(v ?? "").trim().toLowerCase())
+      .filter(Boolean);
+    return !mine.includes(assignedId);
+  }
+
+  async function saveAgentAssignments() {
+    setSaving(true);
+    setError("");
+    try {
+      if (!agentBusinessId) {
+        throw new Error("Agent ID is required on the profile before assigning labs");
+      }
+
+      let labChanges = 0;
+      const initialAssignedKeys = initialAssignedKeysRef.current;
+      for (const lab of labAssignments) {
+        const key = labAssignmentKey(lab);
+        const wasMine = initialAssignedKeys.has(key);
+        const nowMine = selectedLabKeys.has(key);
+        if (wasMine === nowMine) continue;
+
+        if (nowMine) {
+          const res = await updateLabAgentAssignmentWrite({
+            tenantId: lab.tenantId,
+            labId: lab.labId,
+            agentId: agentBusinessId,
+            agentName: agentDisplayName,
+          });
+          if (!res?.success) {
+            throw new Error(res?.error || `Failed to assign ${lab.labId}`);
+          }
+        } else {
+          const res = await updateLabAgentAssignmentWrite({
+            tenantId: lab.tenantId,
+            labId: lab.labId,
+            remove: true,
+          });
+          if (!res?.success) {
+            throw new Error(res?.error || `Failed to unassign ${lab.labId}`);
+          }
+        }
+        labChanges += 1;
+      }
+
+      const territoryChanged = territory !== initialTerritory;
+      if (territoryChanged) {
+        const res = await updateOperationsPlatformUserWrite(user.userId, {
+          tenantId,
+          displayName: user.displayName || user.name,
+          role,
+          territory,
+          agentId: user.agentId,
+        });
+        if (!res?.success) throw new Error(res?.error || "Failed to update territory");
+      }
+
+      if (labChanges === 0 && !territoryChanged) {
+        throw new Error("No assignment changes to save");
+      }
+
+      onSaved?.({
+        assignedCount: selectedLabKeys.size,
+        labChanges,
+        territoryChanged,
+      });
+    } catch (err) {
+      setError(err?.message || "Failed to save assignments");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function saveProfileScope() {
     setSaving(true);
@@ -497,7 +608,7 @@ function UserAssignmentDrawer({ user, agents, labAssignments, distributors, tena
         agentId: user.agentId,
       });
       if (!res?.success) throw new Error(res?.error || "Failed to update");
-      onSaved?.();
+      onSaved?.({ assignedCount: 0, labChanges: 0, territoryChanged: true });
     } catch (err) {
       setError(err?.message || "Failed to update");
     } finally {
@@ -507,7 +618,7 @@ function UserAssignmentDrawer({ user, agents, labAssignments, distributors, tena
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40">
-      <div className="h-full w-full max-w-md overflow-y-auto border-l bg-white p-4 shadow-xl">
+      <div className="h-full w-full max-w-lg overflow-y-auto border-l bg-white p-4 shadow-xl">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-bold">Assignments — {user.name}</h3>
           <Button type="button" variant="ghost" size="icon" onClick={onClose}>
@@ -518,21 +629,88 @@ function UserAssignmentDrawer({ user, agents, labAssignments, distributors, tena
         <p className="mb-3 text-xs text-slate-500">{platformRoleLabel(role)}</p>
 
         {isAgentRole(role) ? (
-          <div className="space-y-3 text-xs">
+          <div className="space-y-4 text-xs">
             <div>
-              <p className="font-medium text-slate-700">Assigned Labs ({agentLabs.length})</p>
+              <p className="font-medium text-slate-700">
+                Assigned Labs ({selectedLabKeys.size} selected)
+              </p>
               <ul className="mt-1 list-inside list-disc text-slate-600">
-                {agentLabs.length === 0 ? (
+                {selectedLabKeys.size === 0 ? (
                   <li className="list-none text-slate-400">No labs assigned</li>
                 ) : (
-                  agentLabs.map((lab) => (
-                    <li key={`${lab.tenantId}-${lab.labId}`}>
-                      {lab.labName} ({lab.labId})
-                    </li>
-                  ))
+                  labAssignments
+                    .filter((lab) => selectedLabKeys.has(labAssignmentKey(lab)))
+                    .map((lab) => (
+                      <li key={labAssignmentKey(lab)}>
+                        {lab.labName} ({lab.labId})
+                      </li>
+                    ))
                 )}
               </ul>
             </div>
+
+            <div>
+              <p className="font-medium text-slate-700">Assign labs to this agent</p>
+              {!agentBusinessId ? (
+                <p className="mt-1 text-amber-700">
+                  Agent ID is missing on this profile. Set Agent ID before assigning labs.
+                </p>
+              ) : null}
+              {labAssignments.length === 0 ? (
+                <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+                  No labs visible to assign. Check HQ tenant/RLS or use Executive.
+                </p>
+              ) : (
+                <>
+                  <div className="mt-2">
+                    <SearchInput
+                      value={labSearch}
+                      onChange={setLabSearch}
+                      placeholder="Search labs…"
+                    />
+                  </div>
+                  <div className="mt-2 max-h-56 overflow-y-auto rounded-md border border-slate-200">
+                    {filteredLabs.length === 0 ? (
+                      <p className="px-3 py-4 text-center text-slate-500">No labs match your search.</p>
+                    ) : (
+                      <ul className="divide-y divide-slate-100">
+                        {filteredLabs.map((lab) => {
+                          const key = labAssignmentKey(lab);
+                          const checked = selectedLabKeys.has(key);
+                          const otherOwner = checked ? false : labOwnedByOtherAgent(lab);
+                          return (
+                            <li key={key} className="px-3 py-2">
+                              <label className="flex cursor-pointer items-start gap-2">
+                                <input
+                                  type="checkbox"
+                                  className="mt-0.5"
+                                  checked={checked}
+                                  disabled={!agentBusinessId || saving}
+                                  onChange={() => toggleLabSelection(lab)}
+                                />
+                                <span className="min-w-0 flex-1">
+                                  <span className="font-medium text-slate-900">{lab.labName}</span>{" "}
+                                  <span className="font-mono text-[10px] text-slate-500">{lab.labId}</span>
+                                  <span className="mt-0.5 block text-[10px] text-slate-500">
+                                    {lab.tenantName || lab.tenantId}
+                                    {otherOwner && lab.assignedAgentName
+                                      ? ` · assigned to ${lab.assignedAgentName}`
+                                      : otherOwner && lab.assignedAgentId
+                                        ? ` · assigned to ${lab.assignedAgentId}`
+                                        : ""}
+                                  </span>
+                                </span>
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
             <div>
               <p className="font-medium text-slate-700">Assigned Distributor</p>
               <p className="text-slate-600">
@@ -543,6 +721,16 @@ function UserAssignmentDrawer({ user, agents, labAssignments, distributors, tena
               Territory
               <Input className="mt-1" value={territory} onChange={(e) => setTerritory(e.target.value)} />
             </label>
+
+            <Button
+              type="button"
+              size="sm"
+              className="w-full"
+              disabled={saving || !agentBusinessId}
+              onClick={() => void saveAgentAssignments()}
+            >
+              {saving ? "Saving…" : "Save assignments"}
+            </Button>
           </div>
         ) : null}
 
@@ -571,7 +759,7 @@ function UserAssignmentDrawer({ user, agents, labAssignments, distributors, tena
           </label>
         ) : null}
 
-        {(role === ROLES.LAB || role === ROLES.DISTRIBUTOR_ADMIN || isAgentRole(role)) ? (
+        {role === ROLES.LAB || role === ROLES.DISTRIBUTOR_ADMIN ? (
           <Button
             type="button"
             size="sm"
@@ -581,9 +769,11 @@ function UserAssignmentDrawer({ user, agents, labAssignments, distributors, tena
           >
             {saving ? "Saving…" : "Save scope"}
           </Button>
-        ) : (
+        ) : null}
+
+        {!isAgentRole(role) && role !== ROLES.LAB && role !== ROLES.DISTRIBUTOR_ADMIN ? (
           <p className="text-xs text-slate-500">HQ roles have full tenant access — no scoped assignments.</p>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -1168,8 +1358,19 @@ export default function UserProvisioningPanel({
           distributors={distributorAssignments}
           tenantId={tenantId}
           onClose={() => setAssignmentUser(null)}
-          onSaved={async () => {
-            onStatus?.("Assignments updated");
+          onSaved={async (result) => {
+            const assignedCount = result?.assignedCount ?? 0;
+            const labChanges = result?.labChanges ?? 0;
+            if (labChanges > 0) {
+              onStatus?.(
+                `Saved ${labChanges} lab assignment change(s). Agent now has ${assignedCount} lab(s) assigned.`
+              );
+            } else if (result?.territoryChanged) {
+              onStatus?.(`Territory updated. Agent has ${assignedCount} lab(s) assigned.`);
+            } else {
+              onStatus?.("Assignments updated");
+            }
+            setAssignmentUser(null);
             await onReload?.();
           }}
         />

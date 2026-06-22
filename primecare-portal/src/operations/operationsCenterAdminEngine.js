@@ -222,6 +222,31 @@ export function mapLabAssignmentRow(row = {}, tenantNameById = new Map()) {
   };
 }
 
+/** Stable key for lab assignment UI and diffing. */
+export function labAssignmentKey(lab = {}) {
+  return `${str(lab.tenantId ?? lab.tenant_id)}::${str(lab.labId ?? lab.lab_id)}`;
+}
+
+/** Fill missing assignedAgentName when v_labs_credit omits agent_name. */
+export function enrichLabAssignmentsWithAgentNames(labs = [], agents = []) {
+  const nameByAgentKey = new Map();
+  for (const agent of agents) {
+    const name = str(agent.name ?? agent.displayName);
+    if (!name) continue;
+    for (const key of [agent.agentId, agent.userId, agent.id]
+      .map((v) => str(v).toLowerCase())
+      .filter(Boolean)) {
+      if (!nameByAgentKey.has(key)) nameByAgentKey.set(key, name);
+    }
+  }
+
+  return labs.map((lab) => {
+    if (str(lab.assignedAgentName)) return lab;
+    const derived = nameByAgentKey.get(str(lab.assignedAgentId).toLowerCase());
+    return derived ? { ...lab, assignedAgentName: derived } : lab;
+  });
+}
+
 export function mapDistributorAssignmentRow(row = {}, options = {}) {
   const distributorId = str(row.distributorId ?? row.distributor_id ?? row.id);
   const tenantNameById = options.tenantNameById || new Map();
