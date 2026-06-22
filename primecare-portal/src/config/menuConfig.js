@@ -3,6 +3,58 @@ import { ROLES } from "./roles";
 import { ALLOW_EXPERIMENTAL_MODULES, IS_QA, IS_PROD } from "./environment";
 import { isPredatorEnabled } from "@/predator/predatorGuards.js";
 
+/** HQ Admin sidebar sections (order preserved within each group). */
+export const HQ_ADMIN_MENU_SECTIONS = [
+  { id: "home", label: "HOME", keys: ["dashboard"] },
+  {
+    id: "operations",
+    label: "OPERATIONS",
+    keys: ["orders", "risk", "notifications", "visits", "distributorOs"],
+  },
+  {
+    id: "inventory",
+    label: "INVENTORY",
+    keys: ["masterCatalog", "inventory", "purchase"],
+  },
+  {
+    id: "people",
+    label: "PEOPLE",
+    keys: ["operationsCenter", "accessAudit"],
+  },
+  { id: "growth", label: "GROWTH", keys: ["qualificationReview"] },
+  { id: "system", label: "SYSTEM", keys: ["predatorDebug"] },
+];
+
+/** HQ Executive sidebar sections. */
+export const HQ_EXECUTIVE_MENU_SECTIONS = [
+  { id: "home", label: "HOME", keys: ["dashboard"] },
+  {
+    id: "founder",
+    label: "FOUNDER",
+    keys: [
+      "founderNavigation",
+      "founderStrategy",
+      "founderFinancialIntelligence",
+      "revenueFunnel",
+      "pilotReadiness",
+      "tenantManagement",
+    ],
+  },
+  {
+    id: "operations",
+    label: "OPERATIONS",
+    keys: ["orders", "risk", "notifications", "distributorOs", "operationsCenter"],
+  },
+  {
+    id: "inventory",
+    label: "INVENTORY",
+    keys: ["masterCatalog", "inventory", "purchase"],
+  },
+  { id: "people", label: "PEOPLE", keys: ["accessAudit"] },
+  { id: "growth", label: "GROWTH", keys: ["qualificationReview", "commissionEngine"] },
+  { id: "system", label: "SYSTEM", keys: ["predatorDebug", "qaCommandCenter"] },
+];
+
 /** PrimeCare HQ sidebar — platform modules only (no distributor ops). */
 const EXECUTIVE_HQ_MENU_KEYS = new Set([
   "dashboard",
@@ -181,6 +233,46 @@ export function getMenuForRole(role) {
   }
 
   return items;
+}
+
+/**
+ * Group HQ menu items into labeled sections for sidebar navigation.
+ * @param {string} role
+ * @returns {{ id: string, label: string, items: typeof MENU_ITEMS }[]|null}
+ */
+export function getMenuSectionsForRole(role) {
+  const normalizedRole = String(role || "").toLowerCase();
+  const flatMenu = getMenuForRole(role);
+  const byKey = new Map(flatMenu.map((item) => [item.key, item]));
+
+  let sectionDefs = null;
+  if (normalizedRole === ROLES.ADMIN) sectionDefs = HQ_ADMIN_MENU_SECTIONS;
+  else if (normalizedRole === ROLES.EXECUTIVE) sectionDefs = HQ_EXECUTIVE_MENU_SECTIONS;
+  else return null;
+
+  const used = new Set();
+  const sections = [];
+
+  for (const section of sectionDefs) {
+    const items = [];
+    for (const key of section.keys) {
+      const item = byKey.get(key);
+      if (item) {
+        items.push(item);
+        used.add(key);
+      }
+    }
+    if (items.length > 0) {
+      sections.push({ id: section.id, label: section.label, items });
+    }
+  }
+
+  const remainder = flatMenu.filter((item) => !used.has(item.key));
+  if (remainder.length > 0) {
+    sections.push({ id: "more", label: "MORE", items: remainder });
+  }
+
+  return sections.length > 0 ? sections : null;
 }
 
 /**

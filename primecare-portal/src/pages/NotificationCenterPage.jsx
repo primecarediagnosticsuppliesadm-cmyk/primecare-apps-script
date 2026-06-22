@@ -23,6 +23,7 @@ import {
   prepareLabRepeatOrderHandoff,
 } from "@/utils/orderTracking.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
+import ActivityCenterPanel, { ActivityCenterHeader } from "@/components/hq/ActivityCenterPanel.jsx";
 import { isNotificationsFoundationEnabled } from "@/config/notificationFoundation.js";
 import { resolveNotificationFoundationState } from "@/notifications/notificationFoundationProbe.js";
 import { ROLES } from "@/config/roles";
@@ -472,6 +473,15 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
     if (action === "account") {
       handleActivityCta("labAccount");
     }
+  }
+
+  if (showAdminUi) {
+    return (
+      <div className="space-y-5 p-4 sm:p-6">
+        <ActivityCenterHeader />
+        <ActivityCenterPanel tenantId={tenantId} />
+      </div>
+    );
   }
 
   return (

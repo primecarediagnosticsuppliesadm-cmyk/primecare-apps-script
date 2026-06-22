@@ -40,6 +40,7 @@ import {
 } from "@/predator/adminDashboardDomKpis.js";
 import { adminDashboardModelFromMerge } from "@/pages/adminDashboardState.js";
 import AdminDashboardQaValidationPanel from "@/components/qa/AdminDashboardQaValidationPanel.jsx";
+import HqPrioritiesStrip from "@/components/hq/HqPrioritiesStrip.jsx";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
 import {
   KpiCard,
@@ -1286,6 +1287,11 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       {showQaValidationPanel && qaValidationSnapshot ? (
         <AdminDashboardQaValidationPanel renderedSnapshot={qaValidationSnapshot} autoRun />
       ) : null}
+
+      <HqPrioritiesStrip
+        tenantId={currentUser?.tenantId ?? currentUser?.tenant_id ?? null}
+        setActivePage={setActivePage}
+      />
 
       {backgroundLoading ? (
         <div className="rounded-2xl border border-[var(--pc-info-border)] bg-[var(--pc-info-bg)] px-4 py-3 text-sm text-[var(--pc-info)]">

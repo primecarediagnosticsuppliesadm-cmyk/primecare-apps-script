@@ -1,4 +1,4 @@
-import { getMenuForRole } from "../config/menuConfig";
+import { getMenuForRole, getMenuSectionsForRole } from "../config/menuConfig";
 import { ROLES } from "../config/roles";
 import {
   LayoutDashboard,
@@ -70,7 +70,27 @@ export default function PortalLayout({
   children,
 }) {
   const menu = getMenuForRole(role);
+  const menuSections = getMenuSectionsForRole(role);
   const activeMenuItem = menu.find((item) => item.key === activePage);
+
+  function renderNavButton(item) {
+    const Icon = ICONS[item.key] || LayoutDashboard;
+    const isActive = activePage === item.key;
+    return (
+      <button
+        key={item.key}
+        onClick={() => setActivePage(item.key)}
+        className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left transition ${
+          isActive
+            ? "bg-white/95 text-slate-900 shadow-sm"
+            : "text-slate-200 hover:bg-white/10 hover:text-white"
+        }`}
+      >
+        <Icon className="h-4 w-4 shrink-0" />
+        <span className="truncate text-sm font-medium">{item.label}</span>
+      </button>
+    );
+  }
 
   const isFieldMobileRole =
     role === ROLES.AGENT || role === ROLES.LAB;
@@ -87,26 +107,17 @@ export default function PortalLayout({
             </p>
           </div>
 
-          <nav className="space-y-1.5">
-            {menu.map((item) => {
-              const Icon = ICONS[item.key] || LayoutDashboard;
-              const isActive = activePage === item.key;
-
-              return (
-                <button
-                  key={item.key}
-                  onClick={() => setActivePage(item.key)}
-                  className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left transition ${
-                    isActive
-                      ? "bg-white/95 text-slate-900 shadow-sm"
-                      : "text-slate-200 hover:bg-white/10 hover:text-white"
-                  }`}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  <span className="truncate text-sm font-medium">{item.label}</span>
-                </button>
-              );
-            })}
+          <nav className="space-y-4 overflow-y-auto pb-2">
+            {menuSections
+              ? menuSections.map((section) => (
+                  <div key={section.id}>
+                    <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      {section.label}
+                    </p>
+                    <div className="space-y-1">{section.items.map(renderNavButton)}</div>
+                  </div>
+                ))
+              : menu.map(renderNavButton)}
           </nav>
         </aside>
 
