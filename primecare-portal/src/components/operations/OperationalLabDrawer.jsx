@@ -5,18 +5,31 @@ import { getLabQualificationRead } from "@/api/primecareSupabaseApi.js";
 import { buildOperationalLabSnapshot } from "@/operations/operationsCommandCenterModel.js";
 import { collectionRiskToVariant } from "@/utils/statusTokens.js";
 import { cn } from "@/lib/utils";
-import { X, Loader2, IndianRupee, MapPin } from "lucide-react";
+import { X, Loader2, MapPin } from "lucide-react";
 import EvidenceContextActions from "@/components/evidence/EvidenceContextActions.jsx";
+import { formatLabsCurrency, formatLabsDate, resolveLabAssignedAgentName, labAssignedAgentId } from "@/operations/labsHqEngine.js";
 
-function formatCurrency(value) {
-  return `₹${Number(value || 0).toLocaleString("en-IN")}`;
-}
+const TABS = [
+  { id: "overview", label: "Overview" },
+  { id: "collections", label: "Collections" },
+  { id: "orders", label: "Orders" },
+  { id: "visits", label: "Visits" },
+  { id: "qualification", label: "Qualification" },
+  { id: "agent", label: "Assigned Agent" },
+];
 
 function formatWhen(iso) {
-  if (!iso || iso === "—") return "—";
-  const d = new Date(String(iso).slice(0, 10));
-  if (Number.isNaN(d.getTime())) return String(iso).slice(0, 10);
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return formatLabsDate(iso) || null;
+}
+
+function Field({ label, value }) {
+  if (value == null || value === "") return null;
+  return (
+    <div>
+      <dt className="text-slate-500">{label}</dt>
+      <dd className="font-medium text-slate-800">{value}</dd>
+    </div>
+  );
 }
 
 /**
@@ -26,6 +39,8 @@ function formatWhen(iso) {
  * @param {string} props.labId
  * @param {object} props.opsPayload
  * @param {(action: string, snapshot: object) => void} props.onAction
+ * @param {object} [props.labRecord] HQ lab row for agent / contact fields
+ * @param {object[]} [props.directoryUsers] Operations Center directory for agent name lookup
  */
 export default function OperationalLabDrawer({
   open,
@@ -34,9 +49,12 @@ export default function OperationalLabDrawer({
   opsPayload,
   onAction,
   currentUser,
+  labRecord = null,
+  directoryUsers = [],
 }) {
   const [qualification, setQualification] = useState(null);
   const [qualLoading, setQualLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState("overview");
 
   const snapshot = useMemo(() => {
     if (!labId || !opsPayload) return null;
@@ -46,6 +64,10 @@ export default function OperationalLabDrawer({
     );
     return base;
   }, [labId, opsPayload]);
+
+  useEffect(() => {
+    if (open) setActiveTab("overview");
+  }, [open, labId]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -80,11 +102,18 @@ export default function OperationalLabDrawer({
 
   if (!open) return null;
 
-  const riskLevel = snapshot?.risk?.level || snapshot?.riskLevel || "—";
+  const riskLevel = snapshot?.risk?.level || snapshot?.riskLevel || "Low";
   const drivers = snapshot?.risk?.drivers || [];
+  const agentName =
+    resolveLabAssignedAgentName(labRecord, directoryUsers) ||
+    snapshot?.collection?.assignedAgent ||
+    "";
+  const agentId = labAssignedAgentId(labRecord) || "";
+  const qualStage =
+    qualification?.pipeline_stage || qualification?.stage || labRecord?.stage || snapshot?.stage || "";
 
   return (
-    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Lab operations">
+    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Review lab">
       <button
         type="button"
         className="absolute inset-0 bg-slate-900/45 backdrop-blur-[2px]"
@@ -93,21 +122,23 @@ export default function OperationalLabDrawer({
       />
       <div
         className={cn(
-          "absolute inset-y-0 right-0 flex w-full max-w-[min(100vw,520px)] flex-col bg-white shadow-[-12px_0_40px_rgba(15,23,42,0.2)]"
+          "absolute inset-y-0 right-0 flex w-full max-w-[min(100vw,540px)] flex-col bg-white shadow-[-12px_0_40px_rgba(15,23,42,0.2)]"
         )}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between border-b px-3 py-2.5">
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">{snapshot?.labName || "Lab"}</p>
+            <p className="truncate text-sm font-semibold">
+              {labRecord?.labName || snapshot?.labName || "Lab"}
+            </p>
             <p className="text-[11px] text-slate-500">
-              {snapshot?.area ? (
+              {labRecord?.area ? (
                 <>
                   <MapPin className="mr-0.5 inline h-3 w-3" />
-                  {snapshot.area}
+                  {labRecord.area}
                 </>
               ) : (
-                "Operational snapshot"
+                "HQ lab workspace"
               )}
             </p>
           </div>
@@ -116,160 +147,217 @@ export default function OperationalLabDrawer({
           </Button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 space-y-3">
-          <section className="rounded-lg border bg-slate-50/80 p-2.5">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <StatusBadge variant={collectionRiskToVariant(riskLevel)} compact>
-                {riskLevel} risk
-              </StatusBadge>
-              <StatusBadge variant="neutral" compact>
-                {snapshot?.paymentStatus || "—"}
-              </StatusBadge>
+        <div className="shrink-0 border-b px-2 py-1.5">
+          <div className="flex gap-1 overflow-x-auto">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={cn(
+                  "shrink-0 rounded-md px-2.5 py-1 text-[11px] font-medium transition",
+                  activeTab === tab.id
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-600 hover:bg-slate-100"
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+          {!snapshot && !labRecord ? (
+            <div className="flex items-center justify-center gap-2 py-12 text-sm text-slate-500">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading lab data…
             </div>
-            <p className="mt-2 text-lg font-semibold tabular-nums">
-              {formatCurrency(snapshot?.outstanding)}
-              <span className="ml-1 text-xs font-normal text-slate-500">outstanding</span>
-            </p>
-            <p className="text-[11px] text-slate-600">
-              Overdue {snapshot?.overdueDays ?? 0} days
-            </p>
-            {drivers.length ? (
-              <ul className="mt-2 list-inside list-disc text-[11px] text-slate-600">
-                {drivers.map((d) => (
-                  <li key={d}>{d}</li>
-                ))}
-              </ul>
-            ) : null}
-          </section>
+          ) : null}
 
-          <section className="rounded-lg border p-2.5">
-            <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-              Recent orders
-            </h3>
-            {snapshot?.orders?.length ? (
-              <ul className="space-y-1">
-                {snapshot.orders.map((o) => (
-                  <li
-                    key={o.orderId}
-                    className="flex justify-between gap-2 rounded border border-slate-100 px-2 py-1 text-[11px]"
-                  >
-                    <span className="font-medium">{o.orderId}</span>
-                    <span>
-                      {o.orderStatus} · {formatCurrency(o.orderTotal)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-xs text-slate-500">No orders in current load.</p>
-            )}
-          </section>
+          {activeTab === "overview" ? (
+            <div className="space-y-3">
+              <section className="rounded-lg border bg-slate-50/80 p-3">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <StatusBadge variant={collectionRiskToVariant(riskLevel)} compact>
+                    {riskLevel} risk
+                  </StatusBadge>
+                  {labRecord?.creditStatus ? (
+                    <StatusBadge variant="neutral" compact>
+                      Credit {labRecord.creditStatus}
+                    </StatusBadge>
+                  ) : null}
+                  {labRecord?.status ? (
+                    <StatusBadge variant="neutral" compact>
+                      {labRecord.status}
+                    </StatusBadge>
+                  ) : null}
+                </div>
+                <p className="mt-2 text-xl font-semibold tabular-nums">
+                  {formatLabsCurrency(snapshot?.outstanding ?? labRecord?.outstandingAmount)}
+                  <span className="ml-1 text-xs font-normal text-slate-500">outstanding</span>
+                </p>
+                {Number(snapshot?.overdueDays ?? labRecord?.daysOverdue) > 0 ? (
+                  <p className="text-[11px] text-amber-700">
+                    Overdue {snapshot?.overdueDays ?? labRecord?.daysOverdue} days
+                  </p>
+                ) : null}
+                {drivers.length ? (
+                  <ul className="mt-2 list-inside list-disc text-[11px] text-slate-600">
+                    {drivers.map((d) => (
+                      <li key={d}>{d}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </section>
+              <dl className="grid grid-cols-2 gap-3 text-xs">
+                <Field label="Revenue" value={formatLabsCurrency(labRecord?.revenue)} />
+                <Field label="Credit limit" value={formatLabsCurrency(labRecord?.creditLimit)} />
+                <Field label="Stage" value={labRecord?.stage} />
+                <Field label="Last visit" value={formatWhen(labRecord?.lastVisit)} />
+                <Field label="Next follow-up" value={formatWhen(labRecord?.nextFollowUp)} />
+              </dl>
+            </div>
+          ) : null}
 
-          <section className="rounded-lg border p-2.5">
-            <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-              Collections & visits
-            </h3>
-            <dl className="grid grid-cols-2 gap-2 text-[11px]">
-              <div>
-                <dt className="text-slate-500">Total paid</dt>
-                <dd>{formatCurrency(snapshot?.collection?.totalPaid)}</dd>
-              </div>
-              <div>
-                <dt className="text-slate-500">Last follow-up</dt>
-                <dd>{formatWhen(snapshot?.collection?.lastFollowUp)}</dd>
-              </div>
-            </dl>
-            {snapshot?.visits?.length ? (
-              <ul className="mt-2 space-y-1">
-                {snapshot.visits.map((v) => (
-                  <li key={v.visitId || v.id} className="text-[11px] text-slate-700">
-                    {formatWhen(v.visitDate || v.date)} · {v.visitType} · {v.agent || v.agentName}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-2 text-xs text-slate-500">No recent visits cached.</p>
-            )}
-          </section>
+          {activeTab === "collections" ? (
+            <div className="space-y-3">
+              <section className="rounded-lg border p-3">
+                <p className="text-lg font-semibold tabular-nums">
+                  {formatLabsCurrency(snapshot?.outstanding ?? labRecord?.outstandingAmount)}
+                </p>
+                <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                  <Field label="Payment status" value={snapshot?.paymentStatus !== "—" ? snapshot?.paymentStatus : null} />
+                  <Field label="Total paid" value={formatLabsCurrency(snapshot?.collection?.totalPaid)} />
+                  <Field
+                    label="Last follow-up"
+                    value={formatWhen(snapshot?.collection?.lastFollowUp)}
+                  />
+                  <Field label="Days overdue" value={snapshot?.overdueDays ? String(snapshot.overdueDays) : null} />
+                </dl>
+                {snapshot?.collection?.collectionsNotes ? (
+                  <p className="mt-3 text-xs text-slate-600">{snapshot.collection.collectionsNotes}</p>
+                ) : null}
+              </section>
+              {currentUser ? (
+                <EvidenceContextActions
+                  currentUser={currentUser}
+                  labId={labId}
+                  className="h-8 w-full text-xs"
+                />
+              ) : null}
+              <Button
+                type="button"
+                size="sm"
+                className="w-full"
+                onClick={() => onAction("collections", snapshot)}
+              >
+                Open Collections
+              </Button>
+            </div>
+          ) : null}
 
-          {currentUser ? (
-            <section className="rounded-lg border border-dashed border-slate-200 p-2.5">
-              <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                Field evidence
-              </h3>
-              <EvidenceContextActions
-                currentUser={currentUser}
-                labId={labId}
-                className="h-8 w-full text-xs"
-              />
+          {activeTab === "orders" ? (
+            <section className="rounded-lg border p-3">
+              {snapshot?.orders?.length ? (
+                <ul className="space-y-1.5">
+                  {snapshot.orders.map((o) => (
+                    <li
+                      key={o.orderId}
+                      className="flex justify-between gap-2 rounded border border-slate-100 px-2 py-1.5 text-xs"
+                    >
+                      <span className="font-medium">{o.orderId}</span>
+                      <span className="text-slate-600">
+                        {o.orderStatus} · {formatLabsCurrency(o.orderTotal)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-slate-500">No orders loaded for this lab.</p>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="mt-3 w-full"
+                onClick={() => onAction("orders", snapshot)}
+              >
+                Open Orders
+              </Button>
             </section>
           ) : null}
 
-          <section className="rounded-lg border p-2.5">
-            <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-              Qualification
-            </h3>
-            {qualLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
-            ) : (
-              <p className="text-xs">
-                Stage:{" "}
-                <span className="font-semibold">
-                  {qualification?.pipeline_stage ||
-                    qualification?.stage ||
-                    snapshot?.stage ||
-                    "—"}
-                </span>
-              </p>
-            )}
-            <p className="mt-2 text-[11px] text-slate-600">
-              {snapshot?.collection?.collectionsNotes || "No operational notes on file."}
-            </p>
-          </section>
-        </div>
+          {activeTab === "visits" ? (
+            <section className="rounded-lg border p-3">
+              {snapshot?.visits?.length ? (
+                <ul className="space-y-1.5">
+                  {snapshot.visits.map((v) => (
+                    <li key={v.visitId || v.id} className="rounded border border-slate-100 px-2 py-1.5 text-xs">
+                      <span className="font-medium">{formatWhen(v.visitDate || v.date)}</span>
+                      <span className="text-slate-600">
+                        {" "}
+                        · {v.visitType} · {v.agent || v.agentName}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-slate-500">No recent visits on record.</p>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="mt-3 w-full"
+                onClick={() => onAction("visits", snapshot)}
+              >
+                Open Visits
+              </Button>
+            </section>
+          ) : null}
 
-        <div className="shrink-0 border-t px-3 py-3">
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              type="button"
-              size="sm"
-              className="h-9 text-xs"
-              disabled={!snapshot}
-              onClick={() => onAction("orders", snapshot)}
-            >
-              Open Orders
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-9 text-xs"
-              disabled={!snapshot}
-              onClick={() => onAction("collections", snapshot)}
-            >
-              Collections
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-9 text-xs"
-              disabled={!snapshot}
-              onClick={() => onAction("visits", snapshot)}
-            >
-              Visit History
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-9 text-xs"
-              disabled={!snapshot}
-              onClick={() => onAction("labs", snapshot)}
-            >
-              Review Lab
-            </Button>
-          </div>
+          {activeTab === "qualification" ? (
+            <section className="rounded-lg border p-3">
+              {qualLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+              ) : (
+                <>
+                  <p className="text-sm">
+                    Stage: <span className="font-semibold">{qualStage || "Not recorded"}</span>
+                  </p>
+                  {qualification?.status ? (
+                    <p className="mt-2 text-xs text-slate-600">Status: {qualification.status}</p>
+                  ) : null}
+                  {qualification?.notes ? (
+                    <p className="mt-2 text-xs text-slate-600">{qualification.notes}</p>
+                  ) : null}
+                </>
+              )}
+            </section>
+          ) : null}
+
+          {activeTab === "agent" ? (
+            <section className="rounded-lg border p-3">
+              {agentName || agentId ? (
+                <dl className="space-y-2 text-xs">
+                  <Field label="Agent name" value={agentName} />
+                  <Field label="Agent ID" value={agentId} />
+                </dl>
+              ) : (
+                <p className="text-xs text-amber-700">No field agent assigned to this lab.</p>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="mt-3 w-full"
+                onClick={() => onAction("operationsCenter", snapshot)}
+              >
+                Manage in Operations Center
+              </Button>
+            </section>
+          ) : null}
         </div>
       </div>
     </div>

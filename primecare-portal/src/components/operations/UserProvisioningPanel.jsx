@@ -39,6 +39,10 @@ import { ROLES } from "@/config/roles.js";
 import { cn } from "@/lib/utils";
 import { Plus, Search, Copy, X } from "lucide-react";
 
+function str(v) {
+  return String(v ?? "").trim();
+}
+
 function StatusBadge({ active }) {
   return (
     <Badge variant={active ? "default" : "secondary"}>{active ? "Active" : "Inactive"}</Badge>
@@ -622,6 +626,7 @@ function UserAssignmentDrawer({
   labAssignments,
   distributors,
   tenantId,
+  focusLabId = "",
   onClose,
   onSaved,
   onRequestConfirm,
@@ -630,6 +635,7 @@ function UserAssignmentDrawer({
   const agentLabs = isAgentRole(role) ? labsForAgent(user, labAssignments) : [];
   const agentDists = isAgentRole(role) ? distributorsForAgent(user, distributors) : [];
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
   const [saving, setSaving] = useState(false);
   const [labSearch, setLabSearch] = useState("");
   const [selectedLabKeys, setSelectedLabKeys] = useState(() => new Set());
@@ -650,11 +656,22 @@ function UserAssignmentDrawer({
     setSelectedLabKeys(new Set(keys));
     setLabSearch("");
     setError("");
+    setInfo("");
     setRole(user?.role || "agent");
     setTerritory(user?.territory === "—" ? "" : user?.territory || "");
     setLabId(user?.labId || "");
     setDistributorId(user?.distributorId || "");
   }, [user?.userId, user?.agentId, labAssignments, user?.role, user?.territory, user?.labId, user?.distributorId]);
+
+  useEffect(() => {
+    if (!focusLabId) return;
+    window.setTimeout(() => {
+      document.getElementById(`hq-assign-lab-${focusLabId}`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 200);
+  }, [focusLabId, user?.userId]);
 
   const filteredLabs = useMemo(() => {
     const q = labSearch.trim().toLowerCase();
@@ -675,6 +692,8 @@ function UserAssignmentDrawer({
 
   function toggleLabSelection(lab) {
     const key = labAssignmentKey(lab);
+    setError("");
+    setInfo("");
     setSelectedLabKeys((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -782,6 +801,7 @@ function UserAssignmentDrawer({
 
   function requestSaveAgentAssignments() {
     setError("");
+    setInfo("");
     const diff = computeAgentLabAssignmentDiff(
       labAssignments,
       initialAssignedKeysRef.current,
@@ -792,7 +812,7 @@ function UserAssignmentDrawer({
     const roleChanged = role !== initialRole;
 
     if (diff.labChanges === 0 && !territoryChanged && !roleChanged) {
-      setError("No assignment changes to save");
+      setInfo("No changes to save — assignments are already up to date.");
       return;
     }
 
@@ -966,6 +986,11 @@ function UserAssignmentDrawer({
           </Button>
         </div>
         {error ? <p className="mb-2 text-xs text-red-600">{error}</p> : null}
+        {info ? (
+          <p className="mb-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-600">
+            {info}
+          </p>
+        ) : null}
 
         <label className="mb-3 block text-xs text-slate-600">
           Role
@@ -1031,9 +1056,20 @@ function UserAssignmentDrawer({
                         {filteredLabs.map((lab) => {
                           const key = labAssignmentKey(lab);
                           const checked = selectedLabKeys.has(key);
+                          const ownedByMe = !labOwnedByOtherAgent(lab) && str(lab.assignedAgentId);
                           const otherOwner = checked ? false : labOwnedByOtherAgent(lab);
+                          const highlightLab =
+                            focusLabId &&
+                            str(lab.labId).toLowerCase() === str(focusLabId).toLowerCase();
                           return (
-                            <li key={key} className="px-3 py-2">
+                            <li
+                              key={key}
+                              id={lab.labId ? `hq-assign-lab-${lab.labId}` : undefined}
+                              className={cn(
+                                "px-3 py-2",
+                                highlightLab && "bg-indigo-50/60 ring-1 ring-inset ring-indigo-200"
+                              )}
+                            >
                               <label className="flex cursor-pointer items-start gap-2">
                                 <input
                                   type="checkbox"
@@ -1051,7 +1087,9 @@ function UserAssignmentDrawer({
                                       ? ` · assigned to ${lab.assignedAgentName}`
                                       : otherOwner && lab.assignedAgentId
                                         ? ` · assigned to ${lab.assignedAgentId}`
-                                        : ""}
+                                        : ownedByMe && checked
+                                          ? " · assigned to this agent"
+                                          : ""}
                                   </span>
                                 </span>
                               </label>
@@ -1431,6 +1469,9 @@ export default function UserProvisioningPanel({
   error,
   statusMessage,
   focusUserId = "",
+  openAssignDrawer = false,
+  focusLabId = "",
+  onNavIntentHandled,
   onReload,
   onError,
   onStatus,
@@ -1473,13 +1514,18 @@ export default function UserProvisioningPanel({
     setSearch("");
     setRoleFilter("");
     setStatusFilter("");
+    const user = directoryUsers.find((u) => u.userId === focusUserId);
+    if (openAssignDrawer && user) {
+      setAssignmentUser(user);
+      onNavIntentHandled?.();
+    }
     window.setTimeout(() => {
       document.getElementById(`hq-user-row-${focusUserId}`)?.scrollIntoView({
         behavior: "smooth",
         block: "center",
       });
     }, 150);
-  }, [focusUserId, loading]);
+  }, [focusUserId, openAssignDrawer, loading, directoryUsers, onNavIntentHandled]);
 
   const filteredLabs = labAssignments;
   const filteredDistributors = distributorAssignments;
@@ -1921,6 +1967,7 @@ export default function UserProvisioningPanel({
           labAssignments={labAssignments}
           distributors={distributorAssignments}
           tenantId={tenantId}
+          focusLabId={focusLabId}
           onClose={() => setAssignmentUser(null)}
           onRequestConfirm={requestConfirm}
           onSaved={async (result) => {

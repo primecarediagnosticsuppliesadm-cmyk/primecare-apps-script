@@ -42,6 +42,7 @@ import { labIdKey } from "@/utils/labId.js";
 import StatusBadge from "@/components/ux/StatusBadge";
 import { cn } from "@/lib/utils";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
+import HqLabsAdminView from "@/components/hq/HqLabsAdminView.jsx";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -296,8 +297,8 @@ function normalizeLab(lab) {
     ownerName: lab.ownerName || "",
     phone: lab.phone || "",
     area: lab.area || "",
-    assignedAgentId: lab.assignedAgentId || lab.assigned_agent_id || "",
-    assignedAgent: lab.assignedAgent || "",
+    assignedAgentId: lab.assignedAgentId || lab.assigned_agent_id || lab.agent_id || "",
+    assignedAgent: lab.assignedAgent || lab.agent_name || lab.agentName || "",
     status:
       lab.status ||
       (String(lab.activeFlag || "").toUpperCase() === "N" ? "Inactive" : "Active"),
@@ -440,6 +441,10 @@ export default function LabsPage({
   const isExecutive = currentUser?.role === ROLES.EXECUTIVE;
   const isAgentView = currentUser?.role === ROLES.AGENT;
   const isDistributorOs = Boolean(distributorScope?.tenantId);
+  const isHqAdminView =
+    !isAgentView &&
+    !isDistributorOs &&
+    (currentUser?.role === ROLES.ADMIN || currentUser?.role === ROLES.EXECUTIVE);
   const { orderByLabId, workspace: agentWorkspace } = useAgentDailyOs(currentUser, {
     enabled: isAgentView && !isDistributorOs,
   });
@@ -773,6 +778,16 @@ export default function LabsPage({
             </div>
           )}
         </>
+      ) : isHqAdminView ? (
+        <HqLabsAdminView
+          visibleLabs={visibleLabs}
+          summary={summary}
+          creditFilter={creditFilter}
+          setCreditFilter={setCreditFilter}
+          setActivePage={setActivePage}
+          currentUser={currentUser}
+          focusLabId={focusLabId}
+        />
       ) : (
         <>
       <div className="grid md:grid-cols-4 gap-4">

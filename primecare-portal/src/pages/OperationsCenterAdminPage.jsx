@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { PageSkeleton } from "@/components/ux";
 import UserProvisioningPanel from "@/components/operations/UserProvisioningPanel.jsx";
 import { loadOperationsCenterAdminBundle } from "@/operations/operationsCenterAdminData.js";
+import { findDirectoryUserForLabAgent } from "@/operations/operationsCenterAdminEngine.js";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import { Radio } from "lucide-react";
 
@@ -16,6 +17,8 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
   const [error, setError] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const [focusUserId, setFocusUserId] = useState("");
+  const [navIntent, setNavIntent] = useState(null);
+  const clearNavIntent = useCallback(() => setNavIntent(null), []);
 
   const load = useCallback(async () => {
     try {
@@ -38,10 +41,24 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
   }, [load]);
 
   useEffect(() => {
-    if (loading) return;
+    if (loading || !bundle) return;
     const ctx = consumeHqNavContext("operationsCenter");
-    if (ctx?.userId) setFocusUserId(String(ctx.userId));
-  }, [loading]);
+    if (!ctx) return;
+
+    const user = findDirectoryUserForLabAgent(bundle.directoryUsers || [], ctx);
+    if (user?.userId) {
+      setFocusUserId(String(user.userId));
+      setNavIntent({
+        openAssignDrawer: Boolean(ctx.openAssignDrawer),
+        focusLabId: String(ctx.labId || "").trim(),
+      });
+      return;
+    }
+
+    if (ctx.agentId || ctx.agentName) {
+      setStatusMessage("Could not match agent in directory — use Assign on the user row.");
+    }
+  }, [loading, bundle]);
 
   if (loading) return <PageSkeleton rows={8} />;
 
@@ -64,6 +81,9 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
         error={error}
         statusMessage={statusMessage}
         focusUserId={focusUserId}
+        openAssignDrawer={navIntent?.openAssignDrawer === true}
+        focusLabId={navIntent?.focusLabId || ""}
+        onNavIntentHandled={clearNavIntent}
         onReload={load}
         onError={setError}
         onStatus={setStatusMessage}

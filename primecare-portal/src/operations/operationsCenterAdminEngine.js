@@ -315,6 +315,35 @@ export function labsForAgent(agent, labs = []) {
   return labs.filter((lab) => keys.has(str(lab.assignedAgentId).toLowerCase()));
 }
 
+/** Resolve directory user from HQ nav context (agent id/name). */
+export function findDirectoryUserForLabAgent(directoryUsers = [], context = {}) {
+  const users = Array.isArray(directoryUsers) ? directoryUsers : [];
+  const userId = str(context.userId).toLowerCase();
+  if (userId) {
+    const match = users.find((u) => str(u.userId).toLowerCase() === userId);
+    if (match) return match;
+  }
+
+  const agentId = str(context.agentId).toLowerCase();
+  if (agentId) {
+    const match = users.find((u) =>
+      [u.userId, u.agentId, u.id].some((v) => str(v).toLowerCase() === agentId)
+    );
+    if (match) return match;
+  }
+
+  const agentName = str(context.agentName).toLowerCase();
+  if (agentName) {
+    return (
+      users.find((u) =>
+        [u.name, u.displayName].some((v) => str(v).toLowerCase() === agentName)
+      ) || null
+    );
+  }
+
+  return null;
+}
+
 export function distributorsForAgent(agent, distributors = []) {
   const keys = new Set(
     [agent?.userId, agent?.agentId, agent?.id].map((v) => str(v).toLowerCase()).filter(Boolean)
