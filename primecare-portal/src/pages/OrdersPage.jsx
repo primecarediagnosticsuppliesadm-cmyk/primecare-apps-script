@@ -52,6 +52,15 @@ import {
 } from "@/utils/orderTracking.js";
 import { collectOrderRowIds } from "@/metrics/computeRevenueMetrics.js";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
+import HqObjectLink from "@/components/hq/HqObjectLink.jsx";
+import {
+  navigateToCollections,
+  navigateToLabs,
+  navigateToOperationsCenter,
+  navigateToOrders,
+} from "@/operations/hqWorkflowNav.js";
+import { loadOperationsCenterAdminBundle } from "@/operations/operationsCenterAdminData.js";
+import { resolveLabAgentForLabId } from "@/operations/labAgentResolver.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -187,6 +196,7 @@ export default function OrdersPage({
   currentUser = null,
   distributorScope = null,
   embedded = false,
+  setActivePage,
 }) {
   const [orders, setOrders] = useState([]);
   const [allOrders, setAllOrders] = useState([]);
@@ -206,6 +216,24 @@ export default function OrdersPage({
   const [error, setError] = useState("");
   const [ordersReadOk, setOrdersReadOk] = useState(true);
   const [successMessage, setSuccessMessage] = useState("");
+  const [labAssignments, setLabAssignments] = useState([]);
+  const [directoryUsers, setDirectoryUsers] = useState([]);
+
+  const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
+
+  useEffect(() => {
+    if (!homeTenantId || !setActivePage) return;
+    let cancelled = false;
+    void loadOperationsCenterAdminBundle(homeTenantId).then((bundle) => {
+      if (!cancelled) {
+        setLabAssignments(bundle?.labAssignments || []);
+        setDirectoryUsers(bundle?.directoryUsers || []);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [homeTenantId, setActivePage]);
 
   useEffect(() => {
     loadOrders();
@@ -214,9 +242,8 @@ export default function OrdersPage({
   useEffect(() => {
     if (loading || !orders.length) return;
     const ctx = consumeHqNavContext("orders");
-    if (ctx?.orderId) {
-      void openOrder(ctx.orderId);
-    }
+    if (ctx?.labId) setLabFilter(ctx.labId);
+    if (ctx?.orderId) void openOrder(ctx.orderId);
   }, [loading, orders.length]);
 
   useEffect(() => {
@@ -439,6 +466,17 @@ export default function OrdersPage({
 
   const selectedOrderSummary = details?.order;
 
+  const selectedLabAgent = useMemo(() => {
+    if (!selectedOrderSummary?.labId) {
+      return resolveLabAgentForLabId("", labAssignments, directoryUsers);
+    }
+    return resolveLabAgentForLabId(
+      selectedOrderSummary.labId,
+      labAssignments,
+      directoryUsers
+    );
+  }, [selectedOrderSummary, labAssignments, directoryUsers]);
+
   const selectedOrderUx = useMemo(() => {
     if (!selectedOrderSummary) return null;
     const orderStatus = normalizeOrderStatusLabel(selectedOrderSummary.orderStatus);
@@ -642,11 +680,30 @@ export default function OrdersPage({
                           }`}
                         >
                           <td className="px-2 py-2 font-mono font-medium text-slate-900">
-                            {order.orderId}
+                            <HqObjectLink
+                              onClick={setActivePage ? () => void openOrder(order.orderId) : undefined}
+                              title="Review order"
+                            >
+                              {order.orderId}
+                            </HqObjectLink>
                           </td>
                           <td className="px-2 py-2 text-slate-700">
                             <div className="max-w-[140px] truncate" title={order.labName}>
-                              {order.labName || order.labId || "—"}
+                              <HqObjectLink
+                                onClick={
+                                  setActivePage && (order.labId || order.labName)
+                                    ? () =>
+                                        navigateToLabs(setActivePage, {
+                                          labId: order.labId || order.labName,
+                                          labName: order.labName,
+                                          openReviewDrawer: true,
+                                        })
+                                    : undefined
+                                }
+                                title="Review lab"
+                              >
+                                {order.labName || order.labId || "—"}
+                              </HqObjectLink>
                             </div>
                           </td>
                           <td className="px-2 py-2 whitespace-nowrap text-slate-600">
@@ -722,8 +779,72 @@ export default function OrdersPage({
                     {selectedOrderSummary.orderId}
                   </div>
                   <div className="mt-0.5 text-sm text-slate-600">
-                    {selectedOrderSummary.labName || selectedOrderSummary.labId}
+                    <HqObjectLink
+                      onClick={
+                        setActivePage && (selectedOrderSummary.labId || selectedOrderSummary.labName)
+                          ? () =>
+                              navigateToLabs(setActivePage, {
+                                labId: selectedOrderSummary.labId || selectedOrderSummary.labName,
+                                labName: selectedOrderSummary.labName,
+                                openReviewDrawer: true,
+                              })
+                          : undefined
+                      }
+                      title="Review lab"
+                    >
+                      {selectedOrderSummary.labName || selectedOrderSummary.labId}
+                    </HqObjectLink>
                   </div>
+                  {setActivePage ? (
+                    <p className="mt-1 text-xs text-slate-600">
+                      Assigned agent:{" "}
+                      {selectedLabAgent.isAssigned ? (
+                        <HqObjectLink
+                          onClick={() =>
+                            navigateToOperationsCenter(setActivePage, {
+                              agentId: selectedLabAgent.agentId,
+                              agentName: selectedLabAgent.agentName,
+                              labId: selectedOrderSummary.labId,
+                            })
+                          }
+                          title="Open agent in Operations Center"
+                        >
+                          {selectedLabAgent.displayLabel}
+                        </HqObjectLink>
+                      ) : (
+                        <span className="text-amber-700">Unassigned</span>
+                      )}
+                    </p>
+                  ) : null}
+                  {setActivePage ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-xs"
+                        onClick={() =>
+                          navigateToOrders(setActivePage, { labId: selectedOrderSummary.labId })
+                        }
+                      >
+                        All lab orders
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-xs"
+                        onClick={() =>
+                          navigateToCollections(setActivePage, {
+                            labId: selectedOrderSummary.labId,
+                            focusSection: "details",
+                          })
+                        }
+                      >
+                        Collections
+                      </Button>
+                    </div>
+                  ) : null}
                   <div className="mt-2 flex flex-wrap gap-2">
                     <StatusBadge
                       variant={orderStatusToVariant(

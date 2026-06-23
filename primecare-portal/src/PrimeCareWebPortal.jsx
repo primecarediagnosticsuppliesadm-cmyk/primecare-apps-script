@@ -177,6 +177,7 @@ export default function PrimeCareWebPortal({
           <CollectionsPage
             currentUser={currentUser}
             authToken={authToken}
+            setActivePage={setActivePage}
           />
         );
 
@@ -205,7 +206,7 @@ export default function PrimeCareWebPortal({
         return <ReorderForecastPage currentUser={currentUser} />;
 
       case "orders":
-        return <OrdersPage currentUser={currentUser} />;
+        return <OrdersPage currentUser={currentUser} setActivePage={setActivePage} />;
       case "distributorOs":
         return (
           <DistributorOsPage
@@ -220,6 +221,7 @@ export default function PrimeCareWebPortal({
           <CollectionsPage
             currentUser={currentUser}
             authToken={authToken}
+            setActivePage={setActivePage}
           />
         );
 
@@ -397,7 +399,7 @@ export default function PrimeCareWebPortal({
         return <ReorderForecastPage currentUser={currentUser} />;
 
       case "orders":
-        return <OrdersPage currentUser={currentUser} />;
+        return <OrdersPage currentUser={currentUser} setActivePage={setActivePage} />;
       case "distributorOs":
         return (
           <DistributorOsPage
@@ -412,6 +414,7 @@ export default function PrimeCareWebPortal({
           <CollectionsPage
             currentUser={currentUser}
             authToken={authToken}
+            setActivePage={setActivePage}
           />
         );
 

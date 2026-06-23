@@ -14,11 +14,22 @@ import {
   formatActivityTimestamp,
   uniqueActivityEventTypes,
 } from "@/operations/activityCenterEngine.js";
+import {
+  navigateFromActivityEvent,
+  resolveActivityEventNav,
+} from "@/operations/hqWorkflowNav.js";
+import HqObjectLink from "@/components/hq/HqObjectLink.jsx";
 import { cn } from "@/lib/utils";
 import { Bell, History, LayoutList, Loader2, RefreshCw, Search } from "lucide-react";
 
 function str(v) {
   return String(v ?? "").trim();
+}
+
+function labAgentLabel(labAgentByLabId, labId) {
+  const key = str(labId).toLowerCase();
+  if (!key) return "";
+  return labAgentByLabId.get(key)?.displayLabel || "";
 }
 
 function severityVariant(severity) {
@@ -35,12 +46,13 @@ function statusVariant(status) {
   return "outline";
 }
 
-export default function ActivityCenterPanel({ tenantId }) {
+export default function ActivityCenterPanel({ tenantId, setActivePage }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [events, setEvents] = useState([]);
   const [counts, setCounts] = useState(null);
+  const [labAgentByLabId, setLabAgentByLabId] = useState(() => new Map());
 
   const [severity, setSeverity] = useState("");
   const [module, setModule] = useState("");
@@ -59,6 +71,7 @@ export default function ActivityCenterPanel({ tenantId }) {
       const bundle = await loadActivityCenterBundle(tenantId);
       setEvents(bundle.events || []);
       setCounts(bundle.counts || null);
+      setLabAgentByLabId(bundle.labAgentByLabId || new Map());
       if (bundle.error) setError(bundle.error);
     } catch (err) {
       setError(err?.message || "Failed to load activity feed");
@@ -233,7 +246,10 @@ export default function ActivityCenterPanel({ tenantId }) {
         />
       ) : viewMode === "timeline" ? (
         <ul className="space-y-2">
-          {filtered.map((ev) => (
+          {filtered.map((ev) => {
+            const navTarget = setActivePage ? resolveActivityEventNav(ev) : null;
+            const labAgent = labAgentLabel(labAgentByLabId, ev.labId);
+            return (
             <li
               key={ev.id}
               className={cn(
@@ -257,9 +273,22 @@ export default function ActivityCenterPanel({ tenantId }) {
                     {ev.severity}
                   </Badge>
                 ) : null}
+                {labAgent ? (
+                  <span className="text-[10px] text-slate-600">Lab agent: {labAgent}</span>
+                ) : null}
+                {navTarget ? (
+                  <HqObjectLink
+                    onClick={() => navigateFromActivityEvent(setActivePage, ev)}
+                    className="text-[10px]"
+                    title={`Open ${navTarget.label}`}
+                  >
+                    Open {navTarget.label}
+                  </HqObjectLink>
+                ) : null}
               </div>
             </li>
-          ))}
+            );
+          })}
         </ul>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
@@ -276,7 +305,10 @@ export default function ActivityCenterPanel({ tenantId }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((ev) => (
+              {filtered.map((ev) => {
+                const navTarget = setActivePage ? resolveActivityEventNav(ev) : null;
+                const labAgent = labAgentLabel(labAgentByLabId, ev.labId);
+                return (
                 <tr key={ev.id} className="border-b border-border/60 hover:bg-muted/20">
                   <td className="whitespace-nowrap px-3 py-2.5 text-foreground">
                     {formatActivityTimestamp(ev.timestamp)}
@@ -285,9 +317,23 @@ export default function ActivityCenterPanel({ tenantId }) {
                     {ev.eventLabel}
                   </td>
                   <td className="max-w-[200px] truncate px-3 py-2.5" title={ev.entity}>
-                    {ev.entity}
+                    {navTarget ? (
+                      <HqObjectLink
+                        onClick={() => navigateFromActivityEvent(setActivePage, ev)}
+                        title={`Open ${navTarget.label}`}
+                      >
+                        {ev.entity}
+                      </HqObjectLink>
+                    ) : (
+                      ev.entity
+                    )}
                   </td>
-                  <td className="px-3 py-2.5">{ev.actor}</td>
+                  <td className="px-3 py-2.5">
+                    <div>{ev.actor}</div>
+                    {labAgent ? (
+                      <div className="text-[10px] text-muted-foreground">Lab agent: {labAgent}</div>
+                    ) : null}
+                  </td>
                   <td className="px-3 py-2.5 capitalize">{formatActivityModuleLabel(ev.module)}</td>
                   <td className="px-3 py-2.5">
                     <Badge variant={statusVariant(ev.status)} className="text-[10px] capitalize">
@@ -300,7 +346,8 @@ export default function ActivityCenterPanel({ tenantId }) {
                     </Badge>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

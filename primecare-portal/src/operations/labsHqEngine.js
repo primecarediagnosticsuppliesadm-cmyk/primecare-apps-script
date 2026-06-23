@@ -1,3 +1,27 @@
+import {
+  buildAgentDisplayNameLookup,
+  buildLabAgentLookupByLabId,
+  isLabAssigned,
+  labAssignedAgentId,
+  labAssignedAgentNameRaw,
+  resolveLabAgent,
+  resolveLabAgentForLabId,
+  resolveLabAssignedAgentDisplay,
+  resolveLabAssignedAgentName,
+} from "@/operations/labAgentResolver.js";
+
+export {
+  buildAgentDisplayNameLookup,
+  buildLabAgentLookupByLabId,
+  isLabAssigned,
+  labAssignedAgentId,
+  labAssignedAgentNameRaw,
+  resolveLabAgent,
+  resolveLabAgentForLabId,
+  resolveLabAssignedAgentDisplay,
+  resolveLabAssignedAgentName,
+};
+
 function str(v) {
   return String(v ?? "").trim();
 }
@@ -133,65 +157,6 @@ export function hasLabField(value) {
   return Boolean(s && s !== "-");
 }
 
-/** Agent business id from a lab row (v_labs_credit / labs table shapes). */
-export function labAssignedAgentId(lab = {}) {
-  return str(
-    lab.assignedAgentId ??
-      lab.assigned_agent_id ??
-      lab.agentId ??
-      lab.agent_id
-  );
-}
-
-/** Display name already on the lab row, if any. */
-export function labAssignedAgentNameRaw(lab = {}) {
-  return str(
-    lab.assignedAgent ??
-      lab.assigned_agent ??
-      lab.agent_name ??
-      lab.agentName
-  );
-}
-
-/** Map agent/user ids → display names from Operations Center directory. */
-export function buildAgentDisplayNameLookup(users = []) {
-  const map = new Map();
-  for (const user of users) {
-    const name = str(user.displayName ?? user.name ?? user.agentName);
-    if (!name) continue;
-    for (const key of [user.agentId, user.userId, user.id]) {
-      const k = str(key).toLowerCase();
-      if (k && !map.has(k)) map.set(k, name);
-    }
-  }
-  return map;
-}
-
-/**
- * Resolve assigned agent display name for HQ Labs UI.
- * Prefer lab.agent_name / assignedAgent; else map assigned_agent_id via directory users.
- */
-export function resolveLabAssignedAgentName(lab, users = []) {
-  const rawName = labAssignedAgentNameRaw(lab);
-  if (rawName) return rawName;
-
-  const agentId = labAssignedAgentId(lab);
-  if (!agentId) return "";
-
-  const lookup = buildAgentDisplayNameLookup(users);
-  return lookup.get(agentId.toLowerCase()) || "";
-}
-
-/** True when lab has an assigned agent id or resolved display name. */
-export function isLabAssigned(lab, users = []) {
-  return Boolean(labAssignedAgentId(lab) || resolveLabAssignedAgentName(lab, users));
-}
-
-/** Directory / drawer label: name, else Unassigned. */
-export function resolveLabAssignedAgentDisplay(lab, users = []) {
-  return resolveLabAssignedAgentName(lab, users) || "";
-}
-
 export function labOutstandingAmount(lab = {}) {
   return num(lab.outstandingAmount ?? lab.outstanding);
 }
@@ -215,8 +180,9 @@ export function buildAgentCoverage(labs = [], users = []) {
       continue;
     }
 
-    const agentId = labAssignedAgentId(lab);
-    const agentName = resolveLabAssignedAgentName(lab, users) || agentId || "Unknown Agent";
+    const agent = resolveLabAgent(lab, users);
+    const agentId = agent.agentId;
+    const agentName = agent.agentName || agentId || "Unknown Agent";
     const key = (agentId || agentName).toLowerCase();
 
     if (!byAgent.has(key)) {

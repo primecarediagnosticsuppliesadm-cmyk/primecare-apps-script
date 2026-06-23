@@ -172,7 +172,7 @@ export function buildHqSearchIndex(sources = {}) {
       title: orderId || invoiceId,
       subtitle: `${str(order.labName ?? order.lab_name) || "Lab"} · ${str(order.orderStatus ?? order.status)}`,
       page: "orders",
-      context: { orderId: orderId || invoiceId },
+      context: { orderId: orderId || invoiceId, labId: str(order.labId ?? order.lab_id) },
       haystack,
       haystackCompact,
       rawLower,

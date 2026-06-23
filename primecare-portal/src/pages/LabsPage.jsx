@@ -461,6 +461,7 @@ export default function LabsPage({
   );
   const [lastCreatedLab, setLastCreatedLab] = useState(null);
   const [focusLabId, setFocusLabId] = useState("");
+  const [initialReviewLabId, setInitialReviewLabId] = useState("");
 
   const canAddLab =
     currentUser?.role === ROLES.EXECUTIVE || currentUser?.role === ROLES.ADMIN;
@@ -531,10 +532,15 @@ export default function LabsPage({
   useEffect(() => {
     if (loading || !labs.length) return;
     const ctx = consumeHqNavContext("labs");
+    if (!ctx?.labId && !ctx?.creditFilter) return;
+    if (ctx.creditFilter) {
+      setCreditFilter(String(ctx.creditFilter).toUpperCase());
+    }
     if (!ctx?.labId) return;
     const targetId = labIdKey(ctx.labId);
     setFocusLabId(targetId);
-    setCreditFilter("ALL");
+    if (!ctx.creditFilter) setCreditFilter("ALL");
+    if (ctx.openReviewDrawer) setInitialReviewLabId(targetId);
     window.setTimeout(() => {
       document.getElementById(`hq-lab-row-${targetId}`)?.scrollIntoView({
         behavior: "smooth",
@@ -787,6 +793,7 @@ export default function LabsPage({
           setActivePage={setActivePage}
           currentUser={currentUser}
           focusLabId={focusLabId}
+          initialReviewLabId={initialReviewLabId}
         />
       ) : (
         <>

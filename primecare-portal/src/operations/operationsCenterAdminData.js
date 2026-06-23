@@ -121,12 +121,17 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
     distributorAssignments,
   });
 
+  const enrichedLabAssignments = enrichLabAssignmentsWithAgentNames(
+    labAssignments,
+    directoryUsers
+  );
+
   const userNameById = new Map(directoryUsers.map((u) => [str(u.userId), str(u.name)]));
   const auditEvents = (auditRes?.data?.events || []).map((row) =>
     mapProvisioningEventRow(row, userNameById)
   );
 
-  const kpis = computeProvisioningKpis(directoryUsers, labAssignments);
+  const kpis = computeProvisioningKpis(directoryUsers, enrichedLabAssignments);
 
   return {
     ok:
@@ -139,7 +144,7 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
     agents,
     users,
     directoryUsers,
-    labAssignments,
+    labAssignments: enrichedLabAssignments,
     distributorAssignments,
     auditEvents,
     kpis,

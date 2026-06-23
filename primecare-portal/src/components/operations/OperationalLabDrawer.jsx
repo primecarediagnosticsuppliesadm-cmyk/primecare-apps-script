@@ -7,7 +7,8 @@ import { collectionRiskToVariant } from "@/utils/statusTokens.js";
 import { cn } from "@/lib/utils";
 import { X, Loader2, MapPin } from "lucide-react";
 import EvidenceContextActions from "@/components/evidence/EvidenceContextActions.jsx";
-import { formatLabsCurrency, formatLabsDate, resolveLabAssignedAgentName, labAssignedAgentId } from "@/operations/labsHqEngine.js";
+import { formatLabsCurrency, formatLabsDate } from "@/operations/labsHqEngine.js";
+import { labAssignedAgentId, resolveLabAgent } from "@/operations/labAgentResolver.js";
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -104,11 +105,12 @@ export default function OperationalLabDrawer({
 
   const riskLevel = snapshot?.risk?.level || snapshot?.riskLevel || "Low";
   const drivers = snapshot?.risk?.drivers || [];
+  const assignedAgent = resolveLabAgent(labRecord, directoryUsers);
   const agentName =
-    resolveLabAssignedAgentName(labRecord, directoryUsers) ||
+    assignedAgent.agentName ||
     snapshot?.collection?.assignedAgent ||
     "";
-  const agentId = labAssignedAgentId(labRecord) || "";
+  const agentId = assignedAgent.agentId || labAssignedAgentId(labRecord) || "";
   const qualStage =
     qualification?.pipeline_stage || qualification?.stage || labRecord?.stage || snapshot?.stage || "";
 
@@ -262,14 +264,19 @@ export default function OperationalLabDrawer({
               {snapshot?.orders?.length ? (
                 <ul className="space-y-1.5">
                   {snapshot.orders.map((o) => (
-                    <li
-                      key={o.orderId}
-                      className="flex justify-between gap-2 rounded border border-slate-100 px-2 py-1.5 text-xs"
-                    >
-                      <span className="font-medium">{o.orderId}</span>
-                      <span className="text-slate-600">
-                        {o.orderStatus} · {formatLabsCurrency(o.orderTotal)}
-                      </span>
+                    <li key={o.orderId}>
+                      <button
+                        type="button"
+                        className="flex w-full justify-between gap-2 rounded border border-slate-100 px-2 py-1.5 text-left text-xs hover:bg-slate-50"
+                        onClick={() =>
+                          onAction("orderReview", { ...(snapshot || {}), orderId: o.orderId })
+                        }
+                      >
+                        <span className="font-medium text-indigo-700">{o.orderId}</span>
+                        <span className="text-slate-600">
+                          {o.orderStatus} · {formatLabsCurrency(o.orderTotal)}
+                        </span>
+                      </button>
                     </li>
                   ))}
                 </ul>

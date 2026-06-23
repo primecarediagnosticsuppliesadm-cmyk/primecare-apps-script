@@ -479,7 +479,7 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
     return (
       <div className="space-y-5 p-4 sm:p-6">
         <ActivityCenterHeader />
-        <ActivityCenterPanel tenantId={tenantId} />
+        <ActivityCenterPanel tenantId={tenantId} setActivePage={setActivePage} />
       </div>
     );
   }

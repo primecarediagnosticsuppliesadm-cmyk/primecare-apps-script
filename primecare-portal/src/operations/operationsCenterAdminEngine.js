@@ -1,4 +1,5 @@
 import { ROLE_LABELS, ROLES } from "@/config/roles.js";
+import { resolveLabAgent } from "@/operations/labAgentResolver.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -227,22 +228,16 @@ export function labAssignmentKey(lab = {}) {
 }
 
 /** Fill missing assignedAgentName when v_labs_credit omits agent_name. */
-export function enrichLabAssignmentsWithAgentNames(labs = [], agents = []) {
-  const nameByAgentKey = new Map();
-  for (const agent of agents) {
-    const name = str(agent.name ?? agent.displayName);
-    if (!name) continue;
-    for (const key of [agent.agentId, agent.userId, agent.id]
-      .map((v) => str(v).toLowerCase())
-      .filter(Boolean)) {
-      if (!nameByAgentKey.has(key)) nameByAgentKey.set(key, name);
-    }
-  }
-
-  return labs.map((lab) => {
-    if (str(lab.assignedAgentName)) return lab;
-    const derived = nameByAgentKey.get(str(lab.assignedAgentId).toLowerCase());
-    return derived ? { ...lab, assignedAgentName: derived } : lab;
+export function enrichLabAssignmentsWithAgentNames(labs = [], directoryUsers = []) {
+  return (labs || []).map((lab) => {
+    const agent = resolveLabAgent(lab, directoryUsers);
+    if (!agent.agentName && !agent.agentId) return lab;
+    return {
+      ...lab,
+      assignedAgentId: agent.agentId || lab.assignedAgentId,
+      assignedAgentName: agent.agentName || lab.assignedAgentName,
+      assignedAgent: agent.agentName || lab.assignedAgent,
+    };
   });
 }
 
@@ -318,13 +313,23 @@ export function labsForAgent(agent, labs = []) {
 /** Resolve directory user from HQ nav context (agent id/name). */
 export function findDirectoryUserForLabAgent(directoryUsers = [], context = {}) {
   const users = Array.isArray(directoryUsers) ? directoryUsers : [];
+  const agent = resolveLabAgent(
+    {
+      assignedAgentId: context.agentId,
+      assignedAgent: context.agentName,
+      agentId: context.agentId,
+      agentName: context.agentName,
+    },
+    users
+  );
+
   const userId = str(context.userId).toLowerCase();
   if (userId) {
     const match = users.find((u) => str(u.userId).toLowerCase() === userId);
     if (match) return match;
   }
 
-  const agentId = str(context.agentId).toLowerCase();
+  const agentId = str(agent.agentId || context.agentId).toLowerCase();
   if (agentId) {
     const match = users.find((u) =>
       [u.userId, u.agentId, u.id].some((v) => str(v).toLowerCase() === agentId)
@@ -332,11 +337,11 @@ export function findDirectoryUserForLabAgent(directoryUsers = [], context = {}) 
     if (match) return match;
   }
 
-  const agentName = str(context.agentName).toLowerCase();
+  const agentName = str(agent.agentName || context.agentName).toLowerCase();
   if (agentName) {
     return (
       users.find((u) =>
-        [u.name, u.displayName].some((v) => str(v).toLowerCase() === agentName)
+        [u.name, u.displayName, u.agentName].some((v) => str(v).toLowerCase() === agentName)
       ) || null
     );
   }

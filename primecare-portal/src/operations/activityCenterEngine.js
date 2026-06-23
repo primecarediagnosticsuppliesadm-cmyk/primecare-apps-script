@@ -61,6 +61,8 @@ function mapNotificationEvent(row = {}) {
     actor: str(payload.actorName ?? payload.actor ?? row.created_by) || "System",
     status: str(row.status) || "pending",
     severity: str(row.severity).toLowerCase() || "info",
+    labId: str(payload.labId ?? payload.lab_id),
+    orderId: str(payload.orderId ?? payload.order_id),
     raw: row,
   };
 }

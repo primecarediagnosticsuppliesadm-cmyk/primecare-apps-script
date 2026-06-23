@@ -1,7 +1,8 @@
 import { Button } from "@/components/ui/button";
 import CollectionHealthIndicator from "@/components/collections/CollectionHealthIndicator.jsx";
+import HqObjectLink from "@/components/hq/HqObjectLink.jsx";
 import { cn } from "@/lib/utils";
-import { IndianRupee } from "lucide-react";
+import { Building2, IndianRupee } from "lucide-react";
 
 function formatMoney(value) {
   const n = Number(value);
@@ -13,6 +14,7 @@ export default function CollectionsAttentionQueue({
   queue = [],
   onRecordPayment,
   onViewDetails,
+  onReviewLab,
   className,
 }) {
   if (!queue.length) return null;
@@ -37,7 +39,15 @@ export default function CollectionsAttentionQueue({
                 {entry.lastPaymentAge}
               </span>
             </div>
-            <h3 className="truncate text-sm font-semibold text-slate-900">{entry.labName}</h3>
+            <h3 className="truncate text-sm font-semibold text-slate-900">
+              {onReviewLab ? (
+                <HqObjectLink onClick={() => onReviewLab(entry.labId)} title="Review lab">
+                  {entry.labName}
+                </HqObjectLink>
+              ) : (
+                entry.labName
+              )}
+            </h3>
             <p className="mt-0.5 text-base font-bold tabular-nums text-slate-900">
               {formatMoney(entry.outstanding)}
             </p>
@@ -64,6 +74,18 @@ export default function CollectionsAttentionQueue({
               >
                 View Details
               </Button>
+              {onReviewLab ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 rounded-md px-2 text-[11px]"
+                  onClick={() => onReviewLab(entry.labId)}
+                >
+                  <Building2 className="mr-1 h-3 w-3" />
+                  Review Lab
+                </Button>
+              ) : null}
             </div>
           </article>
         ))}

@@ -97,6 +97,7 @@ import {
 import { supabase } from "@/api/supabaseClient.js";
 import { ROLES } from "@/config/roles";
 import { labIdKey } from "@/utils/labId";
+import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import {
   logAppsScriptFallbackUsed,
   logSupabaseFeatureSource,
@@ -1133,6 +1134,13 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
     }
     return labs;
   }, [labs, currentUser]);
+
+  useEffect(() => {
+    if (loading || !visibleLabs.length) return;
+    const ctx = consumeHqNavContext("visits");
+    if (!ctx?.labId) return;
+    setForm((prev) => ({ ...prev, labId: ctx.labId }));
+  }, [loading, visibleLabs.length]);
 
   useEffect(() => {
     if (loading || draftRestoreAttemptedRef.current) return;

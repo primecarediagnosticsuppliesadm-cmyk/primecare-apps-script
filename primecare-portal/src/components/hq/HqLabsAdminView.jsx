@@ -12,13 +12,20 @@ import {
   formatLabsCurrency,
   formatLabsDate,
   hasLabField,
-  resolveLabAssignedAgentDisplay,
-  resolveLabAssignedAgentName,
+} from "@/operations/labsHqEngine.js";
+import {
+  resolveLabAgent,
   labAssignedAgentId,
   isLabAssigned,
-} from "@/operations/labsHqEngine.js";
+} from "@/operations/labAgentResolver.js";
 import { enterDistributorOs } from "@/tenant/tenantFoundationStore.js";
-import { persistHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
+import {
+  navigateToCollections,
+  navigateToOperationsCenter,
+  navigateToOrders,
+  navigateToVisits,
+} from "@/operations/hqWorkflowNav.js";
+import HqObjectLink from "@/components/hq/HqObjectLink.jsx";
 import { labIdKey } from "@/utils/labId.js";
 import { cn } from "@/lib/utils";
 import {
@@ -72,13 +79,21 @@ function CreditBadge({ status }) {
   );
 }
 
-function HqLabDirectoryCard({ lab, focusLabId, homeTenantId, directoryUsers, onReviewLab, onOpenDistributorOs }) {
+function HqLabDirectoryCard({
+  lab,
+  focusLabId,
+  homeTenantId,
+  directoryUsers,
+  onReviewLab,
+  onOpenDistributorOs,
+  onNavigate,
+}) {
   const outstanding = Number(lab.outstandingAmount ?? lab.outstanding ?? 0);
   const revenue = Number(lab.revenue ?? 0);
   const canOpenDistributor =
     str(lab.tenantId) && str(lab.tenantId) !== str(homeTenantId);
   const lastVisit = formatLabsDate(lab.lastVisit);
-  const agent = resolveLabAssignedAgentDisplay(lab, directoryUsers);
+  const agent = resolveLabAgent(lab, directoryUsers);
 
   return (
     <article
@@ -92,7 +107,11 @@ function HqLabDirectoryCard({ lab, focusLabId, homeTenantId, directoryUsers, onR
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            <h3 className="text-sm font-semibold text-slate-900">{lab.labName || "Unnamed Lab"}</h3>
+            <h3 className="text-sm font-semibold text-slate-900">
+              <HqObjectLink onClick={() => onReviewLab(lab)} title="Review lab">
+                {lab.labName || "Unnamed Lab"}
+              </HqObjectLink>
+            </h3>
             <CreditBadge status={lab.creditStatus} />
             {hasLabField(lab.status) ? (
               <Badge variant="secondary" className="text-[10px]">
@@ -122,8 +141,22 @@ function HqLabDirectoryCard({ lab, focusLabId, homeTenantId, directoryUsers, onR
         </div>
         <div>
           <dt className="text-slate-500">Assigned Agent</dt>
-          <dd className={cn("font-medium", agent ? "text-slate-800" : "text-amber-700")}>
-            {agent || "Unassigned"}
+          <dd className={cn("font-medium", agent.isAssigned ? "text-slate-800" : "text-amber-700")}>
+            {agent.isAssigned ? (
+              <HqObjectLink
+                onClick={() =>
+                  onNavigate?.("agent", {
+                    agentId: agent.agentId || labAssignedAgentId(lab),
+                    agentName: agent.agentName,
+                  })
+                }
+                title="Manage agent assignments"
+              >
+                {agent.displayLabel}
+              </HqObjectLink>
+            ) : (
+              "Unassigned"
+            )}
           </dd>
         </div>
         {lastVisit ? (
@@ -137,6 +170,33 @@ function HqLabDirectoryCard({ lab, focusLabId, homeTenantId, directoryUsers, onR
       <div className="mt-3 flex flex-wrap gap-2">
         <Button type="button" size="sm" className="h-8 text-xs" onClick={() => onReviewLab(lab)}>
           Review Lab
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs"
+          onClick={() => onNavigate?.("orders", { labId: lab.labId })}
+        >
+          Orders
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs"
+          onClick={() => onNavigate?.("collections", { labId: lab.labId })}
+        >
+          Collections
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs"
+          onClick={() => onNavigate?.("visits", { labId: lab.labId })}
+        >
+          Visits
         </Button>
         {canOpenDistributor ? (
           <Button
@@ -155,7 +215,7 @@ function HqLabDirectoryCard({ lab, focusLabId, homeTenantId, directoryUsers, onR
   );
 }
 
-function AgentCoverageCard({ agent, onManageAgent }) {
+function AgentCoverageCard({ agent, onManageAgent, onReviewLab }) {
   return (
     <button
       type="button"
@@ -178,7 +238,22 @@ function AgentCoverageCard({ agent, onManageAgent }) {
           </span>
         ) : null}
       </div>
-      <p className="mt-2 text-xs text-slate-700">{agent.labNames.join(", ")}</p>
+      <p className="mt-2 text-xs text-slate-700" onClick={(e) => e.stopPropagation()}>
+        {agent.labNames.map((name, idx) => (
+          <span key={`${agent.agentId}-${name}`}>
+            {idx > 0 ? ", " : null}
+            <HqObjectLink
+              onClick={() => {
+                const lab = agent.labs[idx];
+                if (lab) onReviewLab?.({ labId: lab.labId, labName: lab.labName });
+              }}
+              title="Review lab"
+            >
+              {name}
+            </HqObjectLink>
+          </span>
+        ))}
+      </p>
       <p className="mt-2 text-xs font-semibold tabular-nums text-slate-900">
         Outstanding: {formatLabsCurrency(agent.totalOutstanding)}
       </p>
@@ -194,6 +269,7 @@ export default function HqLabsAdminView({
   setActivePage,
   currentUser,
   focusLabId = "",
+  initialReviewLabId = "",
 }) {
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
   const [reviewLabId, setReviewLabId] = useState("");
@@ -237,6 +313,10 @@ export default function HqLabsAdminView({
   }, [currentUser]);
 
   useEffect(() => {
+    if (initialReviewLabId) setReviewLabId(initialReviewLabId);
+  }, [initialReviewLabId]);
+
+  useEffect(() => {
     if (!homeTenantId) return;
     let cancelled = false;
     void loadOperationsCenterAdminBundle(homeTenantId).then((bundle) => {
@@ -264,7 +344,16 @@ export default function HqLabsAdminView({
       setCreditFilter("ALL");
       return;
     }
-    if (card.page) setActivePage?.(card.page);
+    if (card.page) {
+      if (card.page === "operationsCenter") {
+        navigateToOperationsCenter(setActivePage, {
+          openAssignDrawer: String(card.filter).toLowerCase() === "unassigned",
+        });
+      } else {
+        setActivePage?.(card.page);
+      }
+      return;
+    }
   }
 
   function handleCreditChip(filter) {
@@ -276,23 +365,51 @@ export default function HqLabsAdminView({
     setReviewLabId(labIdKey(lab.labId));
   }
 
-  function handleDrawerAction(action) {
+  function handleDrawerAction(action, snapshot) {
     const lab = reviewLab;
     setReviewLabId("");
     if (action === "operationsCenter") {
-      persistHqNavContext({
-        page: "operationsCenter",
+      navigateToOperationsCenter(setActivePage, {
         agentId: labAssignedAgentId(lab) || "",
-        agentName: resolveLabAssignedAgentName(lab, directoryUsers) || "",
+        agentName: resolveLabAgent(lab, directoryUsers).agentName || "",
         openAssignDrawer: isLabAssigned(lab, directoryUsers),
         labId: lab?.labId || "",
       });
-      setActivePage?.("operationsCenter");
       return;
     }
-    if (action === "collections") setActivePage?.("collections");
-    else if (action === "orders") setActivePage?.("orders");
-    else if (action === "visits") setActivePage?.("visits");
+    if (action === "collections") {
+      navigateToCollections(setActivePage, { labId: lab?.labId, focusSection: "details" });
+      return;
+    }
+    if (action === "orders") {
+      navigateToOrders(setActivePage, { labId: lab?.labId });
+      return;
+    }
+    if (action === "orderReview") {
+      navigateToOrders(setActivePage, {
+        labId: lab?.labId,
+        orderId: snapshot?.orderId || "",
+      });
+      return;
+    }
+    if (action === "visits") {
+      navigateToVisits(setActivePage, { labId: lab?.labId });
+    }
+  }
+
+  function handleHqNavigate(kind, payload = {}) {
+    if (kind === "orders") navigateToOrders(setActivePage, payload);
+    else if (kind === "collections") navigateToCollections(setActivePage, payload);
+    else if (kind === "visits") navigateToVisits(setActivePage, payload);
+    else if (kind === "agent") {
+      navigateToOperationsCenter(setActivePage, {
+        agentId: payload.agentId || "",
+        agentName: payload.agentName || "",
+        openAssignDrawer: true,
+      });
+    } else if (kind === "reviewLab") {
+      handleReviewLab(payload.lab || { labId: payload.labId });
+    }
   }
 
   function handleOpenDistributorOs(lab) {
@@ -307,24 +424,16 @@ export default function HqLabsAdminView({
     setActivePage?.("distributorOs");
   }
 
-  function navigateToOperationsCenter(context = {}) {
-    persistHqNavContext({
-      page: "operationsCenter",
-      agentId: "",
-      agentName: "",
-      openAssignDrawer: false,
-      labId: "",
-      ...context,
-    });
-    setActivePage?.("operationsCenter");
+  function navigateToOperationsCenterPage(context = {}) {
+    navigateToOperationsCenter(setActivePage, context);
   }
 
   function handleManageAssignments() {
-    navigateToOperationsCenter();
+    navigateToOperationsCenterPage();
   }
 
   function handleManageAgent(agent) {
-    navigateToOperationsCenter({
+    navigateToOperationsCenterPage({
       agentId: agent?.agentId || "",
       agentName: agent?.agentName || "",
       openAssignDrawer: true,
@@ -332,7 +441,7 @@ export default function HqLabsAdminView({
   }
 
   function handleManageUnassigned() {
-    navigateToOperationsCenter({ openAssignDrawer: false });
+    navigateToOperationsCenterPage();
   }
 
   return (
@@ -424,6 +533,7 @@ export default function HqLabsAdminView({
                     key={agent.agentId || agent.agentName}
                     agent={agent}
                     onManageAgent={handleManageAgent}
+                    onReviewLab={handleReviewLab}
                   />
                 ))}
               </div>
@@ -512,6 +622,7 @@ export default function HqLabsAdminView({
                 directoryUsers={directoryUsers}
                 onReviewLab={handleReviewLab}
                 onOpenDistributorOs={handleOpenDistributorOs}
+                onNavigate={handleHqNavigate}
               />
             ))}
           </div>

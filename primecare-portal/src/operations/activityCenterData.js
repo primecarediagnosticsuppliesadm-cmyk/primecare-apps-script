@@ -7,6 +7,7 @@ import { getUserProvisioningEventsRead } from "@/api/userProvisioningApi.js";
 import { loadOperationsCenterAdminBundle } from "@/operations/operationsCenterAdminData.js";
 import { mapProvisioningEventRow } from "@/operations/userProvisioningEngine.js";
 import { mergeActivityCenterEvents } from "@/operations/activityCenterEngine.js";
+import { buildLabAgentLookupByLabId } from "@/operations/labAgentResolver.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -41,6 +42,10 @@ export async function loadActivityCenterBundle(tenantId, options = {}) {
   const inventoryMovements = (ledgerRes?.data?.movements || []).slice(0, 60);
   const purchaseOrders = (poRes?.data?.purchaseOrders || []).slice(0, 40);
 
+  const labAssignments = opsBundle.labAssignments || [];
+  const directoryUsers = opsBundle.directoryUsers || [];
+  const labAgentByLabId = buildLabAgentLookupByLabId(labAssignments, directoryUsers);
+
   const events = mergeActivityCenterEvents({
     notifications,
     provisioningEvents,
@@ -53,6 +58,7 @@ export async function loadActivityCenterBundle(tenantId, options = {}) {
     ok: notifyRes?.success !== false,
     error: notifyRes?.error || ledgerRes?.error || poRes?.error || null,
     events,
+    labAgentByLabId,
     counts: {
       notifications: notifications.length,
       provisioning: provisioningEvents.length,
