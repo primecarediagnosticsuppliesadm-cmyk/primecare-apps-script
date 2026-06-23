@@ -3,8 +3,11 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { loadHqGlobalSearchIndex } from "@/operations/hqGlobalSearchData.js";
 import {
+  formatHqSearchCoverageLine,
   persistHqNavContext,
   searchHqIndex,
+  shouldShowHqSearchDiagnostics,
+  summarizeHqSearchQueryResults,
 } from "@/operations/hqGlobalSearchEngine.js";
 import { getMenuItem } from "@/config/menuConfig.js";
 import { cn } from "@/lib/utils";
@@ -18,12 +21,15 @@ export default function HqGlobalSearch({ tenantId, open, onClose, setActivePage 
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [index, setIndex] = useState([]);
+  const [coverage, setCoverage] = useState(null);
+  const showDiagnostics = shouldShowHqSearchDiagnostics();
 
   const loadIndex = useCallback(async () => {
     setLoading(true);
     try {
       const res = await loadHqGlobalSearchIndex(tenantId, { force: true });
       setIndex(res.index || []);
+      setCoverage(res.coverage || null);
     } finally {
       setLoading(false);
     }
@@ -45,6 +51,7 @@ export default function HqGlobalSearch({ tenantId, open, onClose, setActivePage 
   }, [open, onClose]);
 
   const groups = useMemo(() => searchHqIndex(index, query), [index, query]);
+  const querySummary = useMemo(() => summarizeHqSearchQueryResults(groups), [groups]);
 
   function selectItem(item) {
     persistHqNavContext({ page: item.page, ...item.context });
@@ -113,6 +120,37 @@ export default function HqGlobalSearch({ tenantId, open, onClose, setActivePage 
             ))
           )}
         </div>
+
+        {showDiagnostics && coverage ? (
+          <div className="border-t bg-slate-50 px-3 py-2 text-[10px] text-slate-600">
+            <p className="font-semibold uppercase tracking-wide text-slate-500">HQ Search Coverage</p>
+            <p className="mt-0.5 font-mono">{formatHqSearchCoverageLine(coverage)}</p>
+            {coverage.orders?.error ? (
+              <p className="mt-1 text-amber-700">Orders API: {coverage.orders.error}</p>
+            ) : null}
+            {coverage.products?.error ? (
+              <p className="mt-0.5 text-amber-700">Products API: {coverage.products.error}</p>
+            ) : null}
+            {str(query) ? (
+              <div className="mt-2 border-t border-slate-200 pt-2">
+                <p className="font-semibold uppercase tracking-wide text-slate-500">Query diagnostics</p>
+                <p className="mt-0.5">
+                  &quot;{query}&quot; → {querySummary.total} result{querySummary.total === 1 ? "" : "s"}
+                  {Object.keys(querySummary.byType).length
+                    ? ` · ${Object.entries(querySummary.byType)
+                        .map(([type, count]) => `${type}: ${count}`)
+                        .join(", ")}`
+                    : ""}
+                </p>
+                {querySummary.targets.length ? (
+                  <p className="mt-0.5 text-slate-500">
+                    Nav: {querySummary.targets.join(", ")}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );

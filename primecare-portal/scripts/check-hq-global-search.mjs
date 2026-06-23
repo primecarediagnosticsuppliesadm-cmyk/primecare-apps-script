@@ -50,7 +50,13 @@ const FIXTURE = {
       orderStatus: "Fulfilled",
     },
   ],
-  products: [],
+  products: [
+    {
+      productId: "QA_SKU_003",
+      productName: "QA Test Product 003",
+      sku: "QA_SKU_003",
+    },
+  ],
   purchaseOrders: [],
 };
 
@@ -82,6 +88,11 @@ const CASES = [
     query: "1728",
     expectTypes: ["orders"],
     expectTitles: ["ORD-1728"],
+  },
+  {
+    query: "QA_SKU_003",
+    expectTypes: ["products"],
+    expectTitles: ["QA Test Product 003"],
   },
 ];
 

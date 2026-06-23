@@ -40,7 +40,15 @@ export function buildSearchHaystack(parts = []) {
     .filter(Boolean);
   const haystack = normalizeSearchText(raw.join(" "));
   const haystackCompact = haystack.replace(/\s+/g, "");
-  return { haystack, haystackCompact, tokens: haystack ? haystack.split(" ") : [] };
+  const rawLower = raw.map((p) => str(p).toLowerCase()).join(" ");
+  const rawCompact = raw.map((p) => str(p).toLowerCase().replace(/[^a-z0-9]/g, "")).join("");
+  return {
+    haystack,
+    haystackCompact,
+    rawLower,
+    rawCompact,
+    tokens: haystack ? haystack.split(" ") : [],
+  };
 }
 
 /**
@@ -54,10 +62,16 @@ export function scoreHqSearchMatch(item, query) {
   const titleNorm = normalizeSearchText(item.title);
   const haystack = item.haystack || "";
   const haystackCompact = item.haystackCompact || haystack.replace(/\s+/g, "");
+  const rawLower = item.rawLower || "";
+  const rawCompact = item.rawCompact || "";
   const qCompact = qNorm.replace(/\s+/g, "");
+  const qRaw = str(query).toLowerCase();
+  const qRawCompact = qRaw.replace(/[^a-z0-9]/g, "");
 
   if (titleNorm === qNorm) return 100;
   if (titleNorm.startsWith(qNorm)) return 95;
+  if (qRaw.length >= 2 && rawLower.includes(qRaw)) return 92;
+  if (qRawCompact.length >= 2 && rawCompact.includes(qRawCompact)) return 91;
   if (haystack.startsWith(qNorm)) return 90;
   if (haystack.includes(qNorm)) return 85;
   if (qCompact.length >= 2 && haystackCompact.includes(qCompact)) return 80;
@@ -85,7 +99,7 @@ export function buildHqSearchIndex(sources = {}) {
   const labs = (sources.labs || []).map((lab) => {
     const labId = str(lab.labId ?? lab.lab_id);
     const labName = str(lab.labName ?? lab.lab_name ?? lab.name) || labId;
-    const { haystack, haystackCompact, tokens } = buildSearchHaystack([
+    const { haystack, haystackCompact, rawLower, rawCompact, tokens } = buildSearchHaystack([
       labName,
       labId,
       lab.area,
@@ -103,6 +117,8 @@ export function buildHqSearchIndex(sources = {}) {
       context: { labId, labName },
       haystack,
       haystackCompact,
+      rawLower,
+      rawCompact,
       tokens,
     };
   });
@@ -113,7 +129,7 @@ export function buildHqSearchIndex(sources = {}) {
     const agentName = str(user.agentName ?? user.agent_name);
     const userName = str(user.userName ?? user.user_name);
     const name = str(user.name) || userName || displayName || agentName || str(user.email);
-    const { haystack, haystackCompact, tokens } = buildSearchHaystack([
+    const { haystack, haystackCompact, rawLower, rawCompact, tokens } = buildSearchHaystack([
       name,
       displayName,
       agentName,
@@ -133,41 +149,47 @@ export function buildHqSearchIndex(sources = {}) {
       context: { userId },
       haystack,
       haystackCompact,
+      rawLower,
+      rawCompact,
       tokens,
     };
   });
 
   const orders = (sources.orders || []).map((order) => {
     const orderId = str(order.orderId ?? order.order_id);
-    const { haystack, haystackCompact, tokens } = buildSearchHaystack([
+    const invoiceId = str(order.invoiceId ?? order.invoice_id);
+    const { haystack, haystackCompact, rawLower, rawCompact, tokens } = buildSearchHaystack([
       orderId,
       orderId.replace(/-/g, ""),
+      invoiceId,
       order.labName ?? order.lab_name,
       order.labId ?? order.lab_id,
-      order.invoiceId ?? order.invoice_id,
       order.orderStatus ?? order.status,
     ]);
     return {
       id: `order:${orderId}`,
       type: "orders",
-      title: orderId,
+      title: orderId || invoiceId,
       subtitle: `${str(order.labName ?? order.lab_name) || "Lab"} · ${str(order.orderStatus ?? order.status)}`,
       page: "orders",
-      context: { orderId },
+      context: { orderId: orderId || invoiceId },
       haystack,
       haystackCompact,
+      rawLower,
+      rawCompact,
       tokens,
     };
   });
 
   const products = (sources.products || []).map((product) => {
     const productId = str(product.productId ?? product.product_id ?? product.sku);
+    const sku = str(product.sku ?? productId);
     const productName =
       str(product.productName ?? product.product_name ?? product.name) || productId;
-    const { haystack, haystackCompact, tokens } = buildSearchHaystack([
+    const { haystack, haystackCompact, rawLower, rawCompact, tokens } = buildSearchHaystack([
       productName,
       productId,
-      product.sku,
+      sku,
       product.category,
     ]);
     return {
@@ -179,13 +201,15 @@ export function buildHqSearchIndex(sources = {}) {
       context: { productId },
       haystack,
       haystackCompact,
+      rawLower,
+      rawCompact,
       tokens,
     };
   });
 
   const purchaseOrders = (sources.purchaseOrders || []).map((po) => {
     const poId = str(po.poId ?? po.po_id ?? po.id);
-    const { haystack, haystackCompact, tokens } = buildSearchHaystack([
+    const { haystack, haystackCompact, rawLower, rawCompact, tokens } = buildSearchHaystack([
       poId,
       poId.replace(/-/g, ""),
       po.status ?? po.poStatus,
@@ -200,6 +224,8 @@ export function buildHqSearchIndex(sources = {}) {
       context: { poId },
       haystack,
       haystackCompact,
+      rawLower,
+      rawCompact,
       tokens,
     };
   });
@@ -249,7 +275,7 @@ export function buildHqSearchCoverageReport(index = [], sourceMeta = {}) {
       error: sourceMeta.ordersError ?? null,
     },
     products: {
-      sourceApi: "loadMasterCatalog",
+      sourceApi: "loadMasterCatalog + getLabCatalogRead + getStockDashboard",
       indexedFields: HQ_SEARCH_INDEXED_FIELDS.products,
       countIndexed: counts.products,
       sourceCount: sourceMeta.products ?? counts.products,
@@ -265,15 +291,42 @@ export function buildHqSearchCoverageReport(index = [], sourceMeta = {}) {
   };
 }
 
+export function formatHqSearchCoverageLine(report = {}) {
+  return `HQ Search Coverage — Labs: ${report.labs?.countIndexed ?? 0}, Users: ${report.users?.countIndexed ?? 0}, Orders: ${report.orders?.countIndexed ?? 0}, Products: ${report.products?.countIndexed ?? 0}, POs: ${report.purchaseOrders?.countIndexed ?? 0}`;
+}
+
+/** Summarize grouped search results for diagnostics footer. */
+export function summarizeHqSearchQueryResults(groups = []) {
+  const flat = groups.flatMap((g) =>
+    g.items.map((item) => ({
+      entityType: g.label,
+      title: item.title,
+      page: item.page,
+    }))
+  );
+  const byType = new Map();
+  for (const row of flat) {
+    byType.set(row.entityType, (byType.get(row.entityType) || 0) + 1);
+  }
+  return {
+    total: flat.length,
+    byType: Object.fromEntries(byType),
+    targets: [...new Set(flat.map((r) => r.page))],
+    samples: flat.slice(0, 5),
+  };
+}
+
+export function shouldShowHqSearchDiagnostics() {
+  if (typeof import.meta === "undefined") return false;
+  const env = String(import.meta.env?.VITE_APP_ENV || "").toLowerCase();
+  return import.meta.env?.DEV === true || env === "qa" || env === "staging";
+}
+
 export function logHqSearchDiagnostics(report = {}, options = {}) {
-  const isDev =
-    options.force === true ||
-    (typeof import.meta !== "undefined" && import.meta.env?.DEV === true);
+  const isDev = options.force === true || shouldShowHqSearchDiagnostics();
   if (!isDev) return;
 
-  const lines = [
-    `[HQ Search] Indexed counts — Labs: ${report.labs?.countIndexed ?? 0}, Users: ${report.users?.countIndexed ?? 0}, Orders: ${report.orders?.countIndexed ?? 0}, Products: ${report.products?.countIndexed ?? 0}, POs: ${report.purchaseOrders?.countIndexed ?? 0}`,
-  ];
+  const lines = [`[HQ Search] ${formatHqSearchCoverageLine(report)}`];
   for (const key of ["labs", "users", "orders", "products", "purchaseOrders"]) {
     const row = report[key];
     if (row?.error) lines.push(`[HQ Search] ${key} load warning: ${row.error}`);

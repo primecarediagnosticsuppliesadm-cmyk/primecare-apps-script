@@ -9,7 +9,7 @@ export const HQ_ADMIN_MENU_SECTIONS = [
   {
     id: "operations",
     label: "OPERATIONS",
-    keys: ["orders", "risk", "notifications", "visits", "distributorOs"],
+    keys: ["labs", "orders", "risk", "notifications", "visits", "distributorOs"],
   },
   {
     id: "inventory",
@@ -86,6 +86,7 @@ const ADMIN_HQ_MENU_KEYS = new Set([
   "qualificationReview",
   "masterCatalog",
   "inventory",
+  "labs",
   "orders",
   "risk",
   "purchase",

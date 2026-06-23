@@ -1,4 +1,11 @@
-import { getLabsCredit, getOrdersRead, getOperationsPlatformUsersRead, getPurchaseOrdersRead } from "@/api/primecareSupabaseApi.js";
+import {
+  getLabsCredit,
+  getLabCatalogRead,
+  getOrdersRead,
+  getOperationsPlatformUsersRead,
+  getPurchaseOrdersRead,
+  getStockDashboard,
+} from "@/api/primecareSupabaseApi.js";
 import { loadMasterCatalog } from "@/catalog/masterCatalogData.js";
 import {
   buildHqSearchCoverageReport,
@@ -39,6 +46,29 @@ function mapPlatformUsers(rows = []) {
   }));
 }
 
+function mergeProductsById(...lists) {
+  const map = new Map();
+  for (const list of lists) {
+    for (const row of list || []) {
+      const productId = str(row.productId ?? row.product_id ?? row.sku);
+      if (!productId) continue;
+      if (!map.has(productId)) {
+        map.set(productId, {
+          productId,
+          productName: row.productName ?? row.product_name ?? row.name ?? productId,
+          sku: row.sku ?? productId,
+          category: row.category,
+        });
+      }
+    }
+  }
+  return Array.from(map.values());
+}
+
+function readApiError(res, loadError) {
+  return loadError || (res?.success === false ? res?.error : null) || null;
+}
+
 /** Load searchable HQ index from existing read APIs (RLS-scoped). */
 export async function loadHqGlobalSearchIndex(tenantId, options = {}) {
   const tid = str(tenantId);
@@ -47,22 +77,27 @@ export async function loadHqGlobalSearchIndex(tenantId, options = {}) {
     return { ok: true, index: cachedIndex, coverage: cachedCoverage };
   }
 
-  const [labsLoad, usersLoad, ordersLoad, catalogLoad, poLoad] = await Promise.all([
-    safeLoad("labs", () => getLabsCredit()),
-    safeLoad("users", () =>
-      tid ? getOperationsPlatformUsersRead({ tenantId: tid }) : Promise.resolve({ data: { users: [] } })
-    ),
-    safeLoad("orders", () => getOrdersRead()),
-    safeLoad("catalog", () =>
-      tid ? loadMasterCatalog({ tenantId: tid }) : Promise.resolve({ products: [] })
-    ),
-    safeLoad("purchaseOrders", () => getPurchaseOrdersRead()),
-  ]);
+  const [labsLoad, usersLoad, ordersLoad, catalogLoad, labCatalogAllLoad, stockLoad, poLoad] =
+    await Promise.all([
+      safeLoad("labs", () => getLabsCredit()),
+      safeLoad("users", () =>
+        tid ? getOperationsPlatformUsersRead({ tenantId: tid }) : Promise.resolve({ data: { users: [] } })
+      ),
+      safeLoad("orders", () => getOrdersRead()),
+      safeLoad("catalog", () =>
+        tid ? loadMasterCatalog({ tenantId: tid }) : Promise.resolve({ products: [] })
+      ),
+      safeLoad("labCatalogAll", () => getLabCatalogRead({})),
+      safeLoad("stock", () => getStockDashboard()),
+      safeLoad("purchaseOrders", () => getPurchaseOrdersRead()),
+    ]);
 
   const labsRes = labsLoad.result;
   const usersRes = usersLoad.result;
   const ordersRes = ordersLoad.result;
   const catalogRes = catalogLoad.result;
+  const labCatalogAllRes = labCatalogAllLoad.result;
+  const stockRes = stockLoad.result;
   const poRes = poLoad.result;
 
   const labs = labsLoad.ok && Array.isArray(labsRes?.data) ? labsRes.data : [];
@@ -74,7 +109,13 @@ export async function loadHqGlobalSearchIndex(tenantId, options = {}) {
     ordersLoad.ok && ordersRes?.success !== false && Array.isArray(ordersRes?.data?.orders)
       ? ordersRes.data.orders
       : [];
-  const products = catalogLoad.ok ? catalogRes?.products || catalogRes?.rows || [] : [];
+  const catalogProducts = catalogLoad.ok ? catalogRes?.products || catalogRes?.rows || [] : [];
+  const labCatalogProducts =
+    labCatalogAllLoad.ok && labCatalogAllRes?.success !== false
+      ? labCatalogAllRes?.data?.products || []
+      : [];
+  const stockProducts = stockLoad.ok ? stockRes?.data?.inventory || [] : [];
+  const products = mergeProductsById(catalogProducts, labCatalogProducts, stockProducts);
   const purchaseOrders = poLoad.ok ? poRes?.data?.purchaseOrders || [] : [];
 
   const index = buildHqSearchIndex({ labs, users, orders, products, purchaseOrders });
@@ -84,11 +125,11 @@ export async function loadHqGlobalSearchIndex(tenantId, options = {}) {
     orders: orders.length,
     products: products.length,
     purchaseOrders: purchaseOrders.length,
-    labsError: labsLoad.error || labsRes?.error || null,
-    usersError: usersLoad.error || usersRes?.error || null,
-    ordersError: ordersLoad.error || ordersRes?.error || null,
-    productsError: catalogLoad.error || catalogRes?.error || null,
-    purchaseOrdersError: poLoad.error || poRes?.error || null,
+    labsError: readApiError(labsRes, labsLoad.error),
+    usersError: readApiError(usersRes, usersLoad.error),
+    ordersError: readApiError(ordersRes, ordersLoad.error),
+    productsError: readApiError(catalogRes, catalogLoad.error || labCatalogAllLoad.error || stockLoad.error),
+    purchaseOrdersError: readApiError(poRes, poLoad.error),
   });
 
   logHqSearchDiagnostics(coverage);
@@ -106,11 +147,14 @@ export async function loadHqGlobalSearchIndex(tenantId, options = {}) {
       usersLoad.error,
       ordersLoad.error,
       catalogLoad.error,
+      labCatalogAllLoad.error,
+      stockLoad.error,
       poLoad.error,
       labsRes?.error,
       usersRes?.error,
       ordersRes?.error,
       catalogRes?.error,
+      labCatalogAllRes?.error,
       poRes?.error,
     ].filter(Boolean),
   };
