@@ -49,6 +49,7 @@ import {
   getPipelineStageOrder,
   PIPELINE_STAGE_SELECT_OPTIONS,
 } from "@/utils/qualificationPipeline";
+import HqQualificationRecommendations from "@/components/hq/HqQualificationRecommendations.jsx";
 
 function canEditPipeline() {
   return false;
@@ -861,7 +862,10 @@ function QualificationReviewListItem({
   setActivePage = null,
 }) {
   return (
-    <Card className="overflow-hidden rounded-lg border-slate-200 shadow-sm">
+    <Card
+      id={row.labId ? `qualification-row-${row.labId}` : undefined}
+      className="overflow-hidden rounded-lg border-slate-200 shadow-sm"
+    >
       <ReviewSummaryRow
         row={row}
         expanded={expanded}
@@ -1081,6 +1085,18 @@ export default function QualificationReviewPage({ currentUser, setActivePage = n
     setExpandedLabId((prev) => (prev === labId ? null : labId));
   }
 
+  function handleReviewLab(labId) {
+    if (!labId) return;
+    setSearchQuery("");
+    setExpandedLabId(labId);
+    window.setTimeout(() => {
+      document.getElementById(`qualification-row-${labId}`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 100);
+  }
+
   function handleRowSaved(updated, saveType) {
     if (!updated?.labId) {
       loadRows();
@@ -1145,6 +1161,8 @@ export default function QualificationReviewPage({ currentUser, setActivePage = n
           </Button>
         </div>
       ) : null}
+
+      <HqQualificationRecommendations rows={rows} onReviewLab={handleReviewLab} />
 
       <StickyReviewFilters
         searchQuery={searchQuery}

@@ -61,6 +61,14 @@ import {
 } from "@/operations/hqWorkflowNav.js";
 import { loadOperationsCenterAdminBundle } from "@/operations/operationsCenterAdminData.js";
 import { resolveLabAgentForLabId } from "@/operations/labAgentResolver.js";
+import HqOrdersOperationsQueue from "@/components/hq/HqOrdersOperationsQueue.jsx";
+import {
+  ORDER_QUEUE_KEYS,
+  buildOrdersOperationsQueue,
+  filterOrdersByQueue,
+  queueKeyToFilterPatch,
+} from "@/orders/ordersOperationsQueueEngine.js";
+import { cn } from "@/lib/utils";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -104,8 +112,18 @@ function orderPaymentLabel(order) {
   });
 }
 
-function OrdersDetailEmptyState({ kpis, loading, filteredOrders, onShowPending, onShowPendingPayment, onOpenFirst }) {
+function OrdersDetailEmptyState({
+  kpis,
+  loading,
+  filteredOrders,
+  onShowPending,
+  onShowPendingPayment,
+  onOpenFirst,
+  activeQueueKey = "",
+  queue = [],
+}) {
   const pending = kpis.placed + kpis.processing;
+  const activeQueue = queue.find((q) => q.id === activeQueueKey);
   const suggestions = [];
 
   if (pending > 0) {
@@ -142,7 +160,9 @@ function OrdersDetailEmptyState({ kpis, loading, filteredOrders, onShowPending, 
   return (
     <div className="space-y-4">
       <p className="text-sm text-slate-600">
-        Select an order from the list to review lines, payment status, and fulfillment actions.
+        {activeQueue
+          ? `${activeQueue.label}: ${activeQueue.count} order${activeQueue.count === 1 ? "" : "s"} in this bucket. Select one from the list to review details.`
+          : "Select an order from the list to review lines, payment status, and fulfillment actions."}
       </p>
       <div className="grid gap-2 sm:grid-cols-2">
         <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2.5">
@@ -160,6 +180,15 @@ function OrdersDetailEmptyState({ kpis, loading, filteredOrders, onShowPending, 
           <p className="text-xl font-bold tabular-nums text-slate-900">{loading ? "—" : kpis.cancelled}</p>
         </div>
         <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 px-3 py-2.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">Recently fulfilled</p>
+          <p className="text-xl font-bold tabular-nums text-emerald-950">
+            {loading
+              ? "—"
+              : (queue.find((q) => q.id === ORDER_QUEUE_KEYS.RECENTLY_FULFILLED)?.count ?? kpis.fulfilled)}
+          </p>
+          <p className="text-[11px] text-emerald-800/80">Last 14 days</p>
+        </div>
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 px-3 py-2.5 sm:col-span-2">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">Active order value</p>
           <p className="text-lg font-bold tabular-nums text-emerald-950">
             {loading ? "—" : formatCurrency(kpis.totalOrderValue)}
@@ -218,6 +247,7 @@ export default function OrdersPage({
   const [successMessage, setSuccessMessage] = useState("");
   const [labAssignments, setLabAssignments] = useState([]);
   const [directoryUsers, setDirectoryUsers] = useState([]);
+  const [activeQueueKey, setActiveQueueKey] = useState("");
 
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
 
@@ -438,10 +468,38 @@ export default function OrdersPage({
       dateFrom,
       dateTo,
     });
-    return sortOrders(filtered, sortKey);
-  }, [orders, search, status, paymentStatus, labFilter, dateFrom, dateTo, sortKey]);
+    const queueFiltered = activeQueueKey
+      ? filterOrdersByQueue(filtered, activeQueueKey)
+      : filtered;
+    return sortOrders(queueFiltered, sortKey);
+  }, [orders, search, status, paymentStatus, labFilter, dateFrom, dateTo, sortKey, activeQueueKey]);
 
   const kpis = useMemo(() => computeOrdersKpis(orders), [orders]);
+  const operationsQueue = useMemo(
+    () => buildOrdersOperationsQueue(orders, kpis),
+    [orders, kpis]
+  );
+  const highlightedOrderIds = useMemo(() => {
+    if (!activeQueueKey) return new Set();
+    const bucket = operationsQueue.find((q) => q.id === activeQueueKey);
+    return new Set(bucket?.orderIds || []);
+  }, [activeQueueKey, operationsQueue]);
+
+  function handleQueueSelect(queueKey) {
+    if (!queueKey) {
+      setActiveQueueKey("");
+      return;
+    }
+    setActiveQueueKey(queueKey);
+    const patch = queueKeyToFilterPatch(queueKey);
+    if (patch) {
+      setStatus(patch.status);
+      setPaymentStatus(patch.paymentStatus);
+      setSortKey(patch.sortKey);
+    }
+    setSelectedOrder(null);
+    setDetails(null);
+  }
 
   usePredatorModuleValidation(
     "PrimeCare OS",
@@ -552,6 +610,14 @@ export default function OrdersPage({
           loading={loading}
         />
       </KpiCardGrid>
+
+      <HqOrdersOperationsQueue
+        orders={orders}
+        kpis={kpis}
+        activeQueueKey={activeQueueKey}
+        onSelectQueue={handleQueueSelect}
+        loading={loading}
+      />
 
       <div className="grid gap-5 xl:grid-cols-[1.35fr_1fr]">
         <Card className="rounded-2xl shadow-sm">
@@ -671,13 +737,16 @@ export default function OrdersPage({
                       return (
                         <tr
                           key={order.orderId}
-                          className={`border-b border-slate-100 transition-colors ${
+                          className={cn(
+                            "border-b border-slate-100 transition-colors",
                             isSelected
                               ? "bg-slate-100"
-                              : cancelled
-                                ? "bg-slate-50/80 text-slate-600"
-                                : "hover:bg-slate-50"
-                          }`}
+                              : highlightedOrderIds.has(order.orderId)
+                                ? "bg-amber-50/70 ring-1 ring-inset ring-amber-200"
+                                : cancelled
+                                  ? "bg-slate-50/80 text-slate-600"
+                                  : "hover:bg-slate-50"
+                          )}
                         >
                           <td className="px-2 py-2 font-mono font-medium text-slate-900">
                             <HqObjectLink
@@ -760,11 +829,10 @@ export default function OrdersPage({
                 kpis={kpis}
                 loading={loading}
                 filteredOrders={filteredOrders}
-                onShowPending={() => setStatus("Placed")}
-                onShowPendingPayment={() => {
-                  setStatus("ALL");
-                  setPaymentStatus("Pending");
-                }}
+                activeQueueKey={activeQueueKey}
+                queue={operationsQueue}
+                onShowPending={() => handleQueueSelect(ORDER_QUEUE_KEYS.AWAITING_FULFILLMENT)}
+                onShowPendingPayment={() => handleQueueSelect(ORDER_QUEUE_KEYS.PENDING_PAYMENT)}
                 onOpenFirst={(orderId) => void openOrder(orderId)}
               />
             ) : detailsLoading ? (

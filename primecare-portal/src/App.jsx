@@ -20,6 +20,7 @@ import {
 import { PortalToastProvider } from "@/context/PortalToastContext";
 import { TenantViewProvider } from "@/context/TenantViewContext.jsx";
 import OperatingZoneSync from "@/components/OperatingZoneSync.jsx";
+import { loadHqNavBadgeCounts } from "@/operations/hqNavBadgeCounts.js";
 
 function canRoleAccessPage(role, pageKey) {
   if (!role || !pageKey) return false;
@@ -143,6 +144,7 @@ export default function App() {
   const [role, setRole] = useState(null);
   const [activePage, setActivePage] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
+  const [navBadges, setNavBadges] = useState({});
 
   const navigateToPage = useCallback(
     (pageKey, { replace = false } = {}) => {
@@ -243,6 +245,37 @@ export default function App() {
   }, [role, activePage]);
 
   useEffect(() => {
+    if (!isAuthenticated || !role || !currentUser?.tenantId) {
+      setNavBadges({});
+      return;
+    }
+    if (role !== ROLES.ADMIN && role !== ROLES.EXECUTIVE) {
+      setNavBadges({});
+      return;
+    }
+
+    let cancelled = false;
+    const refreshBadges = async () => {
+      try {
+        const badges = await loadHqNavBadgeCounts({
+          tenantId: currentUser.tenantId,
+          role,
+        });
+        if (!cancelled) setNavBadges(badges);
+      } catch {
+        if (!cancelled) setNavBadges({});
+      }
+    };
+
+    void refreshBadges();
+    const interval = window.setInterval(refreshBadges, 120000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [isAuthenticated, role, currentUser?.tenantId]);
+
+  useEffect(() => {
     if (!role) return;
 
     function handlePopState() {
@@ -311,6 +344,7 @@ export default function App() {
           role={role}
           activePage={activePage}
           setActivePage={navigateToPage}
+          navBadges={navBadges}
         >
           <ExecutivePortalHeader
             currentUser={currentUser}

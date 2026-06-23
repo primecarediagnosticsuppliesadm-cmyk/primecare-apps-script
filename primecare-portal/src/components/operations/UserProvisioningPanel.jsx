@@ -38,6 +38,7 @@ import {
 import { ROLES } from "@/config/roles.js";
 import { cn } from "@/lib/utils";
 import { Plus, Search, Copy, X } from "lucide-react";
+import UserDetailDrawer from "@/components/operations/UserDetailDrawer.jsx";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -1492,11 +1493,13 @@ export default function UserProvisioningPanel({
   const [resetPasswordResult, setResetPasswordResult] = useState(null);
   const [resettingUserId, setResettingUserId] = useState("");
   const [confirmDialog, setConfirmDialog] = useState(null);
+  const [reviewUser, setReviewUser] = useState(null);
 
   const agents = bundle?.agents || [];
   const directoryUsers = bundle?.directoryUsers || [];
   const labAssignments = bundle?.labAssignments || [];
   const distributorAssignments = bundle?.distributorAssignments || [];
+  const auditEvents = bundle?.auditEvents || [];
   const kpis = bundle?.kpis || {};
 
   const filteredUsers = useMemo(() => {
@@ -1760,6 +1763,15 @@ export default function UserProvisioningPanel({
                             variant="outline"
                             size="sm"
                             className="h-7 px-2 text-[10px]"
+                            onClick={() => setReviewUser(user)}
+                          >
+                            Review
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 px-2 text-[10px]"
                             onClick={() => setAssignmentUser(user)}
                           >
                             Assign
@@ -1957,6 +1969,27 @@ export default function UserProvisioningPanel({
             setDeactivateUser(null);
             await onReload?.();
           }}
+        />
+      ) : null}
+
+      {reviewUser ? (
+        <UserDetailDrawer
+          user={reviewUser}
+          auditEvents={auditEvents}
+          labAssignments={labAssignments}
+          busyId={busyId}
+          resettingUserId={resettingUserId}
+          onClose={() => setReviewUser(null)}
+          onAssign={(user) => {
+            setReviewUser(null);
+            setAssignmentUser(user);
+          }}
+          onDeactivate={(user) => {
+            setReviewUser(null);
+            setDeactivateUser(user);
+          }}
+          onReactivate={(user) => promptReactivate(user)}
+          onResetPassword={(user) => promptResetPassword(user)}
         />
       ) : null}
 

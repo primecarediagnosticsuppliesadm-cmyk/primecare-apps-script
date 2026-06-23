@@ -3,6 +3,11 @@ import { getStockDashboard } from "../api/primecareSupabaseApi";
 import { fetchDatabaseTenants } from "@/tenant/durableTenantStore.js";
 import InventoryLedgerPage from "./InventoryLedgerPage";
 import InventoryHealthPage from "./InventoryHealthPage";
+import HqInventoryValueAnalytics from "@/components/hq/HqInventoryValueAnalytics.jsx";
+import {
+  distributorNamesFromRegistry,
+  loadInventoryEconomicsBundle,
+} from "@/inventory/inventoryEconomicsData.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -92,8 +97,34 @@ export default function StockPage({ currentUser = null }) {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [tenantFilter, setTenantFilter] = useState("hq");
+  const [economicsBundle, setEconomicsBundle] = useState(null);
+  const [economicsLoading, setEconomicsLoading] = useState(false);
 
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
+
+  useEffect(() => {
+    if (activeTab !== "stock") return;
+    let cancelled = false;
+
+    async function loadEconomics() {
+      setEconomicsLoading(true);
+      try {
+        const tenantsRes = await fetchDatabaseTenants().catch(() => ({ rows: [] }));
+        const distributorNames = distributorNamesFromRegistry(tenantsRes.rows || []);
+        const bundle = await loadInventoryEconomicsBundle({ distributorNames });
+        if (!cancelled) setEconomicsBundle(bundle);
+      } catch {
+        if (!cancelled) setEconomicsBundle(null);
+      } finally {
+        if (!cancelled) setEconomicsLoading(false);
+      }
+    }
+
+    void loadEconomics();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab]);
 
   useEffect(() => {
     async function loadStock() {
@@ -255,6 +286,14 @@ export default function StockPage({ currentUser = null }) {
               appear under HQ and distributor tenants with separate on-hand quantities.
             </div>
           ) : null}
+
+          <HqInventoryValueAnalytics
+            model={economicsBundle?.model}
+            healthRows={economicsBundle?.inventoryRows || []}
+            tenantFilter={tenantFilter}
+            homeTenantId={homeTenantId}
+            loading={economicsLoading}
+          />
 
           <div style={styles.statsRow}>
             <div style={styles.statCard}>

@@ -68,14 +68,21 @@ export default function PortalLayout({
   activePage,
   setActivePage,
   children,
+  navBadges = {},
 }) {
   const menu = getMenuForRole(role);
   const menuSections = getMenuSectionsForRole(role);
   const activeMenuItem = menu.find((item) => item.key === activePage);
 
+  function badgeNum(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+
   function renderNavButton(item) {
     const Icon = ICONS[item.key] || LayoutDashboard;
     const isActive = activePage === item.key;
+    const badgeCount = badgeNum(navBadges[item.key]);
     return (
       <button
         key={item.key}
@@ -88,6 +95,11 @@ export default function PortalLayout({
       >
         <Icon className="h-4 w-4 shrink-0" />
         <span className="truncate text-sm font-medium">{item.label}</span>
+        {badgeCount > 0 ? (
+          <span className="ml-auto inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+            {badgeCount > 99 ? "99+" : badgeCount}
+          </span>
+        ) : null}
       </button>
     );
   }
