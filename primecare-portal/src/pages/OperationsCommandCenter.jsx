@@ -2,8 +2,11 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, PageSkeleton, KpiCard, KpiCardGrid, usePortalToast } from "@/components/ux";
 import OperationalLabDrawer from "@/components/operations/OperationalLabDrawer.jsx";
+import OwnershipStatusCard from "@/components/operations/OwnershipStatusCard.jsx";
+import LabOwnershipDrawer from "@/components/operations/LabOwnershipDrawer.jsx";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import { buildOperationsCommandCenterModel } from "@/operations/operationsCommandCenterModel.js";
+import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import {
   recordOperationsCenterEvent,
   traceOperationsCenterLoad,
@@ -137,8 +140,10 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [drawerLabId, setDrawerLabId] = useState("");
+  const [ownershipDrawerLab, setOwnershipDrawerLab] = useState(null);
   const [attentionExpanded, setAttentionExpanded] = useState(true);
   const { showToast } = usePortalToast();
+  const tenantId = currentUser?.tenantId || currentUser?.tenant_id || "";
 
   const load = useCallback(
     async (isRefresh = false) => {
@@ -169,6 +174,23 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
   }, [load]);
 
   const model = opsModel;
+
+  useEffect(() => {
+    if (!opsModel) return;
+    const ctx = consumeHqNavContext("operationsCenter");
+    if (!ctx) return;
+    const lid = String(ctx.labId || "").trim();
+    if (ctx.tab === "labOwnership" && lid && opsModel.ownershipMetrics) {
+      const lab =
+        (opsModel.ownershipMetrics.unassignedAttention || []).find(
+          (row) => String(row.labId).toLowerCase() === lid.toLowerCase()
+        ) ||
+        (opsModel.ownershipMetrics.enrichedLabs || []).find(
+          (row) => String(row.labId).toLowerCase() === lid.toLowerCase()
+        );
+      if (lab && ctx.openAssignDrawer) setOwnershipDrawerLab(lab);
+    }
+  }, [opsModel]);
 
   useEffect(() => {
     if (!model?.attention?.length) return;
@@ -212,7 +234,17 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
         labs: "labs",
         lab: "labs",
         qualification: "qualificationReview",
+        labOwnership: "labOwnership",
       };
+      if (action === "labOwnership") {
+        const unassigned = model?.ownershipMetrics?.unassignedAttention || [];
+        if (unassigned.length > 0) {
+          setOwnershipDrawerLab(unassigned[0]);
+          return;
+        }
+        showToast("info", "All labs in scope have owners assigned.");
+        return;
+      }
       const page = map[action] || "dashboard";
       if (page === "dashboard") {
         showToast("info", "Use the module sidebar to continue.");
@@ -220,7 +252,7 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
       }
       setActivePage?.(page);
     },
-    [setActivePage, showToast]
+    [setActivePage, showToast, model?.ownershipMetrics]
   );
 
   const openLab = useCallback((labId) => {
@@ -259,8 +291,11 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
     health,
     healthTiles,
     riskLabs,
+    ownershipMetrics,
   } = model;
   const criticalCount = attentionBySeverity.CRITICAL?.length ?? 0;
+  const ownershipPayload = model.payload || {};
+  const unassignedOwnership = ownershipMetrics?.unassignedAttention || [];
 
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-4 pb-10 lg:p-6">
@@ -360,6 +395,53 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
           ))}
         </div>
       </section>
+
+      {ownershipMetrics ? (
+        <section aria-label="Lab ownership status" className="space-y-3">
+          <OwnershipStatusCard metrics={ownershipMetrics} />
+          {unassignedOwnership.length > 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+              <h3 className="text-sm font-semibold text-slate-900">Unassigned Labs</h3>
+              <p className="mb-2 text-[11px] text-slate-500">
+                CRITICAL if unassigned &gt; 7 days · ATTENTION otherwise
+              </p>
+              <ul className="space-y-1.5">
+                {unassignedOwnership.slice(0, 6).map((lab) => (
+                  <li
+                    key={`${lab.tenantId}-${lab.labId}`}
+                    className={cn(
+                      "flex flex-wrap items-center justify-between gap-2 rounded-lg border px-2.5 py-2",
+                      SEVERITY_STYLES[lab.severity] || SEVERITY_STYLES.ATTENTION
+                    )}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-slate-900">
+                        {lab.labName || lab.labId}
+                      </p>
+                      <p className="text-[10px] text-slate-600">
+                        {lab.daysUnassigned ?? 0}d unassigned · {lab.tenantName || "—"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <StatusBadge variant={SEVERITY_BADGE[lab.severity] || "warning"} compact>
+                        {lab.severity}
+                      </StatusBadge>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-7 px-2 text-[10px]"
+                        onClick={() => setOwnershipDrawerLab(lab)}
+                      >
+                        Assign owner
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
         {/* 2. Needs Attention Queue */}
@@ -677,6 +759,22 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
         onAction={handleDrawerAction}
         currentUser={currentUser}
       />
+
+      {ownershipDrawerLab ? (
+        <LabOwnershipDrawer
+          lab={ownershipDrawerLab}
+          tenantId={tenantId}
+          agents={ownershipPayload.ownershipAgents || []}
+          directoryUsers={ownershipPayload.ownershipDirectoryUsers || []}
+          onClose={() => setOwnershipDrawerLab(null)}
+          onSaved={() => {
+            setOwnershipDrawerLab(null);
+            showToast("success", "Lab ownership updated");
+            void load(true);
+          }}
+          onError={(message) => showToast("error", message || "Ownership update failed")}
+        />
+      ) : null}
     </div>
   );
 }

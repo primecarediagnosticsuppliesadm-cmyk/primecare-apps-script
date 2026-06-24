@@ -1,7 +1,13 @@
 import { PERMISSIONS } from "./permissions";
 import { ROLES } from "./roles";
+import {
+  DISTRIBUTOR_ADMIN_MENU_KEYS,
+  DISTRIBUTOR_MANAGER_MENU_ORDER,
+  READ_ONLY_AUDITOR_MENU_ORDER,
+} from "./rolePermissionMatrix.js";
 import { ALLOW_EXPERIMENTAL_MODULES, IS_QA, IS_PROD } from "./environment";
 import { isPredatorEnabled } from "@/predator/predatorGuards.js";
+import { isQaCommandCenterEnabled } from "@/config/qaValidation.js";
 
 /** HQ Admin sidebar sections (order preserved within each group). */
 export const HQ_ADMIN_MENU_SECTIONS = [
@@ -51,7 +57,7 @@ export const HQ_EXECUTIVE_MENU_SECTIONS = [
     keys: ["masterCatalog", "inventory", "purchase"],
   },
   { id: "people", label: "PEOPLE", keys: ["accessAudit"] },
-  { id: "growth", label: "GROWTH", keys: ["qualificationReview", "commissionEngine"] },
+  { id: "growth", label: "GROWTH", keys: ["qualificationReview", "commissionEngine", "labContractEngine"] },
   { id: "system", label: "SYSTEM", keys: ["predatorDebug", "qaCommandCenter"] },
 ];
 
@@ -74,6 +80,7 @@ const EXECUTIVE_HQ_MENU_KEYS = new Set([
   "risk",
   "purchase",
   "commissionEngine",
+  "labContractEngine",
   "predatorDebug",
   "qaCommandCenter",
 ]);
@@ -101,6 +108,8 @@ const LAB_MENU_ORDER = ["labOrders", "labAccount", "notifications"];
 /** Agent sidebar: execution workflow only (Activity Center merged into Dashboard). */
 const AGENT_MENU_ORDER = ["dashboard", "collections", "visits", "labs"];
 
+const DISTRIBUTOR_ADMIN_MENU_KEY_SET = new Set(DISTRIBUTOR_ADMIN_MENU_KEYS);
+
 /**
  * Central Menu Configuration for PrimeCare Portal
  * - Single source of truth for all pages
@@ -126,7 +135,7 @@ export const MENU_ITEMS = [
   { key: "distributorOs", label: "Distributor OS", icon: "Building2" },
   { key: "distributorProvisioning", label: "Launch Distributor", icon: "ClipboardList" },
   { key: "commissionEngine", label: "Commission Engine", icon: "Coins" },
-  { key: "labContractEngine", label: "Lab Contracts", icon: "FileText" },
+  { key: "labContractEngine", label: "Contract Engine", icon: "FileText" },
   { key: "operationsCenter", label: "Operations Center", icon: "Radio" },
   { key: "accessAudit", label: "Access Audit", icon: "Shield" },
 
@@ -208,16 +217,37 @@ export function getMenuForRole(role) {
 
   const items = MENU_ITEMS.filter((item) => {
     if (item.key === "predatorDebug" && !isPredatorEnabled()) return false;
-    if (item.key === "qaCommandCenter" && normalizedRole !== ROLES.EXECUTIVE) return false;
+    if (item.key === "qaCommandCenter" && (!isQaCommandCenterEnabled() || normalizedRole !== ROLES.EXECUTIVE)) {
+      return false;
+    }
     if (normalizedRole === ROLES.LAB && !LAB_MENU_ORDER.includes(item.key)) {
       return false;
     }
     if (normalizedRole === ROLES.AGENT && !AGENT_MENU_ORDER.includes(item.key)) {
       return false;
     }
+    if (
+      normalizedRole === ROLES.DISTRIBUTOR_ADMIN &&
+      !DISTRIBUTOR_ADMIN_MENU_KEY_SET.has(item.key)
+    ) {
+      return false;
+    }
+    if (
+      normalizedRole === ROLES.DISTRIBUTOR_MANAGER &&
+      !DISTRIBUTOR_MANAGER_MENU_ORDER.includes(item.key)
+    ) {
+      return false;
+    }
+    if (
+      normalizedRole === ROLES.READ_ONLY_AUDITOR &&
+      !READ_ONLY_AUDITOR_MENU_ORDER.includes(item.key)
+    ) {
+      return false;
+    }
     if (hqMenuKeys && !hqMenuKeys.has(item.key)) return false;
     return (
-      PERMISSIONS[item.key]?.includes(role) && isPageVisibleInCurrentEnvironment(item.key)
+      PERMISSIONS[item.key]?.includes(normalizedRole) &&
+      isPageVisibleInCurrentEnvironment(item.key)
     );
   });
 
@@ -230,6 +260,28 @@ export function getMenuForRole(role) {
   if (normalizedRole === ROLES.AGENT) {
     return [...items].sort(
       (a, b) => AGENT_MENU_ORDER.indexOf(a.key) - AGENT_MENU_ORDER.indexOf(b.key)
+    );
+  }
+
+  if (normalizedRole === ROLES.DISTRIBUTOR_MANAGER) {
+    return [...items].sort(
+      (a, b) =>
+        DISTRIBUTOR_MANAGER_MENU_ORDER.indexOf(a.key) -
+        DISTRIBUTOR_MANAGER_MENU_ORDER.indexOf(b.key)
+    );
+  }
+
+  if (normalizedRole === ROLES.READ_ONLY_AUDITOR) {
+    return [...items].sort(
+      (a, b) =>
+        READ_ONLY_AUDITOR_MENU_ORDER.indexOf(a.key) - READ_ONLY_AUDITOR_MENU_ORDER.indexOf(b.key)
+    );
+  }
+
+  if (normalizedRole === ROLES.DISTRIBUTOR_ADMIN) {
+    return [...items].sort(
+      (a, b) =>
+        DISTRIBUTOR_ADMIN_MENU_KEYS.indexOf(a.key) - DISTRIBUTOR_ADMIN_MENU_KEYS.indexOf(b.key)
     );
   }
 
@@ -280,7 +332,9 @@ export function getMenuSectionsForRole(role) {
  * Default landing page per role
  */
 export function getDefaultPageForRole(role) {
-  if (role === "lab") return "labOrders";
+  const normalizedRole = String(role || "").toLowerCase();
+  if (normalizedRole === ROLES.LAB) return "labOrders";
+  if (normalizedRole === ROLES.DISTRIBUTOR_ADMIN) return "distributorOs";
   const menu = getMenuForRole(role);
   return menu.length ? menu[0].key : null;
 }

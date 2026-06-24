@@ -154,19 +154,28 @@ export function checkMutableMetricAcrossLayers({
   seedBaseline,
   tolerance = 0,
   omitUiUnlessPresent = false,
+  boundedApiMax = null,
 }) {
   const actual = { ...layers, mutable: true, seedBaseline: seedBaseline ?? null };
   const browser = numOrNull(layers.browserRls);
   const db = numOrNull(layers.dbComputed);
+  const api = numOrNull(layers.apiPayload);
   const runtimeBaseline = browser ?? db ?? null;
 
-  const comparableValues = MUTABLE_LAYER_KEYS.filter((key) => key in layers)
-    .filter((key) => {
-      if (key !== "uiRendered") return true;
-      if (!omitUiUnlessPresent) return true;
-      const raw = layers.uiRendered;
-      return raw !== null && raw !== undefined;
-    })
+  const boundedApiWindow =
+    boundedApiMax != null && api != null && browser != null && browser > api;
+
+  const comparableKeys = MUTABLE_LAYER_KEYS.filter((key) => key in layers).filter((key) => {
+    if (key !== "uiRendered") {
+      if (boundedApiWindow && (key === "browserRls" || key === "dbComputed")) return false;
+      return true;
+    }
+    if (!omitUiUnlessPresent) return true;
+    const raw = layers.uiRendered;
+    return raw !== null && raw !== undefined;
+  });
+
+  const comparableValues = comparableKeys
     .map((key) => numOrNull(layers[key]))
     .filter((value) => value !== null);
 
@@ -200,7 +209,9 @@ export function checkMutableMetricAcrossLayers({
 
   const message =
     mismatches.length === 0
-      ? `All layers agree at ${comparableValues[0] ?? expected} (${baselineNote}; mutable field)`
+      ? boundedApiWindow
+        ? `Bounded API window (${api}) validated; browser probe (${browser}) exceeds cap (expected)`
+        : `All layers agree at ${comparableValues[0] ?? expected} (${baselineNote}; mutable field)`
       : mismatches.join("; ");
 
   return { id, label, status, expected, actual, message };

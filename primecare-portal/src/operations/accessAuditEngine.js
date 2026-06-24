@@ -14,6 +14,12 @@ export const ACCESS_AUDIT_ACTION_OPTIONS = [
   { value: "lab_unassigned", label: "Lab Unassigned" },
   { value: "lab_transferred", label: "Lab Transferred" },
   { value: "role_changed", label: "Role Changed" },
+  { value: "ownership_reassigned", label: "Ownership Reassigned" },
+  { value: "ownership_assigned", label: "Ownership Assigned" },
+  { value: "ownership_transferred", label: "Ownership Transferred" },
+  { value: "ownership_removed", label: "Ownership Removed" },
+  { value: "ownership_secondary_added", label: "Secondary Owner Added" },
+  { value: "ownership_secondary_removed", label: "Secondary Owner Removed" },
   { value: "distributor_changed", label: "Distributor Changed" },
 ];
 
@@ -23,6 +29,13 @@ const EVENT_TYPE_LABELS = {
   deactivated: "User Deactivated",
   reactivated: "User Reactivated",
   lab_transferred: "Lab Transferred",
+  role_changed: "Role Changed",
+  ownership_reassigned: "Ownership Reassigned",
+  ownership_assigned: "Ownership Assigned",
+  ownership_transferred: "Ownership Transferred",
+  ownership_removed: "Ownership Removed",
+  ownership_secondary_added: "Secondary Owner Added",
+  ownership_secondary_removed: "Secondary Owner Removed",
   updated: "Profile Updated",
 };
 
@@ -30,6 +43,12 @@ const PAYLOAD_ACTION_LABELS = {
   lab_assigned: "Lab Assigned",
   lab_unassigned: "Lab Unassigned",
   role_changed: "Role Changed",
+  ownership_reassigned: "Ownership Reassigned",
+  ownership_assigned: "Ownership Assigned",
+  ownership_transferred: "Ownership Transferred",
+  ownership_removed: "Ownership Removed",
+  ownership_secondary_added: "Secondary Owner Added",
+  ownership_secondary_removed: "Secondary Owner Removed",
   distributor_changed: "Distributor Changed",
 };
 
@@ -38,10 +57,24 @@ const USER_CHANGE_ACTIONS = new Set([
   "deactivated",
   "reactivated",
   "role_changed",
+  "ownership_reassigned",
+  "ownership_assigned",
+  "ownership_transferred",
+  "ownership_removed",
   "distributor_changed",
 ]);
 
-const LAB_CHANGE_ACTIONS = new Set(["lab_transferred", "lab_assigned", "lab_unassigned"]);
+const LAB_CHANGE_ACTIONS = new Set([
+  "lab_transferred",
+  "lab_assigned",
+  "lab_unassigned",
+  "ownership_reassigned",
+  "ownership_assigned",
+  "ownership_transferred",
+  "ownership_removed",
+  "ownership_secondary_added",
+  "ownership_secondary_removed",
+]);
 
 export function formatOpsDateTime(value) {
   if (!value) return "—";
@@ -63,11 +96,15 @@ export function startOfToday() {
 }
 
 export function resolveAccessAuditAction(event = {}) {
+  const eventType = str(event.eventType ?? event.event_type ?? event.actionKey).toLowerCase();
+  if (EVENT_TYPE_LABELS[eventType] && eventType !== "updated") {
+    return { key: eventType, label: EVENT_TYPE_LABELS[eventType] };
+  }
+
   const payloadAction = str(event.payload?.action).toLowerCase();
   if (payloadAction && PAYLOAD_ACTION_LABELS[payloadAction]) {
     return { key: payloadAction, label: PAYLOAD_ACTION_LABELS[payloadAction] };
   }
-  const eventType = str(event.eventType ?? event.event_type).toLowerCase();
   return {
     key: eventType,
     label: EVENT_TYPE_LABELS[eventType] || eventType.replace(/_/g, " "),
@@ -93,18 +130,37 @@ function buildPreviousNew(payload = {}, actionKey = "") {
   const previous = {};
   const next = {};
 
-  if (actionKey === "lab_transferred" || actionKey === "lab_assigned" || actionKey === "lab_unassigned") {
-    if (payload.fromAgentId || payload.fromAgentName) {
-      previous.agent = payload.fromAgentName || payload.fromAgentId;
+  if (
+    actionKey === "lab_transferred" ||
+    actionKey === "lab_assigned" ||
+    actionKey === "lab_unassigned" ||
+    actionKey === "ownership_reassigned" ||
+    actionKey === "ownership_assigned" ||
+    actionKey === "ownership_transferred" ||
+    actionKey === "ownership_removed" ||
+    actionKey === "ownership_secondary_added" ||
+    actionKey === "ownership_secondary_removed"
+  ) {
+    if (payload.fromAgentId || payload.fromAgentName || payload.previous?.agentId) {
+      previous.agent =
+        payload.fromAgentName ||
+        payload.previous?.agentName ||
+        payload.fromAgentId ||
+        payload.previous?.agentId;
     }
-    if (payload.toAgentId || payload.toAgentName) {
-      next.agent = payload.toAgentName || payload.toAgentId;
+    if (payload.toAgentId || payload.toAgentName || payload.next?.agentId) {
+      next.agent =
+        payload.toAgentName ||
+        payload.next?.agentName ||
+        payload.toAgentId ||
+        payload.next?.agentId;
     }
     if (payload.agentId || payload.agentName) {
       next.agent = payload.agentName || payload.agentId;
     }
     if (payload.labId) next.labId = payload.labId;
     if (payload.labName) next.labName = payload.labName;
+    if (payload.slot || payload.next?.slot) next.slot = payload.slot || payload.next?.slot;
   }
 
   if (actionKey === "role_changed") {

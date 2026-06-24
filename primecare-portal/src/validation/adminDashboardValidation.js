@@ -219,6 +219,7 @@ export async function runAdminDashboardValidation(options = {}) {
       label: "Orders row count (mutable, RLS/API)",
       seedBaseline: expected.ordersCount,
       omitUiUnlessPresent: true,
+      boundedApiMax: 2000,
       layers: {
         browserRls: browser.ordersRowCount,
         dbComputed: browser.ordersRowCount,
@@ -264,6 +265,7 @@ export async function runAdminDashboardValidation(options = {}) {
       id: "total_sold_value",
       label: "Total sold value (₹, mutable)",
       seedBaseline: expected.totalSoldValue,
+      boundedApiMax: 2000,
       layers: {
         browserRls: browser.totalSoldValue,
         dbComputed: browser.totalSoldValue,

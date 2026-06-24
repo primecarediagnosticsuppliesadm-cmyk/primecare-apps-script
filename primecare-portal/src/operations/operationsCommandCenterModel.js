@@ -424,6 +424,24 @@ export function buildAttentionQueue(payload) {
     }
   }
 
+  for (const lab of payload.ownershipMetrics?.unassignedAttention || []) {
+    items.push(
+      makeAttentionItem({
+        id: `ownership-unassigned-${lab.labId}`,
+        severity: str(lab.severity).toUpperCase() === "CRITICAL" ? "CRITICAL" : "ATTENTION",
+        title: "Unassigned lab",
+        subtitle: lab.labName || lab.labId,
+        explanation: `No primary owner · ${lab.daysUnassigned ?? 0}d unassigned`,
+        recommendedAction: "Assign primary agent ownership",
+        ageLabel: lab.daysUnassigned > 0 ? `${lab.daysUnassigned}d unassigned` : "Unassigned",
+        labId: lab.labId,
+        labName: lab.labName,
+        action: "labOwnership",
+        actionLabel: "Assign Owner",
+      })
+    );
+  }
+
   let localEvidenceAlerts = 0;
   for (const ev of evidence) {
     if (ev.storageBackend !== "local_embedded") continue;
@@ -1053,6 +1071,7 @@ export function buildOperationsCommandCenterModel(payload) {
     health,
     healthTiles: buildOperationalHealthTiles(payload, health),
     riskLabs,
+    ownershipMetrics: payload.ownershipMetrics || null,
     payload,
   };
 }

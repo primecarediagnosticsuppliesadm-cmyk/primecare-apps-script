@@ -1,8 +1,15 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { getCurrentUser, loginUser, logoutUser } from "@/api/primecareApi";
 import { resolveLoginEmailForAuth } from "@/api/primecareSupabaseApi.js";
+import { touchPlatformUserLastLoginWrite } from "@/api/userProvisioningApi.js";
 import { supabase } from "@/api/supabaseClient";
 import { ALLOW_LEGACY_APPS_SCRIPT, REQUIRE_SUPABASE_AUTH } from "@/config/environment";
+import {
+  normalizePlatformRole,
+  isLoginEnabledRole,
+  ROLES,
+} from "@/config/rolePermissionMatrix.js";
+import { getDefaultPageForRole } from "@/config/menuConfig.js";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
 import { predatorStore } from "@/predator/predatorStore.js";
 import { tenantContextFromUser } from "@/predator/predatorContext.js";
@@ -11,7 +18,6 @@ import { recordPredatorTiming, predatorTrace } from "@/predator/predatorTiming.j
 const AuthContext = createContext(null);
 
 const STORAGE_KEY = "primecare_auth_token";
-const VALID_ROLES = new Set(["admin", "executive", "agent", "lab"]);
 
 /** Local Vite-only session marker; never sent to Apps Script (bootstrap skips API). */
 const DEV_SESSION_PREFIX = "__PRIMECARE_DEV_SESSION__:";
@@ -31,8 +37,16 @@ function decodeDevSessionUser(token) {
 }
 
 function normalizeRole(role) {
-  const normalized = String(role || "").trim().toLowerCase();
-  return VALID_ROLES.has(normalized) ? normalized : null;
+  const normalized = normalizePlatformRole(role);
+  return isLoginEnabledRole(normalized) ? normalized : null;
+}
+
+async function recordSignInLastLogin() {
+  try {
+    await touchPlatformUserLastLoginWrite();
+  } catch (err) {
+    console.warn("[Auth] last_login_at sync failed", err);
+  }
 }
 
 function buildUserFromProfile(sessionUser, profile) {
@@ -67,8 +81,10 @@ function buildUserFromProfile(sessionUser, profile) {
     agentId: profile.agent_id || "",
     agent_id: profile.agent_id || "",
     agentName: profile.agent_name || "",
+    distributorId: profile.distributor_id || "",
+    distributor_id: profile.distributor_id || "",
     active: profile.active === true,
-    defaultPage: role === "lab" ? "labOrders" : "dashboard",
+    defaultPage: getDefaultPageForRole(role) || (role === ROLES.LAB ? "labOrders" : "dashboard"),
     authSource: "supabase",
   };
 }
@@ -82,7 +98,7 @@ export function AuthProvider({ children }) {
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState("");
 
-  const applySupabaseSession = useCallback(async (session) => {
+  const applySupabaseSession = useCallback(async (session, { recordLastLogin = false } = {}) => {
     setAuthError("");
 
     if (!session?.user) {
@@ -97,7 +113,7 @@ export function AuthProvider({ children }) {
       const t0 = performance.now();
       const { data: profile, error } = await supabase
         .from("profiles")
-        .select("user_id, tenant_id, role, lab_id, agent_id, agent_name, active")
+        .select("user_id, tenant_id, role, lab_id, agent_id, agent_name, distributor_id, active")
         .eq("user_id", session.user.id)
         .maybeSingle();
       recordPredatorTiming({
@@ -115,7 +131,6 @@ export function AuthProvider({ children }) {
       return buildUserFromProfile(session.user, profile);
     });
 
-    predatorStore.setActiveTenantContext(tenantContextFromUser(user));
     setAuthToken(session.access_token || "");
     setCurrentUser((prev) => {
       if (!prev) return user;
@@ -132,6 +147,12 @@ export function AuthProvider({ children }) {
       }
       return user;
     });
+
+    predatorStore.setActiveTenantContext(tenantContextFromUser(user));
+
+    if (recordLastLogin) {
+      await recordSignInLastLogin();
+    }
   }, []);
 
   const bootstrapUser = useCallback(async (token) => {
@@ -239,7 +260,8 @@ export function AuthProvider({ children }) {
         return;
       }
 
-      applySupabaseSession(session).catch(async (err) => {
+      const recordLastLogin = event === "SIGNED_IN";
+      applySupabaseSession(session, { recordLastLogin }).catch(async (err) => {
         console.error("Supabase auth state rejected", err);
         setAuthError(err?.message || "Authentication failed.");
         setAuthToken("");
@@ -349,7 +371,7 @@ export function AuthProvider({ children }) {
       }
 
       const endApply = perfTime("auth.applySupabaseSession.afterLogin");
-      await applySupabaseSession(data?.session || null);
+      await applySupabaseSession(data?.session || null, { recordLastLogin: true });
       endApply();
       perfMark("auth.login.end");
       return { success: true };

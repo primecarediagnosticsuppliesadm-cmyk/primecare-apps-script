@@ -39,6 +39,7 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     selectColumns: ["tenant_id", "lab_id"],
     allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.LAB, ROLES.AGENT],
     scope: "lab_scoped",
+    executiveCrossTenantReadable: true,
   },
   {
     id: "order_lines",
@@ -58,6 +59,7 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     selectColumns: ["tenant_id", "lab_id"],
     allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.LAB, ROLES.AGENT],
     scope: "lab_scoped",
+    executiveCrossTenantReadable: true,
   },
   {
     id: "collections",
@@ -117,6 +119,7 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     selectColumns: ["tenant_id", "lab_id"],
     allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE],
     scope: "admin_only",
+    executiveCrossTenantReadable: true,
   },
   {
     id: "lab_contracts",

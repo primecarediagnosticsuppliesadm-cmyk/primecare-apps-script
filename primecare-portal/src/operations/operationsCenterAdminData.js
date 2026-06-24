@@ -19,6 +19,15 @@ import {
   enrichDirectoryUsers,
   mapProvisioningEventRow,
 } from "@/operations/userProvisioningEngine.js";
+import {
+  buildAccessAuditContext,
+  enrichAccessAuditEvents,
+} from "@/operations/accessAuditEngine.js";
+import { getLabOwnershipRead } from "@/api/labOwnershipApi.js";
+import {
+  buildOwnershipIndex,
+  computeOwnershipMetrics,
+} from "@/operations/labOwnershipEngine.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -56,12 +65,14 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
     };
   }
 
-  const [usersRes, operationalAgentsRes, labsRes, distributorsRes, auditRes] = await Promise.all([
+  const [usersRes, operationalAgentsRes, labsRes, distributorsRes, auditRes, ownershipRes] =
+    await Promise.all([
     getOperationsPlatformUsersRead({ tenantId: tid }),
     getOperationsOperationalAgentsRead({ tenantId: tid }),
     getOperationsLabAssignmentsRead({ tenantId: tid }),
     getOperationsDistributorAssignmentsRead({ tenantId: tid }),
     getUserProvisioningEventsRead({ tenantId: tid }),
+    getLabOwnershipRead({ tenantId: tid }),
   ]);
 
   const errors = [
@@ -71,6 +82,7 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
     distributorsRes?.error,
     distributorsRes?.warning,
     auditRes?.error,
+    ownershipRes?.error,
   ].filter(Boolean);
 
   const operationalAgents = (operationalAgentsRes?.data?.agents || []).map(mapOperationsAgentRow);
@@ -127,11 +139,25 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
   );
 
   const userNameById = new Map(directoryUsers.map((u) => [str(u.userId), str(u.name)]));
-  const auditEvents = (auditRes?.data?.events || []).map((row) =>
-    mapProvisioningEventRow(row, userNameById)
+  const auditContext = buildAccessAuditContext(
+    { directoryUsers, labAssignments: enrichedLabAssignments, distributorAssignments },
+    tid
+  );
+  const auditEvents = enrichAccessAuditEvents(
+    (auditRes?.data?.events || []).map((row) => mapProvisioningEventRow(row, userNameById)),
+    auditContext
   );
 
   const kpis = computeProvisioningKpis(directoryUsers, enrichedLabAssignments);
+
+  const ownershipRows = ownershipRes?.data?.rows || [];
+  const ownershipIndex = buildOwnershipIndex(ownershipRows, enrichedLabAssignments, tid);
+  const ownershipMetrics = computeOwnershipMetrics({
+    labAssignments: enrichedLabAssignments,
+    ownershipIndex,
+    agents,
+    hqTenantId: tid,
+  });
 
   return {
     ok:
@@ -140,13 +166,29 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
       labsRes?.success !== false &&
       distributorsRes?.success !== false,
     error: errors[0] || null,
-    warning: distributorsRes?.warning || auditRes?.error || null,
+    warning: distributorsRes?.warning || auditRes?.error || ownershipRes?.error || null,
     agents,
     users,
     directoryUsers,
-    labAssignments: enrichedLabAssignments,
+    labAssignments: ownershipMetrics.enrichedLabs,
     distributorAssignments,
     auditEvents,
     kpis,
+    ownershipRows,
+    ownershipMetrics,
+  };
+}
+
+/** Lightweight ownership metrics for executive queue + ops command center. */
+export async function loadLabOwnershipMetricsBundle(tenantId) {
+  const tid = str(tenantId);
+  if (!tid) return { ownershipMetrics: null, directoryUsers: [] };
+
+  const partial = await loadOperationsCenterAdminBundle(tid);
+  return {
+    ownershipMetrics: partial.ownershipMetrics || null,
+    directoryUsers: partial.directoryUsers || [],
+    labAssignments: partial.labAssignments || [],
+    agents: partial.agents || [],
   };
 }

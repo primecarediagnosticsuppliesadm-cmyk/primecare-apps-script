@@ -16,6 +16,8 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { createLabWrite, getLabsCredit } from "@/api/primecareSupabaseApi";
+import { loadLabOwnershipMetricsBundle } from "@/operations/operationsCenterAdminData.js";
+import AssignLabOwnerPromptModal from "@/components/operations/AssignLabOwnerPromptModal.jsx";
 import { ROLES } from "@/config/roles";
 import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
 import { summarizeLabsCreditPortfolio } from "@/metrics/computeRiskMetrics.js";
@@ -460,6 +462,8 @@ export default function LabsPage({
     distributorScope?.tenantId ? readDistributorLabContext() : null
   );
   const [lastCreatedLab, setLastCreatedLab] = useState(null);
+  const [ownershipPromptLab, setOwnershipPromptLab] = useState(null);
+  const [provisionAgents, setProvisionAgents] = useState([]);
   const [focusLabId, setFocusLabId] = useState("");
   const [initialReviewLabId, setInitialReviewLabId] = useState("");
 
@@ -548,6 +552,13 @@ export default function LabsPage({
       });
     }, 150);
   }, [loading, labs.length]);
+
+  useEffect(() => {
+    if (!canAddLab || !homeTenantId) return;
+    void loadLabOwnershipMetricsBundle(homeTenantId).then((data) => {
+      setProvisionAgents((data?.agents || []).filter((a) => a.active !== false));
+    });
+  }, [canAddLab, homeTenantId]);
 
   useEffect(() => {
     if (!isDistributorOs) return;
@@ -716,6 +727,11 @@ export default function LabsPage({
               tenantId: data?.tenantId,
               labId: data?.labId,
             });
+            setOwnershipPromptLab({
+              labName: data?.labName,
+              tenantId: data?.tenantId,
+              labId: data?.labId,
+            });
             if (selectedDistributorTenantId) {
               setDistributorLabContext({
                 tenantId: selectedDistributorTenantId,
@@ -727,7 +743,25 @@ export default function LabsPage({
               });
               setLabContext(readDistributorLabContext());
             }
-            setMsg(`Lab created under ${selectedDistributorName || data?.tenantId} · ${data?.labName || data?.labId}`);
+            setMsg(`Lab created · ${data?.labName || data?.labId} — assign primary owner`);
+            void loadLabs();
+          }}
+        />
+      ) : null}
+
+      {ownershipPromptLab ? (
+        <AssignLabOwnerPromptModal
+          lab={ownershipPromptLab}
+          hqTenantId={homeTenantId}
+          agents={provisionAgents}
+          onClose={() => setOwnershipPromptLab(null)}
+          onSkip={() => {
+            setOwnershipPromptLab(null);
+            setMsg(`Lab created · ${ownershipPromptLab.labName || ownershipPromptLab.labId} (owner not assigned)`);
+          }}
+          onAssigned={({ lab, agentName }) => {
+            setOwnershipPromptLab(null);
+            setMsg(`Owner assigned · ${lab.labName || lab.labId} → ${agentName}`);
             void loadLabs();
           }}
         />

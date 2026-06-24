@@ -250,7 +250,10 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx, options = {}) {
       metricId: "orders_count",
       metricLabel: "Orders row count (mutable, backend/API)",
       expected:
-        snap.ordersRowCount ?? snap.apiTraceOrders ?? snap.apiOrdersRowCount ?? seed.ordersCount,
+        snap.apiTraceOrders ??
+        snap.apiOrdersRowCount ??
+        snap.ordersRowCount ??
+        seed.ordersCount,
       tenantCtx: ctx,
       cacheMeta: { ...cacheMeta, ordersUiNotRendered: snap.uiOrdersRowCount == null },
       compareMode: "kpi",
@@ -331,7 +334,7 @@ export function buildAdminDashboardMetricDiagnoses(snap, ctx, options = {}) {
     diagnoseMetricLayers({
       metricId: "total_sold_value",
       metricLabel: "Total sold value (mutable)",
-      expected: snap.totalSoldValue ?? seed.totalSoldValue,
+      expected: snap.apiTotalSold ?? snap.totalSoldValue ?? seed.totalSoldValue,
       tenantCtx: ctx,
       compareMode: "kpi",
       layers: [

@@ -10,6 +10,9 @@ import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidat
 import PageSkeleton from "@/components/ux/PageSkeleton";
 import { usePortalToast } from "@/components/ux";
 import AgentLabSnapshotDrawer from "@/components/agent/AgentLabSnapshotDrawer.jsx";
+import AgentMyOwnershipSection from "@/components/agent/AgentMyOwnershipSection.jsx";
+import { loadLabOwnershipMetricsBundle } from "@/operations/operationsCenterAdminData.js";
+import { buildAgentOwnershipSummary } from "@/operations/labOwnershipEngine.js";
 import {
   TodaysMissionCard,
   ActionQueueCard,
@@ -109,6 +112,7 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
   const [completingTaskId, setCompletingTaskId] = useState("");
   const [activityRows, setActivityRows] = useState([]);
   const [activityLoading, setActivityLoading] = useState(true);
+  const [ownershipSummary, setOwnershipSummary] = useState(null);
 
   const tenantId = currentUser?.tenantId || "";
   const { showToast } = usePortalToast();
@@ -130,13 +134,25 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
         recordAgentWorkspaceEvent("agent_workspace.load_start");
 
         await traceAgentDailyWorkspaceLoad(async () => {
-          const apiRes = await getAgentWorkspaceRead(currentUser);
+          const [apiRes, ownershipBundle] = await Promise.all([
+            getAgentWorkspaceRead(currentUser),
+            tenantId
+              ? loadLabOwnershipMetricsBundle(tenantId).catch(() => null)
+              : Promise.resolve(null),
+          ]);
           if (!apiRes?.success) {
             throw new Error(apiRes?.error || "Failed to load agent workspace");
           }
           const normalized = normalizeWorkspacePayload(apiRes.data || EMPTY_WORKSPACE);
           const model = buildAgentDailyWorkspaceModel(normalized);
           setWorkspace(normalized);
+          setOwnershipSummary(
+            buildAgentOwnershipSummary({
+              agentId: currentUser?.agentId || currentUser?.id,
+              enrichedLabs: ownershipBundle?.ownershipMetrics?.enrichedLabs || [],
+              pendingCollections: normalized.pendingCollections,
+            })
+          );
           recordAgentWorkspaceEvent("agent_workspace.load_success", {
             queueCount: model.actionQueue.length,
             assignedLabs: model.kpis.activeLabs,
@@ -152,7 +168,7 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
         setRefreshing(false);
       }
     },
-    [currentUser]
+    [currentUser, tenantId]
   );
 
   useEffect(() => {
@@ -225,6 +241,17 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
       count: visibleQueue.length,
     });
   }, [visibleQueue.length]);
+
+  usePredatorModuleValidation(
+    "Lab Ownership",
+    currentUser,
+    {
+      assignedLabCount: ownershipSummary?.assignedLabCount ?? 0,
+      followUpsDue: ownershipSummary?.followUpsDue ?? 0,
+      escalations: ownershipSummary?.escalations ?? 0,
+    },
+    !loading
+  );
 
   usePredatorModuleValidation(
     "Agent Visits",
@@ -498,6 +525,11 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
       )}
 
       <AgentTodaysProgressCard osState={osState} loading={false} />
+
+      <AgentMyOwnershipSection
+        summary={ownershipSummary}
+        onOpenLab={(lab) => openLabSnapshot({ labId: lab.labId, labName: lab.labName })}
+      />
 
       <AgentDailyChecklist
         osState={osState}

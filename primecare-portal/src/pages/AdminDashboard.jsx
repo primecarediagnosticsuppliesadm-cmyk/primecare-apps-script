@@ -42,6 +42,7 @@ import { adminDashboardModelFromMerge } from "@/pages/adminDashboardState.js";
 import AdminDashboardQaValidationPanel from "@/components/qa/AdminDashboardQaValidationPanel.jsx";
 import HqPrioritiesStrip from "@/components/hq/HqPrioritiesStrip.jsx";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
+import { hqDebugLog } from "@/utils/hqDebugLog.js";
 import {
   KpiCard,
   KpiCardGrid,
@@ -808,7 +809,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       if (loadId !== loadGenerationRef.current) return;
 
       lastRawReadRef.current = result;
-      console.log("[AdminDashboard] getAdminDashboardRead raw", result);
+      hqDebugLog("[AdminDashboard] getAdminDashboardRead raw", result);
 
       const hydrated = normalizeDashboardFromReadResult(result);
       if (!hydrated) {
@@ -819,7 +820,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
         return;
       }
 
-      console.log("[AdminDashboard] normalized KPI model", hydrated.kpis);
+      hqDebugLog("[AdminDashboard] normalized KPI model", hydrated.kpis);
       commitDashboardHydration(hydrated, hydrationCtx);
       return;
     }
@@ -900,10 +901,10 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     const readResult = supabaseSlice.dashboardRead;
     if (readResult?.success && readResult?.data) {
       lastRawReadRef.current = readResult;
-      console.log("[AdminDashboard] getAdminDashboardRead raw", readResult);
+      hqDebugLog("[AdminDashboard] getAdminDashboardRead raw", readResult);
       const fromRead = normalizeDashboardFromReadResult(readResult);
       if (fromRead) {
-        console.log("[AdminDashboard] normalized KPI model", fromRead.kpis);
+        hqDebugLog("[AdminDashboard] normalized KPI model", fromRead.kpis);
         if (commitDashboardHydration(fromRead, hydrationCtx)) {
           if (adminDashboardClientCacheEnabled() && (hasVisibleKpis(fromRead.kpis) || force)) {
             adminDashboardCache.dashboard = fromRead.summary;
@@ -944,7 +945,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       kpis: kpiModelFromSummaryExecutive(merged.summary, merged.executive),
     };
 
-    console.log("[AdminDashboard] normalized KPI model", mergedHydrated.kpis);
+    hqDebugLog("[AdminDashboard] normalized KPI model", mergedHydrated.kpis);
 
     const mergedVisible = hasVisibleKpis(mergedHydrated.kpis);
 

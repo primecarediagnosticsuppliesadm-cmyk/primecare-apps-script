@@ -45,6 +45,7 @@ import {
 } from "@/utils/migrationTrace.js";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 import { cn } from "@/lib/utils";
+import { hqDebugLog } from "@/utils/hqDebugLog.js";
 import OrderTrackingDrawer from "@/components/lab/OrderTrackingDrawer.jsx";
 import OrderProgressMini from "@/components/lab/OrderProgressMini.jsx";
 import { StatusBadge, usePortalToast } from "@/components/ux";
@@ -606,7 +607,7 @@ export default function LabOrderingPage({ currentUser }) {
 
         const productsRaw = Array.isArray(sbRes?.data?.products) ? sbRes.data.products : [];
         const products = productsRaw;
-        console.log("SUPABASE LAB CATALOG", {
+        hqDebugLog("SUPABASE LAB CATALOG", {
           count: products.length,
           source: sbRes?.data?.source || "supabase",
         });

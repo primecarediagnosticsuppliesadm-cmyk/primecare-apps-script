@@ -1534,6 +1534,7 @@ export default function CollectionsPage({
   const [labOrdersByLabId, setLabOrdersByLabId] = useState({});
   const [labOrdersLoadingByLabId, setLabOrdersLoadingByLabId] = useState({});
   const [hqFocusLabId, setHqFocusLabId] = useState("");
+  const [hqCreditAttentionFilter, setHqCreditAttentionFilter] = useState("");
 
   const isAgentView = useMemo(
     () => isAgentCollectionsView(currentUser, isLabAccount),
@@ -1725,9 +1726,17 @@ export default function CollectionsPage({
   }, [loadCollections, authToken]);
 
   useEffect(() => {
-    if (loading || !collections.length || isLabAccount) return;
-    const ctx = consumeHqNavContext("collections");
-    if (!ctx?.labId) return;
+    if (loading || isLabAccount) return;
+    const ctx =
+      consumeHqNavContext("risk") ||
+      consumeHqNavContext("collections");
+    if (!ctx) return;
+
+    if (ctx.attentionFilter && isHqCreditRiskView(currentUser, isLabAccount, isAgentView)) {
+      setHqCreditAttentionFilter(str(ctx.attentionFilter));
+    }
+
+    if (!ctx.labId) return;
     const targetId = labIdKey(ctx.labId);
     if (isHqCreditRiskView(currentUser, isLabAccount, isAgentView)) {
       setHqFocusLabId(targetId);
@@ -1739,6 +1748,7 @@ export default function CollectionsPage({
       }, 150);
       return;
     }
+    if (!collections.length) return;
     void openCollectionPanel(ctx.labId, ctx.focusSection || "details");
   }, [loading, collections.length, isLabAccount, currentUser, isAgentView]);
 
@@ -2502,7 +2512,22 @@ export default function CollectionsPage({
         </div>
       ) : null}
 
-      {filteredCollections.length === 0 ? (
+      {isHqCreditRisk ? (
+        <HqCreditRiskCommandCenter
+          key={hqCreditAttentionFilter || "credit-default"}
+          collections={collections}
+          searchFiltered={filteredCollections}
+          searchActive={Boolean(search.trim())}
+          initialAttentionFilter={hqCreditAttentionFilter}
+          summary={summary}
+          lastPaymentByLabId={lastPaymentByLabId}
+          focusLabId={hqFocusLabId}
+          setActivePage={setActivePage}
+          currentUser={currentUser}
+          onReviewLab={handleOpenLabReview}
+          onOpenCollections={handleHqOpenCollections}
+        />
+      ) : filteredCollections.length === 0 ? (
         <EmptyState
           title={isLabAccount ? "No account records" : "No collection records"}
           description={
@@ -2565,17 +2590,6 @@ export default function CollectionsPage({
             );
           })}
         </div>
-      ) : isHqCreditRisk ? (
-        <HqCreditRiskCommandCenter
-          collections={filteredCollections}
-          summary={summary}
-          lastPaymentByLabId={lastPaymentByLabId}
-          focusLabId={hqFocusLabId}
-          setActivePage={setActivePage}
-          currentUser={currentUser}
-          onReviewLab={handleOpenLabReview}
-          onOpenCollections={handleHqOpenCollections}
-        />
       ) : (
         <div className="space-y-2" role="list">
           {filteredCollections.map((item) => {

@@ -1,6 +1,6 @@
 import { createPredatorEntry, summarizePredatorEntries } from "@/predator/predatorSchema.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
-import { checkTenantConsistency } from "@/predator/predatorChecks.js";
+import { checkTenantConsistency, resolveExecutiveRegisteredTenantIds, executiveCrossTenantOpts } from "@/predator/predatorChecks.js";
 import { resolvePredatorOpsPayload } from "@/predator/predatorOpsPayload.js";
 import { buildExecutiveInterventionModel } from "@/operations/executiveInterventionModel.js";
 import { INTERVENTION_STATES } from "@/operations/executiveInterventionStateStore.js";
@@ -166,6 +166,7 @@ export async function validateExecutiveInterventionModule({
       })
     );
 
+    const registeredTenantIds = await resolveExecutiveRegisteredTenantIds(ctx);
     const collectionTenantIds = (model.payload?.collections || [])
       .map((c) => c.tenantId || c.tenant_id)
       .filter(Boolean);
@@ -177,6 +178,7 @@ export async function validateExecutiveInterventionModule({
           ctx,
           profileTenantId: ctx.tenantId,
           rowTenantIds: collectionTenantIds,
+          ...executiveCrossTenantOpts(ctx, registeredTenantIds),
         })
       );
     }

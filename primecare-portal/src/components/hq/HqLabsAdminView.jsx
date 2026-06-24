@@ -21,6 +21,7 @@ import {
 import { enterDistributorOs } from "@/tenant/tenantFoundationStore.js";
 import {
   navigateToCollections,
+  navigateToCreditRisk,
   navigateToOperationsCenter,
   navigateToOrders,
   navigateToVisits,
@@ -333,27 +334,45 @@ export default function HqLabsAdminView({
     }
   }, [reviewLabId, opsPayload, opsLoading, loadOps]);
 
-  function handleAttentionAction(card) {
-    if (card.filter === "HOLD") {
+  function applyLabsAttentionFilter(filterKey) {
+    const f = str(filterKey).toLowerCase();
+    if (f === "hold") {
       setAttentionFilter(null);
       setCreditFilter("HOLD");
       return;
     }
-    if (card.filter) {
-      setAttentionFilter(String(card.filter).toUpperCase());
-      setCreditFilter("ALL");
+    if (!f) return;
+    const map = {
+      outstanding: "OUTSTANDING",
+      followups: "FOLLOWUPS",
+      unassigned: "UNASSIGNED",
+    };
+    setAttentionFilter(map[f] || f.toUpperCase());
+    setCreditFilter("ALL");
+  }
+
+  function handleAttentionAction(card) {
+    applyLabsAttentionFilter(card.filter);
+
+    if (!card.page) return;
+
+    if (card.page === "operationsCenter") {
+      navigateToOperationsCenter(setActivePage, {
+        openAssignDrawer: str(card.filter).toLowerCase() === "unassigned",
+      });
       return;
     }
-    if (card.page) {
-      if (card.page === "operationsCenter") {
-        navigateToOperationsCenter(setActivePage, {
-          openAssignDrawer: String(card.filter).toLowerCase() === "unassigned",
-        });
-      } else {
-        setActivePage?.(card.page);
-      }
+    if (card.page === "collections") {
+      navigateToCreditRisk(setActivePage, {
+        attentionFilter: str(card.filter).toLowerCase() === "outstanding" ? "outstanding" : "",
+      });
       return;
     }
+    if (card.page === "visits") {
+      navigateToVisits(setActivePage);
+      return;
+    }
+    setActivePage?.(card.page);
   }
 
   function handleCreditChip(filter) {

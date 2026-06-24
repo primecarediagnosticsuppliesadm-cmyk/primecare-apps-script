@@ -5,6 +5,8 @@ import {
   checkEmptyApiWhenDbHasRows,
   checkTenantConsistency,
   checkRoleAccess,
+  resolveExecutiveRegisteredTenantIds,
+  executiveCrossTenantOpts,
 } from "@/predator/predatorChecks.js";
 import { predatorTrace } from "@/predator/predatorTiming.js";
 import {
@@ -111,6 +113,7 @@ export async function validateQualificationModule({ ctx, rendered = null }) {
       })
     );
 
+    const registeredTenantIds = await resolveExecutiveRegisteredTenantIds(ctx);
     entries.push(
       ...checkTenantConsistency({
         module: "Qualification Analytics",
@@ -118,6 +121,7 @@ export async function validateQualificationModule({ ctx, rendered = null }) {
         ctx,
         profileTenantId: ctx.tenantId,
         rowTenantIds: qualRaw.map((r) => r.tenant_id).filter(Boolean),
+        ...executiveCrossTenantOpts(ctx, registeredTenantIds),
       })
     );
 

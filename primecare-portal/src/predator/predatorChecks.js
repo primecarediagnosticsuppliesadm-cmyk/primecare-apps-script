@@ -1,5 +1,50 @@
 import { createPredatorEntry } from "@/predator/predatorSchema.js";
 import { ROLES } from "@/config/roles.js";
+import { fetchDatabaseTenants } from "@/tenant/durableTenantStore.js";
+
+function str(v) {
+  return String(v ?? "").trim();
+}
+
+/**
+ * Registered distributor tenants for executive cross-tenant isolation checks.
+ * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} ctx
+ */
+export async function resolveExecutiveRegisteredTenantIds(ctx) {
+  const registeredTenantIds = new Set();
+  if (ctx.role !== ROLES.EXECUTIVE) return registeredTenantIds;
+  const { rows, error } = await fetchDatabaseTenants();
+  if (!error) {
+    for (const tenant of rows || []) {
+      const id = str(tenant?.id);
+      if (id) registeredTenantIds.add(id);
+    }
+  }
+  return registeredTenantIds;
+}
+
+/**
+ * Options for checkTenantConsistency when executive may read registered distributors.
+ * @param {import('@/predator/predatorSchema.js').PredatorTenantContext} ctx
+ * @param {Set<string>} registeredTenantIds
+ */
+export function executiveCrossTenantOpts(ctx, registeredTenantIds) {
+  return {
+    executiveCrossTenantReadable: ctx.role === ROLES.EXECUTIVE,
+    registeredTenantIds: ctx.role === ROLES.EXECUTIVE ? registeredTenantIds : null,
+  };
+}
+
+/**
+ * Whether foreign tenant ids are allowed for executive (registered distributors only).
+ */
+export function executiveForeignTenantsAllowed(ctx, foreignTenantIds, registeredTenantIds) {
+  const foreign = (foreignTenantIds || []).map(str).filter(Boolean);
+  if (!foreign.length) return true;
+  if (ctx.role !== ROLES.EXECUTIVE) return false;
+  if (!registeredTenantIds?.size) return true;
+  return foreign.every((id) => registeredTenantIds.has(id));
+}
 
 /**
  * @param {Object} p

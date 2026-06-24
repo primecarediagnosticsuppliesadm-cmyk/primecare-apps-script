@@ -10,7 +10,11 @@ function resolveTenantId(currentUser) {
   return String(currentUser?.tenantId || currentUser?.tenant_id || "").trim() || null;
 }
 
-export default function OperationsCenterAdminPage({ currentUser = null }) {
+function str(v) {
+  return String(v ?? "").trim();
+}
+
+export default function OperationsCenterAdminPage({ currentUser = null, setActivePage = null }) {
   const tenantId = resolveTenantId(currentUser);
   const [loading, setLoading] = useState(true);
   const [bundle, setBundle] = useState(null);
@@ -44,6 +48,20 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
     if (loading || !bundle) return;
     const ctx = consumeHqNavContext("operationsCenter");
     if (!ctx) return;
+
+    if (str(ctx.tab) === "labOwnership") {
+      setNavIntent({
+        tab: "labOwnership",
+        openAssignDrawer: Boolean(ctx.openAssignDrawer),
+        focusLabId: String(ctx.labId || "").trim(),
+      });
+      return;
+    }
+
+    if (str(ctx.tab) === "pilotOnboarding") {
+      setNavIntent({ tab: "pilotOnboarding" });
+      return;
+    }
 
     const user = findDirectoryUserForLabAgent(bundle.directoryUsers || [], ctx);
     if (user?.userId) {
@@ -80,13 +98,16 @@ export default function OperationsCenterAdminPage({ currentUser = null }) {
         loading={loading}
         error={error}
         statusMessage={statusMessage}
+        actorRole={currentUser?.role}
         focusUserId={focusUserId}
         openAssignDrawer={navIntent?.openAssignDrawer === true}
         focusLabId={navIntent?.focusLabId || ""}
+        initialTab={navIntent?.tab || ""}
         onNavIntentHandled={clearNavIntent}
         onReload={load}
         onError={setError}
         onStatus={setStatusMessage}
+        setActivePage={setActivePage}
       />
     </div>
   );

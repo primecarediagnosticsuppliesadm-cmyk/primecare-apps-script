@@ -107,6 +107,47 @@ export function filterLabsForUser(labs = [], currentUser) {
   return [];
 }
 
+function labScopeKey(lab = {}) {
+  return `${normalize(lab.tenantId ?? lab.tenant_id)}|${labIdKey(lab.labId ?? lab.lab_id)}`;
+}
+
+function ownedLabKeysFromOwnershipRows(ownershipRows = [], agentId = "") {
+  const keys = new Set();
+  const aid = normalizeAgentIdKey(agentId);
+  if (!aid) return keys;
+  for (const row of ownershipRows || []) {
+    const primary = normalizeAgentIdKey(row.primaryAgentId ?? row.primary_agent_id);
+    const secondary = normalizeAgentIdKey(row.secondaryAgentId ?? row.secondary_agent_id);
+    if (primary !== aid && secondary !== aid) continue;
+    const labTenantId = normalize(row.labTenantId ?? row.lab_tenant_id ?? row.tenantId);
+    const lid = labIdKey(row.labId ?? row.lab_id);
+    if (lid) keys.add(`${labTenantId}|${lid}`);
+  }
+  return keys;
+}
+
+/**
+ * Agent lab scope: legacy primary assignment + ownership primary/secondary rows.
+ */
+export function filterLabsForUserWithOwnership(labs = [], currentUser, ownershipRows = []) {
+  const base = filterLabsForUser(labs, currentUser);
+  if (!currentUser || currentUser.role !== ROLES.AGENT || !ownershipRows?.length) return base;
+
+  const ownedKeys = ownedLabKeysFromOwnershipRows(
+    ownershipRows,
+    currentUser.agentId || currentUser.agent_id
+  );
+  if (!ownedKeys.size) return base;
+
+  const merged = new Map();
+  for (const lab of base) merged.set(labScopeKey(lab), lab);
+  for (const lab of labs) {
+    const key = labScopeKey(lab);
+    if (ownedKeys.has(key) && !merged.has(key)) merged.set(key, lab);
+  }
+  return [...merged.values()];
+}
+
 /**
  * Agent scope for AR rows: explicit ar_credit_control.agent_id, else labs.assigned_agent_id.
  */
@@ -120,19 +161,30 @@ export function collectionEffectiveAgentId(item) {
   );
 }
 
-export function filterCollectionsForUser(collections = [], currentUser) {
+export function filterCollectionsForUser(collections = [], currentUser, ownershipRows = []) {
   if (!currentUser) return [];
 
   if (canSeeAllData(currentUser)) return collections;
 
   if (currentUser.role === ROLES.AGENT) {
-    return collections.filter((item) =>
-      agentRecordMatchesUser(
-        collectionEffectiveAgentId(item),
-        item.assignedAgent || item.agentName || item.Agent_Name,
-        currentUser
-      )
+    const ownedKeys = ownedLabKeysFromOwnershipRows(
+      ownershipRows,
+      currentUser.agentId || currentUser.agent_id
     );
+    return collections.filter((item) => {
+      if (
+        agentRecordMatchesUser(
+          collectionEffectiveAgentId(item),
+          item.assignedAgent || item.agentName || item.Agent_Name,
+          currentUser
+        )
+      ) {
+        return true;
+      }
+      if (!ownedKeys.size) return false;
+      const key = `${normalize(item.tenantId ?? item.tenant_id)}|${labIdKey(item.labId ?? item.lab_id)}`;
+      return ownedKeys.has(key);
+    });
   }
 
   if (currentUser.role === ROLES.LAB) {

@@ -174,7 +174,16 @@ Create with `"role": "distributor_admin"` and `"distributorId": "<distributor-te
 
 ## 7. QA reset password flow (UI)
 
-Use this when QA users have fake emails (e.g. `qa.test.agent1@primecare.test`) that cannot receive Supabase recovery mail.
+## Canonical QA credentials (browser certification)
+
+| Role | Email | Password |
+|------|-------|----------|
+| HQ Executive | `qa.executive@primecare.test` | `1234` |
+| HQ Admin | `qa.admin@primecare.test` | `1234` |
+| Field Agent | `qa.test.agent1@primecare.test` | `07a2b8cb3661Aa1!` |
+| Lab User | `qa.lab@primecare.test` | `1234` |
+
+Agent password is set via Operations Center **Reset Pwd** when rotated. Do not commit live passwords outside this QA doc.
 
 1. Apply `user_provisioning_password_reset_event_migration.sql` in QA SQL editor.
 2. Deploy both Edge Functions (`npm run supabase:functions:deploy:qa`).

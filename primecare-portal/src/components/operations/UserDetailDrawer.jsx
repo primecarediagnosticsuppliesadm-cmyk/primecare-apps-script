@@ -8,6 +8,7 @@ import {
   isAgentRole,
 } from "@/operations/operationsCenterAdminEngine.js";
 import { enrichAccessAuditEvent } from "@/operations/accessAuditEngine.js";
+import { formatLastLogin } from "@/operations/userProvisioningEngine.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -55,8 +56,8 @@ export default function UserDetailDrawer({
     if (!user) return [];
     const userNameById = new Map([[str(user.userId), str(user.name || user.displayName)]]);
     return (auditEvents || [])
-      .filter((ev) => str(ev.subjectUserId) === str(user.userId))
-      .map((ev) => enrichAccessAuditEvent(ev, { userNameById }))
+      .filter((ev) => str(ev.subjectUserId || ev.targetUserId) === str(user.userId))
+      .map((ev) => (ev.actionLabel ? ev : enrichAccessAuditEvent(ev, { userNameById })))
       .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
       .slice(0, 12);
   }, [user, auditEvents]);
@@ -65,6 +66,13 @@ export default function UserDetailDrawer({
     const resets = userAuditEvents.filter((ev) => ev.actionKey === "password_reset");
     return resets[0]?.timestamp || null;
   }, [userAuditEvents]);
+
+  const lastRoleChange = useMemo(() => {
+    const changes = userAuditEvents.filter((ev) => ev.actionKey === "role_changed");
+    return changes[0] || null;
+  }, [userAuditEvents]);
+
+  const lastLoginLabel = formatLastLogin(user?.lastLoginAt ?? user?.lastLogin);
 
   if (!user) return null;
 
@@ -105,6 +113,19 @@ export default function UserDetailDrawer({
               <p className="text-[10px] font-semibold uppercase text-slate-500">Territory</p>
               <p className="mt-0.5 text-slate-800">{user.territory || "—"}</p>
             </div>
+            <div className="rounded-lg border px-3 py-2 col-span-2">
+              <p className="text-[10px] font-semibold uppercase text-slate-500">Last login</p>
+              <p className="mt-0.5 text-slate-800">{lastLoginLabel}</p>
+            </div>
+          </section>
+
+          <section>
+            <p className="mb-2 text-xs font-semibold text-slate-700">Last role change</p>
+            <p className="text-xs text-slate-600">
+              {lastRoleChange
+                ? `${lastRoleChange.previousValues?.role || "—"} → ${lastRoleChange.newValues?.role || "—"} · ${formatAuditTime(lastRoleChange.timestamp)}`
+                : "Not recorded in loaded audit window"}
+            </p>
           </section>
 
           <section>

@@ -115,14 +115,6 @@ export default function PrimeCareWebPortal({
           />
         );
 
-      case "orders":
-        return (
-          <PlaceholderCard
-            title="Agent Orders"
-            subtitle="Agent-specific order visibility will be mapped in a later step."
-          />
-        );
-
       case "notifications":
       case "notification-center":
         return <NotificationCenterPage currentUser={currentUser} setActivePage={setActivePage} />;
@@ -244,7 +236,12 @@ export default function PrimeCareWebPortal({
 
       case "operationsCenter":
       case "operations-center":
-        return <OperationsCenterAdminPage currentUser={currentUser} />;
+        return (
+          <OperationsCenterAdminPage
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+          />
+        );
 
       case "accessAudit":
       case "access-audit":

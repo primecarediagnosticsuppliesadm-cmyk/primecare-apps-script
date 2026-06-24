@@ -241,6 +241,29 @@ function evaluateLabsGate(distributor, metrics, qualifications = []) {
       pendingOnboarding ? `${pendingOnboarding} pending review` : "No blocking reviews"
     ),
   ];
+
+  const ownershipMetrics = metrics.ownershipMetrics || null;
+  const scopedLabs = (metrics.labsRows || []).filter(
+    (l) => str(l.tenantId ?? l.tenant_id) === str(distributor.id)
+  );
+  const unassigned =
+    ownershipMetrics?.unassignedAttention?.filter(
+      (l) => str(l.tenantId ?? l.tenant_id) === str(distributor.id)
+    ).length ??
+    scopedLabs.filter((l) => !str(l.primaryAgentId ?? l.assignedAgentId ?? l.assigned_agent_id))
+      .length;
+
+  if (scopedLabs.length > 0) {
+    checks.push(
+      makeCheck(
+        "labs_owned",
+        "All labs have primary owner",
+        unassigned === 0 ? "PASS" : unassigned <= 2 ? "WARN" : "FAIL",
+        unassigned === 0 ? "Fully owned" : `${unassigned} unassigned`
+      )
+    );
+  }
+
   return { id: GATE_IDS.LABS, label: "Lab Readiness", checks, status: aggregateGateStatus(checks) };
 }
 

@@ -12,6 +12,7 @@ import { validateLabPortalModule } from "@/predator/validators/labPortalValidato
 import { validateOperationalEvidenceModule } from "@/predator/validators/operationalEvidenceValidator.js";
 import { validateOperationsCommandCenterModule } from "@/predator/validators/operationsCommandCenterValidator.js";
 import { validateExecutiveInterventionModule } from "@/predator/validators/executiveInterventionValidator.js";
+import { validateExecutiveActionQueueModule } from "@/predator/validators/executiveActionQueueValidator.js";
 import { validateOperationalTasksModule } from "@/predator/validators/operationalTaskValidator.js";
 import { validateOperationalEventLedgerModule } from "@/predator/validators/operationalEventLedgerValidator.js";
 import { validateExecutiveIntelligenceModule } from "@/predator/validators/executiveIntelligenceValidator.js";
@@ -22,6 +23,8 @@ import { validateFounderFinancialIntelligenceModule } from "@/predator/validator
 import { validateTenantFoundationModule } from "@/predator/validators/tenantFoundationValidator.js";
 import { validateDistributorWorkspaceModule } from "@/predator/validators/distributorWorkspaceValidator.js";
 import { validateDistributorProvisioningModule } from "@/predator/validators/distributorProvisioningValidator.js";
+import { validateUserProvisioningModule } from "@/predator/validators/userProvisioningValidator.js";
+import { validateLabOwnershipModule } from "@/predator/validators/labOwnershipValidator.js";
 import { validateDistributorOsModule } from "@/predator/validators/distributorOsValidator.js";
 import { validatePrimecareOsModule } from "@/predator/validators/primecareOsValidator.js";
 import { validateCommissionEngineModule } from "@/predator/validators/commissionEngineValidator.js";
@@ -171,6 +174,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
       const [
         operationsCenter,
         executiveIntervention,
+        executiveActionQueue,
         operationalTasks,
         eventLedger,
         executiveIntelligence,
@@ -181,6 +185,8 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         tenantFoundation,
         distributorWorkspace,
         distributorProvisioning,
+        userProvisioning,
+        labOwnership,
         commissionEngine,
         labContractEngine,
         distributorBilling,
@@ -201,6 +207,11 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
           ctx,
           currentUser,
           rendered: snapshots.executiveIntervention ?? null,
+          opsPayload,
+        }),
+        validateExecutiveActionQueueModule({
+          ctx,
+          currentUser,
           opsPayload,
         }),
         validateOperationalTasksModule({
@@ -262,6 +273,14 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
           rendered: snapshots.distributorProvisioning ?? null,
           opsPayload,
         }),
+        validateUserProvisioningModule({
+          ctx,
+          currentUser,
+        }),
+        validateLabOwnershipModule({
+          ctx,
+          currentUser,
+        }),
         validateCommissionEngineModule({
           ctx,
           currentUser,
@@ -312,6 +331,7 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
       modules.push(
         storePolishedModule("Operations Center", operationsCenter, ctx),
         storePolishedModule("Executive Intervention", executiveIntervention, ctx),
+        storePolishedModule("Executive Action Queue", executiveActionQueue, ctx),
         storePolishedModule("Operational Tasks", operationalTasks, ctx),
         storePolishedModule("Operational Event Ledger", eventLedger, ctx),
         storePolishedModule("Executive Intelligence", executiveIntelligence, ctx),
@@ -322,6 +342,8 @@ export async function runAllPredatorValidations(currentUser, snapshots = {}) {
         storePolishedModule("Tenant Foundation", tenantFoundation, ctx),
         storePolishedModule("Distributor Workspace", distributorWorkspace, ctx),
         storePolishedModule("Distributor Provisioning", distributorProvisioning, ctx),
+        storePolishedModule("User Provisioning", userProvisioning, ctx),
+        storePolishedModule("Lab Ownership", labOwnership, ctx),
         storePolishedModule("Commission Engine", commissionEngine, ctx),
         storePolishedModule("Lab Contract Engine", labContractEngine, ctx),
         storePolishedModule("Distributor Billing", distributorBilling, ctx),
@@ -494,6 +516,18 @@ export async function runPredatorModuleValidation(moduleName, currentUser, snaps
         rendered: snapshot,
       });
       break;
+    case "User Provisioning":
+      result = await validateUserProvisioningModule({
+        ctx,
+        currentUser,
+      });
+      break;
+    case "Lab Ownership":
+      result = await validateLabOwnershipModule({
+        ctx,
+        currentUser,
+      });
+      break;
     case "Distributor OS":
       if (snapshot?.distributorOs) {
         predatorStore.setModuleRenderedSnapshot(DISTRIBUTOR_OS_MODULE, {
@@ -625,6 +659,11 @@ export async function runPredatorExecutiveBatchValidation(currentUser, snapshots
       ctx,
       currentUser,
       rendered: snapshots.executiveIntervention ?? null,
+      opsPayload,
+    }),
+    validateExecutiveActionQueueModule({
+      ctx,
+      currentUser,
       opsPayload,
     }),
     validateOperationalTasksModule({

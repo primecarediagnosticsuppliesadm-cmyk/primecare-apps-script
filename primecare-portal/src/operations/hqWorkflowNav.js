@@ -44,6 +44,17 @@ export function navigateToCollections(
   });
 }
 
+export function navigateToCreditRisk(
+  setActivePage,
+  { labId = "", attentionFilter = "" } = {}
+) {
+  hqNavigate(setActivePage, {
+    page: "risk",
+    labId: str(labId),
+    attentionFilter: str(attentionFilter),
+  });
+}
+
 export function navigateToVisits(setActivePage, { labId = "" } = {}) {
   hqNavigate(setActivePage, {
     page: "visits",
@@ -59,6 +70,7 @@ export function navigateToOperationsCenter(
     agentName = "",
     openAssignDrawer = false,
     labId = "",
+    tab = "",
   } = {}
 ) {
   hqNavigate(setActivePage, {
@@ -68,6 +80,7 @@ export function navigateToOperationsCenter(
     agentName: str(agentName),
     openAssignDrawer: Boolean(openAssignDrawer),
     labId: str(labId),
+    tab: str(tab),
   });
 }
 

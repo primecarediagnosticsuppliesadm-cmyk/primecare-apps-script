@@ -2,6 +2,7 @@ import { supabase } from "./supabaseClient.js";
 import {
   filterCollectionsForUser,
   filterLabsForUser,
+  filterLabsForUserWithOwnership,
   filterVisitsForUser,
 } from "@/utils/accessFilters.js";
 import {
@@ -9,6 +10,7 @@ import {
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { labIdKey, normalizeLabIdKey } from "@/utils/labId.js";
+import { ALL_ROLE_SLUGS, isDistributorScopedRole, validateActorRoleAssignment } from "@/config/rolePermissionMatrix.js";
 import { computeQualificationScore } from "@/utils/computeQualificationScore.js";
 import {
   deriveDefaultPipelineStage,
@@ -36,6 +38,27 @@ import {
   rollupStockDashboardMappedItems,
 } from "@/metrics/computeInventoryMetrics.js";
 import { IS_QA } from "@/config/environment";
+import {
+  clampLimit,
+  HQ_AGENT_VISIT_COLUMNS,
+  HQ_AR_COLUMNS,
+  HQ_COLLECTIONS_AR_LIMIT,
+  HQ_DASHBOARD_ORDERS_LIMIT,
+  HQ_DASHBOARD_RECENT_DAYS,
+  HQ_DASHBOARD_VISITS_LIMIT,
+  HQ_INVENTORY_COLUMNS,
+  HQ_LABS_NAME_COLUMNS,
+  HQ_ORDER_LINE_COUNT_COLUMNS,
+  HQ_ORDER_LIST_COLUMNS,
+  HQ_ORDERS_LIST_DEFAULT_LIMIT,
+  HQ_ORDERS_LIST_MAX_LIMIT,
+  HQ_PAYMENT_COLUMNS,
+  HQ_PAYMENTS_RECENT_DAYS,
+  HQ_PAYMENTS_RECENT_LIMIT,
+  HQ_V_LABS_CREDIT_COLUMNS,
+  recentDateYmd,
+} from "@/api/hqReadBounds.js";
+import { hqDebugLog, hqDebugWarn, isHqDebugLogEnabled } from "@/utils/hqDebugLog.js";
 import { recordPredatorCacheEvent } from "@/predator/cacheDiagnostics.js";
 import {
   estimatePayloadBytes,
@@ -223,7 +246,7 @@ export function auditCollectionDataInconsistencies(arRaw, payRaw, collections) {
   }
 
   if (issues.length) {
-    console.warn("COLLECTION DATA INCONSISTENCIES", issues);
+    hqDebugWarn("COLLECTION DATA INCONSISTENCIES", { count: issues.length });
   }
   return issues;
 }
@@ -445,7 +468,7 @@ export async function getLabCatalogRead(options = {}) {
       const inv = await readInventoryCatalogFallbackRows();
       data = inv.data;
       error = inv.error;
-      console.log("SUPABASE LAB CATALOG RAW INVENTORY", data || []);
+      hqDebugLog("SUPABASE LAB CATALOG RAW INVENTORY", data || []);
     }
 
     if (error) {
@@ -460,7 +483,7 @@ export async function getLabCatalogRead(options = {}) {
         return a.productName.localeCompare(b.productName);
       });
 
-    console.log("SUPABASE LAB CATALOG", {
+    hqDebugLog("SUPABASE LAB CATALOG", {
       source,
       count: products.length,
       rawCount: mapped.length,
@@ -1558,14 +1581,16 @@ export async function createPaymentWrite(payload = {}) {
  * Read-only collections: `ar_credit_control` (outstanding, total_paid) + `payments` (today's total),
  * enriched from `v_labs_credit` when present. Never throws.
  */
-export async function getCollectionsRead() {
+export async function getCollectionsRead(params = {}) {
   return predatorTrace("Collections", "api.getCollectionsRead", async () => {
   traceSupabaseRead("Collections.getCollectionsRead", {
     tables: ["ar_credit_control", "payments", "v_labs_credit"],
   });
   if (!supabase) {
     return {
-      success: true,
+      success: false,
+      readFailed: true,
+      error: "Supabase is not configured",
       data: {
         summary: { ...EMPTY_COLLECTIONS_SUMMARY },
         collections: [],
@@ -1575,23 +1600,55 @@ export async function getCollectionsRead() {
 
   try {
     const today = localDateYmd();
+    const recentFrom = recentDateYmd(
+      Number(params.daysBack) > 0 ? Number(params.daysBack) : HQ_PAYMENTS_RECENT_DAYS
+    );
+    const arLimit = clampLimit(params.limit, HQ_COLLECTIONS_AR_LIMIT, HQ_COLLECTIONS_AR_LIMIT);
 
-    const { data: arRaw, error: arErr } = await supabase.from("ar_credit_control").select("*");
+    const { data: arRaw, error: arErr } = await supabase
+      .from("ar_credit_control")
+      .select(HQ_AR_COLUMNS)
+      .limit(arLimit);
     if (arErr) {
       console.warn("[getCollectionsRead] ar_credit_control:", arErr.message);
+      return {
+        success: false,
+        readFailed: true,
+        error: arErr.message,
+        data: { summary: { ...EMPTY_COLLECTIONS_SUMMARY }, collections: [] },
+      };
     }
-    const { data: payRaw, error: payErr } = await supabase.from("payments").select("*");
-    if (payErr) {
-      console.warn("[getCollectionsRead] payments:", payErr.message);
+
+    const { data: payTodayRaw, error: payTodayErr } = await supabase
+      .from("payments")
+      .select(HQ_PAYMENT_COLUMNS)
+      .eq("payment_date", today);
+    if (payTodayErr) {
+      console.warn("[getCollectionsRead] payments today:", payTodayErr.message);
     }
+
+    const { data: payRecentRaw, error: payRecentErr } = await supabase
+      .from("payments")
+      .select(HQ_PAYMENT_COLUMNS)
+      .gte("payment_date", recentFrom)
+      .order("payment_date", { ascending: false })
+      .limit(HQ_PAYMENTS_RECENT_LIMIT);
+
+    if (payRecentErr) {
+      console.warn("[getCollectionsRead] payments recent:", payRecentErr.message);
+    }
+
+    const payRaw = payRecentRaw || [];
     const { byLab: paymentsByLab, casingVariants } = buildPaymentsByNormalizedLabId(payRaw);
-    if (casingVariants.length) {
-      console.warn("COLLECTION PAYMENT LAB_ID CASING VARIANTS", casingVariants.slice(0, 10));
+    if (casingVariants.length && isHqDebugLogEnabled()) {
+      hqDebugWarn("COLLECTION PAYMENT LAB_ID CASING VARIANTS", casingVariants.slice(0, 10));
     }
 
-    const todayCollections = sumTodayPayments(payRaw);
+    const todayCollections = sumTodayPayments(payTodayRaw || []);
 
-    const { data: labsRaw, error: labsErr } = await supabase.from("v_labs_credit").select("*");
+    const { data: labsRaw, error: labsErr } = await supabase
+      .from("v_labs_credit")
+      .select(HQ_V_LABS_CREDIT_COLUMNS);
     if (labsErr) {
       console.warn("[getCollectionsRead] v_labs_credit:", labsErr.message);
     }
@@ -1643,7 +1700,9 @@ export async function getCollectionsRead() {
   } catch (err) {
     console.warn("[getCollectionsRead] failed:", err?.message || err);
     return {
-      success: true,
+      success: false,
+      readFailed: true,
+      error: err?.message || String(err),
       data: {
         summary: { ...EMPTY_COLLECTIONS_SUMMARY },
         collections: [],
@@ -2077,7 +2136,7 @@ function logAdminDashboardSupabaseAudit(ctx) {
     }
   }
 
-  console.log("DASHBOARD KPI AUDIT", {
+  hqDebugLog("DASHBOARD KPI AUDIT", {
     scope: "Supabase backend (getAdminDashboardRead)",
     asOfLocalDate: today,
     rowCounts: {
@@ -2132,9 +2191,9 @@ function logAdminDashboardSupabaseAudit(ctx) {
     const r = num(recomputed);
     const ok = Math.abs(d - r) <= eps;
     if (ok) {
-      console.log("KPI SOURCE VERIFIED", { kpi, displayed: d, rawRecomputed: r, note });
+      hqDebugLog("KPI SOURCE VERIFIED", { kpi, displayed: d, rawRecomputed: r, note });
     } else {
-      console.warn("KPI MISMATCH DETECTED", { kpi, displayed: d, rawRecomputed: r, note });
+      hqDebugWarn("KPI MISMATCH DETECTED", { kpi, displayed: d, rawRecomputed: r, note });
     }
     return ok;
   };
@@ -2170,14 +2229,14 @@ function logAdminDashboardSupabaseAudit(ctx) {
     num(stockStats?.healthyItems);
   const tSku = num(stockStats?.totalSkus);
   if (tSku === skuSum) {
-    console.log("KPI SOURCE VERIFIED", {
+    hqDebugLog("KPI SOURCE VERIFIED", {
       kpi: "inventorySnapshot_buckets",
       displayedTotalSkus: tSku,
       recomputedBucketSum: skuSum,
       note: "critical+reorder+healthy matches totalSkus",
     });
   } else {
-    console.warn("KPI MISMATCH DETECTED", {
+    hqDebugWarn("KPI MISMATCH DETECTED", {
       kpi: "inventorySnapshot_buckets",
       displayedTotalSkus: tSku,
       recomputedBucketSum: skuSum,
@@ -2185,13 +2244,13 @@ function logAdminDashboardSupabaseAudit(ctx) {
     });
   }
 
-  console.log("KPI SOURCE VERIFIED", {
+  hqDebugLog("KPI SOURCE VERIFIED", {
     kpi: "recentVisitsCountCardSemantics",
     uiValueUses: "COUNT(*) agent_visits (all-time), not today's visits only",
     note: 'Compare dashboard "Recent Visits" StatCard vs Recent Field Activity (top 10 mapped, truncated to 5 in UI)',
   });
 
-  console.log("KPI SOURCE VERIFIED", {
+  hqDebugLog("KPI SOURCE VERIFIED", {
     kpi: "nearStockout",
     computedAs: productsNearStockout,
     note: 'Backend uses criticalItems+reorderItems from inventory table; merged UI may MAX with reorder forecast urgency',
@@ -2208,7 +2267,7 @@ function logAdminDashboardSupabaseAudit(ctx) {
   }
 
   if (naiveTodayNonCancelledAnyStatus > recalcTodayFulfilled + eps) {
-    console.log("KPI SOURCE VERIFIED", {
+    hqDebugLog("KPI SOURCE VERIFIED", {
       kpi: "nonFulFilledPipelineExistsToday",
       note: `Today Σ(non-cancelled, any status)=${naiveTodayNonCancelledAnyStatus.toFixed(
         2
@@ -2217,24 +2276,24 @@ function logAdminDashboardSupabaseAudit(ctx) {
   }
 
   if (ordersWithoutArPostedWhenFulfilled > 0) {
-    console.warn("KPI MISMATCH DETECTED", {
+    hqDebugWarn("KPI MISMATCH DETECTED", {
       kpi: "fulfilledOrders_missing_ar_posted_flag",
       count: ordersWithoutArPostedWhenFulfilled,
       note: "May indicate AR not incremented for some fulfilled orders—compare collections AR vs order fulfill path",
     });
   } else {
-    console.log("KPI SOURCE VERIFIED", {
+    hqDebugLog("KPI SOURCE VERIFIED", {
       kpi: "fulfilled_orders_ar_posted_scan",
       note: "No Fulfilled rows with orders.ar_posted===false among scanned orders (migration-dependent column)",
     });
   }
 
-  console.log("KPI SOURCE VERIFIED", {
+  hqDebugLog("KPI SOURCE VERIFIED", {
     kpi: "recentFieldActivity_linkedOrders_excludeCancelled",
     note: "buildOrdersByLabDateIndex skips Cancelled orders; linked visit amounts cannot derive from cancelled rows",
   });
 
-  console.log("DASHBOARD KPI AUDIT complete");
+  hqDebugLog("DASHBOARD KPI AUDIT complete");
 }
 
 const ADMIN_DASHBOARD_READ_CACHE_TTL_MS = 60 * 1000;
@@ -2329,7 +2388,12 @@ function combineOrderLineItemsForMetrics(orderItemsRaw, orderLinesRaw) {
 
 function logAdminDashboardKpiDebug(rowCounts, kpis, queryErrors) {
   if (!isPerfLogEnabled()) return;
-  console.log("[AdminDashboard KPI debug]", { rowCounts, kpis, queryErrors });
+  hqDebugLog("[AdminDashboard KPI debug]", {
+    orderCount: rowCounts?.orders,
+    arCount: rowCounts?.ar,
+    visitCount: rowCounts?.visits,
+    queryErrorCount: queryErrors?.length ?? 0,
+  });
 }
 
 function recordAdminDashboardApiExecutionTrace({
@@ -2489,19 +2553,38 @@ export async function getAdminDashboardRead(options = {}) {
     const endQuery = perfTime("getAdminDashboardRead.supabaseQueries");
 
     const queryErrors = [];
+    const recentFrom = recentDateYmd(HQ_DASHBOARD_RECENT_DAYS);
 
-    const [ordersRes, arRes, visitsRes, invRes, labsRes, orderLinesRes, payRes] =
-      await Promise.all([
-        timedSupabaseQuery("orders", () => supabase.from("orders").select("*")),
-        timedSupabaseQuery("ar_credit_control", () =>
-          supabase.from("ar_credit_control").select("*")
-        ),
-        timedSupabaseQuery("agent_visits", () => supabase.from("agent_visits").select("*")),
-        timedSupabaseQuery("inventory", () => supabase.from("inventory").select("*")),
-        timedSupabaseQuery("labs", () => supabase.from("labs").select("*")),
-        timedSupabaseQuery("order_lines", () => supabase.from("order_lines").select("*")),
-        timedSupabaseQuery("payments", () => supabase.from("payments").select("*")),
-      ]);
+    const ordersQuery = supabase
+      .from("orders")
+      .select(HQ_ORDER_LIST_COLUMNS)
+      .gte("order_date", recentFrom)
+      .order("order_date", { ascending: false })
+      .limit(HQ_DASHBOARD_ORDERS_LIMIT);
+
+    const paymentsTodayQuery = supabase
+      .from("payments")
+      .select(HQ_PAYMENT_COLUMNS)
+      .eq("payment_date", today);
+
+    const visitsQuery = supabase
+      .from("agent_visits")
+      .select(HQ_AGENT_VISIT_COLUMNS)
+      .order("created_at", { ascending: false })
+      .limit(HQ_DASHBOARD_VISITS_LIMIT);
+
+    const [ordersRes, arRes, visitsRes, invRes, labsRes, payRes] = await Promise.all([
+      timedSupabaseQuery("orders", () => ordersQuery),
+      timedSupabaseQuery("ar_credit_control", () =>
+        supabase.from("ar_credit_control").select(HQ_AR_COLUMNS)
+      ),
+      timedSupabaseQuery("agent_visits", () => visitsQuery),
+      timedSupabaseQuery("inventory", () =>
+        supabase.from("inventory").select(HQ_INVENTORY_COLUMNS)
+      ),
+      timedSupabaseQuery("labs", () => supabase.from("labs").select(HQ_LABS_NAME_COLUMNS)),
+      timedSupabaseQuery("payments", () => paymentsTodayQuery),
+    ]);
 
     const ordersRaw = ordersRes.error ? [] : ordersRes.data || [];
     const orderIds = collectOrderRowIds(ordersRaw);
@@ -2509,8 +2592,13 @@ export async function getAdminDashboardRead(options = {}) {
     const visitsAllRaw = visitsRes.error ? [] : visitsRes.data || [];
     const invRaw = invRes.error ? [] : invRes.data || [];
     const labsRaw = labsRes.error ? [] : labsRes.data || [];
-    const orderLinesRaw = orderLinesRes.error ? [] : orderLinesRes.data || [];
     const payRaw = payRes.error ? [] : payRes.data || [];
+
+    let orderLinesRaw = [];
+    if (orderIds.length) {
+      const lineRes = await fetchOrderLineCountsForOrders(orderIds, { returnRows: true });
+      orderLinesRaw = lineRes.rows || [];
+    }
 
     const orderItemsRaw = combineOrderLineItemsForMetrics([], orderLinesRaw);
     const visitsTotalCount = visitsAllRaw.length;
@@ -2542,9 +2630,8 @@ export async function getAdminDashboardRead(options = {}) {
       queryErrors.push("labs");
       console.warn("[getAdminDashboardRead] labs:", labsRes.error.message);
     }
-    if (orderLinesRes.error) {
+    if (orderIds.length && !orderLinesRaw.length) {
       queryErrors.push("order_lines");
-      console.warn("[getAdminDashboardRead] order_lines:", orderLinesRes.error.message);
     }
     if (payRes.error) {
       queryErrors.push("payments");
@@ -3363,11 +3450,22 @@ export async function getAgentWorkspaceRead(currentUser) {
   }
 
   try {
+    let ownershipRows = [];
+    if (currentUser?.role === "agent") {
+      const ownRes = await supabase
+        .from("lab_ownership")
+        .select("lab_tenant_id, lab_id, primary_agent_id, secondary_agent_id, status")
+        .eq("status", "ACTIVE");
+      if (!ownRes.error && Array.isArray(ownRes.data)) {
+        ownershipRows = ownRes.data;
+      }
+    }
+
     const collectionsRes = await getCollectionsRead();
     const allCollections = Array.isArray(collectionsRes?.data?.collections)
       ? collectionsRes.data.collections
       : [];
-    const pendingCollections = filterCollectionsForUser(allCollections, currentUser);
+    const pendingCollections = filterCollectionsForUser(allCollections, currentUser, ownershipRows);
 
     const { data: labsRaw, error: labsErr } = await supabase.from("v_labs_credit").select("*");
     if (labsErr) {
@@ -3376,7 +3474,8 @@ export async function getAgentWorkspaceRead(currentUser) {
     const allLabs = (labsRaw || [])
       .map(mapLabsCreditRow)
       .filter((l) => l.labId || l.labName);
-    const assignedLabs = filterLabsForUser(allLabs, currentUser);
+
+    const assignedLabs = filterLabsForUserWithOwnership(allLabs, currentUser, ownershipRows);
 
     let visitRows = [];
     const av = await supabase.from("agent_visits").select("*");
@@ -3424,7 +3523,7 @@ export async function getAgentWorkspaceRead(currentUser) {
       recentVisits,
       pendingCollections,
     };
-    console.log("SUPABASE AGENT WORKSPACE:", data);
+    hqDebugLog("SUPABASE AGENT WORKSPACE:", data);
 
     return {
       success: true,
@@ -3432,7 +3531,7 @@ export async function getAgentWorkspaceRead(currentUser) {
     };
   } catch (err) {
     console.warn("[getAgentWorkspaceRead] failed:", err?.message || err);
-    return { success: true, data: { ...EMPTY_AGENT_WORKSPACE } };
+    return { success: false, readFailed: true, error: err?.message || String(err), data: { ...EMPTY_AGENT_WORKSPACE } };
   }
 }
 
@@ -3667,10 +3766,7 @@ export async function getInventoryLedgerRead() {
     }
 
     const movements = (data || []).map(mapInventoryLedgerRow);
-    console.log("SUPABASE INVENTORY LEDGER", {
-      count: movements.length,
-      movements,
-    });
+    hqDebugLog("SUPABASE INVENTORY LEDGER", { count: movements.length });
 
     return { success: true, data: { movements }, error: null };
   } catch (err) {
@@ -3832,11 +3928,14 @@ export async function getInventoryHealthRead() {
     };
 
     const payload = { summary, rows };
-    console.log("SUPABASE INVENTORY HEALTH", {
+    hqDebugLog("SUPABASE INVENTORY HEALTH", {
       inventoryRows: inventoryRows.length,
       ledgerRows: ledgerRows.length,
     });
-    console.log("INVENTORY HEALTH CALCULATED", payload);
+    hqDebugLog("INVENTORY HEALTH CALCULATED", {
+      totalSkus: summary.totalSkus,
+      criticalCount: summary.criticalCount,
+    });
 
     return { success: true, data: payload, error: null };
   } catch (err) {
@@ -4408,6 +4507,43 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
 }
 
 /**
+ * Server-side credit eligibility for lab order placement.
+ * @returns {Promise<{ ok: boolean, error?: string }>}
+ */
+async function assertLabOrderCreditEligible(tenantId, labId) {
+  if (!supabase) return { ok: true };
+  const tid = str(tenantId);
+  const lid = labIdKey(labId);
+  if (!tid || !lid) return { ok: true };
+
+  const { data, error } = await supabase
+    .from("ar_credit_control")
+    .select("credit_hold, outstanding, credit_limit")
+    .eq("tenant_id", tid)
+    .eq("lab_id", lid)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("[assertLabOrderCreditEligible]", error.message);
+    return { ok: true };
+  }
+  if (!data) return { ok: true };
+
+  const onHold =
+    data.credit_hold === true ||
+    String(data.credit_hold ?? "").toUpperCase() === "TRUE" ||
+    String(data.credit_hold ?? "").toUpperCase() === "HOLD";
+  if (onHold) {
+    return {
+      ok: false,
+      error: "Credit hold active — new orders are blocked until collections clear.",
+    };
+  }
+
+  return { ok: true };
+}
+
+/**
  * Inserts a lab order into `orders` and line rows into `order_items`.
  * Payload mirrors LabOrderingPage: { labId, labName?, notes?, items: [{ productId, productName?, quantity, unitSellingPrice }], tenantId?, createdBy?, orderId?, orderDate?, status? }
  * Apps Script `submitLabOrder` remains the fallback caller when this returns failure.
@@ -4445,6 +4581,11 @@ export async function createOrderWrite(payload = {}) {
     }
     if (!items.length) {
       return { success: false, error: "items are required", data: null };
+    }
+
+    const creditCheck = await assertLabOrderCreditEligible(tenant_id, lab_id);
+    if (!creditCheck.ok) {
+      return { success: false, error: creditCheck.error, data: null };
     }
 
     const normalizedLines = items.map((it) => {
@@ -4727,7 +4868,7 @@ async function fetchLabsNameMap() {
   const map = new Map();
   if (!supabase) return map;
   try {
-    const { data: labsRows, error } = await supabase.from("labs").select("*");
+    const { data: labsRows, error } = await supabase.from("labs").select(HQ_LABS_NAME_COLUMNS);
     if (error || !Array.isArray(labsRows)) return map;
     for (const l of labsRows) {
       const id = str(l.lab_id ?? l.labId ?? l.id);
@@ -4738,6 +4879,85 @@ async function fetchLabsNameMap() {
     /* ignore — orders list still works without lab names */
   }
   return map;
+}
+
+async function fetchOrderLineCountsForOrders(orderIds = [], options = {}) {
+  const counts = new Map();
+  const rows = [];
+  if (!supabase || !orderIds?.length) return { counts, rows };
+
+  const ids = [...new Set(orderIds.map((id) => str(id)).filter(Boolean))];
+  const chunkSize = 200;
+
+  const accumulate = (lineRows) => {
+    for (const line of lineRows || []) {
+      const oid = str(line.order_id ?? line.orderId);
+      if (oid) counts.set(oid, (counts.get(oid) || 0) + 1);
+      if (options.returnRows) rows.push(line);
+    }
+  };
+
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    try {
+      const { data, error } = await supabase
+        .from("order_lines")
+        .select(HQ_ORDER_LINE_COUNT_COLUMNS)
+        .in("order_id", chunk);
+      if (!error && Array.isArray(data)) accumulate(data);
+    } catch {
+      /* optional */
+    }
+    try {
+      const { data, error } = await supabase
+        .from("order_items")
+        .select(HQ_ORDER_LINE_COUNT_COLUMNS)
+        .in("order_id", chunk);
+      if (!error && Array.isArray(data)) accumulate(data);
+    } catch {
+      /* optional */
+    }
+  }
+
+  return { counts, rows };
+}
+
+async function fetchOrderLineCounts(orderIds = null) {
+  if (Array.isArray(orderIds) && orderIds.length) {
+    const { counts } = await fetchOrderLineCountsForOrders(orderIds);
+    return counts;
+  }
+  const counts = new Map();
+  if (!supabase) return counts;
+
+  const accumulate = (lineRows) => {
+    for (const line of lineRows || []) {
+      const oid = str(line.order_id ?? line.orderId);
+      if (oid) counts.set(oid, (counts.get(oid) || 0) + 1);
+    }
+  };
+
+  try {
+    const { data, error } = await supabase
+      .from("order_lines")
+      .select(HQ_ORDER_LINE_COUNT_COLUMNS)
+      .limit(5000);
+    if (!error && Array.isArray(data)) accumulate(data);
+  } catch {
+    /* optional */
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("order_items")
+      .select(HQ_ORDER_LINE_COUNT_COLUMNS)
+      .limit(5000);
+    if (!error && Array.isArray(data)) accumulate(data);
+  } catch {
+    /* optional */
+  }
+
+  return counts;
 }
 
 /**
@@ -4787,7 +5007,7 @@ export async function getLabRecentOrdersRead(labId) {
     }
 
     const rawList = Array.isArray(rows) ? rows : [];
-    console.log("SUPABASE LAB RECENT ORDERS:", rawList);
+    hqDebugLog("SUPABASE LAB RECENT ORDERS:", rawList);
 
     let labMap = new Map();
     try {
@@ -4808,65 +5028,54 @@ export async function getLabRecentOrdersRead(labId) {
   }
 }
 
-async function fetchOrderLineCounts() {
-  const counts = new Map();
-  if (!supabase) return counts;
-
-  const accumulate = (rows) => {
-    for (const line of rows || []) {
-      const oid = str(line.order_id ?? line.orderId);
-      if (oid) counts.set(oid, (counts.get(oid) || 0) + 1);
-    }
-  };
-
-  try {
-    const { data, error } = await supabase.from("order_lines").select("order_id");
-    if (!error && Array.isArray(data)) accumulate(data);
-  } catch {
-    /* optional */
-  }
-
-  try {
-    const { data, error } = await supabase.from("order_items").select("order_id");
-    if (!error && Array.isArray(data)) {
-      for (const line of data) {
-        const oid = str(line.order_id ?? line.orderId);
-        if (oid && !counts.has(oid)) {
-          counts.set(oid, (counts.get(oid) || 0) + 1);
-        }
-      }
-    }
-  } catch {
-    /* optional */
-  }
-
-  return counts;
-}
-
 /**
- * Read-only order list: bare `from("orders").select("*")` (no filters, limits, or ranges).
+ * Bounded read-only order list (tenant-scoped via RLS).
  * Never throws.
  */
-export async function getOrdersRead(_params = {}) {
-  void _params;
-  traceSupabaseRead("Orders.getOrdersRead", { table: "orders" });
+export async function getOrdersRead(params = {}) {
+  const limit = clampLimit(params.limit, HQ_ORDERS_LIST_DEFAULT_LIMIT, HQ_ORDERS_LIST_MAX_LIMIT);
+  const offset = Math.max(0, Number(params.offset) || 0);
+  traceSupabaseRead("Orders.getOrdersRead", { table: "orders", limit, offset });
 
-  const emptyOrders = { success: false, error: "Supabase is not configured", data: { orders: [] } };
+  const emptyOrders = {
+    success: false,
+    readFailed: true,
+    error: "Supabase is not configured",
+    data: { orders: [] },
+  };
 
   if (!supabase) {
     return emptyOrders;
   }
 
   try {
-    const { data, error } = await supabase.from("orders").select("*");
+    const recentFrom = recentDateYmd(
+      Number(params.daysBack) > 0 ? Number(params.daysBack) : HQ_DASHBOARD_RECENT_DAYS
+    );
 
-    if (error) {
-      const message = error.message || String(error);
-      console.warn("[getOrdersRead] Supabase error:", message);
-      return { success: false, error: message, data: { orders: [] } };
+    let rawList = [];
+    const primary = await supabase
+      .from("orders")
+      .select(HQ_ORDER_LIST_COLUMNS)
+      .gte("order_date", recentFrom)
+      .order("order_date", { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (primary.error) {
+      const fallback = await supabase
+        .from("orders")
+        .select(HQ_ORDER_LIST_COLUMNS)
+        .order("created_at", { ascending: false })
+        .range(offset, offset + limit - 1);
+      if (fallback.error) {
+        const message = fallback.error.message || String(fallback.error);
+        console.warn("[getOrdersRead] Supabase error:", message);
+        return { success: false, readFailed: true, error: message, data: { orders: [] } };
+      }
+      rawList = Array.isArray(fallback.data) ? fallback.data : [];
+    } else {
+      rawList = Array.isArray(primary.data) ? primary.data : [];
     }
-
-    const rawList = Array.isArray(data) ? data : [];
 
     let labMap = new Map();
     try {
@@ -4875,7 +5084,7 @@ export async function getOrdersRead(_params = {}) {
       labMap = new Map();
     }
 
-    const lineCounts = await fetchOrderLineCounts();
+    const lineCounts = await fetchOrderLineCounts(collectOrderRowIds(rawList));
 
     const orders = rawList.map((r, idx) => {
       const labId = str(r.lab_id ?? r.labId ?? r.lab_uuid ?? r.labUUID ?? "");
@@ -4894,17 +5103,20 @@ export async function getOrdersRead(_params = {}) {
       rawRowCount: rawList.length,
       mappedRowCount: orders.length,
       orderIds,
+      limit,
+      offset,
+      hasMore: rawList.length >= limit,
     };
 
     if (rawList.length !== orders.length) {
       console.warn("[getOrdersRead] row count mismatch after mapping", meta);
     }
 
-    return { success: true, data: { orders }, meta, error: null };
+    return { success: true, readFailed: false, data: { orders }, meta, error: null };
   } catch (err) {
     const message = err?.message || String(err);
     console.warn("[getOrdersRead] failed:", message);
-    return { success: false, error: message, data: { orders: [] } };
+    return { success: false, readFailed: true, error: message, data: { orders: [] } };
   }
 }
 
@@ -5401,9 +5613,9 @@ function mapProfilesPlatformUserRow(row, directory = null) {
 }
 
 const PROFILES_IDENTITY_SELECT =
-  "user_id, tenant_id, role, username, display_name, agent_name, agent_id, lab_id, distributor_id, territory, active, created_at, email, phone";
+  "user_id, tenant_id, role, username, display_name, agent_name, agent_id, lab_id, distributor_id, territory, active, created_at, last_login_at, email, phone";
 const PROFILES_BASE_SELECT =
-  "user_id, tenant_id, role, agent_name, agent_id, lab_id, active, created_at";
+  "user_id, tenant_id, role, agent_name, agent_id, lab_id, active, created_at, last_login_at";
 
 function buildUserDirectoryIndex(rows = []) {
   const byAuthUserId = new Map();
@@ -5617,7 +5829,7 @@ export async function getOperationsPlatformUsersRead(options = {}) {
   ]);
 
   if (error) {
-    const missingIdentityColumn = /display_name|username|profiles.*email|column.*email|column.*phone|distributor_id|territory/i.test(
+    const missingIdentityColumn = /display_name|username|profiles.*email|column.*email|column.*phone|distributor_id|territory|last_login_at/i.test(
       error.message || ""
     );
     if (missingIdentityColumn) {
@@ -5676,7 +5888,7 @@ export async function createOperationsPlatformUserWrite(payload = {}) {
   if (!username) return { success: false, error: "Username is required" };
   if (!email) return { success: false, error: "Email is required" };
   if (!name) return { success: false, error: "Full name is required" };
-  if (!role || !["admin", "executive", "agent", "lab", "distributor_admin"].includes(role)) {
+  if (!role || !ALL_ROLE_SLUGS.includes(role)) {
     return { success: false, error: "A valid role is required" };
   }
 
@@ -5691,8 +5903,7 @@ export async function createOperationsPlatformUserWrite(payload = {}) {
     phone: phone || null,
     agent_id: role === "agent" ? agentId || null : null,
     lab_id: role === "lab" ? normalizeLabIdKey(labId) || null : null,
-    distributor_id:
-      role === "distributor_admin"
+    distributor_id: isDistributorScopedRole(role)
         ? str(payload.distributorId ?? payload.distributor_id) || null
         : null,
     territory: str(payload.territory) || null,
@@ -5726,11 +5937,12 @@ export async function createOperationsPlatformUserWrite(payload = {}) {
   };
 }
 
-export async function updateOperationsPlatformUserWrite(userId, payload = {}) {
+export async function updateOperationsPlatformUserWrite(userId, payload = {}, options = {}) {
   if (!supabase) return { success: false, error: "Supabase is not configured" };
 
   const uid = str(userId ?? payload.userId ?? payload.user_id);
   const tenantId = str(payload.tenantId ?? payload.tenant_id);
+  const actorRole = str(options.actorRole ?? payload.actorRole ?? "");
   if (!uid) return { success: false, error: "User id is required" };
   if (!tenantId) return { success: false, error: "Tenant is required" };
 
@@ -5739,6 +5951,25 @@ export async function updateOperationsPlatformUserWrite(userId, payload = {}) {
   const username = str(payload.username).toLowerCase();
   const email = str(payload.email);
   const phone = str(payload.phone);
+
+  let previousRole = "";
+  if (role && ALL_ROLE_SLUGS.includes(role)) {
+    const { data: existingProfile, error: readErr } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("user_id", uid)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (readErr) {
+      return { success: false, error: readErr.message || "Failed to verify current role" };
+    }
+    previousRole = str(existingProfile?.role);
+    const validation = validateActorRoleAssignment(actorRole, role, previousRole);
+    if (!validation.ok) {
+      return { success: false, error: validation.error };
+    }
+  }
+
   const patch = {
     display_name: name || null,
   };
@@ -5747,11 +5978,11 @@ export async function updateOperationsPlatformUserWrite(userId, payload = {}) {
   if (email) patch.email = email;
   if (phone) patch.phone = phone;
   if (payload.active !== undefined) patch.active = payload.active !== false;
-  if (role && ["admin", "executive", "agent", "lab", "distributor_admin"].includes(role)) {
+  if (role && ALL_ROLE_SLUGS.includes(role)) {
     patch.role = role;
     if (role === "agent") patch.agent_id = str(payload.agentId ?? payload.agent_id) || null;
     if (role === "lab") patch.lab_id = normalizeLabIdKey(payload.labId ?? payload.lab_id) || null;
-    if (role === "distributor_admin") {
+    if (isDistributorScopedRole(role)) {
       patch.distributor_id = str(payload.distributorId ?? payload.distributor_id) || null;
     }
   }
@@ -6000,7 +6231,7 @@ export async function getOperationsLabAssignmentsRead(options = {}) {
     data: {
       labs: labs.map((lab) => ({
         ...lab,
-        tenantName: tenantNameById.get(str(lab.tenantId)) || str(lab.tenantId),
+        tenantName: tenantNameById.get(str(lab.tenantId)) || "",
       })),
       opsTenantId,
     },
@@ -6008,6 +6239,7 @@ export async function getOperationsLabAssignmentsRead(options = {}) {
 }
 
 export async function updateLabAgentAssignmentWrite(payload = {}) {
+  /** @internal Sync helper — prefer assignPrimaryLabOwnerWrite() for HQ assignments. */
   if (!supabase) return { success: false, error: "Supabase is not configured" };
 
   const tenantId = str(payload.tenantId ?? payload.tenant_id);
@@ -6071,18 +6303,25 @@ export async function transferLabAssignmentWrite(payload = {}) {
   if (!labTenantId) return { success: false, error: "Lab tenant is required" };
   if (!labId) return { success: false, error: "Lab ID is required" };
   if (!toAgentId) return { success: false, error: "New agent is required" };
+  if (!hqTenantId) return { success: false, error: "HQ tenant is required" };
 
-  const assignRes = await updateLabAgentAssignmentWrite({
-    tenantId: labTenantId,
+  const labName = str(payload.labName ?? payload.lab_name);
+  const { transferLabOwnership } = await import("@/api/labOwnershipApi.js");
+
+  const transferRes = await transferLabOwnership({
+    tenantId: hqTenantId,
+    labTenantId,
     labId,
-    agentId: toAgentId,
+    fromAgentId,
+    toAgentId,
+    subjectUserId,
+    labName,
     agentName: toAgentName,
+    reason,
   });
-  if (!assignRes?.success) return assignRes;
+  if (!transferRes?.success) return transferRes;
 
-  const { insertLabAssignmentHistoryWrite, insertProvisioningEventWrite } = await import(
-    "@/api/userProvisioningApi.js"
-  );
+  const { insertLabAssignmentHistoryWrite } = await import("@/api/userProvisioningApi.js");
 
   const historyRes = await insertLabAssignmentHistoryWrite({
     hqTenantId,
@@ -6097,29 +6336,20 @@ export async function transferLabAssignmentWrite(payload = {}) {
   if (!historyRes?.success) {
     return {
       success: false,
-      error: historyRes.error || "Lab updated but history write failed",
-      data: assignRes.data,
+      error: historyRes.error || "Ownership transferred but history write failed",
+      data: transferRes.data,
     };
   }
 
-  if (subjectUserId) {
-    await insertProvisioningEventWrite({
-      tenantId: hqTenantId,
-      subjectUserId,
-      eventType: "lab_transferred",
-      payload: {
-        labId,
-        labTenantId,
-        fromAgentId,
-        fromAgentName,
-        toAgentId,
-        toAgentName,
-        reason,
-      },
-    });
-  }
-
-  return { success: true, data: assignRes.data };
+  return {
+    success: true,
+    data: {
+      labId,
+      assignedAgentId: toAgentId,
+      assignedAgentName: toAgentName,
+      tenantId: labTenantId,
+    },
+  };
 }
 
 export function getPasswordResetRedirectUrl() {

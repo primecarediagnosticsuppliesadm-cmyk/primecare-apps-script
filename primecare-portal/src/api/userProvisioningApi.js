@@ -1,5 +1,6 @@
 import { supabase } from "@/api/supabaseClient.js";
-import { LOGIN_ENABLED_ROLES } from "@/config/roles.js";
+import { isProvisionableRole } from "@/config/rolePermissionMatrix.js";
+import { buildProvisioningAuditPayload } from "@/operations/userProvisioningEngine.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -53,7 +54,7 @@ export async function provisionPlatformUserWrite(payload = {}) {
   if (!supabase) return { success: false, error: "Supabase is not configured" };
 
   const role = str(payload.role).toLowerCase();
-  if (!LOGIN_ENABLED_ROLES.has(role) && role !== "distributor_admin") {
+  if (!isProvisionableRole(role)) {
     return { success: false, error: "Invalid role for provisioning" };
   }
 
@@ -139,6 +140,27 @@ export async function reactivatePlatformUserWrite(userId, note = "") {
   return { success: true, data };
 }
 
+/** Record authenticated sign-in on profiles.last_login_at (Phase 3B RPC). */
+export async function touchPlatformUserLastLoginWrite() {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+
+  const { data, error } = await supabase.rpc("touch_platform_user_last_login");
+
+  if (error) {
+    const missing = /touch_platform_user_last_login|function.*does not exist|last_login_at/i.test(
+      error.message || ""
+    );
+    return {
+      success: false,
+      error: missing
+        ? "Run user_provisioning_phase3b_migration.sql in Supabase"
+        : error.message || "Failed to update last login",
+    };
+  }
+
+  return { success: true, data: { lastLoginAt: data } };
+}
+
 export async function getUserProvisioningEventsRead(options = {}) {
   if (!supabase) {
     return { success: false, error: "Supabase is not configured", data: { events: [] } };
@@ -179,18 +201,93 @@ export async function insertProvisioningEventWrite({
   const { data: sessionData } = await supabase.auth.getSession();
   const actorUserId = sessionData?.session?.user?.id;
 
+  const normalizedPayload =
+    payload?.schemaVersion === 1
+      ? payload
+      : buildProvisioningAuditPayload({
+          action: str(eventType),
+          related: payload,
+        });
+
   const { error } = await supabase.from("user_provisioning_events").insert([
     {
       hq_tenant_id: str(tenantId),
       subject_user_id: str(subjectUserId),
       event_type: str(eventType),
       actor_user_id: actorUserId || null,
-      payload,
+      payload: normalizedPayload,
     },
   ]);
 
   if (error) return { success: false, error: error.message || "Failed to write audit event" };
   return { success: true };
+}
+
+export async function writeRoleChangedEvent({
+  tenantId,
+  subjectUserId,
+  previousRole,
+  nextRole,
+  reason = "",
+  related = {},
+}) {
+  return insertProvisioningEventWrite({
+    tenantId,
+    subjectUserId,
+    eventType: "role_changed",
+    payload: buildProvisioningAuditPayload({
+      action: "role_changed",
+      reason,
+      previous: { role: str(previousRole) },
+      next: { role: str(nextRole) },
+      related,
+    }),
+  });
+}
+
+export async function writeOwnershipReassignedEvent({
+  tenantId,
+  subjectUserId,
+  labId,
+  labName = "",
+  labTenantId = "",
+  fromAgentId = "",
+  fromAgentName = "",
+  toAgentId = "",
+  toAgentName = "",
+  reason = "",
+  slot = "primary",
+  related = {},
+}) {
+  return insertProvisioningEventWrite({
+    tenantId,
+    subjectUserId,
+    eventType: "ownership_reassigned",
+    payload: buildProvisioningAuditPayload({
+      action: "ownership_reassigned",
+      reason,
+      previous: {
+        agentId: str(fromAgentId) || undefined,
+        agentName: str(fromAgentName) || undefined,
+      },
+      next: {
+        agentId: str(toAgentId) || undefined,
+        agentName: str(toAgentName) || undefined,
+        slot: str(slot) || "primary",
+      },
+      related: {
+        labId: str(labId),
+        labName: str(labName) || undefined,
+        labTenantId: str(labTenantId) || undefined,
+        fromAgentId: str(fromAgentId) || undefined,
+        fromAgentName: str(fromAgentName) || undefined,
+        toAgentId: str(toAgentId) || undefined,
+        toAgentName: str(toAgentName) || undefined,
+        slot: str(slot) || "primary",
+        ...related,
+      },
+    }),
+  });
 }
 
 export async function writeAccessAuditUpdatedEvent({
@@ -206,14 +303,13 @@ export async function writeAccessAuditUpdatedEvent({
     tenantId,
     subjectUserId,
     eventType: "updated",
-    payload: {
+    payload: buildProvisioningAuditPayload({
       action: str(action),
-      reason: str(reason) || undefined,
+      reason: str(reason),
       previous,
       next,
-      ...related,
-      status: "success",
-    },
+      related,
+    }),
   });
 }
 

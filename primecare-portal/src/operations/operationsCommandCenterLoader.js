@@ -11,6 +11,8 @@ import {
 import { getNotificationEventsRead } from "@/api/notificationApi.js";
 import { listOperationalEvidence } from "@/api/operationalEvidenceApi.js";
 import { loadInventoryEconomicsBundle } from "@/inventory/inventoryEconomicsData.js";
+import { loadLabOwnershipMetricsBundle } from "@/operations/operationsCenterAdminData.js";
+import { HQ_COLLECTIONS_AR_LIMIT, HQ_ORDERS_LIST_DEFAULT_LIMIT } from "@/api/hqReadBounds.js";
 
 const OPS_CACHE_MS = 45_000;
 /** @type {Map<string, { at: number, data: object }>} */
@@ -40,6 +42,9 @@ const EMPTY_PAYLOAD = {
   visits: [],
   qualifications: [],
   evidence: [],
+  ownershipMetrics: null,
+  ownershipAgents: [],
+  ownershipDirectoryUsers: [],
 };
 
 /**
@@ -67,11 +72,12 @@ export async function loadOperationsCommandCenterData(currentUser, options = {})
     qualRes,
     evidenceRows,
     inventoryEconomicsRes,
+    ownershipBundle,
   ] = await Promise.all([
     getAdminDashboardRead(),
-    getCollectionsRead(),
+    getCollectionsRead({ limit: HQ_COLLECTIONS_AR_LIMIT }),
     getStockDashboard(),
-    getOrdersRead(),
+    getOrdersRead({ limit: HQ_ORDERS_LIST_DEFAULT_LIMIT }),
     getReorderForecastRead().catch(() => ({ data: { forecast: [] } })),
     getNotificationEventsRead({ tenantId, limit: 60 }),
     getPurchaseOrdersRead(),
@@ -80,6 +86,7 @@ export async function loadOperationsCommandCenterData(currentUser, options = {})
       ? listOperationalEvidence(tenantId, currentUser, { limit: 100 }).catch(() => [])
       : Promise.resolve([]),
     loadInventoryEconomicsBundle(),
+    tenantId ? loadLabOwnershipMetricsBundle(tenantId).catch(() => null) : Promise.resolve(null),
   ]);
 
   const dashboard = normalizeAdminDashboardReadResult(dashRes);
@@ -121,6 +128,9 @@ export async function loadOperationsCommandCenterData(currentUser, options = {})
     evidence,
     inventoryEconomics: inventoryEconomicsRes?.model || null,
     inventoryEconomicsLoadOk: inventoryEconomicsRes?.ok === true,
+    ownershipMetrics: ownershipBundle?.ownershipMetrics || null,
+    ownershipAgents: ownershipBundle?.agents || [],
+    ownershipDirectoryUsers: ownershipBundle?.directoryUsers || [],
   };
   opsPayloadCache.set(cacheKey, { at: Date.now(), data });
   return data;

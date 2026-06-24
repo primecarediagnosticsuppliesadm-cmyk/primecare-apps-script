@@ -1,35 +1,4 @@
-import { ROLES } from "./roles";
+import { PERMISSION_BY_KEY } from "./rolePermissionMatrix.js";
 
-export const PERMISSIONS = {
-  dashboard: [ROLES.AGENT, ROLES.ADMIN, ROLES.EXECUTIVE],
-  founderNavigation: [ROLES.EXECUTIVE],
-  founderStrategy: [ROLES.EXECUTIVE],
-  founderFinancialIntelligence: [ROLES.EXECUTIVE],
-  revenueFunnel: [ROLES.EXECUTIVE],
-  pilotReadiness: [ROLES.EXECUTIVE],
-  tenantManagement: [ROLES.EXECUTIVE],
-  distributorManagement: [ROLES.EXECUTIVE],
-  distributorOs: [ROLES.EXECUTIVE, ROLES.ADMIN],
-  distributorProvisioning: [ROLES.EXECUTIVE],
-  commissionEngine: [ROLES.EXECUTIVE],
-  labContractEngine: [ROLES.ADMIN, ROLES.EXECUTIVE],
-  operationsCenter: [ROLES.ADMIN, ROLES.EXECUTIVE],
-  accessAudit: [ROLES.ADMIN, ROLES.EXECUTIVE],
-  visits: [ROLES.AGENT, ROLES.ADMIN],
-  collections: [ROLES.AGENT, ROLES.ADMIN],
-  labAccount: [ROLES.LAB],
-  labs: [ROLES.AGENT, ROLES.ADMIN, ROLES.EXECUTIVE],
-  masterCatalog: [ROLES.ADMIN, ROLES.EXECUTIVE],
-  inventory: [ROLES.ADMIN, ROLES.EXECUTIVE],
-  orders: [ROLES.ADMIN, ROLES.EXECUTIVE],
-  risk: [ROLES.ADMIN, ROLES.EXECUTIVE],
-  performance: [ROLES.ADMIN, ROLES.EXECUTIVE],
-  insights: [ROLES.ADMIN, ROLES.EXECUTIVE],
-  labOrders: [ROLES.LAB],
-  purchase: [ROLES.ADMIN, ROLES.EXECUTIVE],
-  reorder: [ROLES.ADMIN, ROLES.EXECUTIVE],
-  qualificationReview: [ROLES.ADMIN, ROLES.EXECUTIVE],
-  notifications: [ROLES.AGENT, ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.LAB],
-  predatorDebug: [ROLES.ADMIN, ROLES.EXECUTIVE],
-  qaCommandCenter: [ROLES.EXECUTIVE],
-};
+/** Page-level permission map — derived from rolePermissionMatrix (single source of truth). */
+export const PERMISSIONS = PERMISSION_BY_KEY;

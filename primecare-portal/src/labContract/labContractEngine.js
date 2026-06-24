@@ -5,6 +5,7 @@ import {
   REAGENT_COMPLIANCE,
 } from "@/labContract/labContractTypes.js";
 import { labIdKey } from "@/utils/labId.js";
+import { hqDebugLog, hqDebugWarn } from "@/utils/hqDebugLog.js";
 import {
   buildLineTotalByOrderId,
   orderCountsTowardDashboardRevenue,
@@ -204,21 +205,13 @@ export function computeContractReadiness(contract, { labs, distributors }) {
     ? `PASS · ${labMatch.matchBy} match · ${labMatch.matched?.labName || "—"} (${labMatch.matched?.labId || "—"})`
     : `FAIL · contract lab ${labMatch.contractLabId || "—"} "${labMatch.contractLabName || "—"}" · tenant ${labMatch.contractTenantId || "—"} · ${labs.size} lab(s) indexed`;
   if (!labMatch.pass) {
-    console.warn("[contractReadiness] lab match failed", {
+    hqDebugWarn("[contractReadiness] lab match failed", {
       contractLabId: labMatch.contractLabId,
-      contractLabName: labMatch.contractLabName,
-      contractTenantId: labMatch.contractTenantId,
-      matchedLab: labMatch.matched,
       lookupCount: labs.size,
     });
   } else {
-    console.info("[contractReadiness] lab match ok", {
+    hqDebugLog("[contractReadiness] lab match ok", {
       contractLabId: labMatch.contractLabId,
-      contractLabName: labMatch.contractLabName,
-      contractTenantId: labMatch.contractTenantId,
-      matchedLabId: labMatch.matched?.labId,
-      matchedLabName: labMatch.matched?.labName,
-      matchedLabTenantId: labMatch.matched?.tenantId,
       matchBy: labMatch.matchBy,
     });
   }

@@ -3,6 +3,7 @@ import { predatorTrace } from "@/predator/predatorTiming.js";
 import { resolvePredatorOpsPayload } from "@/predator/predatorOpsPayload.js";
 import { loadDistributorWorkspaceBundle, resolveDistributorWorkspace } from "@/distributor/distributorWorkspaceData.js";
 import { polishPredatorEntries } from "@/predator/predatorEntryPolish.js";
+import { resolveExecutiveRegisteredTenantIds, executiveForeignTenantsAllowed } from "@/predator/predatorChecks.js";
 import { ROLES } from "@/config/roles.js";
 
 const VALID_STATUS = new Set(["pending", "active", "suspended", "draft", "deactivated"]);
@@ -183,17 +184,23 @@ export async function validateDistributorWorkspaceModule({
       );
 
       if (workspace.isLive && bundle.opsPayload) {
+        const registeredTenantIds = await resolveExecutiveRegisteredTenantIds(ctx);
         const tenantIds = new Set(
           (bundle.opsPayload.collections || [])
             .map((c) => String(c.tenantId || c.tenant_id || "").trim())
             .filter(Boolean)
         );
         const foreign = [...tenantIds].filter((t) => t !== String(ctx.tenantId));
+        const allowed = executiveForeignTenantsAllowed(ctx, foreign, registeredTenantIds);
         entries.push(
           createPredatorEntry({
-            status: foreign.length === 0 ? "PASS" : "FAIL",
+            status: allowed ? "PASS" : "FAIL",
             module: "Distributor Workspace",
             step: "isolation.collections",
+            expected:
+              ctx.role === ROLES.EXECUTIVE
+                ? "Executive collections limited to registered distributor tenants"
+                : "Collections scoped to profile tenant",
             actual: foreign.length ? foreign.join(", ") : "scoped",
             tenantId: ctx.tenantId,
             role: ctx.role,

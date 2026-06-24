@@ -39,6 +39,15 @@ import ExecutiveIntelligenceLayer from "@/components/executive/ExecutiveIntellig
 import { buildExecutiveIntelligenceModel } from "@/operations/executiveIntelligenceModel.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { presetDistributorOsTab } from "@/tenant/tenantFoundationStore.js";
+import ExecutiveActionQueuePanel from "@/components/executive/ExecutiveActionQueuePanel.jsx";
+import ExecutiveQualActionModal from "@/components/executive/ExecutiveQualActionModal.jsx";
+import ExecutiveContractRenewalModal from "@/components/executive/ExecutiveContractRenewalModal.jsx";
+import ExecutiveCommissionApproveModal from "@/components/executive/ExecutiveCommissionApproveModal.jsx";
+import { loadExecutiveActionQueueBundle } from "@/operations/executiveActionQueueData.js";
+import { buildExecutiveActionQueue } from "@/operations/executiveActionQueueEngine.js";
+import { executeExecutiveActionPlan } from "@/operations/executiveActionQueueHandlers.js";
+import { ACTION_PLAN_TYPES, ACTION_QUEUE_SOURCE_MODULES } from "@/operations/executiveActionQueueTypes.js";
+import { labIdKey } from "@/utils/labId.js";
 
 const INTERVENTION_TOAST = {
   assign_owner: "Owner assigned",
@@ -125,6 +134,9 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
   const [workflowIssue, setWorkflowIssue] = useState(null);
   const [workflowTick, setWorkflowTick] = useState(0);
   const [taskTick, setTaskTick] = useState(0);
+  const [actionQueueBundle, setActionQueueBundle] = useState(null);
+  const [actionQueueLoading, setActionQueueLoading] = useState(false);
+  const [writeModal, setWriteModal] = useState(null);
 
   const tenantId = currentUser?.tenantId || "";
   const { showToast } = usePortalToast();
@@ -145,9 +157,30 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
           backfillOperationalLedgerFromPayload(tid, payload);
           await flushPendingOperationalEvents(tid);
         }
-        return buildExecutiveInterventionModel(payload, { tenantId: tid });
+        const interventionModel = buildExecutiveInterventionModel(payload, { tenantId: tid });
+        return { interventionModel, opsPayload: payload };
       });
-      setModel(built);
+      setModel(built.interventionModel);
+      setActionQueueLoading(true);
+      try {
+        const bundle = await loadExecutiveActionQueueBundle(currentUser, {
+          force: isRefresh,
+          payload: built.opsPayload,
+        });
+        setActionQueueBundle(bundle);
+      } catch (queueErr) {
+        console.warn("[Control Tower] action queue load failed", queueErr);
+        setActionQueueBundle({
+          queue: buildExecutiveActionQueue({
+            payload: built.opsPayload,
+            contracts: [],
+            pendingCommissions: [],
+            tenantId,
+          }),
+        });
+      } finally {
+        setActionQueueLoading(false);
+      }
     } catch (err) {
       setError(err?.message || "Failed to load executive workspace");
       setModel(null);
@@ -169,6 +202,55 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
       buildInterventionQueues(model.priorities, model.founderQueue, tenantId, model.payload)
     );
   }, [model, tenantId, workflowTick]);
+
+  const actionQueue = useMemo(() => {
+    void workflowTick;
+    if (actionQueueBundle?.queue) return actionQueueBundle.queue;
+    if (!model?.payload) return null;
+    return buildExecutiveActionQueue({
+      payload: model.payload,
+      contracts: actionQueueBundle?.contracts || [],
+      pendingCommissions: actionQueueBundle?.pendingCommissions || [],
+      tenantId,
+    });
+  }, [actionQueueBundle, model?.payload, tenantId, workflowTick]);
+
+  const refreshActionQueue = useCallback(
+    async (force = true) => {
+      if (!currentUser) return;
+      if (force && tenantId) invalidateOperationsCommandCenterCache(tenantId);
+      setActionQueueLoading(true);
+      try {
+        let opsPayload = model?.payload;
+        if (force) {
+          opsPayload = await loadOperationsCommandCenterData(currentUser, { force: true });
+          setModel(buildExecutiveInterventionModel(opsPayload, { tenantId }));
+        }
+        const bundle = await loadExecutiveActionQueueBundle(currentUser, {
+          force: true,
+          payload: opsPayload,
+        });
+        setActionQueueBundle(bundle);
+        setWorkflowTick((n) => n + 1);
+      } catch (err) {
+        console.warn("[Control Tower] action queue refresh failed", err);
+      } finally {
+        setActionQueueLoading(false);
+      }
+    },
+    [currentUser, tenantId, model?.payload]
+  );
+
+  const qualificationRowForModal = useMemo(() => {
+    if (!writeModal?.item || writeModal.type !== ACTION_QUEUE_SOURCE_MODULES.QUALIFICATION) {
+      return null;
+    }
+    const target = labIdKey(writeModal.item.entityRefs?.labId);
+    if (!target) return null;
+    return (model?.payload?.qualifications || []).find(
+      (row) => labIdKey(row.labId ?? row.lab_id) === target
+    );
+  }, [writeModal, model?.payload?.qualifications]);
 
   const operationalTaskModel = useMemo(() => {
     if (!model) return null;
@@ -235,6 +317,7 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
             model?.payload
           );
           const updated =
+            actionQueue?.items?.find((i) => i.id === issue.id) ||
             refreshed.allIssues?.find((i) => i.id === issue.id) ||
             refreshed.singles.find((i) => i.id === issue.id) ||
             refreshed.founderActive.find((i) => i.id === issue.id);
@@ -249,13 +332,69 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
         showToast("error", result.error?.message || "Could not apply intervention action");
       }
     },
-    [tenantId, currentUser, workflowIssue?.id, model, actionSubmit, showToast]
+    [tenantId, currentUser, workflowIssue?.id, model, actionSubmit, showToast, actionQueue?.items]
   );
 
   const openIntervention = useCallback((item) => {
     setWorkflowIssue(item);
     setDrawerContext(null);
   }, []);
+
+  const handleOpenWriteModal = useCallback((type, item) => {
+    setWriteModal({ type, item });
+    setWorkflowIssue(null);
+  }, []);
+
+  const handleExecuteActionPlan = useCallback(
+    (plan, item) => {
+      const result = executeExecutiveActionPlan({
+        plan,
+        item,
+        setActivePage,
+        onWorkflowAction: handleInterventionAction,
+        onOpenWriteModal: handleOpenWriteModal,
+      });
+      if (result.message) {
+        showToast(result.type === "write_navigate" ? "info" : "success", result.message);
+      }
+    },
+    [setActivePage, handleInterventionAction, handleOpenWriteModal, showToast]
+  );
+
+  const openQueueItem = useCallback(
+    (item) => {
+      if (item?.sourceModule === ACTION_QUEUE_SOURCE_MODULES.QUALIFICATION) {
+        handleOpenWriteModal(ACTION_QUEUE_SOURCE_MODULES.QUALIFICATION, item);
+        return;
+      }
+      if (item?.sourceModule === ACTION_QUEUE_SOURCE_MODULES.CONTRACT_RENEWAL) {
+        handleOpenWriteModal(ACTION_QUEUE_SOURCE_MODULES.CONTRACT_RENEWAL, item);
+        return;
+      }
+      if (item?.sourceModule === ACTION_QUEUE_SOURCE_MODULES.COMMISSION) {
+        handleOpenWriteModal(ACTION_QUEUE_SOURCE_MODULES.COMMISSION, item);
+        return;
+      }
+      if (item?.sourceModule === ACTION_QUEUE_SOURCE_MODULES.OWNERSHIP) {
+        const plan = (item.actionPlan || []).find((p) => p.type === ACTION_PLAN_TYPES.NAVIGATE);
+        if (plan) {
+          handleExecuteActionPlan(plan, item);
+          return;
+        }
+      }
+      openIntervention(item);
+    },
+    [handleOpenWriteModal, openIntervention, handleExecuteActionPlan]
+  );
+
+  const handleWriteModalSuccess = useCallback(
+    (label, opts = {}) => {
+      showToast("success", label || "Action completed");
+      if (opts?.warning) showToast("info", opts.warning);
+      setWriteModal(null);
+    },
+    [showToast]
+  );
 
   const openInterventionById = useCallback(
     (interventionId) => {
@@ -562,6 +701,16 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
           </p>
         )}
       </section>
+
+      <ExecutiveActionQueuePanel
+        queue={actionQueue}
+        loading={actionQueueLoading}
+        onOpen={openQueueItem}
+        onWorkflowAction={handleInterventionAction}
+        onExecutePlan={handleExecuteActionPlan}
+        busyAction={actionSubmit.busyKey}
+        actionsDisabled={actionSubmit.isAnyBusy}
+      />
 
       <section
         className="rounded-xl border-2 border-slate-800/15 bg-slate-50/50 p-3"
@@ -870,6 +1019,38 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
           setWorkflowIssue(null);
           setLabDrawerId(String(id));
         }}
+      />
+
+      <ExecutiveQualActionModal
+        open={writeModal?.type === ACTION_QUEUE_SOURCE_MODULES.QUALIFICATION}
+        item={writeModal?.item}
+        qualificationRow={qualificationRowForModal}
+        currentUser={currentUser}
+        tenantId={tenantId}
+        onClose={() => setWriteModal(null)}
+        onSuccess={handleWriteModalSuccess}
+        onRefresh={refreshActionQueue}
+      />
+
+      <ExecutiveContractRenewalModal
+        open={writeModal?.type === ACTION_QUEUE_SOURCE_MODULES.CONTRACT_RENEWAL}
+        item={writeModal?.item}
+        currentUser={currentUser}
+        tenantId={tenantId}
+        onClose={() => setWriteModal(null)}
+        onSuccess={handleWriteModalSuccess}
+        onRefresh={refreshActionQueue}
+      />
+
+      <ExecutiveCommissionApproveModal
+        open={writeModal?.type === ACTION_QUEUE_SOURCE_MODULES.COMMISSION}
+        item={writeModal?.item}
+        visibleQueueItems={actionQueue?.items || []}
+        currentUser={currentUser}
+        tenantId={tenantId}
+        onClose={() => setWriteModal(null)}
+        onSuccess={handleWriteModalSuccess}
+        onRefresh={refreshActionQueue}
       />
     </div>
   );

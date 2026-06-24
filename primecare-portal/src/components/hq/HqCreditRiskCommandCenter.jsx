@@ -190,6 +190,9 @@ function WorkspaceLabRow({
 
 export default function HqCreditRiskCommandCenter({
   collections = [],
+  searchFiltered = null,
+  searchActive = false,
+  initialAttentionFilter = "",
   summary = {},
   lastPaymentByLabId = {},
   focusLabId = "",
@@ -198,7 +201,9 @@ export default function HqCreditRiskCommandCenter({
   onReviewLab,
   onOpenCollections,
 }) {
-  const [attentionFilter, setAttentionFilter] = useState("ALL");
+  const [attentionFilter, setAttentionFilter] = useState(
+    () => str(initialAttentionFilter) || "ALL"
+  );
   const [workspaceBucket, setWorkspaceBucket] = useState("ALL");
   const [directoryUsers, setDirectoryUsers] = useState([]);
 
@@ -215,6 +220,12 @@ export default function HqCreditRiskCommandCenter({
     };
   }, [homeTenantId]);
 
+  const visibleCollections = useMemo(() => {
+    if (!searchActive || !Array.isArray(searchFiltered)) return collections;
+    const ids = new Set(searchFiltered.map((c) => labIdKey(c.labId)));
+    return collections.filter((c) => ids.has(labIdKey(c.labId)));
+  }, [collections, searchFiltered, searchActive]);
+
   const attentionCards = useMemo(
     () => buildCreditRiskAttentionCards(collections),
     [collections]
@@ -224,8 +235,8 @@ export default function HqCreditRiskCommandCenter({
     [collections, summary]
   );
   const filteredForView = useMemo(
-    () => filterCollectionsForCreditRiskView(collections, attentionFilter),
-    [collections, attentionFilter]
+    () => filterCollectionsForCreditRiskView(visibleCollections, attentionFilter),
+    [visibleCollections, attentionFilter]
   );
   const bucketGroups = useMemo(
     () => groupCollectionsByOverdueBucket(filteredForView),
@@ -305,6 +316,20 @@ export default function HqCreditRiskCommandCenter({
 
   return (
     <div className="space-y-4">
+      {collections.length === 0 ? (
+        <div
+          className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 shadow-sm"
+          role="status"
+          aria-label="All clear"
+        >
+          <h2 className="text-base font-semibold text-emerald-900">All Clear</h2>
+          <p className="mt-1 text-sm text-emerald-800">
+            No receivables requiring action in your portfolio. All AR balances are current or no
+            collection records are loaded yet.
+          </p>
+        </div>
+      ) : null}
+
       <p className="text-sm text-slate-600">
         What needs attention? Who owns it? How much is at risk? Use the queue below to prioritize
         collections, credit holds, and exposure.
@@ -518,6 +543,12 @@ export default function HqCreditRiskCommandCenter({
           <h2 className="text-sm font-semibold text-slate-900">Collections Workspace</h2>
           <span className="text-[11px] text-slate-500">{workspaceRows.length} labs shown</span>
         </div>
+
+        {searchActive && visibleCollections.length === 0 && collections.length > 0 ? (
+          <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-sm text-amber-900">
+            No labs match your search. Clear the search box to see the full portfolio.
+          </p>
+        ) : null}
 
         <div className="mb-3 flex flex-wrap gap-1.5">
           <Button

@@ -1,5 +1,9 @@
 import { getUserProvisioningEventsRead } from "@/api/userProvisioningApi.js";
 import { loadOperationsCenterAdminBundle } from "@/operations/operationsCenterAdminData.js";
+import {
+  buildAccessAuditContext,
+  enrichAccessAuditEvents,
+} from "@/operations/accessAuditEngine.js";
 import { mapProvisioningEventRow } from "@/operations/userProvisioningEngine.js";
 
 function str(v) {
@@ -28,9 +32,11 @@ export async function loadAccessAuditBundle(tenantId) {
   const userNameById = new Map(
     (baseBundle.directoryUsers || []).map((u) => [str(u.userId), str(u.name)])
   );
-  const auditEvents = (auditRes?.data?.events || []).map((row) =>
+  const mappedEvents = (auditRes?.data?.events || []).map((row) =>
     mapProvisioningEventRow(row, userNameById)
   );
+  const context = buildAccessAuditContext(baseBundle, tid);
+  const auditEvents = enrichAccessAuditEvents(mappedEvents, context);
 
   return {
     ...baseBundle,

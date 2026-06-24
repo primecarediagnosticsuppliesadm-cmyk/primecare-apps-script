@@ -1,6 +1,8 @@
 /**
  * Performance timing (enable with VITE_PERF_LOG=true in any environment).
  */
+import { isHqDebugLogEnabled } from "@/utils/hqDebugLog.js";
+
 export function isPerfLogEnabled() {
   return String(import.meta.env.VITE_PERF_LOG || "").trim().toLowerCase() === "true";
 }
@@ -31,7 +33,7 @@ export function perfMark(label) {
 
 export function shouldRunDashboardKpiAudit() {
   return (
-    import.meta.env.DEV &&
+    isHqDebugLogEnabled() &&
     String(import.meta.env.VITE_DASHBOARD_KPI_AUDIT || "").trim().toLowerCase() === "true"
   );
 }

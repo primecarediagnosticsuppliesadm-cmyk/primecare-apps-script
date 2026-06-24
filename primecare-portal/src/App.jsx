@@ -3,6 +3,7 @@ import LoginPage from "./pages/LoginPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import { useAuth } from "./context/AuthContext";
 import { ROLES } from "./config/roles";
+import { normalizePlatformRole, isLoginEnabledRole } from "./config/rolePermissionMatrix.js";
 import HqGlobalSearch, {
   HqSearchTriggerButton,
   useHqGlobalSearchShortcut,
@@ -24,22 +25,19 @@ import { loadHqNavBadgeCounts } from "@/operations/hqNavBadgeCounts.js";
 
 function canRoleAccessPage(role, pageKey) {
   if (!role || !pageKey) return false;
-  const resolved = resolvePageKeyForRole(role, pageKey);
-  return Array.isArray(PERMISSIONS[resolved]) && PERMISSIONS[resolved].includes(role);
+  const normalizedRole = normalizePlatformRole(role);
+  const resolved = resolvePageKeyForRole(normalizedRole, pageKey);
+  return (
+    Array.isArray(PERMISSIONS[resolved]) && PERMISSIONS[resolved].includes(normalizedRole)
+  );
 }
 
 const PortalLayout = lazy(() => import("./layout/PortalLayout"));
 const PrimeCareWebPortal = lazy(() => import("./PrimeCareWebPortal"));
 
 function normalizeRole(role) {
-  const value = String(role || "").trim().toLowerCase();
-
-  if (value === "agent") return ROLES.AGENT;
-  if (value === "admin") return ROLES.ADMIN;
-  if (value === "executive") return ROLES.EXECUTIVE;
-  if (value === "lab") return ROLES.LAB;
-
-  return null;
+  const normalized = normalizePlatformRole(role);
+  return isLoginEnabledRole(normalized) ? normalized : null;
 }
 
 function UnauthorizedScreen({ message, onLogout }) {

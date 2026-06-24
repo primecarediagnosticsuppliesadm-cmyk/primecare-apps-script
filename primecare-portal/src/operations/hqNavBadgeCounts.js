@@ -9,6 +9,11 @@ import { computeAccessAuditKpis, enrichAccessAuditEvent } from "@/operations/acc
 import { buildCreditRiskAttentionCards } from "@/operations/creditRiskHqEngine.js";
 import { computeOrdersKpis } from "@/orders/ordersMonitorEngine.js";
 import { ROLES } from "@/config/roles.js";
+import { loadExecutiveActionQueueEnrichment } from "@/operations/executiveActionQueueData.js";
+import {
+  buildExecutiveActionQueue,
+  countOpenExecutiveActionQueueItems,
+} from "@/operations/executiveActionQueueEngine.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -91,8 +96,11 @@ export async function loadHqNavBadgeCounts(options = {}) {
   const auditCount = countAccessAuditToday(auditEvents);
   if (auditCount > 0) badges.accessAudit = auditCount;
 
-  const orders = ordersRes?.data?.orders || [];
-  const ordersCount = countOrdersAttention(orders);
+  const orders =
+    ordersRes?.success !== false && Array.isArray(ordersRes?.data?.orders)
+      ? ordersRes.data.orders
+      : [];
+  const ordersCount = ordersRes?.success !== false ? countOrdersAttention(orders) : 0;
   if (ordersCount > 0) badges.orders = ordersCount;
 
   const collections = collectionsRes?.data?.collections || [];
@@ -102,6 +110,23 @@ export async function loadHqNavBadgeCounts(options = {}) {
   const inventory = stockRes?.data?.inventory || [];
   const inventoryCount = countStockAttention(inventory);
   if (inventoryCount > 0) badges.inventory = inventoryCount;
+
+  try {
+    const enrich = await loadExecutiveActionQueueEnrichment(
+      { tenantId, tenant_id: tenantId, role },
+      { commissionLimit: 15, qualificationLimit: 12 }
+    );
+    const queue = buildExecutiveActionQueue({
+      payload: enrich.payload,
+      contracts: enrich.contracts,
+      pendingCommissions: enrich.pendingCommissions,
+      tenantId,
+    });
+    const actionQueueOpen = countOpenExecutiveActionQueueItems(queue.items);
+    if (actionQueueOpen > 0) badges.dashboard = actionQueueOpen;
+  } catch {
+    /* badge is best-effort */
+  }
 
   return badges;
 }

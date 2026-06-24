@@ -50,6 +50,7 @@ import {
   PIPELINE_STAGE_SELECT_OPTIONS,
 } from "@/utils/qualificationPipeline";
 import HqQualificationRecommendations from "@/components/hq/HqQualificationRecommendations.jsx";
+import { enterDistributorOs } from "@/tenant/tenantFoundationStore.js";
 
 function canEditPipeline() {
   return false;

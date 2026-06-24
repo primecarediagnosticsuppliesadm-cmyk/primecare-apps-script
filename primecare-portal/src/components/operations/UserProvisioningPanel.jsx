@@ -3,9 +3,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
+  assignPrimaryLabOwnerWrite,
+  unassignPrimaryLabOwnerWrite,
+} from "@/api/labOwnershipApi.js";
+import {
   transferLabAssignmentWrite,
   updateDistributorAgentAssignmentWrite,
-  updateLabAgentAssignmentWrite,
   updateOperationsPlatformUserWrite,
 } from "@/api/primecareSupabaseApi.js";
 import {
@@ -15,11 +18,14 @@ import {
   resetPlatformUserPasswordWrite,
   writeAccessAuditUpdatedEvent,
   insertProvisioningEventWrite,
+  writeRoleChangedEvent,
+  writeOwnershipReassignedEvent,
 } from "@/api/userProvisioningApi.js";
 import {
   EMAIL_NOT_ADDED,
   OPERATIONS_CENTER_TABS,
   PLATFORM_ROLE_OPTIONS,
+  filterPlatformRoleOptionsForActor,
   formatOpsDate,
   isAgentRole,
   labAssignmentKey,
@@ -27,6 +33,7 @@ import {
   matchesSearch,
   platformRoleLabel,
   distributorsForAgent,
+  requiresDistributorScope,
 } from "@/operations/operationsCenterAdminEngine.js";
 import {
   filterDirectoryUsers,
@@ -39,6 +46,9 @@ import { ROLES } from "@/config/roles.js";
 import { cn } from "@/lib/utils";
 import { Plus, Search, Copy, X } from "lucide-react";
 import UserDetailDrawer from "@/components/operations/UserDetailDrawer.jsx";
+import LabOwnershipPanel from "@/components/operations/LabOwnershipPanel.jsx";
+import PilotOnboardingImportPanel from "@/components/operations/PilotOnboardingImportPanel.jsx";
+import PilotHardeningChecksPanel from "@/components/operations/PilotHardeningChecksPanel.jsx";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -200,7 +210,7 @@ function SearchInput({ value, onChange, placeholder }) {
   );
 }
 
-function CreateUserDrawer({ tenantId, distributors, labAssignments, onClose, onSaved }) {
+function CreateUserDrawer({ tenantId, distributors, labAssignments, roleOptions, onClose, onSaved }) {
   const territories = territoryOptionsFromDistributors(distributors);
   const [form, setForm] = useState({
     displayName: "",
@@ -316,7 +326,7 @@ function CreateUserDrawer({ tenantId, distributors, labAssignments, onClose, onS
                 value={form.role}
                 onChange={(e) => setForm((p) => ({ ...p, role: e.target.value }))}
               >
-                {PLATFORM_ROLE_OPTIONS.map((opt) => (
+                {(roleOptions || PLATFORM_ROLE_OPTIONS).map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
                   </option>
@@ -369,7 +379,7 @@ function CreateUserDrawer({ tenantId, distributors, labAssignments, onClose, onS
                 </select>
               </label>
             ) : null}
-            {form.role === ROLES.DISTRIBUTOR_ADMIN ? (
+            {requiresDistributorScope(form.role) ? (
               <label className="block text-xs text-slate-600">
                 Assigned distributor *
                 <select
@@ -385,9 +395,6 @@ function CreateUserDrawer({ tenantId, distributors, labAssignments, onClose, onS
                     </option>
                   ))}
                 </select>
-                <span className="mt-1 block text-[11px] text-amber-700">
-                  Directory-only role — login blocked until Phase 2.
-                </span>
               </label>
             ) : null}
             <label className="flex items-center gap-2 text-xs text-slate-600">
@@ -627,10 +634,12 @@ function UserAssignmentDrawer({
   labAssignments,
   distributors,
   tenantId,
+  actorRole = "",
   focusLabId = "",
   onClose,
   onSaved,
   onRequestConfirm,
+  roleOptions,
 }) {
   const [role, setRole] = useState(user?.role || "agent");
   const agentLabs = isAgentRole(role) ? labsForAgent(user, labAssignments) : [];
@@ -717,11 +726,15 @@ function UserAssignmentDrawer({
       if (wasMine === nowMine) continue;
 
       if (nowMine) {
-        const res = await updateLabAgentAssignmentWrite({
-          tenantId: lab.tenantId,
+        const res = await assignPrimaryLabOwnerWrite({
+          hqTenantId: tenantId,
+          labTenantId: lab.tenantId,
           labId: lab.labId,
-          agentId: agentBusinessId,
+          primaryAgentId: agentBusinessId,
           agentName: agentDisplayName,
+          subjectUserId: user.userId,
+          labName: lab.labName,
+          reason,
         });
         if (!res?.success) {
           throw new Error(res?.error || `Failed to assign ${lab.labId}`);
@@ -729,7 +742,7 @@ function UserAssignmentDrawer({
         await writeAccessAuditUpdatedEvent({
           tenantId,
           subjectUserId: user.userId,
-          action: "lab_assigned",
+          action: "ownership_assigned",
           reason,
           previous: lab.assignedAgentId
             ? { agentId: lab.assignedAgentId, agentName: lab.assignedAgentName }
@@ -744,10 +757,12 @@ function UserAssignmentDrawer({
           },
         });
       } else {
-        const res = await updateLabAgentAssignmentWrite({
-          tenantId: lab.tenantId,
+        const res = await unassignPrimaryLabOwnerWrite({
+          hqTenantId: tenantId,
+          labTenantId: lab.tenantId,
           labId: lab.labId,
-          remove: true,
+          subjectUserId: user.userId,
+          reason,
         });
         if (!res?.success) {
           throw new Error(res?.error || `Failed to unassign ${lab.labId}`);
@@ -755,10 +770,12 @@ function UserAssignmentDrawer({
         await writeAccessAuditUpdatedEvent({
           tenantId,
           subjectUserId: user.userId,
-          action: "lab_unassigned",
+          action: "ownership_removed",
           reason,
-          previous: { agentId: agentBusinessId, agentName: agentDisplayName },
-          next: { assigned: false },
+          previous: lab.assignedAgentId
+            ? { agentId: lab.assignedAgentId, agentName: lab.assignedAgentName }
+            : {},
+          next: {},
           related: {
             labTenantId: lab.tenantId,
             labId: lab.labId,
@@ -772,22 +789,25 @@ function UserAssignmentDrawer({
     const territoryChanged = territory !== initialTerritory;
     const roleChanged = role !== initialRole;
     if (territoryChanged || roleChanged) {
-      const res = await updateOperationsPlatformUserWrite(user.userId, {
-        tenantId,
-        displayName: user.displayName || user.name,
-        role,
-        territory,
-        agentId: user.agentId,
-      });
+      const res = await updateOperationsPlatformUserWrite(
+        user.userId,
+        {
+          tenantId,
+          displayName: user.displayName || user.name,
+          role,
+          territory,
+          agentId: user.agentId,
+        },
+        { actorRole }
+      );
       if (!res?.success) throw new Error(res?.error || "Failed to update profile");
       if (roleChanged) {
-        await writeAccessAuditUpdatedEvent({
+        await writeRoleChangedEvent({
           tenantId,
           subjectUserId: user.userId,
-          action: "role_changed",
+          previousRole: initialRole,
+          nextRole: role,
           reason,
-          previous: { role: initialRole },
-          next: { role },
         });
       }
     }
@@ -865,25 +885,28 @@ function UserAssignmentDrawer({
     const roleChanged = role !== initialRole;
     const labIdChanged = labId !== String(user?.labId ?? "").trim();
 
-    const res = await updateOperationsPlatformUserWrite(user.userId, {
-      tenantId,
-      displayName: user.displayName || user.name,
-      role,
-      territory,
-      labId,
-      distributorId,
-      agentId: user.agentId,
-    });
+    const res = await updateOperationsPlatformUserWrite(
+      user.userId,
+      {
+        tenantId,
+        displayName: user.displayName || user.name,
+        role,
+        territory,
+        labId,
+        distributorId,
+        agentId: user.agentId,
+      },
+      { actorRole }
+    );
     if (!res?.success) throw new Error(res?.error || "Failed to update");
 
     if (roleChanged) {
-      await writeAccessAuditUpdatedEvent({
+      await writeRoleChangedEvent({
         tenantId,
         subjectUserId: user.userId,
-        action: "role_changed",
+        previousRole: initialRole,
+        nextRole: role,
         reason,
-        previous: { role: initialRole },
-        next: { role },
       });
     }
     if (distributorChanged) {
@@ -946,7 +969,7 @@ function UserAssignmentDrawer({
         "Distributor Admin will lose scoped distributor access in the directory until reassigned.";
       title = `Remove distributor — ${user.name}`;
       confirmLabel = "Remove distributor";
-    } else if (distributorChanged && role === ROLES.DISTRIBUTOR_ADMIN) {
+    } else if (distributorChanged && requiresDistributorScope(role)) {
       detailParts.push(
         `Distributor: ${initialDistributorName} → ${distributorName || "—"}`
       );
@@ -1000,7 +1023,7 @@ function UserAssignmentDrawer({
             value={role}
             onChange={(e) => setRole(e.target.value)}
           >
-            {PLATFORM_ROLE_OPTIONS.map((opt) => (
+            {(roleOptions || PLATFORM_ROLE_OPTIONS).map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>
@@ -1134,7 +1157,7 @@ function UserAssignmentDrawer({
           </label>
         ) : null}
 
-        {role === ROLES.DISTRIBUTOR_ADMIN ? (
+        {requiresDistributorScope(role) ? (
           <label className="block text-xs text-slate-600">
             Assigned Distributor
             <select
@@ -1152,7 +1175,7 @@ function UserAssignmentDrawer({
           </label>
         ) : null}
 
-        {role === ROLES.LAB || role === ROLES.DISTRIBUTOR_ADMIN ? (
+        {role === ROLES.LAB || requiresDistributorScope(role) ? (
           <Button
             type="button"
             size="sm"
@@ -1164,7 +1187,7 @@ function UserAssignmentDrawer({
           </Button>
         ) : null}
 
-        {!isAgentRole(role) && role !== ROLES.LAB && role !== ROLES.DISTRIBUTOR_ADMIN ? (
+        {!isAgentRole(role) && role !== ROLES.LAB && !requiresDistributorScope(role) ? (
           <div className="space-y-3 text-xs">
             <p className="text-slate-500">HQ roles have full tenant access — no lab assignments.</p>
             {role !== initialRole ? (
@@ -1186,6 +1209,7 @@ function UserAssignmentDrawer({
 
 function LabAssignmentModal({ lab, agents, tenantId, onClose, onSaved, onRequestConfirm }) {
   const labTenantId = lab?.tenantId || "";
+  const hqTenantId = tenantId;
   const [agentId, setAgentId] = useState(lab?.assignedAgentId || "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -1193,39 +1217,40 @@ function LabAssignmentModal({ lab, agents, tenantId, onClose, onSaved, onRequest
   const previousAgentName = lab?.assignedAgentName || lab?.assignedAgentId || "Unassigned";
 
   async function executeAssign(reason) {
-    const res = await updateLabAgentAssignmentWrite({
-      tenantId: labTenantId,
+    const res = await assignPrimaryLabOwnerWrite({
+      hqTenantId,
+      labTenantId,
       labId: lab.labId,
-      agentId,
+      primaryAgentId: agentId,
       agentName: selectedAgent?.name || "",
+      subjectUserId: selectedAgent?.userId || selectedAgent?.id,
+      labName: lab.labName,
+      reason,
     });
     if (!res?.success) throw new Error(res?.error || "Failed to assign agent");
 
     const subjectUserId = String(selectedAgent?.userId || selectedAgent?.id || "").trim();
     const isReassignment = Boolean(lab?.assignedAgentId) && lab.assignedAgentId !== agentId;
-    if (tenantId && subjectUserId) {
+    if (hqTenantId && subjectUserId) {
       if (isReassignment) {
-        await insertProvisioningEventWrite({
-          tenantId,
+        await writeOwnershipReassignedEvent({
+          tenantId: hqTenantId,
           subjectUserId,
-          eventType: "lab_transferred",
-          payload: {
-            labId: lab.labId,
-            labName: lab.labName,
-            labTenantId,
-            fromAgentId: lab.assignedAgentId,
-            fromAgentName: previousAgentName,
-            toAgentId: agentId,
-            toAgentName: selectedAgent?.name || "",
-            reason,
-            status: "success",
-          },
+          labId: lab.labId,
+          labName: lab.labName,
+          labTenantId,
+          fromAgentId: lab.assignedAgentId,
+          fromAgentName: previousAgentName,
+          toAgentId: agentId,
+          toAgentName: selectedAgent?.name || "",
+          reason,
+          slot: "primary",
         });
       } else {
         await writeAccessAuditUpdatedEvent({
-          tenantId,
+          tenantId: hqTenantId,
           subjectUserId,
-          action: "lab_assigned",
+          action: "ownership_assigned",
           reason,
           next: { agentId, agentName: selectedAgent?.name || "" },
           related: {
@@ -1469,13 +1494,16 @@ export default function UserProvisioningPanel({
   loading,
   error,
   statusMessage,
+  actorRole = "",
   focusUserId = "",
   openAssignDrawer = false,
   focusLabId = "",
+  initialTab = "",
   onNavIntentHandled,
   onReload,
   onError,
   onStatus,
+  setActivePage = null,
 }) {
   const [tab, setTab] = useState("directory");
   const [search, setSearch] = useState("");
@@ -1495,6 +1523,10 @@ export default function UserProvisioningPanel({
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [reviewUser, setReviewUser] = useState(null);
 
+  const roleOptions = useMemo(
+    () => filterPlatformRoleOptionsForActor(actorRole || bundle?.actorRole || ROLES.ADMIN),
+    [actorRole, bundle?.actorRole]
+  );
   const agents = bundle?.agents || [];
   const directoryUsers = bundle?.directoryUsers || [];
   const labAssignments = bundle?.labAssignments || [];
@@ -1529,6 +1561,12 @@ export default function UserProvisioningPanel({
       });
     }, 150);
   }, [focusUserId, openAssignDrawer, loading, directoryUsers, onNavIntentHandled]);
+
+  useEffect(() => {
+    if (!initialTab || loading) return;
+    setTab(initialTab);
+    onNavIntentHandled?.();
+  }, [initialTab, loading, onNavIntentHandled]);
 
   const filteredLabs = labAssignments;
   const filteredDistributors = distributorAssignments;
@@ -1706,7 +1744,7 @@ export default function UserProvisioningPanel({
                     ["actions", "Actions"],
                   ].map(([key, label]) => (
                     <th key={key} className="px-2 py-2">
-                      {["name", "role", "status", "labs", "created"].includes(key) ? (
+                      {["name", "role", "status", "labs", "created", "lastLogin"].includes(key) ? (
                         <button
                           type="button"
                           className="font-medium hover:text-slate-800"
@@ -1754,7 +1792,14 @@ export default function UserProvisioningPanel({
                       <td className="px-2 py-2">
                         <StatusBadge active={user.active} />
                       </td>
-                      <td className="px-2 py-2 text-slate-400">{user.lastLogin}</td>
+                      <td
+                        className={cn(
+                          "px-2 py-2",
+                          user.lastLogin === "—" ? "text-slate-400" : "text-slate-700"
+                        )}
+                      >
+                        {user.lastLogin}
+                      </td>
                       <td className="px-2 py-2">{formatOpsDate(user.createdAt)}</td>
                       <td className="px-2 py-2">
                         <div className="flex flex-wrap gap-1">
@@ -1835,6 +1880,41 @@ export default function UserProvisioningPanel({
             </table>
           </div>
         </>
+      ) : null}
+
+      {tab === "labOwnership" ? (
+        <LabOwnershipPanel
+          tenantId={tenantId}
+          bundle={bundle}
+          loading={loading}
+          focusLabId={focusLabId}
+          openAssignDrawer={openAssignDrawer}
+          onReload={onReload}
+          onError={onError}
+          onStatus={onStatus}
+        />
+      ) : null}
+
+      {tab === "pilotOnboarding" ? (
+        <div className="space-y-4">
+          <PilotHardeningChecksPanel
+            tenantId={tenantId}
+            setActivePage={setActivePage}
+            onStatus={onStatus}
+            onError={onError}
+          />
+          <PilotOnboardingImportPanel
+            tenantId={tenantId}
+            bundle={bundle}
+            defaultDistributorTenantId={
+              distributorAssignments[0]?.distributorId || tenantId
+            }
+            agents={agents}
+            onReload={onReload}
+            onStatus={onStatus}
+            onError={onError}
+          />
+        </div>
       ) : null}
 
       {tab === "labAssignment" ? (
@@ -1941,6 +2021,7 @@ export default function UserProvisioningPanel({
           tenantId={tenantId}
           distributors={distributorAssignments}
           labAssignments={labAssignments}
+          roleOptions={roleOptions}
           onClose={() => setCreateOpen(false)}
           onSaved={async () => {
             onStatus?.("User provisioned");
@@ -2000,6 +2081,8 @@ export default function UserProvisioningPanel({
           labAssignments={labAssignments}
           distributors={distributorAssignments}
           tenantId={tenantId}
+          actorRole={actorRole}
+          roleOptions={roleOptions}
           focusLabId={focusLabId}
           onClose={() => setAssignmentUser(null)}
           onRequestConfirm={requestConfirm}

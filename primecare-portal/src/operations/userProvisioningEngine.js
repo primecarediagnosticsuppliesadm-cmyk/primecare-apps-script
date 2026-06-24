@@ -1,4 +1,5 @@
-import { LOGIN_ENABLED_ROLES, ROLES } from "@/config/roles.js";
+import { ROLES } from "@/config/roles.js";
+import { isLoginEnabledRole as matrixIsLoginEnabledRole } from "@/config/rolePermissionMatrix.js";
 import {
   isAgentRole,
   labsForAgent,
@@ -12,7 +13,7 @@ function str(v) {
 }
 
 export function isLoginEnabledRole(role) {
-  return LOGIN_ENABLED_ROLES.has(normalizePlatformRole(role));
+  return matrixIsLoginEnabledRole(normalizePlatformRole(role));
 }
 
 export function enrichDirectoryUsers(users = [], options = {}) {
@@ -35,7 +36,7 @@ export function enrichDirectoryUsers(users = [], options = {}) {
         distributorName = str(dist.distributorName);
         if (!distributorId) distributorId = str(dist.distributorId);
       }
-    } else if (role === ROLES.DISTRIBUTOR_ADMIN) {
+    } else if (role === ROLES.DISTRIBUTOR_ADMIN || role === ROLES.DISTRIBUTOR_MANAGER) {
       distributorName = distributorNameById.get(distributorId) || distributorId;
     } else if (role === ROLES.LAB) {
       assignedLabsCount = user.labId ? 1 : 0;
@@ -49,7 +50,8 @@ export function enrichDirectoryUsers(users = [], options = {}) {
       distributorName: distributorName || "—",
       territory: str(user.territory) || "—",
       assignedLabsCount,
-      lastLogin: "—",
+      lastLoginAt: user.lastLoginAt ?? user.last_login_at ?? null,
+      lastLogin: formatLastLogin(user.lastLoginAt ?? user.last_login_at),
       loginEnabled: isLoginEnabledRole(role),
       createdAt: user.createdAt ?? null,
     };
@@ -129,6 +131,10 @@ export function sortDirectoryUsers(users = [], sortKey = "name", sortDir = "asc"
         av = new Date(a.createdAt || 0).getTime();
         bv = new Date(b.createdAt || 0).getTime();
         break;
+      case "lastLogin":
+        av = new Date(a.lastLoginAt || 0).getTime();
+        bv = new Date(b.lastLoginAt || 0).getTime();
+        break;
       default:
         av = str(a.name || a.displayName).toLowerCase();
         bv = str(b.name || b.displayName).toLowerCase();
@@ -164,13 +170,143 @@ export function suggestAgentId(displayName = "") {
 }
 
 export function mapProvisioningEventRow(row = {}, userNameById = new Map()) {
+  const eventType = str(row.event_type ?? row.eventType).toLowerCase();
+  const payload = row.payload && typeof row.payload === "object" ? row.payload : {};
+  const payloadAction = str(payload.action).toLowerCase();
+  const actionKey =
+    eventType === "updated" && payloadAction ? payloadAction : eventType || payloadAction;
+
   return {
     id: str(row.id),
-    eventType: str(row.event_type ?? row.eventType),
+    eventType,
+    actionKey,
     subjectUserId: str(row.subject_user_id ?? row.subjectUserId),
     subjectName: userNameById.get(str(row.subject_user_id)) || str(row.subject_user_id).slice(0, 8),
     actorUserId: str(row.actor_user_id ?? row.actorUserId),
-    payload: row.payload || {},
+    payload,
     createdAt: row.created_at ?? row.createdAt,
+    timestamp: row.created_at ?? row.createdAt,
   };
+}
+
+/** Standard provisioning audit payload (Phase 3B). */
+export function buildProvisioningAuditPayload({
+  action = "",
+  reason = "",
+  previous = {},
+  next = {},
+  related = {},
+  meta = {},
+} = {}) {
+  const base = {
+    schemaVersion: 1,
+    status: "success",
+    recordedAt: new Date().toISOString(),
+  };
+  const actionKey = str(action);
+  if (actionKey) base.action = actionKey;
+  const reasonText = str(reason);
+  if (reasonText) base.reason = reasonText;
+  if (previous && Object.keys(previous).length > 0) base.previous = previous;
+  if (next && Object.keys(next).length > 0) base.next = next;
+  return { ...base, ...related, ...meta };
+}
+
+export const PROVISIONING_AUDIT_EVENT_TYPES = new Set([
+  "created",
+  "updated",
+  "deactivated",
+  "reactivated",
+  "lab_transferred",
+  "password_reset",
+  "role_changed",
+  "ownership_reassigned",
+  "ownership_assigned",
+  "ownership_transferred",
+  "ownership_removed",
+  "ownership_secondary_added",
+  "ownership_secondary_removed",
+]);
+
+/**
+ * Pre–Phase 3B audit rows (no schemaVersion / recordedAt envelope).
+ * @param {object} payload
+ */
+export function isLegacyProvisioningAuditPayload(payload = {}) {
+  const p = payload && typeof payload === "object" ? payload : {};
+  if (p.schemaVersion === 1) return false;
+  const hasPhase3BEnvelope =
+    Boolean(str(p.recordedAt)) && (Boolean(str(p.status)) || p.success !== undefined);
+  return !hasPhase3BEnvelope;
+}
+
+/**
+ * Validate a single provisioning audit payload shape for Predator / integrity checks.
+ * @param {string} eventType
+ * @param {object} payload
+ */
+export function validateProvisioningEventPayload(eventType, payload = {}) {
+  const type = str(eventType).toLowerCase();
+  const p = payload && typeof payload === "object" ? payload : {};
+  if (isLegacyProvisioningAuditPayload(p)) {
+    return { valid: true, issues: [], legacy: true };
+  }
+  const issues = [];
+
+  if (p.schemaVersion !== 1 && type !== "created" && type !== "deactivated" && type !== "reactivated") {
+    issues.push("missing_or_invalid_schemaVersion");
+  }
+  if (!str(p.status) && p.success === undefined) {
+    issues.push("missing_status");
+  }
+
+  if (type === "role_changed") {
+    const prevRole = str(p.previous?.role ?? p.fromRole);
+    const nextRole = str(p.next?.role ?? p.toRole);
+    if (!prevRole || !nextRole) issues.push("role_changed_missing_previous_or_next");
+  }
+
+  if (type === "password_reset") {
+    if (!str(p.method)) issues.push("password_reset_missing_method");
+  }
+
+  if (type === "ownership_reassigned" || type === "ownership_assigned" || type === "ownership_transferred") {
+    if (!str(p.labId ?? p.lab_id)) issues.push("ownership_missing_labId");
+    if (
+      type !== "ownership_removed" &&
+      !str(p.toAgentId ?? p.to_agent_id) &&
+      !str(p.next?.agentId) &&
+      !str(p.primaryAgentId ?? p.primary_agent_id)
+    ) {
+      issues.push("ownership_missing_toAgent");
+    }
+  }
+
+  if (type === "ownership_removed") {
+    if (!str(p.labId ?? p.lab_id)) issues.push("ownership_missing_labId");
+  }
+
+  if (type === "ownership_secondary_added" || type === "ownership_secondary_removed") {
+    if (!str(p.labId ?? p.lab_id)) issues.push("ownership_missing_labId");
+    if (!str(p.secondaryAgentId ?? p.secondary_agent_id)) issues.push("ownership_missing_secondary");
+  }
+
+  if (type === "created") {
+    if (!str(p.role) && !str(p.email)) issues.push("created_missing_role_or_email");
+  }
+
+  return { valid: issues.length === 0, issues, eventType: type };
+}
+
+export function formatLastLogin(value) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return "—";
+  return d.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }

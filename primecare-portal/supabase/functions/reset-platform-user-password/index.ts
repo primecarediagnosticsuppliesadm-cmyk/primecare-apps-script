@@ -8,7 +8,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const LOGIN_BLOCKED_ROLES = new Set(["distributor_admin"]);
+const LOGIN_BLOCKED_ROLES = new Set<string>();
 
 type ResetBody = {
   tenantId?: string;
@@ -176,9 +176,14 @@ Deno.serve(async (req) => {
       event_type: "password_reset",
       actor_user_id: actorUserId,
       payload: {
+        schemaVersion: 1,
+        status: "success",
+        recordedAt: new Date().toISOString(),
+        action: "password_reset",
         method: "admin_temp_password",
         subjectEmail: str(subjectProfile.email) || email || null,
         subjectRole: targetRole,
+        source: "reset-platform-user-password",
       },
     },
   ]);

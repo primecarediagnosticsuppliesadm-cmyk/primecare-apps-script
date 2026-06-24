@@ -1,4 +1,11 @@
 import { ROLE_LABELS, ROLES } from "@/config/roles.js";
+import {
+  normalizePlatformRole as matrixNormalizeRole,
+  platformRoleLabel as matrixPlatformRoleLabel,
+  directoryRoleFromPlatformRole as matrixDirectoryRole,
+  isDistributorScopedRole,
+  getProvisionableRolesForActor,
+} from "@/config/rolePermissionMatrix.js";
 import { resolveLabAgent } from "@/operations/labAgentResolver.js";
 
 function str(v) {
@@ -7,17 +14,27 @@ function str(v) {
 
 export const OPERATIONS_CENTER_TABS = [
   { id: "directory", label: "User Directory" },
+  { id: "labOwnership", label: "Lab Ownership" },
+  { id: "pilotOnboarding", label: "Pilot Onboarding" },
   { id: "labAssignment", label: "Bulk Lab Assign" },
   { id: "distributorAssignment", label: "Bulk Distributor Assign" },
 ];
 
 export const PLATFORM_ROLE_OPTIONS = [
-  { value: "admin", label: "HQ Admin" },
-  { value: "executive", label: "Executive" },
-  { value: "agent", label: "Agent" },
-  { value: "lab", label: "Lab User" },
-  { value: "distributor_admin", label: "Distributor Admin" },
+  { value: ROLES.ADMIN, label: "HQ Admin" },
+  { value: ROLES.EXECUTIVE, label: "HQ Executive" },
+  { value: ROLES.AGENT, label: "Field Agent" },
+  { value: ROLES.LAB, label: "Lab User" },
+  { value: ROLES.DISTRIBUTOR_ADMIN, label: "Distributor Admin" },
+  { value: ROLES.DISTRIBUTOR_MANAGER, label: "Distributor Manager" },
+  { value: ROLES.READ_ONLY_AUDITOR, label: "Read Only Auditor" },
 ];
+
+/** Role dropdown options filtered by provisioning matrix for the acting user. */
+export function filterPlatformRoleOptionsForActor(actorRole) {
+  const allowed = new Set(getProvisionableRolesForActor(actorRole));
+  return PLATFORM_ROLE_OPTIONS.filter((opt) => allowed.has(opt.value));
+}
 
 const KNOWN_PLATFORM_ROLES = new Set([
   ROLES.AGENT,
@@ -25,12 +42,14 @@ const KNOWN_PLATFORM_ROLES = new Set([
   ROLES.EXECUTIVE,
   ROLES.LAB,
   ROLES.DISTRIBUTOR_ADMIN,
+  ROLES.DISTRIBUTOR_MANAGER,
+  ROLES.READ_ONLY_AUDITOR,
 ]);
 
 export function normalizePlatformRole(role) {
+  const fromMatrix = matrixNormalizeRole(role);
+  if (fromMatrix) return fromMatrix;
   const r = str(role).toLowerCase();
-  if (r === "lab user") return ROLES.LAB;
-  if (KNOWN_PLATFORM_ROLES.has(r)) return r;
   return PLATFORM_ROLE_OPTIONS.some((o) => o.value === r) ? r : "";
 }
 
@@ -40,7 +59,7 @@ export function isAgentRole(role) {
 
 export function platformRoleLabel(role) {
   const normalized = normalizePlatformRole(role);
-  return ROLE_LABELS[normalized] || str(role) || "—";
+  return matrixPlatformRoleLabel(normalized) || ROLE_LABELS[normalized] || str(role) || "—";
 }
 
 export const EMAIL_NOT_ADDED = "Contact email not added";
@@ -109,12 +128,12 @@ export function deriveDisplayNameFromEmail(email) {
 
 export function directoryRoleFromPlatformRole(role) {
   const normalized = normalizePlatformRole(role);
-  if (normalized === ROLES.LAB) return "LAB";
-  if (normalized === ROLES.AGENT) return "AGENT";
-  if (normalized === ROLES.ADMIN) return "ADMIN";
-  if (normalized === ROLES.EXECUTIVE) return "EXECUTIVE";
-  if (normalized === ROLES.DISTRIBUTOR_ADMIN) return "DISTRIBUTOR_ADMIN";
-  return str(role).toUpperCase();
+  if (!normalized) return str(role).toUpperCase();
+  return matrixDirectoryRole(normalized);
+}
+
+export function requiresDistributorScope(role) {
+  return isDistributorScopedRole(role);
 }
 
 export function formatOpsDate(value) {
@@ -192,6 +211,7 @@ export function mapPlatformUserRow(row = {}) {
     labId: str(row.lab_id ?? row.labId),
     distributorId: str(row.distributor_id ?? row.distributorId),
     territory: str(row.territory),
+    lastLoginAt: row.last_login_at ?? row.lastLoginAt ?? null,
   };
 }
 
@@ -216,7 +236,8 @@ export function mapLabAssignmentRow(row = {}, tenantNameById = new Map()) {
     assignedAgentId: agentId,
     assignedAgentName: agentName,
     tenantId,
-    tenantName: str(row.tenantName ?? row.tenant_name) || tenantNameById.get(tenantId) || tenantId,
+    tenantName:
+      str(row.tenantName ?? row.tenant_name) || tenantNameById.get(tenantId) || "",
     status,
     active: row.active !== false && str(row.activeFlag).toLowerCase() !== "inactive",
   };

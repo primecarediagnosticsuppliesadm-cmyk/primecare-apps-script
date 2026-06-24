@@ -18,6 +18,7 @@ import {
   validateSupabaseClientForPredator,
   validatePersistenceStatusResolvesForPredator,
   validateDurableCatalogFlagPersistsForPredator,
+  fetchDatabaseTenants,
 } from "@/tenant/durableTenantStore.js";
 
 function str(v) {
@@ -548,14 +549,24 @@ export async function validateDistributorProvisioningModule({
     );
 
     if (model.activated) {
-      const row = getRegistryTenant(model.distributorId);
-      const activeOk = row?.status === "ACTIVE";
+      let row = getRegistryTenant(model.distributorId);
+      if (!row?.status) {
+        const { rows } = await fetchDatabaseTenants();
+        row =
+          (rows || []).find((t) => str(t?.id) === str(model.distributorId)) ||
+          row;
+      }
+      const activeOk = str(row?.status).toUpperCase() === "ACTIVE";
       entries.push(
         createPredatorEntry({
-          status: activeOk ? "PASS" : "FAIL",
+          status: activeOk ? "PASS" : row?.status ? "FAIL" : "WARN",
           module: "Distributor Provisioning",
           step: "activation.active_status",
-          actual: row?.status,
+          expected: "Activated distributor status ACTIVE in tenant registry",
+          actual: row?.status || "registry row not found in headless run",
+          suggestedFix: !row?.status
+            ? "Open Distributor Provisioning in browser or verify public.tenants row"
+            : undefined,
           tenantId: ctx.tenantId,
           role: ctx.role,
           userId: ctx.userId,
