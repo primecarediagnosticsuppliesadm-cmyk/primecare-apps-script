@@ -42,7 +42,9 @@ export default function PaymentCollectionContext({
         </p>
         <p className="text-lg font-bold tabular-nums text-slate-900">{formatMoney(outstanding)}</p>
         <p className="text-[11px] text-muted-foreground">
-          Payment reduces lab outstanding (account-level). Order checkboxes are reference only.
+          {selectedOrderIds.length === 1
+            ? "Payment will allocate to the selected order invoice."
+            : "Payment reduces lab outstanding (account-level). Select one open order to allocate."}
         </p>
       </div>
 

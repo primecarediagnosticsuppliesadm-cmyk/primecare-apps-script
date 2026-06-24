@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient.js";
+import { autoAllocatePaymentToOrderInvoice } from "@/api/invoiceSupabaseApi.js";
 import {
   filterCollectionsForUser,
   filterLabsForUser,
@@ -393,7 +394,7 @@ async function readInventoryCatalogFallbackRows() {
     .limit(HQ_LAB_CATALOG_LIMIT);
   if (!inv.error) return inv;
 
-  console.warn(
+  hqDebugWarn(
     "[getLabCatalogRead] inventory catalog projection failed; retrying core stock columns:",
     inv.error.message
   );
@@ -469,8 +470,8 @@ export async function getLabCatalogRead(options = {}) {
     });
 
     if (error) {
-      console.warn("[getLabCatalogRead] v_lab_catalog unavailable; trying inventory:", error.message);
-      console.warn("SUPABASE LAB CATALOG USING INVENTORY FALLBACK", {
+      hqDebugWarn("[getLabCatalogRead] v_lab_catalog unavailable; trying inventory:", error.message);
+      hqDebugWarn("SUPABASE LAB CATALOG USING INVENTORY FALLBACK", {
         reason: error.message,
         expectedView: "v_lab_catalog",
         fallbackTable: "inventory",
@@ -504,7 +505,7 @@ export async function getLabCatalogRead(options = {}) {
 
     return { success: true, data: { products, source }, error: null };
   } catch (err) {
-    console.warn("[getLabCatalogRead] failed:", err?.message || err);
+    hqDebugWarn("[getLabCatalogRead] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: { products: [] } };
   }
 }
@@ -641,7 +642,7 @@ export async function createHqProductWrite(payload = {}) {
         },
       ]);
       if (!ledger.success) {
-        console.warn("[createHqProductWrite] opening stock ledger insert failed:", ledger.error);
+        hqDebugWarn("[createHqProductWrite] opening stock ledger insert failed:", ledger.error);
       }
     }
 
@@ -655,7 +656,7 @@ export async function createHqProductWrite(payload = {}) {
       error: null,
     };
   } catch (err) {
-    console.warn("[createHqProductWrite] failed:", err?.message || err);
+    hqDebugWarn("[createHqProductWrite] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: null };
   }
 }
@@ -733,7 +734,7 @@ export async function updateHqProductWrite(productId, payload = {}) {
       error: null,
     };
   } catch (err) {
-    console.warn("[updateHqProductWrite] failed:", err?.message || err);
+    hqDebugWarn("[updateHqProductWrite] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: null };
   }
 }
@@ -772,7 +773,7 @@ export async function setHqProductActiveWrite(productId, active, payload = {}) {
       error: null,
     };
   } catch (err) {
-    console.warn("[setHqProductActiveWrite] failed:", err?.message || err);
+    hqDebugWarn("[setHqProductActiveWrite] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: null };
   }
 }
@@ -792,7 +793,7 @@ export async function enrichCatalogWithProductMetadata(products, tenantId) {
     .eq("tenant_id", id);
 
   if (error) {
-    console.warn("[enrichCatalogWithProductMetadata]", error.message);
+    hqDebugWarn("[enrichCatalogWithProductMetadata]", error.message);
     return products;
   }
 
@@ -1433,7 +1434,7 @@ async function insertPaymentsRow(paymentRow) {
   const slim = { ...paymentRow };
   delete slim.collected_by;
   delete slim.note;
-  console.warn(
+  hqDebugWarn(
     "[createPaymentWrite] payments.note/collected_by missing in Supabase — retrying core columns only. Run primecare-portal/supabase/sql/collections_notes_migration.sql",
     res.error.message
   );
@@ -1483,7 +1484,7 @@ export async function createPaymentWrite(payload = {}) {
     const arSel = await arSelQuery.limit(1);
 
     if (arSel.error) {
-      console.warn("[createPaymentWrite] ar_credit_control select:", arSel.error.message);
+      hqDebugWarn("[createPaymentWrite] ar_credit_control select:", arSel.error.message);
       return { success: false, error: arSel.error.message || "AR read failed", data: null };
     }
 
@@ -1530,7 +1531,7 @@ export async function createPaymentWrite(payload = {}) {
     const { data: payData, error: payErr } = await insertPaymentsRow(paymentRow);
 
     if (payErr) {
-      console.warn("[createPaymentWrite] payments insert:", payErr.message);
+      hqDebugWarn("[createPaymentWrite] payments insert:", payErr.message);
       return { success: false, error: payErr.message || "Payment insert failed", data: null };
     }
 
@@ -1549,15 +1550,41 @@ export async function createPaymentWrite(payload = {}) {
       .eq("lab_id", lab_id);
 
     if (arUpd.error) {
-      console.warn(
-        "[createPaymentWrite] ar_credit_control update FAILED — payment row kept; reconcile AR manually:",
+      hqDebugWarn(
+        "[createPaymentWrite] ar_credit_control update FAILED — rolling back payment row:",
         arUpd.error.message
       );
+      const rollback = await supabase
+        .from("payments")
+        .delete()
+        .eq("tenant_id", scoped_tenant_id)
+        .eq("payment_id", payment_id);
+      if (rollback.error) {
+        hqDebugWarn(
+          "[createPaymentWrite] payment rollback FAILED — reconcile manually:",
+          rollback.error.message
+        );
+      }
       return {
         success: false,
-        error: `Payment saved but AR update failed: ${arUpd.error.message}`,
-        data: { payment: savedPay, partial: true },
+        error: `AR update failed; payment rolled back: ${arUpd.error.message}`,
+        data: null,
       };
+    }
+
+    let allocation = null;
+    if (order_id) {
+      const allocRes = await autoAllocatePaymentToOrderInvoice({
+        tenantId: scoped_tenant_id,
+        paymentId: payment_id,
+        orderId: order_id,
+        amountReceived: amount_received,
+        actorId: collected_by || payload.actorId,
+      });
+      allocation = allocRes.skipped ? null : allocRes.data;
+      if (!allocRes.success && !allocRes.skipped) {
+        hqDebugWarn("[createPaymentWrite] invoice auto-allocation failed:", allocRes.error);
+      }
     }
 
     fireNotificationEvent(
@@ -1581,11 +1608,11 @@ export async function createPaymentWrite(payload = {}) {
 
     return {
       success: true,
-      data: { payment: savedPay, ar: { lab_id, ...arPatch } },
+      data: { payment: savedPay, ar: { lab_id, ...arPatch }, allocation },
       error: null,
     };
   } catch (err) {
-    console.warn("[createPaymentWrite] failed:", err?.message || err);
+    hqDebugWarn("[createPaymentWrite] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: null };
   }
   });
@@ -1669,7 +1696,7 @@ export async function getCollectionsRead(params = {}) {
     });
 
     if (arRes.error) {
-      console.warn("[getCollectionsRead] ar_credit_control:", arRes.error.message);
+      hqDebugWarn("[getCollectionsRead] ar_credit_control:", arRes.error.message);
       return {
         success: false,
         readFailed: true,
@@ -1679,10 +1706,10 @@ export async function getCollectionsRead(params = {}) {
     }
 
     if (payRes.error) {
-      console.warn("[getCollectionsRead] payments:", payRes.error.message);
+      hqDebugWarn("[getCollectionsRead] payments:", payRes.error.message);
     }
     if (labsRes.error) {
-      console.warn("[getCollectionsRead] v_labs_credit:", labsRes.error.message);
+      hqDebugWarn("[getCollectionsRead] v_labs_credit:", labsRes.error.message);
     }
 
     const payRaw = payRes.error ? [] : payRes.data || [];
@@ -1743,7 +1770,7 @@ export async function getCollectionsRead(params = {}) {
       },
     };
   } catch (err) {
-    console.warn("[getCollectionsRead] failed:", err?.message || err);
+    hqDebugWarn("[getCollectionsRead] failed:", err?.message || err);
     return {
       success: false,
       readFailed: true,
@@ -1802,7 +1829,7 @@ export async function getCollectionHistoryRead(labId, options = {}) {
     if (!payRaw) {
       const { data, error } = await fetchPaymentsForLabBoundedRows(supabase, labKey);
       if (error) {
-        console.warn("[getCollectionHistoryRead] payments:", error.message);
+        hqDebugWarn("[getCollectionHistoryRead] payments:", error.message);
         return { success: false, error: error.message, data: { history: [] } };
       }
       payRaw = data || [];
@@ -1814,7 +1841,7 @@ export async function getCollectionHistoryRead(labId, options = {}) {
     const history = matchedRaw.map(mapPaymentHistoryRow).filter((h) => h.amountCollected > 0);
     return { success: true, data: { history } };
   } catch (err) {
-    console.warn("[getCollectionHistoryRead] failed:", err?.message || err);
+    hqDebugWarn("[getCollectionHistoryRead] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: { history: [] } };
   }
 }
@@ -1856,7 +1883,7 @@ export async function getCollectionDetailRead(labId, options = {}) {
 
       if (!arRow) {
         if (arSel.error) {
-          console.warn("[getCollectionDetailRead] ar_credit_control:", arSel.error.message);
+          hqDebugWarn("[getCollectionDetailRead] ar_credit_control:", arSel.error.message);
           return { success: false, error: arSel.error.message, data: { collection: null } };
         }
         arRow = Array.isArray(arSel.data) && arSel.data[0] ? arSel.data[0] : null;
@@ -1887,7 +1914,7 @@ export async function getCollectionDetailRead(labId, options = {}) {
     const collection = buildCollectionDetailFromSources(arRow, labsCreditRow, paymentsForLab || []);
     return { success: true, data: { collection } };
   } catch (err) {
-    console.warn("[getCollectionDetailRead] failed:", err?.message || err);
+    hqDebugWarn("[getCollectionDetailRead] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: { collection: null } };
   }
 }
@@ -1917,7 +1944,7 @@ export async function updateCollectionNotesWrite(payload = {}) {
     if (tenant_id) arSelQuery = arSelQuery.eq("tenant_id", tenant_id);
     const arSel = await arSelQuery.limit(1);
     if (arSel.error) {
-      console.warn("[updateCollectionNotesWrite] ar_credit_control select:", arSel.error.message);
+      hqDebugWarn("[updateCollectionNotesWrite] ar_credit_control select:", arSel.error.message);
       return { success: false, error: arSel.error.message, data: null };
     }
 
@@ -1955,7 +1982,7 @@ export async function updateCollectionNotesWrite(payload = {}) {
       .select();
 
     if (arUpd.error) {
-      console.warn("[updateCollectionNotesWrite] ar_credit_control update:", arUpd.error.message);
+      hqDebugWarn("[updateCollectionNotesWrite] ar_credit_control update:", arUpd.error.message);
       return { success: false, error: arUpd.error.message, data: null };
     }
 
@@ -1967,7 +1994,7 @@ export async function updateCollectionNotesWrite(payload = {}) {
       error: null,
     };
   } catch (err) {
-    console.warn("[updateCollectionNotesWrite] failed:", err?.message || err);
+    hqDebugWarn("[updateCollectionNotesWrite] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: null };
   }
 }
@@ -2655,26 +2682,26 @@ export async function getAdminDashboardRead(options = {}) {
     const payRaw = payRes.error ? [] : payRes.data || [];
 
     if (boundedSource.errors?.orders) {
-      console.warn("[getAdminDashboardRead] orders:", boundedSource.errors.orders);
+      hqDebugWarn("[getAdminDashboardRead] orders:", boundedSource.errors.orders);
     }
     if (boundedSource.errors?.ar_credit_control) {
-      console.warn("[getAdminDashboardRead] ar_credit_control:", boundedSource.errors.ar_credit_control);
+      hqDebugWarn("[getAdminDashboardRead] ar_credit_control:", boundedSource.errors.ar_credit_control);
     }
     if (boundedSource.errors?.agent_visits) {
-      console.warn("[getAdminDashboardRead] agent_visits:", boundedSource.errors.agent_visits);
+      hqDebugWarn("[getAdminDashboardRead] agent_visits:", boundedSource.errors.agent_visits);
     }
     if (boundedSource.errors?.inventory) {
-      console.warn("[getAdminDashboardRead] inventory:", boundedSource.errors.inventory);
+      hqDebugWarn("[getAdminDashboardRead] inventory:", boundedSource.errors.inventory);
     }
     if (boundedSource.errors?.labs) {
-      console.warn("[getAdminDashboardRead] labs:", boundedSource.errors.labs);
+      hqDebugWarn("[getAdminDashboardRead] labs:", boundedSource.errors.labs);
     }
     if (orderIds.length && !orderLinesRaw.length) {
       queryErrors.push("order_lines");
     }
     if (payRes.error) {
       queryErrors.push("payments");
-      console.warn("[getAdminDashboardRead] payments:", payRes.error.message);
+      hqDebugWarn("[getAdminDashboardRead] payments:", payRes.error.message);
     }
 
     endQuery({
@@ -2851,7 +2878,7 @@ export async function getAdminDashboardRead(options = {}) {
     recordAdminDashboardApiUiSnapshots(payload, "getAdminDashboardRead.fresh");
     return result;
   } catch (err) {
-    console.warn("[getAdminDashboardRead] failed:", err?.message || err);
+    hqDebugWarn("[getAdminDashboardRead] failed:", err?.message || err);
     endTotal({ error: err?.message || String(err) });
     recordPredatorTiming({
       module: "Admin Dashboard",
@@ -3268,7 +3295,7 @@ export async function getQualificationReviewRead(options = {}) {
     }
 
     if (labsRes.error) {
-      console.warn("[getQualificationReviewRead] v_labs_credit:", labsRes.error.message);
+      hqDebugWarn("[getQualificationReviewRead] v_labs_credit:", labsRes.error.message);
     }
 
     const qualRows = qualRes.data || [];
@@ -3555,7 +3582,7 @@ export async function getAgentWorkspaceRead(currentUser) {
 
     const { data: labsRaw, error: labsErr } = await fetchLabsCreditBoundedRows(supabase);
     if (labsErr) {
-      console.warn("[getAgentWorkspaceRead] v_labs_credit:", labsErr.message);
+      hqDebugWarn("[getAgentWorkspaceRead] v_labs_credit:", labsErr.message);
     }
     const allLabs = (labsRaw || [])
       .map(mapLabsCreditRow)
@@ -3566,7 +3593,7 @@ export async function getAgentWorkspaceRead(currentUser) {
     let visitRows = [];
     const av = await fetchAgentVisitsBoundedRows(supabase);
     if (av.error) {
-      console.warn("[getAgentWorkspaceRead] agent_visits:", av.error.message);
+      hqDebugWarn("[getAgentWorkspaceRead] agent_visits:", av.error.message);
     } else if (Array.isArray(av.data)) {
       visitRows = av.data;
     }
@@ -3616,7 +3643,7 @@ export async function getAgentWorkspaceRead(currentUser) {
       data,
     };
   } catch (err) {
-    console.warn("[getAgentWorkspaceRead] failed:", err?.message || err);
+    hqDebugWarn("[getAgentWorkspaceRead] failed:", err?.message || err);
     return { success: false, readFailed: true, error: err?.message || String(err), data: { ...EMPTY_AGENT_WORKSPACE } };
   }
 }
@@ -3731,7 +3758,7 @@ export async function createAgentVisitWrite(payload = {}) {
     const { data, error } = await supabase.from("agent_visits").insert([insertRow]).select();
 
     if (error) {
-      console.warn("[createAgentVisitWrite]", error.message);
+      hqDebugWarn("[createAgentVisitWrite]", error.message);
       return { success: false, error: error.message || "Insert failed", data: null };
     }
 
@@ -3765,7 +3792,7 @@ export async function createAgentVisitWrite(payload = {}) {
 
     return { success: true, data: saved ?? null, error: null };
   } catch (err) {
-    console.warn("[createAgentVisitWrite] failed:", err?.message || err);
+    hqDebugWarn("[createAgentVisitWrite] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: null };
   }
 }
@@ -3787,14 +3814,14 @@ export async function createInventoryLedgerWrite(ledgerRows) {
     const { data, error } = await supabase.from("inventory_ledger").insert(ledgerRows).select();
 
     if (error) {
-      console.warn("[createInventoryLedgerWrite]", error.message);
+      hqDebugWarn("[createInventoryLedgerWrite]", error.message);
       return { success: false, error: error.message || "Ledger insert failed", data: null };
     }
 
-    console.log("SUPABASE INVENTORY LEDGER SAVED", data);
+    hqDebugLog("SUPABASE INVENTORY LEDGER SAVED", data);
     return { success: true, data: data ?? [], error: null };
   } catch (err) {
-    console.warn("[createInventoryLedgerWrite] failed:", err?.message || err);
+    hqDebugWarn("[createInventoryLedgerWrite] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: null };
   }
 }
@@ -3855,7 +3882,7 @@ export async function getInventoryLedgerRead(options = {}) {
 
     return { success: true, data: { movements }, error: null };
   } catch (err) {
-    console.warn("[getInventoryLedgerRead] failed:", err?.message || err);
+    hqDebugWarn("[getInventoryLedgerRead] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: { movements: [] } };
   }
 }
@@ -4024,7 +4051,7 @@ export async function getInventoryHealthRead() {
 
     return { success: true, data: payload, error: null };
   } catch (err) {
-    console.warn("[getInventoryHealthRead] failed:", err?.message || err);
+    hqDebugWarn("[getInventoryHealthRead] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: { rows: [] } };
   }
 }
@@ -4106,7 +4133,7 @@ export async function getPurchaseOrdersRead() {
     const purchaseOrders = (po.data || []).map((row) => mapPurchaseOrderRow(row, itemsByPo));
     return { success: true, data: { purchaseOrders }, error: null };
   } catch (err) {
-    console.warn("[getPurchaseOrdersRead] failed:", err?.message || err);
+    hqDebugWarn("[getPurchaseOrdersRead] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: { purchaseOrders: [] } };
   }
 }
@@ -4167,7 +4194,7 @@ export async function createPurchaseOrderWrite(payload = {}) {
       updated_at: new Date().toISOString(),
     };
 
-    console.log("PURCHASE ORDER WRITE PAYLOAD", { po: poPayload, item: itemPayload });
+    hqDebugLog("PURCHASE ORDER WRITE PAYLOAD", { po: poPayload, item: itemPayload });
 
     const poIns = await supabase.from("purchase_orders").insert([poPayload]).select();
     if (poIns.error) {
@@ -4181,7 +4208,7 @@ export async function createPurchaseOrderWrite(payload = {}) {
 
     const savedPo = Array.isArray(poIns.data) ? poIns.data[0] : poIns.data;
     const savedItem = Array.isArray(itemIns.data) ? itemIns.data[0] : itemIns.data;
-    console.log("SUPABASE PURCHASE ORDER SAVED", { po: savedPo, item: savedItem });
+    hqDebugLog("SUPABASE PURCHASE ORDER SAVED", { po: savedPo, item: savedItem });
 
     return {
       success: true,
@@ -4189,7 +4216,7 @@ export async function createPurchaseOrderWrite(payload = {}) {
       error: null,
     };
   } catch (err) {
-    console.warn("[createPurchaseOrderWrite] failed:", err?.message || err);
+    hqDebugWarn("[createPurchaseOrderWrite] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: null };
   }
 }
@@ -4326,7 +4353,7 @@ export async function receivePurchaseOrderWrite(poId, payload = {}) {
     };
     const ledger = await createInventoryLedgerWrite([ledgerRow]);
     if (!ledger.success) return { success: false, error: ledger.error || "Purchase ledger insert failed", data: null };
-    console.log("INVENTORY PURCHASE_IN LEDGER SAVED", ledger.data);
+    hqDebugLog("INVENTORY PURCHASE_IN LEDGER SAVED", ledger.data);
 
     const orderedQty = num(itemRow.quantity ?? poRow.quantity);
     const previousReceived = num(itemRow.received_qty ?? poRow.received_qty);
@@ -4358,7 +4385,7 @@ export async function receivePurchaseOrderWrite(poId, payload = {}) {
     if (poUpdate.error) return { success: false, error: poUpdate.error.message, data: null };
 
     const savedPo = Array.isArray(poUpdate.data) ? poUpdate.data[0] : poUpdate.data;
-    console.log("SUPABASE PURCHASE RECEIVED", {
+    hqDebugLog("SUPABASE PURCHASE RECEIVED", {
       poId: id,
       productId,
       receivedQty,
@@ -4379,7 +4406,7 @@ export async function receivePurchaseOrderWrite(poId, payload = {}) {
       error: null,
     };
   } catch (err) {
-    console.warn("[receivePurchaseOrderWrite] failed:", err?.message || err);
+    hqDebugWarn("[receivePurchaseOrderWrite] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: null };
   }
 }
@@ -4446,12 +4473,12 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
   const scopedTenantId = str(tenant_id);
   if (!scopedTenantId) {
     const message = "tenant_id is required for inventory deduction";
-    console.warn("[applyLabOrderInventoryDeduction]", message, { order_id });
+    hqDebugWarn("[applyLabOrderInventoryDeduction]", message, { order_id });
     return { success: false, error: message };
   }
 
   const tableName = "inventory";
-  console.log("INVENTORY TABLE TARGET", tableName, { tenant_id: scopedTenantId });
+  hqDebugLog("INVENTORY TABLE TARGET", tableName, { tenant_id: scopedTenantId });
 
   const oid = str(order_id);
   const lines = Array.isArray(savedLineItems) ? savedLineItems : [];
@@ -4471,7 +4498,7 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
       stockErrors.push(
         inventoryResolved.error || `Inventory row not found for ${product_id}`
       );
-      console.warn(
+      hqDebugWarn(
         "[applyLabOrderInventoryDeduction] row resolution failed:",
         product_id,
         inventoryResolved.error
@@ -4488,7 +4515,7 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
       stockErrors.push(
         `Insufficient stock for ${label}: requested ${qty}, available ${stock_before}`
       );
-      console.warn("[applyLabOrderInventoryDeduction] insufficient stock:", {
+      hqDebugWarn("[applyLabOrderInventoryDeduction] insufficient stock:", {
         product_id,
         requested: qty,
         available: stock_before,
@@ -4498,7 +4525,7 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
 
     const stock_after = stock_before - qty;
 
-    console.log("INVENTORY BEFORE UPDATE", {
+    hqDebugLog("INVENTORY BEFORE UPDATE", {
       table: tableName,
       tenant_id: inventoryTenantId,
       product_id,
@@ -4512,7 +4539,7 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
       current_stock: stock_after,
       updated_at: new Date().toISOString(),
     };
-    console.log("INVENTORY UPDATE PATCH", updatePatch);
+    hqDebugLog("INVENTORY UPDATE PATCH", updatePatch);
 
     const upd = await supabase
       .from("inventory")
@@ -4522,12 +4549,12 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
       .select("tenant_id, product_id, current_stock");
 
     if (upd.error) {
-      console.warn(
+      hqDebugWarn(
         "[createOrderWrite] INVENTORY UPDATE FAILED — order is NOT rolled back:",
         product_id,
         upd.error.message
       );
-      console.log("INVENTORY AFTER UPDATE", {
+      hqDebugLog("INVENTORY AFTER UPDATE", {
         product_id,
         skipped: true,
         reason: upd.error.message,
@@ -4537,7 +4564,7 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
 
     const updatedRows = Array.isArray(upd.data) ? upd.data : [];
     if (updatedRows.length !== 1) {
-      console.warn(
+      hqDebugWarn(
         "[createOrderWrite] INVENTORY UPDATE row count unexpected — order is NOT rolled back:",
         product_id,
         `expected 1, got ${updatedRows.length}`
@@ -4546,7 +4573,7 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
     }
 
     updatedLines += 1;
-    console.log("INVENTORY AFTER UPDATE", { tenant_id: inventoryTenantId, product_id, stock_after });
+    hqDebugLog("INVENTORY AFTER UPDATE", { tenant_id: inventoryTenantId, product_id, stock_after });
 
     ledgerBatch.push({
       movement_type: "ORDER_OUT",
@@ -4581,7 +4608,7 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
 
   const led = await createInventoryLedgerWrite(ledgerBatch);
   if (!led.success) {
-    console.warn(
+    hqDebugWarn(
       "[createOrderWrite] INVENTORY LEDGER insert failed — stock may already be updated; order is NOT rolled back:",
       led.error
     );
@@ -4609,7 +4636,7 @@ async function assertLabOrderCreditEligible(tenantId, labId) {
     .maybeSingle();
 
   if (error) {
-    console.warn("[assertLabOrderCreditEligible]", error.message);
+    hqDebugWarn("[assertLabOrderCreditEligible]", error.message);
     return { ok: true };
   }
   if (!data) return { ok: true };
@@ -4701,7 +4728,7 @@ export async function createOrderWrite(payload = {}) {
       created_at: new Date().toISOString(),
       items: normalizedLines,
     };
-    console.log("ORDER WRITE PAYLOAD", writePayload);
+    hqDebugLog("ORDER WRITE PAYLOAD", writePayload);
 
     const orderRow = {
       order_id,
@@ -4721,12 +4748,12 @@ export async function createOrderWrite(payload = {}) {
       .select();
 
     if (orderError) {
-      console.warn("[createOrderWrite] orders:", orderError.message);
+      hqDebugWarn("[createOrderWrite] orders:", orderError.message);
       return { success: false, error: orderError.message || "Order insert failed", data: null };
     }
 
     const savedOrder = Array.isArray(orderData) ? orderData[0] : orderData;
-    console.log("SUPABASE ORDER SAVED", savedOrder);
+    hqDebugLog("SUPABASE ORDER SAVED", savedOrder);
     await getLabRecentOrdersRead(lab_id);
 
     const itemsPayload = normalizedLines.map((line, idx) => ({
@@ -4740,7 +4767,7 @@ export async function createOrderWrite(payload = {}) {
       total_price: line.total_price,
       created_by,
     }));
-    console.log("SUPABASE ORDER ITEMS PAYLOAD", itemsPayload);
+    hqDebugLog("SUPABASE ORDER ITEMS PAYLOAD", itemsPayload);
 
     const { data: itemsData, error: itemsError } = await supabase
       .from("order_items")
@@ -4748,7 +4775,7 @@ export async function createOrderWrite(payload = {}) {
       .select();
 
     if (itemsError) {
-      console.warn("[createOrderWrite] order_items:", itemsError.message);
+      hqDebugWarn("[createOrderWrite] order_items:", itemsError.message);
       return {
         success: false,
         error: itemsError.message || "Order items insert failed",
@@ -4756,10 +4783,10 @@ export async function createOrderWrite(payload = {}) {
       };
     }
 
-    console.log("SUPABASE ORDER ITEMS SAVED", itemsData);
+    hqDebugLog("SUPABASE ORDER ITEMS SAVED", itemsData);
 
     if (str(status).toLowerCase() === "fulfilled") {
-      console.log("ORDER STATUS BUSINESS RULE", {
+      hqDebugLog("ORDER STATUS BUSINESS RULE", {
         branch: "createOrderWrite: Fulfill-on-submit — deduct inventory once + AR post once",
         order_id,
         lab_id,
@@ -4772,7 +4799,7 @@ export async function createOrderWrite(payload = {}) {
           created_by,
         });
       } catch (invErr) {
-        console.warn(
+        hqDebugWarn(
           "[createOrderWrite] Fulfilled order inventory deduction threw — order is NOT rolled back:",
           invErr?.message || invErr
         );
@@ -4785,7 +4812,7 @@ export async function createOrderWrite(payload = {}) {
         deltaAmount: amt,
       });
       if (bump.success && !bump.skipped) {
-        console.log("AR POSTED FOR ORDER", {
+        hqDebugLog("AR POSTED FOR ORDER", {
           phase: "createOrderWrite",
           order_id,
           lab_id,
@@ -4801,7 +4828,24 @@ export async function createOrderWrite(payload = {}) {
       };
       const uf = await supabase.from("orders").update(flagPatch).eq("order_id", order_id).select();
       if (uf.error) {
-        console.warn("[createOrderWrite] Fulfillment flags update:", uf.error.message);
+        hqDebugWarn("[createOrderWrite] Fulfillment flags update:", uf.error.message);
+      }
+
+      const invoiceRes = await createInvoiceForFulfilledOrderWrite({
+        tenantId: tenant_id,
+        orderId: order_id,
+        actorId: created_by,
+        createdSource: "createOrderWrite",
+      });
+      if (!invoiceRes.success && !invoiceRes.skipped) {
+        hqDebugWarn("[createOrderWrite] Invoice creation after fulfill failed:", invoiceRes.error);
+      } else if (invoiceRes.data?.invoice_id) {
+        hqDebugLog("INVOICE CREATED FOR ORDER", {
+          orderId: order_id,
+          invoiceId: invoiceRes.data.invoice_id,
+          invoiceNumber: invoiceRes.data.invoice_number,
+          skipped: Boolean(invoiceRes.skipped),
+        });
       }
     }
 
@@ -4856,7 +4900,7 @@ export async function createOrderWrite(payload = {}) {
       error: null,
     };
   } catch (err) {
-    console.warn("[createOrderWrite] failed:", err?.message || err);
+    hqDebugWarn("[createOrderWrite] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: null };
   }
 }
@@ -5087,7 +5131,7 @@ export async function getLabRecentOrdersRead(labId) {
     }
 
     if (lastError) {
-      console.warn("[getLabRecentOrdersRead]", lastError.message);
+      hqDebugWarn("[getLabRecentOrdersRead]", lastError.message);
       return empty;
     }
 
@@ -5108,7 +5152,7 @@ export async function getLabRecentOrdersRead(labId) {
 
     return { success: true, data: { orders } };
   } catch (err) {
-    console.warn("[getLabRecentOrdersRead] failed:", err?.message || err);
+    hqDebugWarn("[getLabRecentOrdersRead] failed:", err?.message || err);
     return empty;
   }
 }
@@ -5154,7 +5198,7 @@ export async function getOrdersRead(params = {}) {
         .range(offset, offset + limit - 1);
       if (fallback.error) {
         const message = fallback.error.message || String(fallback.error);
-        console.warn("[getOrdersRead] Supabase error:", message);
+        hqDebugWarn("[getOrdersRead] Supabase error:", message);
         return { success: false, readFailed: true, error: message, data: { orders: [] } };
       }
       rawList = Array.isArray(fallback.data) ? fallback.data : [];
@@ -5194,13 +5238,13 @@ export async function getOrdersRead(params = {}) {
     };
 
     if (rawList.length !== orders.length) {
-      console.warn("[getOrdersRead] row count mismatch after mapping", meta);
+      hqDebugWarn("[getOrdersRead] row count mismatch after mapping", meta);
     }
 
     return { success: true, readFailed: false, data: { orders }, meta, error: null };
   } catch (err) {
     const message = err?.message || String(err);
-    console.warn("[getOrdersRead] failed:", message);
+    hqDebugWarn("[getOrdersRead] failed:", message);
     return { success: false, readFailed: true, error: message, data: { orders: [] } };
   }
 }
@@ -5227,14 +5271,14 @@ export async function getOrderDetailsRead(orderId) {
     if (!byBusinessId.error && Array.isArray(byBusinessId.data) && byBusinessId.data[0]) {
       orderRow = byBusinessId.data[0];
     } else if (byBusinessId.error) {
-      console.warn("[getOrderDetailsRead] orders by order_id:", byBusinessId.error.message);
+      hqDebugWarn("[getOrderDetailsRead] orders by order_id:", byBusinessId.error.message);
     }
 
     if (!orderRow) {
       const byPk = await supabase.from("orders").select("*").eq("id", oid).limit(1);
       if (!byPk.error && Array.isArray(byPk.data) && byPk.data[0]) orderRow = byPk.data[0];
       else if (byPk.error) {
-        console.warn("[getOrderDetailsRead] orders by id:", byPk.error.message);
+        hqDebugWarn("[getOrderDetailsRead] orders by id:", byPk.error.message);
       }
     }
 
@@ -5253,7 +5297,7 @@ export async function getOrderDetailsRead(orderId) {
     if (!q1.error && Array.isArray(q1.data)) {
       lineRows = q1.data;
     } else if (q1.error) {
-      console.warn("[getOrderDetailsRead] order_lines:", q1.error.message);
+      hqDebugWarn("[getOrderDetailsRead] order_lines:", q1.error.message);
     }
 
     if (!lineRows.length && str(orderRow.order_id)) {
@@ -5268,7 +5312,7 @@ export async function getOrderDetailsRead(orderId) {
         .eq("order_id", str(orderRow.order_id));
       if (!qi.error && Array.isArray(qi.data)) lineRows = qi.data;
       else if (qi.error) {
-        console.warn("[getOrderDetailsRead] order_items:", qi.error.message);
+        hqDebugWarn("[getOrderDetailsRead] order_items:", qi.error.message);
       }
     }
 
@@ -5282,7 +5326,7 @@ export async function getOrderDetailsRead(orderId) {
       },
     };
   } catch (err) {
-    console.warn("[getOrderDetailsRead] failed:", err?.message || err);
+    hqDebugWarn("[getOrderDetailsRead] failed:", err?.message || err);
     return empty;
   }
 }
@@ -5351,7 +5395,7 @@ async function bumpArOutstandingForFulfillment({ lab_id, tenant_id, deltaAmount 
   }
   const row = Array.isArray(sel.data) && sel.data[0];
   if (!row) {
-    console.warn("[bumpArOutstandingForFulfillment] No ar_credit_control row for lab:", sid);
+    hqDebugWarn("[bumpArOutstandingForFulfillment] No ar_credit_control row for lab:", sid);
     return { success: false, error: "No AR row for lab", skipped: true };
   }
   const d = num(deltaAmount);
@@ -5384,6 +5428,58 @@ async function bumpArOutstandingForFulfillment({ lab_id, tenant_id, deltaAmount 
     .eq("lab_id", sid);
   if (!upd.error) return { success: true, skipped: false };
   return { success: false, error: upd.error.message, skipped: true };
+}
+
+/**
+ * Invoke server-side invoice creation for a fulfilled order (idempotent RPC).
+ * Does not modify AR/collections; failures are logged and do not roll back fulfill.
+ */
+export async function createInvoiceForFulfilledOrderWrite({
+  tenantId,
+  tenant_id,
+  orderId,
+  order_id,
+  actorId,
+  actor_id,
+  createdSource,
+  created_source,
+} = {}) {
+  const tid = str(tenantId ?? tenant_id);
+  const oid = str(orderId ?? order_id);
+  const source = str(createdSource ?? created_source) || "createInvoiceForFulfilledOrderWrite";
+  const actor = str(actorId ?? actor_id) || null;
+
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+  if (!tid || !oid) {
+    return { success: false, error: "tenant_id and order_id are required", data: null };
+  }
+
+  try {
+    const { data, error } = await supabase.rpc("create_invoice_for_fulfilled_order", {
+      p_tenant_id: tid,
+      p_order_id: oid,
+      p_actor_id: actor,
+      p_created_source: source,
+    });
+
+    if (error) {
+      hqDebugWarn(`[${source}] create_invoice_for_fulfilled_order:`, error.message);
+      return { success: false, error: error.message, data: null };
+    }
+
+    const payload = data && typeof data === "object" ? data : {};
+    return {
+      success: payload.success !== false,
+      skipped: Boolean(payload.skipped),
+      data: payload,
+      error: null,
+    };
+  } catch (err) {
+    hqDebugWarn(`[${source}] create_invoice_for_fulfilled_order failed:`, err?.message || err);
+    return { success: false, error: err?.message || String(err), data: null };
+  }
 }
 
 /** Resolves order row and the eq() column for updates (order_id or id). */
@@ -5421,7 +5517,7 @@ async function patchOrderRow(updateKey, updateValue, patch) {
   let slim = { ...patch };
   if (slim.status_notes && isMissingOrdersColumnError(res.error, "status_notes")) {
     delete slim.status_notes;
-    console.warn(
+    hqDebugWarn(
       "[updateOrderStatusWrite] orders.status_notes missing — retrying without it. Run order_status_update_migration.sql"
     );
     res = await attempt(slim);
@@ -5440,7 +5536,7 @@ async function patchOrderRow(updateKey, updateValue, patch) {
     if (!(extraCol in slim)) continue;
     if (isMissingOrdersColumnError(res.error, extraCol)) {
       delete slim[extraCol];
-      console.warn(
+      hqDebugWarn(
         `[updateOrderStatusWrite] orders.${extraCol} missing in schema — retrying without it`
       );
       res = await attempt(slim);
@@ -5488,14 +5584,14 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
     const businessOrderId = str(orderRow.order_id ?? orderRow.orderId ?? oid);
     const labId = normalizeLabIdKey(orderRow.lab_id ?? orderRow.labId);
 
-    console.log("ORDERS STATUS SUPABASE AUTHORITATIVE", {
+    hqDebugLog("ORDERS STATUS SUPABASE AUTHORITATIVE", {
       orderId: businessOrderId,
       prevStatus: prevNorm,
       nextStatus,
       fallbackDisabledWhenSupabaseConfigured: true,
     });
 
-    console.log("ORDER STATUS BUSINESS RULE", {
+    hqDebugLog("ORDER STATUS BUSINESS RULE", {
       orderId: businessOrderId,
       labId,
       prevStatus: prevNorm,
@@ -5507,7 +5603,7 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
       cancelledExcludedFromAnalytics: nextStatus === "Cancelled",
       inventoryDeductionIdempotentFlag: true,
     });
-    console.log("ORDER STATUS SYNC START", {
+    hqDebugLog("ORDER STATUS SYNC START", {
       orderId: businessOrderId,
       prevStatus: prevNorm,
       nextStatus,
@@ -5541,7 +5637,7 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
       const hasLedgerOut = await ledgerHasOrderOutMovement(businessOrderId);
       if (inventoryDoneFlag || hasLedgerOut) {
         inventoryDoneFlag = true;
-        console.log("INVENTORY DEDUCTION SKIPPED_ALREADY_DONE", {
+        hqDebugLog("INVENTORY DEDUCTION SKIPPED_ALREADY_DONE", {
           orderId: businessOrderId,
           reason: hasLedgerOut ? "ledger_ORDER_OUT_present" : "orders.inventory_updated",
         });
@@ -5566,13 +5662,13 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
         });
         inventoryDoneFlag = Boolean(await ledgerHasOrderOutMovement(businessOrderId));
         if (!inventoryDoneFlag) {
-          console.warn(
+          hqDebugWarn(
             "[updateOrderStatusWrite] Fulfilled but no ORDER_OUT ledger rows after deduction attempt:",
             businessOrderId
           );
         }
       } else {
-        console.warn("[updateOrderStatusWrite] Fulfilled — no order_items rows:", businessOrderId);
+        hqDebugWarn("[updateOrderStatusWrite] Fulfilled — no order_items rows:", businessOrderId);
       }
 
       if (!arDoneFlag && labId && orderAmt > 0) {
@@ -5582,14 +5678,14 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
           deltaAmount: orderAmt,
         });
         if (bump.success && !bump.skipped) {
-          console.log("AR POSTED FOR ORDER", {
+          hqDebugLog("AR POSTED FOR ORDER", {
             orderId: businessOrderId,
             labId,
             deltaAmount: orderAmt,
           });
           arDoneFlag = true;
         } else if (!bump.skipped) {
-          console.warn("[updateOrderStatusWrite] AR bump failed:", bump.error || bump);
+          hqDebugWarn("[updateOrderStatusWrite] AR bump failed:", bump.error || bump);
         }
       }
     }
@@ -5619,7 +5715,7 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
       patch.status_notes = mergedNote;
     }
 
-    console.log("ORDER STATUS WRITE PAYLOAD", {
+    hqDebugLog("ORDER STATUS WRITE PAYLOAD", {
       orderId: oid,
       businessOrderId,
       updateKey,
@@ -5630,17 +5726,40 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
 
     const { data, error } = await patchOrderRow(updateKey, updateValue, patch);
     if (error) {
-      console.warn("[updateOrderStatusWrite] orders update:", error.message);
+      hqDebugWarn("[updateOrderStatusWrite] orders update:", error.message);
       return { success: false, error: error.message || "Order status update failed", data: null };
     }
 
     const saved = Array.isArray(data) ? data[0] : data;
-    console.log("SUPABASE ORDER STATUS UPDATED", saved);
-    console.log("CROSS MODULE SYNC COMPLETE", {
+    hqDebugLog("SUPABASE ORDER STATUS UPDATED", saved);
+    hqDebugLog("CROSS MODULE SYNC COMPLETE", {
       orderId: businessOrderId,
       status: nextStatus,
       fulfilmentRan: Boolean(becomingFulfilled),
     });
+
+    if (becomingFulfilled) {
+      const invoiceTenantId = str(orderRow.tenant_id ?? orderRow.tenantId);
+      const invoiceRes = await createInvoiceForFulfilledOrderWrite({
+        tenantId: invoiceTenantId,
+        orderId: businessOrderId,
+        actorId: str(payload.actorId ?? payload.actor_id ?? payload.updatedBy ?? ""),
+        createdSource: "updateOrderStatusWrite",
+      });
+      if (!invoiceRes.success && !invoiceRes.skipped) {
+        hqDebugWarn(
+          "[updateOrderStatusWrite] Invoice creation after fulfill failed:",
+          invoiceRes.error
+        );
+      } else if (invoiceRes.data?.invoice_id) {
+        hqDebugLog("INVOICE CREATED FOR ORDER", {
+          orderId: businessOrderId,
+          invoiceId: invoiceRes.data.invoice_id,
+          invoiceNumber: invoiceRes.data.invoice_number,
+          skipped: Boolean(invoiceRes.skipped),
+        });
+      }
+    }
 
     return {
       success: true,
@@ -5653,7 +5772,7 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
       error: null,
     };
   } catch (err) {
-    console.warn("[updateOrderStatusWrite] failed:", err?.message || err);
+    hqDebugWarn("[updateOrderStatusWrite] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: null };
   }
 }

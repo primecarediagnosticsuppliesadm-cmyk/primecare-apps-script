@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { PageSkeleton } from "@/components/ux";
+import { PageSkeleton, PageHeader, DataFetchError } from "@/components/ux";
 import UserProvisioningPanel from "@/components/operations/UserProvisioningPanel.jsx";
 import { loadOperationsCenterAdminBundle } from "@/operations/operationsCenterAdminData.js";
 import { findDirectoryUserForLabAgent } from "@/operations/operationsCenterAdminEngine.js";
@@ -34,7 +34,7 @@ export default function OperationsCenterAdminPage({ currentUser = null, setActiv
       else if (data.warning) setError(data.warning);
     } catch (err) {
       setError(err?.message || "Failed to load operations center");
-      setBundle(null);
+      if (!bundle) setBundle(null);
     } finally {
       setLoading(false);
     }
@@ -82,15 +82,20 @@ export default function OperationsCenterAdminPage({ currentUser = null, setActiv
 
   return (
     <div className="mx-auto max-w-6xl space-y-3 p-3 pb-8">
-      <header>
-        <h1 className="flex items-center gap-2 text-lg font-bold text-slate-900">
-          <Radio className="h-5 w-5 text-indigo-600" />
-          User &amp; Access
-        </h1>
-        <p className="text-[11px] text-slate-600">
-          HQ user provisioning — directory, assignments, deactivation, and audit.
-        </p>
-      </header>
+      <PageHeader
+        title="Operations Center"
+        subtitle="Manage user accounts, laboratory assignments, and organization access."
+        icon={Radio}
+      />
+
+      {error ? (
+        <DataFetchError
+          message={error}
+          onRetry={() => void load()}
+          retrying={loading}
+          staleDataNote={bundle ? "Showing the last directory data loaded successfully." : ""}
+        />
+      ) : null}
 
       <UserProvisioningPanel
         tenantId={tenantId}

@@ -1,15 +1,12 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, Brain, ClipboardCheck, ShieldAlert } from "lucide-react";
 import { getAIInsights } from "@/api/primecareApi";
 import { getAdminDashboardRead } from "@/api/primecareSupabaseApi";
 import { supabase } from "@/api/supabaseClient.js";
-import {
-  logAppsScriptPrimarySource,
-  logPartialMigrationWarning,
-  logSupabaseFeatureSource,
-} from "@/utils/migrationTrace.js";
+import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
+import { PageSkeleton, DataFetchError, PageHeader } from "@/components/ux";
 
 function StatCard({ title, value, icon: Icon, subtitle }) {
   return (
@@ -41,45 +38,52 @@ export default function AIInsightsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    async function loadInsights() {
-      try {
-        if (supabase && import.meta.env.DEV) {
-          logSupabaseFeatureSource("AIInsights.load", {
-            api: "getAdminDashboardRead",
-            note: "DEV derived insights from dashboard aggregates",
-          });
-          const dash = await getAdminDashboardRead();
-          if (dash?.data?.insights) {
-            setData(dash.data.insights);
-            logPartialMigrationWarning(
-              "AIInsights",
-              "Using rule-based insights from getAdminDashboardRead; Apps Script AI not called in this path."
-            );
-            return;
-          }
+  const loadInsights = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
+      if (supabase) {
+        const dash = await getAdminDashboardRead();
+        if (dash?.data?.insights) {
+          setData(dash.data.insights);
+          return;
         }
-
-        logAppsScriptPrimarySource("AIInsights.load", "getAIInsights");
-        const res = await getAIInsights();
-        if (!res.success) throw new Error(res.error || "Failed to load AI insights");
-        setData(res.data || {});
-      } catch (err) {
-        setError(err.message || "Failed to load AI insights");
-      } finally {
-        setLoading(false);
       }
-    }
 
-    loadInsights();
+      if (!ALLOW_LEGACY_APPS_SCRIPT) {
+        setData({
+          summary: "Insights are derived from live Supabase dashboard aggregates.",
+          alerts: [],
+          recommendations: [],
+        });
+        return;
+      }
+
+      const res = await getAIInsights();
+      if (!res.success) throw new Error(res.error || "Failed to load AI insights");
+      setData(res.data || {});
+    } catch (err) {
+      setError(err.message || "Failed to load AI insights");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  if (loading) {
-    return <div className="p-4 text-slate-600">Loading AI insights...</div>;
+  useEffect(() => {
+    void loadInsights();
+  }, [loadInsights]);
+
+  if (loading && !data) {
+    return <PageSkeleton kpiCount={3} kpiColumns={3} listRows={4} className="p-4" />;
   }
 
-  if (error) {
-    return <div className="p-4 text-red-600">{error}</div>;
+  if (error && !data) {
+    return (
+      <div className="space-y-3 p-4">
+        <PageHeader title="Business Insights" subtitle="Operational signals from live dashboard data." icon={Brain} />
+        <DataFetchError message={error} onRetry={() => void loadInsights()} retrying={loading} />
+      </div>
+    );
   }
 
   const summary = data?.summary || {};

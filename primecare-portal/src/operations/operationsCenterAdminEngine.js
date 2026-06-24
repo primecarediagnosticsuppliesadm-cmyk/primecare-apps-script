@@ -14,10 +14,10 @@ function str(v) {
 
 export const OPERATIONS_CENTER_TABS = [
   { id: "directory", label: "User Directory" },
-  { id: "labOwnership", label: "Lab Ownership" },
+  { id: "labOwnership", label: "Assigned Laboratories" },
   { id: "pilotOnboarding", label: "Pilot Onboarding" },
-  { id: "labAssignment", label: "Bulk Lab Assign" },
-  { id: "distributorAssignment", label: "Bulk Distributor Assign" },
+  { id: "labAssignment", label: "Bulk Laboratory Assignment" },
+  { id: "distributorAssignment", label: "Bulk Distributor Assignment" },
 ];
 
 export const PLATFORM_ROLE_OPTIONS = [

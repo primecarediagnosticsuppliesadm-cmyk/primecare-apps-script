@@ -1,48 +1,91 @@
-import { ROLES } from "./config/roles";
+import React, { Suspense, useEffect, lazy } from "react";
+import { ROLES, platformRoleLabel, NON_PILOT_RELEASE_MESSAGE, isPilotLaunchRole } from "./config/roles";
 import { PERMISSIONS } from "./config/permissions";
-import { isPageVisibleInCurrentEnvironment } from "./config/menuConfig";
+import { isPageVisibleInCurrentEnvironment, MENU_ITEMS } from "./config/menuConfig";
 import { normalizePageKey, resolvePageKeyForRole } from "./config/pageRouting.js";
+import PortalAccessCard, {
+  PageLoadingFallback,
+  PortalAccessAction,
+} from "@/components/ux/PortalAccessCard.jsx";
 
-import AgentDashboard from "./pages/AgentDashboard";
-import AgentPortalShell from "./components/agent/AgentPortalShell.jsx";
-import AgentVisitPage from "./pages/AgentVisitPage";
-import AdminDashboard from "./pages/AdminDashboard";
-import AIInsightsPage from "./pages/AIInsightsPage";
-import CollectionsPage from "./pages/CollectionsPage";
-import ExecutiveControlTower from "./pages/ExecutiveControlTower";
-import FounderNavigationPage from "./pages/FounderNavigationPage";
-import FounderStrategyPage from "./pages/FounderStrategyPage";
-import FounderFinancialIntelligencePage from "./pages/FounderFinancialIntelligencePage";
-import TenantManagementPage from "./pages/TenantManagementPage";
-import DistributorManagementPage from "./pages/DistributorManagementPage";
-import DistributorOsPage from "./pages/DistributorOsPage";
-import DistributorProvisioningPage from "./pages/DistributorProvisioningPage";
-import CommissionEnginePage from "./pages/CommissionEnginePage";
-import LabContractManagementPage from "./pages/LabContractManagementPage";
-import LabOrderingPage from "./pages/LabOrderingPage";
-import LabsPage from "./pages/LabsPage";
-import InventoryLedgerPage from "./pages/InventoryLedgerPage";
-import OrdersPage from "./pages/OrdersPage";
-import ReorderForecastPage from "./pages/ReorderForecastPage";
-import StockPage from "./pages/StockPage";
-import MasterCatalogPage from "./pages/MasterCatalogPage";
-import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
-import QualificationReviewPage from "./pages/QualificationReviewPage";
-import PredatorDebugConsole from "./pages/PredatorDebugConsole";
-import NotificationCenterPage from "./pages/NotificationCenterPage";
-import OperationsCommandCenter from "./pages/OperationsCommandCenter";
-import OperationsCenterAdminPage from "./pages/OperationsCenterAdminPage";
-import AccessAuditPage from "./pages/AccessAuditPage";
-import QACommandCenterPage from "./pages/QACommandCenterPage";
-import PilotReadinessPage from "./pages/PilotReadinessPage";
-import RevenueFunnelPage from "./pages/RevenueFunnelPage";
+const AgentDashboard = lazy(() => import("./pages/AgentDashboard"));
+const AgentPortalShell = lazy(() => import("./components/agent/AgentPortalShell.jsx"));
+const AgentVisitPage = lazy(() => import("./pages/AgentVisitPage"));
+const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
+const AIInsightsPage = lazy(() => import("./pages/AIInsightsPage"));
+const CollectionsPage = lazy(() => import("./pages/CollectionsPage"));
+const ExecutiveControlTower = lazy(() => import("./pages/ExecutiveControlTower"));
+const FounderNavigationPage = lazy(() => import("./pages/FounderNavigationPage"));
+const FounderStrategyPage = lazy(() => import("./pages/FounderStrategyPage"));
+const FounderFinancialIntelligencePage = lazy(() => import("./pages/FounderFinancialIntelligencePage"));
+const TenantManagementPage = lazy(() => import("./pages/TenantManagementPage"));
+const DistributorManagementPage = lazy(() => import("./pages/DistributorManagementPage"));
+const DistributorOsPage = lazy(() => import("./pages/DistributorOsPage"));
+const DistributorProvisioningPage = lazy(() => import("./pages/DistributorProvisioningPage"));
+const CommissionEnginePage = lazy(() => import("./pages/CommissionEnginePage"));
+const LabContractManagementPage = lazy(() => import("./pages/LabContractManagementPage"));
+const LabOrderingPage = lazy(() => import("./pages/LabOrderingPage"));
+const LabInvoiceCenterPage = lazy(() => import("./pages/LabInvoiceCenterPage.jsx"));
+const LabsPage = lazy(() => import("./pages/LabsPage"));
+const InventoryLedgerPage = lazy(() => import("./pages/InventoryLedgerPage"));
+const OrdersPage = lazy(() => import("./pages/OrdersPage"));
+const ReorderForecastPage = lazy(() => import("./pages/ReorderForecastPage"));
+const StockPage = lazy(() => import("./pages/StockPage"));
+const MasterCatalogPage = lazy(() => import("./pages/MasterCatalogPage"));
+const PurchaseOrdersPage = lazy(() => import("./pages/PurchaseOrdersPage"));
+const QualificationReviewPage = lazy(() => import("./pages/QualificationReviewPage"));
+const PredatorDebugConsole = lazy(() => import("./pages/PredatorDebugConsole"));
+const NotificationCenterPage = lazy(() => import("./pages/NotificationCenterPage"));
+const OperationsCommandCenter = lazy(() => import("./pages/OperationsCommandCenter"));
+const OperationsCenterAdminPage = lazy(() => import("./pages/OperationsCenterAdminPage"));
+const AccessAuditPage = lazy(() => import("./pages/AccessAuditPage"));
+const QACommandCenterPage = lazy(() => import("./pages/QACommandCenterPage"));
+const PilotReadinessPage = lazy(() => import("./pages/PilotReadinessPage"));
+const RevenueFunnelPage = lazy(() => import("./pages/RevenueFunnelPage"));
 
-function PlaceholderCard({ title, subtitle }) {
+function pageLabel(pageKey) {
+  const key = normalizePageKey(pageKey);
+  return MENU_ITEMS.find((item) => item.key === key)?.label || "this page";
+}
+
+function PageRedirect({ setActivePage, target = "dashboard" }) {
+  useEffect(() => {
+    setActivePage?.(target);
+  }, [setActivePage, target]);
+  return <PageLoadingFallback />;
+}
+
+function RoutedPage({ children }) {
+  return <Suspense fallback={<PageLoadingFallback />}>{children}</Suspense>;
+}
+
+function UnauthorizedCard({ role, activePage, setActivePage }) {
+  const roleLabel = platformRoleLabel(role) || role || "your";
   return (
-    <div className="rounded-2xl border bg-white p-6 shadow-sm">
-      <h2 className="text-xl font-semibold">{title}</h2>
-      <p className="mt-2 text-gray-500">{subtitle}</p>
-    </div>
+    <PortalAccessCard
+      variant="unauthorized"
+      description={`${roleLabel} accounts cannot open ${pageLabel(activePage)}. Choose another item from the menu or contact your administrator.`}
+      action={
+        setActivePage ? (
+          <PortalAccessAction label="Go to dashboard" onClick={() => setActivePage("dashboard")} />
+        ) : null
+      }
+    />
+  );
+}
+
+function UnmappedPageCard({ portalName, setActivePage }) {
+  return (
+    <PortalAccessCard
+      variant="notFound"
+      title={`${portalName} — section unavailable`}
+      description="This link is not available in your workspace. Use the navigation menu to continue."
+      action={
+        setActivePage ? (
+          <PortalAccessAction label="Go to dashboard" onClick={() => setActivePage("dashboard")} />
+        ) : null
+      }
+    />
   );
 }
 
@@ -56,15 +99,6 @@ function canAccessPage(role, activePage) {
   );
 }
 
-function UnauthorizedCard({ role, activePage }) {
-  return (
-    <PlaceholderCard
-      title="Unauthorized"
-      subtitle={`Your ${role || "current"} role cannot access ${activePage || "this page"}.`}
-    />
-  );
-}
-
 export default function PrimeCareWebPortal({
   role,
   activePage,
@@ -73,7 +107,11 @@ export default function PrimeCareWebPortal({
   authToken,
 }) {
   if (!canAccessPage(role, activePage)) {
-    return <UnauthorizedCard role={role} activePage={activePage} />;
+    return (
+      <RoutedPage>
+        <UnauthorizedCard role={role} activePage={activePage} setActivePage={setActivePage} />
+      </RoutedPage>
+    );
   }
 
   if (role === ROLES.AGENT) {
@@ -120,28 +158,28 @@ export default function PrimeCareWebPortal({
         return <NotificationCenterPage currentUser={currentUser} setActivePage={setActivePage} />;
 
       default:
-        return (
-          <PlaceholderCard
-            title="Agent Portal"
-            subtitle="Agent-specific page is not mapped yet."
-          />
-        );
+        return <UnmappedPageCard portalName="Agent Portal" setActivePage={setActivePage} />;
       }
     })();
 
     return (
-      <AgentPortalShell
-        currentUser={currentUser}
-        activePage={activePage}
-        setActivePage={setActivePage}
-      >
-        {agentPage}
-      </AgentPortalShell>
+      <RoutedPage>
+        <AgentPortalShell
+          currentUser={currentUser}
+          activePage={activePage}
+          setActivePage={setActivePage}
+        >
+          {agentPage}
+        </AgentPortalShell>
+      </RoutedPage>
     );
   }
 
   if (role === ROLES.ADMIN) {
-    switch (activePage) {
+    return (
+      <RoutedPage>
+        {(() => {
+          switch (activePage) {
       case "dashboard":
   return (
     <AdminDashboard
@@ -248,12 +286,7 @@ export default function PrimeCareWebPortal({
         return <AccessAuditPage currentUser={currentUser} />;
 
       case "performance":
-        return (
-          <PlaceholderCard
-            title="Agent Performance"
-            subtitle="Productivity, visits, collections, and field execution quality."
-          />
-        );
+        return <PageRedirect setActivePage={setActivePage} target="dashboard" />;
 
       case "insights":
       case "ai-insights":
@@ -271,17 +304,18 @@ export default function PrimeCareWebPortal({
         );
 
       default:
-        return (
-          <PlaceholderCard
-            title="Admin Portal"
-            subtitle="Admin page is not mapped yet."
-          />
-        );
-    }
+        return <UnmappedPageCard portalName="Admin Portal" setActivePage={setActivePage} />;
+          }
+        })()}
+      </RoutedPage>
+    );
   }
 
   if (role === ROLES.EXECUTIVE) {
-    switch (activePage) {
+    return (
+      <RoutedPage>
+        {(() => {
+          switch (activePage) {
       case "dashboard":
         return (
           <ExecutiveControlTower
@@ -433,12 +467,7 @@ export default function PrimeCareWebPortal({
         return <PredatorDebugConsole currentUser={currentUser} />;
 
       case "performance":
-        return (
-          <PlaceholderCard
-            title="Business Performance"
-            subtitle="Business-wide performance across operations and field execution."
-          />
-        );
+        return <PageRedirect setActivePage={setActivePage} target="dashboard" />;
 
       case "insights":
       case "ai-insights":
@@ -451,24 +480,30 @@ export default function PrimeCareWebPortal({
         return <PurchaseOrdersPage currentUser={currentUser} />;
 
       default:
-        return (
-          <PlaceholderCard
-            title="Executive Portal"
-            subtitle="Executive page is not mapped yet."
-          />
-        );
-    }
+        return <UnmappedPageCard portalName="Executive Portal" setActivePage={setActivePage} />;
+          }
+        })()}
+      </RoutedPage>
+    );
   }
 
   if (role === ROLES.LAB) {
     const labPage = resolvePageKeyForRole(role, normalizePageKey(activePage));
-    switch (labPage) {
+    return (
+      <RoutedPage>
+        {(() => {
+          switch (labPage) {
       case "labOrders":
       case "lab-orders":
       case "lab-ordering":
       case "ordering":
       case "orders":
         return <LabOrderingPage currentUser={currentUser} authToken={authToken} />;
+
+      case "labInvoices":
+      case "lab-invoices":
+      case "invoices":
+        return <LabInvoiceCenterPage currentUser={currentUser} />;
 
       case "labAccount":
         return (
@@ -484,19 +519,32 @@ export default function PrimeCareWebPortal({
         return <NotificationCenterPage currentUser={currentUser} setActivePage={setActivePage} />;
 
       default:
-        return (
-          <PlaceholderCard
-            title="Lab Portal"
-            subtitle="Lab-specific page is not mapped yet."
-          />
-        );
-    }
+        return <UnmappedPageCard portalName="Lab Portal" setActivePage={setActivePage} />;
+          }
+        })()}
+      </RoutedPage>
+    );
+  }
+
+  if (!isPilotLaunchRole(role)) {
+    return (
+      <RoutedPage>
+        <PortalAccessCard
+          variant="unauthorized"
+          title="Workspace not available"
+          description={NON_PILOT_RELEASE_MESSAGE}
+        />
+      </RoutedPage>
+    );
   }
 
   return (
-    <PlaceholderCard
-      title="PrimeCare Portal"
-      subtitle="Role is not recognized yet."
-    />
+    <RoutedPage>
+      <PortalAccessCard
+        variant="error"
+        title="Workspace unavailable"
+        description="Your role is not recognized. Sign out and sign in again, or contact support."
+      />
+    </RoutedPage>
   );
 }

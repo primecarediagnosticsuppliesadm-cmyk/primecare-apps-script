@@ -49,6 +49,7 @@ import UserDetailDrawer from "@/components/operations/UserDetailDrawer.jsx";
 import LabOwnershipPanel from "@/components/operations/LabOwnershipPanel.jsx";
 import PilotOnboardingImportPanel from "@/components/operations/PilotOnboardingImportPanel.jsx";
 import PilotHardeningChecksPanel from "@/components/operations/PilotHardeningChecksPanel.jsx";
+import { ENTERPRISE_ACTIONS } from "@/config/enterpriseCopy.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -243,11 +244,11 @@ function CreateUserDrawer({ tenantId, distributors, labAssignments, roleOptions,
         ...form,
         agentId,
       });
-      if (!res?.success) throw new Error(res?.error || "Failed to provision user");
+      if (!res?.success) throw new Error(res?.error || ENTERPRISE_ACTIONS.userCreateFailed);
       setProvisionResult(res.data);
       onSaved?.(res.data);
     } catch (err) {
-      setError(err?.message || "Failed to provision user");
+      setError(err?.message || ENTERPRISE_ACTIONS.userCreateFailed);
     } finally {
       setSaving(false);
     }
@@ -259,7 +260,7 @@ function CreateUserDrawer({ tenantId, distributors, labAssignments, roleOptions,
         {error ? <p className="text-xs text-red-600">{error}</p> : null}
         {provisionResult ? (
           <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-900">
-            <p className="font-medium">User provisioned successfully.</p>
+            <p className="font-medium">{ENTERPRISE_ACTIONS.userCreated}</p>
             {provisionResult.loginEnabled && provisionResult.temporaryPassword ? (
               <p className="mt-1">
                 Temporary password (share securely):{" "}
@@ -411,7 +412,7 @@ function CreateUserDrawer({ tenantId, distributors, labAssignments, roleOptions,
                 Cancel
               </Button>
               <Button type="submit" disabled={saving}>
-                {saving ? "Provisioning…" : "Provision User"}
+                {saving ? ENTERPRISE_ACTIONS.creatingUser : ENTERPRISE_ACTIONS.createUser}
               </Button>
             </div>
           </>
@@ -2024,7 +2025,7 @@ export default function UserProvisioningPanel({
           roleOptions={roleOptions}
           onClose={() => setCreateOpen(false)}
           onSaved={async () => {
-            onStatus?.("User provisioned");
+            onStatus?.("User account created");
             setCreateOpen(false);
             await onReload?.();
           }}

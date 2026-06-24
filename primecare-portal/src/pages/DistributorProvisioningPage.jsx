@@ -114,7 +114,7 @@ function ActivationDiagnosis({ diagnosis }) {
           >
             {g.label}
             {g.comingSoon ? (
-              <span className="ml-1 font-normal text-amber-700">· Coming Soon</span>
+              <span className="ml-1 font-normal text-slate-600">· Activation prerequisite</span>
             ) : !g.blocksActivation ? (
               <span className="ml-1 font-normal text-slate-500">(readiness only)</span>
             ) : null}
@@ -596,10 +596,10 @@ export default function DistributorProvisioningPage({
           <div>
             <h1 className="flex items-center gap-2 text-lg font-bold text-slate-900">
               <ClipboardList className="h-5 w-5 text-indigo-600" />
-              Provisioning
+              Distributor Setup
             </h1>
             <p className="text-[11px] text-slate-600">
-              Onboard distributor companies · tenant_id = business entity
+              Guided onboarding for new distributor organizations
             </p>
           </div>
           <div className="flex gap-2">
@@ -918,7 +918,7 @@ export default function DistributorProvisioningPage({
                           className="h-7 text-[10px]"
                           onClick={() => handleAckTask(t.id)}
                         >
-                          Mark provisioned
+                          Mark complete
                         </Button>
                       ) : null}
                     </li>

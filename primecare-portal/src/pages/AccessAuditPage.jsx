@@ -44,7 +44,7 @@ export default function AccessAuditPage({ currentUser = null }) {
           Access Audit
         </h1>
         <p className="text-[11px] text-slate-600">
-          HQ read-only audit trail for user provisioning, lab assignments, and access changes.
+          HQ read-only audit trail for user accounts, laboratory assignments, and access changes.
         </p>
       </header>
 

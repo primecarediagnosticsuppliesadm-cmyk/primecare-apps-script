@@ -43,6 +43,8 @@ import { AgentLabFieldStrip } from "@/components/agent/AgentFieldExecution.jsx";
 import { labIdKey } from "@/utils/labId.js";
 import StatusBadge from "@/components/ux/StatusBadge";
 import PageSkeleton from "@/components/ux/PageSkeleton";
+import PageHeader from "@/components/ux/PageHeader";
+import DataFetchError from "@/components/ux/DataFetchError";
 import { cn } from "@/lib/utils";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import HqLabsAdminView from "@/components/hq/HqLabsAdminView.jsx";
@@ -676,8 +678,15 @@ export default function LabsPage({
     );
   }
 
-  if (error) {
-    return <div className="p-4 text-red-600">{error}</div>;
+  if (error && !labs.length && !loading) {
+    return (
+      <div className={cn(embedded ? "space-y-4" : "space-y-6 p-4")}>
+        {!embedded ? (
+          <PageHeader title={isAgentView ? "My Laboratories" : "Laboratories"} subtitle="Laboratory accounts, credit status, and assignments." icon={Building2} />
+        ) : null}
+        <DataFetchError message={error} onRetry={() => void loadLabs()} retrying={loading} />
+      </div>
+    );
   }
 
   const defaultTenantId = isDistributorOs
@@ -692,21 +701,23 @@ export default function LabsPage({
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0 flex-1">
           {!embedded ? (
-            <h1 className="text-2xl font-semibold tracking-tight">
-              {isAgentView ? "My Labs" : "Labs"}
-            </h1>
+            <PageHeader
+              title={isAgentView ? "My Laboratories" : "Laboratories"}
+              subtitle={
+                isAgentView
+                  ? "Your assigned accounts — outstanding, visits, and status at a glance."
+                  : currentUser?.role === "agent"
+                    ? "Only laboratories assigned to this field agent are visible."
+                    : selectedDistributorTenantId
+                      ? `Showing laboratories for ${selectedDistributorName || "selected distributor"} only.`
+                      : "PrimeCare HQ laboratories — use Distributor OS for distributor organizations."
+              }
+              icon={Building2}
+              className="!mb-0"
+            />
           ) : null}
-          <p className="text-sm text-muted-foreground">
-            {isAgentView
-              ? "Your assigned accounts — outstanding, visits, and status at a glance."
-              : currentUser?.role === "agent"
-                ? "Only labs assigned to this logged-in agent are visible."
-                : selectedDistributorTenantId
-                  ? `Showing labs for ${selectedDistributorName || "selected distributor"} only.`
-                  : "PrimeCare HQ labs only — use Distributor OS for distributor tenants."}
-          </p>
           {selectedDistributorTenantId && lockDistributor ? (
             <p className="mt-1 text-xs font-medium text-indigo-700">
               Distributor context: {selectedDistributorName || selectedDistributorTenantId}
@@ -719,6 +730,15 @@ export default function LabsPage({
           </Button>
         ) : null}
       </div>
+
+      {error ? (
+        <DataFetchError
+          message={error}
+          onRetry={() => void loadLabs()}
+          retrying={loading}
+          staleDataNote={labs.length > 0 ? "Showing the last laboratory list loaded successfully." : ""}
+        />
+      ) : null}
 
       {msg ? <p className="text-sm text-emerald-700">{msg}</p> : null}
 

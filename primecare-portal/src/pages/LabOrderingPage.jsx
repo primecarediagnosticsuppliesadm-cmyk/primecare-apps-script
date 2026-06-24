@@ -47,8 +47,9 @@ import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 import { cn } from "@/lib/utils";
 import { hqDebugLog } from "@/utils/hqDebugLog.js";
 import OrderTrackingDrawer from "@/components/lab/OrderTrackingDrawer.jsx";
+import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
 import OrderProgressMini from "@/components/lab/OrderProgressMini.jsx";
-import { StatusBadge, usePortalToast } from "@/components/ux";
+import { StatusBadge, usePortalToast, PageHeader, DataFetchError } from "@/components/ux";
 import {
   fetchScopedOrderDetails,
   formatOrderPaymentLabel,
@@ -343,6 +344,8 @@ export default function LabOrderingPage({ currentUser }) {
   const [notes, setNotes] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [catalogFetchError, setCatalogFetchError] = useState("");
+  const [ordersFetchError, setOrdersFetchError] = useState("");
   const [loadingCatalog, setLoadingCatalog] = useState(true);
   const [loadingOrders, setLoadingOrders] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -356,6 +359,7 @@ export default function LabOrderingPage({ currentUser }) {
   const [trackingLoading, setTrackingLoading] = useState(false);
   const [trackingError, setTrackingError] = useState("");
   const [repeatLoading, setRepeatLoading] = useState(false);
+  const [invoiceDownloadKey, setInvoiceDownloadKey] = useState("");
   const { showToast } = usePortalToast();
 
   const labId =
@@ -517,6 +521,7 @@ export default function LabOrderingPage({ currentUser }) {
       const handoff = JSON.parse(raw);
       if (handoff?.message) setStatusMessage(String(handoff.message));
       if (handoff?.openCart) setIsCartOpen(true);
+      if (handoff?.openOrdersTab) setActiveTab("orders");
       window.localStorage.removeItem(cartHandoffStorageKey);
     } catch (error) {
       console.warn("[LabOrderingPage] failed to process handoff", error);
@@ -595,6 +600,7 @@ export default function LabOrderingPage({ currentUser }) {
   async function loadCatalog() {
     try {
       setLoadingCatalog(true);
+      setCatalogFetchError("");
       setErrorMessage("");
 
       if (supabase) {
@@ -639,7 +645,7 @@ export default function LabOrderingPage({ currentUser }) {
       setProductQty((prev) => ({ ...buildDefaultQtyMap(products), ...prev }));
     } catch (error) {
       console.error("Failed to load catalog", error);
-      setErrorMessage("Unable to load product catalog right now.");
+      setCatalogFetchError("Unable to load product catalog. Check your connection and try again.");
     } finally {
       setLoadingCatalog(false);
     }
@@ -648,6 +654,7 @@ export default function LabOrderingPage({ currentUser }) {
   async function loadRecentOrders() {
     try {
       setLoadingOrders(true);
+      setOrdersFetchError("");
 
       let supabaseOrders = [];
       if (supabase && labId) {
@@ -684,6 +691,7 @@ export default function LabOrderingPage({ currentUser }) {
       setRecentOrders(merged);
     } catch (error) {
       console.error("Failed to load recent orders", error);
+      setOrdersFetchError("Unable to load previous orders. Check your connection and try again.");
     } finally {
       setLoadingOrders(false);
     }
@@ -719,13 +727,44 @@ export default function LabOrderingPage({ currentUser }) {
     setTrackingError("");
   }
 
+  async function handleInvoiceDownload(orderOrDetails) {
+    const orderId = String(orderOrDetails?.orderId || orderOrDetails?.order_id || "").trim();
+    const status = orderOrDetails?.orderStatus || orderOrDetails?.status || "";
+    if (isCancelledStatus(status)) {
+      showToast("info", "No invoice available for cancelled orders.");
+      return;
+    }
+    const downloadKey = orderId || String(orderOrDetails?.invoiceId || "invoice");
+    setInvoiceDownloadKey(downloadKey);
+    try {
+      const result = await downloadInvoicePdf({
+        invoiceId: orderOrDetails?.invoiceId || orderOrDetails?.invoice_id,
+        orderId,
+        tenantId,
+        onPhase: (phase, detail) => {
+          if (phase === "error") {
+            showToast("error", detail || "Unable to download invoice PDF.");
+          }
+          if (phase === "success") {
+            showToast("success", "Invoice download started.");
+          }
+        },
+      });
+      if (!result.success && !result.error?.includes("download")) {
+        showToast("error", result.error || "Unable to download invoice PDF.");
+      }
+    } finally {
+      setInvoiceDownloadKey("");
+    }
+  }
+
   async function handleTrackingDrawerAction(action, details) {
     if (action === "invoice") {
       if (details && isCancelledStatus(details.orderStatus)) {
         showToast("info", "No invoice available for cancelled orders.");
         return;
       }
-      showToast("info", "Invoice PDFs will be available in a future release.");
+      await handleInvoiceDownload(details || trackingOrder || {});
       return;
     }
     if (action === "support") {
@@ -1222,13 +1261,16 @@ export default function LabOrderingPage({ currentUser }) {
 
   return (
     <div className="space-y-4 pb-[max(7rem,env(safe-area-inset-bottom))] lg:pb-6">
-      <div className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Lab Ordering</h1>
-        <p className="text-sm text-slate-500">
-          {labName} — place orders for your lab. Outstanding and payments are under{" "}
-          <span className="font-medium text-slate-700">Payments &amp; Account</span>.
-        </p>
-      </div>
+      <PageHeader
+        title="Lab Ordering"
+        subtitle={
+          <>
+            {labName} — place orders for your lab. Outstanding and payments are under{" "}
+            <span className="font-medium text-slate-700">Payments &amp; Account</span>.
+          </>
+        }
+        icon={ShoppingCart}
+      />
 
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
         <QuickStat
@@ -1282,6 +1324,15 @@ export default function LabOrderingPage({ currentUser }) {
         <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-700">
           ⚠️ Warning: You are near your credit limit. Please clear dues to avoid order blockage.
         </div>
+      ) : null}
+
+      {catalogFetchError ? (
+        <DataFetchError
+          message={catalogFetchError}
+          onRetry={() => void loadCatalog()}
+          retrying={loadingCatalog}
+          staleDataNote={catalog.length ? "Showing the last product catalog loaded successfully." : ""}
+        />
       ) : null}
 
       {errorMessage ? (
@@ -1457,6 +1508,19 @@ export default function LabOrderingPage({ currentUser }) {
             <p className="text-[11px] text-slate-500">Track fulfillment, payments, and reorders</p>
           </div>
           <div className="p-2">
+            {ordersFetchError ? (
+              <DataFetchError
+                message={ordersFetchError}
+                onRetry={() => void loadRecentOrders()}
+                retrying={loadingOrders}
+                staleDataNote={
+                  scopedRecentOrders.length
+                    ? "Showing the last order list loaded successfully."
+                    : ""
+                }
+                className="mb-3"
+              />
+            ) : null}
             {loadingOrders ? (
               <div className="flex items-center gap-2 py-6 text-sm text-slate-500">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -1540,17 +1604,17 @@ export default function LabOrderingPage({ currentUser }) {
                                   size="sm"
                                   variant="ghost"
                                   className="h-7 px-2 text-[10px]"
-                                  disabled={cancelled}
+                                  disabled={cancelled || invoiceDownloadKey === order.orderId}
                                   title={
                                     cancelled ? "No invoice available for cancelled orders" : undefined
                                   }
-                                  onClick={() =>
-                                    cancelled
-                                      ? showToast("info", "No invoice available for cancelled orders.")
-                                      : showToast("info", "Invoice download coming soon.")
-                                  }
+                                  onClick={() => void handleInvoiceDownload(order)}
                                 >
-                                  Invoice
+                                  {invoiceDownloadKey === order.orderId ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    "Invoice"
+                                  )}
                                 </Button>
                                 <Button
                                   type="button"
@@ -1639,17 +1703,17 @@ export default function LabOrderingPage({ currentUser }) {
                             size="sm"
                             variant="ghost"
                             className="h-8 px-2 text-[11px]"
-                            disabled={cancelled}
+                            disabled={cancelled || invoiceDownloadKey === order.orderId}
                             title={
                               cancelled ? "No invoice available for cancelled orders" : undefined
                             }
-                            onClick={() =>
-                              cancelled
-                                ? showToast("info", "No invoice available for cancelled orders.")
-                                : showToast("info", "Invoice download coming soon.")
-                            }
+                            onClick={() => void handleInvoiceDownload(order)}
                           >
-                            Invoice
+                            {invoiceDownloadKey === order.orderId ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              "Invoice"
+                            )}
                           </Button>
                           <Button
                             type="button"
@@ -1681,6 +1745,7 @@ export default function LabOrderingPage({ currentUser }) {
         loading={trackingLoading}
         error={trackingError}
         repeatLoading={repeatLoading}
+        invoiceLoading={Boolean(invoiceDownloadKey)}
         onAction={handleTrackingDrawerAction}
       />
 

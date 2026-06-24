@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { StatusBadge, PageSkeleton, KpiCard, KpiCardGrid, DataFreshnessLabel } from "@/components/ux";
+import { StatusBadge, PageSkeleton, KpiCard, KpiCardGrid, DataFreshnessLabel, DataFetchError, PageHeader } from "@/components/ux";
 import {
   loadOperationsCommandCenterData,
   invalidateOperationsCommandCenterCache,
@@ -48,6 +48,7 @@ import { buildExecutiveActionQueue } from "@/operations/executiveActionQueueEngi
 import { executeExecutiveActionPlan } from "@/operations/executiveActionQueueHandlers.js";
 import { ACTION_PLAN_TYPES, ACTION_QUEUE_SOURCE_MODULES } from "@/operations/executiveActionQueueTypes.js";
 import { labIdKey } from "@/utils/labId.js";
+import { getInvoiceTenantKpisRead } from "@/api/invoiceSupabaseApi.js";
 
 const INTERVENTION_TOAST = {
   assign_owner: "Owner assigned",
@@ -138,6 +139,8 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
   const [actionQueueLoading, setActionQueueLoading] = useState(false);
   const [writeModal, setWriteModal] = useState(null);
   const [dataLoadedAt, setDataLoadedAt] = useState(null);
+  const [invoiceKpis, setInvoiceKpis] = useState(null);
+  const [invoiceKpisLoading, setInvoiceKpisLoading] = useState(false);
 
   const tenantId = currentUser?.tenantId || "";
   const { showToast } = usePortalToast();
@@ -185,7 +188,7 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
       }
     } catch (err) {
       setError(err?.message || "Failed to load executive workspace");
-      setModel(null);
+      if (!isRefresh) setModel(null);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -195,6 +198,30 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
   useEffect(() => {
     void load(false);
   }, [load]);
+
+  useEffect(() => {
+    if (!tenantId) {
+      setInvoiceKpis(null);
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      setInvoiceKpisLoading(true);
+      try {
+        const res = await getInvoiceTenantKpisRead(tenantId);
+        if (!cancelled) {
+          setInvoiceKpis(res.success ? res.kpis : null);
+        }
+      } catch {
+        if (!cancelled) setInvoiceKpis(null);
+      } finally {
+        if (!cancelled) setInvoiceKpisLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, dataLoadedAt]);
 
   const interventionQueues = useMemo(() => {
     if (!model) return { clusters: [], singles: [], founderActive: [], resolvedCount: 0 };
@@ -542,31 +569,31 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
   if (!model) {
     return (
       <div className="mx-auto max-w-6xl space-y-3 p-4 pb-10 lg:p-5">
-        <header className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-              Executive intervention
-            </p>
-            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Control Tower</h1>
-            <p className="mt-0.5 max-w-xl text-sm text-slate-600">
-              Acknowledge, assign, escalate, and resolve operational issues without leaving this
-              workspace.
-            </p>
+        <PageHeader
+          title="Control Tower"
+          subtitle="Acknowledge, assign, escalate, and resolve operational issues without leaving this workspace."
+          icon={Crown}
+          freshness={
             <DataFreshnessLabel
               loadedAt={dataLoadedAt}
               refreshing={loading || refreshing}
               className="mt-1 block"
             />
-          </div>
-          <Button type="button" variant="outline" size="sm" disabled={refreshing || loading} onClick={() => void load(true)}>
-            <RefreshCw className={cn("mr-2 h-4 w-4", (refreshing || loading) && "animate-spin")} />
-            Refresh
-          </Button>
-        </header>
+          }
+          actions={
+            <Button type="button" variant="outline" size="sm" disabled={refreshing || loading} onClick={() => void load(true)}>
+              <RefreshCw className={cn("mr-2 h-4 w-4", (refreshing || loading) && "animate-spin")} />
+              Refresh
+            </Button>
+          }
+        />
         {error ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </div>
+          <DataFetchError
+            message={error}
+            onRetry={() => void load(true)}
+            retrying={refreshing || loading}
+            staleDataNote={model ? "Showing the last workspace loaded successfully." : ""}
+          />
         ) : null}
         <PageSkeleton kpiCount={5} kpiColumns={3} listRows={6} />
       </div>
@@ -587,39 +614,38 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
 
   return (
     <div className="mx-auto max-w-6xl space-y-3 p-4 pb-10 lg:p-5">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-            Executive intervention
-          </p>
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-            Control Tower
-          </h1>
-          <p className="mt-0.5 max-w-xl text-sm text-slate-600">
-            Acknowledge, assign, escalate, and resolve operational issues without leaving this workspace.
-          </p>
+      <PageHeader
+        title="Control Tower"
+        subtitle="Acknowledge, assign, escalate, and resolve operational issues without leaving this workspace."
+        icon={Crown}
+        freshness={
           <DataFreshnessLabel
             loadedAt={dataLoadedAt}
             refreshing={refreshing}
             className="mt-1 block"
           />
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={refreshing}
-          onClick={() => void load(true)}
-        >
-          <RefreshCw className={cn("mr-2 h-4 w-4", refreshing && "animate-spin")} />
-          Refresh
-        </Button>
-      </header>
+        }
+        actions={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={refreshing}
+            onClick={() => void load(true)}
+          >
+            <RefreshCw className={cn("mr-2 h-4 w-4", refreshing && "animate-spin")} />
+            Refresh
+          </Button>
+        }
+      />
 
       {error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
-        </div>
+        <DataFetchError
+          message={error}
+          onRetry={() => void load(true)}
+          retrying={refreshing || loading}
+          staleDataNote="Showing the last workspace loaded successfully."
+        />
       ) : null}
 
       <section
@@ -674,6 +700,98 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
               snapshot.lowStockSkus > 0 || snapshot.ordersPendingFulfillment > 0
             )}
             subtitle={`${snapshot.ordersPendingFulfillment} orders open`}
+            className="!rounded-xl !p-3"
+          />
+        </KpiCardGrid>
+      </section>
+
+      <section aria-label="Invoice visibility" className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <FileCheck className="h-4 w-4 text-slate-500" />
+            Invoice visibility
+          </h2>
+          <span className="text-[10px] text-slate-500">Read-only · invoice entity</span>
+        </div>
+        <KpiCardGrid columns={3} className="sm:grid-cols-2 lg:grid-cols-5">
+          <KpiCard
+            title="Total Invoices"
+            value={invoiceKpisLoading ? "…" : formatPilotCount(invoiceKpis?.totalInvoices ?? 0, Boolean(invoiceKpis))}
+            subtitle="Issued invoices"
+            className="!rounded-xl !p-3"
+          />
+          <KpiCard
+            title="Invoice Value"
+            value={
+              invoiceKpisLoading
+                ? "…"
+                : formatPilotKpi(invoiceKpis?.invoiceValue ?? 0, invoiceKpis?.invoiceValue ?? 0, Boolean(invoiceKpis))
+            }
+            subtitle="Gross invoice total"
+            className="!rounded-xl !p-3"
+          />
+          <KpiCard
+            title="Paid"
+            value={
+              invoiceKpisLoading
+                ? "…"
+                : formatPilotKpi(invoiceKpis?.paidValue ?? 0, invoiceKpis?.paidValue ?? 0, Boolean(invoiceKpis))
+            }
+            subtitle={`${invoiceKpis?.paidCount ?? 0} invoices`}
+            className="!rounded-xl !p-3"
+          />
+          <KpiCard
+            title="Outstanding"
+            value={
+              invoiceKpisLoading
+                ? "…"
+                : formatPilotKpi(
+                    invoiceKpis?.outstandingValue ?? 0,
+                    invoiceKpis?.outstandingValue ?? 0,
+                    Boolean(invoiceKpis)
+                  )
+            }
+            subtitle={`${invoiceKpis?.outstandingCount ?? 0} sent`}
+            className="!rounded-xl !p-3"
+          />
+          <KpiCard
+            title="Overdue"
+            value={
+              invoiceKpisLoading
+                ? "…"
+                : formatPilotKpi(
+                    invoiceKpis?.overdueValue ?? 0,
+                    invoiceKpis?.overdueValue ?? 0,
+                    Boolean(invoiceKpis)
+                  )
+            }
+            subtitle={`${invoiceKpis?.overdueCount ?? 0} invoices`}
+            className="!rounded-xl !p-3"
+          />
+        </KpiCardGrid>
+        <KpiCardGrid columns={2} className="mt-2 sm:grid-cols-2">
+          <KpiCard
+            title="Collection %"
+            value={
+              invoiceKpisLoading
+                ? "…"
+                : `${Number(invoiceKpis?.collectionPct ?? 0).toFixed(1)}%`
+            }
+            subtitle="Paid value / invoice value"
+            className="!rounded-xl !p-3"
+          />
+          <KpiCard
+            title="Unallocated Cash"
+            value={
+              invoiceKpisLoading
+                ? "…"
+                : formatPilotKpi(
+                    invoiceKpis?.unallocatedCash ?? 0,
+                    invoiceKpis?.unallocatedCash ?? 0,
+                    Boolean(invoiceKpis)
+                  )
+            }
+            subtitle="Payments not linked to invoices"
             className="!rounded-xl !p-3"
           />
         </KpiCardGrid>

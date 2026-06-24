@@ -1,3 +1,4 @@
+import { hqDebugWarn } from "@/utils/hqDebugLog.js";
 import { supabase } from "@/api/supabaseClient.js";
 import {
   fetchOrderLinesBoundedRows,
@@ -40,7 +41,7 @@ export async function fetchPaymentsRaw() {
   if (!supabase) return [];
   const { data, error } = await fetchPaymentsBoundedRows(supabase);
   if (error) {
-    console.warn("[commission] payments read", error.message);
+    hqDebugWarn("[commission] payments read", error.message);
     return [];
   }
   return Array.isArray(data) ? data : [];
@@ -131,7 +132,7 @@ export async function loadCommissionEngineBundle(currentUser, options = {}) {
       registryTenantId: homeTenantId || tenantId,
     });
     if (!upsertRes.ok) {
-      console.warn("[commission] upsert failed:", upsertRes.error);
+      hqDebugWarn("[commission] upsert failed:", upsertRes.error);
     }
   }
 

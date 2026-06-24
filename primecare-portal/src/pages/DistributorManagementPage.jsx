@@ -391,16 +391,17 @@ export default function DistributorManagementPage({ currentUser = null, setActiv
                   </div>
                 </dl>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {workspace.actions.map((a) => (
+                  {workspace.actions
+                    .filter((a) => a.wired && !a.comingSoon)
+                    .map((a) => (
                     <Button
                       key={a.id}
                       type="button"
                       size="sm"
-                      variant={a.wired ? "outline" : "ghost"}
-                      disabled={!a.wired || a.comingSoon}
-                      onClick={a.wired && !a.comingSoon ? () => handleAction(a) : undefined}
+                      variant="outline"
+                      onClick={() => handleAction(a)}
                     >
-                      {a.comingSoon ? `${a.label} (Coming soon)` : a.label}
+                      {a.label}
                     </Button>
                   ))}
                 </div>

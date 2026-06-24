@@ -8,7 +8,7 @@ import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
 import { AGENT_TASK_COMPLETION_ENABLED } from "@/config/environment";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import PageSkeleton from "@/components/ux/PageSkeleton";
-import { usePortalToast } from "@/components/ux";
+import { usePortalToast, DataFetchError, PageHeader } from "@/components/ux";
 import AgentLabSnapshotDrawer from "@/components/agent/AgentLabSnapshotDrawer.jsx";
 import AgentMyOwnershipSection from "@/components/agent/AgentMyOwnershipSection.jsx";
 import { loadLabOwnershipMetricsBundle } from "@/operations/operationsCenterAdminData.js";
@@ -162,7 +162,7 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
       } catch (err) {
         console.error(err);
         setError(err.message || "Failed to load daily workspace");
-        setWorkspace(EMPTY_WORKSPACE);
+        if (!showRefreshState) setWorkspace(EMPTY_WORKSPACE);
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -478,33 +478,36 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
 
   return (
     <div className="mx-auto w-full max-w-[1520px] space-y-4 px-1 pb-24 sm:px-2 md:pb-6">
-      <header className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Command center
-          </p>
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-            {topPriority
-              ? `Good morning — ${visibleQueue.length} stop${visibleQueue.length === 1 ? "" : "s"} today`
-              : `Today · ${currentUser?.name || "Agent"}`}
-          </h1>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="shrink-0 rounded-xl"
-          onClick={() => loadWorkspace(true)}
-          disabled={refreshing}
-        >
-          <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-        </Button>
-      </header>
+      <PageHeader
+        title={
+          topPriority
+            ? `Today — ${visibleQueue.length} stop${visibleQueue.length === 1 ? "" : "s"}`
+            : `Today · ${currentUser?.name || "Agent"}`
+        }
+        subtitle="Your route, collections priorities, and field execution for the day."
+        actions={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0 rounded-xl"
+            onClick={() => loadWorkspace(true)}
+            disabled={refreshing}
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+          </Button>
+        }
+      />
 
       {error ? (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/5 px-3 py-2 text-sm text-red-700">
-          {error}
-        </div>
+        <DataFetchError
+          message={error}
+          onRetry={() => loadWorkspace(true)}
+          retrying={refreshing}
+          staleDataNote={
+            workspace.assignedLabs?.length ? "Showing the last route data loaded successfully." : ""
+          }
+        />
       ) : null}
 
       {osState.dayComplete ? (

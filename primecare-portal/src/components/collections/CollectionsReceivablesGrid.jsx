@@ -75,7 +75,7 @@ export default function CollectionsReceivablesGrid({
     <div className={cn("overflow-hidden rounded-lg border border-border bg-card shadow-sm", className)}>
       <div
         className={cn(
-          "sticky top-0 z-10 hidden border-b border-border bg-muted/50 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground lg:grid",
+          "sticky top-0 z-10 hidden border-b border-border bg-muted/50 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground xl:grid",
           GRID_COLUMNS
         )}
         role="row"
@@ -141,7 +141,7 @@ export default function CollectionsReceivablesGrid({
                 onKeyDown={(e) => handleRowKeyDown(e, index, item.labId)}
               >
                 {/* Desktop grid row */}
-                <div className={cn("hidden lg:grid lg:items-center", GRID_COLUMNS)}>
+                <div className={cn("hidden xl:grid xl:items-center", GRID_COLUMNS)}>
                   <div className="px-2 py-1.5" role="gridcell">
                     <CollectionHealthIndicator tier={healthTier} compact />
                   </div>
@@ -237,9 +237,9 @@ export default function CollectionsReceivablesGrid({
                 </div>
 
                 {/* Mobile stacked row */}
-                <div className="space-y-2 p-2.5 lg:hidden">
+                <div className="space-y-2 p-2.5 xl:hidden">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
                         <CollectionHealthIndicator tier={healthTier} compact />
                         <button
@@ -250,35 +250,58 @@ export default function CollectionsReceivablesGrid({
                           {item.labName || item.labId}
                         </button>
                       </div>
-                      <p className="mt-1 text-lg font-bold tabular-nums">
+                      {item.area ? (
+                        <p className="mt-0.5 truncate text-[10px] text-muted-foreground">{item.area}</p>
+                      ) : null}
+                      <p className="mt-1 text-lg font-bold tabular-nums text-slate-900">
                         {formatMoney(item.outstandingAmount)}
                       </p>
                       <p className="text-[10px] text-muted-foreground">
-                        Age {formatArAgeBucket(item, lastPaymentDate)} · Last pay{" "}
+                        Age {formatArAgeBucket(item, lastPaymentDate)} · Last payment{" "}
                         {formatShortDate(lastPaymentDate)}
                       </p>
                     </div>
-                    <StatusBadge variant={collectionRiskToVariant(item.riskStatus)} compact>
-                      {item.riskStatus || "Low"}
-                    </StatusBadge>
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      <StatusBadge variant={collectionRiskToVariant(item.riskStatus)} compact>
+                        {item.riskStatus || "Low"}
+                      </StatusBadge>
+                      <StatusBadge variant={paymentStatusToVariant(paymentLabel)} compact>
+                        {paymentLabel}
+                      </StatusBadge>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                    <span>Follow-up {formatShortDate(item.nextFollowUp)}</span>
+                    <span aria-hidden>·</span>
+                    <span>{openOrdersCount} open orders</span>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     <Button
                       type="button"
                       size="sm"
-                      className="h-9 flex-1 rounded-lg text-xs font-semibold"
+                      className="h-10 min-w-[8rem] flex-1 rounded-lg text-xs font-semibold"
                       onClick={() => onRecordPayment?.(item.labId)}
                     >
+                      <IndianRupee className="mr-1 h-3.5 w-3.5" />
                       Record Payment
                     </Button>
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
-                      className="h-9 rounded-lg text-xs"
+                      className="h-10 rounded-lg text-xs"
                       onClick={() => onViewDetails?.(item.labId)}
                     >
                       Details
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-10 rounded-lg text-xs text-muted-foreground"
+                      onClick={() => onAddFollowUp?.(item.labId)}
+                    >
+                      Follow-up
                     </Button>
                   </div>
                 </div>

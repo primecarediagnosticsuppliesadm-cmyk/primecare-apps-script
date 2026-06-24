@@ -3,6 +3,8 @@
  * menu allowlists, and provisioning boundaries (Phase 3A).
  */
 
+import { IS_DEV } from "@/config/environment.js";
+
 export const ROLES = {
   EXECUTIVE: "executive",
   ADMIN: "admin",
@@ -26,7 +28,7 @@ export const ROLE_LABELS = {
   [ROLES.READ_ONLY_AUDITOR]: "Read Only Auditor",
 };
 
-/** Roles that may authenticate into the portal. */
+/** Roles that may authenticate into the portal (provisioning + auth matrix). */
 export const LOGIN_ENABLED_ROLES = new Set([
   ROLES.ADMIN,
   ROLES.EXECUTIVE,
@@ -36,6 +38,17 @@ export const LOGIN_ENABLED_ROLES = new Set([
   ROLES.DISTRIBUTOR_MANAGER,
   ROLES.READ_ONLY_AUDITOR,
 ]);
+
+/** HQ pilot launch — only these roles may sign in on QA/PROD (RC-9). */
+export const PILOT_LAUNCH_ROLES = new Set([
+  ROLES.EXECUTIVE,
+  ROLES.ADMIN,
+  ROLES.AGENT,
+  ROLES.LAB,
+]);
+
+export const NON_PILOT_RELEASE_MESSAGE =
+  "Your workspace is not enabled for this release. Contact HQ Admin.";
 
 /** Roles scoped to a distributor tenant via profiles.distributor_id. */
 export const DISTRIBUTOR_SCOPED_ROLES = new Set([
@@ -78,6 +91,7 @@ export const PERMISSION_BY_KEY = {
   visits: [ROLES.AGENT, ROLES.ADMIN, ROLES.DISTRIBUTOR_MANAGER],
   collections: [ROLES.AGENT, ROLES.ADMIN, ROLES.READ_ONLY_AUDITOR],
   labAccount: [ROLES.LAB],
+  labInvoices: [ROLES.LAB],
   labs: [ROLES.AGENT, ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.DISTRIBUTOR_ADMIN, ROLES.DISTRIBUTOR_MANAGER, ROLES.READ_ONLY_AUDITOR],
   masterCatalog: [ROLES.ADMIN, ROLES.EXECUTIVE],
   inventory: [ROLES.ADMIN, ROLES.EXECUTIVE],
@@ -214,7 +228,7 @@ export const REQUIRED_MENU_PAGES_BY_ROLE = {
   [ROLES.READ_ONLY_AUDITOR]: ["dashboard", "accessAudit", "operationsCenter"],
   [ROLES.DISTRIBUTOR_MANAGER]: ["dashboard", "visits", "operationsCenter"],
   [ROLES.DISTRIBUTOR_ADMIN]: ["distributorOs", "operationsCenter"],
-  [ROLES.LAB]: ["labOrders", "labAccount"],
+  [ROLES.LAB]: ["labOrders", "labAccount", "labInvoices"],
   [ROLES.AGENT]: ["dashboard", "collections", "visits"],
 };
 
@@ -274,6 +288,27 @@ export function normalizePlatformRole(role) {
  */
 export function isLoginEnabledRole(role) {
   return LOGIN_ENABLED_ROLES.has(normalizePlatformRole(role));
+}
+
+/**
+ * @param {string} [role]
+ * @returns {boolean}
+ */
+export function isPilotLaunchRole(role) {
+  return PILOT_LAUNCH_ROLES.has(normalizePlatformRole(role));
+}
+
+/**
+ * Environment-aware portal login gate. Dev allows all LOGIN_ENABLED roles for Distributor OS work.
+ * QA/PROD restrict to PILOT_LAUNCH_ROLES only (RC-9).
+ * @param {string} [role]
+ * @returns {boolean}
+ */
+export function canAuthenticateRole(role) {
+  const normalized = normalizePlatformRole(role);
+  if (!LOGIN_ENABLED_ROLES.has(normalized)) return false;
+  if (IS_DEV) return true;
+  return isPilotLaunchRole(normalized);
 }
 
 /**

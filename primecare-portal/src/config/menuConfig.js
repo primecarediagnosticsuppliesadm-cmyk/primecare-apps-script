@@ -8,6 +8,7 @@ import {
 import { ALLOW_EXPERIMENTAL_MODULES, IS_QA, IS_PROD } from "./environment";
 import { isPredatorEnabled } from "@/predator/predatorGuards.js";
 import { isQaCommandCenterEnabled } from "@/config/qaValidation.js";
+import { ENTERPRISE_PAGE_LABELS } from "@/config/enterpriseCopy.js";
 
 /** HQ Admin sidebar sections (order preserved within each group). */
 export const HQ_ADMIN_MENU_SECTIONS = [
@@ -103,10 +104,10 @@ const ADMIN_HQ_MENU_KEYS = new Set([
 ]);
 
 /** Lab sidebar: ordering, account, activity only. */
-const LAB_MENU_ORDER = ["labOrders", "labAccount", "notifications"];
+const LAB_MENU_ORDER = ["labOrders", "labInvoices", "labAccount", "notifications"];
 
 /** Agent sidebar: execution workflow only (Activity Center merged into Dashboard). */
-const AGENT_MENU_ORDER = ["dashboard", "collections", "visits", "labs"];
+const AGENT_MENU_ORDER = ["dashboard", "collections", "visits", "labs", "notifications"];
 
 const DISTRIBUTOR_ADMIN_MENU_KEY_SET = new Set(DISTRIBUTOR_ADMIN_MENU_KEYS);
 
@@ -130,14 +131,14 @@ export const MENU_ITEMS = [
     icon: "ClipboardCheck",
   },
   { key: "pilotReadiness", label: "Pilot Readiness", icon: "Rocket" },
-  { key: "tenantManagement", label: "Tenant Management", icon: "Building" },
+  { key: "tenantManagement", label: ENTERPRISE_PAGE_LABELS.tenantManagement, icon: "Building" },
   { key: "distributorManagement", label: "Distributor Management", icon: "Briefcase" },
   { key: "distributorOs", label: "Distributor OS", icon: "Building2" },
-  { key: "distributorProvisioning", label: "Launch Distributor", icon: "ClipboardList" },
-  { key: "commissionEngine", label: "Commission Engine", icon: "Coins" },
-  { key: "labContractEngine", label: "Contract Engine", icon: "FileText" },
-  { key: "operationsCenter", label: "Operations Center", icon: "Radio" },
-  { key: "accessAudit", label: "Access Audit", icon: "Shield" },
+  { key: "distributorProvisioning", label: ENTERPRISE_PAGE_LABELS.distributorProvisioning, icon: "ClipboardList" },
+  { key: "commissionEngine", label: ENTERPRISE_PAGE_LABELS.commissionEngine, icon: "Coins" },
+  { key: "labContractEngine", label: ENTERPRISE_PAGE_LABELS.labContractEngine, icon: "FileText" },
+  { key: "operationsCenter", label: ENTERPRISE_PAGE_LABELS.operationsCenter, icon: "Radio" },
+  { key: "accessAudit", label: ENTERPRISE_PAGE_LABELS.accessAudit, icon: "Shield" },
 
   // Field Ops
   { key: "visits", label: "Visits", icon: "ClipboardList" },
@@ -152,17 +153,18 @@ export const MENU_ITEMS = [
 
   // Finance / Risk
   { key: "risk", label: "Credit & Risk", icon: "AlertTriangle" },
-  { key: "notifications", label: "Activity Center", icon: "Bell" },
+  { key: "notifications", label: ENTERPRISE_PAGE_LABELS.notifications, icon: "Bell" },
 
   // Performance / AI
   { key: "performance", label: "Performance", icon: "BarChart3" },
-  { key: "insights", label: "Insights / AI", icon: "Brain" },
+  { key: "insights", label: ENTERPRISE_PAGE_LABELS.insights, icon: "Brain" },
 
   // Lab Portal
   { key: "labOrders", label: "Lab Ordering", icon: "ClipboardCheck" },
+  { key: "labInvoices", label: "Invoice Center", icon: "FileText" },
   { key: "purchase", label: "Purchase / Reorder", icon: "PackagePlus" },
-  { key: "predatorDebug", label: "Predator Debug", icon: "Brain" },
-  { key: "qaCommandCenter", label: "QA Command Center", icon: "ClipboardCheck" },
+  { key: "predatorDebug", label: ENTERPRISE_PAGE_LABELS.predatorDebug, icon: "Brain" },
+  { key: "qaCommandCenter", label: ENTERPRISE_PAGE_LABELS.qaCommandCenter, icon: "ClipboardCheck" },
 ];
 
 const PILOT_SAFE_PAGE_KEYS = new Set([
@@ -191,6 +193,7 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "qualificationReview",
   "notifications",
   "labOrders",
+  "labInvoices",
   "purchase",
   "reorder",
   "predatorDebug",

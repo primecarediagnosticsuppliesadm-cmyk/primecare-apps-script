@@ -59,6 +59,8 @@ export default function LabCollectionPanel({
   setProofRemarks,
   evidenceUploading,
   focusSection = "details",
+  paymentOrderId = "",
+  onPaymentOrderIdChange,
 }) {
   const [activeTab, setActiveTab] = useState(() => normalizeTab(focusSection));
   const [selectedOrderIds, setSelectedOrderIds] = useState([]);
@@ -110,11 +112,7 @@ export default function LabCollectionPanel({
                 </>
               )}
             </Button>
-          ) : (
-            <p className="rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground sm:flex-1">
-              Task completion coming soon.
-            </p>
-          )
+          ) : null
         ) : null}
       </div>
     ),
@@ -143,9 +141,15 @@ export default function LabCollectionPanel({
   }
 
   function toggleOrder(orderId) {
-    setSelectedOrderIds((prev) =>
-      prev.includes(orderId) ? prev.filter((id) => id !== orderId) : [...prev, orderId]
-    );
+    setSelectedOrderIds((prev) => {
+      const next = prev.includes(orderId)
+        ? prev.filter((id) => id !== orderId)
+        : [...prev, orderId];
+      if (onPaymentOrderIdChange) {
+        onPaymentOrderIdChange(next.length === 1 ? next[0] : "");
+      }
+      return next;
+    });
   }
 
   return (

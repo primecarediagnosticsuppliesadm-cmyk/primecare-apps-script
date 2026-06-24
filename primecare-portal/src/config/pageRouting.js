@@ -104,6 +104,9 @@ export function normalizePageKey(page) {
     case "lab-account":
     case "labAccount":
       return "labAccount";
+    case "lab-invoices":
+    case "invoices":
+      return "labInvoices";
     default:
       return page;
   }
@@ -119,6 +122,7 @@ export function resolvePageKeyForRole(role, page) {
   if (role === ROLES.LAB) {
     if (key === "collections") return "labAccount";
     if (key === "orders") return "labOrders";
+    if (key === "invoices") return "labInvoices";
   }
   return key;
 }

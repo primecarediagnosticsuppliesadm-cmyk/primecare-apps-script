@@ -3,7 +3,12 @@ import LoginPage from "./pages/LoginPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import { useAuth } from "./context/AuthContext";
 import { ROLES } from "./config/roles";
-import { normalizePlatformRole, isLoginEnabledRole } from "./config/rolePermissionMatrix.js";
+import {
+  normalizePlatformRole,
+  canAuthenticateRole,
+  isLoginEnabledRole,
+  NON_PILOT_RELEASE_MESSAGE,
+} from "./config/rolePermissionMatrix.js";
 import HqGlobalSearch, {
   HqSearchTriggerButton,
   useHqGlobalSearchShortcut,
@@ -19,7 +24,8 @@ import {
   syncPagePathToUrl,
 } from "./config/pageRouting.js";
 import { PortalToastProvider } from "@/context/PortalToastContext";
-import { RouteTransitionOverlay } from "@/components/ux";
+import { RouteTransitionOverlay, PortalLoadingScreen, PortalAccessCard, PortalAccessAction } from "@/components/ux";
+import { platformRoleLabel } from "./config/rolePermissionMatrix.js";
 import { TenantViewProvider } from "@/context/TenantViewContext.jsx";
 import OperatingZoneSync from "@/components/OperatingZoneSync.jsx";
 import { loadHqNavBadgeCounts } from "@/operations/hqNavBadgeCounts.js";
@@ -43,20 +49,12 @@ function normalizeRole(role) {
 
 function UnauthorizedScreen({ message, onLogout }) {
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <div className="max-w-md rounded-2xl border bg-white p-6 shadow-sm text-center">
-        <h2 className="text-xl font-semibold text-red-700">Unauthorized</h2>
-        <p className="mt-2 text-gray-600">
-          {message || "Your account is not authorized for PrimeCare pilot access."}
-        </p>
-        <button
-          type="button"
-          onClick={onLogout}
-          className="mt-5 rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
-        >
-          Back to login
-        </button>
-      </div>
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <PortalAccessCard
+        variant="unauthorized"
+        description={message || "Your account is not authorized for PrimeCare access."}
+        action={<PortalAccessAction label="Back to sign in" onClick={onLogout} />}
+      />
     </div>
   );
 }
@@ -75,8 +73,11 @@ function ExecutivePortalHeader({ currentUser, pageTitle, onLogout, role, activeP
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0 flex-1">
           <h1 className="text-xl font-semibold">{pageTitle}</h1>
-          <p className="text-sm text-gray-500">
-            PrimeCare HQ · Logged in as <span className="font-medium">{currentUser.role}</span>
+          <p className="text-sm text-muted-foreground">
+            PrimeCare HQ · Signed in as{" "}
+            <span className="font-medium text-foreground">
+              {platformRoleLabel(currentUser.role) || currentUser.role}
+            </span>
           </p>
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
@@ -118,13 +119,10 @@ function ExecutivePortalHeader({ currentUser, pageTitle, onLogout, role, activeP
   );
 }
 
-function PortalLoadingScreen() {
+function PortalLoadingScreenWrapper() {
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <div className="rounded-2xl border bg-white p-6 shadow-sm text-center">
-        <h2 className="text-xl font-semibold">Loading PrimeCare Portal...</h2>
-        <p className="mt-2 text-gray-500">Preparing portal modules and role-based views.</p>
-      </div>
+    <div className="min-h-screen bg-slate-50">
+      <PortalLoadingScreen message="Preparing your workspace…" />
     </div>
   );
 }
@@ -314,11 +312,8 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="rounded-2xl border bg-white p-6 shadow-sm text-center">
-          <h2 className="text-xl font-semibold">Loading PrimeCare...</h2>
-          <p className="mt-2 text-gray-500">Checking your session.</p>
-        </div>
+      <div className="min-h-screen bg-slate-50">
+        <PortalLoadingScreen message="Verifying your session…" />
       </div>
     );
   }
@@ -330,13 +325,20 @@ export default function App() {
     return <LoginPage />;
   }
 
+  if (isAuthenticated && user && !role) {
+    const rawRole = normalizePlatformRole(user.role);
+    if (isLoginEnabledRole(rawRole) && !canAuthenticateRole(rawRole)) {
+      return <NonPilotReleaseScreen role={rawRole} onLogout={signOut} />;
+    }
+  }
+
   if (!role || !activePage || !currentUser) {
     return <UnauthorizedScreen onLogout={signOut} />;
   }
 
   return (
     <PortalToastProvider>
-      <Suspense fallback={<PortalLoadingScreen />}>
+      <Suspense fallback={<PortalLoadingScreenWrapper />}>
         <TenantViewProvider currentUser={currentUser}>
         <OperatingZoneSync activePage={activePage} />
         <PortalLayout

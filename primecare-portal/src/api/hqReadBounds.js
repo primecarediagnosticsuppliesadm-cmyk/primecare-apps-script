@@ -20,10 +20,13 @@ export const HQ_STOCK_DASHBOARD_LIMIT = 5000;
 export const HQ_LAB_CATALOG_LIMIT = 2000;
 export const HQ_REORDER_CANDIDATES_LIMIT = 2000;
 export const HQ_LAB_ORDERS_RECENT_LIMIT = 50;
+export const HQ_INVOICE_LIST_DEFAULT_LIMIT = 25;
+export const HQ_INVOICE_LIST_MAX_LIMIT = 100;
+export const HQ_INVOICE_ORDER_LOOKUP_CHUNK = 100;
 export const HQ_READ_CACHE_TTL_MS = 45_000;
 
 export const HQ_ORDER_LIST_COLUMNS =
-  "id,order_id,lab_id,status,order_date,created_at,total_amount,tenant_id,created_by,notes,agent_id,inventory_updated,fulfilled_at";
+  "id,order_id,lab_id,status,order_date,created_at,total_amount,tenant_id,created_by,notes,agent_id,inventory_updated,fulfilled_at,invoice_id";
 
 export const HQ_ORDER_LINE_COUNT_COLUMNS = "order_id";
 
@@ -36,6 +39,18 @@ export const HQ_AR_COLUMNS =
 
 export const HQ_PAYMENT_COLUMNS =
   "payment_id,order_id,lab_id,amount_received,payment_date,mode,tenant_id,created_at,agent_id";
+
+/** Bounded invoice list projection (Phase 2+ reads). */
+export const HQ_INVOICE_LIST_COLUMNS =
+  "id,tenant_id,lab_id,order_id,invoice_number,invoice_date,due_date,subtotal,tax_amount,total_amount,status,pdf_storage_path,pdf_generated_at,sent_at,paid_at,created_at,updated_at";
+
+/** Bounded invoice line projection for detail reads. */
+export const HQ_INVOICE_LINE_COLUMNS =
+  "id,tenant_id,invoice_id,line_number,order_id,product_id,product_name,sku,quantity,unit_price,tax_rate,tax_amount,line_total,created_at";
+
+/** Bounded payment allocation projection. */
+export const HQ_INVOICE_ALLOCATION_COLUMNS =
+  "id,tenant_id,payment_id,invoice_id,allocated_amount,created_at,created_by";
 
 export const HQ_LABS_NAME_COLUMNS = "lab_id,lab_name";
 

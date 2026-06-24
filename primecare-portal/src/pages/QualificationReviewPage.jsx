@@ -24,6 +24,8 @@ import {
   ListSkeleton,
   EmptyState,
   usePortalToast,
+  PageHeader,
+  DataFetchError,
 } from "@/components/ux";
 import {
   qualificationBandToVariant,
@@ -43,6 +45,7 @@ import {
 import { loadVisibleLabContracts } from "@/labContract/labContractStore.js";
 import { CONTRACT_STATUSES } from "@/labContract/labContractTypes.js";
 import { labIdKey } from "@/utils/labId.js";
+import { cn } from "@/lib/utils";
 import { formatQualificationBandLabel } from "@/utils/computeQualificationScore";
 import {
   getPipelineStageLabel,
@@ -1019,8 +1022,6 @@ export default function QualificationReviewPage({ currentUser, setActivePage = n
       setContracts(Array.isArray(contractRows) ? contractRows : []);
     } catch (err) {
       setError(err?.message || "Failed to load qualification reviews");
-      setRows([]);
-      setContracts([]);
     } finally {
       setLoading(false);
     }
@@ -1125,42 +1126,32 @@ export default function QualificationReviewPage({ currentUser, setActivePage = n
 
   return (
     <div className="space-y-3 pb-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <ClipboardCheck className="h-5 w-5 text-[var(--pc-brand-primary)]" />
-            <h1 className="text-xl font-semibold tracking-tight">Qualification Analytics</h1>
-          </div>
-          <p className="mt-0.5 text-xs text-slate-500">
-            Read-only portfolio view across distributors. Manage qualifications in Distributor OS →
-            Labs → Qualification.
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-10 rounded-lg"
-          onClick={loadRows}
-        >
-          <RefreshCw className="mr-2 h-4 w-4" />
-          Refresh
-        </Button>
-      </div>
-
-      {error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
+      <PageHeader
+        title="Qualification Review"
+        subtitle="Read-only portfolio view across distributors. Manage qualifications in Distributor OS → Labs → Qualification."
+        icon={ClipboardCheck}
+        actions={
           <Button
             type="button"
             variant="outline"
             size="sm"
-            className="mt-2 h-9 rounded-lg"
-            onClick={loadRows}
+            className="h-10 rounded-lg"
+            onClick={() => void loadRows()}
+            disabled={loading}
           >
-            Retry
+            <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
+            Refresh
           </Button>
-        </div>
+        }
+      />
+
+      {error ? (
+        <DataFetchError
+          message={error}
+          onRetry={() => void loadRows()}
+          retrying={loading}
+          staleDataNote={rows.length ? "Showing the last qualification list loaded successfully." : ""}
+        />
       ) : null}
 
       <HqQualificationRecommendations rows={rows} onReviewLab={handleReviewLab} />

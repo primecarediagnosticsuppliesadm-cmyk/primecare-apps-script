@@ -2,7 +2,32 @@
 
 **Purpose:** Every requirement before handing PrimeCare HQ to the tester.  
 **Scope:** 11 HQ modules only — not Distributor OS or roadmap modules.  
-**Environment:** Staging Supabase + `qa` branch build + `VITE_PREDATOR_DEBUG=true`
+**Environment:** QA: `zipuzmfkwwucbchlphcj` · Production: provision per `HQ_PRODUCTION_ENV_CHECKLIST.md`  
+**RC-9 updated:** 2026-06-24 — code blockers closed; operational checklists added
+
+---
+
+## Section 0 — RC-9 operational readiness (pre-Production setup)
+
+| # | Requirement | Evidence | Pass |
+|---|-------------|----------|------|
+| 0.1 | AppErrorBoundary mounted at app root | `src/main.jsx` wraps `AuthProvider` → `App` | ☑ |
+| 0.2 | Non-pilot roles blocked on QA/PROD | `canAuthenticateRole()` — distributor/auditor get release message | ☑ |
+| 0.3 | SQL migration manifest | `docs/operations/HQ_SQL_MIGRATION_MANIFEST.md` | ☑ |
+| 0.4 | Production env checklist | `docs/operations/HQ_PRODUCTION_ENV_CHECKLIST.md` | ☑ |
+| 0.5 | Edge function health checklist | `docs/operations/HQ_EDGE_FUNCTION_HEALTH_CHECK.md` | ☑ |
+| 0.6 | Storage health checklist | `docs/operations/HQ_STORAGE_HEALTH_CHECK.md` | ☑ |
+| 0.7 | Browser/device UAT checklist | `docs/operations/HQ_BROWSER_DEVICE_UAT_CHECKLIST.md` | ☑ |
+| 0.8 | Backup/restore drill plan | `HQ_BACKUP_RECOVERY_RUNBOOK.md` § RC-9 drill — **READY FOR DRILL** | ☑ |
+| 0.9 | Monitoring/alerting plan | `HQ_MONITORING_PLAN.md` + `HQ_ALERTING_RUNBOOK.md` — **READY FOR IMPLEMENTATION** | ☑ |
+| 0.10 | Automated regression (RC-9) | Build, RLS, Predator Fail=0, golden path, perf, dead ends | ☑ |
+| 0.11 | Production Supabase provisioned | `HQ_PRODUCTION_ENV_CHECKLIST.md` S1–S15 | ☐ |
+| 0.12 | Production Vercel provisioned | `HQ_PRODUCTION_ENV_CHECKLIST.md` V1–V12 | ☐ |
+| 0.13 | Human UAT signatures | `HQ_UAT_SIGNOFF.md` | ☐ |
+| 0.14 | Backup restore drill executed | Drill sign-off in backup runbook | ☐ |
+| 0.15 | Alert delivery tested | GitHub Actions failure notification | ☐ |
+
+**Section 0 readiness:** 10/15 (67%) — code/docs closed; infra/human gates open
 
 ---
 
@@ -15,7 +40,7 @@
 | 1.3 | `executive_distributor_ops_rls_migration.sql` applied | Executive can SELECT HQ `orders`, `payments`, `ar_credit_control` | ☐ |
 | 1.4 | Supabase env vars set in staging build | App loads without "Supabase not configured" | ☐ |
 | 1.5 | `VITE_PREDATOR_DEBUG=true` in staging | Predator Debug + QA Command Center accessible | ☐ |
-| 1.6 | `npm run build` passes on `qa` branch | CI/local build exit 0 | ☐ |
+| 1.6 | `npm run build` passes on `qa` branch | CI/local build exit 0 | ☑ RC-9 2026-06-24 |
 | 1.7 | QA auth users seeded with active profiles | Executive + Admin login succeeds | ☐ |
 | 1.8 | HQ tenant UUID confirmed (`f168b98f-47a6-42c3-b788-24c00436fac2` or env-specific) | Profile `tenant_id` matches | ☐ |
 
@@ -211,7 +236,7 @@
 | Section 13 (E2E) | 6/6 | | ☐ |
 | Section 14 (Handoff) | 7/7 | | ☐ |
 | P0 defects open | 0 | | ☐ |
-| HQ weighted readiness | ≥ 85% | 71% (pre-remediation) | ☐ |
+| HQ weighted readiness | ≥ 85% | 67% Section 0 + automated certs; browser UAT pending | ☐ |
 
 **QA Lead sign-off:** _________________ Date: _________  
 **Architect sign-off:** _________________ Date: _________

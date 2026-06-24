@@ -59,6 +59,7 @@ function StepIcon({ state, stepKey }) {
  * @param {string} [props.error]
  * @param {(action: string, details: object | null) => void} [props.onAction]
  * @param {boolean} [props.repeatLoading]
+ * @param {boolean} [props.invoiceLoading]
  */
 export default function OrderTrackingDrawer({
   open,
@@ -68,6 +69,7 @@ export default function OrderTrackingDrawer({
   error = "",
   onAction,
   repeatLoading = false,
+  invoiceLoading = false,
 }) {
   const details = useMemo(() => resolveDrawerDetails(order), [order]);
 
@@ -333,12 +335,16 @@ export default function OrderTrackingDrawer({
               variant="outline"
               size="sm"
               className="h-9 flex-1 min-w-[7rem] text-xs"
-              disabled={!details || cancelled}
+              disabled={!details || cancelled || invoiceLoading}
               title={cancelled ? "No invoice available for cancelled orders" : undefined}
               onClick={() => handleAction("invoice")}
             >
-              <Download className="mr-1.5 h-3.5 w-3.5" />
-              Invoice
+              {invoiceLoading ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Download className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              {invoiceLoading ? "Downloading…" : "Invoice"}
             </Button>
             <Button
               type="button"

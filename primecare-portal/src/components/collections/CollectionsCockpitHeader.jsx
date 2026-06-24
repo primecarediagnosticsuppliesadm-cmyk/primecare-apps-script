@@ -1,4 +1,4 @@
-import { IndianRupee, AlertCircle, Wallet, CalendarClock, ShieldAlert, TrendingUp } from "lucide-react";
+import { IndianRupee, AlertCircle, Wallet, CalendarClock, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 function formatMoney(value) {
@@ -29,12 +29,6 @@ function MetricCard({ title, value, icon: Icon, className, hero = false }) {
           >
             {value}
           </p>
-          {hero ? (
-            <p className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
-              <TrendingUp className="h-3 w-3" aria-hidden />
-              Trend — coming soon
-            </p>
-          ) : null}
         </div>
         {Icon ? (
           <div

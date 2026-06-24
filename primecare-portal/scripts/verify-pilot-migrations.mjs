@@ -16,6 +16,10 @@ const sqlDir = resolve(__dirname, "../supabase/sql");
 /** Ordered deployment manifest — apply top to bottom. */
 export const PILOT_MIGRATION_MANIFEST = [
   {
+    tier: "P0 — Purchase orders foundation",
+    files: ["purchase_orders_migration.sql"],
+  },
+  {
     tier: "P0 — Security foundation",
     files: [
       "production_auth_rls_pilot_migration.sql",
@@ -72,6 +76,22 @@ export const PILOT_MIGRATION_MANIFEST = [
       "v_labs_credit_security_invoker_migration.sql",
       "executive_distributor_catalog_inventory_rls.sql",
     ],
+  },
+  {
+    tier: "P2 — Invoice foundation (Phase 1)",
+    files: ["invoice_system_phase1_migration.sql"],
+  },
+  {
+    tier: "P2 — Invoice creation engine (Phase 2)",
+    files: ["invoice_system_phase2_migration.sql"],
+  },
+  {
+    tier: "P2 — Invoice PDF download (Phase 3)",
+    files: ["invoice_system_phase3_migration.sql"],
+  },
+  {
+    tier: "P2 — Invoice payment allocation (Phase 5)",
+    files: ["invoice_system_phase5_migration.sql"],
   },
 ];
 

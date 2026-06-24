@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { StatusBadge, PageSkeleton, KpiCard, KpiCardGrid, usePortalToast, DataFreshnessLabel } from "@/components/ux";
+import { StatusBadge, PageSkeleton, KpiCard, KpiCardGrid, usePortalToast, DataFreshnessLabel, PageHeader, DataFetchError } from "@/components/ux";
 import OperationalLabDrawer from "@/components/operations/OperationalLabDrawer.jsx";
 import OwnershipStatusCard from "@/components/operations/OwnershipStatusCard.jsx";
 import LabOwnershipDrawer from "@/components/operations/LabOwnershipDrawer.jsx";
@@ -162,7 +162,7 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
       } catch (err) {
         console.error(err);
         setError(err?.message || "Failed to load operations center");
-        setOpsModel(null);
+        if (!isRefresh) setOpsModel(null);
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -274,39 +274,36 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
   if (!model) {
     return (
       <div className="mx-auto max-w-6xl space-y-4 p-4 pb-10 lg:p-6">
-        <header className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-              Executive oversight
-            </p>
-            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-              Operations Command Center
-            </h1>
-            <p className="mt-0.5 max-w-xl text-sm text-slate-600">
-              What needs attention, who is behind, and where operational risk is building — no charts,
-              just live status.
-            </p>
+        <PageHeader
+          title="Operations Command Center"
+          subtitle="What needs attention, who is behind, and where operational risk is building — no charts, just live status."
+          icon={Radio}
+          freshness={
             <DataFreshnessLabel
               loadedAt={dataLoadedAt}
               refreshing={loading || refreshing}
               className="mt-1 block"
             />
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => void load(true)}
-            disabled={refreshing || loading}
-          >
-            <RefreshCw className={cn("mr-2 h-4 w-4", (refreshing || loading) && "animate-spin")} />
-            Refresh
-          </Button>
-        </header>
+          }
+          actions={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void load(true)}
+              disabled={refreshing || loading}
+            >
+              <RefreshCw className={cn("mr-2 h-4 w-4", (refreshing || loading) && "animate-spin")} />
+              Refresh
+            </Button>
+          }
+        />
         {error ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </div>
+          <DataFetchError
+            message={error}
+            onRetry={() => void load(true)}
+            retrying={refreshing || loading}
+          />
         ) : null}
         <PageSkeleton kpiCount={6} kpiColumns={3} listRows={6} />
       </div>
@@ -331,40 +328,38 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
 
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-4 pb-10 lg:p-6">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-            Executive oversight
-          </p>
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-            Operations Command Center
-          </h1>
-          <p className="mt-0.5 max-w-xl text-sm text-slate-600">
-            What needs attention, who is behind, and where operational risk is building — no
-            charts, just live status.
-          </p>
+      <PageHeader
+        title="Operations Command Center"
+        subtitle="What needs attention, who is behind, and where operational risk is building — no charts, just live status."
+        icon={Radio}
+        freshness={
           <DataFreshnessLabel
             loadedAt={dataLoadedAt}
             refreshing={refreshing}
             className="mt-1 block"
           />
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => void load(true)}
-          disabled={refreshing}
-        >
-          <RefreshCw className={cn("mr-2 h-4 w-4", refreshing && "animate-spin")} />
-          Refresh
-        </Button>
-      </header>
+        }
+        actions={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void load(true)}
+            disabled={refreshing}
+          >
+            <RefreshCw className={cn("mr-2 h-4 w-4", refreshing && "animate-spin")} />
+            Refresh
+          </Button>
+        }
+      />
 
       {error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
-        </div>
+        <DataFetchError
+          message={error}
+          onRetry={() => void load(true)}
+          retrying={refreshing}
+          staleDataNote="Showing the last operations workspace loaded successfully."
+        />
       ) : null}
 
       {/* 1. Executive Daily Snapshot */}

@@ -11,6 +11,8 @@ import {
   ListSkeleton,
   EmptyState,
   usePortalToast,
+  PageHeader,
+  DataFetchError,
 } from "@/components/ux";
 import { typography } from "@/styles/designTokens";
 import { cn } from "@/lib/utils";
@@ -1110,8 +1112,10 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
         });
 
         setLoadError(err.message || "Failed to load agent visit page");
-        setLabs([]);
-        setAgentWorkspace(null);
+        if (!hasLoadedDataRef.current) {
+          setLabs([]);
+          setAgentWorkspace(null);
+        }
         setLoading(false);
       }
     });
@@ -2088,15 +2092,11 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
           : "pb-4"
       )}
     >
-      <header className="space-y-0">
-        <div className="flex items-center gap-2">
-          <ClipboardCheck className="h-5 w-5 text-[var(--pc-brand-primary)]" />
-          <h1 className={typography.pageTitle}>Agent Visits</h1>
-        </div>
-        <p className={cn(typography.pageSubtitle, "mt-0.5 sm:hidden")}>
-          Quick guided visit log — tap through each step, then save on review.
-        </p>
-      </header>
+      <PageHeader
+        title="Agent Visits"
+        subtitle="Quick guided visit log — tap through each step, then save on review."
+        icon={ClipboardCheck}
+      />
 
       <div className="sm:hidden">
         <CompactVisitKpiStrip
@@ -2135,18 +2135,14 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
       ) : null}
 
       {loadError ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {loadError}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="mt-2 h-9 rounded-lg"
-            onClick={() => loadPageData()}
-          >
-            Retry
-          </Button>
-        </div>
+        <DataFetchError
+          message={loadError}
+          onRetry={() => void loadPageData()}
+          retrying={loading}
+          staleDataNote={
+            hasLoadedDataRef.current ? "Showing the last visit workspace loaded successfully." : ""
+          }
+        />
       ) : null}
 
       <Card className="overflow-hidden rounded-2xl border-border/80 shadow-[var(--pc-shadow-card)]">

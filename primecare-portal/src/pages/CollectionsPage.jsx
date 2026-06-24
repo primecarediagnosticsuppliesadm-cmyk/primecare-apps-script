@@ -39,14 +39,19 @@ import {
   EmptyState,
   usePortalToast,
   DataFreshnessLabel,
+  PageHeader,
+  DataFetchError,
 } from "@/components/ux";
-import { typography } from "@/styles/designTokens";
 import {
   collectionRiskToVariant,
   paymentStatusToVariant,
 } from "@/utils/statusTokens";
 import { cn } from "@/lib/utils";
 import { labIdKey } from "@/utils/labId.js";
+import { getInvoicesForLabRead } from "@/api/invoiceSupabaseApi.js";
+import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
+import InvoiceDetailsDrawer from "@/components/invoice/InvoiceDetailsDrawer.jsx";
+import InvoiceAllocationsDrawer from "@/components/invoice/InvoiceAllocationsDrawer.jsx";
 import {
   AGENT_TASK_COMPLETION_ENABLED,
   ALLOW_LEGACY_APPS_SCRIPT,
@@ -327,8 +332,11 @@ function LabAccountTimeline({
   detailsLoading,
   copy,
   collectionDetails,
-  onWorkspaceAction,
+  setActivePage,
+  onRecordInvoicePayment,
+  tenantId,
 }) {
+  const { showToast } = usePortalToast();
   const outstanding = Number(item.outstandingAmount || 0);
   const totalPaid = Number(item.totalPaid || 0);
   const overdueDays = Number(item.overdueDays || 0);
@@ -342,12 +350,84 @@ function LabAccountTimeline({
   const creditUsed = Math.max(0, outstanding);
   const utilizationPct = creditLimit > 0 ? Math.min(100, Math.round((creditUsed / creditLimit) * 100)) : null;
   const [expandedInvoiceId, setExpandedInvoiceId] = useState("");
-  const [invoiceDrawerId, setInvoiceDrawerId] = useState("");
+  const [invoiceDrawer, setInvoiceDrawer] = useState(null);
+  const [allocationsDrawer, setAllocationsDrawer] = useState(null);
   const [activeFinanceTab, setActiveFinanceTab] = useState("activity");
-  const invoices = useMemo(
-    () => buildInvoiceRows(collectionDetails || item, history),
-    [collectionDetails, item, history]
+  const [serverInvoices, setServerInvoices] = useState([]);
+  const [invoiceDownloadKey, setInvoiceDownloadKey] = useState("");
+  const labId = item?.labId || item?.lab_id || "";
+
+  const handleWorkspaceAction = useCallback(
+    (action) => {
+      const storageKey = labIdKey(labId) ? `lab-ordering-handoff:${labIdKey(labId)}` : "";
+      if (action === "view_orders") {
+        setActivePage?.("labOrders");
+        return;
+      }
+      if (action === "download_statement") {
+        setActiveFinanceTab("statements");
+        return;
+      }
+      if (action === "repeat_last_order") {
+        if (storageKey) {
+          try {
+            window.localStorage.setItem(
+              storageKey,
+              JSON.stringify({
+                message: "Open Previous Orders to repeat your latest order.",
+                openOrdersTab: true,
+              })
+            );
+          } catch {
+            // ignore storage failures
+          }
+        }
+        setActivePage?.("labOrders");
+        return;
+      }
+      if (action === "contact_support") {
+        setActivePage?.("notifications");
+        showToast("success", "Activity Center opened — track orders and payment updates here.");
+      }
+    },
+    [labId, setActivePage, showToast]
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!labId) return undefined;
+    void getInvoicesForLabRead(labId, { tenantId }).then((res) => {
+      if (!cancelled && res.success) {
+        setServerInvoices(res.rows || []);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [labId, tenantId]);
+
+  const invoices = useMemo(() => {
+    if (serverInvoices.length) {
+      return serverInvoices.map((inv) => ({
+        invoiceId: inv.invoiceNumber || inv.id,
+        invoiceDbId: inv.id,
+        orderId: inv.orderId,
+        amount: inv.totalAmount,
+        subtotal: inv.subtotal,
+        taxAmount: inv.taxAmount,
+        totalAmount: inv.totalAmount,
+        allocatedAmount: inv.allocatedAmount,
+        openBalance: inv.openBalance,
+        invoiceDate: inv.invoiceDate,
+        dueDate: inv.dueDate,
+        status: inv.displayStatus || inv.status,
+        rawStatus: inv.status,
+        hasPdf: inv.hasPdf,
+        labId: inv.labId,
+      }));
+    }
+    return buildInvoiceRows(collectionDetails || item, history);
+  }, [serverInvoices, collectionDetails, item, history]);
   const financialTimeline = useMemo(
     () => buildFinancialTimeline(collectionDetails || item, history),
     [collectionDetails, item, history]
@@ -417,6 +497,28 @@ function LabAccountTimeline({
           : notesRows;
   const groupedTabRows = groupTimelineByDate(tabRows);
 
+  async function handleInvoiceDownload(invoice) {
+    const key = invoice?.invoiceDbId || invoice?.orderId || invoice?.invoiceId || "invoice";
+    setInvoiceDownloadKey(key);
+    try {
+      await downloadInvoicePdf({
+        invoiceId: invoice?.invoiceDbId,
+        orderId: invoice?.orderId,
+        tenantId,
+        onPhase: (phase, detail) => {
+          if (phase === "error") {
+            showToast("error", detail || "Unable to download invoice PDF.");
+          }
+          if (phase === "success") {
+            showToast("success", "Invoice download started.");
+          }
+        },
+      });
+    } finally {
+      setInvoiceDownloadKey("");
+    }
+  }
+
   return (
     <div className="space-y-2">
       <div className="grid gap-2 lg:grid-cols-[1.35fr_0.9fr]">
@@ -431,35 +533,42 @@ function LabAccountTimeline({
           </div>
           {topInvoices.length ? (
             <>
-              <div className="hidden text-[10px] font-medium uppercase tracking-wide text-slate-500 md:grid md:grid-cols-[1fr_1fr_0.9fr_0.8fr_0.8fr_1fr] md:gap-2 md:px-2 md:py-1">
+              <div className="hidden text-[10px] font-medium uppercase tracking-wide text-slate-500 xl:grid xl:grid-cols-[1fr_0.9fr_0.8fr_0.8fr_0.8fr_0.7fr_1.2fr] xl:gap-2 xl:px-2 xl:py-1">
                 <span>Invoice</span>
                 <span>Order</span>
-                <span>Amount</span>
-                <span>Due</span>
+                <span>Total</span>
+                <span>Allocated</span>
+                <span>Open</span>
                 <span>Status</span>
                 <span>Actions</span>
               </div>
               <div className="space-y-1">
                 {topInvoices.map((invoice, idx) => {
                   const id = `${invoice.invoiceId}-${idx}`;
+                  const total = Number(invoice.totalAmount ?? invoice.amount ?? 0);
+                  const allocated = Number(invoice.allocatedAmount ?? 0);
+                  const openBalance = Number(
+                    invoice.openBalance ?? Math.max(0, total - allocated)
+                  );
                   return (
                     <div
                       key={id}
                       className="rounded-md border border-border/70 px-2 py-1.5 transition hover:border-slate-300"
                     >
-                      <div className="grid items-center gap-1 md:grid-cols-[1fr_1fr_0.9fr_0.8fr_0.8fr_1fr] md:gap-2">
+                      <div className="hidden items-center gap-1 xl:grid xl:grid-cols-[1fr_0.9fr_0.8fr_0.8fr_0.8fr_0.7fr_1.2fr] xl:gap-2">
                         <div className="min-w-0 text-[11px] font-semibold text-slate-900">{invoice.invoiceId}</div>
                         <div className="min-w-0 text-[10px] text-slate-600">{invoice.orderId || "—"}</div>
-                        <div className="text-[11px] font-semibold tabular-nums text-slate-900">{formatMoney(invoice.amount)}</div>
-                        <div className="text-[10px] text-slate-600">{formatShortDate(invoice.dueDate)}</div>
+                        <div className="text-[11px] font-semibold tabular-nums text-slate-900">{formatMoney(total)}</div>
+                        <div className="text-[10px] tabular-nums text-emerald-700">{formatMoney(allocated)}</div>
+                        <div className="text-[10px] tabular-nums text-amber-700">{formatMoney(openBalance)}</div>
                         <div className="text-[10px]">
                           <span
                             className={cn(
                               "rounded px-1 py-0.5",
-                              Number(invoice.overdueDays || 0) > 0
-                                ? "bg-red-50 text-red-700"
-                                : invoice.status === "Paid"
-                                  ? "bg-emerald-50 text-emerald-700"
+                              invoice.status === "paid" || invoice.status === "Paid"
+                                ? "bg-emerald-50 text-emerald-700"
+                                : invoice.status === "overdue"
+                                  ? "bg-red-50 text-red-700"
                                   : "bg-amber-50 text-amber-700"
                             )}
                           >
@@ -472,25 +581,140 @@ function LabAccountTimeline({
                             size="sm"
                             variant="outline"
                             className="h-6 px-1.5 text-[10px]"
-                            onClick={() => setExpandedInvoiceId((prev) => (prev === id ? "" : id))}
+                            onClick={() => setInvoiceDrawer(invoice)}
                           >
-                            View
+                            View Invoice
                           </Button>
                           <Button
                             type="button"
                             size="sm"
                             variant="outline"
                             className="h-6 px-1.5 text-[10px]"
-                            onClick={() => setInvoiceDrawerId(id)}
+                            onClick={() => setAllocationsDrawer(invoice)}
                           >
-                            Download
+                            Allocations
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-6 px-1.5 text-[10px]"
+                            disabled={!invoice.orderId || openBalance <= 0}
+                            onClick={() =>
+                              onRecordInvoicePayment?.({
+                                ...invoice,
+                                labId,
+                              })
+                            }
+                          >
+                            Record Payment
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-6 px-1.5 text-[10px]"
+                            disabled={invoiceDownloadKey === (invoice.invoiceDbId || invoice.orderId || id)}
+                            onClick={() => void handleInvoiceDownload(invoice)}
+                          >
+                            {invoiceDownloadKey === (invoice.invoiceDbId || invoice.orderId || id) ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              "Download"
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="space-y-2 xl:hidden">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-slate-900">{invoice.invoiceId}</p>
+                            <p className="text-xs text-slate-600">Order {invoice.orderId || "—"}</p>
+                          </div>
+                          <span
+                            className={cn(
+                              "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium",
+                              invoice.status === "paid" || invoice.status === "Paid"
+                                ? "bg-emerald-50 text-emerald-700"
+                                : invoice.status === "overdue"
+                                  ? "bg-red-50 text-red-700"
+                                  : "bg-amber-50 text-amber-700"
+                            )}
+                          >
+                            {invoice.status}
+                          </span>
+                        </div>
+                        <dl className="grid grid-cols-3 gap-2 text-xs">
+                          <div>
+                            <dt className="text-muted-foreground">Total</dt>
+                            <dd className="font-semibold tabular-nums">{formatMoney(total)}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-muted-foreground">Allocated</dt>
+                            <dd className="font-semibold tabular-nums text-emerald-700">{formatMoney(allocated)}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-muted-foreground">Open</dt>
+                            <dd className="font-semibold tabular-nums text-amber-700">{formatMoney(openBalance)}</dd>
+                          </div>
+                        </dl>
+                        <div className="flex flex-wrap gap-1.5">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-9 rounded-lg text-xs"
+                            onClick={() => setInvoiceDrawer(invoice)}
+                          >
+                            View Invoice
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-9 rounded-lg text-xs"
+                            onClick={() => setAllocationsDrawer(invoice)}
+                          >
+                            Allocations
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-9 rounded-lg text-xs"
+                            disabled={!invoice.orderId || openBalance <= 0}
+                            onClick={() =>
+                              onRecordInvoicePayment?.({
+                                ...invoice,
+                                labId,
+                              })
+                            }
+                          >
+                            Record Payment
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-9 rounded-lg text-xs"
+                            disabled={invoiceDownloadKey === (invoice.invoiceDbId || invoice.orderId || id)}
+                            onClick={() => void handleInvoiceDownload(invoice)}
+                          >
+                            {invoiceDownloadKey === (invoice.invoiceDbId || invoice.orderId || id) ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              "Download"
+                            )}
                           </Button>
                         </div>
                       </div>
                       {expandedInvoiceId === id ? (
                         <div className="mt-1.5 rounded border border-dashed border-border px-2 py-1 text-[10px] text-slate-600">
                           <div>Order {invoice.orderId || "—"} <ArrowRight className="mx-0.5 inline h-2.5 w-2.5" /> {invoice.invoiceId}</div>
-                          <div>Due {formatShortDate(invoice.dueDate)} · {invoice.status}</div>
+                          <div>
+                            Allocated {formatMoney(allocated)} · Open {formatMoney(openBalance)} · Due{" "}
+                            {formatShortDate(invoice.dueDate)} · {invoice.status}
+                          </div>
                         </div>
                       ) : null}
                     </div>
@@ -551,23 +775,22 @@ function LabAccountTimeline({
           ) : null}
           <p className="mt-2 text-[10px] text-muted-foreground">{accountStandingSummary}</p>
           <div className="mt-2 flex flex-wrap gap-1.5">
-            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => onWorkspaceAction?.("view_orders")}>
+            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => handleWorkspaceAction("view_orders")}>
               <FileText className="mr-1 h-3 w-3" />
               Orders
             </Button>
-            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => onWorkspaceAction?.("download_statement")}>
+            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => handleWorkspaceAction("download_statement")}>
               <Download className="mr-1 h-3 w-3" />
-              Statement
+              Statements
             </Button>
-            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => onWorkspaceAction?.("repeat_last_order")}>
+            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => handleWorkspaceAction("repeat_last_order")}>
               Repeat
             </Button>
-            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => onWorkspaceAction?.("contact_support")}>
+            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => handleWorkspaceAction("contact_support")}>
               <LifeBuoy className="mr-1 h-3 w-3" />
               Support
             </Button>
           </div>
-          <p className="mt-1 text-[10px] text-muted-foreground">Online payments coming soon.</p>
         </aside>
       </div>
 
@@ -636,35 +859,44 @@ function LabAccountTimeline({
         )}
       </section>
 
-      {invoiceDrawerId ? (
-        <div className="fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label="Invoice details">
-          <button
-            type="button"
-            className="absolute inset-0 bg-slate-900/30"
-            onClick={() => setInvoiceDrawerId("")}
-          />
-          <div className="absolute bottom-0 right-0 h-[70vh] w-full max-w-[min(100vw,460px)] rounded-t-xl border border-border bg-white p-3 shadow-xl md:top-0 md:h-full md:rounded-none md:rounded-l-xl">
-            <div className="flex items-center justify-between">
-              <h4 className="text-sm font-semibold text-slate-900">Invoice Details</h4>
-              <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setInvoiceDrawerId("")}>
-                Close
-              </Button>
-            </div>
-            <p className="mt-2 text-xs text-slate-600">
-              Detailed invoice preview and download actions will be available here.
-            </p>
-            <div className="mt-3 flex gap-2">
-              <Button type="button" size="sm" variant="outline" className="h-8 text-xs">
-                View Invoice
-              </Button>
-              <Button type="button" size="sm" variant="outline" className="h-8 text-xs">
-                <Download className="mr-1 h-3 w-3" />
-                Download Statement
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <InvoiceAllocationsDrawer
+        open={Boolean(allocationsDrawer)}
+        onClose={() => setAllocationsDrawer(null)}
+        invoiceId={allocationsDrawer?.invoiceDbId}
+        invoiceNumber={allocationsDrawer?.invoiceId}
+        totalAmount={allocationsDrawer?.totalAmount ?? allocationsDrawer?.amount}
+        allocatedAmount={allocationsDrawer?.allocatedAmount}
+        openBalance={allocationsDrawer?.openBalance}
+      />
+      <InvoiceDetailsDrawer
+        open={Boolean(invoiceDrawer)}
+        onClose={() => setInvoiceDrawer(null)}
+        invoiceId={invoiceDrawer?.invoiceDbId}
+        orderId={invoiceDrawer?.orderId}
+        tenantId={tenantId}
+        invoicePreview={
+          invoiceDrawer
+            ? {
+                id: invoiceDrawer.invoiceDbId,
+                invoiceNumber: invoiceDrawer.invoiceId,
+                orderId: invoiceDrawer.orderId,
+                labId: invoiceDrawer.labId || labId,
+                invoiceDate: invoiceDrawer.invoiceDate,
+                dueDate: invoiceDrawer.dueDate,
+                subtotal: invoiceDrawer.subtotal ?? invoiceDrawer.amount,
+                taxAmount: invoiceDrawer.taxAmount,
+                totalAmount: invoiceDrawer.totalAmount ?? invoiceDrawer.amount,
+                status: invoiceDrawer.rawStatus || invoiceDrawer.status,
+                displayStatus: invoiceDrawer.status,
+                hasPdf: invoiceDrawer.hasPdf,
+              }
+            : null
+        }
+        onDownloadPhase={(phase, detail) => {
+          if (phase === "error") showToast("error", detail || "Unable to download invoice PDF.");
+          if (phase === "success") showToast("success", "Invoice download started.");
+        }}
+      />
     </div>
   );
 }
@@ -1320,11 +1552,7 @@ function CollectionExpandedPanel({
                       </>
                     )}
                   </Button>
-                ) : (
-                  <p className="rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground sm:flex-1">
-                    Task completion coming soon.
-                  </p>
-                )
+                ) : null
               ) : null}
             </div>
           </section>
@@ -1533,6 +1761,7 @@ export default function CollectionsPage({
   const [evidenceUploading, setEvidenceUploading] = useState(false);
   const [expandFocus, setExpandFocus] = useState("");
   const [paymentDrawerLabId, setPaymentDrawerLabId] = useState("");
+  const [paymentOrderId, setPaymentOrderId] = useState("");
   const [lastPaymentByLabId, setLastPaymentByLabId] = useState({});
   const [labOrdersByLabId, setLabOrdersByLabId] = useState({});
   const [labOrdersLoadingByLabId, setLabOrdersLoadingByLabId] = useState({});
@@ -1713,13 +1942,15 @@ export default function CollectionsPage({
               "Failed to load account information"
             )
         );
-        setSummary({
-          totalOutstanding: 0,
-          overdueCount: 0,
-          highRiskCount: 0,
-          todayCollections: 0,
-        });
-        setCollections([]);
+        if (!hasRows) {
+          setSummary({
+            totalOutstanding: 0,
+            overdueCount: 0,
+            highRiskCount: 0,
+            todayCollections: 0,
+          });
+          setCollections([]);
+        }
       } finally {
         setLoading(false);
         setListRefreshing(false);
@@ -1993,10 +2224,11 @@ export default function CollectionsPage({
         }
 
         if (supabase && amt > 0) {
+          const linkedOrderId = resolvePaymentOrderIdForLab(selectedLabId);
           const sbRes = await createPaymentWrite({
             labId: labIdKey(selectedLabId),
             tenantId: tenantId || null,
-            orderId: null,
+            orderId: linkedOrderId,
             amountReceived: amt,
             paymentMode,
             outstandingBefore: Number(selectedCollection?.outstandingAmount ?? 0),
@@ -2051,6 +2283,7 @@ export default function CollectionsPage({
             const paidLabKey = labIdKey(selectedLabId);
             const paidDate = localDateYmd(new Date());
             setLastPaymentByLabId((prev) => ({ ...prev, [paidLabKey]: paidDate }));
+            setPaymentOrderId("");
 
             await loadCollections();
             if (isAgentView && paymentDrawerLabId) {
@@ -2233,8 +2466,31 @@ export default function CollectionsPage({
     await openCollection(labId);
   }
 
+  function resolvePaymentOrderIdForLab(labId) {
+    const explicit = str(paymentOrderId);
+    if (explicit) return explicit;
+    const key = labIdKey(labId);
+    const openOrders = labOrdersByLabId[key] || [];
+    if (openOrders.length === 1) {
+      return str(openOrders[0]?.orderId ?? openOrders[0]?.order_id) || null;
+    }
+    return null;
+  }
+
+  function handleRecordInvoicePayment(invoice) {
+    const orderId = str(invoice?.orderId ?? invoice?.order_id);
+    const openBalance = Number(invoice?.openBalance ?? invoice?.amount ?? 0);
+    if (orderId) setPaymentOrderId(orderId);
+    if (openBalance > 0) setAmountCollected(String(openBalance));
+    const labId = str(invoice?.labId ?? invoice?.lab_id ?? selectedCollection?.labId);
+    if (labId) openCollectionPanel(labId, "payment");
+  }
+
   function openCollectionPanel(labId, focusSection = "details") {
     const key = labIdKey(labId);
+    if (focusSection !== "payment") {
+      setPaymentOrderId("");
+    }
     if (isAgentView && focusSection === "payment") {
       setPaymentDrawerLabId(key);
       void openCollection(labId, { focusSection, suppressExpand: true });
@@ -2284,29 +2540,9 @@ export default function CollectionsPage({
     currentUser,
     tenantId,
     collectionEvidence,
+    paymentOrderId,
+    onPaymentOrderIdChange: setPaymentOrderId,
   };
-
-  const handleLabWorkspaceAction = useCallback(
-    (action) => {
-      if (!isLabAccount) return;
-      if (action === "view_orders") {
-        showToast("info", "Open Lab Ordering from sidebar to view order details.");
-        return;
-      }
-      if (action === "download_statement") {
-        showToast("info", "Statement download placeholder is available in this release.");
-        return;
-      }
-      if (action === "repeat_last_order") {
-        showToast("info", "Use Activity Center or Lab Ordering to repeat your latest order.");
-        return;
-      }
-      if (action === "contact_support") {
-        showToast("info", "Contact support placeholder: support workflows are coming soon.");
-      }
-    },
-    [isLabAccount, showToast]
-  );
 
   const handleScheduleFollowUp = useCallback(
     (item) => {
@@ -2333,47 +2569,47 @@ export default function CollectionsPage({
       )}
     >
       {!embedded ? (
-        <header className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <Wallet className="h-5 w-5 text-[var(--pc-brand-primary)]" />
-              <h1 className={typography.pageTitle}>
-                {isLabAccount
-                  ? "Payments & Account"
+        <PageHeader
+          title={
+            isLabAccount
+              ? "Payments & Account"
+              : isHqCreditRisk
+                ? "Credit & Risk"
+                : "Collections"
+          }
+          subtitle={
+            distributorScope?.tenantId
+              ? `Collections for ${distributorScope.tenantName || "selected distributor"} only.`
+              : isLabAccount
+                ? "Operational financial workspace for your lab: account health, invoices, and payment activity."
+                : isAgentView
+                  ? "Who to collect from, how much is owed, and what to do next."
                   : isHqCreditRisk
-                    ? "Credit & Risk"
-                    : "Collections"}
-              </h1>
-            </div>
-            <p className={cn(typography.pageSubtitle, "mt-0.5")}>
-              {distributorScope?.tenantId
-                ? `Collections for ${distributorScope.tenantName || "selected distributor"} only.`
-                : isLabAccount
-                  ? "Operational financial workspace for your lab: account health, invoices, and payment activity."
-                  : isAgentView
-                    ? "Who to collect from, how much is owed, and what to do next."
-                    : isHqCreditRisk
-                      ? "Operational command center for collections, credit exposure, and intervention priorities."
-                      : "PrimeCare HQ receivables — use Distributor OS for distributor tenants."}
-            </p>
+                    ? "Operational command center for collections, credit exposure, and intervention priorities."
+                    : "PrimeCare HQ receivables — use Distributor OS for distributor tenants."
+          }
+          icon={Wallet}
+          freshness={
             <DataFreshnessLabel
               loadedAt={dataLoadedAt}
               refreshing={loading || listRefreshing}
               className="mt-1 block"
             />
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-10 rounded-lg"
-            onClick={() => loadCollections()}
-            disabled={loading || listRefreshing}
-          >
-            <RefreshCw className={cn("mr-2 h-4 w-4", (loading || listRefreshing) && "animate-spin")} />
-            Refresh
-          </Button>
-        </header>
+          }
+          actions={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-10 rounded-lg"
+              onClick={() => loadCollections()}
+              disabled={loading || listRefreshing}
+            >
+              <RefreshCw className={cn("mr-2 h-4 w-4", (loading || listRefreshing) && "animate-spin")} />
+              Refresh
+            </Button>
+          }
+        />
       ) : null}
 
       {loading && collections.length === 0 ? (
@@ -2406,18 +2642,14 @@ export default function CollectionsPage({
       ) : null}
 
       {loadError ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {loadError}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="mt-2 h-9 rounded-lg"
-            onClick={() => loadCollections()}
-          >
-            Retry
-          </Button>
-        </div>
+        <DataFetchError
+          message={loadError}
+          onRetry={() => loadCollections()}
+          retrying={loading || listRefreshing}
+          staleDataNote={
+            collections.length > 0 ? "Showing the last account data loaded successfully." : ""
+          }
+        />
       ) : null}
 
       <div className={isLabAccount ? "mx-auto max-w-2xl" : ""}>
@@ -2570,12 +2802,14 @@ export default function CollectionsPage({
                 history={isExpanded ? history : []}
                 detailsLoading={isExpanded && detailsLoading}
                 copy={accountLabels}
+                tenantId={tenantId}
                 collectionDetails={
                   isExpanded && labIdKey(selectedCollection?.labId) === key
                     ? selectedCollection
                     : item
                 }
-                onWorkspaceAction={handleLabWorkspaceAction}
+                setActivePage={setActivePage}
+                onRecordInvoicePayment={handleRecordInvoicePayment}
               />
             );
           })}

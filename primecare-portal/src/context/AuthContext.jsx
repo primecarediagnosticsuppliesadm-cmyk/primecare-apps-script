@@ -6,7 +6,9 @@ import { supabase } from "@/api/supabaseClient";
 import { ALLOW_LEGACY_APPS_SCRIPT, REQUIRE_SUPABASE_AUTH } from "@/config/environment";
 import {
   normalizePlatformRole,
+  canAuthenticateRole,
   isLoginEnabledRole,
+  NON_PILOT_RELEASE_MESSAGE,
   ROLES,
 } from "@/config/rolePermissionMatrix.js";
 import { getDefaultPageForRole } from "@/config/menuConfig.js";
@@ -58,6 +60,10 @@ function buildUserFromProfile(sessionUser, profile) {
     throw new Error("Your PrimeCare profile is inactive. Contact an administrator.");
   }
   if (!role) {
+    const normalized = normalizePlatformRole(profile?.role);
+    if (isLoginEnabledRole(normalized) && !canAuthenticateRole(normalized)) {
+      throw new Error(NON_PILOT_RELEASE_MESSAGE);
+    }
     throw new Error("Your PrimeCare role is not authorized for pilot access.");
   }
 

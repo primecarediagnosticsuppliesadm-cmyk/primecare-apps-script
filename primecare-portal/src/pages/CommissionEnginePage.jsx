@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { StatusBadge, PageSkeleton } from "@/components/ux";
+import { StatusBadge, PageSkeleton, PageHeader } from "@/components/ux";
 import {
   loadCommissionEngineBundle,
   approveCommissionEntry,
@@ -230,13 +230,11 @@ export default function CommissionEnginePage({
   if (!embedded && distributors.length === 0) {
     return (
       <div className="mx-auto max-w-5xl space-y-3 p-3 pb-8">
-        <header>
-          <h1 className="flex items-center gap-2 text-lg font-bold text-slate-900">
-            <Coins className="h-5 w-5 text-indigo-600" />
-            Commission Engine
-          </h1>
-          <p className="text-xs text-slate-600">PrimeCare HQ financial controls</p>
-        </header>
+        <PageHeader
+          title="Commission Management"
+          subtitle="PrimeCare HQ financial controls"
+          icon={Coins}
+        />
         <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
           No distributors available. Launch a distributor before managing commissions.
         </p>
@@ -247,15 +245,11 @@ export default function CommissionEnginePage({
   if (!embedded && !scopeTenantId) {
     return (
       <div className="mx-auto max-w-5xl space-y-3 p-3 pb-8">
-        <header className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h1 className="flex items-center gap-2 text-lg font-bold text-slate-900">
-              <Coins className="h-5 w-5 text-indigo-600" />
-              Commission Engine
-            </h1>
-            <p className="text-xs text-slate-600">PrimeCare HQ financial controls</p>
-          </div>
-        </header>
+        <PageHeader
+          title="Commission Management"
+          subtitle="PrimeCare HQ financial controls"
+          icon={Coins}
+        />
         <label className="block text-xs font-medium text-slate-600">
           Select distributor
           <select
@@ -300,20 +294,16 @@ export default function CommissionEnginePage({
   return (
     <div className={embedded ? "space-y-3" : "mx-auto max-w-5xl space-y-3 p-3 pb-8"}>
       {!embedded ? (
-        <header className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h1 className="flex items-center gap-2 text-lg font-bold text-slate-900">
-              <Coins className="h-5 w-5 text-indigo-600" />
-              Commission Engine
-            </h1>
-            <p className="text-[11px] text-slate-600">
-              PrimeCare HQ · {scopeLabel} · {model.periodYmd}
-            </p>
-          </div>
-          <Button type="button" variant="ghost" size="icon" onClick={() => void load()} aria-label="Refresh">
-            <RefreshCw className="h-4 w-4" />
-          </Button>
-        </header>
+        <PageHeader
+          title="Commission Management"
+          subtitle={`PrimeCare HQ · ${scopeLabel} · ${model.periodYmd}`}
+          icon={Coins}
+          actions={
+            <Button type="button" variant="ghost" size="icon" onClick={() => void load()} aria-label="Refresh">
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+          }
+        />
       ) : (
         <p className="flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] text-slate-600">
           <Eye className="h-3.5 w-3.5 shrink-0" />

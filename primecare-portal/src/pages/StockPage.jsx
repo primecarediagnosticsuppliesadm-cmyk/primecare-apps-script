@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { getStockDashboard } from "../api/primecareSupabaseApi";
 import { fetchDatabaseTenants } from "@/tenant/durableTenantStore.js";
 import InventoryLedgerPage from "./InventoryLedgerPage";
 import InventoryHealthPage from "./InventoryHealthPage";
 import PageSkeleton from "@/components/ux/PageSkeleton";
+import PageHeader from "@/components/ux/PageHeader";
+import DataFetchError from "@/components/ux/DataFetchError";
 import HqInventoryValueAnalytics from "@/components/hq/HqInventoryValueAnalytics.jsx";
+import { Package } from "lucide-react";
 import {
   distributorNamesFromRegistry,
   loadInventoryEconomicsBundle,
@@ -45,11 +48,11 @@ function countHealthBuckets(rows) {
  */
 function resolveTenantLabel(tenantId, tenantNameById, homeTenantId) {
   const id = str(tenantId);
-  if (!id) return "Tenant: unknown";
+  if (!id) return "Distributor: unknown";
   const name = tenantNameById.get(id);
-  if (name) return `Tenant: ${name}`;
-  if (homeTenantId && id === homeTenantId) return "Tenant: HQ";
-  return `Tenant: ${id}`;
+  if (name) return `Distributor: ${name}`;
+  if (homeTenantId && id === homeTenantId) return "Distributor: HQ";
+  return `Distributor: ${id}`;
 }
 
 function resolveTenantShortName(tenantId, tenantNameById, homeTenantId) {
@@ -127,38 +130,42 @@ export default function StockPage({ currentUser = null }) {
     };
   }, [activeTab]);
 
-  useEffect(() => {
-    async function loadStock() {
-      try {
-        const [res, tenantsRes] = await Promise.all([
-          getStockDashboard(),
-          fetchDatabaseTenants(),
-        ]);
+  const loadStock = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
+      const [res, tenantsRes] = await Promise.all([
+        getStockDashboard(),
+        fetchDatabaseTenants(),
+      ]);
 
-        if (!res.success) {
-          throw new Error(res.error || "Failed to load stock");
-        }
-
-        const rows = res.data?.inventory ?? [];
-        console.log("SUPABASE STOCK:", rows);
-
-        const nameMap = new Map();
-        for (const tenant of tenantsRes.rows || []) {
-          const id = str(tenant.id);
-          const name = str(tenant.tenant_name || tenant.tenantName);
-          if (id && name) nameMap.set(id, name);
-        }
-        setTenantNameById(nameMap);
-        setData(res.data || { stats: {}, inventory: [] });
-      } catch (err) {
-        setError(err.message || "Something went wrong");
-      } finally {
-        setLoading(false);
+      if (!res.success) {
+        throw new Error(res.error || "Failed to load stock");
       }
-    }
 
-    loadStock();
+      const rows = res.data?.inventory ?? [];
+      console.log("SUPABASE STOCK:", rows);
+
+      const nameMap = new Map();
+      for (const tenant of tenantsRes.rows || []) {
+        const id = str(tenant.id);
+        const name = str(tenant.tenant_name || tenant.tenantName);
+        if (id && name) nameMap.set(id, name);
+      }
+      setTenantNameById(nameMap);
+      setData(res.data || { stats: {}, inventory: [] });
+    } catch (err) {
+      setError(err.message || "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadStock();
+  }, [loadStock]);
+
+  const hasInventoryRows = (data.inventory || []).length > 0;
 
   const tenantFilterOptions = useMemo(() => {
     const options = [];
@@ -183,7 +190,7 @@ export default function StockPage({ currentUser = null }) {
       });
     }
 
-    options.push({ value: "all", label: "All tenants" });
+    options.push({ value: "all", label: "All distributors" });
     return options;
   }, [data.inventory, homeTenantId, tenantNameById]);
 
@@ -235,41 +242,46 @@ export default function StockPage({ currentUser = null }) {
 
   return (
     <div style={styles.page}>
-      <div style={styles.header}>
-        <h1 style={styles.title}>Stock Dashboard</h1>
-        <div style={styles.tabs}>
-          <button
-            type="button"
-            onClick={() => switchTab("stock")}
-            style={{
-              ...styles.tabButton,
-              ...(activeTab === "stock" ? styles.activeTabButton : {}),
-            }}
-          >
-            Stock
-          </button>
-          <button
-            type="button"
-            onClick={() => switchTab("ledger")}
-            style={{
-              ...styles.tabButton,
-              ...(activeTab === "ledger" ? styles.activeTabButton : {}),
-            }}
-          >
-            Movements
-          </button>
-          <button
-            type="button"
-            onClick={() => switchTab("health")}
-            style={{
-              ...styles.tabButton,
-              ...(activeTab === "health" ? styles.activeTabButton : {}),
-            }}
-          >
-            Health
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Inventory"
+        subtitle="Stock levels, reorder signals, and distributor inventory across your network."
+        icon={Package}
+        className="mb-3"
+        secondaryActions={
+          <div style={styles.tabs}>
+            <button
+              type="button"
+              onClick={() => switchTab("stock")}
+              style={{
+                ...styles.tabButton,
+                ...(activeTab === "stock" ? styles.activeTabButton : {}),
+              }}
+            >
+              Stock
+            </button>
+            <button
+              type="button"
+              onClick={() => switchTab("ledger")}
+              style={{
+                ...styles.tabButton,
+                ...(activeTab === "ledger" ? styles.activeTabButton : {}),
+              }}
+            >
+              Movements
+            </button>
+            <button
+              type="button"
+              onClick={() => switchTab("health")}
+              style={{
+                ...styles.tabButton,
+                ...(activeTab === "health" ? styles.activeTabButton : {}),
+              }}
+            >
+              Health
+            </button>
+          </div>
+        }
+      />
 
       {activeTab === "health" ? (
         <InventoryHealthPage />
@@ -277,14 +289,23 @@ export default function StockPage({ currentUser = null }) {
         <InventoryLedgerPage />
       ) : loading ? (
         <PageSkeleton kpiCount={4} kpiColumns={4} listRows={8} className="p-4" />
-      ) : error ? (
-        <h2 style={{ padding: "20px", color: "red" }}>{error}</h2>
+      ) : error && !hasInventoryRows ? (
+        <DataFetchError message={error} onRetry={() => void loadStock()} retrying={loading} />
       ) : (
         <>
+          {error ? (
+            <DataFetchError
+              message={error}
+              onRetry={() => void loadStock()}
+              retrying={loading}
+              staleDataNote="Showing the last inventory snapshot loaded successfully."
+              className="mb-3"
+            />
+          ) : null}
           {showPortfolioView ? (
             <div style={styles.portfolioNote}>
-              Portfolio inventory: each row is one stock record per tenant. The same SKU may
-              appear under HQ and distributor tenants with separate on-hand quantities.
+              Portfolio inventory: each row is one stock record per distributor. The same SKU may
+              appear under HQ and distributor accounts with separate on-hand quantities.
             </div>
           ) : null}
 
@@ -323,7 +344,7 @@ export default function StockPage({ currentUser = null }) {
               value={tenantFilter}
               onChange={(e) => setTenantFilter(e.target.value)}
               style={styles.tenantFilter}
-              aria-label="Filter inventory by tenant"
+              aria-label="Filter inventory by distributor"
             >
               {tenantFilterOptions.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -334,14 +355,14 @@ export default function StockPage({ currentUser = null }) {
 
             <input
               type="text"
-              placeholder="Search by product, ID, category, tenant..."
+              placeholder="Search by product, ID, category, distributor..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               style={styles.search}
             />
           </div>
 
-          <div style={styles.tableWrap}>
+          <div style={styles.tableWrap} className="hidden xl:block">
             {filteredRows.length === 0 ? (
               <div style={styles.emptyState}>No stock items found.</div>
             ) : (
@@ -355,7 +376,7 @@ export default function StockPage({ currentUser = null }) {
                     <th style={{ ...styles.th, ...styles.thNumeric }}>Min Stock</th>
                     <th style={{ ...styles.th, ...styles.thNumeric }}>Reorder Qty</th>
                     <th style={styles.th}>Health</th>
-                    {showPortfolioView ? <th style={styles.th}>Tenant</th> : null}
+                    {showPortfolioView ? <th style={styles.th}>Distributor</th> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -383,6 +404,47 @@ export default function StockPage({ currentUser = null }) {
                   ))}
                 </tbody>
               </table>
+            )}
+          </div>
+
+          <div className="space-y-2 xl:hidden">
+            {filteredRows.length === 0 ? (
+              <div style={styles.emptyState}>No stock items found.</div>
+            ) : (
+              filteredRows.map((item) => (
+                <div
+                  key={`${item.tenantId || "tenant"}-${item.productId}-mobile`}
+                  className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-900">{item.productName || "—"}</p>
+                      <p className="font-mono text-xs text-slate-600">{item.productId || "—"}</p>
+                    </div>
+                    <HealthBadge health={item.stockHealth} />
+                  </div>
+                  <dl className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <dt className="text-slate-500">On hand</dt>
+                      <dd className="font-semibold tabular-nums">{item.currentStock ?? 0}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Min</dt>
+                      <dd className="font-semibold tabular-nums">{item.minStock ?? 0}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Reorder</dt>
+                      <dd className="font-semibold tabular-nums">{item.reorderQty ?? 0}</dd>
+                    </div>
+                  </dl>
+                  <p className="mt-2 text-xs text-slate-600">{item.category || "—"}</p>
+                  {showPortfolioView ? (
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      {resolveTenantShortName(item.tenantId, tenantNameById, homeTenantId)}
+                    </p>
+                  ) : null}
+                </div>
+              ))
             )}
           </div>
         </>

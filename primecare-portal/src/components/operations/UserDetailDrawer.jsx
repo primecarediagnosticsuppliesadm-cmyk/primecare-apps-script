@@ -166,7 +166,7 @@ export default function UserDetailDrawer({
             <p className="mb-2 text-xs font-semibold text-slate-700">Recent audit events</p>
             {userAuditEvents.length === 0 ? (
               <p className="rounded-lg border border-dashed px-3 py-2 text-xs text-slate-500">
-                No provisioning audit events for this user in the loaded window.
+                No account activity events for this user in the loaded window.
               </p>
             ) : (
               <ul className="space-y-1.5 text-xs">

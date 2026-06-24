@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { StatusBadge, PageSkeleton, usePortalToast } from "@/components/ux";
+import { StatusBadge, PageSkeleton, usePortalToast, PageHeader } from "@/components/ux";
 import { getLabsCredit } from "@/api/primecareSupabaseApi.js";
 import {
   loadLabContractEngineBundle,
@@ -462,29 +462,27 @@ export default function LabContractManagementPage({
   return (
     <div className={embedded ? "space-y-3" : "mx-auto max-w-6xl space-y-3 p-3 pb-8"}>
       {!embedded ? (
-      <header className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="flex items-center gap-2 text-lg font-bold text-slate-900">
-            <FileText className="h-5 w-5 text-indigo-600" />
-            Lab Contract Engine
-          </h1>
-          <p className="text-[11px] text-slate-600">
-            {distributorScope?.tenantId
-              ? `Contracts for ${distributorScope.tenantName || "selected distributor"} only.`
-              : "PrimeCare HQ contracts only — open Distributor OS for distributor lab contracts."}
-          </p>
-        </div>
-        <div className="flex gap-1">
-          {canCreateContract ? (
-            <Button type="button" size="sm" variant="outline" onClick={openCreateForm}>
-              <Plus className="h-4 w-4" /> New
+      <PageHeader
+        title="Contract Engine"
+        subtitle={
+          distributorScope?.tenantId
+            ? `Contracts for ${distributorScope.tenantName || "selected distributor"} only.`
+            : "PrimeCare HQ contracts only — open Distributor OS for distributor lab contracts."
+        }
+        icon={FileText}
+        actions={
+          <div className="flex gap-1">
+            {canCreateContract ? (
+              <Button type="button" size="sm" variant="outline" onClick={openCreateForm}>
+                <Plus className="h-4 w-4" /> New
+              </Button>
+            ) : null}
+            <Button type="button" variant="ghost" size="icon" onClick={() => void load()} aria-label="Refresh">
+              <RefreshCw className="h-4 w-4" />
             </Button>
-          ) : null}
-          <Button type="button" variant="ghost" size="icon" onClick={() => void load()}>
-            <RefreshCw className="h-4 w-4" />
-          </Button>
-        </div>
-      </header>
+          </div>
+        }
+      />
       ) : (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
           <div>

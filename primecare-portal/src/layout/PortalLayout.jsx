@@ -86,8 +86,11 @@ export default function PortalLayout({
     return (
       <button
         key={item.key}
+        type="button"
         onClick={() => setActivePage(item.key)}
-        className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left transition ${
+        aria-current={isActive ? "page" : undefined}
+        aria-label={item.label}
+        className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/80 ${
           isActive
             ? "bg-white/95 text-slate-900 shadow-sm"
             : "text-slate-200 hover:bg-white/10 hover:text-white"
@@ -158,8 +161,10 @@ export default function PortalLayout({
                 return (
                   <button
                     key={item.key}
+                    type="button"
                     onClick={() => setActivePage(item.key)}
-                  className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm transition ${
+                    aria-current={isActive ? "page" : undefined}
+                  className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 ${
                       isActive
                         ? "bg-slate-900 text-white"
                         : "bg-slate-100 text-slate-700"
@@ -206,8 +211,11 @@ export default function PortalLayout({
               return (
                 <button
                   key={item.key}
+                  type="button"
                   onClick={() => setActivePage(item.key)}
-                  className={`flex flex-col items-center justify-center gap-1 text-xs transition ${
+                  aria-current={isActive ? "page" : undefined}
+                  aria-label={item.label}
+                  className={`flex flex-col items-center justify-center gap-1 text-xs transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 ${
                     isActive
                       ? "text-slate-900"
                       : "text-slate-500"

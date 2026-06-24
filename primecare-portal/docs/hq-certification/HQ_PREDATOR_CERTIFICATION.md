@@ -1,9 +1,9 @@
 # HQ Predator Certification
 
-**Generated:** 2026-06-24T15:20:45.312Z
+**Generated:** 2026-06-24T23:49:40.053Z
 **Environment:** https://zipuzmfkwwucbchlphcj.supabase.co
 **Actor:** qa.executive@primecare.test
-**Duration:** 22243 ms
+**Duration:** 45318 ms
 
 **Executive visibility:** VERIFIED INTENTIONAL — HQ Executive reads registered distributor tenants via RLS (`predatorChecks.executiveCrossTenantOpts`). Guntur in collections is expected when `787999b9-…` exists in `public.tenants`. Prior FAIL was certification harness without Vite session (empty tenant registry), not a loader defect.
 
@@ -12,7 +12,7 @@
 ### Batch summary
 
 - Status: WARN
-- Pass: 331
+- Pass: 342
 - Warn: 22
 - Fail: 0
 - Modules run: 32
@@ -24,7 +24,7 @@
 | User Provisioning | PASS | 12 | 0 | 0 |
 | Lab Ownership | PASS | 7 | 0 | 0 |
 | Executive Action Queue | PASS | 8 | 0 | 0 |
-| Tenant + Role Isolation | PASS | 61 | 0 | 0 |
+| Tenant + Role Isolation | PASS | 72 | 0 | 0 |
 | Revenue Funnel | PASS | 12 | 0 | 0 |
 | Orders | PASS | 8 | 0 | 0 |
 | Collections | WARN | 4 | 1 | 0 |
@@ -37,18 +37,18 @@
 | Admin Dashboard | WARN | 5 | 1 | 0 |
 | Collections | WARN | 4 | 1 | 0 |
 | Lab Portal | WARN | 4 | 1 | 0 |
-| Qualification Analytics | WARN | 3 | 2 | 0 |
+| Qualification Analytics | WARN | 3 | 3 | 0 |
 | Agent Visits | WARN | 5 | 1 | 0 |
-| Tenant + Role Isolation | PASS | 61 | 0 | 0 |
+| Tenant + Role Isolation | PASS | 72 | 0 | 0 |
 | Notifications | PASS | 2 | 0 | 0 |
 | Operational Evidence | PASS | 7 | 0 | 0 |
 | Operations Center | PASS | 8 | 0 | 0 |
-| Executive Intervention | WARN | 9 | 3 | 0 |
+| Executive Intervention | WARN | 10 | 2 | 0 |
 | Executive Action Queue | PASS | 8 | 0 | 0 |
 | Operational Tasks | PASS | 4 | 0 | 0 |
 | Operational Event Ledger | WARN | 7 | 1 | 0 |
 | Executive Intelligence | PASS | 16 | 0 | 0 |
-| Pilot Readiness | PASS | 13 | 0 | 0 |
+| Pilot Readiness | WARN | 12 | 1 | 0 |
 | Founder Navigation | WARN | 9 | 1 | 0 |
 | Founder Strategy | PASS | 12 | 0 | 0 |
 | Founder Financial Intelligence | PASS | 7 | 0 | 0 |
@@ -58,7 +58,7 @@
 | User Provisioning | PASS | 12 | 0 | 0 |
 | Lab Ownership | PASS | 7 | 0 | 0 |
 | Commission Engine | WARN | 12 | 2 | 0 |
-| Lab Contract Engine | WARN | 19 | 1 | 0 |
+| Lab Contract Engine | PASS | 19 | 0 | 0 |
 | Distributor Billing | WARN | 10 | 5 | 0 |
 | Inventory Economics | PASS | 6 | 0 | 0 |
 | Inventory Tenant Safety | PASS | 3 | 0 | 0 |

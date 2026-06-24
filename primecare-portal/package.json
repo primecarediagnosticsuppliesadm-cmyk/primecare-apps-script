@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "supabase:functions:serve": "supabase functions serve provision-platform-user reset-platform-user-password --env-file .env.functions.local",
-    "supabase:functions:deploy:qa": "supabase functions deploy provision-platform-user reset-platform-user-password --project-ref zipuzmfkwwucbchlphcj"
+    "supabase:functions:deploy:qa": "supabase functions deploy provision-platform-user reset-platform-user-password generate-invoice-pdf --project-ref zipuzmfkwwucbchlphcj"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.8",

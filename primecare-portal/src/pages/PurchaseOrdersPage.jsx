@@ -176,7 +176,7 @@ function buildPlaceholderAutoTriggersFromForecast(forecast) {
       urgency: urgencyUpper === "CRITICAL" ? "CRITICAL" : urgencyUpper,
       hasOpenPo: false,
       canAutoCreate: true,
-      autoTriggerReason: `Forecast suggestion from Supabase reorder data (${f.stockHealth || urgencyRaw}). Review manually — automated procurement triggers are not implemented.`,
+      autoTriggerReason: `Forecast suggestion from Supabase reorder data (${f.stockHealth || urgencyRaw}). Review manually before creating a purchase order.`,
       currentStock: numberValue(f.currentStock),
       minStock: numberValue(f.minStock),
       dailyConsumption: dailyFromMonthly,

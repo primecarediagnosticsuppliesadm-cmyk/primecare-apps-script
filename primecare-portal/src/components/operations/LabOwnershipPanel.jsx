@@ -62,7 +62,7 @@ export default function LabOwnershipPanel({
       <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h3 className="text-sm font-semibold text-slate-900">Unassigned Labs</h3>
+            <h3 className="text-sm font-semibold text-slate-900">Unassigned Laboratories</h3>
             <p className="text-[11px] text-slate-500">
               CRITICAL if unassigned &gt; 7 days · ATTENTION otherwise
             </p>

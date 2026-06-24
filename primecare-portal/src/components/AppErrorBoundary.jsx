@@ -1,5 +1,6 @@
 import React from "react";
-import { logClientError } from "@/utils/debugLogger";
+import PortalAccessCard, { PortalAccessAction } from "@/components/ux/PortalAccessCard.jsx";
+import { logClientError } from "@/utils/debugLogger.js";
 
 export default class AppErrorBoundary extends React.Component {
   constructor(props) {
@@ -26,12 +27,28 @@ export default class AppErrorBoundary extends React.Component {
 
   render() {
     if (this.state.hasError) {
+      const goHome = () => {
+        const base = typeof window !== "undefined" ? window.location.origin : "";
+        if (base) window.location.assign(`${base}/`);
+        else window.location.reload();
+      };
+
       return (
-        <div className="min-h-screen flex items-center justify-center p-6">
-          <div className="rounded-2xl border bg-white p-6 shadow-sm text-center">
-            <h2 className="text-xl font-semibold">Something went wrong</h2>
-            <p className="mt-2 text-slate-500">The error was logged for review.</p>
-          </div>
+        <div className="flex min-h-screen items-center justify-center p-6">
+          <PortalAccessCard
+            variant="error"
+            title="Something went wrong"
+            description="An unexpected error occurred in PrimeCare. Refresh the page or return to your dashboard. If the problem persists, contact your administrator."
+            action={
+              <div className="flex flex-wrap gap-2">
+                <PortalAccessAction
+                  label="Refresh page"
+                  onClick={() => window.location.reload()}
+                />
+                <PortalAccessAction label="Back to dashboard" onClick={goHome} />
+              </div>
+            }
+          />
         </div>
       );
     }

@@ -21,9 +21,11 @@ import {
   KpiCardGrid,
   ListSkeleton,
   StatusBadge,
+  PageHeader,
+  DataFetchError,
 } from "@/components/ux";
 import { orderStatusToVariant, paymentStatusToVariant } from "@/utils/statusTokens";
-import { Loader2, AlertTriangle } from "lucide-react";
+import { Loader2, AlertTriangle, Download, Eye } from "lucide-react";
 import { ROLES } from "@/config/roles";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import {
@@ -62,6 +64,10 @@ import {
 import { loadOperationsCenterAdminBundle } from "@/operations/operationsCenterAdminData.js";
 import { resolveLabAgentForLabId } from "@/operations/labAgentResolver.js";
 import HqOrdersOperationsQueue from "@/components/hq/HqOrdersOperationsQueue.jsx";
+import InvoiceDetailsDrawer from "@/components/invoice/InvoiceDetailsDrawer.jsx";
+import InvoiceStatusBadge from "@/components/invoice/InvoiceStatusBadge.jsx";
+import { getInvoicesByOrderIdsRead } from "@/api/invoiceSupabaseApi.js";
+import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
 import {
   ORDER_QUEUE_KEYS,
   buildOrdersOperationsQueue,
@@ -248,6 +254,9 @@ export default function OrdersPage({
   const [labAssignments, setLabAssignments] = useState([]);
   const [directoryUsers, setDirectoryUsers] = useState([]);
   const [activeQueueKey, setActiveQueueKey] = useState("");
+  const [invoiceByOrderId, setInvoiceByOrderId] = useState({});
+  const [invoiceDrawer, setInvoiceDrawer] = useState(null);
+  const [invoiceDownloadKey, setInvoiceDownloadKey] = useState("");
 
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
 
@@ -303,6 +312,7 @@ export default function OrdersPage({
 
   async function loadOrders(options = {}) {
     const silent = Boolean(options?.silent);
+    const hadRows = orders.length > 0;
     try {
       if (!silent) {
         setLoading(true);
@@ -351,8 +361,10 @@ export default function OrdersPage({
       const message = err?.message || "Failed to load orders.";
       setError(message);
       setOrdersReadOk(false);
-      setAllOrders([]);
-      setOrders([]);
+      if (!hadRows) {
+        setAllOrders([]);
+        setOrders([]);
+      }
     } finally {
       if (!silent) {
         setLoading(false);
@@ -485,6 +497,23 @@ export default function OrdersPage({
     return new Set(bucket?.orderIds || []);
   }, [activeQueueKey, operationsQueue]);
 
+  useEffect(() => {
+    const orderIds = filteredOrders.map((order) => str(order.orderId)).filter(Boolean);
+    if (!orderIds.length) {
+      setInvoiceByOrderId({});
+      return undefined;
+    }
+    let cancelled = false;
+    void getInvoicesByOrderIdsRead(orderIds, { tenantId: homeTenantId }).then((res) => {
+      if (!cancelled && res.success) {
+        setInvoiceByOrderId(res.byOrderId || {});
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [filteredOrders, homeTenantId]);
+
   function handleQueueSelect(queueKey) {
     if (!queueKey) {
       setActiveQueueKey("");
@@ -523,6 +552,35 @@ export default function OrdersPage({
   );
 
   const selectedOrderSummary = details?.order;
+
+  const selectedOrderInvoice = useMemo(() => {
+    if (!selectedOrderSummary?.orderId) return null;
+    return invoiceByOrderId[selectedOrderSummary.orderId] || null;
+  }, [selectedOrderSummary, invoiceByOrderId]);
+
+  async function handleInvoiceDownload(invoice, orderId) {
+    const key = invoice?.id || orderId || "invoice";
+    setInvoiceDownloadKey(key);
+    try {
+      await downloadInvoicePdf({
+        invoiceId: invoice?.id,
+        orderId: invoice?.orderId || orderId,
+        tenantId: homeTenantId,
+      });
+    } finally {
+      setInvoiceDownloadKey("");
+    }
+  }
+
+  function openInvoiceDrawer(invoice) {
+    if (!invoice) return;
+    setInvoiceDrawer(invoice);
+  }
+
+  function resolveOrderInvoice(order) {
+    if (!order?.orderId) return null;
+    return invoiceByOrderId[order.orderId] || null;
+  }
 
   const selectedLabAgent = useMemo(() => {
     if (!selectedOrderSummary?.labId) {
@@ -564,24 +622,23 @@ export default function OrdersPage({
   return (
     <div className={embedded ? "space-y-4" : "space-y-5"}>
       {!embedded ? (
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Orders Monitor</h1>
-          <p className="text-sm text-slate-500">
-            {distributorScope?.tenantId
+        <PageHeader
+          title="Orders"
+          subtitle={
+            distributorScope?.tenantId
               ? `Orders for ${distributorScope.tenantName || "selected distributor"} labs only.`
-              : "PrimeCare HQ orders — scan status, payment, and fulfillment at a glance."}
-          </p>
-        </div>
+              : "PrimeCare HQ orders — scan status, payment, and fulfillment at a glance."
+          }
+        />
       ) : null}
 
       {error ? (
-        <div
-          className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
-          role="alert"
-        >
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{error}</span>
-        </div>
+        <DataFetchError
+          message={error}
+          onRetry={() => void loadOrders()}
+          retrying={loading}
+          staleDataNote={orders.length > 0 ? "Showing the last orders loaded successfully." : ""}
+        />
       ) : null}
 
       {successMessage ? (
@@ -714,8 +771,9 @@ export default function OrdersPage({
                   : "No orders match the current filters."}
               </div>
             ) : (
-              <div className="overflow-x-auto rounded-lg border border-slate-200">
-                <table className="w-full min-w-[760px] text-xs">
+              <>
+              <div className="hidden overflow-x-auto rounded-lg border border-slate-200 xl:block">
+                <table className="w-full min-w-[920px] text-xs">
                   <thead>
                     <tr className="border-b bg-slate-50 text-left text-slate-500">
                       <th className="px-2 py-2 font-medium">Order ID</th>
@@ -723,6 +781,8 @@ export default function OrdersPage({
                       <th className="px-2 py-2 font-medium">Date</th>
                       <th className="px-2 py-2 font-medium">Status</th>
                       <th className="px-2 py-2 font-medium">Payment</th>
+                      <th className="px-2 py-2 font-medium">Invoice</th>
+                      <th className="px-2 py-2 font-medium">Invoice Status</th>
                       <th className="px-2 py-2 font-medium text-right">Amount</th>
                       <th className="px-2 py-2 font-medium">Items</th>
                       <th className="px-2 py-2 font-medium" />
@@ -732,6 +792,7 @@ export default function OrdersPage({
                     {filteredOrders.map((order) => {
                       const orderStatus = normalizeOrderStatusLabel(order.orderStatus);
                       const payStatus = orderPaymentLabel(order);
+                      const orderInvoice = resolveOrderInvoice(order);
                       const isSelected = selectedOrder === order.orderId;
                       const cancelled = isCancelledStatus(orderStatus);
                       return (
@@ -791,6 +852,19 @@ export default function OrdersPage({
                               {payStatus}
                             </StatusBadge>
                           </td>
+                          <td className="px-2 py-2 font-mono text-[10px] text-slate-700">
+                            {orderInvoice?.invoiceNumber || (order.invoiceId ? "Linked" : "—")}
+                          </td>
+                          <td className="px-2 py-2">
+                            {orderInvoice ? (
+                              <InvoiceStatusBadge
+                                status={orderInvoice.status}
+                                displayStatus={orderInvoice.displayStatus}
+                              />
+                            ) : (
+                              <span className="text-slate-400">—</span>
+                            )}
+                          </td>
                           <td className="px-2 py-2 text-right font-medium tabular-nums text-slate-900">
                             {formatCurrency(order.orderTotal)}
                           </td>
@@ -815,6 +889,60 @@ export default function OrdersPage({
                   </tbody>
                 </table>
               </div>
+              <div className="space-y-2 xl:hidden">
+                {filteredOrders.map((order) => {
+                  const orderStatus = normalizeOrderStatusLabel(order.orderStatus);
+                  const payStatus = orderPaymentLabel(order);
+                  const orderInvoice = resolveOrderInvoice(order);
+                  return (
+                    <div
+                      key={order.orderId}
+                      className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-mono text-xs font-semibold text-slate-900">
+                            {order.orderId}
+                          </p>
+                          <p className="truncate text-sm text-slate-700">
+                            {order.labName || order.labId || "—"}
+                          </p>
+                          <p className="mt-1 text-base font-bold tabular-nums">
+                            {formatCurrency(order.orderTotal)}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {order.orderDate || "—"} · {formatItemCount(order.itemCount ?? 0)}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          <StatusBadge variant={orderStatusToVariant(orderStatus)} compact>
+                            {orderStatus}
+                          </StatusBadge>
+                          <StatusBadge variant={paymentStatusToVariant(payStatus)} compact>
+                            {payStatus}
+                          </StatusBadge>
+                        </div>
+                      </div>
+                      {orderInvoice?.invoiceNumber ? (
+                        <p className="mt-2 text-[10px] text-muted-foreground">
+                          Invoice {orderInvoice.invoiceNumber}
+                        </p>
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mt-2 h-9 w-full rounded-lg text-xs"
+                        disabled={updatingStatus}
+                        onClick={() => openOrder(order.orderId)}
+                      >
+                        Review order
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+              </>
             )}
           </CardContent>
         </Card>
@@ -970,7 +1098,19 @@ export default function OrdersPage({
                     </dd>
                     <dt className="text-slate-500">Invoice</dt>
                     <dd className="text-slate-900">
-                      {formatMissingField(selectedOrderSummary.invoiceId)}
+                      {selectedOrderInvoice?.invoiceNumber ||
+                        formatMissingField(selectedOrderSummary.invoiceId)}
+                    </dd>
+                    <dt className="text-slate-500">Invoice Status</dt>
+                    <dd className="text-slate-900">
+                      {selectedOrderInvoice ? (
+                        <InvoiceStatusBadge
+                          status={selectedOrderInvoice.status}
+                          displayStatus={selectedOrderInvoice.displayStatus}
+                        />
+                      ) : (
+                        "—"
+                      )}
                     </dd>
                     <dt className="text-slate-500">Contact</dt>
                     <dd className="text-slate-900">
@@ -1033,6 +1173,46 @@ export default function OrdersPage({
                     <div className="text-sm text-slate-500">No line items found.</div>
                   )}
                 </section>
+
+                {selectedOrderInvoice ? (
+                  <section className="space-y-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Invoice
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 text-xs"
+                        onClick={() => openInvoiceDrawer(selectedOrderInvoice)}
+                      >
+                        <Eye className="mr-1.5 h-3.5 w-3.5" />
+                        View Invoice
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 text-xs"
+                        disabled={invoiceDownloadKey === selectedOrderInvoice.id}
+                        onClick={() =>
+                          void handleInvoiceDownload(
+                            selectedOrderInvoice,
+                            selectedOrderSummary.orderId
+                          )
+                        }
+                      >
+                        {invoiceDownloadKey === selectedOrderInvoice.id ? (
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Download className="mr-1.5 h-3.5 w-3.5" />
+                        )}
+                        Download Invoice
+                      </Button>
+                    </div>
+                  </section>
+                ) : null}
 
                 <section className="space-y-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -1124,6 +1304,15 @@ export default function OrdersPage({
           </CardContent>
         </Card>
       </div>
+
+      <InvoiceDetailsDrawer
+        open={Boolean(invoiceDrawer)}
+        onClose={() => setInvoiceDrawer(null)}
+        invoiceId={invoiceDrawer?.id}
+        orderId={invoiceDrawer?.orderId}
+        tenantId={homeTenantId}
+        invoicePreview={invoiceDrawer}
+      />
     </div>
   );
 }

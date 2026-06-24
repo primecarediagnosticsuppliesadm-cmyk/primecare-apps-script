@@ -13,7 +13,9 @@ import {
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { EmptyState, usePortalToast } from "@/components/ux";
+import { EmptyState, PageSkeleton, usePortalToast } from "@/components/ux";
+import { ENTERPRISE_EMPTY } from "@/config/enterpriseCopy.js";
+import { IS_QA, IS_PROD } from "@/config/environment.js";
 import OrderTrackingDrawer from "@/components/lab/OrderTrackingDrawer.jsx";
 import OrderProgressMini from "@/components/lab/OrderProgressMini.jsx";
 import { Bell, Loader2, RefreshCw, CheckCircle2, AlertTriangle, Truck, Clock3 } from "lucide-react";
@@ -29,6 +31,8 @@ import { resolveNotificationFoundationState } from "@/notifications/notification
 import { ROLES } from "@/config/roles";
 import { cn } from "@/lib/utils";
 import { labIdKey } from "@/utils/labId.js";
+import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
+import { isCancelledStatus } from "@/utils/orderTracking.js";
 
 const LAB_SAFE_EVENT_TYPES = new Set([
   "order_created",
@@ -266,6 +270,7 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
   const [trackedOrder, setTrackedOrder] = useState(null);
   const [completedExpanded, setCompletedExpanded] = useState(false);
   const [repeatLoading, setRepeatLoading] = useState(false);
+  const [invoiceDownloadKey, setInvoiceDownloadKey] = useState("");
   const { showToast } = usePortalToast();
 
   const [severity, setSeverity] = useState("");
@@ -458,9 +463,28 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
     }
   }
 
-  function handleTrackingDrawerAction(action, details) {
+  async function handleTrackingDrawerAction(action, details) {
     if (action === "invoice") {
-      showToast("info", "Invoice PDFs will be available in a future release.");
+      if (details && isCancelledStatus(details.orderStatus)) {
+        showToast("info", "No invoice available for cancelled orders.");
+        return;
+      }
+      const orderId = String(details?.orderId || "").trim();
+      const downloadKey = orderId || "invoice";
+      setInvoiceDownloadKey(downloadKey);
+      try {
+        await downloadInvoicePdf({
+          invoiceId: details?.invoiceId,
+          orderId,
+          tenantId,
+          onPhase: (phase, detail) => {
+            if (phase === "error") showToast("error", detail || "Unable to download invoice PDF.");
+            if (phase === "success") showToast("success", "Invoice download started.");
+          },
+        });
+      } finally {
+        setInvoiceDownloadKey("");
+      }
       return;
     }
     if (action === "support") {
@@ -616,9 +640,9 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
           className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
         >
           {error}
-          {String(error).toLowerCase().includes("does not exist") ? (
+          {String(error).toLowerCase().includes("does not exist") && !IS_QA && !IS_PROD ? (
             <p className="mt-2 text-xs">
-              Run `primecare-portal/supabase/sql/notifications_foundation_migration.sql` in Supabase.
+              Your administrator may need to enable the activity center for this organization.
             </p>
           ) : null}
         </div>
@@ -632,27 +656,24 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
 
       {nonAdminSetupPending ? (
         <EmptyState
-          title={role === ROLES.LAB ? "Updates are not available yet" : "Notifications are not available yet"}
+          title={role === ROLES.LAB ? "Activity center setup in progress" : "Activity center setup in progress"}
           description={
             role === ROLES.LAB
-              ? "Your lab will see order and payment updates here once enabled."
-              : "You’ll see your notifications here once enabled."
+              ? "Your lab will see order and payment updates here once your organization completes setup."
+              : "You'll see notifications here once your organization completes activity center setup."
           }
         />
       ) : null}
 
       {loading ? (
-        <div className="flex items-center justify-center py-16 text-muted-foreground">
-          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-          Loading notifications…
-        </div>
+        <PageSkeleton kpiCount={0} showList listRows={5} />
       ) : nonAdminSetupPending ? null : displayRows.length === 0 ? (
         <EmptyState
-          title={role === ROLES.LAB ? "No recent order or payment activity." : "No notification events"}
+          title={role === ROLES.LAB ? "No recent activity" : "No activity yet"}
           description={
             role === ROLES.LAB
-              ? "New operational updates will appear here when orders or account activity changes."
-              : "Events appear here when modules call createNotificationEvent (e.g. order created, payment received)."
+              ? ENTERPRISE_EMPTY.notificationsLab
+              : ENTERPRISE_EMPTY.notificationsAdmin
           }
         />
       ) : isLabTimeline ? (
@@ -913,6 +934,7 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
         loading={orderDrawerLoading}
         error={orderDrawerError}
         repeatLoading={repeatLoading}
+        invoiceLoading={Boolean(invoiceDownloadKey)}
         onAction={handleTrackingDrawerAction}
       />
     </div>

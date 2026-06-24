@@ -1,4 +1,5 @@
 import { supabase } from "@/api/supabaseClient.js";
+import { hqDebugWarn } from "@/utils/hqDebugLog.js";
 import {
   NOTIFICATION_CHANNELS,
   NOTIFICATION_EVENT_TYPES,
@@ -84,7 +85,8 @@ export async function createNotificationEvent(event = {}) {
     }
 
     const eventId = inserted?.event_id;
-    const deliveryRows = NOTIFICATION_CHANNELS.map((channel) => ({
+    const now = new Date().toISOString();
+    const deliveryBase = NOTIFICATION_CHANNELS.map((channel) => ({
       tenant_id: tenantId,
       event_id: eventId,
       channel,
@@ -93,16 +95,32 @@ export async function createNotificationEvent(event = {}) {
           ? row.target_user_id || row.target_role || row.target_lab_id || "tenant"
           : "placeholder",
       status: channel === "in_app" ? "logged_in_app" : "placeholder_not_sent",
-      provider_response: { foundation: true, liveSend: false },
-      attempted_at: new Date().toISOString(),
-      delivered_at: channel === "in_app" ? new Date().toISOString() : null,
-      error_message: null,
+      attempted_at: now,
+      delivered_at: channel === "in_app" ? now : null,
     }));
 
-    const { error: logErr } = await supabase.from("notification_delivery_log").insert(deliveryRows);
+    let logErr = null;
+    const attempts = [
+      deliveryBase.map((r) => ({
+        ...r,
+        provider_response: { foundation: true, liveSend: false },
+        error_message: null,
+      })),
+      deliveryBase.map((r) => ({
+        ...r,
+        provider_response: { foundation: true, liveSend: false },
+      })),
+      deliveryBase,
+    ];
+    for (const rows of attempts) {
+      const res = await supabase.from("notification_delivery_log").insert(rows);
+      logErr = res.error;
+      if (!logErr) break;
+      if (!/schema cache|column/i.test(logErr.message)) break;
+    }
 
     if (logErr) {
-      console.warn("[createNotificationEvent] delivery log insert:", logErr.message);
+      hqDebugWarn("[createNotificationEvent] delivery log insert:", logErr.message);
     }
 
     return { success: true, data: inserted, error: null };
