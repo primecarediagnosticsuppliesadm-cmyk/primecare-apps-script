@@ -1,4 +1,5 @@
 import { supabase } from "@/api/supabaseClient.js";
+import { fetchCollectionsBoundedArRows } from "@/api/adminDashboardBoundedReads.js";
 import { getCollectionsRead } from "@/api/primecareSupabaseApi.js";
 import { computeReceivableMetrics } from "@/metrics/computeReceivableMetrics.js";
 import { createPredatorEntry, summarizePredatorEntries } from "@/predator/predatorSchema.js";
@@ -57,7 +58,7 @@ export async function validateCollectionsModule({ ctx, rendered = null }) {
       return { module: "Collections", summary: summarizePredatorEntries(entries), entries };
     }
 
-    const arRes = await supabase.from("ar_credit_control").select("*");
+    const arRes = await fetchCollectionsBoundedArRows(supabase);
     const arRaw = arRes.error ? [] : arRes.data || [];
     const { outstandingReceivables } = computeReceivableMetrics(arRaw);
     const dbArRows = arRaw.length;

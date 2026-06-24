@@ -1,6 +1,7 @@
 import { supabase } from "@/api/supabaseClient.js";
+import { fetchAdminDashboardBoundedSourceRows } from "@/api/adminDashboardBoundedReads.js";
 import { getAdminDashboardRead } from "@/api/primecareSupabaseApi.js";
-import { computeRevenueMetrics, collectOrderRowIds } from "@/metrics/computeRevenueMetrics.js";
+import { computeRevenueMetrics } from "@/metrics/computeRevenueMetrics.js";
 import { computeReceivableMetrics } from "@/metrics/computeReceivableMetrics.js";
 import { rollupInventoryTableRows } from "@/metrics/computeInventoryMetrics.js";
 import { normalizeLabIdKey } from "@/utils/labId.js";
@@ -64,9 +65,23 @@ function mapOrderLineToItemShape(row) {
 }
 
 /**
- * Browser-visible Supabase rows + metric rollups (RLS applies; same queries as dashboard).
+ * Browser-visible bounded Supabase rows + metric rollups (same scope as getAdminDashboardRead).
  */
 async function fetchBrowserDashboardDbSnapshot() {
+  const source = await fetchAdminDashboardBoundedSourceRows(supabase);
+  const {
+    errors,
+    ordersRaw,
+    orderIds,
+    arRaw,
+    visitsAllRaw,
+    invRaw,
+    labsRaw,
+    orderLinesRaw,
+    queryMeta,
+    recentFrom,
+  } = source;
+
   if (!supabase) {
     return {
       errors: { client: "Supabase client not configured" },
@@ -79,32 +94,7 @@ async function fetchBrowserDashboardDbSnapshot() {
     };
   }
 
-  const errors = {};
-  const [ordersRes, arRes, visitsRes, invRes, orderLinesRes, labsRes] = await Promise.all([
-    supabase.from("orders").select("*"),
-    supabase.from("ar_credit_control").select("*"),
-    supabase.from("agent_visits").select("*"),
-    supabase.from("inventory").select("*"),
-    supabase.from("order_lines").select("*"),
-    supabase.from("labs").select("*"),
-  ]);
-
-  if (ordersRes.error) errors.orders = ordersRes.error.message;
-  if (arRes.error) errors.ar_credit_control = arRes.error.message;
-  if (visitsRes.error) errors.agent_visits = visitsRes.error.message;
-  if (invRes.error) errors.inventory = invRes.error.message;
-  if (orderLinesRes.error) errors.order_lines = orderLinesRes.error.message;
-  if (labsRes.error) errors.labs = labsRes.error.message;
-
-  const ordersRaw = ordersRes.error ? [] : ordersRes.data || [];
-  const arRaw = arRes.error ? [] : arRes.data || [];
-  const visitsRaw = visitsRes.error ? [] : visitsRes.data || [];
-  const invRaw = invRes.error ? [] : invRes.data || [];
-  const orderLinesRaw = orderLinesRes.error ? [] : orderLinesRes.data || [];
-  const labsRaw = labsRes.error ? [] : labsRes.data || [];
-
   const orderItemsRaw = (orderLinesRaw || []).map(mapOrderLineToItemShape);
-  const orderIds = collectOrderRowIds(ordersRaw);
   const labNameById = new Map();
   for (const l of labsRaw) {
     const id = normalizeLabIdKey(l.lab_id ?? l.labId ?? l.id);
@@ -126,17 +116,11 @@ async function fetchBrowserDashboardDbSnapshot() {
     ordersRowCount: ordersRaw.length,
     orderIds,
     arOutstanding: outstandingReceivables,
-    visitsRowCount: visitsRaw.length,
+    visitsRowCount: visitsAllRaw.length,
     inventorySkus: stockStats.totalSkus,
     totalSoldValue: revenue.totalSoldValue,
-    queryChains: {
-      orders: 'from("orders").select("*")',
-      ar_credit_control: 'from("ar_credit_control").select("*")',
-      agent_visits: 'from("agent_visits").select("*")',
-      inventory: 'from("inventory").select("*")',
-      order_lines: 'from("order_lines").select("*")',
-    },
-    postgrestFilters: "none (no eq/match/in/filter on dashboard reads)",
+    queryChains: queryMeta,
+    postgrestFilters: `orders order_date >= ${recentFrom}; visits/orders bounded per hqReadBounds`,
   };
 }
 

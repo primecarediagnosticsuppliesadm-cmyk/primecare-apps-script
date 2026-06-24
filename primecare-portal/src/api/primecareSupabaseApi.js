@@ -58,6 +58,7 @@ import {
   HQ_V_LABS_CREDIT_COLUMNS,
   recentDateYmd,
 } from "@/api/hqReadBounds.js";
+import { fetchAdminDashboardBoundedSourceRows, fetchCollectionsBoundedArRows, fetchAgentVisitsBoundedRows } from "@/api/adminDashboardBoundedReads.js";
 import { hqDebugLog, hqDebugWarn, isHqDebugLogEnabled } from "@/utils/hqDebugLog.js";
 import { recordPredatorCacheEvent } from "@/predator/cacheDiagnostics.js";
 import {
@@ -1605,10 +1606,9 @@ export async function getCollectionsRead(params = {}) {
     );
     const arLimit = clampLimit(params.limit, HQ_COLLECTIONS_AR_LIMIT, HQ_COLLECTIONS_AR_LIMIT);
 
-    const { data: arRaw, error: arErr } = await supabase
-      .from("ar_credit_control")
-      .select(HQ_AR_COLUMNS)
-      .limit(arLimit);
+    const { data: arRaw, error: arErr } = await fetchCollectionsBoundedArRows(supabase, {
+      limit: arLimit,
+    });
     if (arErr) {
       console.warn("[getCollectionsRead] ar_credit_control:", arErr.message);
       return {
@@ -2553,53 +2553,19 @@ export async function getAdminDashboardRead(options = {}) {
     const endQuery = perfTime("getAdminDashboardRead.supabaseQueries");
 
     const queryErrors = [];
-    const recentFrom = recentDateYmd(HQ_DASHBOARD_RECENT_DAYS);
 
-    const ordersQuery = supabase
-      .from("orders")
-      .select(HQ_ORDER_LIST_COLUMNS)
-      .gte("order_date", recentFrom)
-      .order("order_date", { ascending: false })
-      .limit(HQ_DASHBOARD_ORDERS_LIMIT);
-
-    const paymentsTodayQuery = supabase
-      .from("payments")
-      .select(HQ_PAYMENT_COLUMNS)
-      .eq("payment_date", today);
-
-    const visitsQuery = supabase
-      .from("agent_visits")
-      .select(HQ_AGENT_VISIT_COLUMNS)
-      .order("created_at", { ascending: false })
-      .limit(HQ_DASHBOARD_VISITS_LIMIT);
-
-    const [ordersRes, arRes, visitsRes, invRes, labsRes, payRes] = await Promise.all([
-      timedSupabaseQuery("orders", () => ordersQuery),
-      timedSupabaseQuery("ar_credit_control", () =>
-        supabase.from("ar_credit_control").select(HQ_AR_COLUMNS)
-      ),
-      timedSupabaseQuery("agent_visits", () => visitsQuery),
-      timedSupabaseQuery("inventory", () =>
-        supabase.from("inventory").select(HQ_INVENTORY_COLUMNS)
-      ),
-      timedSupabaseQuery("labs", () => supabase.from("labs").select(HQ_LABS_NAME_COLUMNS)),
-      timedSupabaseQuery("payments", () => paymentsTodayQuery),
-    ]);
-
-    const ordersRaw = ordersRes.error ? [] : ordersRes.data || [];
-    const orderIds = collectOrderRowIds(ordersRaw);
-    const arRaw = arRes.error ? [] : arRes.data || [];
-    const visitsAllRaw = visitsRes.error ? [] : visitsRes.data || [];
-    const invRaw = invRes.error ? [] : invRes.data || [];
-    const labsRaw = labsRes.error ? [] : labsRes.data || [];
-    const payRaw = payRes.error ? [] : payRes.data || [];
-
-    let orderLinesRaw = [];
-    if (orderIds.length) {
-      const lineRes = await fetchOrderLineCountsForOrders(orderIds, { returnRows: true });
-      orderLinesRaw = lineRes.rows || [];
+    const boundedSource = await fetchAdminDashboardBoundedSourceRows(supabase);
+    for (const table of Object.keys(boundedSource.errors || {})) {
+      if (table !== "client") queryErrors.push(table);
     }
 
+    const ordersRaw = boundedSource.ordersRaw;
+    const orderIds = boundedSource.orderIds;
+    const arRaw = boundedSource.arRaw;
+    const visitsAllRaw = boundedSource.visitsAllRaw;
+    const invRaw = boundedSource.invRaw;
+    const labsRaw = boundedSource.labsRaw;
+    const orderLinesRaw = boundedSource.orderLinesRaw;
     const orderItemsRaw = combineOrderLineItemsForMetrics([], orderLinesRaw);
     const visitsTotalCount = visitsAllRaw.length;
     const visitsRaw = [...visitsAllRaw]
@@ -2610,25 +2576,28 @@ export async function getAdminDashboardRead(options = {}) {
       })
       .slice(0, 40);
 
-    if (ordersRes.error) {
-      queryErrors.push("orders");
-      console.warn("[getAdminDashboardRead] orders:", ordersRes.error.message);
+    const paymentsTodayQuery = supabase
+      .from("payments")
+      .select(HQ_PAYMENT_COLUMNS)
+      .eq("payment_date", today);
+
+    const payRes = await timedSupabaseQuery("payments", () => paymentsTodayQuery);
+    const payRaw = payRes.error ? [] : payRes.data || [];
+
+    if (boundedSource.errors?.orders) {
+      console.warn("[getAdminDashboardRead] orders:", boundedSource.errors.orders);
     }
-    if (arRes.error) {
-      queryErrors.push("ar_credit_control");
-      console.warn("[getAdminDashboardRead] ar_credit_control:", arRes.error.message);
+    if (boundedSource.errors?.ar_credit_control) {
+      console.warn("[getAdminDashboardRead] ar_credit_control:", boundedSource.errors.ar_credit_control);
     }
-    if (visitsRes.error) {
-      queryErrors.push("agent_visits");
-      console.warn("[getAdminDashboardRead] agent_visits:", visitsRes.error.message);
+    if (boundedSource.errors?.agent_visits) {
+      console.warn("[getAdminDashboardRead] agent_visits:", boundedSource.errors.agent_visits);
     }
-    if (invRes.error) {
-      queryErrors.push("inventory");
-      console.warn("[getAdminDashboardRead] inventory:", invRes.error.message);
+    if (boundedSource.errors?.inventory) {
+      console.warn("[getAdminDashboardRead] inventory:", boundedSource.errors.inventory);
     }
-    if (labsRes.error) {
-      queryErrors.push("labs");
-      console.warn("[getAdminDashboardRead] labs:", labsRes.error.message);
+    if (boundedSource.errors?.labs) {
+      console.warn("[getAdminDashboardRead] labs:", boundedSource.errors.labs);
     }
     if (orderIds.length && !orderLinesRaw.length) {
       queryErrors.push("order_lines");
@@ -3478,7 +3447,7 @@ export async function getAgentWorkspaceRead(currentUser) {
     const assignedLabs = filterLabsForUserWithOwnership(allLabs, currentUser, ownershipRows);
 
     let visitRows = [];
-    const av = await supabase.from("agent_visits").select("*");
+    const av = await fetchAgentVisitsBoundedRows(supabase);
     if (av.error) {
       console.warn("[getAgentWorkspaceRead] agent_visits:", av.error.message);
     } else if (Array.isArray(av.data)) {

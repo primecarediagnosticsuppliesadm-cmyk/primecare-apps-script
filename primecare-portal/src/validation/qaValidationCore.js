@@ -162,8 +162,8 @@ export function checkMutableMetricAcrossLayers({
   const api = numOrNull(layers.apiPayload);
   const runtimeBaseline = browser ?? db ?? null;
 
-  const boundedApiWindow =
-    boundedApiMax != null && api != null && browser != null && browser > api;
+  // Browser validation uses the same bounded window as getAdminDashboardRead; compare all layers.
+  const boundedApiWindow = false;
 
   const comparableKeys = MUTABLE_LAYER_KEYS.filter((key) => key in layers).filter((key) => {
     if (key !== "uiRendered") {

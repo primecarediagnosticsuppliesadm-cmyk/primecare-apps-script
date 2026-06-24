@@ -14,6 +14,10 @@ export const HQ_ORDER_LIST_COLUMNS =
 
 export const HQ_ORDER_LINE_COUNT_COLUMNS = "order_id";
 
+/** Order line columns for dashboard revenue rollups (scoped by order_id chunks). */
+export const HQ_ORDER_LINE_METRIC_COLUMNS =
+  "order_id,net_line_total,quantity,unit_selling_price,total_price";
+
 export const HQ_AR_COLUMNS =
   "lab_id,lab_name,outstanding,total_paid,credit_limit,credit_hold,tenant_id,total_delivered";
 

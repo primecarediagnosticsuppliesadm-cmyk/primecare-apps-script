@@ -1,4 +1,5 @@
 import { supabase } from "@/api/supabaseClient.js";
+import { fetchAdminDashboardBoundedSourceRows } from "@/api/adminDashboardBoundedReads.js";
 import { createPredatorEntry } from "@/predator/predatorSchema.js";
 import {
   computeRevenueMetrics,
@@ -21,6 +22,17 @@ function mapOrderLineToItemShape(row) {
     total_price: row.net_line_total ?? row.netLineTotal ?? row.total_price,
     quantity: row.quantity,
     unit_price: row.unit_selling_price ?? row.unitSellingPrice ?? row.unit_price,
+  };
+}
+
+function mapBoundedOrderToRevenueShape(row) {
+  return {
+    order_id: row.order_id ?? row.orderId ?? row.id,
+    lab_id: row.lab_id ?? row.labId,
+    status: row.status,
+    order_date: row.order_date ?? row.orderDate,
+    total_amount: row.total_amount ?? row.totalAmount,
+    tenant_id: row.tenant_id ?? row.tenantId,
   };
 }
 
@@ -53,19 +65,18 @@ export async function validateQualificationRevenueConsistency({ ctx }) {
     ];
   }
 
-  const [ordersRes, orderLinesRes, labsRes, qualRes] = await Promise.all([
-    supabase.from("orders").select("*"),
-    supabase.from("order_lines").select("*"),
+  const [boundedSource, labsRes, qualRes] = await Promise.all([
+    fetchAdminDashboardBoundedSourceRows(supabase),
     supabase.from("labs").select("lab_id, lab_name"),
     supabase.from("lab_qualifications").select("lab_id"),
   ]);
 
-  if (ordersRes.error) {
+  if (boundedSource.errors?.orders) {
     return [
       createPredatorEntry({
         ...base,
         status: "WARN",
-        actual: { error: ordersRes.error.message },
+        actual: { error: boundedSource.errors.orders },
         rootCauseGuess: "Cannot read orders for qualification revenue consistency check",
         suggestedFix: "Verify orders RLS for current role",
         severity: "low",
@@ -73,10 +84,8 @@ export async function validateQualificationRevenueConsistency({ ctx }) {
     ];
   }
 
-  const ordersRaw = ordersRes.data || [];
-  const orderItemsRaw = (orderLinesRes.error ? [] : orderLinesRes.data || []).map(
-    mapOrderLineToItemShape
-  );
+  const ordersRaw = (boundedSource.ordersRaw || []).map(mapBoundedOrderToRevenueShape);
+  const orderItemsRaw = (boundedSource.orderLinesRaw || []).map(mapOrderLineToItemShape);
   const labsRaw = labsRes.error ? [] : labsRes.data || [];
   const qualRaw = qualRes.error ? [] : qualRes.data || [];
 

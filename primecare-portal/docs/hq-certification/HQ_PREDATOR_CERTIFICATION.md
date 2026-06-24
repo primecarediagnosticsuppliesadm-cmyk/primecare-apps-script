@@ -1,9 +1,9 @@
 # HQ Predator Certification
 
-**Generated:** 2026-06-24T13:49:31.875Z
+**Generated:** 2026-06-24T14:18:08.403Z
 **Environment:** https://zipuzmfkwwucbchlphcj.supabase.co
 **Actor:** qa.executive@primecare.test
-**Duration:** 37205 ms
+**Duration:** 30727 ms
 
 **Executive visibility:** VERIFIED INTENTIONAL — HQ Executive reads registered distributor tenants via RLS (`predatorChecks.executiveCrossTenantOpts`). Guntur in collections is expected when `787999b9-…` exists in `public.tenants`. Prior FAIL was certification harness without Vite session (empty tenant registry), not a loader defect.
 

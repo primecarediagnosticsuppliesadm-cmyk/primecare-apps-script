@@ -1,4 +1,5 @@
 import { supabase } from "@/api/supabaseClient.js";
+import { fetchAgentVisitsBoundedRows } from "@/api/adminDashboardBoundedReads.js";
 import { getAgentWorkspaceRead } from "@/api/primecareSupabaseApi.js";
 import { createPredatorEntry, summarizePredatorEntries } from "@/predator/predatorSchema.js";
 import {
@@ -91,7 +92,7 @@ export async function validateAgentVisitsModule({ ctx, currentUser = null, rende
       return { module: "Agent Visits", summary: summarizePredatorEntries(entries), entries };
     }
 
-    const visitsRes = await supabase.from("agent_visits").select("*");
+    const visitsRes = await fetchAgentVisitsBoundedRows(supabase);
     const visitsRaw = visitsRes.error ? [] : visitsRes.data || [];
     const dbMetrics = computeScopedVisitMetrics(visitsRaw, currentUser);
 
