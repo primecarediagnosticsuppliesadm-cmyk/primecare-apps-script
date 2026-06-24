@@ -38,6 +38,7 @@ import {
   ListSkeleton,
   EmptyState,
   usePortalToast,
+  DataFreshnessLabel,
 } from "@/components/ux";
 import { typography } from "@/styles/designTokens";
 import {
@@ -1512,6 +1513,8 @@ export default function CollectionsPage({
 
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [listRefreshing, setListRefreshing] = useState(false);
+  const [dataLoadedAt, setDataLoadedAt] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [completingTask, setCompletingTask] = useState(false);
@@ -1632,7 +1635,9 @@ export default function CollectionsPage({
   const loadCollections = useCallback(async () => {
     return predatorTrace("Collections", "page.load", async () => {
       try {
-        setLoading(true);
+        const hasRows = collections.length > 0;
+        if (hasRows) setListRefreshing(true);
+        else setLoading(true);
         setLoadError("");
 
         logSupabaseFeatureSource("Collections.list", { api: "getCollectionsRead" });
@@ -1717,6 +1722,8 @@ export default function CollectionsPage({
         setCollections([]);
       } finally {
         setLoading(false);
+        setListRefreshing(false);
+        setDataLoadedAt(Date.now());
       }
     });
   }, [currentUser, isLabAccount]);
@@ -2318,10 +2325,6 @@ export default function CollectionsPage({
     [setActivePage]
   );
 
-  if (loading) {
-    return <CollectionsLoading />;
-  }
-
   return (
     <div
       className={cn(
@@ -2353,6 +2356,11 @@ export default function CollectionsPage({
                       ? "Operational command center for collections, credit exposure, and intervention priorities."
                       : "PrimeCare HQ receivables — use Distributor OS for distributor tenants."}
             </p>
+            <DataFreshnessLabel
+              loadedAt={dataLoadedAt}
+              refreshing={loading || listRefreshing}
+              className="mt-1 block"
+            />
           </div>
           <Button
             type="button"
@@ -2360,14 +2368,26 @@ export default function CollectionsPage({
             size="sm"
             className="h-10 rounded-lg"
             onClick={() => loadCollections()}
+            disabled={loading || listRefreshing}
           >
-            <RefreshCw className="mr-2 h-4 w-4" />
+            <RefreshCw className={cn("mr-2 h-4 w-4", (loading || listRefreshing) && "animate-spin")} />
             Refresh
           </Button>
         </header>
       ) : null}
 
+      {loading && collections.length === 0 ? (
+        <>
+          <PageSkeleton kpiCount={4} kpiColumns={4} showList={false} />
+          <div className="animate-pulse rounded-lg border border-border bg-card p-3 shadow-sm">
+            <div className="mb-2 h-9 w-full rounded-lg bg-muted" />
+            <ListSkeleton rows={6} />
+          </div>
+        </>
+      ) : null}
 
+      {!(loading && collections.length === 0) ? (
+        <>
       {pendingTaskContext && !isLabAccount ? (
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
           <div className="flex items-start gap-2">
@@ -2664,6 +2684,8 @@ export default function CollectionsPage({
             />
           ) : null}
         </AgentCollectionPaymentDrawer>
+      ) : null}
+        </>
       ) : null}
     </div>
   );

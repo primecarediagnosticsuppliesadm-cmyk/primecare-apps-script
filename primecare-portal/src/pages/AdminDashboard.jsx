@@ -51,6 +51,7 @@ import {
   ListSkeleton,
   EmptyState,
   StatusBadge,
+  DataFreshnessLabel,
 } from "@/components/ux";
 import { insightSeverityToVariant, visitTypeToVariant } from "@/utils/statusTokens";
 import { typography } from "@/styles/designTokens";
@@ -758,11 +759,14 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     shouldUseQaDirectDashboardRead() ? EMPTY_VISITS_PAYLOAD : adminDashboardCache.visits
   );
 
-  const [loading, setLoading] = useState(
+  const [kpisLoading, setKpisLoading] = useState(
     shouldUseQaDirectDashboardRead() ? true : !initialBundle
   );
   const [refreshing, setRefreshing] = useState(false);
   const [backgroundLoading, setBackgroundLoading] = useState(false);
+  const [dataLoadedAt, setDataLoadedAt] = useState(
+    !shouldUseQaDirectDashboardRead() && initialBundle ? Date.now() : null
+  );
   const [errorMessage, setErrorMessage] = useState("");
   const [domKpiValues, setDomKpiValues] = useState({});
   const loadGenerationRef = useRef(0);
@@ -1064,10 +1068,10 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
 
         const hydrated = hasVisibleKpis(kpiModelRef.current);
         if (!hydrated && !dashboardBundleRef.current) {
-          setLoading(true);
+          setKpisLoading(true);
           setRefreshing(false);
         } else {
-          setLoading(false);
+          setKpisLoading(false);
           setRefreshing(true);
         }
 
@@ -1076,8 +1080,11 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
         console.error(err);
         setErrorMessage(err?.message || "Failed to load admin dashboard");
       } finally {
-        setLoading(false);
+        setKpisLoading(false);
         setRefreshing(false);
+        if (hasVisibleKpis(kpiModelRef.current)) {
+          setDataLoadedAt(Date.now());
+        }
         endLoadAll({ force });
       }
 
@@ -1124,7 +1131,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   }, []);
 
   useEffect(() => {
-    if (loading) return;
+    if (kpisLoading) return;
     const id = requestAnimationFrame(() => {
       perfMark("AdminDashboard.renderReady");
       recordPredatorTiming({
@@ -1135,11 +1142,12 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       });
     });
     return () => cancelAnimationFrame(id);
-  }, [loading]);
+  }, [kpisLoading]);
 
   const stockStats = summaryData?.stockStats ?? EMPTY_STOCK_STATS;
   const displayKpis = kpiModel ?? kpiModelRef.current;
   const dashboardHydrated = hasVisibleKpis(displayKpis);
+  const kpisReady = dashboardHydrated && !kpisLoading;
   const insights = Array.isArray(insightsData?.insights)
     ? insightsData.insights.map(normalizeInsight)
     : [];
@@ -1188,16 +1196,16 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     "Admin Dashboard",
     currentUser,
     qaValidationSnapshot,
-    !loading && dashboardHydrated
+    !kpisLoading && dashboardHydrated
   );
 
   usePredatorRenderTrace("Admin Dashboard", {
-    ready: !loading && dashboardHydrated,
+    ready: !kpisLoading && dashboardHydrated,
     hasData: dashboardHydrated,
   });
 
   useEffect(() => {
-    if (loading || !dashboardHydrated || !displayKpis) {
+    if (kpisLoading || !dashboardHydrated || !displayKpis) {
       setDomKpiValues({});
       return;
     }
@@ -1205,9 +1213,9 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       setDomKpiValues(readAdminDashboardDomKpis());
     });
     return () => cancelAnimationFrame(id);
-  }, [loading, dashboardHydrated, displayKpis]);
+  }, [kpisLoading, dashboardHydrated, displayKpis]);
 
-  const predatorKpiTraceReady = !loading && dashboardHydrated && Boolean(displayKpis);
+  const predatorKpiTraceReady = !kpisLoading && dashboardHydrated && Boolean(displayKpis);
 
   const kpiCardMetrics = useMemo(() => {
     if (!predatorKpiTraceReady || !displayKpis) return {};
@@ -1237,23 +1245,19 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   }, [predatorKpiTraceReady, displayKpis, domKpiValues]);
 
   usePredatorUiSyncTrace("Admin Dashboard", {
-    loading,
+    loading: kpisLoading,
     apiReady: predatorKpiTraceReady,
     traceReady: predatorKpiTraceReady,
     metrics: kpiCardMetrics,
   });
 
   useEffect(() => {
-    if (loading || !qaValidationSnapshot) return;
+    if (kpisLoading || !qaValidationSnapshot) return;
     recordAdminDashboardRenderedSnapshot(qaValidationSnapshot, {
       source: "AdminDashboard.render",
       kpiModel: displayKpis,
     });
-  }, [loading, qaValidationSnapshot, displayKpis]);
-
-  if (loading) {
-    return <AdminDashboardLoading />;
-  }
+  }, [kpisLoading, qaValidationSnapshot, displayKpis]);
 
   return (
     <div className="space-y-5 p-4 sm:p-6">
@@ -1263,6 +1267,11 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
           <p className={cn(typography.pageSubtitle, "mt-1")}>
             Operational control across stock, revenue, receivables, risk, and field execution.
           </p>
+          <DataFreshnessLabel
+            loadedAt={dataLoadedAt}
+            refreshing={refreshing || kpisLoading}
+            className="mt-1 block"
+          />
         </div>
 
         <button
@@ -1300,7 +1309,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
         </div>
       ) : null}
 
-      {displayKpis ? (
+      {kpisReady ? (
         <KpiCardGrid columns={6}>
           <KpiCard
             title="Today's Revenue"
@@ -1365,22 +1374,30 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
             </button>
           }
         >
-          <KpiCardGrid columns={4}>
-            <KpiCard
-              title="Total SKUs"
-              value={displayKpis?.inventorySkus ?? stockStats?.totalSkus ?? 0}
-              icon={Package}
-              dataTestId={ADMIN_DASHBOARD_KPI_TEST_IDS.inventory_skus}
-              kpiRawValue={displayKpis?.inventorySkus ?? stockStats?.totalSkus ?? 0}
-            />
-            <KpiCard
-              title="Critical Items"
-              value={stockStats?.criticalItems || 0}
-              icon={AlertTriangle}
-            />
-            <KpiCard title="Reorder Items" value={stockStats?.reorderItems || 0} icon={Package} />
-            <KpiCard title="Healthy Items" value={stockStats?.healthyItems || 0} icon={Activity} />
-          </KpiCardGrid>
+          {kpisReady ? (
+            <KpiCardGrid columns={4}>
+              <KpiCard
+                title="Total SKUs"
+                value={displayKpis?.inventorySkus ?? stockStats?.totalSkus ?? 0}
+                icon={Package}
+                dataTestId={ADMIN_DASHBOARD_KPI_TEST_IDS.inventory_skus}
+                kpiRawValue={displayKpis?.inventorySkus ?? stockStats?.totalSkus ?? 0}
+              />
+              <KpiCard
+                title="Critical Items"
+                value={stockStats?.criticalItems || 0}
+                icon={AlertTriangle}
+              />
+              <KpiCard title="Reorder Items" value={stockStats?.reorderItems || 0} icon={Package} />
+              <KpiCard title="Healthy Items" value={stockStats?.healthyItems || 0} icon={Activity} />
+            </KpiCardGrid>
+          ) : (
+            <KpiCardGrid columns={4}>
+              {Array.from({ length: 4 }).map((_, i) => (
+                <KpiSkeleton key={i} />
+              ))}
+            </KpiCardGrid>
+          )}
         </SectionCard>
 
         <SectionCard
@@ -1421,7 +1438,9 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
             </button>
           }
         >
-          {topLabs.length === 0 ? (
+          {kpisLoading ? (
+            <ListSkeleton rows={4} />
+          ) : topLabs.length === 0 ? (
             <EmptyState
               title="No revenue data yet"
               description="Top lab rankings appear once fulfilled orders are recorded."
@@ -1463,7 +1482,9 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
             </button>
           }
         >
-          {recentVisits.length === 0 ? (
+          {backgroundLoading || (kpisLoading && recentVisits.length === 0) ? (
+            <ListSkeleton rows={3} />
+          ) : recentVisits.length === 0 ? (
             <EmptyState
               title="No recent visits"
               description="Field activity from agents will show here after visits are logged."
@@ -1542,7 +1563,9 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
             </button>
           }
         >
-          {insights.length === 0 ? (
+          {backgroundLoading ? (
+            <ListSkeleton rows={3} />
+          ) : insights.length === 0 ? (
             <EmptyState
               title="No AI insights yet"
               description="Insights appear when enough operational data is available to analyze."
@@ -1573,7 +1596,9 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
           title="Recommended Actions"
           subtitle="Practical next moves from the AI layer"
         >
-          {recommendedActions.length === 0 ? (
+          {backgroundLoading ? (
+            <ListSkeleton rows={3} />
+          ) : recommendedActions.length === 0 ? (
             <EmptyState
               title="No recommended actions"
               description="Action suggestions will appear alongside AI insights when available."

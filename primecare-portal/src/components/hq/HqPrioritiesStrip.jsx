@@ -1,8 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { loadHqPrioritiesBundle } from "@/operations/hqCommandCenterData.js";
+import {
+  createTodaysWorkCardLoaders,
+  getHqTodaysWorkCacheMeta,
+  invalidateHqTodaysWorkCache,
+  peekHqTodaysWorkBundle,
+  storeHqTodaysWorkBundle,
+  TODAYS_WORK_CARD_IDS,
+} from "@/operations/hqCommandCenterData.js";
 import { buildHqPriorityCards } from "@/operations/hqCommandCenterEngine.js";
+import { DataFreshnessLabel } from "@/components/ux";
 import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
@@ -36,6 +44,14 @@ const CARD_ICONS = {
   audit: Shield,
 };
 
+const CARD_TITLES = {
+  inventory: "Critical Inventory Issues",
+  collections: "Collections Requiring Action",
+  orders: "Pending Orders",
+  users: "Inactive Users",
+  audit: "Recent Audit Alerts",
+};
+
 function severityLabel(severity) {
   if (severity === "critical") return "Critical";
   if (severity === "attention") return "Action needed";
@@ -43,27 +59,92 @@ function severityLabel(severity) {
   return "Clear";
 }
 
+function initialCardState(ids, value) {
+  return Object.fromEntries(ids.map((id) => [id, value]));
+}
+
 export default function HqPrioritiesStrip({ tenantId, setActivePage }) {
-  const [loading, setLoading] = useState(true);
+  const [bundleParts, setBundleParts] = useState({});
+  const [cardLoading, setCardLoading] = useState(() =>
+    initialCardState(TODAYS_WORK_CARD_IDS, true)
+  );
+  const [cardErrors, setCardErrors] = useState({});
   const [refreshing, setRefreshing] = useState(false);
-  const [bundle, setBundle] = useState(null);
-  const [error, setError] = useState("");
+  const [dataLoadedAt, setDataLoadedAt] = useState(null);
+  const loadGenRef = useRef(0);
 
   const load = useCallback(
-    async (opts = {}) => {
+    (opts = {}) => {
       const isRefresh = opts.refresh === true;
-      try {
-        if (isRefresh) setRefreshing(true);
-        else setLoading(true);
-        setError("");
-        const data = await loadHqPrioritiesBundle(tenantId);
-        setBundle(data);
-        if (data.error) setError(data.error);
-      } catch (err) {
-        setError(err?.message || "Failed to load HQ priorities");
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
+      if (isRefresh) {
+        invalidateHqTodaysWorkCache();
+        setRefreshing(true);
+      } else {
+        const cached = peekHqTodaysWorkBundle(tenantId);
+        if (cached) {
+          setBundleParts({
+            dashboard: cached.dashboard,
+            collections: cached.collections,
+            orders: cached.orders,
+            directoryUsers: cached.directoryUsers,
+            auditEvents: cached.auditEvents,
+          });
+          setCardLoading(initialCardState(TODAYS_WORK_CARD_IDS, false));
+          setCardErrors({});
+          const meta = getHqTodaysWorkCacheMeta(tenantId);
+          if (meta?.loadedAt) setDataLoadedAt(meta.loadedAt);
+          return;
+        }
+      }
+
+      setCardErrors({});
+      setCardLoading(initialCardState(TODAYS_WORK_CARD_IDS, true));
+
+      const gen = ++loadGenRef.current;
+      const loaders = createTodaysWorkCardLoaders(tenantId, { force: isRefresh });
+
+      let completed = 0;
+      const merged = {
+        ok: true,
+        error: null,
+        dashboard: null,
+        collections: [],
+        orders: [],
+        directoryUsers: [],
+        auditEvents: [],
+      };
+
+      for (const cardId of TODAYS_WORK_CARD_IDS) {
+        void loaders[cardId]()
+          .then(({ slice, error }) => {
+            if (gen !== loadGenRef.current) return;
+            Object.assign(merged, slice);
+            setBundleParts((prev) => ({ ...prev, ...slice }));
+            setCardLoading((prev) => ({ ...prev, [cardId]: false }));
+            if (error) {
+              setCardErrors((prev) => ({ ...prev, [cardId]: String(error) }));
+              merged.error = merged.error || error;
+            }
+            completed += 1;
+            if (completed === TODAYS_WORK_CARD_IDS.length) {
+              storeHqTodaysWorkBundle(tenantId, { ...merged, ok: !merged.error });
+              setDataLoadedAt(Date.now());
+            }
+          })
+          .catch((err) => {
+            if (gen !== loadGenRef.current) return;
+            setCardLoading((prev) => ({ ...prev, [cardId]: false }));
+            setCardErrors((prev) => ({
+              ...prev,
+              [cardId]: err?.message || "Failed to load card",
+            }));
+          });
+      }
+
+      if (isRefresh) {
+        Promise.allSettled(TODAYS_WORK_CARD_IDS.map((id) => loaders[id]())).finally(() => {
+          if (gen === loadGenRef.current) setRefreshing(false);
+        });
       }
     },
     [tenantId]
@@ -73,7 +154,12 @@ export default function HqPrioritiesStrip({ tenantId, setActivePage }) {
     void load();
   }, [load]);
 
-  const cards = useMemo(() => buildHqPriorityCards(bundle || {}), [bundle]);
+  const cards = useMemo(() => buildHqPriorityCards(bundleParts), [bundleParts]);
+  const cardsById = useMemo(
+    () => Object.fromEntries(cards.map((card) => [card.id, card])),
+    [cards]
+  );
+  const anyLoading = TODAYS_WORK_CARD_IDS.some((id) => cardLoading[id]);
 
   return (
     <section
@@ -86,72 +172,115 @@ export default function HqPrioritiesStrip({ tenantId, setActivePage }) {
           <p className="text-xs text-muted-foreground">
             What needs your attention right now — each card explains the next step.
           </p>
+          <DataFreshnessLabel
+            loadedAt={dataLoadedAt}
+            refreshing={refreshing || anyLoading}
+            className="mt-1 block"
+          />
         </div>
         <Button
           type="button"
           variant="outline"
           size="sm"
           className="h-9 shrink-0"
-          disabled={loading || refreshing}
-          onClick={() => void load({ refresh: true })}
+          disabled={refreshing}
+          onClick={() => load({ refresh: true })}
         >
           <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", refreshing && "animate-spin")} />
           Refresh
         </Button>
       </div>
 
-      {error ? (
-        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          {error}
-        </p>
-      ) : null}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+        {TODAYS_WORK_CARD_IDS.map((cardId) => {
+          const card = cardsById[cardId];
+          const Icon = CARD_ICONS[cardId] || AlertTriangle;
+          const loading = cardLoading[cardId];
+          const error = cardErrors[cardId];
+          const title = card?.title || CARD_TITLES[cardId] || cardId;
 
-      {loading ? (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="h-36 animate-pulse rounded-xl bg-muted/40" />
-          ))}
-        </div>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
-          {cards.map((card) => {
-            const Icon = CARD_ICONS[card.id] || AlertTriangle;
-            return (
-              <article
-                key={card.id}
-                className={cn(
-                  "flex flex-col rounded-xl border p-3 shadow-sm",
-                  SEVERITY_STYLES[card.severity] || SEVERITY_STYLES.healthy
-                )}
-              >
-                <div className="mb-2 flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="rounded-lg bg-white/80 p-1.5 shadow-sm">
-                      <Icon className="h-4 w-4 text-slate-700" />
-                    </span>
-                    <Badge variant={SEVERITY_BADGE[card.severity] || "outline"} className="text-[10px]">
+          return (
+            <article
+              key={cardId}
+              className={cn(
+                "flex flex-col rounded-xl border p-3 shadow-sm",
+                !loading && card
+                  ? SEVERITY_STYLES[card.severity] || SEVERITY_STYLES.healthy
+                  : "border-slate-200 bg-slate-50/80"
+              )}
+            >
+              <div className="mb-2 flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="rounded-lg bg-white/80 p-1.5 shadow-sm">
+                    <Icon className="h-4 w-4 text-slate-700" />
+                  </span>
+                  {!loading && card ? (
+                    <Badge
+                      variant={SEVERITY_BADGE[card.severity] || "outline"}
+                      className="text-[10px]"
+                    >
                       {severityLabel(card.severity)}
                     </Badge>
-                  </div>
-                  <span className="text-2xl font-bold tabular-nums text-slate-900">{card.count}</span>
+                  ) : (
+                    <span className="h-5 w-16 animate-pulse rounded bg-muted/50" />
+                  )}
                 </div>
-                <h3 className="text-sm font-semibold text-slate-900">{card.title}</h3>
-                <p className="mt-1 text-[11px] font-medium leading-snug text-slate-700">{card.actionNeeded}</p>
-                <p className="mt-1 flex-1 text-[10px] leading-snug text-slate-500">{card.description}</p>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={card.count > 0 ? "default" : "outline"}
-                  className="mt-3 h-9 w-full text-xs"
-                  onClick={() => setActivePage?.(card.page)}
-                >
-                  {card.ctaLabel}
-                </Button>
-              </article>
-            );
-          })}
-        </div>
-      )}
+                {loading ? (
+                  <span
+                    className="h-8 w-10 animate-pulse rounded bg-muted/50"
+                    aria-label={`Loading ${title}`}
+                  />
+                ) : error ? (
+                  <span className="text-lg font-bold text-amber-700" title={error}>
+                    —
+                  </span>
+                ) : (
+                  <span className="text-2xl font-bold tabular-nums text-slate-900">{card?.count}</span>
+                )}
+              </div>
+
+              <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+
+              {loading ? (
+                <>
+                  <div className="mt-2 h-8 animate-pulse rounded bg-muted/40" />
+                  <div className="mt-2 h-6 flex-1 animate-pulse rounded bg-muted/30" />
+                </>
+              ) : error ? (
+                <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] text-amber-900">
+                  {error}
+                </p>
+              ) : card ? (
+                <>
+                  <p className="mt-1 text-[11px] font-medium leading-snug text-slate-700">
+                    {card.actionNeeded}
+                  </p>
+                  <p className="mt-1 flex-1 text-[10px] leading-snug text-slate-500">
+                    {card.description}
+                  </p>
+                </>
+              ) : null}
+
+              <Button
+                type="button"
+                size="sm"
+                variant={!loading && card && card.count > 0 ? "default" : "outline"}
+                className="mt-3 h-9 w-full text-xs"
+                disabled={loading || Boolean(error) || !card}
+                onClick={() => card && setActivePage?.(card.page)}
+              >
+                {card?.ctaLabel || "Review"}
+              </Button>
+            </article>
+          );
+        })}
+      </div>
+
+      {anyLoading ? (
+        <p className="sr-only" aria-live="polite">
+          Loading Today&apos;s Work cards
+        </p>
+      ) : null}
     </section>
   );
 }

@@ -42,6 +42,7 @@ import { AgentRouteStopBadge } from "@/components/agent/AgentOsSections.jsx";
 import { AgentLabFieldStrip } from "@/components/agent/AgentFieldExecution.jsx";
 import { labIdKey } from "@/utils/labId.js";
 import StatusBadge from "@/components/ux/StatusBadge";
+import PageSkeleton from "@/components/ux/PageSkeleton";
 import { cn } from "@/lib/utils";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import HqLabsAdminView from "@/components/hq/HqLabsAdminView.jsx";
@@ -662,7 +663,17 @@ export default function LabsPage({
   }, [visibleLabs]);
 
   if (loading) {
-    return <div className="p-4 text-slate-600">Loading labs...</div>;
+    return (
+      <PageSkeleton
+        kpiCount={4}
+        kpiColumns={4}
+        listRows={8}
+        className={cn(
+          embedded ? "space-y-4" : "space-y-6 p-4",
+          isAgentView && !embedded && !isDistributorOs && "mx-auto w-full max-w-[1360px]"
+        )}
+      />
+    );
   }
 
   if (error) {

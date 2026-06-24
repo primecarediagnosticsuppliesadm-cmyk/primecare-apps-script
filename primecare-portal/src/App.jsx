@@ -19,6 +19,7 @@ import {
   syncPagePathToUrl,
 } from "./config/pageRouting.js";
 import { PortalToastProvider } from "@/context/PortalToastContext";
+import { RouteTransitionOverlay } from "@/components/ux";
 import { TenantViewProvider } from "@/context/TenantViewContext.jsx";
 import OperatingZoneSync from "@/components/OperatingZoneSync.jsx";
 import { loadHqNavBadgeCounts } from "@/operations/hqNavBadgeCounts.js";
@@ -344,22 +345,24 @@ export default function App() {
           setActivePage={navigateToPage}
           navBadges={navBadges}
         >
-          <ExecutivePortalHeader
-            currentUser={currentUser}
-            pageTitle={pageTitle}
-            onLogout={signOut}
-            role={role}
-            activePage={activePage}
-            setActivePage={navigateToPage}
-          />
+          <RouteTransitionOverlay pageKey={activePage}>
+            <ExecutivePortalHeader
+              currentUser={currentUser}
+              pageTitle={pageTitle}
+              onLogout={signOut}
+              role={role}
+              activePage={activePage}
+              setActivePage={navigateToPage}
+            />
 
-          <PrimeCareWebPortal
-            role={role}
-            activePage={activePage}
-            currentUser={currentUser}
-            setActivePage={navigateToPage}
-            authToken={authToken}
-          />
+            <PrimeCareWebPortal
+              role={role}
+              activePage={activePage}
+              currentUser={currentUser}
+              setActivePage={navigateToPage}
+              authToken={authToken}
+            />
+          </RouteTransitionOverlay>
         </PortalLayout>
         </TenantViewProvider>
       </Suspense>

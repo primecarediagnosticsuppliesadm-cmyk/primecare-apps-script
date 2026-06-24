@@ -21,6 +21,7 @@ import {
 } from "@/utils/migrationTrace.js";
 import { invalidateAdminDashboardCaches } from "@/utils/dashboardInvalidate.js";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
+import PageSkeleton from "@/components/ux/PageSkeleton";
 
 const emptyCreateForm = {
   productId: "",
@@ -825,10 +826,8 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
   if (loading) {
     return (
-      <div className="p-4 sm:p-6">
-        <div className="rounded-2xl border border-dashed bg-white p-8 text-sm text-slate-500 shadow-sm">
-          Loading purchase operations...
-        </div>
+      <div className="space-y-4 p-4 sm:p-6">
+        <PageSkeleton kpiCount={4} kpiColumns={4} listRows={8} />
       </div>
     );
   }

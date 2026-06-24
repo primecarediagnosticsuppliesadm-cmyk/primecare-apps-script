@@ -10,6 +10,8 @@ export { default as ListSkeleton } from "./ListSkeleton";
 export { default as EmptyState } from "./EmptyState";
 export { default as PageSkeleton } from "./PageSkeleton";
 export { default as PortalToastViewport } from "./PortalToastViewport";
+export { default as DataFreshnessLabel } from "./DataFreshnessLabel";
+export { default as RouteTransitionOverlay } from "./RouteTransitionOverlay";
 
 export {
   qualificationBandToVariant,

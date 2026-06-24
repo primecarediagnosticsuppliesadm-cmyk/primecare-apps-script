@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { StatusBadge, PageSkeleton, KpiCard, KpiCardGrid } from "@/components/ux";
+import { StatusBadge, PageSkeleton, KpiCard, KpiCardGrid, DataFreshnessLabel } from "@/components/ux";
 import {
   loadOperationsCommandCenterData,
   invalidateOperationsCommandCenterCache,
@@ -137,6 +137,7 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
   const [actionQueueBundle, setActionQueueBundle] = useState(null);
   const [actionQueueLoading, setActionQueueLoading] = useState(false);
   const [writeModal, setWriteModal] = useState(null);
+  const [dataLoadedAt, setDataLoadedAt] = useState(null);
 
   const tenantId = currentUser?.tenantId || "";
   const { showToast } = usePortalToast();
@@ -161,6 +162,7 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
         return { interventionModel, opsPayload: payload };
       });
       setModel(built.interventionModel);
+      setDataLoadedAt(Date.now());
       setActionQueueLoading(true);
       try {
         const bundle = await loadExecutiveActionQueueBundle(currentUser, {
@@ -537,12 +539,38 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
     }
   }, []);
 
-  if (loading) {
-    return <PageSkeleton kpiCount={5} kpiColumns={3} listRows={6} />;
-  }
-
   if (!model) {
-    return <div className="p-4 text-sm text-red-700">{error || "Unable to load executive workspace."}</div>;
+    return (
+      <div className="mx-auto max-w-6xl space-y-3 p-4 pb-10 lg:p-5">
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+              Executive intervention
+            </p>
+            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Control Tower</h1>
+            <p className="mt-0.5 max-w-xl text-sm text-slate-600">
+              Acknowledge, assign, escalate, and resolve operational issues without leaving this
+              workspace.
+            </p>
+            <DataFreshnessLabel
+              loadedAt={dataLoadedAt}
+              refreshing={loading || refreshing}
+              className="mt-1 block"
+            />
+          </div>
+          <Button type="button" variant="outline" size="sm" disabled={refreshing || loading} onClick={() => void load(true)}>
+            <RefreshCw className={cn("mr-2 h-4 w-4", (refreshing || loading) && "animate-spin")} />
+            Refresh
+          </Button>
+        </header>
+        {error ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </div>
+        ) : null}
+        <PageSkeleton kpiCount={5} kpiColumns={3} listRows={6} />
+      </div>
+    );
   }
 
   const { snapshot, feed, healthStrip } = model;
@@ -570,6 +598,11 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
           <p className="mt-0.5 max-w-xl text-sm text-slate-600">
             Acknowledge, assign, escalate, and resolve operational issues without leaving this workspace.
           </p>
+          <DataFreshnessLabel
+            loadedAt={dataLoadedAt}
+            refreshing={refreshing}
+            className="mt-1 block"
+          />
         </div>
         <Button
           type="button"

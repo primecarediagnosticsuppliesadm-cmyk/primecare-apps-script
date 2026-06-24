@@ -3,6 +3,7 @@ import { getStockDashboard } from "../api/primecareSupabaseApi";
 import { fetchDatabaseTenants } from "@/tenant/durableTenantStore.js";
 import InventoryLedgerPage from "./InventoryLedgerPage";
 import InventoryHealthPage from "./InventoryHealthPage";
+import PageSkeleton from "@/components/ux/PageSkeleton";
 import HqInventoryValueAnalytics from "@/components/hq/HqInventoryValueAnalytics.jsx";
 import {
   distributorNamesFromRegistry,
@@ -275,7 +276,7 @@ export default function StockPage({ currentUser = null }) {
       ) : activeTab === "ledger" ? (
         <InventoryLedgerPage />
       ) : loading ? (
-        <h2 style={{ padding: "20px" }}>Loading stock...</h2>
+        <PageSkeleton kpiCount={4} kpiColumns={4} listRows={8} className="p-4" />
       ) : error ? (
         <h2 style={{ padding: "20px", color: "red" }}>{error}</h2>
       ) : (

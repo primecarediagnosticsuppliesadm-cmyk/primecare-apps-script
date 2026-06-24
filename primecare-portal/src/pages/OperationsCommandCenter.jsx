@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { StatusBadge, PageSkeleton, KpiCard, KpiCardGrid, usePortalToast } from "@/components/ux";
+import { StatusBadge, PageSkeleton, KpiCard, KpiCardGrid, usePortalToast, DataFreshnessLabel } from "@/components/ux";
 import OperationalLabDrawer from "@/components/operations/OperationalLabDrawer.jsx";
 import OwnershipStatusCard from "@/components/operations/OwnershipStatusCard.jsx";
 import LabOwnershipDrawer from "@/components/operations/LabOwnershipDrawer.jsx";
@@ -142,6 +142,7 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
   const [drawerLabId, setDrawerLabId] = useState("");
   const [ownershipDrawerLab, setOwnershipDrawerLab] = useState(null);
   const [attentionExpanded, setAttentionExpanded] = useState(true);
+  const [dataLoadedAt, setDataLoadedAt] = useState(null);
   const { showToast } = usePortalToast();
   const tenantId = currentUser?.tenantId || currentUser?.tenant_id || "";
 
@@ -157,6 +158,7 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
           return buildOperationsCommandCenterModel(payload);
         });
         setOpsModel(model);
+        setDataLoadedAt(Date.now());
       } catch (err) {
         console.error(err);
         setError(err?.message || "Failed to load operations center");
@@ -269,14 +271,44 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
     [navigateForAction]
   );
 
-  if (loading) {
-    return <PageSkeleton kpiCount={6} kpiColumns={3} listRows={6} />;
-  }
-
   if (!model) {
     return (
-      <div className="p-6 text-sm text-red-700">
-        {error || "Unable to load operations center."}
+      <div className="mx-auto max-w-6xl space-y-4 p-4 pb-10 lg:p-6">
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+              Executive oversight
+            </p>
+            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+              Operations Command Center
+            </h1>
+            <p className="mt-0.5 max-w-xl text-sm text-slate-600">
+              What needs attention, who is behind, and where operational risk is building — no charts,
+              just live status.
+            </p>
+            <DataFreshnessLabel
+              loadedAt={dataLoadedAt}
+              refreshing={loading || refreshing}
+              className="mt-1 block"
+            />
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void load(true)}
+            disabled={refreshing || loading}
+          >
+            <RefreshCw className={cn("mr-2 h-4 w-4", (refreshing || loading) && "animate-spin")} />
+            Refresh
+          </Button>
+        </header>
+        {error ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </div>
+        ) : null}
+        <PageSkeleton kpiCount={6} kpiColumns={3} listRows={6} />
       </div>
     );
   }
@@ -311,6 +343,11 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
             What needs attention, who is behind, and where operational risk is building — no
             charts, just live status.
           </p>
+          <DataFreshnessLabel
+            loadedAt={dataLoadedAt}
+            refreshing={refreshing}
+            className="mt-1 block"
+          />
         </div>
         <Button
           type="button"

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getInventoryHealthRead } from "@/api/primecareSupabaseApi";
+import PageSkeleton from "@/components/ux/PageSkeleton";
 
 function formatNumber(value, fallback = "-") {
   if (value == null || value === "") return fallback;
@@ -61,7 +62,9 @@ export default function InventoryHealthPage() {
     });
   }, [data.rows, search, urgencyFilter]);
 
-  if (loading) return <div style={styles.notice}>Loading inventory health...</div>;
+  if (loading) {
+    return <PageSkeleton kpiCount={6} kpiColumns={3} listRows={8} />;
+  }
   if (error) return <div style={{ ...styles.notice, color: "#b91c1c" }}>{error}</div>;
 
   const summary = data.summary || {};
