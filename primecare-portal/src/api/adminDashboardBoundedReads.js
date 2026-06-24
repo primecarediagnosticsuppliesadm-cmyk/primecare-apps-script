@@ -10,4 +10,11 @@ export {
   fetchPaymentsBoundedRows,
   fetchQualificationBoundedRows,
   fetchSearchRuntimeBoundedSources,
+  invalidateBoundedSourceCache,
+  fetchStockDashboardBoundedRows,
+  fetchLabCatalogBoundedRows,
+  fetchReorderCandidatesBoundedRows,
+  invalidateStockDashboardReadCache,
+  invalidateLabCatalogReadCache,
+  invalidateInventoryLedgerReadCache,
 } from "@/api/hqBoundedReads.js";

@@ -1,6 +1,6 @@
 # HQ Performance Certification
 
-**Generated:** 2026-06-24T14:32:25.083Z
+**Generated:** 2026-06-24T14:52:30.214Z
 **PERF tenant:** 3ced2736-acd5-4504-a8cd-5223afbf69e1
 **Scale target:** 1000 labs · 1000 agents · 100000 orders · 100000 payments
 
@@ -21,13 +21,13 @@
 
 | Surface | ms | Rows | Payload bytes | Bounded |
 |---------|-----|------|---------------|---------|
-| Orders (bounded) | 498 | 0 | 166 | yes |
-| Collections (bounded) | 470 | 0 | 131 | yes |
-| Admin Dashboard (bounded) | 414 | 0 | 479 | yes |
-| Operations Center loader | 536 | 0 | 3733 | yes |
-| Revenue Funnel orders probe | 443 | 100 | 7112 | yes |
+| Orders (bounded) | 514 | 0 | 166 | yes |
+| Collections (bounded) | 157 | 0 | 131 | yes |
+| Admin Dashboard (bounded) | 282 | 0 | 479 | yes |
+| Operations Center loader | 441 | 0 | 3733 | yes |
+| Revenue Funnel orders probe | 324 | 100 | 7112 | yes |
 
-- **Slowest query:** Operations Center loader (536 ms)
+- **Slowest query:** Orders (bounded) (514 ms)
 - **API calls measured:** 5
 - **Unbounded surfaces:** 0
 

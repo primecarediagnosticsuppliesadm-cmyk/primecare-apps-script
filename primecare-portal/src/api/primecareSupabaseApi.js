@@ -53,6 +53,9 @@ import {
   HQ_ORDERS_LIST_DEFAULT_LIMIT,
   HQ_ORDERS_LIST_MAX_LIMIT,
   HQ_PAYMENT_COLUMNS,
+  HQ_INVENTORY_CATALOG_FALLBACK_COLUMNS,
+  HQ_LAB_CATALOG_LIMIT,
+  HQ_LAB_ORDERS_RECENT_LIMIT,
   HQ_PAYMENTS_RECENT_DAYS,
   HQ_PAYMENTS_RECENT_LIMIT,
   HQ_V_LABS_CREDIT_COLUMNS,
@@ -67,6 +70,12 @@ import {
   fetchInventoryBoundedRows,
   fetchInventoryLedgerBoundedRows,
   fetchPaymentsBoundedRows,
+  fetchPaymentsForLabBoundedRows,
+  invalidateBoundedSourceCache,
+  loadStockDashboardBoundedRows,
+  loadLabCatalogBoundedRows,
+  loadInventoryLedgerBoundedRows,
+  loadReorderCandidatesBoundedRows,
 } from "@/api/hqBoundedReads.js";
 import { hqDebugLog, hqDebugWarn, isHqDebugLogEnabled } from "@/utils/hqDebugLog.js";
 import { recordPredatorCacheEvent } from "@/predator/cacheDiagnostics.js";
@@ -378,23 +387,10 @@ export function mapLabCatalogRow(row) {
 }
 
 async function readInventoryCatalogFallbackRows() {
-  const catalogProjection = [
-    "tenant_id",
-    "product_id",
-    "product_name",
-    "current_stock",
-    "min_stock",
-    "reorder_qty",
-    "reorder_status",
-    "unit_selling_price",
-    "unit_cost",
-    "category",
-    "brand",
-    "tax_rate",
-    "active_flag",
-  ].join(",");
-
-  let inv = await supabase.from("inventory").select(catalogProjection);
+  let inv = await supabase
+    .from("inventory")
+    .select(HQ_INVENTORY_CATALOG_FALLBACK_COLUMNS)
+    .limit(HQ_LAB_CATALOG_LIMIT);
   if (!inv.error) return inv;
 
   console.warn(
@@ -403,7 +399,8 @@ async function readInventoryCatalogFallbackRows() {
   );
   return supabase
     .from("inventory")
-    .select("tenant_id,product_id,product_name,current_stock,min_stock,reorder_qty,reorder_status");
+    .select(HQ_INVENTORY_HEALTH_COLUMNS)
+    .limit(HQ_LAB_CATALOG_LIMIT);
 }
 
 function normalizeLabCatalogProductId(productId) {
@@ -455,6 +452,7 @@ export function dedupeLabCatalogProducts(products, preferredTenantId = null) {
 export async function getLabCatalogRead(options = {}) {
   const preferredTenantId =
     str(options.tenantId ?? options.preferredTenantId) || null;
+  const force = options.force === true;
   traceSupabaseRead("LabOrdering.getLabCatalogRead", {
     tables: ["v_lab_catalog", "inventory"],
     preferredTenantId,
@@ -465,7 +463,10 @@ export async function getLabCatalogRead(options = {}) {
 
   try {
     let source = "v_lab_catalog";
-    let { data, error } = await supabase.from("v_lab_catalog").select("*");
+    let { data, error } = await loadLabCatalogBoundedRows(supabase, {
+      force,
+      cacheKey: preferredTenantId || "default",
+    });
 
     if (error) {
       console.warn("[getLabCatalogRead] v_lab_catalog unavailable; trying inventory:", error.message);
@@ -816,8 +817,9 @@ export async function enrichCatalogWithProductMetadata(products, tenantId) {
 
 /**
  * Read-only stock dashboard from Supabase view v_stock_dashboard.
+ * @param {{ force?: boolean }} [options]
  */
-export async function getStockDashboard() {
+export async function getStockDashboard(options = {}) {
   traceSupabaseRead("Inventory.getStockDashboard", { table: "v_stock_dashboard" });
   if (!supabase) {
     throw new Error(
@@ -825,9 +827,9 @@ export async function getStockDashboard() {
     );
   }
 
-  const { data: rawRows, error } = await supabase
-    .from("v_stock_dashboard")
-    .select("*");
+  const { data: rawRows, error } = await loadStockDashboardBoundedRows(supabase, {
+    force: options.force === true,
+  });
 
   if (error) {
     throw new Error(error.message || "Supabase stock read failed");
@@ -1145,7 +1147,7 @@ function buildReorderSummaryFromForecast(forecast) {
 /**
  * Read-only reorder forecast from Supabase view v_reorder_candidates.
  */
-export async function getReorderForecastRead() {
+export async function getReorderForecastRead(options = {}) {
   traceSupabaseRead("PurchaseReorder.getReorderForecastRead", { table: "v_reorder_candidates" });
   if (!supabase) {
     throw new Error(
@@ -1153,7 +1155,9 @@ export async function getReorderForecastRead() {
     );
   }
 
-  const { data: rawRows, error } = await supabase.from("v_reorder_candidates").select("*");
+  const { data: rawRows, error } = await loadReorderCandidatesBoundedRows(supabase, {
+    force: options.force === true,
+  });
 
   if (error) {
     throw new Error(error.message || "Supabase reorder forecast read failed");
@@ -1591,8 +1595,46 @@ export async function createPaymentWrite(payload = {}) {
  * Read-only collections: `ar_credit_control` (outstanding, total_paid) + `payments` (today's total),
  * enriched from `v_labs_credit` when present. Never throws.
  */
+const COLLECTIONS_READ_CACHE_TTL_MS = 45_000;
+/** @type {{ result: object|null, loadedAt: number, key: string }} */
+let collectionsReadCache = { result: null, loadedAt: 0, key: "" };
+/** @type {Promise<object>|null} */
+let collectionsReadInFlight = null;
+
+function collectionsReadCacheKey(params = {}) {
+  const limit = clampLimit(params.limit, HQ_COLLECTIONS_AR_LIMIT, HQ_COLLECTIONS_AR_LIMIT);
+  const daysBack =
+    Number(params.daysBack) > 0 ? Number(params.daysBack) : HQ_PAYMENTS_RECENT_DAYS;
+  return `${limit}:${daysBack}`;
+}
+
+export function invalidateCollectionsReadCache() {
+  collectionsReadCache = { result: null, loadedAt: 0, key: "" };
+  collectionsReadInFlight = null;
+}
+
 export async function getCollectionsRead(params = {}) {
   return predatorTrace("Collections", "api.getCollectionsRead", async () => {
+  const force = params.force === true;
+  const cacheKey = collectionsReadCacheKey(params);
+
+  if (!force && collectionsReadInFlight) {
+    perfLog("getCollectionsRead.inFlightJoin");
+    return collectionsReadInFlight;
+  }
+  if (
+    !force &&
+    collectionsReadCache.result &&
+    collectionsReadCache.key === cacheKey &&
+    Date.now() - collectionsReadCache.loadedAt < COLLECTIONS_READ_CACHE_TTL_MS
+  ) {
+    perfLog("getCollectionsRead.cacheHit", {
+      ageMs: Date.now() - collectionsReadCache.loadedAt,
+    });
+    return collectionsReadCache.result;
+  }
+
+  const run = async () => {
   traceSupabaseRead("Collections.getCollectionsRead", {
     tables: ["ar_credit_control", "payments", "v_labs_credit"],
   });
@@ -1610,53 +1652,51 @@ export async function getCollectionsRead(params = {}) {
 
   try {
     const today = localDateYmd();
-    const recentFrom = recentDateYmd(
-      Number(params.daysBack) > 0 ? Number(params.daysBack) : HQ_PAYMENTS_RECENT_DAYS
-    );
+    const daysBack =
+      Number(params.daysBack) > 0 ? Number(params.daysBack) : HQ_PAYMENTS_RECENT_DAYS;
     const arLimit = clampLimit(params.limit, HQ_COLLECTIONS_AR_LIMIT, HQ_COLLECTIONS_AR_LIMIT);
 
-    const { data: arRaw, error: arErr } = await fetchCollectionsBoundedArRows(supabase, {
-      limit: arLimit,
+    const endParallel = perfTime("getCollectionsRead.parallel");
+    const [arRes, payRes, labsRes] = await Promise.all([
+      fetchCollectionsBoundedArRows(supabase, { limit: arLimit }),
+      fetchPaymentsBoundedRows(supabase, { daysBack }),
+      fetchLabsCreditBoundedRows(supabase, { columns: HQ_V_LABS_CREDIT_COLUMNS }),
+    ]);
+    endParallel({
+      ar: arRes.error ? 0 : arRes.data?.length ?? 0,
+      payments: payRes.error ? 0 : payRes.data?.length ?? 0,
+      labs: labsRes.error ? 0 : labsRes.data?.length ?? 0,
     });
-    if (arErr) {
-      console.warn("[getCollectionsRead] ar_credit_control:", arErr.message);
+
+    if (arRes.error) {
+      console.warn("[getCollectionsRead] ar_credit_control:", arRes.error.message);
       return {
         success: false,
         readFailed: true,
-        error: arErr.message,
+        error: arRes.error.message,
         data: { summary: { ...EMPTY_COLLECTIONS_SUMMARY }, collections: [] },
       };
     }
 
-    const { data: payTodayRaw, error: payTodayErr } = await fetchPaymentsBoundedRows(supabase, {
-      paymentDateEq: today,
-    });
-    if (payTodayErr) {
-      console.warn("[getCollectionsRead] payments today:", payTodayErr.message);
+    if (payRes.error) {
+      console.warn("[getCollectionsRead] payments:", payRes.error.message);
+    }
+    if (labsRes.error) {
+      console.warn("[getCollectionsRead] v_labs_credit:", labsRes.error.message);
     }
 
-    const { data: payRecentRaw, error: payRecentErr } = await fetchPaymentsBoundedRows(supabase, {
-      daysBack: Number(params.daysBack) > 0 ? Number(params.daysBack) : HQ_PAYMENTS_RECENT_DAYS,
-    });
-
-    if (payRecentErr) {
-      console.warn("[getCollectionsRead] payments recent:", payRecentErr.message);
-    }
-
-    const payRaw = payRecentRaw || [];
+    const payRaw = payRes.error ? [] : payRes.data || [];
+    const payTodayRaw = payRaw.filter(
+      (p) => str(p.payment_date ?? p.paymentDate).slice(0, 10) === today
+    );
+    const arRaw = arRes.data || [];
+    const labsRaw = labsRes.error ? [] : labsRes.data || [];
     const { byLab: paymentsByLab, casingVariants } = buildPaymentsByNormalizedLabId(payRaw);
     if (casingVariants.length && isHqDebugLogEnabled()) {
       hqDebugWarn("COLLECTION PAYMENT LAB_ID CASING VARIANTS", casingVariants.slice(0, 10));
     }
 
-    const todayCollections = sumTodayPayments(payTodayRaw || []);
-
-    const { data: labsRaw, error: labsErr } = await fetchLabsCreditBoundedRows(supabase, {
-      columns: HQ_V_LABS_CREDIT_COLUMNS,
-    });
-    if (labsErr) {
-      console.warn("[getCollectionsRead] v_labs_credit:", labsErr.message);
-    }
+    const todayCollections = sumTodayPayments(payTodayRaw);
     const labsByLab = buildLabsCreditMapByLabId(labsRaw);
 
     let collections = [];
@@ -1714,6 +1754,19 @@ export async function getCollectionsRead(params = {}) {
       },
     };
   }
+  };
+
+  const promise = run();
+  if (!force) collectionsReadInFlight = promise;
+  try {
+    const result = await promise;
+    if (!force && result?.success) {
+      collectionsReadCache = { result, loadedAt: Date.now(), key: cacheKey };
+    }
+    return result;
+  } finally {
+    if (!force) collectionsReadInFlight = null;
+  }
   });
 }
 
@@ -1747,7 +1800,7 @@ export async function getCollectionHistoryRead(labId, options = {}) {
   try {
     let payRaw = Array.isArray(options.paymentsRaw) ? options.paymentsRaw : null;
     if (!payRaw) {
-      const { data, error } = await supabase.from("payments").select("*");
+      const { data, error } = await fetchPaymentsForLabBoundedRows(supabase, labKey);
       if (error) {
         console.warn("[getCollectionHistoryRead] payments:", error.message);
         return { success: false, error: error.message, data: { history: [] } };
@@ -1781,29 +1834,40 @@ export async function getCollectionDetailRead(labId, options = {}) {
 
   try {
     let arRow = options.arRow ?? null;
-    if (!arRow) {
-      const arSel = await supabase.from("ar_credit_control").select("*").eq("lab_id", labKey).limit(1);
-      if (arSel.error) {
-        console.warn("[getCollectionDetailRead] ar_credit_control:", arSel.error.message);
-        return { success: false, error: arSel.error.message, data: { collection: null } };
-      }
-      arRow = Array.isArray(arSel.data) && arSel.data[0] ? arSel.data[0] : null;
-    }
-
     let labsCreditRow = options.labsCreditRow ?? null;
     let paymentsForLab = options.paymentsForLab ?? null;
-    if (!labsCreditRow) {
-      const labsRes = await supabase.from("v_labs_credit").select("*");
-      if (!labsRes.error) {
+
+    if (!arRow || !labsCreditRow || !paymentsForLab) {
+      const [arSel, labsRes, payRes] = await Promise.all([
+        arRow
+          ? Promise.resolve({ data: [arRow], error: null })
+          : supabase.from("ar_credit_control").select(HQ_AR_COLUMNS).eq("lab_id", labKey).limit(1),
+        labsCreditRow
+          ? Promise.resolve({ data: [labsCreditRow], error: null })
+          : supabase
+              .from("v_labs_credit")
+              .select(HQ_V_LABS_CREDIT_COLUMNS)
+              .eq("lab_id", labKey)
+              .limit(1),
+        paymentsForLab
+          ? Promise.resolve({ data: paymentsForLab, error: null })
+          : fetchPaymentsForLabBoundedRows(supabase, labKey),
+      ]);
+
+      if (!arRow) {
+        if (arSel.error) {
+          console.warn("[getCollectionDetailRead] ar_credit_control:", arSel.error.message);
+          return { success: false, error: arSel.error.message, data: { collection: null } };
+        }
+        arRow = Array.isArray(arSel.data) && arSel.data[0] ? arSel.data[0] : null;
+      }
+      if (!labsCreditRow && !labsRes.error) {
         labsCreditRow = buildLabsCreditMapByLabId(labsRes.data || []).get(labKey) ?? null;
       }
-    }
-    if (!paymentsForLab) {
-      const payRes = await supabase.from("payments").select("*");
-      if (!payRes.error) {
-        paymentsForLab = buildPaymentsByNormalizedLabId(payRes.data || []).byLab.get(labKey) || [];
-      } else {
-        paymentsForLab = [];
+      if (!paymentsForLab) {
+        paymentsForLab = payRes.error
+          ? []
+          : buildPaymentsByNormalizedLabId(payRes.data || []).byLab.get(labKey) || [];
       }
     }
 
@@ -2301,10 +2365,10 @@ function logAdminDashboardSupabaseAudit(ctx) {
   hqDebugLog("DASHBOARD KPI AUDIT complete");
 }
 
-const ADMIN_DASHBOARD_READ_CACHE_TTL_MS = 60 * 1000;
+const ADMIN_DASHBOARD_READ_CACHE_TTL_MS = IS_QA ? 30_000 : 60_000;
 
 function adminDashboardServerCacheEnabled() {
-  return !IS_QA;
+  return true;
 }
 
 export function normalizeAdminDashboardPayload(data) {
@@ -2439,6 +2503,8 @@ let adminDashboardReadInFlight = null;
 export function invalidateAdminDashboardReadCache() {
   adminDashboardReadCache = { result: null, loadedAt: 0, rowCounts: null, orderIds: [] };
   adminDashboardReadInFlight = null;
+  invalidateBoundedSourceCache();
+  invalidateCollectionsReadCache();
   perfLog("getAdminDashboardRead.cacheCleared");
   recordPredatorCacheEvent({ cacheKey: "adminDashboardRead", event: "invalidate" });
 }
@@ -2559,7 +2625,12 @@ export async function getAdminDashboardRead(options = {}) {
 
     const queryErrors = [];
 
-    const boundedSource = await fetchAdminDashboardBoundedSourceRows(supabase);
+    const [boundedSource, payRes] = await Promise.all([
+      fetchAdminDashboardBoundedSourceRows(supabase, { force }),
+      timedSupabaseQuery("payments", () =>
+        fetchPaymentsBoundedRows(supabase, { paymentDateEq: today })
+      ),
+    ]);
     for (const table of Object.keys(boundedSource.errors || {})) {
       if (table !== "client") queryErrors.push(table);
     }
@@ -2581,12 +2652,6 @@ export async function getAdminDashboardRead(options = {}) {
       })
       .slice(0, 40);
 
-    const paymentsTodayQuery = supabase
-      .from("payments")
-      .select(HQ_PAYMENT_COLUMNS)
-      .eq("payment_date", today);
-
-    const payRes = await timedSupabaseQuery("payments", () => paymentsTodayQuery);
     const payRaw = payRes.error ? [] : payRes.data || [];
 
     if (boundedSource.errors?.orders) {
@@ -3141,8 +3206,40 @@ function mapQualificationReviewRow(row, labMeta = null) {
  * Admin/executive review list: lab_qualifications enriched with lab names from v_labs_credit.
  * RLS scopes rows; no service role or Apps Script.
  */
-export async function getQualificationReviewRead() {
-  return predatorTrace("Qualification Review", "api.getQualificationReviewRead", async () => {
+const QUALIFICATION_READ_CACHE_TTL_MS = 45_000;
+/** @type {{ result: object|null, loadedAt: number }} */
+let qualificationReadCache = { result: null, loadedAt: 0 };
+/** @type {Promise<object>|null} */
+let qualificationReadInFlight = null;
+
+export function invalidateQualificationReviewReadCache() {
+  qualificationReadCache = { result: null, loadedAt: 0 };
+  qualificationReadInFlight = null;
+}
+
+export function invalidateAllHqReadCaches() {
+  invalidateAdminDashboardReadCache();
+  invalidateQualificationReviewReadCache();
+}
+
+export async function getQualificationReviewRead(options = {}) {
+  const force = options?.force === true;
+  if (!force && qualificationReadInFlight) {
+    perfLog("getQualificationReviewRead.inFlightJoin");
+    return qualificationReadInFlight;
+  }
+  if (
+    !force &&
+    qualificationReadCache.result &&
+    Date.now() - qualificationReadCache.loadedAt < QUALIFICATION_READ_CACHE_TTL_MS
+  ) {
+    perfLog("getQualificationReviewRead.cacheHit", {
+      ageMs: Date.now() - qualificationReadCache.loadedAt,
+    });
+    return qualificationReadCache.result;
+  }
+
+  const run = predatorTrace("Qualification Review", "api.getQualificationReviewRead", async () => {
   traceSupabaseRead("Qualification.getQualificationReviewRead", {
     tables: ["lab_qualifications", "v_labs_credit"],
   });
@@ -3152,23 +3249,30 @@ export async function getQualificationReviewRead() {
   }
 
   try {
-    const { data: qualRows, error: qualErr } = await fetchQualificationBoundedRows(supabase);
+    const endParallel = perfTime("getQualificationReviewRead.parallel");
+    const [qualRes, labsRes] = await Promise.all([
+      fetchQualificationBoundedRows(supabase),
+      fetchLabsCreditBoundedRows(supabase, { columns: "lab_id, lab_name, area" }),
+    ]);
+    endParallel({
+      qualifications: qualRes.error ? 0 : qualRes.data?.length ?? 0,
+      labs: labsRes.error ? 0 : labsRes.data?.length ?? 0,
+    });
 
-    if (qualErr) {
+    if (qualRes.error) {
       return {
         success: false,
-        error: qualErr.message || "Failed to load qualifications",
+        error: qualRes.error.message || "Failed to load qualifications",
         data: [],
       };
     }
 
-    const { data: labsRaw, error: labsErr } = await fetchLabsCreditBoundedRows(supabase, {
-      columns: "lab_id, lab_name, area",
-    });
-
-    if (labsErr) {
-      console.warn("[getQualificationReviewRead] v_labs_credit:", labsErr.message);
+    if (labsRes.error) {
+      console.warn("[getQualificationReviewRead] v_labs_credit:", labsRes.error.message);
     }
+
+    const qualRows = qualRes.data || [];
+    const labsRaw = labsRes.error ? [] : labsRes.data || [];
 
     const labById = new Map();
     for (const lab of labsRaw || []) {
@@ -3185,6 +3289,17 @@ export async function getQualificationReviewRead() {
     return { success: false, error: err?.message || String(err), data: [] };
   }
   });
+
+  if (!force) qualificationReadInFlight = run;
+  try {
+    const result = await run;
+    if (!force && result?.success) {
+      qualificationReadCache = { result, loadedAt: Date.now() };
+    }
+    return result;
+  } finally {
+    if (!force) qualificationReadInFlight = null;
+  }
 }
 
 /**
@@ -3716,17 +3831,16 @@ export function mapInventoryLedgerRow(row) {
 /**
  * Read-only inventory movement ledger from public.inventory_ledger.
  */
-export async function getInventoryLedgerRead() {
+export async function getInventoryLedgerRead(options = {}) {
   traceSupabaseRead("InventoryLedger.getInventoryLedgerRead", { table: "inventory_ledger" });
   if (!supabase) {
     return { success: false, error: "Supabase is not configured", data: { movements: [] } };
   }
 
   try {
-    const { data, error } = await supabase
-      .from("inventory_ledger")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const { data, error } = await loadInventoryLedgerBoundedRows(supabase, {
+      force: options.force === true,
+    });
 
     if (error) {
       return {
@@ -4949,10 +5063,10 @@ export async function getLabRecentOrdersRead(labId) {
 
     const q1 = await supabase
       .from("orders")
-      .select("*")
+      .select(HQ_ORDER_LIST_COLUMNS)
       .eq("lab_id", lid)
       .order("created_at", { ascending: false })
-      .limit(50);
+      .limit(HQ_LAB_ORDERS_RECENT_LIMIT);
 
     if (!q1.error) {
       rows = q1.data;
@@ -4960,10 +5074,10 @@ export async function getLabRecentOrdersRead(labId) {
       lastError = q1.error;
       const q2 = await supabase
         .from("orders")
-        .select("*")
+        .select(HQ_ORDER_LIST_COLUMNS)
         .eq("lab_id", lid)
         .order("order_date", { ascending: false })
-        .limit(50);
+        .limit(HQ_LAB_ORDERS_RECENT_LIMIT);
       if (!q2.error) {
         rows = q2.data;
         lastError = null;

@@ -16,6 +16,11 @@ export const HQ_INVENTORY_LEDGER_RECENT_DAYS = 90;
 export const HQ_SEARCH_CATALOG_LIMIT = 2000;
 export const HQ_SEARCH_STOCK_LIMIT = 2000;
 export const HQ_PURCHASE_ORDER_LIMIT = 1000;
+export const HQ_STOCK_DASHBOARD_LIMIT = 5000;
+export const HQ_LAB_CATALOG_LIMIT = 2000;
+export const HQ_REORDER_CANDIDATES_LIMIT = 2000;
+export const HQ_LAB_ORDERS_RECENT_LIMIT = 50;
+export const HQ_READ_CACHE_TTL_MS = 45_000;
 
 export const HQ_ORDER_LIST_COLUMNS =
   "id,order_id,lab_id,status,order_date,created_at,total_amount,tenant_id,created_by,notes,agent_id,inventory_updated,fulfilled_at";
@@ -54,8 +59,18 @@ export const HQ_QUALIFICATION_COLUMNS =
 
 export const HQ_V_LAB_CATALOG_COLUMNS = "product_id,product_name,category,tenant_id";
 
+/** Lab catalog / ordering projection (view-safe). */
+export const HQ_LAB_CATALOG_LIST_COLUMNS =
+  "product_id,product_name,category,tenant_id,current_stock,min_stock,reorder_qty,reorder_status,unit_selling_price,unit_cost,brand,tax_rate,active_flag";
+
+export const HQ_REORDER_CANDIDATE_COLUMNS =
+  "product_id,product_name,category,tenant_id,current_stock,min_stock,reorder_qty,reorder_status,selling_price,cost_price,preferred_supplier,unit";
+
+export const HQ_INVENTORY_CATALOG_FALLBACK_COLUMNS =
+  "tenant_id,product_id,product_name,current_stock,min_stock,reorder_qty,reorder_status,unit_selling_price,unit_cost,category,brand,tax_rate,active_flag";
+
 export const HQ_V_STOCK_DASHBOARD_COLUMNS =
-  "product_id,product_name,category,tenant_id,current_stock,min_stock,reorder_qty,reorder_status,stock_health";
+  "product_id,product_name,category,tenant_id,current_stock,min_stock,reorder_qty,reorder_status,selling_price,cost_price,preferred_supplier,unit";
 
 export const HQ_PURCHASE_ORDER_COLUMNS = "po_id,id,status,supplier_name,tenant_id,created_at";
 

@@ -12,6 +12,7 @@ import {
   numOrNull,
   printQaValidationReport,
 } from "@/validation/qaValidationCore.js";
+import { perfTime } from "@/utils/perfLog.js";
 import { resolveAdminDashboardUiSnapshot } from "@/predator/adminDashboardUiSnapshot.js";
 import {
   hasAdminDashboardDomKpis,
@@ -66,9 +67,12 @@ function mapOrderLineToItemShape(row) {
 
 /**
  * Browser-visible bounded Supabase rows + metric rollups (same scope as getAdminDashboardRead).
+ * @param {{ force?: boolean }} [options]
  */
-async function fetchBrowserDashboardDbSnapshot() {
-  const source = await fetchAdminDashboardBoundedSourceRows(supabase);
+async function fetchBrowserDashboardDbSnapshot(options = {}) {
+  const source = await fetchAdminDashboardBoundedSourceRows(supabase, {
+    force: options.force === true,
+  });
   const {
     errors,
     ordersRaw,
@@ -128,15 +132,19 @@ async function fetchBrowserDashboardDbSnapshot() {
  * @param {Object} [options]
  * @param {{ executive?: object, summary?: object }|null} [options.rendered]
  * @param {boolean} [options.printReport]
- * @param {boolean} [options.forceApi] — bypass dashboard read cache/in-flight (default true)
+ * @param {boolean} [options.forceApi] — bypass dashboard read cache/in-flight (default false; true on explicit refresh)
  */
 export async function runAdminDashboardValidation(options = {}) {
   const { rendered = null, printReport = true } = options;
-  const forceApi = options.forceApi !== false;
+  const forceApi = options.forceApi === true;
   const expected = QA_ADMIN_DASHBOARD_SEED;
 
-  const browser = await fetchBrowserDashboardDbSnapshot();
-  const apiResult = await getAdminDashboardRead({ force: forceApi });
+  const endValidation = perfTime("AdminDashboard.validation.full");
+  const [browser, apiResult] = await Promise.all([
+    fetchBrowserDashboardDbSnapshot({ force: forceApi }),
+    getAdminDashboardRead({ force: forceApi }),
+  ]);
+  endValidation({ forceApi });
   const apiValidatedAt = Date.now();
   const api = apiResult?.success ? apiResult.data : null;
 

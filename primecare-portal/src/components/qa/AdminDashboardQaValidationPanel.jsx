@@ -17,12 +17,13 @@ export default function AdminDashboardQaValidationPanel({ renderedSnapshot, auto
   const [running, setRunning] = useState(false);
   const [expanded, setExpanded] = useState(true);
 
-  const runValidation = useCallback(async () => {
+  const runValidation = useCallback(async (opts = {}) => {
     setRunning(true);
     try {
       const next = await runAdminDashboardValidation({
         rendered: renderedSnapshot,
         printReport: true,
+        forceApi: opts.forceApi === true,
       });
       setReport(next);
     } catch (err) {
@@ -86,7 +87,7 @@ export default function AdminDashboardQaValidationPanel({ renderedSnapshot, auto
           </button>
           <button
             type="button"
-            onClick={runValidation}
+            onClick={() => runValidation({ forceApi: true })}
             disabled={running}
             className="min-h-9 rounded-lg border border-current/30 bg-card/50 px-3 py-1 text-xs font-medium disabled:opacity-50"
           >
