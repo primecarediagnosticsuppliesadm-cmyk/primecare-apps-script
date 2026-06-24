@@ -8,6 +8,14 @@ export const HQ_DASHBOARD_RECENT_DAYS = 90;
 export const HQ_PAYMENTS_RECENT_DAYS = 90;
 export const HQ_PAYMENTS_RECENT_LIMIT = 5000;
 export const HQ_COLLECTIONS_AR_LIMIT = 5000;
+export const HQ_LABS_CREDIT_LIMIT = 5000;
+export const HQ_QUALIFICATION_LIMIT = 5000;
+export const HQ_INVENTORY_HEALTH_LIMIT = 5000;
+export const HQ_INVENTORY_LEDGER_LIMIT = 10000;
+export const HQ_INVENTORY_LEDGER_RECENT_DAYS = 90;
+export const HQ_SEARCH_CATALOG_LIMIT = 2000;
+export const HQ_SEARCH_STOCK_LIMIT = 2000;
+export const HQ_PURCHASE_ORDER_LIMIT = 1000;
 
 export const HQ_ORDER_LIST_COLUMNS =
   "id,order_id,lab_id,status,order_date,created_at,total_amount,tenant_id,created_by,notes,agent_id,inventory_updated,fulfilled_at";
@@ -29,8 +37,27 @@ export const HQ_LABS_NAME_COLUMNS = "lab_id,lab_name";
 export const HQ_V_LABS_CREDIT_COLUMNS =
   "lab_id,lab_name,outstanding,credit_limit,credit_hold,tenant_id,credit_status,days_overdue";
 
+/** Full v_labs_credit projection for LabsPage / Agent workspace mapping (view-safe columns only). */
+export const HQ_V_LABS_CREDIT_LIST_COLUMNS =
+  "lab_id,lab_name,tenant_id,area,owner_name,phone,assigned_agent_id,status,credit_hold,credit_limit,credit_status,days_overdue,outstanding,allowed_overdue_days";
+
 export const HQ_INVENTORY_COLUMNS =
   "tenant_id,product_id,current_stock,min_stock,reorder_qty,stock_in,stock_out,last_updated";
+
+export const HQ_INVENTORY_HEALTH_COLUMNS = HQ_INVENTORY_COLUMNS;
+
+export const HQ_INVENTORY_LEDGER_COLUMNS =
+  "id,created_at,tenant_id,product_id,product_name,movement_type,quantity,order_id,reference_type,reference_id,created_by,stock_before,stock_after";
+
+export const HQ_QUALIFICATION_COLUMNS =
+  "id,tenant_id,lab_id,lab_size,monthly_consumables_estimate,current_supplier,payment_terms,decision_maker,reagent_rental_potential,lab_os_fit,next_follow_up_date,founder_review_status,qualification_score,qualification_band,agent_id,agent_name,updated_by,notes,created_at,updated_at,pipeline_stage,pipeline_stage_updated_at,pipeline_stage_updated_by,pipeline_lost_reason,pipeline_next_action,pipeline_expected_value,pipeline_probability,pipeline_notes";
+
+export const HQ_V_LAB_CATALOG_COLUMNS = "product_id,product_name,category,tenant_id";
+
+export const HQ_V_STOCK_DASHBOARD_COLUMNS =
+  "product_id,product_name,category,tenant_id,current_stock,min_stock,reorder_qty,reorder_status,stock_health";
+
+export const HQ_PURCHASE_ORDER_COLUMNS = "po_id,id,status,supplier_name,tenant_id,created_at";
 
 export const HQ_AGENT_VISIT_COLUMNS =
   "id,lab_id,agent_id,agent_name,visit_date,created_at,notes,visit_type,tenant_id,visit_id";

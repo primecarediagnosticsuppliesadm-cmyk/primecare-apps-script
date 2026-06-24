@@ -58,7 +58,16 @@ import {
   HQ_V_LABS_CREDIT_COLUMNS,
   recentDateYmd,
 } from "@/api/hqReadBounds.js";
-import { fetchAdminDashboardBoundedSourceRows, fetchCollectionsBoundedArRows, fetchAgentVisitsBoundedRows } from "@/api/adminDashboardBoundedReads.js";
+import {
+  fetchAdminDashboardBoundedSourceRows,
+  fetchCollectionsBoundedArRows,
+  fetchAgentVisitsBoundedRows,
+  fetchLabsCreditBoundedRows,
+  fetchQualificationBoundedRows,
+  fetchInventoryBoundedRows,
+  fetchInventoryLedgerBoundedRows,
+  fetchPaymentsBoundedRows,
+} from "@/api/hqBoundedReads.js";
 import { hqDebugLog, hqDebugWarn, isHqDebugLogEnabled } from "@/utils/hqDebugLog.js";
 import { recordPredatorCacheEvent } from "@/predator/cacheDiagnostics.js";
 import {
@@ -915,7 +924,7 @@ export async function getLabsCredit() {
     );
   }
 
-  const { data: rawRows, error } = await supabase.from("v_labs_credit").select("*");
+  const { data: rawRows, error } = await fetchLabsCreditBoundedRows(supabase);
 
   if (error) {
     throw new Error(error.message || "Supabase labs read failed");
@@ -1619,20 +1628,16 @@ export async function getCollectionsRead(params = {}) {
       };
     }
 
-    const { data: payTodayRaw, error: payTodayErr } = await supabase
-      .from("payments")
-      .select(HQ_PAYMENT_COLUMNS)
-      .eq("payment_date", today);
+    const { data: payTodayRaw, error: payTodayErr } = await fetchPaymentsBoundedRows(supabase, {
+      paymentDateEq: today,
+    });
     if (payTodayErr) {
       console.warn("[getCollectionsRead] payments today:", payTodayErr.message);
     }
 
-    const { data: payRecentRaw, error: payRecentErr } = await supabase
-      .from("payments")
-      .select(HQ_PAYMENT_COLUMNS)
-      .gte("payment_date", recentFrom)
-      .order("payment_date", { ascending: false })
-      .limit(HQ_PAYMENTS_RECENT_LIMIT);
+    const { data: payRecentRaw, error: payRecentErr } = await fetchPaymentsBoundedRows(supabase, {
+      daysBack: Number(params.daysBack) > 0 ? Number(params.daysBack) : HQ_PAYMENTS_RECENT_DAYS,
+    });
 
     if (payRecentErr) {
       console.warn("[getCollectionsRead] payments recent:", payRecentErr.message);
@@ -1646,9 +1651,9 @@ export async function getCollectionsRead(params = {}) {
 
     const todayCollections = sumTodayPayments(payTodayRaw || []);
 
-    const { data: labsRaw, error: labsErr } = await supabase
-      .from("v_labs_credit")
-      .select(HQ_V_LABS_CREDIT_COLUMNS);
+    const { data: labsRaw, error: labsErr } = await fetchLabsCreditBoundedRows(supabase, {
+      columns: HQ_V_LABS_CREDIT_COLUMNS,
+    });
     if (labsErr) {
       console.warn("[getCollectionsRead] v_labs_credit:", labsErr.message);
     }
@@ -3147,10 +3152,7 @@ export async function getQualificationReviewRead() {
   }
 
   try {
-    const { data: qualRows, error: qualErr } = await supabase
-      .from("lab_qualifications")
-      .select("*")
-      .order("updated_at", { ascending: false });
+    const { data: qualRows, error: qualErr } = await fetchQualificationBoundedRows(supabase);
 
     if (qualErr) {
       return {
@@ -3160,9 +3162,9 @@ export async function getQualificationReviewRead() {
       };
     }
 
-    const { data: labsRaw, error: labsErr } = await supabase
-      .from("v_labs_credit")
-      .select("lab_id, lab_name, area");
+    const { data: labsRaw, error: labsErr } = await fetchLabsCreditBoundedRows(supabase, {
+      columns: "lab_id, lab_name, area",
+    });
 
     if (labsErr) {
       console.warn("[getQualificationReviewRead] v_labs_credit:", labsErr.message);
@@ -3436,7 +3438,7 @@ export async function getAgentWorkspaceRead(currentUser) {
       : [];
     const pendingCollections = filterCollectionsForUser(allCollections, currentUser, ownershipRows);
 
-    const { data: labsRaw, error: labsErr } = await supabase.from("v_labs_credit").select("*");
+    const { data: labsRaw, error: labsErr } = await fetchLabsCreditBoundedRows(supabase);
     if (labsErr) {
       console.warn("[getAgentWorkspaceRead] v_labs_credit:", labsErr.message);
     }
@@ -3784,8 +3786,8 @@ export async function getInventoryHealthRead() {
 
   try {
     const [inventoryRes, ledgerRes] = await Promise.all([
-      supabase.from("inventory").select("*"),
-      supabase.from("inventory_ledger").select("*"),
+      fetchInventoryBoundedRows(supabase),
+      fetchInventoryLedgerBoundedRows(supabase),
     ]);
 
     if (inventoryRes.error) {

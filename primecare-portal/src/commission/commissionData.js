@@ -1,4 +1,8 @@
 import { supabase } from "@/api/supabaseClient.js";
+import {
+  fetchOrderLinesBoundedRows,
+  fetchPaymentsBoundedRows,
+} from "@/api/hqBoundedReads.js";
 import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
 import { buildFounderPhaseEngineView } from "@/founder/founderPhaseEngine.js";
 import { appendOperationalEvent } from "@/operations/operationalEventBridge.js";
@@ -34,7 +38,7 @@ function str(v) {
 
 export async function fetchPaymentsRaw() {
   if (!supabase) return [];
-  const { data, error } = await supabase.from("payments").select("*");
+  const { data, error } = await fetchPaymentsBoundedRows(supabase);
   if (error) {
     console.warn("[commission] payments read", error.message);
     return [];
@@ -44,7 +48,7 @@ export async function fetchPaymentsRaw() {
 
 export async function fetchOrderLinesRaw() {
   if (!supabase) return [];
-  const { data, error } = await supabase.from("order_lines").select("*").limit(5000);
+  const { data, error } = await fetchOrderLinesBoundedRows(supabase);
   if (error) return [];
   return Array.isArray(data) ? data : [];
 }

@@ -1,4 +1,5 @@
 import { supabase } from "@/api/supabaseClient.js";
+import { fetchQualificationBoundedRows } from "@/api/hqBoundedReads.js";
 import { getQualificationReviewRead } from "@/api/primecareSupabaseApi.js";
 import { createPredatorEntry, summarizePredatorEntries } from "@/predator/predatorSchema.js";
 import {
@@ -60,7 +61,7 @@ export async function validateQualificationModule({ ctx, rendered = null }) {
       };
     }
 
-    const qualRes = await supabase.from("lab_qualifications").select("*");
+    const qualRes = await fetchQualificationBoundedRows(supabase);
     const qualRaw = qualRes.error ? [] : qualRes.data || [];
     const dbCount = qualRaw.length;
 

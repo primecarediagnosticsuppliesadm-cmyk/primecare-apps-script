@@ -17,6 +17,19 @@ import {
   summarizeHqSearchIndex,
   formatHqSearchCoverageLine,
 } from "../src/operations/hqGlobalSearchEngine.js";
+import {
+  HQ_DASHBOARD_ORDERS_LIMIT,
+  HQ_DASHBOARD_RECENT_DAYS,
+  HQ_LABS_CREDIT_LIMIT,
+  HQ_ORDER_LIST_COLUMNS,
+  HQ_PURCHASE_ORDER_COLUMNS,
+  HQ_PURCHASE_ORDER_LIMIT,
+  HQ_SEARCH_CATALOG_LIMIT,
+  HQ_SEARCH_STOCK_LIMIT,
+  HQ_V_LAB_CATALOG_COLUMNS,
+  HQ_V_STOCK_DASHBOARD_COLUMNS,
+  recentDateYmd,
+} from "../src/api/hqReadBounds.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -79,17 +92,32 @@ const { data: profile } = await supabase
   .maybeSingle();
 const tenantId = str(profile?.tenant_id);
 
-const [labsRes, ordersRes, catalogRes, stockRes, poRes, usersRes] = await Promise.all([
-  supabase.from("v_labs_credit").select("*"),
-  supabase.from("orders").select("*"),
-  supabase.from("v_lab_catalog").select("*"),
-  supabase.from("v_stock_dashboard").select("*"),
-  supabase.from("purchase_orders").select("*"),
+const recentFrom = recentDateYmd(HQ_DASHBOARD_RECENT_DAYS);
+
+const [labsRes, ordersRes, catalogRes, stockRes, poRes] = await Promise.all([
   supabase
-    .from("profiles")
-    .select("user_id, display_name, agent_name, role, username, email, agent_id")
-    .eq("tenant_id", tenantId),
+    .from("v_labs_credit")
+    .select("lab_id,lab_name,tenant_id,area,owner_name,assigned_agent_id")
+    .limit(HQ_LABS_CREDIT_LIMIT),
+  supabase
+    .from("orders")
+    .select(HQ_ORDER_LIST_COLUMNS)
+    .gte("order_date", recentFrom)
+    .order("order_date", { ascending: false })
+    .limit(HQ_DASHBOARD_ORDERS_LIMIT),
+  supabase.from("v_lab_catalog").select(HQ_V_LAB_CATALOG_COLUMNS).limit(HQ_SEARCH_CATALOG_LIMIT),
+  supabase.from("v_stock_dashboard").select(HQ_V_STOCK_DASHBOARD_COLUMNS).limit(HQ_SEARCH_STOCK_LIMIT),
+  supabase
+    .from("purchase_orders")
+    .select(HQ_PURCHASE_ORDER_COLUMNS)
+    .order("created_at", { ascending: false })
+    .limit(HQ_PURCHASE_ORDER_LIMIT),
 ]);
+
+const usersRes = await supabase
+  .from("profiles")
+  .select("user_id, display_name, agent_name, role, username, email, agent_id")
+  .eq("tenant_id", tenantId);
 
 function mapLab(r) {
   return {
@@ -98,7 +126,7 @@ function mapLab(r) {
     tenantId: r.tenant_id,
     area: r.area,
     ownerName: r.owner_name,
-    assignedAgent: r.assigned_agent,
+    assignedAgent: r.assigned_agent_id,
   };
 }
 
