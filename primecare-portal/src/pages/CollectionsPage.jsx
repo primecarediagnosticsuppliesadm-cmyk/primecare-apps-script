@@ -58,6 +58,7 @@ import {
   ALLOW_LEGACY_APPS_SCRIPT,
 } from "@/config/environment";
 import { ROLES } from "@/config/roles";
+import { getAgentActiveLabOwnershipRowsRead } from "@/api/labOwnershipApi.js";
 import { filterCollectionsForUser } from "@/utils/accessFilters.js";
 import { notifyAgentWorkspaceRefresh } from "@/pages/agentVisitContext.js";
 import { startVisitFromWorkspaceItem } from "@/pages/agentVisitContext.js";
@@ -119,9 +120,15 @@ import { useAgentDailyOs } from "@/hooks/useAgentDailyOs.js";
 import { sortByAgentRouteOrder } from "@/pages/agentOsModel.js";
 import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
 
-function buildCollectionsViewFromPayload(payload, currentUser, distributorScope, isLabAccount) {
+function buildCollectionsViewFromPayload(
+  payload,
+  currentUser,
+  distributorScope,
+  isLabAccount,
+  ownershipRows = []
+) {
   const allRows = Array.isArray(payload?.collections) ? payload.collections : [];
-  let rows = filterCollectionsForUser(allRows, currentUser);
+  let rows = filterCollectionsForUser(allRows, currentUser, ownershipRows);
   if (distributorScope?.tenantId) {
     rows = filterRowsByTenant(rows, distributorScope.tenantId, { tenantKey: rowTenantId });
   } else if (
@@ -1936,13 +1943,22 @@ export default function CollectionsPage({
         setLoadError("");
 
         logSupabaseFeatureSource("Collections.list", { api: "getCollectionsRead" });
-        const res = await getCollectionsRead({ force: silent });
+        const [res, ownershipRes] = await Promise.all([
+          getCollectionsRead({ force: silent }),
+          currentUser?.role === ROLES.AGENT
+            ? getAgentActiveLabOwnershipRowsRead()
+            : Promise.resolve({ data: { rows: [] } }),
+        ]);
         const payload = res?.data || {};
+        const ownershipRows = Array.isArray(ownershipRes?.data?.rows)
+          ? ownershipRes.data.rows
+          : [];
         const built = buildCollectionsViewFromPayload(
           payload,
           currentUser,
           distributorScope,
-          isLabAccount
+          isLabAccount,
+          ownershipRows
         );
 
         setSummary(built.summary);

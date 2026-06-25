@@ -1,3 +1,4 @@
+import { getAgentActiveLabOwnershipRowsRead } from "@/api/labOwnershipApi.js";
 import { supabase } from "./supabaseClient.js";
 import { autoAllocatePaymentToOrderInvoice } from "@/api/invoiceSupabaseApi.js";
 import {
@@ -3698,16 +3699,13 @@ export async function getAgentWorkspaceRead(currentUser, options = {}) {
   }
 
   try {
-    let ownershipRows = [];
-    if (currentUser?.role === "agent") {
-      const ownRes = await supabase
-        .from("lab_ownership")
-        .select("lab_tenant_id, lab_id, primary_agent_id, secondary_agent_id, status")
-        .eq("status", "ACTIVE");
-      if (!ownRes.error && Array.isArray(ownRes.data)) {
-        ownershipRows = ownRes.data;
-      }
-    }
+    const ownershipRes =
+      currentUser?.role === "agent"
+        ? await getAgentActiveLabOwnershipRowsRead()
+        : { data: { rows: [] } };
+    const ownershipRows = Array.isArray(ownershipRes?.data?.rows)
+      ? ownershipRes.data.rows
+      : [];
 
     const collectionsRes = await getCollectionsRead();
     const allCollections = Array.isArray(collectionsRes?.data?.collections)

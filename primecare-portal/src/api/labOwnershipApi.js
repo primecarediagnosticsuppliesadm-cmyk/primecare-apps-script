@@ -48,6 +48,33 @@ export async function getLabOwnershipRead(options = {}) {
   };
 }
 
+/**
+ * Active lab_ownership rows visible to the signed-in agent (RLS-scoped).
+ * Used for agent collections/lab filters when ar_credit_control.agent_id is unset.
+ */
+export async function getAgentActiveLabOwnershipRowsRead() {
+  if (!supabase) {
+    return { success: true, data: { rows: [] } };
+  }
+
+  const { data, error } = await supabase
+    .from("lab_ownership")
+    .select(
+      "tenant_id, lab_tenant_id, lab_id, primary_agent_id, secondary_agent_id, status"
+    )
+    .eq("status", "ACTIVE");
+
+  if (error) {
+    return {
+      success: !isMissingTableError(error.message || ""),
+      error: error.message,
+      data: { rows: [] },
+    };
+  }
+
+  return { success: true, data: { rows: data || [] } };
+}
+
 export async function getLabOwnership(options = {}) {
   const tenantId = str(options.tenantId ?? options.tenant_id);
   const labId = str(options.labId ?? options.lab_id);
