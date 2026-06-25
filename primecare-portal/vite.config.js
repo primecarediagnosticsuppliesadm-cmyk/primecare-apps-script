@@ -123,13 +123,17 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes("node_modules")) {
-            if (id.includes("@supabase")) return "supabase-vendor";
-            if (id.includes("react") || id.includes("scheduler")) return "react-vendor";
-            if (id.includes("recharts") || id.includes("d3-")) return "charts-vendor";
-            if (id.includes("lucide-react")) return "icons-vendor";
-            return "vendor";
+          if (!id.includes("node_modules")) return;
+          if (id.includes("@supabase")) return "supabase-vendor";
+          // Only core React packages — broad `id.includes("react")` pulled
+          // react-router, radix-ui, motion, lucide-react, etc. into react-vendor
+          // while their deps stayed in vendor, creating a circular chunk import.
+          if (/node_modules[/\\](react-dom|react|scheduler)[/\\]/.test(id)) {
+            return "react-vendor";
           }
+          if (id.includes("recharts") || id.includes("d3-")) return "charts-vendor";
+          if (id.includes("lucide-react")) return "icons-vendor";
+          return "vendor";
         },
       },
     },

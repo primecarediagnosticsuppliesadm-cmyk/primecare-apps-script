@@ -53,8 +53,11 @@ import {
   StatusBadge,
   DataFreshnessLabel,
   PageHeader,
+  visitTypeToVariant,
+  insightSeverityToVariant,
 } from "@/components/ux";
 import { cn } from "@/lib/utils";
+import { typography } from "@/styles/designTokens";
 import {
   TrendingUp,
   AlertTriangle,
