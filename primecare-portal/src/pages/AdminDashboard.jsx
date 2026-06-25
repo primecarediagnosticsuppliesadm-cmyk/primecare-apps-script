@@ -11,6 +11,7 @@ import {
   getReorderForecastRead,
   getAdminDashboardRead,
   invalidateAdminDashboardReadCache,
+  peekAdminDashboardReadCache,
   normalizeAdminDashboardPayload,
   resolveAdminVisitRevenue,
 } from "@/api/primecareSupabaseApi";
@@ -740,10 +741,25 @@ function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) 
 }
 
 export default function AdminDashboard({ currentUser, setActivePage }) {
-  const initialBundle =
-    !shouldUseQaDirectDashboardRead() && adminDashboardCache.dashboard && adminDashboardCache.executive
-      ? { summary: adminDashboardCache.dashboard, executive: adminDashboardCache.executive }
-      : null;
+  const resolveInitialAdminBundle = () => {
+    if (!shouldUseQaDirectDashboardRead()) {
+      if (adminDashboardCache.dashboard && adminDashboardCache.executive) {
+        return { summary: adminDashboardCache.dashboard, executive: adminDashboardCache.executive };
+      }
+      return null;
+    }
+    const peeked = peekAdminDashboardReadCache();
+    if (!peeked?.data) return null;
+    const hydrated = normalizeDashboardFromReadResult(peeked);
+    if (!hydrated?.summary || !hydrated?.executive) return null;
+    adminDashboardCache.dashboard = hydrated.summary;
+    adminDashboardCache.executive = hydrated.executive;
+    adminDashboardCache.dashboardLoadedAt = Date.now();
+    adminDashboardCache.executiveLoadedAt = Date.now();
+    return { summary: hydrated.summary, executive: hydrated.executive };
+  };
+
+  const initialBundle = resolveInitialAdminBundle();
 
   const [dashboardBundle, setDashboardBundle] = useState(initialBundle);
   const [kpiModel, setKpiModel] = useState(() => {
@@ -761,14 +777,10 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     shouldUseQaDirectDashboardRead() ? EMPTY_VISITS_PAYLOAD : adminDashboardCache.visits
   );
 
-  const [kpisLoading, setKpisLoading] = useState(
-    shouldUseQaDirectDashboardRead() ? true : !initialBundle
-  );
+  const [kpisLoading, setKpisLoading] = useState(() => !initialBundle);
   const [refreshing, setRefreshing] = useState(false);
   const [backgroundLoading, setBackgroundLoading] = useState(false);
-  const [dataLoadedAt, setDataLoadedAt] = useState(
-    !shouldUseQaDirectDashboardRead() && initialBundle ? Date.now() : null
-  );
+  const [dataLoadedAt, setDataLoadedAt] = useState(() => (initialBundle ? Date.now() : null));
   const [errorMessage, setErrorMessage] = useState("");
   const [domKpiValues, setDomKpiValues] = useState({});
   const loadGenerationRef = useRef(0);

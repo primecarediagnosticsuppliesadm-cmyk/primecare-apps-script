@@ -2,14 +2,15 @@ import React, { useEffect, useRef, useState } from "react";
 import PageSkeleton from "./PageSkeleton";
 import { cn } from "@/lib/utils";
 
-const MIN_MS = 60;
-const MAX_MS = 500;
+const COLD_MIN_MS = 0;
+const COLD_MAX_MS = 120;
 
 /**
- * Brief skeleton overlay on sidebar navigation — avoids frozen blank transitions.
- * @param {{ pageKey: string, children: React.ReactNode, className?: string }} props
+ * Brief skeleton overlay on cold sidebar navigation only.
+ * Skipped when skipOverlay is true (warm cache / revisit).
+ * @param {{ pageKey: string, skipOverlay?: boolean, children: React.ReactNode, className?: string }} props
  */
-export default function RouteTransitionOverlay({ pageKey, children, className }) {
+export default function RouteTransitionOverlay({ pageKey, skipOverlay = false, children, className }) {
   const [visible, setVisible] = useState(false);
   const prevKey = useRef(pageKey);
   const hideTimer = useRef(null);
@@ -18,19 +19,27 @@ export default function RouteTransitionOverlay({ pageKey, children, className })
     if (prevKey.current === pageKey) return undefined;
 
     prevKey.current = pageKey;
-    setVisible(true);
 
     if (hideTimer.current) window.clearTimeout(hideTimer.current);
+    if (skipOverlay) {
+      setVisible(false);
+      return undefined;
+    }
+
+    setVisible(true);
 
     const minTimer = window.setTimeout(() => {
-      hideTimer.current = window.setTimeout(() => setVisible(false), MAX_MS - MIN_MS);
-    }, MIN_MS);
+      hideTimer.current = window.setTimeout(
+        () => setVisible(false),
+        Math.max(0, COLD_MAX_MS - COLD_MIN_MS)
+      );
+    }, COLD_MIN_MS);
 
     return () => {
       window.clearTimeout(minTimer);
       if (hideTimer.current) window.clearTimeout(hideTimer.current);
     };
-  }, [pageKey]);
+  }, [pageKey, skipOverlay]);
 
   return (
     <div className={cn("relative", className)}>

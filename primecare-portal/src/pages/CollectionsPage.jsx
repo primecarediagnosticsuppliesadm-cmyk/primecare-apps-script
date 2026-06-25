@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getCollectionDetails,
   getCollectionHistory,
@@ -10,6 +10,7 @@ import {
   getCollectionDetailRead,
   getCollectionHistoryRead,
   getCollectionsRead,
+  peekCollectionsReadCache,
   getLabRecentOrdersRead,
   updateCollectionNotesWrite,
   deriveCollectionPaymentStatus,
@@ -116,6 +117,58 @@ import { AgentRouteStopBadge } from "@/components/agent/AgentOsSections.jsx";
 import { AgentLabFieldStrip } from "@/components/agent/AgentFieldExecution.jsx";
 import { useAgentDailyOs } from "@/hooks/useAgentDailyOs.js";
 import { sortByAgentRouteOrder } from "@/pages/agentOsModel.js";
+import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
+
+function buildCollectionsViewFromPayload(payload, currentUser, distributorScope, isLabAccount) {
+  const allRows = Array.isArray(payload?.collections) ? payload.collections : [];
+  let rows = filterCollectionsForUser(allRows, currentUser);
+  if (distributorScope?.tenantId) {
+    rows = filterRowsByTenant(rows, distributorScope.tenantId, { tenantKey: rowTenantId });
+  } else if (
+    !isLabAccount &&
+    (currentUser?.role === ROLES.EXECUTIVE || currentUser?.role === ROLES.ADMIN)
+  ) {
+    const homeId = str(currentUser?.tenantId || currentUser?.tenant_id);
+    if (homeId) {
+      rows = filterRowsByTenant(rows, homeId, { tenantKey: rowTenantId });
+    }
+  }
+  const summaryFromApi = payload?.summary || {};
+  const useFilteredSummary =
+    isLabAccount ||
+    distributorScope?.tenantId ||
+    currentUser?.role === ROLES.AGENT;
+  const scopedSummary = useFilteredSummary
+    ? summarizeCollectionsList(rows, Number(summaryFromApi.todayCollections ?? 0))
+    : {
+        totalOutstanding: Number(summaryFromApi.totalOutstanding ?? 0),
+        overdueCount: Number(summaryFromApi.overdueCount ?? 0),
+        highRiskCount: Number(summaryFromApi.highRiskCount ?? 0),
+        todayCollections: Number(summaryFromApi.todayCollections ?? 0),
+      };
+  return {
+    collections: rows,
+    summary: {
+      totalOutstanding: Number(scopedSummary.totalOutstanding ?? 0),
+      overdueCount: Number(scopedSummary.overdueCount ?? 0),
+      highRiskCount: Number(scopedSummary.highRiskCount ?? 0),
+      todayCollections: Number(scopedSummary.todayCollections ?? 0),
+    },
+  };
+}
+
+function hydrateCollectionsFromCache(currentUser, distributorScope, isLabAccount) {
+  const cacheKey = `collections:${String(currentUser?.role || "")}:${String(distributorScope?.tenantId || currentUser?.tenantId || "")}:${isLabAccount ? "lab" : "hq"}`;
+  const ui = readPageUiCache(cacheKey);
+  if (ui?.collections?.length) {
+    return { cacheKey, collections: ui.collections, summary: ui.summary };
+  }
+  const peeked = peekCollectionsReadCache();
+  if (!peeked?.data) return null;
+  const built = buildCollectionsViewFromPayload(peeked.data, currentUser, distributorScope, isLabAccount);
+  if (!built.collections.length) return null;
+  return { cacheKey, ...built };
+}
 
 function findCollectionByLabId(list, labId) {
   const target = labIdKey(labId);
@@ -1727,22 +1780,35 @@ export default function CollectionsPage({
     };
   }, [isLabAccount]);
   const { showToast } = usePortalToast();
-  const [summary, setSummary] = useState({
-    totalOutstanding: 0,
-    overdueCount: 0,
-    highRiskCount: 0,
-    todayCollections: 0,
-  });
 
-  const [collections, setCollections] = useState([]);
+  const hydratedCollections = useMemo(
+    () => hydrateCollectionsFromCache(currentUser, distributorScope, isLabAccount),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-time hydration only
+    []
+  );  const hadCacheOnMount = useRef(Boolean(hydratedCollections));
+  const collectionsCacheKey =
+    hydratedCollections?.cacheKey ||
+    `collections:${String(currentUser?.role || "")}:${String(distributorScope?.tenantId || currentUser?.tenantId || "")}:${isLabAccount ? "lab" : "hq"}`;
+
+  const [summary, setSummary] = useState(
+    () =>
+      hydratedCollections?.summary ?? {
+        totalOutstanding: 0,
+        overdueCount: 0,
+        highRiskCount: 0,
+        todayCollections: 0,
+      }
+  );
+
+  const [collections, setCollections] = useState(() => hydratedCollections?.collections ?? []);
   const [expandedLabId, setExpandedLabId] = useState("");
   const [selectedCollection, setSelectedCollection] = useState(null);
   const [history, setHistory] = useState([]);
 
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !hydratedCollections);
   const [listRefreshing, setListRefreshing] = useState(false);
-  const [dataLoadedAt, setDataLoadedAt] = useState(null);
+  const [dataLoadedAt, setDataLoadedAt] = useState(() => (hydratedCollections ? Date.now() : null));
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [completingTask, setCompletingTask] = useState(false);
@@ -1861,54 +1927,32 @@ export default function CollectionsPage({
     },
   });
 
-  const loadCollections = useCallback(async () => {
+  const loadCollections = useCallback(async ({ silent = false } = {}) => {
     return predatorTrace("Collections", "page.load", async () => {
       try {
-        const hasRows = collections.length > 0;
-        if (hasRows) setListRefreshing(true);
+        const hasRows = collections.length > 0 || hadCacheOnMount.current;
+        if (silent || hasRows) setListRefreshing(true);
         else setLoading(true);
         setLoadError("");
 
         logSupabaseFeatureSource("Collections.list", { api: "getCollectionsRead" });
-        const res = await getCollectionsRead();
+        const res = await getCollectionsRead({ force: silent });
         const payload = res?.data || {};
+        const built = buildCollectionsViewFromPayload(
+          payload,
+          currentUser,
+          distributorScope,
+          isLabAccount
+        );
 
-        const allRows = Array.isArray(payload.collections) ? payload.collections : [];
-        let rows = filterCollectionsForUser(allRows, currentUser);
-        if (distributorScope?.tenantId) {
-          rows = filterRowsByTenant(rows, distributorScope.tenantId, { tenantKey: rowTenantId });
-        } else if (
-          !isLabAccount &&
-          (currentUser?.role === ROLES.EXECUTIVE || currentUser?.role === ROLES.ADMIN)
-        ) {
-          const homeId = str(currentUser?.tenantId || currentUser?.tenant_id);
-          if (homeId) {
-            rows = filterRowsByTenant(rows, homeId, { tenantKey: rowTenantId });
-          }
-        }
-        const summaryFromApi = payload.summary || {};
-        const useFilteredSummary =
-          isLabAccount ||
-          distributorScope?.tenantId ||
-          currentUser?.role === ROLES.AGENT;
-        const scopedSummary = useFilteredSummary
-          ? summarizeCollectionsList(rows, Number(summaryFromApi.todayCollections ?? 0))
-          : {
-              totalOutstanding: Number(summaryFromApi.totalOutstanding ?? 0),
-              overdueCount: Number(summaryFromApi.overdueCount ?? 0),
-              highRiskCount: Number(summaryFromApi.highRiskCount ?? 0),
-              todayCollections: Number(summaryFromApi.todayCollections ?? 0),
-            };
-
-        setSummary({
-          totalOutstanding: Number(scopedSummary.totalOutstanding ?? 0),
-          overdueCount: Number(scopedSummary.overdueCount ?? 0),
-          highRiskCount: Number(scopedSummary.highRiskCount ?? 0),
-          todayCollections: Number(scopedSummary.todayCollections ?? 0),
+        setSummary(built.summary);
+        setCollections(built.collections);
+        writePageUiCache(collectionsCacheKey, {
+          collections: built.collections,
+          summary: built.summary,
         });
 
-        setCollections(rows);
-
+        const rows = built.collections;
         if (
           !isLabAccount &&
           String(currentUser?.role || "").toLowerCase() !== ROLES.AGENT &&
@@ -1942,7 +1986,7 @@ export default function CollectionsPage({
               "Failed to load account information"
             )
         );
-        if (!hasRows) {
+        if (!collections.length && !hadCacheOnMount.current) {
           setSummary({
             totalOutstanding: 0,
             overdueCount: 0,
@@ -1957,10 +2001,10 @@ export default function CollectionsPage({
         setDataLoadedAt(Date.now());
       }
     });
-  }, [currentUser, isLabAccount]);
+  }, [currentUser, isLabAccount, distributorScope, collections.length, collectionsCacheKey]);
 
   useEffect(() => {
-    loadCollections();
+    void loadCollections({ silent: hadCacheOnMount.current });
   }, [loadCollections, authToken]);
 
   useEffect(() => {

@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { recordQualificationRenderedSnapshot } from "@/predator/moduleUiSnapshot.js";
 import { usePredatorRenderTrace } from "@/predator/renderTrace.js";
 import { usePredatorUiSyncTrace } from "@/predator/usePredatorUiSyncTrace.js";
 import {
   getQualificationReviewRead,
+  peekQualificationReviewReadCache,
   updateQualificationPipelineWrite,
 } from "@/api/primecareSupabaseApi";
 import { Card } from "@/components/ui/card";
@@ -54,6 +55,17 @@ import {
 } from "@/utils/qualificationPipeline";
 import HqQualificationRecommendations from "@/components/hq/HqQualificationRecommendations.jsx";
 import { enterDistributorOs } from "@/tenant/tenantFoundationStore.js";
+import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
+
+function hydrateQualificationFromCache() {
+  const ui = readPageUiCache("qualification:review");
+  if (ui?.rows?.length) {
+    return { rows: ui.rows, contracts: ui.contracts || [] };
+  }
+  const peeked = peekQualificationReviewReadCache();
+  if (!peeked?.success || !Array.isArray(peeked.data) || !peeked.data.length) return null;
+  return { rows: peeked.data, contracts: [] };
+}
 
 function canEditPipeline() {
   return false;
@@ -992,9 +1004,12 @@ function QualificationReviewLoading() {
 }
 
 export default function QualificationReviewPage({ currentUser, setActivePage = null }) {
-  const [rows, setRows] = useState([]);
-  const [contracts, setContracts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const hydratedQual = useMemo(() => hydrateQualificationFromCache(), []);
+  const hadCacheOnMount = useRef(Boolean(hydratedQual));
+  const [rows, setRows] = useState(() => hydratedQual?.rows ?? []);
+  const [contracts, setContracts] = useState(() => hydratedQual?.contracts ?? []);
+  const [loading, setLoading] = useState(() => !hydratedQual);
+  const [listRefreshing, setListRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -1007,28 +1022,34 @@ export default function QualificationReviewPage({ currentUser, setActivePage = n
   const [saveMeta, setSaveMeta] = useState({});
   const { showToast } = usePortalToast();
 
-  const loadRows = useCallback(async () => {
+  const loadRows = useCallback(async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
+      if (silent) setListRefreshing(true);
+      else if (!rows.length) setLoading(true);
+      else setListRefreshing(true);
       setError("");
       const [res, contractRows] = await Promise.all([
-        getQualificationReviewRead(),
+        getQualificationReviewRead({ force: silent }),
         loadVisibleLabContracts().catch(() => []),
       ]);
       if (!res?.success) {
         throw new Error(res?.error || "Failed to load qualification reviews");
       }
-      setRows(Array.isArray(res.data) ? res.data : []);
-      setContracts(Array.isArray(contractRows) ? contractRows : []);
+      const nextRows = Array.isArray(res.data) ? res.data : [];
+      const nextContracts = Array.isArray(contractRows) ? contractRows : [];
+      setRows(nextRows);
+      setContracts(nextContracts);
+      writePageUiCache("qualification:review", { rows: nextRows, contracts: nextContracts });
     } catch (err) {
       setError(err?.message || "Failed to load qualification reviews");
     } finally {
       setLoading(false);
+      setListRefreshing(false);
     }
-  }, []);
+  }, [rows.length]);
 
   useEffect(() => {
-    loadRows();
+    void loadRows({ silent: hadCacheOnMount.current });
   }, [loadRows]);
 
   const predatorSnapshot = useMemo(
@@ -1120,7 +1141,7 @@ export default function QualificationReviewPage({ currentUser, setActivePage = n
     }
   }
 
-  if (loading) {
+  if (loading && !rows.length) {
     return <QualificationReviewLoading />;
   }
 

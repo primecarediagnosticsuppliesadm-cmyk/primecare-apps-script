@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
-import { getStockDashboard } from "../api/primecareSupabaseApi";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { getStockDashboard, peekStockDashboardReadCache } from "../api/primecareSupabaseApi";
 import { fetchDatabaseTenants } from "@/tenant/durableTenantStore.js";
 import InventoryLedgerPage from "./InventoryLedgerPage";
 import InventoryHealthPage from "./InventoryHealthPage";
@@ -12,6 +12,17 @@ import {
   distributorNamesFromRegistry,
   loadInventoryEconomicsBundle,
 } from "@/inventory/inventoryEconomicsData.js";
+import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
+
+function hydrateStockFromCache() {
+  const ui = readPageUiCache("inventory:stock");
+  if (ui?.data?.inventory?.length) {
+    return { data: ui.data, tenantNameById: ui.tenantNameById || new Map() };
+  }
+  const peeked = peekStockDashboardReadCache();
+  if (!peeked?.success || !peeked?.data?.inventory?.length) return null;
+  return { data: peeked.data, tenantNameById: new Map() };
+}
 
 function str(v) {
   return String(v ?? "").trim();
@@ -94,10 +105,15 @@ function HealthBadge({ health }) {
 }
 
 export default function StockPage({ currentUser = null }) {
+  const hydratedStock = useMemo(() => hydrateStockFromCache(), []);
+  const hadCacheOnMount = useRef(Boolean(hydratedStock));
   const [activeTab, setActiveTab] = useState("stock");
-  const [data, setData] = useState({ stats: {}, inventory: [] });
-  const [tenantNameById, setTenantNameById] = useState(new Map());
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(() => hydratedStock?.data ?? { stats: {}, inventory: [] });
+  const [tenantNameById, setTenantNameById] = useState(
+    () => hydratedStock?.tenantNameById ?? new Map()
+  );
+  const [loading, setLoading] = useState(() => !hydratedStock);
+  const [listRefreshing, setListRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [tenantFilter, setTenantFilter] = useState("hq");
@@ -130,12 +146,14 @@ export default function StockPage({ currentUser = null }) {
     };
   }, [activeTab]);
 
-  const loadStock = useCallback(async () => {
+  const loadStock = useCallback(async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
+      if (silent) setListRefreshing(true);
+      else if (!data.inventory?.length) setLoading(true);
+      else setListRefreshing(true);
       setError("");
       const [res, tenantsRes] = await Promise.all([
-        getStockDashboard(),
+        getStockDashboard({ force: silent }),
         fetchDatabaseTenants(),
       ]);
 
@@ -153,16 +171,19 @@ export default function StockPage({ currentUser = null }) {
         if (id && name) nameMap.set(id, name);
       }
       setTenantNameById(nameMap);
-      setData(res.data || { stats: {}, inventory: [] });
+      const nextData = res.data || { stats: {}, inventory: [] };
+      setData(nextData);
+      writePageUiCache("inventory:stock", { data: nextData, tenantNameById: nameMap });
     } catch (err) {
       setError(err.message || "Something went wrong");
     } finally {
       setLoading(false);
+      setListRefreshing(false);
     }
-  }, []);
+  }, [data.inventory?.length]);
 
   useEffect(() => {
-    void loadStock();
+    void loadStock({ silent: hadCacheOnMount.current });
   }, [loadStock]);
 
   const hasInventoryRows = (data.inventory || []).length > 0;
@@ -287,17 +308,21 @@ export default function StockPage({ currentUser = null }) {
         <InventoryHealthPage />
       ) : activeTab === "ledger" ? (
         <InventoryLedgerPage />
-      ) : loading ? (
+      ) : loading && !hasInventoryRows ? (
         <PageSkeleton kpiCount={4} kpiColumns={4} listRows={8} className="p-4" />
       ) : error && !hasInventoryRows ? (
-        <DataFetchError message={error} onRetry={() => void loadStock()} retrying={loading} />
+        <DataFetchError
+          message={error}
+          onRetry={() => void loadStock()}
+          retrying={loading || listRefreshing}
+        />
       ) : (
         <>
           {error ? (
             <DataFetchError
               message={error}
-              onRetry={() => void loadStock()}
-              retrying={loading}
+              onRetry={() => void loadStock({ silent: hasInventoryRows })}
+              retrying={loading || listRefreshing}
               staleDataNote="Showing the last inventory snapshot loaded successfully."
               className="mb-3"
             />

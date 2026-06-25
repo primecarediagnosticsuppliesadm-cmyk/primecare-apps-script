@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import {
   IndianRupee,
   ArrowRight,
 } from "lucide-react";
-import { createLabWrite, getLabsCredit } from "@/api/primecareSupabaseApi";
+import { createLabWrite, getLabsCredit, peekLabsCreditReadCache } from "@/api/primecareSupabaseApi";
 import { loadLabOwnershipMetricsBundle } from "@/operations/operationsCenterAdminData.js";
 import AssignLabOwnerPromptModal from "@/components/operations/AssignLabOwnerPromptModal.jsx";
 import { ROLES } from "@/config/roles";
@@ -48,6 +48,7 @@ import DataFetchError from "@/components/ux/DataFetchError";
 import { cn } from "@/lib/utils";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import HqLabsAdminView from "@/components/hq/HqLabsAdminView.jsx";
+import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -328,6 +329,23 @@ function normalizeLab(lab) {
   };
 }
 
+function hydrateLabsFromCache() {
+  const ui = readPageUiCache("labs:credit");
+  if (ui?.labs?.length) {
+    return { labs: ui.labs, summary: ui.summary ?? null };
+  }
+  const peeked = peekLabsCreditReadCache();
+  if (!peeked?.success) return null;
+  const rawLabs = Array.isArray(peeked?.data)
+    ? peeked.data
+    : Array.isArray(peeked?.data?.labs)
+      ? peeked.data.labs
+      : [];
+  if (!rawLabs.length) return null;
+  const rows = rawLabs.map(normalizeLab);
+  return { labs: rows, summary: summarizeLabsCreditPortfolio(rows) };
+}
+
 function CreditBadge({ status }) {
   return (
     <span
@@ -453,9 +471,12 @@ export default function LabsPage({
   const { orderByLabId, workspace: agentWorkspace } = useAgentDailyOs(currentUser, {
     enabled: isAgentView && !isDistributorOs,
   });
-  const [labs, setLabs] = useState([]);
-  const [summary, setSummary] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const hydratedLabs = useMemo(() => hydrateLabsFromCache(), []);
+  const hadCacheOnMount = useRef(Boolean(hydratedLabs));
+  const [labs, setLabs] = useState(() => hydratedLabs?.labs ?? []);
+  const [summary, setSummary] = useState(() => hydratedLabs?.summary ?? null);
+  const [loading, setLoading] = useState(() => !hydratedLabs);
+  const [listRefreshing, setListRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [creditFilter, setCreditFilter] = useState("ALL");
   const [showAddLab, setShowAddLab] = useState(false);
@@ -504,12 +525,14 @@ export default function LabsPage({
     Boolean(canAddLab)
   );
 
-  const loadLabs = useCallback(async () => {
+  const loadLabs = useCallback(async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
+      if (silent) setListRefreshing(true);
+      else if (!labs.length) setLoading(true);
+      else setListRefreshing(true);
       setError("");
 
-      const res = await getLabsCredit();
+      const res = await getLabsCredit({ force: silent });
 
       if (!res?.success) {
         throw new Error(res?.error || "Failed to load labs");
@@ -522,18 +545,21 @@ export default function LabsPage({
           : [];
 
       const rows = rawLabs.map(normalizeLab);
+      const nextSummary = summarizeLabsCreditPortfolio(rows);
       setLabs(rows);
-      setSummary(summarizeLabsCreditPortfolio(rows));
+      setSummary(nextSummary);
+      writePageUiCache("labs:credit", { labs: rows, summary: nextSummary });
     } catch (err) {
       console.error("Failed to load labs", err);
       setError(err.message || "Failed to load labs");
     } finally {
       setLoading(false);
+      setListRefreshing(false);
     }
-  }, []);
+  }, [labs.length]);
 
   useEffect(() => {
-    void loadLabs();
+    void loadLabs({ silent: hadCacheOnMount.current });
   }, [authToken, currentUser, loadLabs]);
 
   useEffect(() => {
@@ -664,7 +690,7 @@ export default function LabsPage({
     };
   }, [visibleLabs]);
 
-  if (loading) {
+  if (loading && !labs.length) {
     return (
       <PageSkeleton
         kpiCount={4}

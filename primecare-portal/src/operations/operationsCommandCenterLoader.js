@@ -29,6 +29,17 @@ export function invalidateOperationsCommandCenterCache(tenantId) {
   }
 }
 
+export function peekOperationsCommandCenterCache(currentUser) {
+  const tenantId = currentUser?.tenantId ?? currentUser?.tenant_id ?? null;
+  const userId = currentUser?.id ?? "anon";
+  const cacheKey = `${tenantId || "none"}:${userId}`;
+  const cached = opsPayloadCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < OPS_CACHE_MS) {
+    return cached.data;
+  }
+  return null;
+}
+
 const EMPTY_PAYLOAD = {
   dashboard: null,
   collections: [],

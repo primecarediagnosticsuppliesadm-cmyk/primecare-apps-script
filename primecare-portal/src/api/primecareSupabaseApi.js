@@ -820,7 +820,31 @@ export async function enrichCatalogWithProductMetadata(products, tenantId) {
  * Read-only stock dashboard from Supabase view v_stock_dashboard.
  * @param {{ force?: boolean }} [options]
  */
+const STOCK_DASHBOARD_READ_CACHE_TTL_MS = 45_000;
+/** @type {{ result: object|null, loadedAt: number }} */
+let stockDashboardReadCache = { result: null, loadedAt: 0 };
+
+export function peekStockDashboardReadCache() {
+  if (
+    stockDashboardReadCache.result &&
+    Date.now() - stockDashboardReadCache.loadedAt < STOCK_DASHBOARD_READ_CACHE_TTL_MS
+  ) {
+    return stockDashboardReadCache.result;
+  }
+  return null;
+}
+
+export function invalidateStockDashboardReadResultCache() {
+  stockDashboardReadCache = { result: null, loadedAt: 0 };
+}
+
 export async function getStockDashboard(options = {}) {
+  const force = options.force === true;
+  if (!force) {
+    const cached = peekStockDashboardReadCache();
+    if (cached) return cached;
+  }
+
   traceSupabaseRead("Inventory.getStockDashboard", { table: "v_stock_dashboard" });
   if (!supabase) {
     throw new Error(
@@ -829,7 +853,7 @@ export async function getStockDashboard(options = {}) {
   }
 
   const { data: rawRows, error } = await loadStockDashboardBoundedRows(supabase, {
-    force: options.force === true,
+    force,
   });
 
   if (error) {
@@ -842,13 +866,17 @@ export async function getStockDashboard(options = {}) {
 
   const stats = rollupStockDashboardMappedItems(inventory);
 
-  return {
+  const result = {
     success: true,
     data: {
       stats,
       inventory,
     },
   };
+  if (!force) {
+    stockDashboardReadCache = { result, loadedAt: Date.now() };
+  }
+  return result;
 }
 
 /**
@@ -919,26 +947,67 @@ export function mapLabsCreditRow(row) {
 /**
  * Read-only labs / credit directory from Supabase view v_labs_credit.
  */
-export async function getLabsCredit() {
-  traceSupabaseRead("Labs.getLabsCredit", { table: "v_labs_credit" });
-  if (!supabase) {
-    throw new Error(
-      "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
-    );
+const LABS_CREDIT_READ_CACHE_TTL_MS = 45_000;
+/** @type {{ result: object|null, loadedAt: number }} */
+let labsCreditReadCache = { result: null, loadedAt: 0 };
+/** @type {Promise<object>|null} */
+let labsCreditReadInFlight = null;
+
+export function peekLabsCreditReadCache() {
+  if (
+    labsCreditReadCache.result &&
+    Date.now() - labsCreditReadCache.loadedAt < LABS_CREDIT_READ_CACHE_TTL_MS
+  ) {
+    return labsCreditReadCache.result;
   }
+  return null;
+}
 
-  const { data: rawRows, error } = await fetchLabsCreditBoundedRows(supabase);
+export function invalidateLabsCreditReadCache() {
+  labsCreditReadCache = { result: null, loadedAt: 0 };
+  labsCreditReadInFlight = null;
+}
 
-  if (error) {
-    throw new Error(error.message || "Supabase labs read failed");
+export async function getLabsCredit(options = {}) {
+  const force = options.force === true;
+  if (!force && labsCreditReadInFlight) {
+    return labsCreditReadInFlight;
   }
+  const cached = !force ? peekLabsCreditReadCache() : null;
+  if (cached) return cached;
 
-  const labs = (rawRows || []).map(mapLabsCreditRow).filter((lab) => lab.labId || lab.labName);
+  const run = (async () => {
+    traceSupabaseRead("Labs.getLabsCredit", { table: "v_labs_credit" });
+    if (!supabase) {
+      throw new Error(
+        "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
+      );
+    }
 
-  return {
-    success: true,
-    data: labs,
-  };
+    const { data: rawRows, error } = await fetchLabsCreditBoundedRows(supabase);
+
+    if (error) {
+      throw new Error(error.message || "Supabase labs read failed");
+    }
+
+    const labs = (rawRows || []).map(mapLabsCreditRow).filter((lab) => lab.labId || lab.labName);
+
+    const result = {
+      success: true,
+      data: labs,
+    };
+    if (!force) {
+      labsCreditReadCache = { result, loadedAt: Date.now() };
+    }
+    return result;
+  })();
+
+  if (!force) labsCreditReadInFlight = run;
+  try {
+    return await run;
+  } finally {
+    if (!force) labsCreditReadInFlight = null;
+  }
 }
 
 /**
@@ -1638,6 +1707,18 @@ function collectionsReadCacheKey(params = {}) {
 export function invalidateCollectionsReadCache() {
   collectionsReadCache = { result: null, loadedAt: 0, key: "" };
   collectionsReadInFlight = null;
+}
+
+export function peekCollectionsReadCache(params = {}) {
+  const cacheKey = collectionsReadCacheKey(params);
+  if (
+    collectionsReadCache.result &&
+    collectionsReadCache.key === cacheKey &&
+    Date.now() - collectionsReadCache.loadedAt < COLLECTIONS_READ_CACHE_TTL_MS
+  ) {
+    return collectionsReadCache.result;
+  }
+  return null;
 }
 
 export async function getCollectionsRead(params = {}) {
@@ -2534,8 +2615,19 @@ export function invalidateAdminDashboardReadCache() {
   invalidateCollectionsReadCache();
   invalidateOrdersReadCache();
   invalidateQualificationReviewReadCache();
+  invalidateStockDashboardReadResultCache();
   perfLog("getAdminDashboardRead.cacheCleared");
   recordPredatorCacheEvent({ cacheKey: "adminDashboardRead", event: "invalidate" });
+}
+
+export function peekAdminDashboardReadCache() {
+  if (
+    adminDashboardReadCache.result &&
+    Date.now() - adminDashboardReadCache.loadedAt < ADMIN_DASHBOARD_READ_CACHE_TTL_MS
+  ) {
+    return adminDashboardReadCache.result;
+  }
+  return null;
 }
 
 async function timedSupabaseQuery(label, queryFnOrPromise) {
@@ -3246,6 +3338,16 @@ export function invalidateQualificationReviewReadCache() {
   qualificationReadInFlight = null;
 }
 
+export function peekQualificationReviewReadCache() {
+  if (
+    qualificationReadCache.result &&
+    Date.now() - qualificationReadCache.loadedAt < QUALIFICATION_READ_CACHE_TTL_MS
+  ) {
+    return qualificationReadCache.result;
+  }
+  return null;
+}
+
 export function invalidateAllHqReadCaches() {
   invalidateAdminDashboardReadCache();
   invalidateQualificationReviewReadCache();
@@ -3552,12 +3654,42 @@ export async function updateQualificationPipelineWrite(payload = {}) {
   }
 }
 
+const AGENT_WORKSPACE_READ_CACHE_TTL_MS = 45_000;
+/** @type {{ result: object|null, loadedAt: number, userId: string }} */
+let agentWorkspaceReadCache = { result: null, loadedAt: 0, userId: "" };
+
+export function peekAgentWorkspaceReadCache(userId = "") {
+  const uid = String(userId || "");
+  if (
+    agentWorkspaceReadCache.result &&
+    agentWorkspaceReadCache.userId === uid &&
+    Date.now() - agentWorkspaceReadCache.loadedAt < AGENT_WORKSPACE_READ_CACHE_TTL_MS
+  ) {
+    return agentWorkspaceReadCache.result;
+  }
+  return null;
+}
+
+export function invalidateAgentWorkspaceReadCache(userId = "") {
+  const uid = String(userId || "");
+  if (!uid || agentWorkspaceReadCache.userId === uid) {
+    agentWorkspaceReadCache = { result: null, loadedAt: 0, userId: "" };
+  }
+}
+
 /**
  * Read-only agent workspace: labs/credit (`v_labs_credit`), collections (`getCollectionsRead`),
  * visits (`agent_visits`). Task queue is always `[]` here (no Supabase task query).
  * Shapes match AgentDashboard expectations. Never throws.
  */
-export async function getAgentWorkspaceRead(currentUser) {
+export async function getAgentWorkspaceRead(currentUser, options = {}) {
+  const force = options.force === true;
+  const userId = String(currentUser?.id || "");
+  if (!force) {
+    const cached = peekAgentWorkspaceReadCache(userId);
+    if (cached) return cached;
+  }
+
   traceSupabaseRead("AgentDashboard.getAgentWorkspaceRead", {
     tables: ["v_labs_credit", "agent_visits", "ar_credit_control"],
   });
@@ -3641,10 +3773,14 @@ export async function getAgentWorkspaceRead(currentUser) {
     };
     hqDebugLog("SUPABASE AGENT WORKSPACE:", data);
 
-    return {
+    const result = {
       success: true,
       data,
     };
+    if (!force && userId) {
+      agentWorkspaceReadCache = { result, loadedAt: Date.now(), userId };
+    }
+    return result;
   } catch (err) {
     hqDebugWarn("[getAgentWorkspaceRead] failed:", err?.message || err);
     return { success: false, readFailed: true, error: err?.message || String(err), data: { ...EMPTY_AGENT_WORKSPACE } };
@@ -5208,6 +5344,18 @@ function ordersReadCacheKey(params = {}) {
 export function invalidateOrdersReadCache() {
   ordersReadCache = { result: null, loadedAt: 0, key: "" };
   ordersReadInFlight = null;
+}
+
+export function peekOrdersReadCache(params = {}) {
+  const cacheKey = ordersReadCacheKey(params);
+  if (
+    ordersReadCache.result &&
+    ordersReadCache.key === cacheKey &&
+    Date.now() - ordersReadCache.loadedAt < ORDERS_READ_CACHE_TTL_MS
+  ) {
+    return ordersReadCache.result;
+  }
+  return null;
 }
 
 export async function getOrdersRead(params = {}) {

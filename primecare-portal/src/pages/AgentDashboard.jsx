@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
-import { getAgentWorkspaceRead } from "@/api/primecareSupabaseApi";
+import { getAgentWorkspaceRead, peekAgentWorkspaceReadCache } from "@/api/primecareSupabaseApi";
 import { completeAgentTask } from "@/api/primecareApi";
 import { logAppsScriptFallbackUsed } from "@/utils/migrationTrace.js";
 import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
@@ -40,6 +40,7 @@ import { applyOperationalTaskAction } from "@/operations/operationalTaskStateSto
 import { buildAgentOperationalTaskModel } from "@/operations/operationalTaskModel.js";
 import { emitTaskLedgerEvent, flushPendingOperationalEvents } from "@/operations/operationalEventBridge.js";
 import { getNotificationEventsRead } from "@/api/notificationApi.js";
+import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
 
 const EMPTY_WORKSPACE = {
   summary: {
@@ -85,6 +86,23 @@ function normalizeWorkspacePayload(payload) {
   };
 }
 
+function hydrateAgentWorkspaceFromCache(currentUser) {
+  const userId = String(currentUser?.id || "");
+  const ui = readPageUiCache(`agent:dashboard:${userId}`);
+  if (ui?.workspace) {
+    return {
+      workspace: normalizeWorkspacePayload(ui.workspace),
+      ownershipSummary: ui.ownershipSummary ?? null,
+    };
+  }
+  const peeked = peekAgentWorkspaceReadCache(userId);
+  if (!peeked?.success || !peeked?.data) return null;
+  return {
+    workspace: normalizeWorkspacePayload(peeked.data),
+    ownershipSummary: null,
+  };
+}
+
 function queueItemFromSnapshot(snapshot) {
   if (!snapshot) return null;
   if (snapshot.queueItem) return snapshot.queueItem;
@@ -102,8 +120,15 @@ function queueItemFromSnapshot(snapshot) {
 }
 
 export default function AgentDashboard({ currentUser, setActivePage }) {
-  const [workspace, setWorkspace] = useState(EMPTY_WORKSPACE);
-  const [loading, setLoading] = useState(true);
+  const agentCacheKey = `agent:dashboard:${String(currentUser?.id || "")}`;
+  const hydratedAgent = useMemo(
+    () => hydrateAgentWorkspaceFromCache(currentUser),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-time hydration only
+    []
+  );
+  const hadCacheOnMount = useRef(Boolean(hydratedAgent));
+  const [workspace, setWorkspace] = useState(() => hydratedAgent?.workspace ?? EMPTY_WORKSPACE);
+  const [loading, setLoading] = useState(() => !hydratedAgent);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [snapshotLabId, setSnapshotLabId] = useState("");
@@ -112,7 +137,7 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
   const [completingTaskId, setCompletingTaskId] = useState("");
   const [activityRows, setActivityRows] = useState([]);
   const [activityLoading, setActivityLoading] = useState(true);
-  const [ownershipSummary, setOwnershipSummary] = useState(null);
+  const [ownershipSummary, setOwnershipSummary] = useState(() => hydratedAgent?.ownershipSummary ?? null);
 
   const tenantId = currentUser?.tenantId || "";
   const { showToast } = usePortalToast();
@@ -128,14 +153,15 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
     async (showRefreshState = false) => {
       try {
         if (showRefreshState) setRefreshing(true);
-        else setLoading(true);
+        else if (!hadCacheOnMount.current) setLoading(true);
+        else setRefreshing(true);
         setError("");
 
         recordAgentWorkspaceEvent("agent_workspace.load_start");
 
         await traceAgentDailyWorkspaceLoad(async () => {
           const [apiRes, ownershipBundle] = await Promise.all([
-            getAgentWorkspaceRead(currentUser),
+            getAgentWorkspaceRead(currentUser, { force: showRefreshState }),
             tenantId
               ? loadLabOwnershipMetricsBundle(tenantId).catch(() => null)
               : Promise.resolve(null),
@@ -145,14 +171,17 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
           }
           const normalized = normalizeWorkspacePayload(apiRes.data || EMPTY_WORKSPACE);
           const model = buildAgentDailyWorkspaceModel(normalized);
+          const nextOwnership = buildAgentOwnershipSummary({
+            agentId: currentUser?.agentId || currentUser?.id,
+            enrichedLabs: ownershipBundle?.ownershipMetrics?.enrichedLabs || [],
+            pendingCollections: normalized.pendingCollections,
+          });
           setWorkspace(normalized);
-          setOwnershipSummary(
-            buildAgentOwnershipSummary({
-              agentId: currentUser?.agentId || currentUser?.id,
-              enrichedLabs: ownershipBundle?.ownershipMetrics?.enrichedLabs || [],
-              pendingCollections: normalized.pendingCollections,
-            })
-          );
+          setOwnershipSummary(nextOwnership);
+          writePageUiCache(agentCacheKey, {
+            workspace: normalized,
+            ownershipSummary: nextOwnership,
+          });
           recordAgentWorkspaceEvent("agent_workspace.load_success", {
             queueCount: model.actionQueue.length,
             assignedLabs: model.kpis.activeLabs,
@@ -162,17 +191,17 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
       } catch (err) {
         console.error(err);
         setError(err.message || "Failed to load daily workspace");
-        if (!showRefreshState) setWorkspace(EMPTY_WORKSPACE);
+        if (!showRefreshState && !hadCacheOnMount.current) setWorkspace(EMPTY_WORKSPACE);
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [currentUser, tenantId]
+    [currentUser, tenantId, agentCacheKey]
   );
 
   useEffect(() => {
-    loadWorkspace(false);
+    loadWorkspace(hadCacheOnMount.current);
   }, [loadWorkspace]);
 
   useEffect(() => {
@@ -467,7 +496,7 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
     setActivePage?.("visits");
   }, [visibleQueue, handleAddFollowUp, setActivePage]);
 
-  if (loading) {
+  if (loading && workspace.assignedLabs.length === 0 && workspace.pendingCollections.length === 0) {
     return (
       <PageSkeleton kpiCount={3} kpiColumns={3} listRows={6} className="mx-auto w-full max-w-[1520px]" />
     );

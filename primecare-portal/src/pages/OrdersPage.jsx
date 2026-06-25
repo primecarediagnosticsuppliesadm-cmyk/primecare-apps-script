@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { updateOrderStatus } from "@/api/primecareApi";
 import {
   getOrdersRead,
   getOrderDetailsRead,
   updateOrderStatusWrite,
+  peekOrdersReadCache,
 } from "@/api/primecareSupabaseApi";
 import { supabase } from "@/api/supabaseClient.js";
 import {
@@ -11,6 +12,7 @@ import {
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { invalidateAdminDashboardCaches } from "@/utils/dashboardInvalidate.js";
+import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 import { isPredatorAutoValidationEnabled } from "@/predator/predatorGuards.js";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -228,14 +230,55 @@ function OrdersDetailEmptyState({
   );
 }
 
+function scopeOrdersForUser(allOrders, currentUser, distributorScope) {
+  if (distributorScope?.tenantId) {
+    return filterRowsByTenant(allOrders, distributorScope.tenantId, { tenantKey: rowTenantId });
+  }
+  if (currentUser?.role === ROLES.EXECUTIVE || currentUser?.role === ROLES.ADMIN) {
+    const homeId = str(currentUser?.tenantId || currentUser?.tenant_id);
+    return homeId ? filterRowsByTenant(allOrders, homeId, { tenantKey: rowTenantId }) : allOrders;
+  }
+  return allOrders;
+}
+
+function hydrateOrdersFromCache(currentUser, distributorScope) {
+  const ui = readPageUiCache(
+    `orders:${String(currentUser?.role || "")}:${String(distributorScope?.tenantId || currentUser?.tenantId || "")}`
+  );
+  if (ui?.allOrders?.length) {
+    return {
+      allOrders: ui.allOrders,
+      orders: ui.orders || ui.allOrders,
+      ordersReadOk: ui.ordersReadOk !== false,
+    };
+  }
+  const peeked = peekOrdersReadCache();
+  const rows = Array.isArray(peeked?.data?.orders) ? peeked.data.orders : [];
+  if (!rows.length) return null;
+  const allOrders = rows;
+  return {
+    allOrders,
+    orders: scopeOrdersForUser(allOrders, currentUser, distributorScope),
+    ordersReadOk: peeked?.success !== false,
+  };
+}
+
 export default function OrdersPage({
   currentUser = null,
   distributorScope = null,
   embedded = false,
   setActivePage,
 }) {
-  const [orders, setOrders] = useState([]);
-  const [allOrders, setAllOrders] = useState([]);
+  const ordersCacheKey = `orders:${String(currentUser?.role || "")}:${String(distributorScope?.tenantId || currentUser?.tenantId || "")}`;
+  const hydratedOrders = useMemo(
+    () => hydrateOrdersFromCache(currentUser, distributorScope),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-time hydration only
+    []
+  );
+  const hadCacheOnMount = useRef(Boolean(hydratedOrders));
+
+  const [orders, setOrders] = useState(() => hydratedOrders?.orders ?? []);
+  const [allOrders, setAllOrders] = useState(() => hydratedOrders?.allOrders ?? []);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [details, setDetails] = useState(null);
   const [search, setSearch] = useState("");
@@ -245,12 +288,13 @@ export default function OrdersPage({
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [sortKey, setSortKey] = useState(DEFAULT_ORDER_SORT);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !hydratedOrders);
+  const [listRefreshing, setListRefreshing] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [statusNote, setStatusNote] = useState("");
   const [error, setError] = useState("");
-  const [ordersReadOk, setOrdersReadOk] = useState(true);
+  const [ordersReadOk, setOrdersReadOk] = useState(() => hydratedOrders?.ordersReadOk ?? true);
   const [successMessage, setSuccessMessage] = useState("");
   const [labAssignments, setLabAssignments] = useState([]);
   const [directoryUsers, setDirectoryUsers] = useState([]);
@@ -278,15 +322,8 @@ export default function OrdersPage({
   }, [homeTenantId, setActivePage, details?.order?.labId, labAssignments.length, directoryUsers.length]);
 
   useEffect(() => {
-    loadOrders();
+    void loadOrders({ silent: hadCacheOnMount.current });
   }, []);
-
-  useEffect(() => {
-    if (loading || !orders.length) return;
-    const ctx = consumeHqNavContext("orders");
-    if (ctx?.labId) setLabFilter(ctx.labId);
-    if (ctx?.orderId) void openOrder(ctx.orderId);
-  }, [loading, orders.length]);
 
   useEffect(() => {
     if (distributorScope?.tenantId) {
@@ -303,6 +340,13 @@ export default function OrdersPage({
     setOrders(allOrders);
   }, [allOrders, distributorScope?.tenantId, currentUser?.role, currentUser?.tenantId]);
 
+  useEffect(() => {
+    if (loading || !orders.length) return;
+    const ctx = consumeHqNavContext("orders");
+    if (ctx?.labId) setLabFilter(ctx.labId);
+    if (ctx?.orderId) void openOrder(ctx.orderId);
+  }, [loading, orders.length]);
+
   async function probeRlsOrderRows() {
     if (!supabase) return [];
     const { data, error } = await supabase.from("orders").select("*");
@@ -315,10 +359,12 @@ export default function OrdersPage({
 
   async function loadOrders(options = {}) {
     const silent = Boolean(options?.silent);
-    const hadRows = orders.length > 0;
+    const hadRows = orders.length > 0 || allOrders.length > 0;
     try {
       if (!silent) {
         setLoading(true);
+      } else if (hadRows) {
+        setListRefreshing(true);
       }
       setError("");
       const res = await getOrdersRead();
@@ -350,6 +396,7 @@ export default function OrdersPage({
       }
 
       setAllOrders(rows);
+      const scoped = scopeOrdersForUser(rows, currentUser, distributorScope);
       if (distributorScope?.tenantId) {
         setOrders(filterRowsByTenant(rows, distributorScope.tenantId, { tenantKey: rowTenantId }));
       } else if (
@@ -361,6 +408,11 @@ export default function OrdersPage({
       } else {
         setOrders(rows);
       }
+      writePageUiCache(ordersCacheKey, {
+        allOrders: rows,
+        orders: scoped,
+        ordersReadOk: true,
+      });
     } catch (err) {
       console.warn("OrdersPage loadOrders:", err);
       const message = err?.message || "Failed to load orders.";
@@ -371,6 +423,7 @@ export default function OrdersPage({
         setOrders([]);
       }
     } finally {
+      setListRefreshing(false);
       if (!silent) {
         setLoading(false);
       }

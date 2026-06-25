@@ -1,10 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, PageSkeleton, KpiCard, KpiCardGrid, DataFreshnessLabel, DataFetchError, PageHeader } from "@/components/ux";
 import {
   loadOperationsCommandCenterData,
   invalidateOperationsCommandCenterCache,
+  peekOperationsCommandCenterCache,
 } from "@/operations/operationsCommandCenterLoader.js";
+import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
 import { usePortalToast } from "@/components/ux";
 import { useActionSubmit } from "@/hooks/useActionSubmit.js";
 import { formatPilotKpi, formatPilotCount } from "@/utils/pilotDisplay.js";
@@ -119,8 +121,18 @@ function formatFeedTime(iso) {
 }
 
 export default function ExecutiveControlTower({ currentUser, setActivePage }) {
-  const [model, setModel] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const tenantId = currentUser?.tenantId || "";
+  const executiveCacheKey = `executive:dashboard:${tenantId}`;
+
+  const [model, setModel] = useState(() => {
+    const ui = readPageUiCache(executiveCacheKey);
+    if (ui?.model) return ui.model;
+    const payload = peekOperationsCommandCenterCache(currentUser);
+    if (!payload) return null;
+    return buildExecutiveInterventionModel(payload, { tenantId });
+  });
+  const hadCacheOnMount = useRef(Boolean(model));
+  const [loading, setLoading] = useState(() => !model);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [labDrawerId, setLabDrawerId] = useState("");
@@ -142,14 +154,14 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
   const [invoiceKpis, setInvoiceKpis] = useState(null);
   const [invoiceKpisLoading, setInvoiceKpisLoading] = useState(false);
 
-  const tenantId = currentUser?.tenantId || "";
   const { showToast } = usePortalToast();
   const actionSubmit = useActionSubmit();
 
   const load = useCallback(async (isRefresh = false) => {
     try {
       if (isRefresh) setRefreshing(true);
-      else setLoading(true);
+      else if (!hadCacheOnMount.current || !model) setLoading(true);
+      else setRefreshing(true);
       setError("");
       const built = await traceOperationsCenterLoad(async () => {
         if (isRefresh && tenantId) invalidateOperationsCommandCenterCache(tenantId);
@@ -166,6 +178,7 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
       });
       setModel(built.interventionModel);
       setDataLoadedAt(Date.now());
+      writePageUiCache(executiveCacheKey, { model: built.interventionModel });
       if (!isRefresh) {
         setLoading(false);
       }

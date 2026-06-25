@@ -30,6 +30,7 @@ import { TenantViewProvider } from "@/context/TenantViewContext.jsx";
 import OperatingZoneSync from "@/components/OperatingZoneSync.jsx";
 import { loadHqNavBadgeCounts } from "@/operations/hqNavBadgeCounts.js";
 import { prefetchLikelyRoutes } from "@/utils/routePrefetch.js";
+import { isNavigationPageCacheWarm } from "@/utils/hqNavigationWarmth.js";
 
 function canRoleAccessPage(role, pageKey) {
   if (!role || !pageKey) return false;
@@ -323,6 +324,11 @@ export default function App() {
     return `PrimeCare Portal — ${currentUser.name}`;
   }, [currentUser]);
 
+  const skipRouteOverlay = useMemo(
+    () => isNavigationPageCacheWarm(activePage, role, currentUser),
+    [activePage, role, currentUser]
+  );
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50">
@@ -360,7 +366,7 @@ export default function App() {
           setActivePage={navigateToPage}
           navBadges={navBadges}
         >
-          <RouteTransitionOverlay pageKey={activePage}>
+          <RouteTransitionOverlay pageKey={activePage} skipOverlay={skipRouteOverlay}>
             <ExecutivePortalHeader
               currentUser={currentUser}
               pageTitle={pageTitle}
