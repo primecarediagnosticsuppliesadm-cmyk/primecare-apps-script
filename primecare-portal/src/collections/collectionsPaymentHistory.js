@@ -2,6 +2,7 @@ import {
   buildPaymentsByNormalizedLabId,
   mapPaymentHistoryRow,
 } from "@/api/primecareSupabaseApi.js";
+import { fetchPaymentsForLabBoundedRows } from "@/api/hqBoundedReads.js";
 import { normalizeLabIdKey } from "@/utils/labId.js";
 
 function str(v) {
@@ -42,11 +43,11 @@ export function mapLabPaymentHistoryRows(rawPayments, labId) {
 }
 
 /**
- * Load all payment history rows for display (client read — same tables as getCollectionHistoryRead).
+ * Load payment history rows for a lab (bounded: lab_id + date window + row limit).
  */
 export async function loadLabPaymentHistoryForDisplay(supabase, labId) {
   if (!supabase || !labId) return [];
-  const { data, error } = await supabase.from("payments").select("*");
+  const { data, error } = await fetchPaymentsForLabBoundedRows(supabase, labId);
   if (error) {
     console.warn("[loadLabPaymentHistoryForDisplay] payments:", error.message);
     return [];

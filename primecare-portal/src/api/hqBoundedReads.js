@@ -24,7 +24,9 @@ import {
   HQ_PAYMENTS_RECENT_DAYS,
   HQ_PAYMENTS_RECENT_LIMIT,
   HQ_PURCHASE_ORDER_COLUMNS,
+  HQ_PURCHASE_ORDER_ITEM_COLUMNS,
   HQ_PURCHASE_ORDER_LIMIT,
+  HQ_PURCHASE_ORDER_LIST_COLUMNS,
   HQ_QUALIFICATION_COLUMNS,
   HQ_QUALIFICATION_LIMIT,
   HQ_READ_CACHE_TTL_MS,
@@ -278,6 +280,40 @@ export async function fetchPaymentsForLabBoundedRows(client, labId, options = {}
     .gte("payment_date", recentFrom)
     .order("payment_date", { ascending: false })
     .limit(limit);
+}
+
+/**
+ * Bounded purchase orders + line items for visible PO ids only.
+ * @param {import('@supabase/supabase-js').SupabaseClient|null|undefined} client
+ * @param {{ limit?: number }} [options]
+ */
+export async function fetchPurchaseOrdersBoundedBundle(client, options = {}) {
+  if (!client) {
+    return {
+      poRes: { data: [], error: { message: "Supabase client not configured" } },
+      itemsRes: { data: [], error: null },
+    };
+  }
+  const limit = clampLimit(options.limit, HQ_PURCHASE_ORDER_LIMIT, HQ_PURCHASE_ORDER_LIMIT);
+  const poRes = await client
+    .from("purchase_orders")
+    .select(HQ_PURCHASE_ORDER_LIST_COLUMNS)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (poRes.error) {
+    return { poRes, itemsRes: { data: [], error: poRes.error } };
+  }
+  const poIds = (poRes.data || [])
+    .map((row) => str(row.po_id ?? row.poId))
+    .filter(Boolean);
+  if (!poIds.length) {
+    return { poRes, itemsRes: { data: [], error: null } };
+  }
+  const itemsRes = await client
+    .from("purchase_order_items")
+    .select(HQ_PURCHASE_ORDER_ITEM_COLUMNS)
+    .in("po_id", poIds);
+  return { poRes, itemsRes };
 }
 
 function str(v) {

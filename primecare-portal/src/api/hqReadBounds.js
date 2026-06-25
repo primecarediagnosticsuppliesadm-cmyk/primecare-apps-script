@@ -89,6 +89,13 @@ export const HQ_V_STOCK_DASHBOARD_COLUMNS =
 
 export const HQ_PURCHASE_ORDER_COLUMNS = "po_id,id,status,supplier_name,tenant_id,created_at";
 
+/** Full PO header projection for list/receive flows. */
+export const HQ_PURCHASE_ORDER_LIST_COLUMNS =
+  "po_id,po_date,product_id,product_name,quantity,received_qty,unit_cost,total_cost,supplier,status,notes,grn_notes,received_at,tenant_id,created_at,updated_at";
+
+export const HQ_PURCHASE_ORDER_ITEM_COLUMNS =
+  "po_id,product_id,product_name,quantity,received_qty,unit_cost,total_cost,tenant_id,created_at,updated_at";
+
 export const HQ_AGENT_VISIT_COLUMNS =
   "id,lab_id,agent_id,agent_name,visit_date,created_at,notes,visit_type,tenant_id,visit_id";
 

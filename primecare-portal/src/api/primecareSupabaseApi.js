@@ -73,6 +73,7 @@ import {
   fetchInventoryLedgerBoundedRows,
   fetchPaymentsBoundedRows,
   fetchPaymentsForLabBoundedRows,
+  fetchPurchaseOrdersBoundedBundle,
   invalidateBoundedSourceCache,
   loadStockDashboardBoundedRows,
   loadLabCatalogBoundedRows,
@@ -4246,28 +4247,23 @@ export async function getPurchaseOrdersRead() {
   }
 
   try {
-    const po = await supabase
-      .from("purchase_orders")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (po.error) {
-      return { success: false, error: po.error.message, data: { purchaseOrders: [] } };
+    const { poRes, itemsRes } = await fetchPurchaseOrdersBoundedBundle(supabase);
+    if (poRes.error) {
+      return { success: false, error: poRes.error.message, data: { purchaseOrders: [] } };
     }
-
-    const items = await supabase.from("purchase_order_items").select("*");
-    if (items.error) {
-      return { success: false, error: items.error.message, data: { purchaseOrders: [] } };
+    if (itemsRes.error) {
+      return { success: false, error: itemsRes.error.message, data: { purchaseOrders: [] } };
     }
 
     const itemsByPo = new Map();
-    for (const item of items.data || []) {
+    for (const item of itemsRes.data || []) {
       const key = str(item.po_id ?? item.poId);
       if (!key) continue;
       if (!itemsByPo.has(key)) itemsByPo.set(key, []);
       itemsByPo.get(key).push(item);
     }
 
-    const purchaseOrders = (po.data || []).map((row) => mapPurchaseOrderRow(row, itemsByPo));
+    const purchaseOrders = (poRes.data || []).map((row) => mapPurchaseOrderRow(row, itemsByPo));
     return { success: true, data: { purchaseOrders }, error: null };
   } catch (err) {
     hqDebugWarn("[getPurchaseOrdersRead] failed:", err?.message || err);
