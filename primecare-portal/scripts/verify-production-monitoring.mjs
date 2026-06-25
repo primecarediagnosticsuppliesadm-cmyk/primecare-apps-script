@@ -12,8 +12,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 
 const PROBES = [
+  { id: "MON-09", label: "Bounded Reads", script: "verify-bounded-reads.mjs" },
   { id: "MON-10", label: "Golden Path", script: "verify-primecare-production-golden-path.mjs" },
   { id: "MON-11", label: "Financial Reconciliation", script: "verify-financial-reconciliation.mjs" },
+  { id: "MON-11b", label: "Inventory Reconciliation", script: "verify-inventory-reconciliation.mjs" },
+  { id: "MON-11c", label: "Transaction Integrity RPCs", script: "verify-transaction-integrity-rpcs.mjs" },
   { id: "MON-12", label: "Pilot Hardening SQL", script: "verify-pilot-hardening-sql.mjs" },
   { id: "MON-13", label: "HQ RLS Reads", script: "verify-hq-rls-reads.mjs" },
   { id: "MON-14", label: "Performance Certification", script: "run-hq-performance-certification.mjs", env: { PERF_SKIP_SEED: "1" } },

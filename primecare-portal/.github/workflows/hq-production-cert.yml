@@ -23,6 +23,7 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           if [ -z "$VITE_SUPABASE_URL" ]; then
             echo "SKIP: Supabase secrets not configured — workflow documents alert hook only"
@@ -30,4 +31,8 @@ jobs:
           fi
           printf 'VITE_SUPABASE_URL=%s\nVITE_SUPABASE_ANON_KEY=%s\n' \
             "$VITE_SUPABASE_URL" "$VITE_SUPABASE_ANON_KEY" > .env.local
+          if [ -n "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            printf 'SUPABASE_SERVICE_ROLE_KEY=%s\n' "$SUPABASE_SERVICE_ROLE_KEY" >> .env.local
+          fi
           node scripts/verify-production-monitoring.mjs
+          node scripts/verify-sprint1-health.mjs
