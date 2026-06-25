@@ -50,6 +50,8 @@ import {
 import { cn } from "@/lib/utils";
 import { labIdKey } from "@/utils/labId.js";
 import { getInvoicesForLabRead } from "@/api/invoiceSupabaseApi.js";
+import { HQ_INVOICE_LIST_MAX_LIMIT } from "@/api/hqReadBounds.js";
+import { buildLabAccountFallbackSummary } from "@/collections/labAccountFallbackSummary.js";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
 import InvoiceDetailsDrawer from "@/components/invoice/InvoiceDetailsDrawer.jsx";
 import InvoiceAllocationsDrawer from "@/components/invoice/InvoiceAllocationsDrawer.jsx";
@@ -289,6 +291,80 @@ function CompactAccountKpi({ title, value, icon: Icon }) {
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function LabAccountFallbackPanel({ summary, invoices, setActivePage }) {
+  const topInvoices = (invoices || []).slice(0, 5);
+  const standingTone = summary.fullyPaid
+    ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+    : "border-blue-200 bg-blue-50 text-blue-900";
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-3">
+      <Card className={cn("border p-4 shadow-sm", standingTone)}>
+        <div className="flex items-start gap-3">
+          <div className="rounded-lg bg-white/70 p-2">
+            {summary.fullyPaid ? (
+              <CheckCircle2 className="h-5 w-5 text-emerald-700" />
+            ) : (
+              <LifeBuoy className="h-5 w-5 text-blue-700" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1 space-y-1">
+            <h2 className="text-base font-semibold">
+              {summary.fullyPaid ? "Account in good standing" : "Account summary is syncing"}
+            </h2>
+            <p className="text-sm opacity-90">
+              {summary.fullyPaid
+                ? "No payment action required. Your recent invoices are fully paid."
+                : "Your invoices are available in Invoice Center. A full account summary will appear here once ledger sync completes."}
+            </p>
+            {!summary.fullyPaid && summary.openBalance > 0 ? (
+              <p className="text-sm font-medium">
+                Open invoice balance: {formatMoney(summary.openBalance)}
+              </p>
+            ) : null}
+            {summary.totalPaid > 0 ? (
+              <p className="text-sm">
+                Total paid recorded: <span className="font-medium">{formatMoney(summary.totalPaid)}</span>
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </Card>
+
+      {topInvoices.length ? (
+        <Card className="border border-border p-3 shadow-sm">
+          <h3 className="mb-2 text-sm font-semibold text-foreground">Recent invoices</h3>
+          <ul className="space-y-2">
+            {topInvoices.map((inv) => (
+              <li
+                key={inv.id || inv.invoiceNumber}
+                className="flex items-center justify-between gap-2 text-sm"
+              >
+                <span className="min-w-0 truncate font-medium">
+                  {inv.invoiceNumber || inv.invoice_number || "Invoice"}
+                </span>
+                <span className="shrink-0 tabular-nums text-muted-foreground">
+                  {formatMoney(inv.totalAmount ?? inv.total_amount)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
+
+      <Button
+        type="button"
+        className="w-full sm:w-auto"
+        onClick={() => setActivePage?.("labInvoices")}
+      >
+        <FileText className="mr-2 h-4 w-4" />
+        Open Invoice Center
+        <ArrowRight className="ml-2 h-4 w-4" />
+      </Button>
     </div>
   );
 }
@@ -1858,6 +1934,8 @@ export default function CollectionsPage({
     currentUser?.tenantId ||
     currentUser?.tenant_id ||
     "";
+  const profileLabId = labIdKey(currentUser?.labId || currentUser?.lab_id || "");
+  const [labAccountFallback, setLabAccountFallback] = useState(null);
   const [collectionEvidence, setCollectionEvidence] = useState([]);
 
   useEffect(() => {
@@ -2469,6 +2547,70 @@ export default function CollectionsPage({
     );
   }, [collections, search, isLabAccount, isAgentView, orderByLabId]);
 
+  const labFallbackActive = useMemo(
+    () =>
+      isLabAccount &&
+      filteredCollections.length === 0 &&
+      labAccountFallback?.status === "ready" &&
+      labAccountFallback.invoiceCount > 0,
+    [isLabAccount, filteredCollections.length, labAccountFallback]
+  );
+
+  useEffect(() => {
+    if (!isLabAccount || loading || listRefreshing) return undefined;
+    if (collections.length > 0) {
+      setLabAccountFallback(null);
+      return undefined;
+    }
+    if (!profileLabId) return undefined;
+
+    let cancelled = false;
+    setLabAccountFallback({ status: "loading" });
+
+    void (async () => {
+      try {
+        const [invoiceRes, historyRes] = await Promise.all([
+          getInvoicesForLabRead(profileLabId, {
+            tenantId,
+            pageSize: HQ_INVOICE_LIST_MAX_LIMIT,
+          }),
+          getCollectionHistoryRead(profileLabId),
+        ]);
+        if (cancelled) return;
+
+        const invoices = invoiceRes?.rows || [];
+        const history = historyRes?.data?.history || [];
+        const summaryPayload = buildLabAccountFallbackSummary(
+          invoices,
+          history,
+          invoiceRes?.total
+        );
+
+        setLabAccountFallback({
+          status: "ready",
+          ...summaryPayload,
+          invoices,
+        });
+      } catch (err) {
+        if (!cancelled) {
+          console.warn("CollectionsPage labAccountFallback:", err);
+          setLabAccountFallback({ status: "ready", invoiceCount: 0, invoices: [] });
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isLabAccount,
+    loading,
+    listRefreshing,
+    collections.length,
+    profileLabId,
+    tenantId,
+  ]);
+
   const agentQueueSummary = useMemo(() => {
     if (!isAgentView) return null;
     const totalCollected = filteredCollections.reduce(
@@ -2717,7 +2859,11 @@ export default function CollectionsPage({
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <CompactAccountKpi
               title="Outstanding"
-              value={formatMoney(summary.totalOutstanding)}
+              value={
+                labFallbackActive
+                  ? formatMoney(labAccountFallback.openBalance)
+                  : formatMoney(summary.totalOutstanding)
+              }
               icon={IndianRupee}
             />
             <CompactAccountKpi
@@ -2731,7 +2877,11 @@ export default function CollectionsPage({
             />
             <CompactAccountKpi
               title="Total paid"
-              value={formatMoney(filteredCollections[0]?.totalPaid)}
+              value={
+                labFallbackActive
+                  ? formatMoney(labAccountFallback.totalPaid)
+                  : formatMoney(filteredCollections[0]?.totalPaid)
+              }
               icon={Wallet}
             />
             <CompactAccountKpi
@@ -2840,16 +2990,33 @@ export default function CollectionsPage({
           onOpenCollections={handleHqOpenCollections}
         />
       ) : filteredCollections.length === 0 ? (
-        <EmptyState
-          title={isLabAccount ? "No account records" : "No collection records"}
-          description={
-            collections.length === 0
-              ? isLabAccount
-                ? "Your lab payment and outstanding details will appear here when available."
-                : "Receivables will appear here when labs have outstanding balances."
-              : "Try a different search term."
-          }
-        />
+        isLabAccount ? (
+          labAccountFallback?.status === "loading" ? (
+            <div className="mx-auto max-w-2xl">
+              <ListSkeleton rows={4} />
+            </div>
+          ) : labFallbackActive ? (
+            <LabAccountFallbackPanel
+              summary={labAccountFallback}
+              invoices={labAccountFallback.invoices}
+              setActivePage={setActivePage}
+            />
+          ) : (
+            <EmptyState
+              title="No account records"
+              description="Your lab payment and outstanding details will appear here when available."
+            />
+          )
+        ) : (
+          <EmptyState
+            title="No collection records"
+            description={
+              collections.length === 0
+                ? "Receivables will appear here when labs have outstanding balances."
+                : "Try a different search term."
+            }
+          />
+        )
       ) : isLabAccount ? (
         <div className="mx-auto max-w-2xl space-y-2" role="list">
           {filteredCollections.map((item) => {
