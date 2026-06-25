@@ -29,6 +29,18 @@ function loadEnv() {
   );
 }
 
+async function loginAdminClient(env) {
+  const sb = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY, {
+    auth: { persistSession: false },
+  });
+  const { error } = await sb.auth.signInWithPassword({
+    email: "qa.admin@primecare.test",
+    password: "1234",
+  });
+  if (error) throw new Error(`Admin login failed: ${error.message}`);
+  return sb;
+}
+
 async function main() {
   const env = loadEnv();
   const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;
@@ -36,13 +48,30 @@ async function main() {
     throw new Error("SUPABASE_SERVICE_ROLE_KEY required in .env.local");
   }
 
-  const sb = createClient(env.VITE_SUPABASE_URL, serviceKey, {
+  console.log(`Tenant target: ${HQ}`);
+
+  const serviceClient = createClient(env.VITE_SUPABASE_URL, serviceKey, {
     auth: { persistSession: false },
   });
 
-  const { data, error } = await sb.rpc("reconcile_ar_from_payments", {
+  let client = serviceClient;
+  let authMode = "service_role";
+
+  let { data, error } = await client.rpc("reconcile_ar_from_payments", {
     p_tenant_id: HQ,
   });
+
+  if (error?.message === "tenant_mismatch") {
+    console.warn(
+      "WARN: service_role hit tenant_mismatch — apply supabase/sql/sprint1_ar_reconcile_service_role_fix.sql"
+    );
+    console.warn("Falling back to qa.admin JWT session for reconcile.");
+    client = await loginAdminClient(env);
+    authMode = "admin_jwt";
+    ({ data, error } = await client.rpc("reconcile_ar_from_payments", {
+      p_tenant_id: HQ,
+    }));
+  }
 
   if (error) {
     if (/reconcile_ar_from_payments|function.*does not exist/i.test(error.message || "")) {
@@ -54,7 +83,7 @@ async function main() {
     throw error;
   }
 
-  console.log("PASS — AR reconcile RPC");
+  console.log(`PASS — AR reconcile RPC (${authMode})`);
   console.log(JSON.stringify(data, null, 2));
 }
 

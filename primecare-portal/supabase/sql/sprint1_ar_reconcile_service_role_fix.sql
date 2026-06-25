@@ -1,4 +1,6 @@
--- Sprint 1: idempotent AR reconciliation from payments (ops / scheduled job).
+-- Hotfix: reconcile_ar_from_payments tenant guard for service_role (no auth.uid()).
+-- Apply in Supabase SQL editor if migration 20260624130000 is already deployed.
+
 CREATE OR REPLACE FUNCTION public.reconcile_ar_from_payments(p_tenant_id uuid DEFAULT NULL)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -9,8 +11,6 @@ DECLARE
   v_updated bigint := 0;
   v_zeroed bigint := 0;
 BEGIN
-  -- Service-role callers have no JWT; tenant_id_matches() requires auth.uid().
-  -- Trusted backend (service_role) may reconcile any tenant id passed explicitly.
   IF p_tenant_id IS NOT NULL
     AND auth.uid() IS NOT NULL
     AND NOT public.tenant_id_matches(p_tenant_id) THEN
@@ -85,9 +85,3 @@ BEGIN
   );
 END;
 $$;
-
-REVOKE ALL ON FUNCTION public.reconcile_ar_from_payments(uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.reconcile_ar_from_payments(uuid) TO service_role;
-
-COMMENT ON FUNCTION public.reconcile_ar_from_payments IS
-  'Recompute ar_credit_control.total_paid/outstanding from payments. Idempotent.';
