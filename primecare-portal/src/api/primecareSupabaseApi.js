@@ -1494,6 +1494,16 @@ function isMissingPaymentsOptionalColumnError(err) {
   );
 }
 
+function isMissingSupabaseRpcError(err, rpcName = "") {
+  const msg = String(err?.message ?? err ?? "").toLowerCase();
+  const name = str(rpcName).toLowerCase();
+  if (name && msg.includes(name) && msg.includes("does not exist")) return true;
+  return (
+    (msg.includes("function") && msg.includes("does not exist")) ||
+    msg.includes("schema cache") && msg.includes("function")
+  );
+}
+
 /** Inserts payment row; retries without optional note/collected_by if columns are not migrated yet. */
 async function insertPaymentsRow(paymentRow) {
   const attempt = (row) => supabase.from("payments").insert([row]).select();
@@ -1564,6 +1574,75 @@ export async function createPaymentWrite(payload = {}) {
     if (!scoped_tenant_id) {
       return { success: false, error: "tenant_id is required for AR write", data: null };
     }
+
+    const note = str(payload.note);
+    const collected_by = str(payload.collectedBy ?? payload.collected_by);
+
+    const rpcPay = await supabase.rpc("post_collection_payment", {
+      p_tenant_id: scoped_tenant_id,
+      p_lab_id: lab_id,
+      p_payment_id: payment_id,
+      p_amount_received: amount_received,
+      p_mode: mode,
+      p_payment_date: payment_date,
+      p_order_id: order_id || null,
+      p_note: note || null,
+      p_collected_by: collected_by || null,
+    });
+
+    if (!rpcPay.error && rpcPay.data && rpcPay.data.success !== false) {
+      const rpcBody = rpcPay.data;
+      const savedPay = rpcBody.payment || null;
+      const arPatch = rpcBody.ar || {};
+      let allocation = null;
+      if (order_id) {
+        const allocRes = await autoAllocatePaymentToOrderInvoice({
+          tenantId: scoped_tenant_id,
+          paymentId: payment_id,
+          orderId: order_id,
+          amountReceived: amount_received,
+          actorId: collected_by || payload.actorId,
+        });
+        allocation = allocRes.skipped ? null : allocRes.data;
+        if (!allocRes.success && !allocRes.skipped) {
+          hqDebugWarn("[createPaymentWrite] invoice auto-allocation failed:", allocRes.error);
+        }
+      }
+      fireNotificationEvent(
+        {
+          eventType: "payment_received",
+          sourceModule: "collections",
+          sourceId: payment_id,
+          tenantId: scoped_tenant_id,
+          targetLabId: lab_id,
+          targetRole: "admin",
+          severity: "info",
+          payload: {
+            paymentId: payment_id,
+            labId: lab_id,
+            amountReceived: amount_received,
+            mode,
+          },
+        },
+        "createPaymentWrite"
+      );
+      return {
+        success: true,
+        data: {
+          payment: savedPay,
+          ar: { lab_id, ...arPatch },
+          allocation,
+          idempotent: Boolean(rpcBody.idempotent),
+        },
+        error: null,
+      };
+    }
+
+    if (rpcPay.error && !isMissingSupabaseRpcError(rpcPay.error, "post_collection_payment")) {
+      hqDebugWarn("[createPaymentWrite] post_collection_payment:", rpcPay.error.message);
+      return { success: false, error: rpcPay.error.message, data: null };
+    }
+
     const old_outstanding = arRow
       ? num(
           arRow.outstanding ??
@@ -1594,8 +1673,6 @@ export async function createPaymentWrite(payload = {}) {
     };
 
     const paymentRow = { ...writePayload };
-    const note = str(payload.note);
-    const collected_by = str(payload.collectedBy ?? payload.collected_by);
     if (note) paymentRow.note = note;
     if (collected_by) paymentRow.collected_by = collected_by;
 
@@ -4639,6 +4716,32 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
       continue;
     }
 
+    const rpcDed = await supabase.rpc("deduct_inventory_for_order", {
+      p_tenant_id: scopedTenantId,
+      p_order_id: oid,
+      p_product_id: product_id,
+      p_quantity: qty,
+      p_product_name: product_name_line,
+      p_created_by: created_by,
+    });
+
+    if (!rpcDed.error && rpcDed.data?.success !== false) {
+      updatedLines += 1;
+      hqDebugLog("INVENTORY AFTER UPDATE (RPC)", {
+        tenant_id: scopedTenantId,
+        product_id,
+        idempotent: Boolean(rpcDed.data?.idempotent),
+        stock_after: rpcDed.data?.stock_after,
+      });
+      continue;
+    }
+
+    if (rpcDed.error && !isMissingSupabaseRpcError(rpcDed.error, "deduct_inventory_for_order")) {
+      stockErrors.push(rpcDed.error.message || `Inventory deduction failed for ${product_id}`);
+      hqDebugWarn("[applyLabOrderInventoryDeduction] RPC failed:", product_id, rpcDed.error.message);
+      continue;
+    }
+
     const row = inventoryResolved.row;
     const inventoryTenantId = str(row.tenant_id ?? inventoryResolved.tenantId);
 
@@ -4732,9 +4835,12 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
   }
 
   if (!ledgerBatch.length) {
+    if (updatedLines > 0) {
+      return { success: true, error: null, updatedLines };
+    }
     return {
       success: false,
-      error: updatedLines === 0 && lines.length ? "No inventory lines updated" : null,
+      error: lines.length ? "No inventory lines updated" : null,
       updatedLines,
     };
   }
@@ -4848,6 +4954,90 @@ export async function createOrderWrite(payload = {}) {
     const stockCheck = await validateOrderLinesInventoryAvailability(tenant_id, normalizedLines);
     if (!stockCheck.success) {
       return { success: false, error: stockCheck.error || "Insufficient inventory", data: null };
+    }
+
+    const client_request_id =
+      str(payload.clientRequestId ?? payload.client_request_id) || null;
+    const rpcItems = normalizedLines.map((line) => ({
+      product_id: line.product_id,
+      product_name: line.product_name,
+      quantity: line.quantity,
+      unit_price: line.unit_price,
+    }));
+
+    if (tenant_id) {
+      const rpcOrder = await supabase.rpc("create_lab_order", {
+        p_tenant_id: tenant_id,
+        p_lab_id: lab_id,
+        p_order_id: order_id,
+        p_items: rpcItems,
+        p_client_request_id: client_request_id,
+        p_order_date: order_date,
+        p_status: status,
+        p_created_by: created_by,
+        p_notes: notesRaw || null,
+      });
+
+      if (!rpcOrder.error && rpcOrder.data?.success !== false) {
+        const rpcBody = rpcOrder.data || {};
+        const savedOrder = rpcBody.order || null;
+        if (savedOrder) {
+          hqDebugLog("SUPABASE ORDER SAVED (RPC)", savedOrder);
+          await getLabRecentOrdersRead(lab_id);
+
+          if (str(status).toLowerCase() === "fulfilled") {
+            const itemsRes = await supabase
+              .from("order_items")
+              .select("*")
+              .eq("order_id", order_id);
+            const itemsData = Array.isArray(itemsRes.data) ? itemsRes.data : [];
+            try {
+              await applyLabOrderInventoryDeduction({
+                savedLineItems: itemsData,
+                order_id,
+                tenant_id,
+                created_by,
+              });
+            } catch (invErr) {
+              hqDebugWarn("[createOrderWrite] RPC fulfill inventory:", invErr?.message || invErr);
+            }
+            const amt = normalizedLines.reduce((s, l) => s + num(l.total_price), 0);
+            const bump = await bumpArOutstandingForFulfillment({
+              lab_id,
+              tenant_id,
+              deltaAmount: amt,
+            });
+            const flagPatch = {
+              fulfilled_at: new Date().toISOString(),
+              inventory_updated: true,
+              ar_posted: Boolean(bump.success && !bump.skipped),
+              updated_at: new Date().toISOString(),
+            };
+            await supabase.from("orders").update(flagPatch).eq("order_id", order_id).select();
+            await createInvoiceForFulfilledOrderWrite({
+              tenantId: tenant_id,
+              orderId: order_id,
+              actorId: created_by,
+              createdSource: "createOrderWrite",
+            });
+          }
+
+          return {
+            success: true,
+            data: {
+              order: savedOrder,
+              orderId: order_id,
+              idempotent: Boolean(rpcBody.idempotent),
+            },
+            error: null,
+          };
+        }
+      }
+
+      if (rpcOrder.error && !isMissingSupabaseRpcError(rpcOrder.error, "create_lab_order")) {
+        hqDebugWarn("[createOrderWrite] create_lab_order:", rpcOrder.error.message);
+        return { success: false, error: rpcOrder.error.message, data: null };
+      }
     }
 
     const writePayload = {

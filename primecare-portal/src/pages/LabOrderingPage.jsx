@@ -1167,6 +1167,7 @@ export default function LabOrderingPage({ currentUser }) {
           labName ||
           labId ||
           null,
+        clientRequestId: `CRQ-${labIdKey(labId)}-${cartHash.slice(0, 48)}`,
         items: cartSnapshot.map((item) => ({
           productId: item.productId,
           productName:
