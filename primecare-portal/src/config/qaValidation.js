@@ -21,7 +21,7 @@ export function isQaValidationLayerEnabled() {
   if (IS_PROD) {
     return envFlagOrDefault("VITE_QA_VALIDATION_LAYER", false);
   }
-  return envFlagOrDefault("VITE_QA_VALIDATION_LAYER", IS_QA || IS_DEV);
+  return envFlagOrDefault("VITE_QA_VALIDATION_LAYER", false);
 }
 
 /** QA Command Center — executive-only; hidden in production unless explicitly enabled. */

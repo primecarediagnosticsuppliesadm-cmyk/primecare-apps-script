@@ -23,6 +23,15 @@ export function isPredatorEnabled() {
   return envFlagOrDefault("VITE_PREDATOR_DEBUG", true);
 }
 
+/**
+ * Automatic validation.full on page load — off by default.
+ * Certification and System Diagnostics use explicit runs (VITE_PREDATOR_AUTO_VALIDATION=true).
+ */
+export function isPredatorAutoValidationEnabled() {
+  if (!hasSupabaseForValidation()) return false;
+  return envFlagOrDefault("VITE_PREDATOR_AUTO_VALIDATION", false);
+}
+
 /** Debug Console page: ADMIN / EXECUTIVE only, QA/dev predator enabled. */
 export function canAccessPredatorDebugConsole(role) {
   if (!isPredatorEnabled()) return false;

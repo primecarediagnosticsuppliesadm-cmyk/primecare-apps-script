@@ -12,7 +12,7 @@ const STATUS_STYLES = {
 /**
  * Dev/QA-only panel: compares DB browser reads, API payload, and rendered KPIs.
  */
-export default function AdminDashboardQaValidationPanel({ renderedSnapshot, autoRun = true }) {
+export default function AdminDashboardQaValidationPanel({ renderedSnapshot, autoRun = false }) {
   const [report, setReport] = useState(null);
   const [running, setRunning] = useState(false);
   const [expanded, setExpanded] = useState(true);

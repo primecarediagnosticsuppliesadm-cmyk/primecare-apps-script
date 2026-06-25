@@ -1297,7 +1297,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       ) : null}
 
       {showQaValidationPanel && qaValidationSnapshot ? (
-        <AdminDashboardQaValidationPanel renderedSnapshot={qaValidationSnapshot} autoRun />
+        <AdminDashboardQaValidationPanel renderedSnapshot={qaValidationSnapshot} />
       ) : null}
 
       <HqPrioritiesStrip

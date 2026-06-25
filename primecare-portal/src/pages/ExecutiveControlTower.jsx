@@ -166,26 +166,32 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
       });
       setModel(built.interventionModel);
       setDataLoadedAt(Date.now());
-      setActionQueueLoading(true);
-      try {
-        const bundle = await loadExecutiveActionQueueBundle(currentUser, {
-          force: isRefresh,
-          payload: built.opsPayload,
-        });
-        setActionQueueBundle(bundle);
-      } catch (queueErr) {
-        console.warn("[Control Tower] action queue load failed", queueErr);
-        setActionQueueBundle({
-          queue: buildExecutiveActionQueue({
-            payload: built.opsPayload,
-            contracts: [],
-            pendingCommissions: [],
-            tenantId,
-          }),
-        });
-      } finally {
-        setActionQueueLoading(false);
+      if (!isRefresh) {
+        setLoading(false);
       }
+
+      setActionQueueLoading(true);
+      void (async () => {
+        try {
+          const bundle = await loadExecutiveActionQueueBundle(currentUser, {
+            force: isRefresh,
+            payload: built.opsPayload,
+          });
+          setActionQueueBundle(bundle);
+        } catch (queueErr) {
+          console.warn("[Control Tower] action queue load failed", queueErr);
+          setActionQueueBundle({
+            queue: buildExecutiveActionQueue({
+              payload: built.opsPayload,
+              contracts: [],
+              pendingCommissions: [],
+              tenantId,
+            }),
+          });
+        } finally {
+          setActionQueueLoading(false);
+        }
+      })();
     } catch (err) {
       setError(err?.message || "Failed to load executive workspace");
       if (!isRefresh) setModel(null);

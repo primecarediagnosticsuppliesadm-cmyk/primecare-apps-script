@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, memo } from "react";
 import LoginPage from "./pages/LoginPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import { useAuth } from "./context/AuthContext";
@@ -29,6 +29,7 @@ import { platformRoleLabel } from "./config/rolePermissionMatrix.js";
 import { TenantViewProvider } from "@/context/TenantViewContext.jsx";
 import OperatingZoneSync from "@/components/OperatingZoneSync.jsx";
 import { loadHqNavBadgeCounts } from "@/operations/hqNavBadgeCounts.js";
+import { prefetchLikelyRoutes } from "@/utils/routePrefetch.js";
 
 function canRoleAccessPage(role, pageKey) {
   if (!role || !pageKey) return false;
@@ -59,7 +60,14 @@ function UnauthorizedScreen({ message, onLogout }) {
   );
 }
 
-function ExecutivePortalHeader({ currentUser, pageTitle, onLogout, role, activePage, setActivePage }) {
+const ExecutivePortalHeader = memo(function ExecutivePortalHeader({
+  currentUser,
+  pageTitle,
+  onLogout,
+  role,
+  activePage,
+  setActivePage,
+}) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const showHqChrome = role === ROLES.ADMIN || role === ROLES.EXECUTIVE;
@@ -117,7 +125,7 @@ function ExecutivePortalHeader({ currentUser, pageTitle, onLogout, role, activeP
       ) : null}
     </>
   );
-}
+});
 
 function PortalLoadingScreenWrapper() {
   return (
@@ -271,6 +279,11 @@ export default function App() {
       window.clearInterval(interval);
     };
   }, [isAuthenticated, role, currentUser?.tenantId]);
+
+  useEffect(() => {
+    if (!role || !activePage) return;
+    prefetchLikelyRoutes(role, activePage);
+  }, [role, activePage]);
 
   useEffect(() => {
     if (!role) return;

@@ -2532,6 +2532,8 @@ export function invalidateAdminDashboardReadCache() {
   adminDashboardReadInFlight = null;
   invalidateBoundedSourceCache();
   invalidateCollectionsReadCache();
+  invalidateOrdersReadCache();
+  invalidateQualificationReviewReadCache();
   perfLog("getAdminDashboardRead.cacheCleared");
   recordPredatorCacheEvent({ cacheKey: "adminDashboardRead", event: "invalidate" });
 }
@@ -3247,6 +3249,7 @@ export function invalidateQualificationReviewReadCache() {
 export function invalidateAllHqReadCaches() {
   invalidateAdminDashboardReadCache();
   invalidateQualificationReviewReadCache();
+  invalidateOrdersReadCache();
 }
 
 export async function getQualificationReviewRead(options = {}) {
@@ -4996,18 +4999,43 @@ export function mapOrderLineRow(row) {
 async function fetchLabsNameMap() {
   const map = new Map();
   if (!supabase) return map;
-  try {
-    const { data: labsRows, error } = await supabase.from("labs").select(HQ_LABS_NAME_COLUMNS);
-    if (error || !Array.isArray(labsRows)) return map;
-    for (const l of labsRows) {
-      const id = str(l.lab_id ?? l.labId ?? l.id);
-      const name = str(l.lab_name ?? l.labName ?? l.name ?? "");
-      if (id) map.set(id, name);
-    }
-  } catch {
-    /* ignore — orders list still works without lab names */
+
+  const LABS_NAME_MAP_TTL_MS = 60_000;
+  if (
+    labsNameMapCache.map &&
+    Date.now() - labsNameMapCache.loadedAt < LABS_NAME_MAP_TTL_MS
+  ) {
+    return labsNameMapCache.map;
   }
-  return map;
+  if (labsNameMapCache.inFlight) {
+    return labsNameMapCache.inFlight;
+  }
+
+  const load = (async () => {
+    const next = new Map();
+    try {
+      const { data: labsRows, error } = await supabase.from("labs").select(HQ_LABS_NAME_COLUMNS);
+      if (error || !Array.isArray(labsRows)) return next;
+      for (const l of labsRows) {
+        const id = str(l.lab_id ?? l.labId ?? l.id);
+        const name = str(l.lab_name ?? l.labName ?? l.name ?? "");
+        if (id) next.set(id, name);
+      }
+      labsNameMapCache = { map: next, loadedAt: Date.now(), inFlight: null };
+      return next;
+    } catch {
+      return next;
+    }
+  })();
+
+  labsNameMapCache.inFlight = load;
+  try {
+    return await load;
+  } finally {
+    if (labsNameMapCache.inFlight === load) {
+      labsNameMapCache.inFlight = null;
+    }
+  }
 }
 
 async function fetchOrderLineCountsForOrders(orderIds = [], options = {}) {
@@ -5161,7 +5189,46 @@ export async function getLabRecentOrdersRead(labId) {
  * Bounded read-only order list (tenant-scoped via RLS).
  * Never throws.
  */
+const ORDERS_READ_CACHE_TTL_MS = 45_000;
+/** @type {{ result: object|null, loadedAt: number, key: string }} */
+let ordersReadCache = { result: null, loadedAt: 0, key: "" };
+/** @type {Promise<object>|null} */
+let ordersReadInFlight = null;
+/** @type {{ map: Map<string, string>|null, loadedAt: number, inFlight: Promise<Map<string, string>>|null }} */
+let labsNameMapCache = { map: null, loadedAt: 0, inFlight: null };
+
+function ordersReadCacheKey(params = {}) {
+  const limit = clampLimit(params.limit, HQ_ORDERS_LIST_DEFAULT_LIMIT, HQ_ORDERS_LIST_MAX_LIMIT);
+  const offset = Math.max(0, Number(params.offset) || 0);
+  const daysBack =
+    Number(params.daysBack) > 0 ? Number(params.daysBack) : HQ_DASHBOARD_RECENT_DAYS;
+  return `${limit}:${offset}:${daysBack}`;
+}
+
+export function invalidateOrdersReadCache() {
+  ordersReadCache = { result: null, loadedAt: 0, key: "" };
+  ordersReadInFlight = null;
+}
+
 export async function getOrdersRead(params = {}) {
+  const force = params.force === true;
+  const cacheKey = ordersReadCacheKey(params);
+
+  if (!force && ordersReadInFlight) {
+    perfLog("getOrdersRead.inFlightJoin");
+    return ordersReadInFlight;
+  }
+  if (
+    !force &&
+    ordersReadCache.result &&
+    ordersReadCache.key === cacheKey &&
+    Date.now() - ordersReadCache.loadedAt < ORDERS_READ_CACHE_TTL_MS
+  ) {
+    perfLog("getOrdersRead.cacheHit", { ageMs: Date.now() - ordersReadCache.loadedAt });
+    return ordersReadCache.result;
+  }
+
+  const run = async () => {
   const limit = clampLimit(params.limit, HQ_ORDERS_LIST_DEFAULT_LIMIT, HQ_ORDERS_LIST_MAX_LIMIT);
   const offset = Math.max(0, Number(params.offset) || 0);
   traceSupabaseRead("Orders.getOrdersRead", { table: "orders", limit, offset });
@@ -5246,6 +5313,18 @@ export async function getOrdersRead(params = {}) {
     const message = err?.message || String(err);
     hqDebugWarn("[getOrdersRead] failed:", message);
     return { success: false, readFailed: true, error: message, data: { orders: [] } };
+  }
+  };
+
+  if (!force) ordersReadInFlight = run();
+  try {
+    const result = await (force ? run() : ordersReadInFlight);
+    if (!force && result?.success !== false) {
+      ordersReadCache = { result, loadedAt: Date.now(), key: cacheKey };
+    }
+    return result;
+  } finally {
+    if (!force) ordersReadInFlight = null;
   }
 }
 

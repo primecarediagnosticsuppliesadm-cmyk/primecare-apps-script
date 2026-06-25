@@ -40,10 +40,12 @@ export default function TenantManagementPage({ currentUser = null }) {
   const [isolationRunning, setIsolationRunning] = useState(false);
   const [actionMsg, setActionMsg] = useState("");
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (options = {}) => {
     try {
       setLoading(true);
-      const data = await loadTenantFoundationRegistry(currentUser, { force: true });
+      const data = await loadTenantFoundationRegistry(currentUser, {
+        force: options.force === true,
+      });
       setRegistry(data);
       syncFromStorage();
     } catch (err) {
@@ -145,7 +147,7 @@ export default function TenantManagementPage({ currentUser = null }) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <TenantSwitcher options={registry?.switcherOptions || []} />
-          <Button type="button" variant="ghost" size="icon" onClick={() => void load()} aria-label="Refresh">
+          <Button type="button" variant="ghost" size="icon" onClick={() => void load({ force: true })} aria-label="Refresh">
             <RefreshCw className="h-4 w-4" />
           </Button>
           {!readOnly ? (

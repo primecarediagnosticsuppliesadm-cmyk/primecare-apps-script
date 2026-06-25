@@ -16,7 +16,7 @@ export const HQ_ADMIN_MENU_SECTIONS = [
   {
     id: "operations",
     label: "OPERATIONS",
-    keys: ["labs", "orders", "risk", "notifications", "visits", "distributorOs"],
+    keys: ["labs", "orders", "risk", "visits"],
   },
   {
     id: "inventory",
@@ -29,7 +29,6 @@ export const HQ_ADMIN_MENU_SECTIONS = [
     keys: ["operationsCenter", "accessAudit"],
   },
   { id: "growth", label: "GROWTH", keys: ["qualificationReview"] },
-  { id: "system", label: "SYSTEM", keys: ["predatorDebug"] },
 ];
 
 /** HQ Executive sidebar sections. */
@@ -38,19 +37,12 @@ export const HQ_EXECUTIVE_MENU_SECTIONS = [
   {
     id: "founder",
     label: "FOUNDER",
-    keys: [
-      "founderNavigation",
-      "founderStrategy",
-      "founderFinancialIntelligence",
-      "revenueFunnel",
-      "pilotReadiness",
-      "tenantManagement",
-    ],
+    keys: ["founderFinancialIntelligence", "revenueFunnel"],
   },
   {
     id: "operations",
     label: "OPERATIONS",
-    keys: ["orders", "risk", "notifications", "distributorOs", "operationsCenter"],
+    keys: ["orders", "risk", "operationsCenter"],
   },
   {
     id: "inventory",
@@ -59,7 +51,6 @@ export const HQ_EXECUTIVE_MENU_SECTIONS = [
   },
   { id: "people", label: "PEOPLE", keys: ["accessAudit"] },
   { id: "growth", label: "GROWTH", keys: ["qualificationReview", "commissionEngine", "labContractEngine"] },
-  { id: "system", label: "SYSTEM", keys: ["predatorDebug", "qaCommandCenter"] },
 ];
 
 /** PrimeCare HQ sidebar — platform modules only (no distributor ops). */
@@ -103,11 +94,11 @@ const ADMIN_HQ_MENU_KEYS = new Set([
   "predatorDebug",
 ]);
 
-/** Lab sidebar: ordering, account, activity only. */
-const LAB_MENU_ORDER = ["labOrders", "labInvoices", "labAccount", "notifications"];
-
 /** Agent sidebar: execution workflow only (Activity Center merged into Dashboard). */
-const AGENT_MENU_ORDER = ["dashboard", "collections", "visits", "labs", "notifications"];
+const AGENT_MENU_ORDER = ["dashboard", "collections", "visits", "labs"];
+
+/** Lab sidebar: ordering, account — Activity Center hidden for pilot speed. */
+const LAB_MENU_ORDER = ["labOrders", "labInvoices", "labAccount"];
 
 const DISTRIBUTOR_ADMIN_MENU_KEY_SET = new Set(DISTRIBUTOR_ADMIN_MENU_KEYS);
 
@@ -200,6 +191,33 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "qaCommandCenter",
 ]);
 
+/**
+ * HQ pilot sidebar — hide internal / low-value items from daily navigation.
+ * Routes stay permissioned; direct URLs still work.
+ */
+const HQ_PILOT_SIDEBAR_HIDDEN_BY_ROLE = {
+  [ROLES.EXECUTIVE]: new Set([
+    "notifications",
+    "founderNavigation",
+    "founderStrategy",
+    "pilotReadiness",
+    "tenantManagement",
+    "distributorOs",
+    "predatorDebug",
+    "qaCommandCenter",
+  ]),
+  [ROLES.ADMIN]: new Set(["notifications", "distributorOs", "predatorDebug"]),
+  [ROLES.AGENT]: new Set(["notifications"]),
+  [ROLES.LAB]: new Set(["notifications"]),
+};
+
+function isHqPilotSidebarHidden(role, pageKey) {
+  if (ALLOW_EXPERIMENTAL_MODULES) return false;
+  if (!IS_QA && !IS_PROD) return false;
+  const hidden = HQ_PILOT_SIDEBAR_HIDDEN_BY_ROLE[role];
+  return hidden?.has(pageKey) ?? false;
+}
+
 export function isPageVisibleInCurrentEnvironment(pageKey) {
   if (ALLOW_EXPERIMENTAL_MODULES) return true;
   if (!IS_QA && !IS_PROD) return true;
@@ -248,6 +266,7 @@ export function getMenuForRole(role) {
       return false;
     }
     if (hqMenuKeys && !hqMenuKeys.has(item.key)) return false;
+    if (isHqPilotSidebarHidden(normalizedRole, item.key)) return false;
     return (
       PERMISSIONS[item.key]?.includes(normalizedRole) &&
       isPageVisibleInCurrentEnvironment(item.key)

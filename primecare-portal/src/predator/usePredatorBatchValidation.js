@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { isPredatorEnabled } from "@/predator/predatorGuards.js";
+import { isPredatorAutoValidationEnabled } from "@/predator/predatorGuards.js";
 import { runPredatorExecutiveBatchValidation } from "@/predator/runPredatorValidation.js";
 
 function stableBatchKey(snapshots) {
@@ -14,7 +14,7 @@ export function usePredatorBatchValidation(currentUser, snapshots, ready) {
   const lastKey = useRef("");
 
   useEffect(() => {
-    if (!isPredatorEnabled() || !ready || !currentUser) return;
+    if (!isPredatorAutoValidationEnabled() || !ready || !currentUser) return;
     const key = stableBatchKey(snapshots);
     if (key === lastKey.current) return;
     lastKey.current = key;

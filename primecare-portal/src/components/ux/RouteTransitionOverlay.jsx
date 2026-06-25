@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import PageSkeleton from "./PageSkeleton";
 import { cn } from "@/lib/utils";
 
-const MIN_MS = 120;
-const MAX_MS = 900;
+const MIN_MS = 60;
+const MAX_MS = 500;
 
 /**
  * Brief skeleton overlay on sidebar navigation — avoids frozen blank transitions.
@@ -36,7 +36,7 @@ export default function RouteTransitionOverlay({ pageKey, children, className })
     <div className={cn("relative", className)}>
       {visible ? (
         <div
-          className="pointer-events-none absolute inset-0 z-20 bg-slate-50/90"
+          className="pointer-events-none absolute inset-0 z-20 bg-slate-50/90 will-change-[opacity]"
           aria-hidden="true"
         >
           <PageSkeleton kpiCount={4} kpiColumns={4} listRows={5} className="p-3 md:p-5" />

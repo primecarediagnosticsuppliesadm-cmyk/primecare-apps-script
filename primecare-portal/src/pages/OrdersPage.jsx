@@ -12,6 +12,7 @@ import {
 } from "@/utils/migrationTrace.js";
 import { invalidateAdminDashboardCaches } from "@/utils/dashboardInvalidate.js";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
+import { isPredatorAutoValidationEnabled } from "@/predator/predatorGuards.js";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -261,7 +262,9 @@ export default function OrdersPage({
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
 
   useEffect(() => {
-    if (!homeTenantId || !setActivePage) return;
+    const orderLabId = details?.order?.labId;
+    if (!homeTenantId || !setActivePage || !orderLabId) return;
+    if (labAssignments.length > 0 || directoryUsers.length > 0) return;
     let cancelled = false;
     void loadOperationsCenterAdminBundle(homeTenantId).then((bundle) => {
       if (!cancelled) {
@@ -272,7 +275,7 @@ export default function OrdersPage({
     return () => {
       cancelled = true;
     };
-  }, [homeTenantId, setActivePage]);
+  }, [homeTenantId, setActivePage, details?.order?.labId, labAssignments.length, directoryUsers.length]);
 
   useEffect(() => {
     loadOrders();
@@ -326,22 +329,24 @@ export default function OrdersPage({
       const rows = Array.isArray(res?.data?.orders) ? res.data.orders : [];
       setOrdersReadOk(true);
 
-      const rlsRows = await probeRlsOrderRows();
-      if (rlsRows != null) {
-        const diagnosis = diagnoseOrdersReadDrift({
-          rawRows: rlsRows,
-          mappedOrders: rows,
-          meta: res?.meta,
-        });
-        if (diagnosis.drift) {
-          console.warn("[OrdersPage] orders count drift (RLS vs API mapping)", diagnosis);
+      if (isPredatorAutoValidationEnabled()) {
+        const rlsRows = await probeRlsOrderRows();
+        if (rlsRows != null) {
+          const diagnosis = diagnoseOrdersReadDrift({
+            rawRows: rlsRows,
+            mappedOrders: rows,
+            meta: res?.meta,
+          });
+          if (diagnosis.drift) {
+            console.warn("[OrdersPage] orders count drift (RLS vs API mapping)", diagnosis);
+          }
+        } else if (res?.meta?.rawRowCount != null && res.meta.rawRowCount !== rows.length) {
+          console.warn("[OrdersPage] orders count drift (raw vs mapped)", {
+            rawRowCount: res.meta.rawRowCount,
+            mappedRowCount: rows.length,
+            orderIds: res.meta.orderIds,
+          });
         }
-      } else if (res?.meta?.rawRowCount != null && res.meta.rawRowCount !== rows.length) {
-        console.warn("[OrdersPage] orders count drift (raw vs mapped)", {
-          rawRowCount: res.meta.rawRowCount,
-          mappedRowCount: rows.length,
-          orderIds: res.meta.orderIds,
-        });
       }
 
       setAllOrders(rows);

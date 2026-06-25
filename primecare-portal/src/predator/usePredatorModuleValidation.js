@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { isPredatorEnabled } from "@/predator/predatorGuards.js";
+import { isPredatorAutoValidationEnabled } from "@/predator/predatorGuards.js";
 import { runPredatorModuleValidation } from "@/predator/runPredatorValidation.js";
 
 /**
@@ -13,7 +13,7 @@ export function usePredatorModuleValidation(moduleName, currentUser, snapshot, r
   const lastKey = useRef("");
 
   useEffect(() => {
-    if (!isPredatorEnabled() || !ready || !currentUser) return;
+    if (!isPredatorAutoValidationEnabled() || !ready || !currentUser) return;
     const key = JSON.stringify({ moduleName, snapshot, userId: currentUser.id });
     if (key === lastKey.current) return;
     lastKey.current = key;
