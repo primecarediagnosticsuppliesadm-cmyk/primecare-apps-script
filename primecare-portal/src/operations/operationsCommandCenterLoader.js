@@ -1,3 +1,4 @@
+import { getFounderSnapshotRead } from "@/api/founderSnapshotApi.js";
 import {
   getAdminDashboardRead,
   getCollectionsRead,
@@ -56,6 +57,7 @@ const EMPTY_PAYLOAD = {
   ownershipMetrics: null,
   ownershipAgents: [],
   ownershipDirectoryUsers: [],
+  founderSnapshot: null,
 };
 
 /**
@@ -84,6 +86,7 @@ export async function loadOperationsCommandCenterData(currentUser, options = {})
     evidenceRows,
     inventoryEconomicsRes,
     ownershipBundle,
+    founderSnapRes,
   ] = await Promise.all([
     getAdminDashboardRead(),
     getCollectionsRead({ limit: HQ_COLLECTIONS_AR_LIMIT }),
@@ -98,6 +101,9 @@ export async function loadOperationsCommandCenterData(currentUser, options = {})
       : Promise.resolve([]),
     loadInventoryEconomicsBundle(),
     tenantId ? loadLabOwnershipMetricsBundle(tenantId).catch(() => null) : Promise.resolve(null),
+    tenantId
+      ? getFounderSnapshotRead({ tenantId }).catch(() => ({ success: false, data: null }))
+      : Promise.resolve({ success: false, data: null }),
   ]);
 
   const dashboard = normalizeAdminDashboardReadResult(dashRes);
@@ -142,6 +148,7 @@ export async function loadOperationsCommandCenterData(currentUser, options = {})
     ownershipMetrics: ownershipBundle?.ownershipMetrics || null,
     ownershipAgents: ownershipBundle?.agents || [],
     ownershipDirectoryUsers: ownershipBundle?.directoryUsers || [],
+    founderSnapshot: founderSnapRes?.success ? founderSnapRes.data : null,
   };
   opsPayloadCache.set(cacheKey, { at: Date.now(), data });
   return data;
