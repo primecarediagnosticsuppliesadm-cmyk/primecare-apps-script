@@ -1124,11 +1124,11 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
           <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("operationsCenter")}>
             Operations center
           </Button>
-          <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("collections")}>
+          <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("risk")}>
             <Wallet className="mr-1 h-3.5 w-3.5" />
             Collections
           </Button>
-          <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("visits")}>
+          <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("operationsCenter")}>
             <User className="mr-1 h-3.5 w-3.5" />
             Field visits
           </Button>

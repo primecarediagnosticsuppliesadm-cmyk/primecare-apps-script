@@ -11,6 +11,7 @@ import { createClient } from "@supabase/supabase-js";
 import { readFileSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import { QA_AGENT, QA_ADMIN, QA_EXECUTIVE, QA_LAB, QA_HQ_TENANT_ID } from "./qaCredentials.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -33,26 +34,23 @@ function str(v) {
   return String(v ?? "").trim();
 }
 
-const HQ_TENANT = "f168b98f-47a6-42c3-b788-24c00436fac2";
+const HQ_TENANT = QA_HQ_TENANT_ID;
 
 const ROLES = [
-  { key: "admin", email: "qa.admin@primecare.test", password: "1234" },
-  { key: "executive", email: "qa.executive@primecare.test", password: "1234" },
+  { key: "admin", email: QA_ADMIN.email, password: QA_ADMIN.password },
+  { key: "executive", email: QA_EXECUTIVE.email, password: QA_EXECUTIVE.password },
   {
     key: "agent",
-    email: "qa.test.agent1@primecare.test",
-    password: "07a2b8cb3661Aa1!",
+    email: QA_AGENT.email,
+    password: QA_AGENT.password,
     fallbackEmail: "qa.agent@primecare.test",
-    repairEmail: "qa.test.agent1@primecare.test",
+    repairEmail: QA_AGENT.email,
   },
-  { key: "lab", email: "qa.lab@primecare.test", password: "1234" },
+  { key: "lab", email: QA_LAB.email, password: QA_LAB.password },
 ];
 
-/** Canonical QA agent credentials for browser certification (see docs/supabase-functions-deploy.md). */
-export const QA_AGENT_CANONICAL = {
-  email: "qa.test.agent1@primecare.test",
-  password: "07a2b8cb3661Aa1!",
-};
+/** Canonical QA agent credentials for browser certification. */
+export const QA_AGENT_CANONICAL = QA_AGENT;
 
 async function repairAgentAuthIfNeeded(env, roleSpec) {
   if (roleSpec.key !== "agent" || !roleSpec.repairEmail) return null;
@@ -61,8 +59,8 @@ async function repairAgentAuthIfNeeded(env, roleSpec) {
     auth: { persistSession: false },
   });
   const { data: adminAuth, error: adminErr } = await admin.auth.signInWithPassword({
-    email: "qa.admin@primecare.test",
-    password: "1234",
+    email: QA_ADMIN.email,
+    password: QA_ADMIN.password,
   });
   if (adminErr) return null;
 

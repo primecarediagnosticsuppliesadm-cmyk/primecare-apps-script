@@ -1,21 +1,5 @@
--- Sprint 1 — Transaction integrity RPCs (payments, inventory, orders).
+-- Fix Sprint 1 transaction RPCs: tenant_id columns are uuid; compare with explicit casts.
 
-ALTER TABLE public.orders
-  ADD COLUMN IF NOT EXISTS client_request_id text;
-
-CREATE UNIQUE INDEX IF NOT EXISTS orders_tenant_client_request_uidx
-  ON public.orders (tenant_id, client_request_id)
-  WHERE client_request_id IS NOT NULL AND btrim(client_request_id) <> '';
-
-ALTER TABLE public.inventory
-  DROP CONSTRAINT IF EXISTS inventory_stock_non_negative;
-
-ALTER TABLE public.inventory
-  ADD CONSTRAINT inventory_stock_non_negative CHECK (current_stock >= 0);
-
--- ---------------------------------------------------------------------------
--- post_collection_payment — atomic payment insert + AR update (idempotent)
--- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.post_collection_payment(
   p_tenant_id text,
   p_lab_id text,
@@ -145,9 +129,6 @@ BEGIN
 END;
 $$;
 
--- ---------------------------------------------------------------------------
--- deduct_inventory_for_order — conditional stock decrement + ledger (idempotent)
--- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.deduct_inventory_for_order(
   p_tenant_id text,
   p_order_id text,
@@ -265,9 +246,6 @@ BEGIN
 END;
 $$;
 
--- ---------------------------------------------------------------------------
--- create_lab_order — atomic order + line items (idempotent via client_request_id)
--- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.create_lab_order(
   p_tenant_id text,
   p_lab_id text,
@@ -465,11 +443,3 @@ EXCEPTION
   RAISE;
 END;
 $$;
-
-REVOKE ALL ON FUNCTION public.post_collection_payment(text, text, text, numeric, text, date, text, text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.deduct_inventory_for_order(text, text, text, numeric, text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.create_lab_order(text, text, text, jsonb, text, date, text, text, text) FROM PUBLIC;
-
-GRANT EXECUTE ON FUNCTION public.post_collection_payment(text, text, text, numeric, text, date, text, text, text) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.deduct_inventory_for_order(text, text, text, numeric, text, text) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.create_lab_order(text, text, text, jsonb, text, date, text, text, text) TO authenticated;

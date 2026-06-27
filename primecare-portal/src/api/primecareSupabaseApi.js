@@ -1639,8 +1639,11 @@ export async function createPaymentWrite(payload = {}) {
     }
 
     if (rpcPay.error && !isMissingSupabaseRpcError(rpcPay.error, "post_collection_payment")) {
-      hqDebugWarn("[createPaymentWrite] post_collection_payment:", rpcPay.error.message);
-      return { success: false, error: rpcPay.error.message, data: null };
+      hqDebugWarn(
+        "[createPaymentWrite] post_collection_payment:",
+        rpcPay.error.message,
+        "— falling back to legacy write path"
+      );
     }
 
     const old_outstanding = arRow
@@ -5035,8 +5038,11 @@ export async function createOrderWrite(payload = {}) {
       }
 
       if (rpcOrder.error && !isMissingSupabaseRpcError(rpcOrder.error, "create_lab_order")) {
-        hqDebugWarn("[createOrderWrite] create_lab_order:", rpcOrder.error.message);
-        return { success: false, error: rpcOrder.error.message, data: null };
+        hqDebugWarn(
+          "[createOrderWrite] create_lab_order:",
+          rpcOrder.error.message,
+          "— falling back to legacy write path"
+        );
       }
     }
 

@@ -10,8 +10,10 @@ import { createServer } from "vite";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
-const AGENT_EMAIL = "qa.test.agent1@primecare.test";
-const AGENT_PASSWORD = "07a2b8cb3661Aa1!";
+import { QA_AGENT } from "./qaCredentials.mjs";
+
+const AGENT_EMAIL = QA_AGENT.email;
+const AGENT_PASSWORD = QA_AGENT.password;
 const QA_GAMMA_LAB = "QA_LAB_003";
 
 function loadEnv() {

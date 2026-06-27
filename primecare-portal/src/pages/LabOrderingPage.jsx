@@ -1762,7 +1762,7 @@ export default function LabOrderingPage({ currentUser }) {
       ) : null}
 
       {isCartOpen ? (
-        <div className="fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label="Shopping cart">
+        <div className="fixed inset-0 z-50 md:z-40" role="dialog" aria-modal="true" aria-label="Shopping cart">
           <button
             type="button"
             className="absolute inset-0 bg-slate-900/35 backdrop-blur-[2px] transition-opacity"
@@ -1884,7 +1884,7 @@ export default function LabOrderingPage({ currentUser }) {
                   </div>
                 </div>
               </CollapsibleSection>
-              <div className="flex gap-2 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
+              <div className="flex gap-2 px-3 pt-2 pb-[max(calc(4.5rem+env(safe-area-inset-bottom)),1rem)] md:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
                 <Button
                   type="button"
                   variant="outline"

@@ -180,7 +180,7 @@ Create with `"role": "distributor_admin"` and `"distributorId": "<distributor-te
 |------|-------|----------|
 | HQ Executive | `qa.executive@primecare.test` | `1234` |
 | HQ Admin | `qa.admin@primecare.test` | `1234` |
-| Field Agent | `qa.test.agent1@primecare.test` | `07a2b8cb3661Aa1!` |
+| Field Agent | `qa.test.agent1@primecare.test` | `115f4ce25fa0Aa1!` |
 | Lab User | `qa.lab@primecare.test` | `1234` |
 
 Agent password is set via Operations Center **Reset Pwd** when rotated. Do not commit live passwords outside this QA doc.

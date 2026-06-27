@@ -16,7 +16,7 @@
 
 ### Agent auth (canonical)
 
-- `qa.test.agent1@primecare.test` / `07a2b8cb3661Aa1!` — browser certification password
+- `qa.test.agent1@primecare.test` / `115f4ce25fa0Aa1!` — browser certification password
 - Script `verify-hq-rls-reads.mjs` uses canonical password; auto-repair via admin reset only if login fails
 
 ## SQL remediation (requires apply in Supabase)

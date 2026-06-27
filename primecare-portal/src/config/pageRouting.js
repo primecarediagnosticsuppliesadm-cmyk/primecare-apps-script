@@ -124,6 +124,10 @@ export function resolvePageKeyForRole(role, page) {
     if (key === "orders") return "labOrders";
     if (key === "invoices") return "labInvoices";
   }
+  if (role === ROLES.EXECUTIVE) {
+    if (key === "collections") return "risk";
+    if (key === "visits") return "operationsCenter";
+  }
   return key;
 }
 

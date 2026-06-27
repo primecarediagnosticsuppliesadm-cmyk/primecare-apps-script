@@ -8,6 +8,7 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { createClient } from "@supabase/supabase-js";
 import { createServer } from "vite";
+import { QA_AGENT } from "./qaCredentials.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -40,7 +41,7 @@ async function main() {
   const accounts = {
     executive: ["qa.executive@primecare.test", "1234"],
     admin: ["qa.admin@primecare.test", "1234"],
-    agent: ["qa.test.agent1@primecare.test", "07a2b8cb3661Aa1!"],
+    agent: [QA_AGENT.email, QA_AGENT.password],
     lab: ["qa.lab@primecare.test", "1234"],
   };
 
