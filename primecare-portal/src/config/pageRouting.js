@@ -170,8 +170,11 @@ export function resolvePageKeyFromPath(pathname) {
 export function resolveInitialPageForRole(role, pathname, defaultPage, canAccess) {
   const fallback = resolvePageKeyForRole(role, defaultPage);
   const fromPath = resolvePageKeyFromPath(pathname);
-  if (fromPath && canAccess(fromPath)) {
-    return resolvePageKeyForRole(role, fromPath);
+  if (fromPath) {
+    const resolvedFromPath = resolvePageKeyForRole(role, fromPath);
+    if (canAccess(resolvedFromPath)) {
+      return resolvedFromPath;
+    }
   }
   return fallback;
 }

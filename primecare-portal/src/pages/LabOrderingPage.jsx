@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -1761,8 +1762,9 @@ export default function LabOrderingPage({ currentUser }) {
         </button>
       ) : null}
 
-      {isCartOpen ? (
-        <div className="fixed inset-0 z-50 md:z-40" role="dialog" aria-modal="true" aria-label="Shopping cart">
+      {isCartOpen
+        ? createPortal(
+        <div className="fixed inset-0 z-[100]" role="dialog" aria-modal="true" aria-label="Shopping cart">
           <button
             type="button"
             className="absolute inset-0 bg-slate-900/35 backdrop-blur-[2px] transition-opacity"
@@ -1884,7 +1886,7 @@ export default function LabOrderingPage({ currentUser }) {
                   </div>
                 </div>
               </CollapsibleSection>
-              <div className="flex gap-2 px-3 pt-2 pb-[max(calc(4.5rem+env(safe-area-inset-bottom)),1rem)] md:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+              <div className="flex gap-2 px-3 pt-2 pb-[max(calc(6rem+env(safe-area-inset-bottom)),1.25rem)] md:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
                 <Button
                   type="button"
                   variant="outline"
@@ -1915,8 +1917,10 @@ export default function LabOrderingPage({ currentUser }) {
               </div>
             </div>
           </div>
-        </div>
-      ) : null}
+        </div>,
+        document.body
+        )
+        : null}
     </div>
   );
 }

@@ -183,7 +183,13 @@ export function filterCollectionsForUser(collections = [], currentUser, ownershi
       }
       if (!ownedKeys.size) return false;
       const key = `${normalize(item.tenantId ?? item.tenant_id)}|${labIdKey(item.labId ?? item.lab_id)}`;
-      return ownedKeys.has(key);
+      if (ownedKeys.has(key)) return true;
+      const lid = labIdKey(item.labId ?? item.lab_id);
+      if (!lid) return false;
+      for (const owned of ownedKeys) {
+        if (owned.endsWith(`|${lid}`)) return true;
+      }
+      return false;
     });
   }
 

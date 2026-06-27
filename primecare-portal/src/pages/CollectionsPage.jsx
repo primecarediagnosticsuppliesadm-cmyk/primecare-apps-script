@@ -167,6 +167,9 @@ function buildCollectionsViewFromPayload(
 }
 
 function hydrateCollectionsFromCache(currentUser, distributorScope, isLabAccount) {
+  // Agent rows require lab_ownership; cached peek reads omit ownership and show empty.
+  if (currentUser?.role === ROLES.AGENT) return null;
+
   const cacheKey = `collections:${String(currentUser?.role || "")}:${String(distributorScope?.tenantId || currentUser?.tenantId || "")}:${isLabAccount ? "lab" : "hq"}`;
   const ui = readPageUiCache(cacheKey);
   if (ui?.collections?.length) {
@@ -2022,7 +2025,9 @@ export default function CollectionsPage({
 
         logSupabaseFeatureSource("Collections.list", { api: "getCollectionsRead" });
         const [res, ownershipRes] = await Promise.all([
-          getCollectionsRead({ force: silent }),
+          getCollectionsRead({
+            force: currentUser?.role === ROLES.AGENT ? true : silent,
+          }),
           currentUser?.role === ROLES.AGENT
             ? getAgentActiveLabOwnershipRowsRead()
             : Promise.resolve({ data: { rows: [] } }),
