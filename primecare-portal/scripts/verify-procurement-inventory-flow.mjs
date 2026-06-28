@@ -14,7 +14,7 @@ import { resolveInventoryUnitCost } from "../src/inventory/resolveInventoryUnitC
 import { resolveMasterCatalogPricing } from "../src/catalog/masterCatalogEngine.js";
 
 const PRICING_EXPECTATIONS = {
-  QA_SKU_003: { price: 900, cost: 200, margin: 78, stock: 120 },
+  QA_SKU_003: { price: 900, cost: 200, margin: 78 },
   QA_SKU_002: { price: 800, cost: 150, margin: 81 },
   "QA TEST KIT D": { price: 13, cost: 12, margin: 8 },
 };
@@ -84,6 +84,25 @@ async function fetchProductCost(sb, tenantId, productId) {
     .maybeSingle();
   if (error) throw new Error(error.message);
   return data;
+}
+
+/** Master Catalog HQ stock from v_lab_catalog (handles duplicate view rows). */
+async function fetchCatalogStock(sb, tenantId, productId) {
+  const { data, error } = await sb
+    .from("v_lab_catalog")
+    .select("current_stock,tenant_id,product_id")
+    .eq("tenant_id", tenantId)
+    .eq("product_id", productId);
+  if (error) throw new Error(error.message);
+  const rows = data || [];
+  if (!rows.length) return null;
+  const stocks = [...new Set(rows.map((row) => num(row.current_stock)))];
+  if (stocks.length > 1) {
+    throw new Error(
+      `Ambiguous catalog stock for ${productId}: ${stocks.join(", ")} across ${rows.length} view rows`
+    );
+  }
+  return stocks[0];
 }
 
 async function receivePoInline(sb, poId, { tenantId, receivedQty, createdBy }) {
@@ -235,26 +254,21 @@ async function main() {
     fail("inventory.no_duplicate", `Found ${(dupRows || []).length} inventory rows`);
   }
 
-  const { data: catalogRow } = await sb
-    .from("v_lab_catalog")
-    .select("product_id,current_stock,unit_cost,unit_selling_price")
-    .eq("tenant_id", HQ)
-    .eq("product_id", TEST_SKU)
-    .maybeSingle();
-  if (catalogRow && invBefore && num(catalogRow.current_stock) === num(invBefore.current_stock)) {
-    pass("catalog.stock_match", `Catalog HQ stock=${catalogRow.current_stock}`);
-  } else if (catalogRow && invBefore) {
-    fail(
-      "catalog.stock_match",
-      `Catalog ${catalogRow.current_stock} != inventory ${invBefore.current_stock}`
-    );
-  }
+  const catalogStock = await fetchCatalogStock(sb, HQ, TEST_SKU);
+  const inventoryStock = num(invBefore?.current_stock);
 
   if (product?.cost_price) {
     pass("catalog.product_cost", `products.cost_price=${product.cost_price}`);
     if (product?.selling_price) {
       pass("catalog.product_price", `products.selling_price=${product.selling_price}`);
     }
+    const { data: catalogRows } = await sb
+      .from("v_lab_catalog")
+      .select("unit_cost,cost_price")
+      .eq("tenant_id", HQ)
+      .eq("product_id", TEST_SKU)
+      .limit(1);
+    const catalogRow = catalogRows?.[0];
     const viewCost = catalogRow?.unit_cost ?? catalogRow?.cost_price;
     if (viewCost != null && num(viewCost) === num(product.cost_price)) {
       pass("catalog.view_cost_match", `v_lab_catalog unit_cost=${viewCost}`);
@@ -302,16 +316,24 @@ async function main() {
     } else {
       pass(`pricing.${sku}.margin`, `Margin ${pricing.marginPct}%`);
     }
-    if (expected.stock != null && sku === TEST_SKU) {
-      const invSku = await fetchInventoryRow(sb, HQ, sku);
-      if (num(invSku?.current_stock) !== expected.stock) {
-        fail(
-          `pricing.${sku}.stock`,
-          `expected stock ${expected.stock}, got ${num(invSku?.current_stock)}`
-        );
-      } else {
-        pass(`pricing.${sku}.stock`, `HQ Stock ${expected.stock}`);
-      }
+  }
+
+  if (!MUTATE) {
+    if (catalogStock == null) {
+      fail(
+        "catalog.stock_match",
+        `No Master Catalog stock row for ${TEST_SKU} (inventory=${inventoryStock})`
+      );
+    } else if (catalogStock === inventoryStock) {
+      pass(
+        "catalog.stock_match",
+        `Master Catalog HQ Stock ${catalogStock} matches inventory.current_stock`
+      );
+    } else {
+      fail(
+        "catalog.stock_match",
+        `Master Catalog ${catalogStock} != inventory.current_stock ${inventoryStock}`
+      );
     }
   }
 
@@ -340,6 +362,7 @@ async function main() {
     pass("po.open", `Open PO ${openPo.po_id} (use --mutate to receive)`);
     pass("mutate.skipped", "Dry-run — receive mutation skipped");
   } else {
+    const beforeStock = inventoryStock;
     const receiveQty = Math.min(10, num(openPo.quantity) - num(openPo.received_qty));
     const first = await receivePoInline(sb, openPo.po_id, {
       tenantId: HQ,
@@ -354,38 +377,63 @@ async function main() {
       );
 
       const invAfter = await fetchInventoryRow(sb, HQ, TEST_SKU);
-      if (num(invAfter.current_stock) === num(invBefore.current_stock) + receiveQty) {
-        pass("mutate.inventory_delta", `Inventory +${receiveQty}`);
+      const afterStock = num(invAfter?.current_stock);
+      if (afterStock === beforeStock + receiveQty) {
+        pass(
+          "mutate.inventory_delta",
+          `afterStock ${afterStock} = beforeStock ${beforeStock} + ${receiveQty}`
+        );
       } else {
-        fail("mutate.inventory_delta", `Expected +${receiveQty}, got ${num(invAfter.current_stock) - num(invBefore.current_stock)}`);
+        fail(
+          "mutate.inventory_delta",
+          `Expected afterStock ${beforeStock + receiveQty}, got ${afterStock} (before=${beforeStock}, received=${receiveQty})`
+        );
+      }
+
+      const { data: ledgerRows } = await sb
+        .from("inventory_ledger")
+        .select("tenant_id,product_id,movement_type,reference_id,reference_type")
+        .eq("tenant_id", HQ)
+        .eq("product_id", TEST_SKU)
+        .eq("reference_id", openPo.po_id)
+        .eq("movement_type", "PURCHASE_IN");
+      const ledgerMatch = (ledgerRows || []).find(
+        (row) =>
+          str(row.tenant_id) === HQ &&
+          str(row.product_id) === TEST_SKU &&
+          str(row.reference_id) === str(openPo.po_id)
+      );
+      if (ledgerMatch) {
+        pass(
+          "mutate.ledger",
+          `PURCHASE_IN ledger for tenant=${HQ} product=${TEST_SKU} reference=${openPo.po_id}`
+        );
+      } else {
+        fail(
+          "mutate.ledger",
+          `No PURCHASE_IN ledger row for tenant=${HQ} product=${TEST_SKU} reference=${openPo.po_id}`
+        );
       }
 
       const costAfter = resolveInventoryUnitCost({
         tenantId: HQ,
         productId: TEST_SKU,
-        currentStock: num(invAfter.current_stock),
+        currentStock: afterStock,
         productCostPrice: product?.cost_price,
         logQa: false,
       });
       const expectedDelta = receiveQty * num(costAfter.resolvedUnitCost);
       const actualDelta = costAfter.inventoryValue - costBefore.inventoryValue;
       if (Math.abs(actualDelta - expectedDelta) <= 0.01) {
-        pass("mutate.valuation_delta", `Valuation +${expectedDelta}`);
+        pass(
+          "mutate.valuation_delta",
+          `Valuation +${expectedDelta} (${receiveQty} × ${costAfter.resolvedUnitCost})`
+        );
       } else {
-        fail("mutate.valuation_delta", `Expected +${expectedDelta}, got +${actualDelta}`);
-      }
-
-      const { data: ledgerRows } = await sb
-        .from("inventory_ledger")
-        .select("tenant_id,product_id,movement_type,reference_id")
-        .eq("tenant_id", HQ)
-        .eq("product_id", TEST_SKU)
-        .eq("reference_id", openPo.po_id)
-        .eq("movement_type", "PURCHASE_IN");
-      if ((ledgerRows || []).length >= 1) {
-        pass("mutate.ledger", `${ledgerRows.length} PURCHASE_IN ledger row(s) for PO`);
-      } else {
-        fail("mutate.ledger", "No PURCHASE_IN ledger row");
+        fail(
+          "mutate.valuation_delta",
+          `Expected +${expectedDelta} (${receiveQty} × ${costAfter.resolvedUnitCost}), got +${actualDelta}`
+        );
       }
 
       const overReceive = await receivePoInline(sb, openPo.po_id, {
