@@ -8,6 +8,7 @@ import {
 } from "@/api/primecareApi";
 import {
   createPurchaseOrderWrite,
+  getInventoryHealthRead,
   getPurchaseOrdersRead,
   getReorderForecastRead,
   receivePurchaseOrderWrite,
@@ -90,6 +91,7 @@ function formatCatalogPickerLabel(product) {
 
 function formatTriggerBasis(triggerBasis) {
   const val = String(triggerBasis || "").trim();
+  if (val === "inventory_health_velocity") return "Inventory Health velocity";
   if (!val) return "-";
   return val
     .split("_")
@@ -353,6 +355,65 @@ function summarizePlaceholderTriggers(triggers) {
   };
 }
 
+/**
+ * Velocity-based forecast suggestions aligned with Inventory Health urgency rules.
+ */
+function buildAutoTriggersFromInventoryHealth(healthRows = [], purchaseOrders = []) {
+  const openPoByProduct = new Map();
+  for (const po of purchaseOrders) {
+    if (!canReceivePurchaseOrder(po)) continue;
+    const pid = String(po.productId || "").trim();
+    if (pid && !openPoByProduct.has(pid)) {
+      openPoByProduct.set(pid, po);
+    }
+  }
+
+  return (healthRows || [])
+    .filter((row) => {
+      const urgency = String(row.urgency || "");
+      if (urgency === "Critical" || urgency === "High" || urgency === "Medium") return true;
+      return row.projectedStockoutDays != null && numberValue(row.projectedStockoutDays) <= 30;
+    })
+    .map((row) => {
+      const openPo = openPoByProduct.get(row.productId);
+      const urgencyUpper = String(row.urgency || "Medium").toUpperCase();
+      const daysLeft =
+        row.projectedStockoutDays != null ? numberValue(row.projectedStockoutDays) : null;
+      const unitCost = numberValue(row.unitCost);
+      const suggestedOrderQty = numberValue(row.recommendedReorderQty);
+      const hasOpenPo = Boolean(openPo);
+      let autoTriggerReason = `Projected stockout in ${daysLeft ?? "—"} days (${urgencyUpper} urgency). Based on 30-day ORDER_OUT velocity — same rules as Inventory → Health.`;
+      if (urgencyUpper === "CRITICAL") {
+        autoTriggerReason = `Current stock (${row.currentStock}) is at or below minimum (${row.minStock}). ${autoTriggerReason}`;
+      }
+
+      return {
+        productId: row.productId,
+        productName: row.productName,
+        urgency: urgencyUpper,
+        hasOpenPo,
+        canAutoCreate: !hasOpenPo,
+        autoTriggerReason,
+        currentStock: numberValue(row.currentStock),
+        minStock: numberValue(row.minStock),
+        dailyConsumption: numberValue(row.avgDailyConsumption),
+        daysLeft: daysLeft ?? "—",
+        suggestedOrderQty,
+        unitCost,
+        supplier: "",
+        triggerBasis: "inventory_health_velocity",
+        openPoId: openPo?.poId || "",
+        openPoStatus: openPo?.status || "",
+        estimatedCost: suggestedOrderQty * unitCost,
+        projectedStockoutDays: daysLeft,
+      };
+    })
+    .sort((a, b) => {
+      const rank = { CRITICAL: 1, HIGH: 2, MEDIUM: 3, LOW: 4 };
+      return (rank[a.urgency] || 99) - (rank[b.urgency] || 99);
+    });
+}
+
 const PURCHASE_TAB_ORDER = [
   "triggers",
   "reorder",
@@ -366,8 +427,8 @@ const PURCHASE_TAB_ORDER = [
 const PURCHASE_TAB_META = {
   triggers: {
     label: "Forecast Suggestions",
-    shortDescription: "Projected demand based on sales/stock history.",
-    purposeSentence: "Review demand projections before purchasing.",
+    shortDescription: "Velocity-based suggestions from Inventory Health (30-day ORDER_OUT).",
+    purposeSentence: "Review projected stockouts before purchasing — aligned with Inventory → Health urgency.",
     nextStepLabel: "Reorder Candidates",
     nextStepTab: "reorder",
   },
@@ -582,9 +643,19 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       logSupabaseFeatureSource("PurchaseOrders.reorderCandidates", {
         api: "getReorderForecastRead",
       });
-      const forecastRes = await getReorderForecastRead();
+      logSupabaseFeatureSource("PurchaseOrders.forecastTriggers", {
+        api: "getInventoryHealthRead",
+      });
+      const [forecastRes, healthRes, poResult] = await Promise.all([
+        getReorderForecastRead(),
+        getInventoryHealthRead(),
+        getPurchaseOrdersRead(),
+      ]);
       if (!forecastRes?.success) {
         throw new Error(forecastRes?.error || "Failed to load reorder candidates from Supabase");
+      }
+      if (!healthRes?.success) {
+        throw new Error(healthRes?.error || "Failed to load inventory health for forecast suggestions");
       }
 
       const forecast = forecastRes.data?.forecast || [];
@@ -601,18 +672,24 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
         console.info("[PurchaseOrders.smartReorder] supabase forecast items", smartItems);
       }
 
-      const triggerRows = buildPlaceholderAutoTriggersFromForecast(forecast);
-      console.log("SUPABASE AUTO PURCHASE TRIGGERS:", triggerRows);
+      const pos = poResult?.success
+        ? Array.isArray(poResult.data)
+          ? poResult.data
+          : Array.isArray(poResult.data?.purchaseOrders)
+            ? poResult.data.purchaseOrders
+            : []
+        : [];
+      const triggerRows = buildAutoTriggersFromInventoryHealth(
+        healthRes?.data?.rows || [],
+        pos
+      );
+      console.log("INVENTORY HEALTH AUTO PURCHASE TRIGGERS:", triggerRows);
       setAutoTriggers(triggerRows);
       setAutoTriggerSummary(summarizePlaceholderTriggers(triggerRows));
 
       logSupabaseFeatureSource("PurchaseOrders.purchaseOrders", { api: "getPurchaseOrdersRead" });
-      const poResult = await getPurchaseOrdersRead();
       if (poResult?.success) {
-        const d = poResult.data;
-        setPurchaseOrders(
-          Array.isArray(d) ? d : Array.isArray(d?.purchaseOrders) ? d.purchaseOrders : []
-        );
+        setPurchaseOrders(pos);
       } else {
         setPurchaseOrders([]);
         console.warn("[PurchaseOrders] getPurchaseOrdersRead:", poResult?.error);
@@ -714,13 +791,17 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   }, [purchaseOrders, poSearch, poStatusFilter]);
 
   const poStats = useMemo(() => {
+    const receivedPos = purchaseOrders.filter(
+      (po) => String(po.status || "").toLowerCase() === "received"
+    );
+    const openPos = purchaseOrders.filter((po) => canReceivePurchaseOrder(po));
     return {
       total: purchaseOrders.length,
-      open: purchaseOrders.filter((po) => canReceivePurchaseOrder(po)).length,
-      received: purchaseOrders.filter(
-        (po) => String(po.status || "").toLowerCase() === "received"
-      ).length,
+      open: openPos.length,
+      received: receivedPos.length,
       totalValue: purchaseOrders.reduce((sum, po) => sum + numberValue(po.totalCost), 0),
+      openValue: openPos.reduce((sum, po) => sum + numberValue(po.totalCost), 0),
+      receivedValue: receivedPos.reduce((sum, po) => sum + numberValue(po.totalCost), 0),
     };
   }, [purchaseOrders]);
 
@@ -1272,21 +1353,28 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
           <div className="text-xs text-slate-500">Total POs</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">All statuses · current tenant</div>
           <div className="mt-1 text-2xl font-semibold">{poStats.total}</div>
         </div>
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
           <div className="text-xs text-slate-500">Open POs</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">Awaiting receipt</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">
+            Ordered or Partially Received with remaining qty · {currency(poStats.openValue)}
+          </div>
           <div className="mt-1 text-2xl font-semibold">{poStats.open}</div>
         </div>
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
           <div className="text-xs text-slate-500">Received</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">Stock received</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">
+            Status = Received (lifetime) · {currency(poStats.receivedValue)}
+          </div>
           <div className="mt-1 text-2xl font-semibold">{poStats.received}</div>
         </div>
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
           <div className="text-xs text-slate-500">Total PO Value</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">Current PO value</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">
+            Sum of PO header total_cost · all statuses
+          </div>
           <div className="mt-1 text-2xl font-semibold">{currency(poStats.totalValue)}</div>
         </div>
       </div>
@@ -1324,6 +1412,12 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
       {activeTab === "triggers" && (
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
+          <p className="mb-3 text-xs text-slate-500">
+            Uses the same 30-day ORDER_OUT velocity and urgency thresholds as Inventory → Health:
+            Critical (at/below min stock), High (stockout within lead time + 7 days), Medium
+            (within 30 days). Reorder Candidates below still lists min-stock SKUs from{" "}
+            <code className="rounded bg-slate-100 px-1">v_reorder_candidates</code>.
+          </p>
           {autoTriggerSummary ? (
             <div className="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-5">
               <div className="rounded-xl border p-3">
@@ -1368,8 +1462,13 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
           <div className="space-y-3">
             {autoTriggers.length === 0 ? (
-              <div className="rounded-xl border border-dashed p-6 text-sm text-slate-500">
-                No reorder forecast suggestions right now.
+              <div className="space-y-2 rounded-xl border border-dashed p-6 text-sm text-slate-500">
+                <p>No reorder forecast suggestions right now.</p>
+                <p className="text-xs text-slate-400">
+                  No SKUs currently meet Inventory Health Critical, High, or Medium urgency. A
+                  projected stockout beyond 30 days (for example ~19 days with Low urgency) stays on
+                  Inventory → Health but does not appear here until urgency is Medium or higher.
+                </p>
               </div>
             ) : (
               autoTriggers.map((item) => (

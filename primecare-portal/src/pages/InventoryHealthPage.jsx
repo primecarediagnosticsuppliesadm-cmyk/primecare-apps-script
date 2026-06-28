@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { getInventoryHealthRead } from "@/api/primecareSupabaseApi";
 import PageSkeleton from "@/components/ux/PageSkeleton";
 
@@ -21,12 +21,19 @@ function urgencyStyle(urgency) {
   return { background: "#dcfce7", color: "#15803d", borderColor: "#bbf7d0" };
 }
 
+function costSourceLabel(source) {
+  if (source === "inventory") return "inventory unit cost";
+  if (source === "product") return "product catalog (cost_price)";
+  return "missing cost";
+}
+
 export default function InventoryHealthPage() {
   const [data, setData] = useState({ summary: {}, rows: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [urgencyFilter, setUrgencyFilter] = useState("");
+  const [expandedKey, setExpandedKey] = useState(null);
 
   useEffect(() => {
     async function loadHealth() {
@@ -62,6 +69,10 @@ export default function InventoryHealthPage() {
     });
   }, [data.rows, search, urgencyFilter]);
 
+  function toggleExpanded(productId) {
+    setExpandedKey((prev) => (prev === productId ? null : productId));
+  }
+
   if (loading) {
     return <PageSkeleton kpiCount={6} kpiColumns={3} listRows={8} />;
   }
@@ -74,7 +85,10 @@ export default function InventoryHealthPage() {
       <div style={styles.header}>
         <div>
           <h1 style={styles.title}>Inventory Health Intelligence</h1>
-          <p style={styles.subtitle}>Read-only operational intelligence from inventory and ledger movement data.</p>
+          <p style={styles.subtitle}>
+            Read-only operational intelligence from inventory and ledger movement data. Expand a row
+            for valuation and warning detail.
+          </p>
         </div>
       </div>
 
@@ -111,6 +125,7 @@ export default function InventoryHealthPage() {
         <table style={styles.table}>
           <thead>
             <tr>
+              <Th style={styles.thExpand} />
               <Th>SKU</Th>
               <Th>Urgency</Th>
               <Th>Current / Min</Th>
@@ -125,46 +140,129 @@ export default function InventoryHealthPage() {
           <tbody>
             {filteredRows.length === 0 ? (
               <tr>
-                <td colSpan={9} style={styles.emptyCell}>No inventory health rows found.</td>
+                <td colSpan={10} style={styles.emptyCell}>No inventory health rows found.</td>
               </tr>
             ) : (
-              filteredRows.map((row) => (
-                <tr key={row.productId}>
-                  <Td>
-                    <div style={styles.productName}>{row.productName || "-"}</div>
-                    <div style={styles.muted}>{row.productId || "-"}</div>
-                  </Td>
-                  <Td>
-                    <span style={{ ...styles.badge, ...urgencyStyle(row.urgency) }}>{row.urgency}</span>
-                  </Td>
-                  <Td>
-                    {formatNumber(row.currentStock)} / {formatNumber(row.minStock)}
-                  </Td>
-                  <Td>{formatNumber(row.avgDailyConsumption)}</Td>
-                  <Td>
-                    {row.projectedStockoutDays == null
-                      ? "No recent usage"
-                      : `${formatNumber(row.projectedStockoutDays)} days`}
-                  </Td>
-                  <Td>{formatNumber(row.recommendedReorderQty)}</Td>
-                  <Td>{formatCurrency(row.inventoryValue)}</Td>
-                  <Td>
-                    {row.isFastMoving ? <div style={styles.flag}>Fast moving</div> : null}
-                    {row.isSlowOrDeadStock ? <div style={styles.flagMuted}>No 30D ORDER_OUT</div> : null}
-                  </Td>
-                  <Td>
-                    {(row.warningNotes || []).length ? (
-                      <ul style={styles.warningList}>
-                        {row.warningNotes.map((note) => (
-                          <li key={note}>{note}</li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <span style={styles.muted}>None</span>
-                    )}
-                  </Td>
-                </tr>
-              ))
+              filteredRows.map((row) => {
+                const isExpanded = expandedKey === row.productId;
+                const valuation = row.valuationDetail || {};
+                return (
+                  <Fragment key={row.productId}>
+                    <tr style={styles.dataRow} onClick={() => toggleExpanded(row.productId)}>
+                      <Td style={styles.tdExpand}>
+                        <button
+                          type="button"
+                          style={styles.expandBtn}
+                          aria-expanded={isExpanded}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleExpanded(row.productId);
+                          }}
+                        >
+                          {isExpanded ? "−" : "+"}
+                        </button>
+                      </Td>
+                      <Td>
+                        <div style={styles.productName}>{row.productName || "-"}</div>
+                        <div style={styles.muted}>{row.productId || "-"}</div>
+                      </Td>
+                      <Td>
+                        <span style={{ ...styles.badge, ...urgencyStyle(row.urgency) }}>{row.urgency}</span>
+                      </Td>
+                      <Td>
+                        {formatNumber(row.currentStock)} / {formatNumber(row.minStock)}
+                      </Td>
+                      <Td>{formatNumber(row.avgDailyConsumption)}</Td>
+                      <Td>
+                        {row.projectedStockoutDays == null
+                          ? "No recent usage"
+                          : `${formatNumber(row.projectedStockoutDays)} days`}
+                      </Td>
+                      <Td>{formatNumber(row.recommendedReorderQty)}</Td>
+                      <Td>{formatCurrency(row.inventoryValue)}</Td>
+                      <Td>
+                        {row.isFastMoving ? <div style={styles.flag}>Fast moving</div> : null}
+                        {row.isSlowOrDeadStock ? <div style={styles.flagMuted}>No 30D ORDER_OUT</div> : null}
+                      </Td>
+                      <Td>
+                        {(row.warningNotes || []).length ? (
+                          <ul style={styles.warningList}>
+                            {row.warningNotes.map((note) => (
+                              <li key={note}>{note}</li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <span style={styles.muted}>None</span>
+                        )}
+                      </Td>
+                    </tr>
+                    {isExpanded ? (
+                      <tr style={styles.detailRow}>
+                        <td colSpan={10} style={styles.detailCell}>
+                          <div style={styles.detailSectionTitle}>Valuation</div>
+                          <div style={styles.detailGrid}>
+                            <DetailItem
+                              label="Formula"
+                              value={
+                                valuation.formula ||
+                                `${row.currentStock} × ${formatCurrency(row.unitCost)} = ${formatCurrency(row.inventoryValue)}`
+                              }
+                            />
+                            <DetailItem
+                              label="Cost source"
+                              value={
+                                valuation.costSourceLabel ||
+                                costSourceLabel(row.unitCostSource)
+                              }
+                            />
+                            <DetailItem
+                              label="Resolved unit cost"
+                              value={formatCurrency(valuation.resolvedUnitCost ?? row.unitCost)}
+                            />
+                            <DetailItem
+                              label="Product cost_price"
+                              value={
+                                valuation.productCostPrice != null
+                                  ? formatCurrency(valuation.productCostPrice)
+                                  : "—"
+                              }
+                            />
+                            <DetailItem
+                              label="Inventory unit cost"
+                              value={
+                                valuation.inventoryUnitCost != null
+                                  ? formatCurrency(valuation.inventoryUnitCost)
+                                  : "—"
+                              }
+                            />
+                          </div>
+
+                          {(row.warningDetails || []).length ? (
+                            <>
+                              <div style={styles.detailSectionTitle}>Warning detail</div>
+                              <div style={styles.warningDetailStack}>
+                                {row.warningDetails.map((detail) => (
+                                  <div key={detail.code} style={styles.warningDetailCard}>
+                                    <div style={styles.warningDetailTitle}>{detail.message}</div>
+                                    <div style={styles.warningDetailBody}>{detail.explanation}</div>
+                                    {detail.code === "unusual_movement" ? (
+                                      <div style={styles.muted}>
+                                        Baseline avg qty: {formatNumber(detail.avgMovementQty)} ·
+                                        Threshold (&gt;3× avg): {formatNumber(detail.thresholdQty)} ·
+                                        Flagged movements: {detail.flaggedCount || 0}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ))}
+                              </div>
+                            </>
+                          ) : null}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -182,12 +280,21 @@ function SummaryCard({ title, value }) {
   );
 }
 
-function Th({ children }) {
-  return <th style={styles.th}>{children}</th>;
+function DetailItem({ label, value }) {
+  return (
+    <div style={styles.detailItem}>
+      <div style={styles.detailLabel}>{label}</div>
+      <div style={styles.detailValue}>{value}</div>
+    </div>
+  );
 }
 
-function Td({ children }) {
-  return <td style={styles.td}>{children}</td>;
+function Th({ children, style }) {
+  return <th style={{ ...styles.th, ...style }}>{children}</th>;
+}
+
+function Td({ children, style }) {
+  return <td style={{ ...styles.td, ...style }}>{children}</td>;
 }
 
 const styles = {
@@ -260,10 +367,19 @@ const styles = {
     background: "#f8fafc",
     whiteSpace: "nowrap",
   },
+  thExpand: {
+    width: "36px",
+  },
   td: {
     padding: "12px",
     borderBottom: "1px solid #f1f5f9",
     verticalAlign: "top",
+  },
+  tdExpand: {
+    width: "36px",
+  },
+  dataRow: {
+    cursor: "pointer",
   },
   emptyCell: {
     padding: "24px",
@@ -299,6 +415,76 @@ const styles = {
     margin: 0,
     paddingLeft: "18px",
     color: "#b45309",
+  },
+  expandBtn: {
+    width: "24px",
+    height: "24px",
+    border: "1px solid #cbd5e1",
+    borderRadius: "6px",
+    background: "white",
+    color: "#475569",
+    fontSize: "14px",
+    lineHeight: 1,
+    cursor: "pointer",
+    padding: 0,
+  },
+  detailRow: {
+    background: "#f8fafc",
+  },
+  detailCell: {
+    padding: "12px 16px 16px 44px",
+    borderBottom: "1px solid #e2e8f0",
+  },
+  detailSectionTitle: {
+    fontSize: "11px",
+    fontWeight: 700,
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+    marginBottom: "8px",
+    marginTop: "4px",
+  },
+  detailGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+    gap: "12px 16px",
+    marginBottom: "12px",
+  },
+  detailItem: {
+    minWidth: 0,
+  },
+  detailLabel: {
+    fontSize: "10px",
+    fontWeight: 600,
+    color: "#94a3b8",
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+    marginBottom: "2px",
+  },
+  detailValue: {
+    fontSize: "13px",
+    color: "#334155",
+    wordBreak: "break-word",
+  },
+  warningDetailStack: {
+    display: "grid",
+    gap: "8px",
+  },
+  warningDetailCard: {
+    border: "1px solid #fde68a",
+    background: "#fffbeb",
+    borderRadius: "10px",
+    padding: "10px 12px",
+  },
+  warningDetailTitle: {
+    fontWeight: 700,
+    color: "#a16207",
+    marginBottom: "4px",
+  },
+  warningDetailBody: {
+    fontSize: "12px",
+    color: "#713f12",
+    lineHeight: 1.45,
   },
   notice: {
     padding: "20px",

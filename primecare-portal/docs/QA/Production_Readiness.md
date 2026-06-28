@@ -18,6 +18,8 @@
 | Products write | ✅ | Product creation tested after grants. |
 | Inventory display | ✅ | Inventory row created from Master Catalog opening stock. |
 | Inventory value KPIs | ✅ | Product `cost_price` fallback for valuation; `[inventoryValuation]` logs + reconciliation (GAP-014). |
+| Master Catalog cost display | ✅ | HQ Cost / margin from catalog cost; transfer price independent (GAP-015). |
+| Procurement forecast alignment | ✅ | Forecast Suggestions use Inventory Health velocity; PO KPI basis labels (GAP-016). |
 | Admin PO product validation | ✅ | Catalog picker + API validation (GAP-009). |
 | Admin PO cancel/edit | ✅ | Draft/Ordered PO recovery before receipt (GAP-010). |
 | Admin PO receive guards | ✅ | Receive only Ordered/Partially Received (GAP-011). |

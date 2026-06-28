@@ -17,6 +17,11 @@
 - [x] Inventory Stock tab — value KPI cards show numeric totals (not "Not enough cost data" when `cost_price` exists)
 - [x] Inventory valuation — `QA_SKU_003` contributes 110 × ₹200 = ₹22,000 (product cost fallback)
 - [x] Inventory valuation reconciliation — dashboard total equals Σ SKU `inventoryValue` logs
+- [x] Master Catalog — HQ Cost shows `products.cost_price` (QA_SKU_003 = ₹200, margin from price/cost)
+- [x] Inventory Health — expandable row shows valuation formula and warning explanations
+- [x] Inventory Movements — expanded audit shows stock before/after, tenant, reference, timestamp
+- [x] Purchase Forecast Suggestions — aligned with Inventory Health velocity thresholds or explains exclusion
+- [x] Purchase Dashboard KPIs — basis labels on Total/Open/Received/Value cards
 - [ ] Create lab (HQ mode — no distributor picker; shows PrimeCare HQ)
 - [ ] Create PO — select product from catalog only (invalid SKU blocked)
 - [ ] Edit Draft/Ordered PO before receipt (qty, cost, supplier, status)

@@ -47,6 +47,18 @@ export function isHqPricingConfigured(hqCostPrice, hqTransferPrice) {
   return isPositivePrice(hqCostPrice) && isPositivePrice(hqTransferPrice);
 }
 
+export function isHqCostConfigured(hqCostPrice) {
+  return isPositivePrice(hqCostPrice);
+}
+
+export function isHqTransferConfigured(hqTransferPrice) {
+  return isPositivePrice(hqTransferPrice);
+}
+
+export function isHqMarginConfigured(sellingPrice, costPrice) {
+  return isPositivePrice(sellingPrice) && isPositivePrice(costPrice);
+}
+
 export function formatPriceOrNotConfigured(value, configured = true) {
   if (!configured || !isPositivePrice(value)) return "Not configured";
   return formatInr(value);
@@ -74,7 +86,10 @@ export function mapMasterCatalogRow(row = {}) {
       row.hqTransferPrice ??
       row.hq_transfer_price
   );
+  const hqCostConfigured = isHqCostConfigured(costPrice);
+  const hqTransferConfigured = isHqTransferConfigured(transferPrice);
   const hqPricingConfigured = isHqPricingConfigured(costPrice, transferPrice);
+  const hqMarginConfigured = isHqMarginConfigured(sellingPrice, costPrice);
   return {
     productId,
     productName: str(row.productName ?? row.product_name) || productId,
@@ -83,8 +98,11 @@ export function mapMasterCatalogRow(row = {}) {
     sellingPrice,
     costPrice,
     transferPrice,
+    hqCostConfigured,
+    hqTransferConfigured,
     hqPricingConfigured,
-    marginPct: hqPricingConfigured ? computeMarginPct(sellingPrice, transferPrice) : null,
+    hqMarginConfigured,
+    marginPct: hqMarginConfigured ? computeMarginPct(sellingPrice, costPrice) : null,
     currentStock: num(row.currentStock ?? row.current_stock),
     minStock: num(row.minStock ?? row.min_stock),
     reorderQty: num(row.reorderQty ?? row.reorder_qty),

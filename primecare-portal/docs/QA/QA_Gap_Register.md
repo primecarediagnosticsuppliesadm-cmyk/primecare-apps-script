@@ -27,6 +27,8 @@ Tracks functional, UX, architecture, security, RLS, data, and production-readine
 | GAP-012 | Admin UAT / Labs | High | Fixed | Add Lab showed placeholder “Selected distributor” in Year-1 HQ mode (no `distributors` table). |
 | GAP-013 | Supplier Master | Low | Deferred | Supplier master entity deferred; PO supplier remains free text this sprint. |
 | GAP-014 | Admin UAT / Inventory KPI | High | Fixed | Inventory value KPI cards showed "Not enough cost data" while stock rows loaded; economics read did not join `products.cost_price`. |
+| GAP-015 | Admin UAT / Master Catalog | High | Fixed | HQ Cost showed "Not configured" when only `cost_price` existed; display required transfer price. |
+| GAP-016 | Admin UAT / Procurement UX | Medium | Fixed | Forecast Suggestions used min-stock view only; contradicted Inventory Health velocity. KPI basis labels missing. |
 
 ---
 
@@ -225,6 +227,52 @@ No estimated values.
 - `QA_SKU_003`: 110 × ₹200 = **₹22,000** (`source: product`)
 - HQ total reconciles: **₹31,956** = Σ(`current_stock × resolvedUnitCost`) across 4 SKUs
 - Fallback cases A/B/C pass; no duplicate SKU valuation
+
+### Status
+**Fixed**
+
+---
+
+## GAP-015: Master Catalog HQ Cost Display (Admin UAT)
+
+### Severity
+High
+
+### Type
+UX / Data mapping
+
+### Current Behavior (before fix)
+- Inventory valuation correctly used `products.cost_price`.
+- Master Catalog showed **HQ Cost: Not configured** because display required both cost and transfer price; transfer price is not stored in Year-1 schema.
+
+### Fix (2026-06-28)
+- Split `hqCostConfigured`, `hqTransferConfigured`, `hqMarginConfigured` in `masterCatalogEngine.js`.
+- HQ Cost and margin (price vs cost) display independently of transfer price.
+- `enrichCatalogWithProductMetadata` backfills `cost_price` / `selling_price` from `products`.
+
+### Status
+**Fixed**
+
+---
+
+## GAP-016: Purchase Forecast vs Inventory Health Contradiction (Admin UAT)
+
+### Severity
+Medium
+
+### Type
+UX / Procurement intelligence
+
+### Current Behavior (before fix)
+- Inventory Health showed projected stockout (~19 days) but Purchase Forecast Suggestions showed all zeros.
+- Forecast Suggestions used `v_reorder_candidates` (min-stock only) with missing `days_left`.
+- PO KPI cards lacked period/basis labels.
+
+### Fix (2026-06-28)
+- Forecast Suggestions derive from `getInventoryHealthRead()` velocity + urgency (aligned with Inventory → Health).
+- Empty state explains why Low-urgency / >30-day stockouts are excluded.
+- PO KPI cards label scope (tenant, status basis, value sum).
+- Regression: `node scripts/verify-procurement-inventory-flow.mjs`.
 
 ### Status
 **Fixed**

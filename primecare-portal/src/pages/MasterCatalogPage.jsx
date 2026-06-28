@@ -503,13 +503,13 @@ export default function MasterCatalogPage({ currentUser = null }) {
                 <td className="px-2 py-2">{p.category}</td>
                 <td className="px-2 py-2 tabular-nums">{formatInr(p.sellingPrice)}</td>
                 <td className="px-2 py-2 tabular-nums">
-                  {formatPriceOrNotConfigured(p.costPrice, p.hqPricingConfigured)}
+                  {formatPriceOrNotConfigured(p.costPrice, p.hqCostConfigured)}
                 </td>
                 <td className="px-2 py-2 tabular-nums">
-                  {formatPriceOrNotConfigured(p.transferPrice, p.hqPricingConfigured)}
+                  {formatPriceOrNotConfigured(p.transferPrice, p.hqTransferConfigured)}
                 </td>
                 <td className="px-2 py-2 tabular-nums">
-                  {formatMarginPct(p.marginPct, p.hqPricingConfigured)}
+                  {formatMarginPct(p.marginPct, p.hqMarginConfigured)}
                 </td>
                 <td className="px-2 py-2 tabular-nums">{p.currentStock}</td>
                 <td className="px-2 py-2">

@@ -959,7 +959,7 @@ export async function enrichCatalogWithProductMetadata(products, tenantId) {
 
   const { data, error } = await supabase
     .from("products")
-    .select("product_id, unit, preferred_supplier, active")
+    .select("product_id, unit, preferred_supplier, active, cost_price, selling_price")
     .eq("tenant_id", id);
 
   if (error) {
@@ -974,10 +974,17 @@ export async function enrichCatalogWithProductMetadata(products, tenantId) {
   return products.map((item) => {
     const meta = metaBySku.get(normalizeHqSku(item.productId));
     if (!meta) return item;
+    const costFromProduct = num(meta.cost_price);
+    const sellFromProduct = num(meta.selling_price);
     return {
       ...item,
       unit: str(meta.unit) || item.unit,
       preferredSupplier: str(meta.preferred_supplier) || item.preferredSupplier,
+      unitCost: num(item.unitCost) > 0 ? item.unitCost : costFromProduct,
+      unitSellingPrice:
+        num(item.unitSellingPrice) > 0 ? item.unitSellingPrice : sellFromProduct,
+      cost_price: num(item.cost_price ?? item.costPrice) > 0 ? item.cost_price ?? item.costPrice : costFromProduct,
+      costPrice: num(item.costPrice ?? item.cost_price) > 0 ? item.costPrice ?? item.cost_price : costFromProduct,
       active:
         meta.active !== false &&
         item.active !== false &&
@@ -4267,6 +4274,7 @@ export function mapInventoryLedgerRow(row) {
     createdBy: str(row.created_by ?? row.createdBy),
     stockBefore: num(row.stock_before ?? row.stockBefore),
     stockAfter: num(row.stock_after ?? row.stockAfter),
+    notes: str(row.notes ?? row.Notes),
     raw: row,
   };
 }
@@ -4464,9 +4472,14 @@ export async function getInventoryHealthRead() {
       const unusualMovements = ledgerRows
         .filter((m) => m.productId === item.productId)
         .filter((m) => {
+          if (m.movementType !== "ORDER_OUT" && m.movementType !== "OUT") return false;
+          const createdAtMs = new Date(m.createdAt || 0).getTime();
+          if (createdAtMs < thirtyDaysAgo.getTime()) return false;
           const qty = Math.abs(num(m.signedQuantity || m.quantity));
           return avgMovementQty > 0 && qty > avgMovementQty * 3;
         });
+      const latestMovementQty =
+        movementQtys.length > 0 ? movementQtys[movementQtys.length - 1] : null;
       const recommendedReorderQty = Math.max(
         item.reorderQty,
         Math.ceil(avgDailyConsumption * (item.leadTimeDays + item.safetyDays) - item.currentStock),
@@ -4475,9 +4488,54 @@ export async function getInventoryHealthRead() {
       const lastOrderOutMs = lastOrderOutAtBySku.get(item.productId);
       const hasRecentOrderOut = recentOrderOutQty > 0;
       const warningNotes = [];
-      if (!hasRecentOrderOut) warningNotes.push("No ORDER_OUT movement in last 30 days");
-      if (unusualMovements.length) warningNotes.push("Unusual movement quantity detected");
-      if (urgency === "Critical") warningNotes.push("Current stock at or below minimum stock");
+      const warningDetails = [];
+      if (!hasRecentOrderOut) {
+        warningNotes.push("No ORDER_OUT movement in last 30 days");
+        warningDetails.push({
+          code: "no_recent_order_out",
+          message: "No ORDER_OUT movement in last 30 days",
+          explanation:
+            "No outbound order consumption was recorded in the last 30 days, so velocity-based stockout projection may be unavailable.",
+        });
+      }
+      if (unusualMovements.length) {
+        const flaggedQtys = unusualMovements.map((m) =>
+          Math.abs(num(m.signedQuantity || m.quantity))
+        );
+        const maxFlaggedQty = Math.max(...flaggedQtys);
+        warningNotes.push("Unusual movement quantity detected");
+        warningDetails.push({
+          code: "unusual_movement",
+          message: "Unusual movement quantity detected",
+          explanation: `${unusualMovements.length} ORDER_OUT movement(s) in the last 30 days exceeded 3× the average movement qty (${Math.round(avgMovementQty * 100) / 100}). Baseline avg: ${Math.round(avgMovementQty * 100) / 100}; largest flagged qty: ${maxFlaggedQty}; threshold: > ${Math.round(avgMovementQty * 3 * 100) / 100}.`,
+          avgMovementQty: Math.round(avgMovementQty * 100) / 100,
+          latestMovementQty,
+          thresholdQty: Math.round(avgMovementQty * 3 * 100) / 100,
+          flaggedCount: unusualMovements.length,
+          flaggedMovements: unusualMovements.slice(0, 5).map((m) => ({
+            id: m.id,
+            createdAt: m.createdAt,
+            movementType: m.movementType,
+            quantity: Math.abs(num(m.signedQuantity || m.quantity)),
+            orderId: m.orderId,
+          })),
+        });
+      }
+      if (urgency === "Critical") {
+        warningNotes.push("Current stock at or below minimum stock");
+        warningDetails.push({
+          code: "below_min_stock",
+          message: "Current stock at or below minimum stock",
+          explanation: `Current stock (${item.currentStock}) is at or below minimum stock (${item.minStock}).`,
+        });
+      }
+      const inventoryValue = Math.round(item.currentStock * item.unitCost * 100) / 100;
+      const costSourceLabel =
+        item.unitCostSource === "inventory"
+          ? "inventory unit cost"
+          : item.unitCostSource === "product"
+            ? "product catalog (cost_price)"
+            : "missing cost";
 
       return {
         ...item,
@@ -4487,11 +4545,33 @@ export async function getInventoryHealthRead() {
         recentOrderOutQty,
         isFastMoving: recentOrderOutQty > 0,
         isSlowOrDeadStock: !hasRecentOrderOut,
-        inventoryValue: Math.round(item.currentStock * item.unitCost * 100) / 100,
+        inventoryValue,
         recommendedReorderQty,
         lastOrderOutAt: lastOrderOutMs ? new Date(lastOrderOutMs).toISOString() : "",
         unusualMovementCount: unusualMovements.length,
+        unusualMovementDetails: unusualMovements.slice(0, 5).map((m) => ({
+          id: m.id,
+          createdAt: m.createdAt,
+          movementType: m.movementType,
+          quantity: Math.abs(num(m.signedQuantity || m.quantity)),
+          orderId: m.orderId,
+          referenceType: m.referenceType,
+          referenceId: m.referenceId,
+        })),
+        avgMovementQty: Math.round(avgMovementQty * 100) / 100,
+        latestMovementQty,
         warningNotes,
+        warningDetails,
+        valuationDetail: {
+          currentStock: item.currentStock,
+          resolvedUnitCost: item.unitCost,
+          inventoryUnitCost: item.inventoryUnitCost,
+          productCostPrice: item.productCostPrice,
+          source: item.unitCostSource,
+          costSourceLabel,
+          inventoryValue,
+          formula: `${item.currentStock} × ₹${item.unitCost} = ₹${inventoryValue.toLocaleString("en-IN")}`,
+        },
       };
     });
 

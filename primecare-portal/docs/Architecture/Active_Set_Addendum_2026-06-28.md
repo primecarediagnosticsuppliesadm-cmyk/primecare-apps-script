@@ -41,6 +41,20 @@ Future target:
 
 Status: Deferred. Not a pilot blocker.
 
+## Inventory Valuation (2026-06-28)
+Year-1 HQ inventory value KPIs resolve unit cost as:
+
+1. Inventory unit cost (when present on row)
+2. `products.cost_price` fallback
+3. Missing-cost message only when both unavailable
+
+Master Catalog HQ Cost uses the same catalog `cost_price`. Transfer price remains deferred.
+
+## Procurement Forecast Alignment (2026-06-28)
+- **Inventory → Health** and **Purchase → Forecast Suggestions** share 30-day ORDER_OUT velocity and urgency thresholds (Critical / High / Medium).
+- **Reorder Candidates** tab remains min-stock based (`v_reorder_candidates`).
+- Regression: `node scripts/verify-procurement-inventory-flow.mjs` (dry-run default; `--mutate` for receive test).
+
 ## Production Testing Status
 Validated so far:
 
