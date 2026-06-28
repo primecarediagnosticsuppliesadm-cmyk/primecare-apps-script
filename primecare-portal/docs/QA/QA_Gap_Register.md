@@ -32,6 +32,7 @@ Tracks functional, UX, architecture, security, RLS, data, and production-readine
 | GAP-017 | Admin UAT / Orders | Medium | Fixed | Fulfillment could mark Fulfilled without ORDER_OUT; cancelled orders could re-fulfill; item counts double-counted from order_lines + order_items. |
 | GAP-018 | Admin UAT / Credit & Risk | Medium | Certified | KPI/AR reconcile on golden labs; 22 inactive AR rows; aging buckets 1–15/16–30/31+ (not 30/60/90 DB-driven). |
 | GAP-019 | Admin UAT / Labs | Medium | Certified | Tenant isolation, ownership sync, KPI/AR reconcile; no edit API; PROSPECT status on golden labs; filters only (no text search/pagination). |
+| GAP-020 | Admin UAT / Operations Center | Medium | Certified | Bundle/RLS/ownership reconcile; role escalation blocked; 26 distributor pilot ownership rows; profiles unbounded read. |
 
 ---
 
@@ -384,3 +385,36 @@ Tenant isolation / lab lifecycle / assignment integrity / UX completeness
 
 ### Status
 **Certified** (GO for Labs module; manual create-lab UAT and edit workflow remain open)
+
+---
+
+## GAP-020: Admin Operations Center Certification (Admin UAT)
+
+### Severity
+Medium
+
+### Type
+User provisioning / role guards / lab ownership integrity / RLS
+
+### Current Behavior (certified 2026-06-28)
+- `loadOperationsCenterAdminBundle()` loads **14** tenant-scoped directory users; KPI strip reconciles with `computeProvisioningKpis`.
+- Golden QA profiles present: admin, executive, agent (`QA_TEST_AGENT_001`), lab (`QA_LAB_001`).
+- Admin cannot assign executive role (`validateActorRoleAssignment` + filtered role dropdown).
+- **26** HQ-lab ACTIVE `lab_ownership` rows; golden labs sync with `labs.assigned_agent_id`; no duplicate ACTIVE keys per lab.
+- **26** distributor-pilot ownership rows with non-HQ `lab_tenant_id` (WARN only).
+- Agent RLS: own profile + ownership-scoped labs; lab user sees only own profile; lab_ownership denied.
+
+### Residual risks (non-blocking)
+- Profiles/users/ownership reads have **no explicit `.limit()`** — tenant filter + RLS only.
+- Manual UAT open: create user UI, reset password, bulk lab/distributor assignment flows.
+- Executive cross-tenant profile read may be limited in QA env (WARN in script).
+- Distributor pilot ownership rows reference labs outside HQ `labs` table — expected for multi-tenant pilot data.
+- `verify-provisioning-role-guard.mjs` Node import path still broken (logic certified via SSR in ops script).
+
+### Verification
+- `node scripts/verify-operations-center-admin-flow.mjs` — **35 PASS, 4 WARN, 0 FAIL**
+- `node scripts/verify-hq-rls-reads.mjs` — profiles module matrix
+- `node scripts/verify-labs-admin-flow.mjs` — ownership golden sync
+
+### Status
+**Certified** (GO for Operations Center module; manual provisioning UAT recommended)

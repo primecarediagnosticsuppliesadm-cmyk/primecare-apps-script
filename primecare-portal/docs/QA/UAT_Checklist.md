@@ -31,6 +31,11 @@
 - [x] Labs — golden labs present; `lab_ownership` sync with assigned agent
 - [x] Labs — agent/lab-user RLS scoped (ownership + own-lab)
 - [ ] Create lab (HQ mode — no distributor picker; shows PrimeCare HQ) — manual UI UAT
+- [x] Operations Center — tenant-scoped users (14); valid roles; KPI reconcile
+- [x] Operations Center — admin→executive role escalation blocked
+- [x] Operations Center — lab_ownership golden sync; no dup ACTIVE HQ-lab rows
+- [x] Operations Center — agent/lab RLS scoped (ownership + own profile)
+- [ ] Create user / reset password / bulk assign — manual UI UAT
 - [ ] Create PO — select product from catalog only (invalid SKU blocked)
 - [ ] Edit Draft/Ordered PO before receipt (qty, cost, supplier, status)
 - [ ] Cancel Draft/Ordered PO before receipt

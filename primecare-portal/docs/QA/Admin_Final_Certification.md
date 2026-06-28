@@ -21,6 +21,8 @@ This sweep reviewed all ten HQ Admin module areas against CRUD, reconciliation, 
 
 **Admin Labs module: GO** (see §7; `verify-labs-admin-flow.mjs` 29/29 PASS, 6 WARN).
 
+**Admin Operations Center module: GO** (see §8; `verify-operations-center-admin-flow.mjs` 35/35 PASS, 4 WARN).
+
 > Per certification rule: Critical issues are resolved, but High/Medium operational gaps and incomplete end-to-end UAT prevent an unconditional GO.
 
 ---
@@ -42,6 +44,7 @@ This sweep reviewed all ten HQ Admin module areas against CRUD, reconciliation, 
 | `verify-orders-admin-flow.mjs` | **PASS** | 64 HQ orders; KPI reconcile; ORDER_OUT ledger match (GAP-017) |
 | `verify-credit-risk-admin-flow.mjs` | **PASS** | 16 PASS / 1 WARN; KPI ₹1,500 = AR; golden allocation (GAP-018) |
 | `verify-labs-admin-flow.mjs` | **PASS** | 29 PASS / 6 WARN; 26 labs tenant-scoped; ownership sync (GAP-019) |
+| `verify-operations-center-admin-flow.mjs` | **PASS** | 35 PASS / 4 WARN; bundle KPI reconcile; role guard (GAP-020) |
 | `verify-inventory-reconciliation.mjs` | **PASS** | No negative stock (does not reconcile ledger Σ vs on-hand) |
 | `verify-financial-reconciliation.mjs` | **PASS** | 12/12 checks |
 | `verify-hq-rls-reads.mjs` | **PASS** | Admin broad reads OK |
@@ -223,14 +226,26 @@ This sweep reviewed all ten HQ Admin module areas against CRUD, reconciliation, 
 
 ---
 
-### 8. Operations Center — **PASS** (code)
+### 8. Operations Center — **GO** (GAP-020 certified)
 
 | Check | Status | Notes |
 |---|---|---|
-| Users / Roles | Pass | `OperationsCenterAdminPage` passes `tenantId` |
-| Agent / Lab assignment | Pass | Bundle loaders tenant-scoped |
-| RLS verification | Pass | `verify-hq-rls-reads.mjs` |
-| Admin → Executive block | Pass (code) | `PROVISION_RULES_BY_ACTOR`; script runner broken (see tooling) |
+| Users / Profiles | Pass | 14 users scoped to `qa-tenant-001`; valid roles; user_id mapped |
+| Role management | Pass | Admin blocked from assigning executive; dropdown filtered |
+| Agent management | Pass | QA agent profile + `QA_TEST_AGENT_001`; agents in bundle |
+| Lab assignment | Pass | 26 HQ-lab ownership rows; golden sync; no dup ACTIVE keys |
+| Lab user mapping | Pass | Lab role users have `lab_id`; RLS own-lab only |
+| Tenant consistency | Pass | Same canonical tenant across profiles/labs/orders/AR |
+| RLS / security | Pass | Admin tenant-scoped; agent ownership-scoped; lab user isolated |
+| UI filter/sort | Pass | Directory search/filter/sort logic verified |
+| Loading / error | Pass | Bundle error path + panel states (code-reviewed) |
+| Audit events | Pass | Provisioning events ≤ 200 read cap |
+
+**WARN:** 26 distributor-pilot ownership rows; profiles unbounded read; manual create/assign UAT open.
+
+**Regression:** `node scripts/verify-operations-center-admin-flow.mjs` — **35 PASS, 4 WARN, 0 FAIL**.
+
+**Admin Operations Center verdict: GO**
 
 ---
 
@@ -280,6 +295,10 @@ This sweep reviewed all ten HQ Admin module areas against CRUD, reconciliation, 
 | CERT-017 | **Medium** | Labs | Golden labs `status=PROSPECT`; active KPI uses `status===active` only | `labs.active=true` operationally |
 | CERT-018 | **Low** | Labs | Duplicate lab names allowed — `(tenant_id, lab_id)` uniqueness only | Document for operators |
 | CERT-019 | **Low** | Labs | Orders lab filter from orders list — no inactive-lab exclusion | Historical orders remain visible |
+| CERT-020 | **Medium** | Operations Center | Profiles/ownership reads unbounded (tenant filter only) | WARN in verify script |
+| CERT-021 | **Medium** | Operations Center | 26 distributor-pilot ownership rows (non-HQ lab_tenant_id) | Pilot data; HQ labs clean |
+| CERT-022 | **Low** | Operations Center | Manual provisioning UAT open (create user, reset password, bulk assign) | Checklist |
+| CERT-023 | **Low** | Tooling | `verify-provisioning-role-guard.mjs` Node `@/` import fails | Logic verified via SSR in GAP-020 script |
 
 **Critical issues from QA Gap Register:** 0 open (GAP-002–007 fixed).
 
@@ -336,6 +355,12 @@ Reasons:
 4. Fix or skip-with-document `verify-provisioning-role-guard.mjs` Node alias issue.
 5. Operator briefing on Stock vs Health "Critical" definitions and dual forecast paths.
 
+### Admin Operations Center module — **GO**
+
+Certified 2026-06-28 via `verify-operations-center-admin-flow.mjs` (35/35 PASS, 4 WARN). Manual user provisioning UI UAT remains open but does not block Operations Center certification.
+
+---
+
 ### Admin Labs module — **GO**
 
 Certified 2026-06-28 via `verify-labs-admin-flow.mjs` (29/29 PASS, 6 WARN). Manual create-lab UI UAT and lab edit workflow remain open but do not block Labs module certification.
@@ -353,7 +378,7 @@ Certified 2026-06-28 via `verify-orders-admin-flow.mjs` (13/13) + GAP-017 fulfil
 - Gap register: `docs/QA/QA_Gap_Register.md`
 - UAT checklist: `docs/QA/UAT_Checklist.md`
 - Production readiness: `docs/QA/Production_Readiness.md`
-- Key scripts: `scripts/verify-inventory-dashboard-kpi.mjs`, `scripts/verify-procurement-inventory-flow.mjs`, `scripts/verify-orders-admin-flow.mjs`, `scripts/verify-credit-risk-admin-flow.mjs`, `scripts/verify-labs-admin-flow.mjs`, `scripts/verify-hq-rls-reads.mjs`, `scripts/verify-financial-reconciliation.mjs`
+- Key scripts: `scripts/verify-inventory-dashboard-kpi.mjs`, `scripts/verify-procurement-inventory-flow.mjs`, `scripts/verify-orders-admin-flow.mjs`, `scripts/verify-credit-risk-admin-flow.mjs`, `scripts/verify-labs-admin-flow.mjs`, `scripts/verify-operations-center-admin-flow.mjs`, `scripts/verify-hq-rls-reads.mjs`, `scripts/verify-financial-reconciliation.mjs`
 
 ---
 

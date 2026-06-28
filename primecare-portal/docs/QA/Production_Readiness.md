@@ -24,6 +24,7 @@
 | Admin Orders fulfillment | ✅ | Fulfillment guards, ORDER_OUT reconciliation, tenant isolation (GAP-017). |
 | Admin Credit & Risk | ✅ | KPI/AR reconcile, aging buckets, allocation golden path (GAP-018). |
 | Admin Labs | ✅ | Tenant isolation, ownership sync, KPI/AR reconcile (GAP-019). |
+| Admin Operations Center | ✅ | User bundle, role guards, ownership sync, RLS (GAP-020). |
 | Procurement forecast alignment | ✅ | Forecast Suggestions use Inventory Health velocity; PO KPI basis labels (GAP-016). |
 | Admin PO product validation | ✅ | Catalog picker + API validation (GAP-009). |
 | Admin PO cancel/edit | ✅ | Draft/Ordered PO recovery before receipt (GAP-010). |
