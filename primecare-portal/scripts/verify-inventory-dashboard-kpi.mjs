@@ -331,10 +331,10 @@ async function main() {
     console.log(JSON.stringify(sku003, null, 2));
     const checks = [
       ["tenantId", sku003.tenantId, HQ],
-      ["currentStock", sku003.currentStock, 110],
+      ["currentStock", sku003.currentStock, 120],
       ["productCostPrice", sku003.productCostPrice, 200],
       ["resolvedUnitCost", sku003.unitCost, 200],
-      ["inventoryValue", sku003.inventoryValue, 22000],
+      ["inventoryValue", sku003.inventoryValue, 24000],
       ["source", sku003.unitCostSource, "product"],
     ];
     for (const [field, actual, expected] of checks) {

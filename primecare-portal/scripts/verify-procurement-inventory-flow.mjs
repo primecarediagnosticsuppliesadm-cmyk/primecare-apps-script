@@ -11,6 +11,13 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveInventoryUnitCost } from "../src/inventory/resolveInventoryUnitCost.js";
+import { resolveMasterCatalogPricing } from "../src/catalog/masterCatalogEngine.js";
+
+const PRICING_EXPECTATIONS = {
+  QA_SKU_003: { price: 900, cost: 200, margin: 78, stock: 120 },
+  QA_SKU_002: { price: 800, cost: 150, margin: 81 },
+  "QA TEST KIT D": { price: 13, cost: 12, margin: 8 },
+};
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -245,6 +252,9 @@ async function main() {
 
   if (product?.cost_price) {
     pass("catalog.product_cost", `products.cost_price=${product.cost_price}`);
+    if (product?.selling_price) {
+      pass("catalog.product_price", `products.selling_price=${product.selling_price}`);
+    }
     const viewCost = catalogRow?.unit_cost ?? catalogRow?.cost_price;
     if (viewCost != null && num(viewCost) === num(product.cost_price)) {
       pass("catalog.view_cost_match", `v_lab_catalog unit_cost=${viewCost}`);
@@ -253,6 +263,55 @@ async function main() {
         "catalog.view_cost_enriched",
         "Master Catalog enriches cost from products when view unit_cost is absent"
       );
+    }
+  }
+
+  for (const [sku, expected] of Object.entries(PRICING_EXPECTATIONS)) {
+    const { data: productRow } = await sb
+      .from("products")
+      .select("selling_price,cost_price")
+      .eq("tenant_id", HQ)
+      .eq("product_id", sku)
+      .maybeSingle();
+    const { data: viewRow } = await sb
+      .from("v_lab_catalog")
+      .select("unit_selling_price,unit_cost")
+      .eq("tenant_id", HQ)
+      .eq("product_id", sku)
+      .maybeSingle();
+    const pricing = resolveMasterCatalogPricing({
+      productId: sku,
+      viewPrice: viewRow?.unit_selling_price,
+      viewCost: viewRow?.unit_cost,
+      productSellingPrice: productRow?.selling_price,
+      productCostPrice: productRow?.cost_price,
+      logQa: false,
+    });
+    if (num(pricing.sellingPrice) !== expected.price) {
+      fail(`pricing.${sku}.price`, `expected ${expected.price}, got ${pricing.sellingPrice}`);
+    } else {
+      pass(`pricing.${sku}.price`, `HQ Price ₹${pricing.sellingPrice}`);
+    }
+    if (num(pricing.costPrice) !== expected.cost) {
+      fail(`pricing.${sku}.cost`, `expected ${expected.cost}, got ${pricing.costPrice}`);
+    } else {
+      pass(`pricing.${sku}.cost`, `HQ Cost ₹${pricing.costPrice}`);
+    }
+    if (num(pricing.marginPct) !== expected.margin) {
+      fail(`pricing.${sku}.margin`, `expected ${expected.margin}%, got ${pricing.marginPct}%`);
+    } else {
+      pass(`pricing.${sku}.margin`, `Margin ${pricing.marginPct}%`);
+    }
+    if (expected.stock != null && sku === TEST_SKU) {
+      const invSku = await fetchInventoryRow(sb, HQ, sku);
+      if (num(invSku?.current_stock) !== expected.stock) {
+        fail(
+          `pricing.${sku}.stock`,
+          `expected stock ${expected.stock}, got ${num(invSku?.current_stock)}`
+        );
+      } else {
+        pass(`pricing.${sku}.stock`, `HQ Stock ${expected.stock}`);
+      }
     }
   }
 
@@ -269,7 +328,14 @@ async function main() {
   });
 
   if (!openPo) {
-    pass("po.open", "No open receivable PO — dry-run complete (create Ordered PO for --mutate)");
+    if (MUTATE) {
+      fail(
+        "mutate.open_po_required",
+        `No open Ordered/Partially Received PO for ${TEST_SKU}. Create one before running --mutate.`
+      );
+    } else {
+      pass("po.open", "No open receivable PO — dry-run OK");
+    }
   } else if (!MUTATE) {
     pass("po.open", `Open PO ${openPo.po_id} (use --mutate to receive)`);
     pass("mutate.skipped", "Dry-run — receive mutation skipped");

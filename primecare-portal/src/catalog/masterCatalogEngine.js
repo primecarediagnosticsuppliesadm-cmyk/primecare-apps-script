@@ -74,10 +74,76 @@ export function formatMarginPct(pct, configured = true) {
   return `${pct}%`;
 }
 
+function optionalPositivePrice(value) {
+  if (value == null || value === "") return null;
+  const n = num(value);
+  return n > 0 ? n : null;
+}
+
+/**
+ * HQ Master Catalog pricing — products table is authoritative for Year-1 HQ.
+ * View/lab prices are fallback only when product selling_price / cost_price is missing.
+ */
+export function resolveMasterCatalogPricing({
+  productId = "",
+  viewPrice = null,
+  viewCost = null,
+  productSellingPrice = null,
+  productCostPrice = null,
+  logQa = true,
+} = {}) {
+  const viewSelling = optionalPositivePrice(viewPrice);
+  const viewCostValue = optionalPositivePrice(viewCost);
+  const productSell = optionalPositivePrice(productSellingPrice);
+  const productCost = optionalPositivePrice(productCostPrice);
+
+  const resolvedHqPrice = productSell ?? viewSelling;
+  const resolvedHqCost = productCost ?? viewCostValue;
+  const margin =
+    resolvedHqPrice != null && resolvedHqCost != null
+      ? computeMarginPct(resolvedHqPrice, resolvedHqCost)
+      : null;
+
+  const payload = {
+    productId: str(productId),
+    viewPrice: viewSelling,
+    productSellingPrice: productSell,
+    productCostPrice: productCost,
+    resolvedHqPrice,
+    resolvedHqCost,
+    margin,
+  };
+
+  if (logQa) {
+    console.log("[masterCatalogPricing]", payload);
+  }
+
+  return {
+    viewPrice: viewSelling,
+    productSellingPrice: productSell,
+    productCostPrice: productCost,
+    sellingPrice: resolvedHqPrice ?? 0,
+    costPrice: resolvedHqCost ?? 0,
+    marginPct: margin,
+    hqCostConfigured: isHqCostConfigured(resolvedHqCost),
+    hqMarginConfigured: isHqMarginConfigured(resolvedHqPrice, resolvedHqCost),
+  };
+}
+
 export function mapMasterCatalogRow(row = {}) {
   const productId = str(row.productId ?? row.product_id);
-  const sellingPrice = num(row.unitSellingPrice ?? row.selling_price ?? row.sellingPrice);
-  const costPrice = num(row.unitCost ?? row.cost_price ?? row.costPrice);
+  const pricing = resolveMasterCatalogPricing({
+    productId,
+    viewPrice: row.viewUnitSellingPrice ?? row.unitSellingPrice ?? row.selling_price ?? row.sellingPrice,
+    viewCost: row.viewUnitCost ?? row.unitCost ?? row.cost_price ?? row.costPrice,
+    productSellingPrice:
+      row.productSellingPrice ?? row.product_selling_price ?? row.catalogSellingPrice ?? null,
+    productCostPrice:
+      row.productCostPrice ?? row.product_cost_price ?? row.catalogCostPrice ?? null,
+    logQa: row._logMasterCatalogPricing !== false,
+  });
+  const sellingPrice = pricing.sellingPrice;
+  const costPrice = pricing.costPrice;
   const transferPrice = num(
     row.transferPrice ??
       row.transfer_price ??
@@ -86,10 +152,10 @@ export function mapMasterCatalogRow(row = {}) {
       row.hqTransferPrice ??
       row.hq_transfer_price
   );
-  const hqCostConfigured = isHqCostConfigured(costPrice);
+  const hqCostConfigured = pricing.hqCostConfigured;
   const hqTransferConfigured = isHqTransferConfigured(transferPrice);
   const hqPricingConfigured = isHqPricingConfigured(costPrice, transferPrice);
-  const hqMarginConfigured = isHqMarginConfigured(sellingPrice, costPrice);
+  const hqMarginConfigured = pricing.hqMarginConfigured;
   return {
     productId,
     productName: str(row.productName ?? row.product_name) || productId,
@@ -102,7 +168,7 @@ export function mapMasterCatalogRow(row = {}) {
     hqTransferConfigured,
     hqPricingConfigured,
     hqMarginConfigured,
-    marginPct: hqMarginConfigured ? computeMarginPct(sellingPrice, costPrice) : null,
+    marginPct: pricing.marginPct,
     currentStock: num(row.currentStock ?? row.current_stock),
     minStock: num(row.minStock ?? row.min_stock),
     reorderQty: num(row.reorderQty ?? row.reorder_qty),

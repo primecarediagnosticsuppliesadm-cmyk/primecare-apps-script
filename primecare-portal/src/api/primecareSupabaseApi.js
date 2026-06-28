@@ -40,6 +40,7 @@ import {
   rollupStockDashboardMappedItems,
 } from "@/metrics/computeInventoryMetrics.js";
 import { IS_DEV, IS_QA } from "@/config/environment";
+import { resolveMasterCatalogPricing } from "@/catalog/masterCatalogEngine.js";
 import {
   coalesceOperatingTenantId,
   validateInventoryLedgerTenantScope,
@@ -974,17 +975,29 @@ export async function enrichCatalogWithProductMetadata(products, tenantId) {
   return products.map((item) => {
     const meta = metaBySku.get(normalizeHqSku(item.productId));
     if (!meta) return item;
-    const costFromProduct = num(meta.cost_price);
-    const sellFromProduct = num(meta.selling_price);
+    const pricing = resolveMasterCatalogPricing({
+      productId: item.productId,
+      viewPrice: item.unitSellingPrice,
+      viewCost: item.unitCost,
+      productSellingPrice: meta.selling_price,
+      productCostPrice: meta.cost_price,
+      logQa: IS_QA || IS_DEV,
+    });
     return {
       ...item,
       unit: str(meta.unit) || item.unit,
       preferredSupplier: str(meta.preferred_supplier) || item.preferredSupplier,
-      unitCost: num(item.unitCost) > 0 ? item.unitCost : costFromProduct,
-      unitSellingPrice:
-        num(item.unitSellingPrice) > 0 ? item.unitSellingPrice : sellFromProduct,
-      cost_price: num(item.cost_price ?? item.costPrice) > 0 ? item.cost_price ?? item.costPrice : costFromProduct,
-      costPrice: num(item.costPrice ?? item.cost_price) > 0 ? item.costPrice ?? item.cost_price : costFromProduct,
+      viewUnitSellingPrice: item.unitSellingPrice,
+      viewUnitCost: item.unitCost,
+      productSellingPrice: pricing.productSellingPrice,
+      productCostPrice: pricing.productCostPrice,
+      unitCost: pricing.costPrice,
+      unitSellingPrice: pricing.sellingPrice,
+      cost_price: pricing.costPrice,
+      costPrice: pricing.costPrice,
+      selling_price: pricing.sellingPrice,
+      sellingPrice: pricing.sellingPrice,
+      _logMasterCatalogPricing: false,
       active:
         meta.active !== false &&
         item.active !== false &&

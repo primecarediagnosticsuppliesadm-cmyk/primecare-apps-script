@@ -224,8 +224,8 @@ No estimated values.
 - Verification: `node scripts/verify-inventory-dashboard-kpi.mjs` (QA Supabase live data).
 
 ### Verification evidence (QA tenant `f168b98f-47a6-42c3-b788-24c00436fac2`)
-- `QA_SKU_003`: 110 × ₹200 = **₹22,000** (`source: product`)
-- HQ total reconciles: **₹31,956** = Σ(`current_stock × resolvedUnitCost`) across 4 SKUs
+- `QA_SKU_003`: 120 × ₹200 = **₹24,000** (`source: product`; post-receive stock)
+- HQ total reconciles: **₹33,956** = Σ(`current_stock × resolvedUnitCost`) across 4 SKUs
 - Fallback cases A/B/C pass; no duplicate SKU valuation
 
 ### Status
@@ -249,6 +249,14 @@ UX / Data mapping
 - Split `hqCostConfigured`, `hqTransferConfigured`, `hqMarginConfigured` in `masterCatalogEngine.js`.
 - HQ Cost and margin (price vs cost) display independently of transfer price.
 - `enrichCatalogWithProductMetadata` backfills `cost_price` / `selling_price` from `products`.
+- **Follow-up:** `resolveMasterCatalogPricing()` — `products.selling_price` / `cost_price` authoritative; view/lab prices are fallback only (fixes mixed-source HQ Price ₹10 vs cost ₹200).
+- QA log: `[masterCatalogPricing]`.
+
+### Verification evidence (QA tenant)
+- `QA_SKU_003`: HQ Price ₹900, HQ Cost ₹200, margin ~78%, stock 120
+- `QA_SKU_002`: HQ Price ₹800, HQ Cost ₹150, margin ~81%
+- `QA TEST KIT D`: HQ Price ₹13, HQ Cost ₹12, margin ~8%
+- Transfer Price: Not configured (deferred)
 
 ### Status
 **Fixed**
@@ -272,7 +280,7 @@ UX / Procurement intelligence
 - Forecast Suggestions derive from `getInventoryHealthRead()` velocity + urgency (aligned with Inventory → Health).
 - Empty state explains why Low-urgency / >30-day stockouts are excluded.
 - PO KPI cards label scope (tenant, status basis, value sum).
-- Regression: `node scripts/verify-procurement-inventory-flow.mjs`.
+- Regression: `node scripts/verify-procurement-inventory-flow.mjs` (dry-run); `--mutate` requires open Ordered PO and fails clearly if missing.
 
 ### Status
 **Fixed**
