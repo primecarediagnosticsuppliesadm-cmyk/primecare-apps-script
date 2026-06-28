@@ -1,0 +1,295 @@
+# PrimeCare HQ Admin — Final Certification Sweep
+
+**Date:** 2026-06-28  
+**Branch:** `qa`  
+**Environment:** QA Supabase (`f168b98f-47a6-42c3-b788-24c00436fac2`) + local build  
+**Scope:** HQ Admin modules only (not Executive, Agent, or Lab full certification)
+
+---
+
+## Executive Summary
+
+This sweep reviewed all ten HQ Admin module areas against CRUD, reconciliation, tenant isolation, and existing automated verification scripts. **No open Critical defects** remain from the QA Gap Register (GAP-002–007 fixed). Core inventory, catalog, and procurement paths are **production-safe for Year-1 HQ** with documented Medium risks.
+
+**Verdict: NO-GO** for full production pilot until manual UAT completion (Orders, Labs, PO lifecycle UI), Agent login smoke test, and Predator certification failures are cleared.
+
+**Verdict: CONDITIONAL GO** for continued HQ Admin UAT on inventory / catalog / procurement only.
+
+> Per certification rule: Critical issues are resolved, but High/Medium operational gaps and incomplete end-to-end UAT prevent an unconditional GO.
+
+---
+
+## Build & Automated Verification
+
+### Build
+
+| Check | Result |
+|---|---|
+| `npm run build` | **PASS** |
+
+### QA verification scripts (25 total)
+
+| Script | Result | Notes |
+|---|---|---|
+| `verify-inventory-dashboard-kpi.mjs` | **PASS** | Fixed during sweep: removed hardcoded `QA_SKU_003` stock (was 120; live 140). Now asserts `stock × cost = value` dynamically. |
+| `verify-procurement-inventory-flow.mjs` | **PASS** | Catalog stock 140 = inventory; pricing matrix OK |
+| `verify-inventory-reconciliation.mjs` | **PASS** | No negative stock (does not reconcile ledger Σ vs on-hand) |
+| `verify-financial-reconciliation.mjs` | **PASS** | 12/12 checks |
+| `verify-hq-rls-reads.mjs` | **PASS** | Admin broad reads OK |
+| `verify-hq-search-runtime.mjs` | **PASS** | Catalog + PO search |
+| `verify-bounded-reads.mjs` | **PASS** | Payments + PO bounds |
+| `verify-collection-inconsistencies.mjs` | **PASS*** | *22 legacy drift rows on non-golden labs; golden labs clean |
+| `verify-ar-reconcile.mjs` | **PASS*** | *Same MIXED legacy classification |
+| `verify-agent-collections-ownership-filter.mjs` | **PASS** | |
+| `verify-founder-snapshot.mjs` | **PASS** | |
+| `verify-sprint1-health.mjs` | **PASS** | RPC presence |
+| `verify-transaction-integrity-rpcs.mjs` | **PASS** | ORDER_OUT idempotency RPC wired |
+| `verify-pilot-migrations.mjs` | **PASS** | 28 migration files present (file check) |
+| `verify-primecare-production-golden-path.mjs` | **PASS** | Golden invoice/payment path |
+| `verify-invoice-phase1.mjs` – `phase5.mjs` | **PASS** | Remote checks skipped without `--remote` |
+| `verify-lab-account-fallback.mjs` | **PASS** | |
+| `verify-production-monitoring.mjs` | **FAIL** | 3/10 sub-checks failed (see below) |
+| `verify-provisioning-role-guard.mjs` | **FAIL** | Node cannot resolve `@/` alias in `rolePermissionMatrix.js` |
+| `verify-perf-scale-counts.mjs` | **FAIL** | Requires `.perf-scale-tenant.json` seed |
+| `verify-pilot-hardening-sql.mjs` | **FAIL** | Requires linked Supabase CLI |
+
+**Monitoring sub-check failures (MON-12/14/15):**
+
+- Pilot hardening SQL dump — Supabase CLI not linked in CI/local sweep environment
+- Performance certification — no PERF tenant seeded
+- Predator validation — **2 FAIL**, 22 WARN (collection inconsistencies on legacy rows)
+
+---
+
+## Cross-Cutting Reconciliation
+
+| Invariant | Status | Evidence |
+|---|---|---|
+| Inventory == Master Catalog HQ Stock | **PASS** | `verify-procurement-inventory-flow.mjs` — `catalog.stock_match` (live: 140) |
+| Inventory Value == Σ(stock × resolved cost) | **PASS** | `verify-inventory-dashboard-kpi.mjs` — reconciliation.total (live HQ total ₹37,756) |
+| Purchase Forecast Suggestions == Inventory Health velocity | **PASS** | GAP-016 fix; same `getInventoryHealthRead()` source |
+| Ledger == Inventory movements (automated) | **NOT ENFORCED** | No scheduled job; `verify-inventory-reconciliation.mjs` checks negative stock only |
+| Purchase Orders == Dashboard totals | **PASS** (scoped) | PO KPI cards label basis; bounded reads guarded |
+| Orders == Inventory deductions | **PASS** (code) | `deduct_inventory_for_order` RPC + idempotency; manual UAT unchecked |
+| Payments == Collections | **PASS*** | Golden path clean; 22 legacy collection drift rows |
+| Collections == Dashboard KPIs | **PASS*** | Golden labs reconcile; legacy MIXED |
+
+---
+
+## Module Certification
+
+### 1. Dashboard — **PASS** (with Medium caveats)
+
+| Check | Status | Notes |
+|---|---|---|
+| KPI accuracy | Pass | `getAdminDashboardRead` + metric engines |
+| Cards vs source tables | Pass | Bounded Supabase reads |
+| Stale cache | Medium | `getStockDashboard` session cache has no tenant key (low risk for admin) |
+| Placeholder values | Pass | No "Not enough cost data" when `cost_price` exists (GAP-014) |
+| Duplicate counting | Medium | Near-stockout uses `MAX(forecast, stock buckets)` — can diverge from Health tab |
+| Refresh | Pass | Force refresh on dashboard load |
+
+**Root cause (Medium):** Admin dashboard bounded reads rely on RLS without explicit `.eq("tenant_id")` in `hqBoundedReads.js`. Isolation depends on Supabase policies.
+
+---
+
+### 2. Master Catalog — **PASS**
+
+| Check | Status | Notes |
+|---|---|---|
+| Add / Edit / Enable / Disable | Pass | `createHqProductWrite`, `updateHqProductWrite` |
+| Price / Cost / Margin | Pass | `products.selling_price` / `cost_price` authoritative (GAP-015); `[masterCatalogPricing]` logs |
+| HQ Stock vs Inventory | Pass | Dynamic reconciliation in verify script |
+| Search / Sort | Pass | Client-side on catalog model; global search wired |
+| Duplicate SKU prevention | Pass | DB unique `(tenant_id, product_id)` |
+
+**Verified live:** QA_SKU_003 ₹900 / ₹200 / ~78%; QA_SKU_002 ₹800 / ₹150 / ~81%; QA TEST KIT D ₹13 / ₹12 / ~8%.
+
+---
+
+### 3. Inventory — **PASS** (with Medium caveats)
+
+| Check | Status | Notes |
+|---|---|---|
+| Stock tab | Pass | `v_stock_dashboard` |
+| Movements | Pass | 90-day bounded ledger; expanded audit fields |
+| Health | Pass | Velocity + urgency; expandable valuation detail |
+| KPI reconciliation | Pass | Value strip reconciles with economics model |
+| Ledger reconciliation | Medium | Audit trail only; no Σ ledger vs on-hand job |
+| Drill-down panels | Pass | Valuation formula + warning explanations |
+| Duplicate inventory detection | Pass | Single row per tenant+SKU verified |
+
+**Medium — semantic mismatch:** Stock tab "Critical" = zero stock; Health "Critical" = at/below min stock. Operators may see conflicting urgency labels across tabs.
+
+**Defect fixed during sweep:** `verify-inventory-dashboard-kpi.mjs` hardcoded stock 120 caused false FAIL at live stock 140.
+
+---
+
+### 4. Purchase & Reorder — **PASS** (with Medium caveats)
+
+| Check | Status | Notes |
+|---|---|---|
+| Forecast Suggestions | Pass | Aligned with Inventory Health (GAP-016) |
+| Reorder Candidates / Smart Reorder | Medium | Still uses `v_reorder_candidates` (min-stock only); UI acknowledges split |
+| Create PO | Pass* | Catalog picker + API validation (GAP-009); *manual UAT unchecked |
+| Receive Stock | Pass | Status guards + remaining qty cap (GAP-011) |
+| PO lifecycle | Pass* | Cancel/edit Draft/Ordered (GAP-010); *manual UAT unchecked |
+| Duplicate receive protection | Pass | Status + qty guards; no DB idempotency RPC for PURCHASE_IN (Medium risk) |
+| Dashboard KPIs | Pass | Basis labels on cards |
+
+**Medium — PO receive:** Multi-step JS write (inventory → ledger → PO) is non-transactional. ORDER_OUT has idempotent RPC; PURCHASE_IN does not.
+
+---
+
+### 5. Orders — **PARTIAL** (code reviewed; manual UAT incomplete)
+
+| Check | Status | Notes |
+|---|---|---|
+| Dashboard / Search / Filters | Pass (code) | `OrdersPage` tenant-scoped for admin |
+| Status transitions | Not UAT'd | Checklist items open |
+| Fulfillment | Pass (code) | Inventory deduction RPC wired |
+| Inventory deduction | Pass (code) | Idempotent ORDER_OUT RPC |
+| Financial reconciliation | Pass | Golden path scripts |
+
+**Blocker for full GO:** UAT checklist — create order, fulfill, record payment — still `[ ]`.
+
+---
+
+### 6. Credit & Risk — **PARTIAL**
+
+| Check | Status | Notes |
+|---|---|---|
+| Outstanding / Aging | Pass (code) | `CollectionsPage` tenant-filtered |
+| Collections | Pass* | *22 legacy drift rows; golden labs clean |
+| Payment recording | Not UAT'd | Admin checklist open |
+| Dashboard reconciliation | Pass* | Golden path; legacy MIXED |
+
+---
+
+### 7. Labs — **PARTIAL**
+
+| Check | Status | Notes |
+|---|---|---|
+| CRUD | Pass (code) | HQ mode uses profile tenant (GAP-012) |
+| Qualification / Status | Pass (code) | |
+| Search / Filters | Pass (code) | |
+| Assignment | Not UAT'd | Checklist open |
+
+---
+
+### 8. Operations Center — **PASS** (code)
+
+| Check | Status | Notes |
+|---|---|---|
+| Users / Roles | Pass | `OperationsCenterAdminPage` passes `tenantId` |
+| Agent / Lab assignment | Pass | Bundle loaders tenant-scoped |
+| RLS verification | Pass | `verify-hq-rls-reads.mjs` |
+| Admin → Executive block | Pass (code) | `PROVISION_RULES_BY_ACTOR`; script runner broken (see tooling) |
+
+---
+
+### 9. Access & Security — **PASS**
+
+| Check | Status | Notes |
+|---|---|---|
+| Roles / Route guards | Pass | `canRoleAccessPage` + `canAccessPage` + env visibility |
+| Menu visibility | Pass | `ADMIN_HQ_MENU_KEYS`; pilot hides Predator/notifications |
+| Unauthorized access | Pass | `UnauthorizedCard` on denied pages |
+| Tenant isolation | Pass | Admin locked to profile tenant; isolation validation probes available |
+
+**Medium:** Some permissioned routes reachable by URL but not in sidebar (`labContractEngine`, `reorder`, `collections`).
+
+---
+
+### 10. Qualification Analytics — **PARTIAL**
+
+| Check | Status | Notes |
+|---|---|---|
+| Dashboard values / Charts / Counts | Pass (code) | `QualificationReviewPage` filter + count display |
+| Filtering | Pass (code) | |
+| Automated verification | None | No dedicated verify script; manual review recommended |
+
+---
+
+## Issue Register (This Sweep)
+
+| ID | Severity | Area | Summary | Status |
+|---|---|---|---|---|
+| CERT-001 | **Medium** | Verification tooling | `verify-inventory-dashboard-kpi.mjs` hardcoded stock caused false FAIL | **Fixed** (dynamic stock × cost) |
+| CERT-002 | **Medium** | Inventory UX | Stock "Critical" ≠ Health "Critical" threshold | Open — document for operators |
+| CERT-003 | **Medium** | Procurement | Reorder Candidates / Smart Reorder still min-stock (`v_reorder_candidates`) | Open — partial GAP-016 fix |
+| CERT-004 | **Medium** | Procurement | PO receive non-transactional; no PURCHASE_IN idempotency RPC | Open — mitigated by UI guards |
+| CERT-005 | **Medium** | Dashboard | Bounded reads RLS-only (no explicit tenant filter) | Open — verify RLS in prod |
+| CERT-006 | **Medium** | Tooling | `verify-provisioning-role-guard.mjs` fails on `@/` alias | Open — logic correct in source |
+| CERT-007 | **Medium** | Legacy | GAP-008 Apps Script error logging in Supabase-only mode | Open |
+| CERT-008 | **Low** | Ledger audit | `receivePurchaseOrderWrite` sets `order_id` but not `reference_id` | Open — UI falls back to `order_id` |
+| CERT-009 | **Low** | Architecture | GAP-001 catalog creates inventory row (deferred) | Deferred |
+| CERT-010 | **Low** | Supplier | GAP-013 free-text supplier (deferred) | Deferred |
+
+**Critical issues from QA Gap Register:** 0 open (GAP-002–007 fixed).
+
+---
+
+## Remaining Risks
+
+1. **Incomplete manual UAT** — PO create/edit/cancel/receive, lab create, order fulfill, payment record still unchecked in `UAT_Checklist.md`.
+2. **Agent login** — Not smoke-tested (Production Readiness ⏳).
+3. **Predator certification** — 2 FAIL in full validation run (MON-15).
+4. **Legacy AR/collection drift** — 22+ rows on pre-golden labs; acceptable for golden path only.
+5. **Dual forecast engines** — Forecast Suggestions vs Reorder Candidates may confuse operators.
+6. **No ledger ↔ on-hand reconciliation job** — Drift possible after partial write failures.
+
+---
+
+## Production Blockers
+
+| Blocker | Severity | Blocks GO? |
+|---|---|---|
+| Open Critical gaps | — | No (all fixed) |
+| Manual Admin E2E UAT incomplete | High | **Yes** |
+| Agent login not validated | High | **Yes** (full pilot) |
+| Predator 2 FAIL | High | **Yes** (full pilot) |
+| GAP-008 legacy logging | Medium | No (core flows) |
+| CERT-002–004 operational semantics | Medium | No (HQ inventory pilot) |
+
+---
+
+## GO / NO-GO Recommendation
+
+### Full production pilot: **NO-GO**
+
+Reasons:
+- Manual UAT checklist incomplete for Orders, Labs, PO UI flows
+- Agent role not smoke-tested
+- Predator full validation reports 2 failures
+- End-to-end business flow (order → fulfill → invoice → payment → AR → inventory) not certified
+
+### HQ Admin inventory / catalog / procurement UAT: **CONDITIONAL GO**
+
+Reasons:
+- All Critical gaps resolved
+- Build passes
+- Core reconciliation scripts pass on live QA data
+- Master Catalog pricing, Inventory valuation, and Procurement dry-run verified
+- Known Medium risks documented and mitigated by UI guards
+
+### Required before full GO
+
+1. Complete manual UAT items in `UAT_Checklist.md` (Admin section lines 27–36).
+2. Agent login smoke test.
+3. Resolve Predator certification failures (re-run `run-hq-predator-certification.mjs`).
+4. Fix or skip-with-document `verify-provisioning-role-guard.mjs` Node alias issue.
+5. Operator briefing on Stock vs Health "Critical" definitions and dual forecast paths.
+
+---
+
+## References
+
+- Gap register: `docs/QA/QA_Gap_Register.md`
+- UAT checklist: `docs/QA/UAT_Checklist.md`
+- Production readiness: `docs/QA/Production_Readiness.md`
+- Key scripts: `scripts/verify-inventory-dashboard-kpi.mjs`, `scripts/verify-procurement-inventory-flow.mjs`, `scripts/verify-hq-rls-reads.mjs`, `scripts/verify-financial-reconciliation.mjs`
+
+---
+
+*Certification performed via code review, live QA Supabase script runs, and existing gap register cross-check. No new features introduced.*

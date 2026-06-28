@@ -329,17 +329,32 @@ async function main() {
     fail("qa.sku003.present", `QA_SKU_003 not found for tenant ${HQ}`);
   } else {
     console.log(JSON.stringify(sku003, null, 2));
+    const expectedValue = sku003.currentStock * sku003.unitCost;
     const checks = [
       ["tenantId", sku003.tenantId, HQ],
-      ["currentStock", sku003.currentStock, 120],
       ["productCostPrice", sku003.productCostPrice, 200],
       ["resolvedUnitCost", sku003.unitCost, 200],
-      ["inventoryValue", sku003.inventoryValue, 24000],
       ["source", sku003.unitCostSource, "product"],
     ];
     for (const [field, actual, expected] of checks) {
       const ok = actual === expected;
       (ok ? pass : fail)(`qa.sku003.${field}`, `expected ${expected}, got ${actual}`);
+    }
+    if (sku003.currentStock <= 0) {
+      fail("qa.sku003.currentStock", `expected positive stock, got ${sku003.currentStock}`);
+    } else {
+      pass("qa.sku003.currentStock", `currentStock=${sku003.currentStock} (live inventory)`);
+    }
+    if (Math.abs(num(sku003.inventoryValue) - expectedValue) > 0.01) {
+      fail(
+        "qa.sku003.inventoryValue",
+        `expected ${expectedValue} (${sku003.currentStock} × ${sku003.unitCost}), got ${sku003.inventoryValue}`
+      );
+    } else {
+      pass(
+        "qa.sku003.inventoryValue",
+        `inventoryValue=${sku003.inventoryValue} (${sku003.currentStock} × ${sku003.unitCost})`
+      );
     }
   }
 

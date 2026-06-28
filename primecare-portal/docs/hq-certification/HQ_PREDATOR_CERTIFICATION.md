@@ -1,20 +1,20 @@
 # HQ Predator Certification
 
-**Generated:** 2026-06-25T02:24:22.815Z
+**Generated:** 2026-06-28T21:02:38.549Z
 **Environment:** https://zipuzmfkwwucbchlphcj.supabase.co
 **Actor:** qa.executive@primecare.test
-**Duration:** 28554 ms
+**Duration:** 25479 ms
 
 **Executive visibility:** VERIFIED INTENTIONAL — HQ Executive reads registered distributor tenants via RLS (`predatorChecks.executiveCrossTenantOpts`). Guntur in collections is expected when `787999b9-…` exists in `public.tenants`. Prior FAIL was certification harness without Vite session (empty tenant registry), not a loader defect.
 
-## Result: PASS
+## Result: FAIL
 
 ### Batch summary
 
-- Status: WARN
-- Pass: 341
-- Warn: 23
-- Fail: 0
+- Status: FAIL
+- Pass: 340
+- Warn: 22
+- Fail: 2
 - Modules run: 32
 
 ### Required modules
@@ -36,7 +36,7 @@
 | --- | --- | --- | --- | --- |
 | Admin Dashboard | WARN | 5 | 1 | 0 |
 | Collections | WARN | 4 | 1 | 0 |
-| Lab Portal | WARN | 4 | 1 | 0 |
+| Lab Portal | FAIL | 2 | 1 | 2 |
 | Qualification Analytics | WARN | 3 | 3 | 0 |
 | Agent Visits | WARN | 5 | 1 | 0 |
 | Tenant + Role Isolation | PASS | 72 | 0 | 0 |
@@ -58,7 +58,7 @@
 | User Provisioning | PASS | 12 | 0 | 0 |
 | Lab Ownership | PASS | 7 | 0 | 0 |
 | Commission Engine | WARN | 12 | 2 | 0 |
-| Lab Contract Engine | WARN | 18 | 1 | 0 |
+| Lab Contract Engine | PASS | 19 | 0 | 0 |
 | Distributor Billing | WARN | 10 | 5 | 0 |
 | Inventory Economics | PASS | 6 | 0 | 0 |
 | Inventory Tenant Safety | PASS | 3 | 0 | 0 |
