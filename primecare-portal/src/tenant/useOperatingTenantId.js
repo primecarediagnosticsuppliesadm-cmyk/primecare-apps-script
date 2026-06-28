@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useTenantView } from "@/context/TenantViewContext.jsx";
 import { resolveOperatingTenantId } from "@/tenant/resolveOperatingTenantId.js";
 
@@ -10,7 +10,7 @@ import { resolveOperatingTenantId } from "@/tenant/resolveOperatingTenantId.js";
 export function useOperatingTenantId(currentUser) {
   const { homeTenantId, viewTenantId } = useTenantView();
 
-  return useMemo(
+  const operatingTenantId = useMemo(
     () =>
       resolveOperatingTenantId(currentUser, {
         homeTenantId,
@@ -18,4 +18,15 @@ export function useOperatingTenantId(currentUser) {
       }),
     [currentUser, homeTenantId, viewTenantId]
   );
+
+  useEffect(() => {
+    console.log("[tenantResolution]", {
+      currentUser,
+      operatingTenantId,
+      viewTenantId,
+      homeTenantId,
+    });
+  }, [currentUser, operatingTenantId, viewTenantId, homeTenantId]);
+
+  return operatingTenantId;
 }
