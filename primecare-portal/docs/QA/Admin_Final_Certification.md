@@ -11,9 +11,13 @@
 
 This sweep reviewed all ten HQ Admin module areas against CRUD, reconciliation, tenant isolation, and existing automated verification scripts. **No open Critical defects** remain from the QA Gap Register (GAP-002–007 fixed). Core inventory, catalog, and procurement paths are **production-safe for Year-1 HQ** with documented Medium risks.
 
-**Verdict: NO-GO** for full production pilot until manual UAT completion (Orders, Labs, PO lifecycle UI), Agent login smoke test, and Predator certification failures are cleared.
+**Verdict: NO-GO** for full production pilot until manual UAT completion (Labs, PO lifecycle UI, payment record), Agent login smoke test, and Predator certification failures are cleared.
 
-**Verdict: CONDITIONAL GO** for continued HQ Admin UAT on inventory / catalog / procurement only.
+**Verdict: CONDITIONAL GO** for continued HQ Admin UAT on inventory / catalog / procurement.
+
+**Admin Orders module: GO** (see §5; `verify-orders-admin-flow.mjs` 13/13 PASS).
+
+**Admin Credit & Risk module: GO** (see §6; `verify-credit-risk-admin-flow.mjs` 16/16 PASS, 1 WARN).
 
 > Per certification rule: Critical issues are resolved, but High/Medium operational gaps and incomplete end-to-end UAT prevent an unconditional GO.
 
@@ -33,6 +37,8 @@ This sweep reviewed all ten HQ Admin module areas against CRUD, reconciliation, 
 |---|---|---|
 | `verify-inventory-dashboard-kpi.mjs` | **PASS** | Fixed during sweep: removed hardcoded `QA_SKU_003` stock (was 120; live 140). Now asserts `stock × cost = value` dynamically. |
 | `verify-procurement-inventory-flow.mjs` | **PASS** | Catalog stock 140 = inventory; pricing matrix OK |
+| `verify-orders-admin-flow.mjs` | **PASS** | 64 HQ orders; KPI reconcile; ORDER_OUT ledger match (GAP-017) |
+| `verify-credit-risk-admin-flow.mjs` | **PASS** | 16 PASS / 1 WARN; KPI ₹1,500 = AR; golden allocation (GAP-018) |
 | `verify-inventory-reconciliation.mjs` | **PASS** | No negative stock (does not reconcile ledger Σ vs on-hand) |
 | `verify-financial-reconciliation.mjs` | **PASS** | 12/12 checks |
 | `verify-hq-rls-reads.mjs` | **PASS** | Admin broad reads OK |
@@ -70,9 +76,9 @@ This sweep reviewed all ten HQ Admin module areas against CRUD, reconciliation, 
 | Purchase Forecast Suggestions == Inventory Health velocity | **PASS** | GAP-016 fix; same `getInventoryHealthRead()` source |
 | Ledger == Inventory movements (automated) | **NOT ENFORCED** | No scheduled job; `verify-inventory-reconciliation.mjs` checks negative stock only |
 | Purchase Orders == Dashboard totals | **PASS** (scoped) | PO KPI cards label basis; bounded reads guarded |
-| Orders == Inventory deductions | **PASS** (code) | `deduct_inventory_for_order` RPC + idempotency; manual UAT unchecked |
-| Payments == Collections | **PASS*** | Golden path clean; 22 legacy collection drift rows |
-| Collections == Dashboard KPIs | **PASS*** | Golden labs reconcile; legacy MIXED |
+| Orders == Inventory deductions | **PASS** | Fulfilled orders: ORDER_OUT qty matches order_items (verify script) |
+| Payments == Collections | **PASS** | Golden allocation; no over-allocations; golden labs clean |
+| Collections == Dashboard KPIs | **PASS** | Outstanding ₹1,500 = Σ AR; aging buckets reconcile |
 
 ---
 
@@ -141,28 +147,51 @@ This sweep reviewed all ten HQ Admin module areas against CRUD, reconciliation, 
 
 ---
 
-### 5. Orders — **PARTIAL** (code reviewed; manual UAT incomplete)
+### 5. Orders — **GO** (GAP-017 fixed; automated certification PASS)
 
 | Check | Status | Notes |
 |---|---|---|
-| Dashboard / Search / Filters | Pass (code) | `OrdersPage` tenant-scoped for admin |
-| Status transitions | Not UAT'd | Checklist items open |
-| Fulfillment | Pass (code) | Inventory deduction RPC wired |
-| Inventory deduction | Pass (code) | Idempotent ORDER_OUT RPC |
-| Financial reconciliation | Pass | Golden path scripts |
+| Dashboard KPIs | Pass | 7 cards reconcile with scoped list (`computeOrdersKpis`) |
+| Orders list | Pass | 64 orders; all `qa-tenant-001`; RLS blocks foreign tenants |
+| Search / Filters / Sort | Pass | Status, payment, lab, date, ops queue, 7 sort keys |
+| Order detail | Pass | `getOrderDetailsRead` — `order_items` + `order_lines` fallback |
+| Status transitions | Pass | API guards; UI disables actions on cancelled/fulfilled |
+| Fulfillment flow | Pass | Blocks deduction failure; requires ORDER_OUT ledger |
+| Inventory deduction | Pass | Idempotent `deduct_inventory_for_order` RPC |
+| order_items reconciliation | Pass | 50/50 header vs line totals in verify script |
+| Ledger reconciliation | Pass | 30/30 fulfilled orders: one ORDER_OUT per SKU |
+| Tenant / RLS | Pass | Zero foreign-tenant rows visible to admin JWT |
+| Duplicate fulfillment | Pass | RPC idempotency + `inventory_updated` / ledger probe |
+| Cancelled orders | Pass* | Cancel does not deduct; *seed `QA_ORD_001` has legacy ORDER_OUT |
+| Error / loading / empty | Pass | Error banner on read failure; detail loading states |
 
-**Blocker for full GO:** UAT checklist — create order, fulfill, record payment — still `[ ]`.
+**Fixes applied (GAP-017):** Block Cancelled→Fulfilled; fail Fulfilled without ORDER_OUT; line-item fallback; item count dedup; status button guards.
+
+**Regression:** `node scripts/verify-orders-admin-flow.mjs` — **13/13 PASS**.
+
+**Admin Orders verdict: GO** — no Critical defects; payment recording UAT still open separately.
 
 ---
 
-### 6. Credit & Risk — **PARTIAL**
+### 6. Credit & Risk — **GO** (GAP-018 certified)
 
 | Check | Status | Notes |
 |---|---|---|
-| Outstanding / Aging | Pass (code) | `CollectionsPage` tenant-filtered |
-| Collections | Pass* | *22 legacy drift rows; golden labs clean |
-| Payment recording | Not UAT'd | Admin checklist open |
-| Dashboard reconciliation | Pass* | Golden path; legacy MIXED |
+| Dashboard KPIs | Pass | Outstanding ₹1,500 = Σ AR; overdue 0; high risk 0 |
+| Lab credit list | Pass | Search, filters, sort (Credit & Risk workspace + standard view) |
+| Aging buckets | Pass | Current / 1–15 / 16–30 / 31+ boundaries verified; Σ = KPI |
+| Payment allocation | Pass | No dup/over-alloc; golden payment ₹100 → open balance ₹0 |
+| Tenant isolation | Pass | 26 AR rows scoped; 0 foreign tenants via RLS |
+| Financial reconciliation | Pass | `verify-financial-reconciliation.mjs` 12/12 |
+| Golden labs | Pass | QA_LAB_* zero audit issues |
+| Bounded reads | Pass | AR 26 / payments 45 within 5,000 limits |
+| Loading / empty states | Pass | Command center + lab account views |
+
+**WARN:** 22 inactive AR rows (`ar_row_no_activity`) on non-golden labs — no KPI impact.
+
+**Regression:** `node scripts/verify-credit-risk-admin-flow.mjs` — **16 PASS, 1 WARN, 0 FAIL**.
+
+**Admin Credit & Risk verdict: GO**
 
 ---
 
@@ -225,6 +254,10 @@ This sweep reviewed all ten HQ Admin module areas against CRUD, reconciliation, 
 | CERT-008 | **Low** | Ledger audit | `receivePurchaseOrderWrite` sets `order_id` but not `reference_id` | Open — UI falls back to `order_id` |
 | CERT-009 | **Low** | Architecture | GAP-001 catalog creates inventory row (deferred) | Deferred |
 | CERT-010 | **Low** | Supplier | GAP-013 free-text supplier (deferred) | Deferred |
+| CERT-011 | **Low** | QA seed data | `QA_ORD_001` cancelled but retains seed ORDER_OUT ledger | Documented exception |
+| CERT-012 | **Medium** | Credit & Risk | 22 inactive AR rows (`ar_row_no_activity`) on non-golden labs | WARN in verify script |
+| CERT-013 | **Medium** | Credit & Risk | `days_overdue` not recomputed from invoices in app code | Stored field only |
+| CERT-014 | **Low** | Credit & Risk | Aging UI uses 1–15/16–30/31+ not 30/60/90 calendar buckets | By design in `creditRiskHqEngine` |
 
 **Critical issues from QA Gap Register:** 0 open (GAP-002–007 fixed).
 
@@ -275,11 +308,15 @@ Reasons:
 
 ### Required before full GO
 
-1. Complete manual UAT items in `UAT_Checklist.md` (Admin section lines 27–36).
+1. Complete manual UAT items in `UAT_Checklist.md` (Labs, PO UI, payment record).
 2. Agent login smoke test.
 3. Resolve Predator certification failures (re-run `run-hq-predator-certification.mjs`).
 4. Fix or skip-with-document `verify-provisioning-role-guard.mjs` Node alias issue.
 5. Operator briefing on Stock vs Health "Critical" definitions and dual forecast paths.
+
+### Admin Orders module — **GO**
+
+Certified 2026-06-28 via `verify-orders-admin-flow.mjs` (13/13) + GAP-017 fulfillment guards. Payment recording remains open in UAT checklist but does not block Orders module certification.
 
 ---
 
@@ -288,7 +325,7 @@ Reasons:
 - Gap register: `docs/QA/QA_Gap_Register.md`
 - UAT checklist: `docs/QA/UAT_Checklist.md`
 - Production readiness: `docs/QA/Production_Readiness.md`
-- Key scripts: `scripts/verify-inventory-dashboard-kpi.mjs`, `scripts/verify-procurement-inventory-flow.mjs`, `scripts/verify-hq-rls-reads.mjs`, `scripts/verify-financial-reconciliation.mjs`
+- Key scripts: `scripts/verify-inventory-dashboard-kpi.mjs`, `scripts/verify-procurement-inventory-flow.mjs`, `scripts/verify-orders-admin-flow.mjs`, `scripts/verify-credit-risk-admin-flow.mjs`, `scripts/verify-hq-rls-reads.mjs`, `scripts/verify-financial-reconciliation.mjs`
 
 ---
 

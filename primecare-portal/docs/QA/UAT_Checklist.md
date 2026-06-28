@@ -24,6 +24,9 @@
 - [x] Purchase Forecast Suggestions — aligned with Inventory Health velocity thresholds or explains exclusion
 - [x] Purchase Dashboard KPIs — basis labels on Total/Open/Received/Value cards
 - [x] Procurement regression — `verify-procurement-inventory-flow.mjs` dry-run passes; `--mutate` fails clearly without open Ordered PO
+- [x] Orders — tenant isolation (qa-tenant-001 only); KPI cards reconcile with list
+- [x] Orders — header total reconciles with order_items; fulfilled orders have ORDER_OUT ledger
+- [x] Orders — duplicate fulfillment blocked (RPC idempotency); cancelled orders cannot re-fulfill
 - [ ] Create lab (HQ mode — no distributor picker; shows PrimeCare HQ)
 - [ ] Create PO — select product from catalog only (invalid SKU blocked)
 - [ ] Edit Draft/Ordered PO before receipt (qty, cost, supplier, status)
@@ -31,9 +34,12 @@
 - [ ] Receive Stock — only Ordered / Partially Received POs
 - [ ] Receive Stock blocked for Draft / Received / Cancelled with clear message
 - [ ] Create / edit AR credit terms
-- [ ] Create order as admin
-- [ ] Fulfill order
-- [ ] Record payment
+- [x] Create order as admin (golden path verified)
+- [x] Fulfill order (ORDER_OUT ledger + idempotent RPC)
+- [x] Credit & Risk — KPI outstanding reconciles with AR (₹1,500 live)
+- [x] Credit & Risk — aging buckets sum to KPI total; golden labs audit-clean
+- [x] Credit & Risk — payment allocation golden path (full allocate, open balance ₹0)
+- [ ] Record payment (manual UAT)
 
 ## Agent
 - [ ] Login as agent

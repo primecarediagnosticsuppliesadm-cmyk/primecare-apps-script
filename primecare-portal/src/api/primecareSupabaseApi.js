@@ -6043,11 +6043,13 @@ async function fetchOrderLineCountsForOrders(orderIds = [], options = {}) {
 
   const ids = [...new Set(orderIds.map((id) => str(id)).filter(Boolean))];
   const chunkSize = 200;
+  const itemsCounts = new Map();
+  const linesCounts = new Map();
 
-  const accumulate = (lineRows) => {
+  const accumulate = (lineRows, target) => {
     for (const line of lineRows || []) {
       const oid = str(line.order_id ?? line.orderId);
-      if (oid) counts.set(oid, (counts.get(oid) || 0) + 1);
+      if (oid) target.set(oid, (target.get(oid) || 0) + 1);
       if (options.returnRows) rows.push(line);
     }
   };
@@ -6056,22 +6058,28 @@ async function fetchOrderLineCountsForOrders(orderIds = [], options = {}) {
     const chunk = ids.slice(i, i + chunkSize);
     try {
       const { data, error } = await supabase
-        .from("order_lines")
+        .from("order_items")
         .select(HQ_ORDER_LINE_COUNT_COLUMNS)
         .in("order_id", chunk);
-      if (!error && Array.isArray(data)) accumulate(data);
+      if (!error && Array.isArray(data)) accumulate(data, itemsCounts);
     } catch {
       /* optional */
     }
     try {
       const { data, error } = await supabase
-        .from("order_items")
+        .from("order_lines")
         .select(HQ_ORDER_LINE_COUNT_COLUMNS)
         .in("order_id", chunk);
-      if (!error && Array.isArray(data)) accumulate(data);
+      if (!error && Array.isArray(data)) accumulate(data, linesCounts);
     } catch {
       /* optional */
     }
+  }
+
+  for (const oid of ids) {
+    const itemCount = itemsCounts.get(oid) || 0;
+    const lineCount = linesCounts.get(oid) || 0;
+    counts.set(oid, itemCount > 0 ? itemCount : lineCount);
   }
 
   return { counts, rows };
@@ -6422,6 +6430,26 @@ export async function getOrderDetailsRead(orderId) {
 
 const ORDER_STATUS_ALLOWED = ["Placed", "Processing", "Fulfilled", "Cancelled"];
 
+async function fetchOrderLineItemsForFulfillment(orderRow, businessOrderId) {
+  const oid = str(businessOrderId);
+  if (!supabase || !oid) return [];
+
+  const itemsRes = await supabase.from("order_items").select("*").eq("order_id", oid);
+  let lineRows = Array.isArray(itemsRes.data) ? itemsRes.data : [];
+  if (lineRows.length) return lineRows;
+
+  const fk = str(orderRow?.id ?? orderRow?.order_id ?? oid);
+  const q1 = await supabase.from("order_lines").select("*").eq("order_id", fk);
+  if (!q1.error && Array.isArray(q1.data)) lineRows = q1.data;
+
+  if (!lineRows.length) {
+    const q2 = await supabase.from("order_lines").select("*").eq("order_id", oid);
+    if (!q2.error && Array.isArray(q2.data)) lineRows = q2.data;
+  }
+
+  return lineRows;
+}
+
 function isMissingOrdersColumnError(err, columnName) {
   const msg = String(err?.message ?? err ?? "").toLowerCase();
   const col = String(columnName ?? "").toLowerCase();
@@ -6702,13 +6730,17 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
     const becomingFulfilled = nextStatus === "Fulfilled" && prevKey !== "fulfilled";
     const becomingCancelled = nextStatus === "Cancelled" && prevKey !== "cancelled";
 
+    if (nextStatus === "Fulfilled" && prevKey === "cancelled") {
+      return {
+        success: false,
+        error: "Cancelled orders cannot be fulfilled",
+        data: null,
+      };
+    }
+
     let fetchedLineItems = [];
     if (becomingFulfilled) {
-      const li = await supabase
-        .from("order_items")
-        .select("*")
-        .eq("order_id", businessOrderId);
-      fetchedLineItems = Array.isArray(li.data) ? li.data : [];
+      fetchedLineItems = await fetchOrderLineItemsForFulfillment(orderRow, businessOrderId);
     }
 
     const amtFromLines = (fetchedLineItems || []).reduce(
@@ -6743,21 +6775,34 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
             data: null,
           };
         }
-        await applyLabOrderInventoryDeduction({
+        const deductRes = await applyLabOrderInventoryDeduction({
           savedLineItems: fetchedLineItems,
           order_id: businessOrderId,
           tenant_id: str(orderRow.tenant_id ?? orderRow.tenantId) || null,
           created_by: str(orderRow.created_by ?? orderRow.createdBy) || null,
         });
+        if (!deductRes.success) {
+          return {
+            success: false,
+            error: deductRes.error || "Inventory deduction failed",
+            data: null,
+          };
+        }
         inventoryDoneFlag = Boolean(await ledgerHasOrderOutMovement(businessOrderId));
         if (!inventoryDoneFlag) {
-          hqDebugWarn(
-            "[updateOrderStatusWrite] Fulfilled but no ORDER_OUT ledger rows after deduction attempt:",
-            businessOrderId
-          );
+          return {
+            success: false,
+            error: "Fulfillment requires ORDER_OUT ledger movement",
+            data: null,
+          };
         }
-      } else {
-        hqDebugWarn("[updateOrderStatusWrite] Fulfilled — no order_items rows:", businessOrderId);
+      } else if (!inventoryDoneFlag && !hasLedgerOut) {
+        hqDebugWarn("[updateOrderStatusWrite] Fulfilled — no order line rows:", businessOrderId);
+        return {
+          success: false,
+          error: "Order has no line items to fulfill",
+          data: null,
+        };
       }
 
       if (!arDoneFlag && labId && orderAmt > 0) {

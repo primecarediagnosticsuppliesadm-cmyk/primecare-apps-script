@@ -29,6 +29,8 @@ Tracks functional, UX, architecture, security, RLS, data, and production-readine
 | GAP-014 | Admin UAT / Inventory KPI | High | Fixed | Inventory value KPI cards showed "Not enough cost data" while stock rows loaded; economics read did not join `products.cost_price`. |
 | GAP-015 | Admin UAT / Master Catalog | High | Fixed | HQ Cost showed "Not configured" when only `cost_price` existed; display required transfer price. |
 | GAP-016 | Admin UAT / Procurement UX | Medium | Fixed | Forecast Suggestions used min-stock view only; contradicted Inventory Health velocity. KPI basis labels missing. |
+| GAP-017 | Admin UAT / Orders | Medium | Fixed | Fulfillment could mark Fulfilled without ORDER_OUT; cancelled orders could re-fulfill; item counts double-counted from order_lines + order_items. |
+| GAP-018 | Admin UAT / Credit & Risk | Medium | Certified | KPI/AR reconcile on golden labs; 22 inactive AR rows; aging buckets 1–15/16–30/31+ (not 30/60/90 DB-driven). |
 
 ---
 
@@ -284,3 +286,66 @@ UX / Procurement intelligence
 
 ### Status
 **Fixed**
+
+---
+
+## GAP-017: Admin Orders Fulfillment Integrity (Admin UAT)
+
+### Severity
+Medium
+
+### Type
+Operator safety / Inventory integrity
+
+### Current Behavior (before fix)
+- `updateOrderStatusWrite` could mark **Fulfilled** even when `applyLabOrderInventoryDeduction` failed or no ORDER_OUT ledger was written.
+- Fulfillment read **`order_items` only**; legacy `order_lines`-only orders fulfilled without deduction.
+- Cancelled orders could be re-fulfilled from UI; status action buttons stayed enabled.
+- List item counts summed both `order_lines` and `order_items` (double-count risk).
+
+### Fix (2026-06-28)
+- Block **Cancelled → Fulfilled** in API; disable status actions on cancelled/fulfilled orders in `OrdersPage.jsx`.
+- Fail fulfillment when deduction fails or ORDER_OUT ledger missing; fail when no line items.
+- `fetchOrderLineItemsForFulfillment()` — `order_items` first, `order_lines` fallback (matches detail read).
+- `fetchOrderLineCountsForOrders()` — prefer `order_items` count per order, fallback `order_lines`.
+- Regression: `node scripts/verify-orders-admin-flow.mjs`.
+
+### Verification evidence (QA tenant)
+- 64 orders visible; all belong to `qa-tenant-001`; no foreign-tenant RLS leak.
+- KPI cards reconcile with order list (64 total; 55 fulfilled; Active Value ₹20,998).
+- 50/50 header totals match line sums; 30/30 fulfilled orders have single ORDER_OUT per SKU.
+- Known seed exception: `QA_ORD_001` (cancelled with historical seed ledger row).
+
+### Status
+**Fixed**
+
+---
+
+## GAP-018: Admin Credit & Risk Certification (Admin UAT)
+
+### Severity
+Medium
+
+### Type
+Financial integrity / AR reconciliation / UX clarity
+
+### Current Behavior (certified 2026-06-28)
+- HQ Credit & Risk Command Center KPIs reconcile with `ar_credit_control` outstanding (live: **₹1,500**).
+- Golden labs (`QA_LAB_*`) pass collection audit with zero issues.
+- Payment allocation golden path: payment fully allocated, invoice open balance **₹0**.
+- Aging buckets in UI: **Current**, **1–15**, **16–30**, **31+** (client-side from `days_overdue` field).
+- 22 inactive AR rows flagged `ar_row_no_activity` (non-golden labs; no collections relevance).
+
+### Residual risks (non-blocking)
+- `days_overdue` is stored on AR/view — not recomputed from invoice due dates in application code.
+- Invoice auto-allocation requires linked `orderId` on payment; unlinked cash may remain unallocated.
+- Bounded AR reads omit `days_overdue` column — enriched via `v_labs_credit`.
+- Legacy dual-ledger drift possible on non-golden labs; golden path clean.
+
+### Verification
+- `node scripts/verify-credit-risk-admin-flow.mjs` — **16 PASS, 1 WARN**
+- `node scripts/verify-financial-reconciliation.mjs` — **PASS**
+- `node scripts/verify-collection-inconsistencies.mjs` — golden labs clean
+
+### Status
+**Certified** (GO for Credit & Risk module; payment recording manual UAT recommended)

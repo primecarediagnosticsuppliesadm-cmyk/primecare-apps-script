@@ -21,6 +21,8 @@
 | Master Catalog cost display | ✅ | HQ Cost / margin from catalog cost; transfer price independent (GAP-015). |
 | Master Catalog price source | ✅ | HQ Price from `products.selling_price`; `[masterCatalogPricing]` logs (GAP-015). QA_SKU_003: ₹900 / ₹200 / ~78%. |
 | Procurement regression scripts | ✅ | `verify-procurement-inventory-flow.mjs` dry-run; `--mutate` fails without open Ordered PO (GAP-016). |
+| Admin Orders fulfillment | ✅ | Fulfillment guards, ORDER_OUT reconciliation, tenant isolation (GAP-017). |
+| Admin Credit & Risk | ✅ | KPI/AR reconcile, aging buckets, allocation golden path (GAP-018). |
 | Procurement forecast alignment | ✅ | Forecast Suggestions use Inventory Health velocity; PO KPI basis labels (GAP-016). |
 | Admin PO product validation | ✅ | Catalog picker + API validation (GAP-009). |
 | Admin PO cancel/edit | ✅ | Draft/Ordered PO recovery before receipt (GAP-010). |
