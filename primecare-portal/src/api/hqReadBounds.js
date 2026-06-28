@@ -67,7 +67,7 @@ export const HQ_INVENTORY_COLUMNS =
 export const HQ_INVENTORY_HEALTH_COLUMNS = HQ_INVENTORY_COLUMNS;
 
 export const HQ_INVENTORY_LEDGER_COLUMNS =
-  "id,created_at,tenant_id,product_id,product_name,movement_type,quantity,order_id,reference_type,reference_id,created_by,stock_before,stock_after";
+  "id,created_at,tenant_id,product_id,product_name,movement_type,quantity,order_id,reference_type,reference_id,created_by,stock_before,stock_after,notes";
 
 export const HQ_QUALIFICATION_COLUMNS =
   "id,tenant_id,lab_id,lab_size,monthly_consumables_estimate,current_supplier,payment_terms,decision_maker,reagent_rental_potential,lab_os_fit,next_follow_up_date,founder_review_status,qualification_score,qualification_band,agent_id,agent_name,updated_by,notes,created_at,updated_at,pipeline_stage,pipeline_stage_updated_at,pipeline_stage_updated_by,pipeline_lost_reason,pipeline_next_action,pipeline_expected_value,pipeline_probability,pipeline_notes";

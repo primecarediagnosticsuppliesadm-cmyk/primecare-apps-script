@@ -39,7 +39,13 @@ import {
   rollupInventoryTableRows,
   rollupStockDashboardMappedItems,
 } from "@/metrics/computeInventoryMetrics.js";
-import { IS_QA } from "@/config/environment";
+import { IS_DEV, IS_QA } from "@/config/environment";
+import { resolveMasterCatalogPricing } from "@/catalog/masterCatalogEngine.js";
+import {
+  coalesceOperatingTenantId,
+  validateInventoryLedgerTenantScope,
+} from "@/tenant/resolveOperatingTenantId.js";
+import { resolveInventoryUnitCost } from "@/inventory/resolveInventoryUnitCost.js";
 import {
   clampLimit,
   HQ_AGENT_VISIT_COLUMNS,
@@ -780,6 +786,169 @@ export async function setHqProductActiveWrite(productId, active, payload = {}) {
   }
 }
 
+function optionalProductPrice(row = {}, ...keys) {
+  for (const key of keys) {
+    const raw = row[key];
+    if (raw == null || raw === "") continue;
+    const n = Number(raw);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+/**
+ * Map a public.products row to the picker / PO form shape.
+ */
+export function mapTenantProductRow(row = {}) {
+  const productId = str(row.product_id ?? row.productId);
+  const costPrice = optionalProductPrice(
+    row,
+    "cost_price",
+    "costPrice",
+    "unit_cost",
+    "unitCost",
+    "price",
+    "defaultUnitCost"
+  );
+  const mapped = {
+    productId,
+    productName: str(row.product_name ?? row.productName) || productId,
+    costPrice,
+    cost_price: costPrice,
+    sellingPrice: optionalProductPrice(row, "selling_price", "sellingPrice"),
+    category: str(row.category) || "Consumables",
+    unit: str(row.unit) || null,
+    preferredSupplier: str(row.preferred_supplier ?? row.preferredSupplier) || null,
+    active: row.active !== false,
+  };
+  if ((IS_QA || IS_DEV) && productId === "QA_SKU_003") {
+    console.info("[mapTenantProductRow] QA_SKU_003", {
+      rawCostFields: {
+        cost_price: row.cost_price,
+        costPrice: row.costPrice,
+        unit_cost: row.unit_cost,
+        unitCost: row.unitCost,
+        price: row.price,
+        defaultUnitCost: row.defaultUnitCost,
+      },
+      mapped,
+    });
+  }
+  return mapped;
+}
+
+/**
+ * Active tenant products from public.products (PO picker / procurement — no inventory row required).
+ * @param {{ tenantId?: string|null, tenant_id?: string|null }} [options]
+ */
+export async function getTenantActiveProductsRead(options = {}) {
+  traceSupabaseRead("PurchaseOrders.getTenantActiveProductsRead", { table: "products" });
+  if (!supabase) {
+    return {
+      success: false,
+      error: "Supabase is not configured",
+      data: { products: [], source: "products" },
+    };
+  }
+
+  const tenantId = str(options.tenantId ?? options.tenant_id);
+  if (!tenantId) {
+    return {
+      success: false,
+      error: "tenant_id is required",
+      data: { products: [], source: "products" },
+    };
+  }
+
+  const queryMeta = {
+    table: "public.products",
+    filters: { tenant_id: tenantId, active: true },
+    select:
+      "tenant_id, product_id, product_name, cost_price, selling_price, category, unit, preferred_supplier, active",
+  };
+
+  if (IS_QA) {
+    console.info("[getTenantActiveProductsRead] query", {
+      table: queryMeta.table,
+      tenantId,
+      filters: queryMeta.filters,
+    });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("products")
+      .select(queryMeta.select)
+      .eq("tenant_id", tenantId)
+      .eq("active", true)
+      .order("product_name");
+
+    if (IS_QA) {
+      console.info("[getTenantActiveProductsRead] result", {
+        table: queryMeta.table,
+        tenantId,
+        filters: queryMeta.filters,
+        returnedCount: Array.isArray(data) ? data.length : 0,
+        returnedError: error?.message || null,
+      });
+    }
+
+    if (error) {
+      return {
+        success: false,
+        error: error.message || "Failed to read products",
+        data: { products: [], source: "products", tenantId, queryMeta },
+      };
+    }
+
+    const rawRows = data || [];
+    if (IS_QA || IS_DEV) {
+      const qaRaw = rawRows.find((row) => str(row.product_id ?? row.productId) === "QA_SKU_003");
+      if (qaRaw) {
+        console.info("[getTenantActiveProductsRead] raw row QA_SKU_003", qaRaw);
+      }
+      rawRows.slice(0, 5).forEach((row, index) => {
+        console.info(`[getTenantActiveProductsRead] raw row[${index}]`, row);
+      });
+    }
+
+    const products = rawRows
+      .map(mapTenantProductRow)
+      .filter((p) => p.productId && p.active !== false);
+
+    if (IS_QA || IS_DEV) {
+      const qaMapped = products.find((p) => p.productId === "QA_SKU_003");
+      if (qaMapped) {
+        console.info("[getTenantActiveProductsRead] mapped QA_SKU_003", qaMapped);
+      }
+    }
+
+    hqDebugLog("TENANT ACTIVE PRODUCTS", { tenantId, count: products.length });
+
+    return {
+      success: true,
+      data: { products, source: "products", tenantId, queryMeta },
+      error: null,
+    };
+  } catch (err) {
+    hqDebugWarn("[getTenantActiveProductsRead] failed:", err?.message || err);
+    if (IS_QA) {
+      console.info("[getTenantActiveProductsRead] exception", {
+        table: queryMeta.table,
+        tenantId,
+        filters: queryMeta.filters,
+        returnedCount: 0,
+        returnedError: err?.message || String(err),
+      });
+    }
+    return {
+      success: false,
+      error: err?.message || String(err),
+      data: { products: [], source: "products", tenantId, queryMeta },
+    };
+  }
+}
+
 /**
  * Merge products-table fields (unit, preferred_supplier) into catalog rows for HQ maintenance UI.
  */
@@ -791,7 +960,7 @@ export async function enrichCatalogWithProductMetadata(products, tenantId) {
 
   const { data, error } = await supabase
     .from("products")
-    .select("product_id, unit, preferred_supplier, active")
+    .select("product_id, unit, preferred_supplier, active, cost_price, selling_price")
     .eq("tenant_id", id);
 
   if (error) {
@@ -806,10 +975,29 @@ export async function enrichCatalogWithProductMetadata(products, tenantId) {
   return products.map((item) => {
     const meta = metaBySku.get(normalizeHqSku(item.productId));
     if (!meta) return item;
+    const pricing = resolveMasterCatalogPricing({
+      productId: item.productId,
+      viewPrice: item.unitSellingPrice,
+      viewCost: item.unitCost,
+      productSellingPrice: meta.selling_price,
+      productCostPrice: meta.cost_price,
+      logQa: IS_QA || IS_DEV,
+    });
     return {
       ...item,
       unit: str(meta.unit) || item.unit,
       preferredSupplier: str(meta.preferred_supplier) || item.preferredSupplier,
+      viewUnitSellingPrice: item.unitSellingPrice,
+      viewUnitCost: item.unitCost,
+      productSellingPrice: pricing.productSellingPrice,
+      productCostPrice: pricing.productCostPrice,
+      unitCost: pricing.costPrice,
+      unitSellingPrice: pricing.sellingPrice,
+      cost_price: pricing.costPrice,
+      costPrice: pricing.costPrice,
+      selling_price: pricing.sellingPrice,
+      sellingPrice: pricing.sellingPrice,
+      _logMasterCatalogPricing: false,
       active:
         meta.active !== false &&
         item.active !== false &&
@@ -863,7 +1051,13 @@ export async function getStockDashboard(options = {}) {
   }
 
   const inventory = sortInventoryLikeLegacy(
-    (rawRows || []).map(mapStockDashboardRow).filter((item) => item.productId)
+    (rawRows || [])
+      .map(mapStockDashboardRow)
+      .filter((item) => item.productId)
+      .filter((item) => {
+        const scopedTenantId = str(options.tenantId ?? options.tenant_id);
+        return !scopedTenantId || str(item.tenantId) === scopedTenantId;
+      })
   );
 
   const stats = rollupStockDashboardMappedItems(inventory);
@@ -1170,6 +1364,18 @@ function sortForecastRows(rows) {
 /**
  * Maps v_reorder_candidates (snake_case) to ReorderForecastPage item shape.
  */
+function resolveReorderSuggestedQty(row = {}) {
+  const explicit =
+    row.suggested_order_qty ??
+    row.suggestedOrderQty ??
+    row.suggested_reorder_qty ??
+    null;
+  if (explicit != null && explicit !== "" && num(explicit) > 0) {
+    return num(explicit);
+  }
+  return num(row.reorder_qty ?? row.reorderQty ?? row.Reorder_Qty);
+}
+
 export function mapReorderCandidateRow(row) {
   const daysLeft = num(
     row.days_left ?? row.daysLeft ?? row.Days_Left ?? row.days_until_stockout ?? row.days_to_stockout
@@ -1202,13 +1408,7 @@ export function mapReorderCandidateRow(row) {
     urgency: normalizeUrgencyLabel(urgencyRaw),
     minStock: num(row.min_stock ?? row.minStock ?? row.Min_Stock),
     reorderQty: num(row.reorder_qty ?? row.reorderQty ?? row.Reorder_Qty),
-    suggestedOrderQty: num(
-      row.suggested_order_qty ??
-        row.suggestedOrderQty ??
-        row.reorder_qty ??
-        row.Reorder_Qty ??
-        row.suggested_reorder_qty
-    ),
+    suggestedOrderQty: resolveReorderSuggestedQty(row),
     costPrice: num(row.cost_price ?? row.costPrice ?? row.unit_cost ?? row.unitCost),
     preferredSupplier: str(
       row.preferred_supplier ?? row.preferredSupplier ?? row.supplier ?? row.supplier_name
@@ -4029,12 +4229,21 @@ export async function createAgentVisitWrite(payload = {}) {
  * @param {object[]} ledgerRows
  * @returns {{ success: boolean, data?: object[], error?: string|null }}
  */
-export async function createInventoryLedgerWrite(ledgerRows) {
+export async function createInventoryLedgerWrite(ledgerRows, options = {}) {
   if (!supabase) {
     return { success: false, error: "Supabase is not configured", data: null };
   }
   if (!Array.isArray(ledgerRows) || !ledgerRows.length) {
     return { success: true, data: [], error: null };
+  }
+
+  const expectedTenantId =
+    str(options.tenantId ?? options.tenant_id) ||
+    str(ledgerRows[0]?.tenant_id ?? ledgerRows[0]?.tenantId);
+  const scopeError = validateInventoryLedgerTenantScope(ledgerRows, expectedTenantId);
+  if (scopeError) {
+    hqDebugWarn("[createInventoryLedgerWrite]", scopeError);
+    return { success: false, error: scopeError, data: null };
   }
 
   try {
@@ -4078,6 +4287,7 @@ export function mapInventoryLedgerRow(row) {
     createdBy: str(row.created_by ?? row.createdBy),
     stockBefore: num(row.stock_before ?? row.stockBefore),
     stockAfter: num(row.stock_after ?? row.stockAfter),
+    notes: str(row.notes ?? row.Notes),
     raw: row,
   };
 }
@@ -4104,7 +4314,12 @@ export async function getInventoryLedgerRead(options = {}) {
       };
     }
 
-    const movements = (data || []).map(mapInventoryLedgerRow);
+    const movements = (data || [])
+      .map(mapInventoryLedgerRow)
+      .filter((row) => {
+        const scopedTenantId = str(options.tenantId ?? options.tenant_id);
+        return !scopedTenantId || str(row.tenantId) === scopedTenantId;
+      });
     hqDebugLog("SUPABASE INVENTORY LEDGER", { count: movements.length });
 
     return { success: true, data: { movements }, error: null };
@@ -4126,16 +4341,66 @@ function inventoryHealthUrgency({ currentStock, minStock, projectedStockoutDays,
   return "Low";
 }
 
+async function fetchProductCostPricesByTenantProduct(inventoryRawRows = []) {
+  const costByKey = new Map();
+  if (!supabase || !inventoryRawRows.length) return costByKey;
+
+  const byTenant = new Map();
+  for (const row of inventoryRawRows) {
+    const tenantId = str(row.tenant_id ?? row.tenantId);
+    const productId = str(row.product_id ?? row.productId);
+    if (!tenantId || !productId) continue;
+    if (!byTenant.has(tenantId)) byTenant.set(tenantId, new Set());
+    byTenant.get(tenantId).add(productId);
+  }
+
+  for (const [tenantId, productIds] of byTenant.entries()) {
+    const ids = [...productIds];
+    const { data, error } = await supabase
+      .from("products")
+      .select("tenant_id, product_id, cost_price")
+      .eq("tenant_id", tenantId)
+      .in("product_id", ids);
+
+    if (error) {
+      hqDebugWarn("[getInventoryHealthRead] product cost lookup failed:", error.message);
+      continue;
+    }
+
+    for (const productRow of data || []) {
+      const key = `${str(productRow.tenant_id)}::${str(productRow.product_id)}`;
+      costByKey.set(key, productRow.cost_price);
+    }
+  }
+
+  return costByKey;
+}
+
 function mapInventoryHealthRow(row) {
+  const productId = str(row.product_id ?? row.productId ?? row.Product_ID);
+  const tenantId = str(row.tenant_id ?? row.tenantId ?? row.Tenant_ID);
+  const currentStock = num(row.current_stock ?? row.currentStock ?? row.Current_Stock);
+  const cost = resolveInventoryUnitCost({
+    tenantId,
+    productId,
+    currentStock,
+    inventoryUnitCost: row.unit_cost ?? row.unitCost ?? null,
+    productCostPrice:
+      row.product_cost_price ?? row.cost_price ?? row.costPrice ?? null,
+  });
+
   return {
-    productId: str(row.product_id ?? row.productId ?? row.Product_ID),
+    productId,
     productName: str(row.product_name ?? row.productName ?? row.Product_Name ?? row.name),
-    tenantId: str(row.tenant_id ?? row.tenantId ?? row.Tenant_ID),
+    tenantId,
     category: str(row.category ?? row.Category),
-    currentStock: num(row.current_stock ?? row.currentStock ?? row.Current_Stock),
+    currentStock,
     minStock: num(row.min_stock ?? row.minStock ?? row.Min_Stock),
     reorderQty: num(row.reorder_qty ?? row.reorderQty ?? row.Reorder_Qty),
-    unitCost: num(row.unit_cost ?? row.unitCost ?? row.cost_price ?? row.costPrice),
+    inventoryUnitCost: cost.inventoryUnitCost,
+    productCostPrice: cost.productCostPrice,
+    unitCost: cost.unitCost,
+    unitCostSource: cost.source,
     leadTimeDays: num(row.lead_time_days ?? row.leadTimeDays ?? row.Lead_Time_Days),
     safetyDays: num(row.safety_days ?? row.safetyDays ?? row.Safety_Days ?? 7),
   };
@@ -4165,7 +4430,15 @@ export async function getInventoryHealthRead() {
       return { success: false, error: ledgerRes.error.message, data: { rows: [] } };
     }
 
-    const inventoryRows = (inventoryRes.data || []).map(mapInventoryHealthRow).filter((r) => r.productId);
+    const productCostByKey = await fetchProductCostPricesByTenantProduct(inventoryRes.data || []);
+    const inventoryRows = (inventoryRes.data || [])
+      .map((row) => {
+        const tenantId = str(row.tenant_id ?? row.tenantId);
+        const productId = str(row.product_id ?? row.productId);
+        const productCostPrice = productCostByKey.get(`${tenantId}::${productId}`) ?? null;
+        return mapInventoryHealthRow({ ...row, product_cost_price: productCostPrice });
+      })
+      .filter((r) => r.productId);
     const ledgerRows = (ledgerRes.data || []).map(mapInventoryLedgerRow);
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000);
@@ -4212,9 +4485,14 @@ export async function getInventoryHealthRead() {
       const unusualMovements = ledgerRows
         .filter((m) => m.productId === item.productId)
         .filter((m) => {
+          if (m.movementType !== "ORDER_OUT" && m.movementType !== "OUT") return false;
+          const createdAtMs = new Date(m.createdAt || 0).getTime();
+          if (createdAtMs < thirtyDaysAgo.getTime()) return false;
           const qty = Math.abs(num(m.signedQuantity || m.quantity));
           return avgMovementQty > 0 && qty > avgMovementQty * 3;
         });
+      const latestMovementQty =
+        movementQtys.length > 0 ? movementQtys[movementQtys.length - 1] : null;
       const recommendedReorderQty = Math.max(
         item.reorderQty,
         Math.ceil(avgDailyConsumption * (item.leadTimeDays + item.safetyDays) - item.currentStock),
@@ -4223,9 +4501,54 @@ export async function getInventoryHealthRead() {
       const lastOrderOutMs = lastOrderOutAtBySku.get(item.productId);
       const hasRecentOrderOut = recentOrderOutQty > 0;
       const warningNotes = [];
-      if (!hasRecentOrderOut) warningNotes.push("No ORDER_OUT movement in last 30 days");
-      if (unusualMovements.length) warningNotes.push("Unusual movement quantity detected");
-      if (urgency === "Critical") warningNotes.push("Current stock at or below minimum stock");
+      const warningDetails = [];
+      if (!hasRecentOrderOut) {
+        warningNotes.push("No ORDER_OUT movement in last 30 days");
+        warningDetails.push({
+          code: "no_recent_order_out",
+          message: "No ORDER_OUT movement in last 30 days",
+          explanation:
+            "No outbound order consumption was recorded in the last 30 days, so velocity-based stockout projection may be unavailable.",
+        });
+      }
+      if (unusualMovements.length) {
+        const flaggedQtys = unusualMovements.map((m) =>
+          Math.abs(num(m.signedQuantity || m.quantity))
+        );
+        const maxFlaggedQty = Math.max(...flaggedQtys);
+        warningNotes.push("Unusual movement quantity detected");
+        warningDetails.push({
+          code: "unusual_movement",
+          message: "Unusual movement quantity detected",
+          explanation: `${unusualMovements.length} ORDER_OUT movement(s) in the last 30 days exceeded 3× the average movement qty (${Math.round(avgMovementQty * 100) / 100}). Baseline avg: ${Math.round(avgMovementQty * 100) / 100}; largest flagged qty: ${maxFlaggedQty}; threshold: > ${Math.round(avgMovementQty * 3 * 100) / 100}.`,
+          avgMovementQty: Math.round(avgMovementQty * 100) / 100,
+          latestMovementQty,
+          thresholdQty: Math.round(avgMovementQty * 3 * 100) / 100,
+          flaggedCount: unusualMovements.length,
+          flaggedMovements: unusualMovements.slice(0, 5).map((m) => ({
+            id: m.id,
+            createdAt: m.createdAt,
+            movementType: m.movementType,
+            quantity: Math.abs(num(m.signedQuantity || m.quantity)),
+            orderId: m.orderId,
+          })),
+        });
+      }
+      if (urgency === "Critical") {
+        warningNotes.push("Current stock at or below minimum stock");
+        warningDetails.push({
+          code: "below_min_stock",
+          message: "Current stock at or below minimum stock",
+          explanation: `Current stock (${item.currentStock}) is at or below minimum stock (${item.minStock}).`,
+        });
+      }
+      const inventoryValue = Math.round(item.currentStock * item.unitCost * 100) / 100;
+      const costSourceLabel =
+        item.unitCostSource === "inventory"
+          ? "inventory unit cost"
+          : item.unitCostSource === "product"
+            ? "product catalog (cost_price)"
+            : "missing cost";
 
       return {
         ...item,
@@ -4235,11 +4558,33 @@ export async function getInventoryHealthRead() {
         recentOrderOutQty,
         isFastMoving: recentOrderOutQty > 0,
         isSlowOrDeadStock: !hasRecentOrderOut,
-        inventoryValue: Math.round(item.currentStock * item.unitCost * 100) / 100,
+        inventoryValue,
         recommendedReorderQty,
         lastOrderOutAt: lastOrderOutMs ? new Date(lastOrderOutMs).toISOString() : "",
         unusualMovementCount: unusualMovements.length,
+        unusualMovementDetails: unusualMovements.slice(0, 5).map((m) => ({
+          id: m.id,
+          createdAt: m.createdAt,
+          movementType: m.movementType,
+          quantity: Math.abs(num(m.signedQuantity || m.quantity)),
+          orderId: m.orderId,
+          referenceType: m.referenceType,
+          referenceId: m.referenceId,
+        })),
+        avgMovementQty: Math.round(avgMovementQty * 100) / 100,
+        latestMovementQty,
         warningNotes,
+        warningDetails,
+        valuationDetail: {
+          currentStock: item.currentStock,
+          resolvedUnitCost: item.unitCost,
+          inventoryUnitCost: item.inventoryUnitCost,
+          productCostPrice: item.productCostPrice,
+          source: item.unitCostSource,
+          costSourceLabel,
+          inventoryValue,
+          formula: `${item.currentStock} × ₹${item.unitCost} = ₹${inventoryValue.toLocaleString("en-IN")}`,
+        },
       };
     });
 
@@ -4506,6 +4851,14 @@ async function resolveInventoryRowForWrite(tenant_id, product_id) {
     };
   }
 
+  const rowTenant = str(rows[0].tenant_id ?? rows[0].tenantId);
+  if (rowTenant && rowTenant !== tenantId) {
+    return {
+      success: false,
+      error: `Inventory row tenant mismatch: expected ${tenantId}, found ${rowTenant} for product_id=${productId}`,
+    };
+  }
+
   return { success: true, row: rows[0], tenantId, productId, error: null };
 }
 
@@ -4591,6 +4944,15 @@ export async function cancelPurchaseOrderWrite(poId, payload = {}) {
     if (!bundle.success) return { success: false, error: bundle.error, data: null };
 
     const { poRow, itemRow } = bundle;
+    const tenantResolved = coalesceOperatingTenantId(
+      payload,
+      str(itemRow.tenant_id ?? poRow.tenant_id),
+      "purchase order cancel"
+    );
+    if (tenantResolved.error) {
+      return { success: false, error: tenantResolved.error, data: null };
+    }
+
     const receivedQty = num(itemRow.received_qty ?? poRow.received_qty);
     const status = normalizePurchaseOrderStatus(poRow.status);
 
@@ -4682,7 +5044,16 @@ export async function updatePurchaseOrderWrite(poId, payload = {}) {
       };
     }
 
-    const tenant_id = str(itemRow.tenant_id ?? poRow.tenant_id ?? payload.tenantId ?? payload.tenant_id);
+    const tenantResolved = coalesceOperatingTenantId(
+      payload,
+      str(itemRow.tenant_id ?? poRow.tenant_id),
+      "purchase order update"
+    );
+    if (tenantResolved.error) {
+      return { success: false, error: tenantResolved.error, data: null };
+    }
+
+    const tenant_id = tenantResolved.tenantId;
     const nextProductId = str(payload.productId ?? payload.product_id ?? itemRow.product_id ?? poRow.product_id);
     const nextProductName = str(
       payload.productName ?? payload.product_name ?? itemRow.product_name ?? poRow.product_name ?? nextProductId
@@ -4802,14 +5173,15 @@ export async function receivePurchaseOrderWrite(poId, payload = {}) {
     const productName = str(itemRow.product_name ?? poRow.product_name ?? productId);
     if (!productId) return { success: false, error: "Purchase order item product_id is missing", data: null };
 
-    const tenantId = str(itemRow.tenant_id ?? poRow.tenant_id);
-    if (!tenantId) {
-      return {
-        success: false,
-        error: "Purchase order tenant_id is required for inventory receipt",
-        data: null,
-      };
+    const tenantResolved = coalesceOperatingTenantId(
+      payload,
+      str(itemRow.tenant_id ?? poRow.tenant_id),
+      "purchase order receipt"
+    );
+    if (tenantResolved.error) {
+      return { success: false, error: tenantResolved.error, data: null };
     }
+    const tenantId = tenantResolved.tenantId;
 
     const orderedQty = num(itemRow.quantity ?? poRow.quantity);
     const previousReceived = num(itemRow.received_qty ?? poRow.received_qty);
@@ -4827,7 +5199,14 @@ export async function receivePurchaseOrderWrite(poId, payload = {}) {
       return { success: false, error: inventoryResolved.error || "Inventory row resolution failed", data: null };
     }
     const inventoryRow = inventoryResolved.row;
-    const inventoryTenantId = str(inventoryRow.tenant_id ?? inventoryResolved.tenantId);
+    const inventoryTenantId = str(inventoryRow.tenant_id ?? inventoryResolved.tenantId ?? tenantId);
+    if (inventoryTenantId !== tenantId) {
+      return {
+        success: false,
+        error: `Inventory tenant mismatch: inventory row tenant ${inventoryTenantId} does not match operating tenant ${tenantId}.`,
+        data: null,
+      };
+    }
 
     const stockBefore = num(inventoryRow.current_stock ?? inventoryRow.currentStock);
     const stockAfter = stockBefore + receivedQty;
@@ -4859,7 +5238,7 @@ export async function receivePurchaseOrderWrite(poId, payload = {}) {
       created_by: str(payload.receivedBy ?? payload.createdBy ?? payload.created_by) || null,
       created_at: new Date().toISOString(),
     };
-    const ledger = await createInventoryLedgerWrite([ledgerRow]);
+    const ledger = await createInventoryLedgerWrite([ledgerRow], { tenantId: inventoryTenantId });
     if (!ledger.success) return { success: false, error: ledger.error || "Purchase ledger insert failed", data: null };
     hqDebugLog("INVENTORY PURCHASE_IN LEDGER SAVED", ledger.data);
 
@@ -5141,7 +5520,7 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
     };
   }
 
-  const led = await createInventoryLedgerWrite(ledgerBatch);
+  const led = await createInventoryLedgerWrite(ledgerBatch, { tenantId: scopedTenantId });
   if (!led.success) {
     hqDebugWarn(
       "[createOrderWrite] INVENTORY LEDGER insert failed — stock may already be updated; order is NOT rolled back:",
@@ -5664,11 +6043,13 @@ async function fetchOrderLineCountsForOrders(orderIds = [], options = {}) {
 
   const ids = [...new Set(orderIds.map((id) => str(id)).filter(Boolean))];
   const chunkSize = 200;
+  const itemsCounts = new Map();
+  const linesCounts = new Map();
 
-  const accumulate = (lineRows) => {
+  const accumulate = (lineRows, target) => {
     for (const line of lineRows || []) {
       const oid = str(line.order_id ?? line.orderId);
-      if (oid) counts.set(oid, (counts.get(oid) || 0) + 1);
+      if (oid) target.set(oid, (target.get(oid) || 0) + 1);
       if (options.returnRows) rows.push(line);
     }
   };
@@ -5677,22 +6058,28 @@ async function fetchOrderLineCountsForOrders(orderIds = [], options = {}) {
     const chunk = ids.slice(i, i + chunkSize);
     try {
       const { data, error } = await supabase
-        .from("order_lines")
+        .from("order_items")
         .select(HQ_ORDER_LINE_COUNT_COLUMNS)
         .in("order_id", chunk);
-      if (!error && Array.isArray(data)) accumulate(data);
+      if (!error && Array.isArray(data)) accumulate(data, itemsCounts);
     } catch {
       /* optional */
     }
     try {
       const { data, error } = await supabase
-        .from("order_items")
+        .from("order_lines")
         .select(HQ_ORDER_LINE_COUNT_COLUMNS)
         .in("order_id", chunk);
-      if (!error && Array.isArray(data)) accumulate(data);
+      if (!error && Array.isArray(data)) accumulate(data, linesCounts);
     } catch {
       /* optional */
     }
+  }
+
+  for (const oid of ids) {
+    const itemCount = itemsCounts.get(oid) || 0;
+    const lineCount = linesCounts.get(oid) || 0;
+    counts.set(oid, itemCount > 0 ? itemCount : lineCount);
   }
 
   return { counts, rows };
@@ -6043,6 +6430,26 @@ export async function getOrderDetailsRead(orderId) {
 
 const ORDER_STATUS_ALLOWED = ["Placed", "Processing", "Fulfilled", "Cancelled"];
 
+async function fetchOrderLineItemsForFulfillment(orderRow, businessOrderId) {
+  const oid = str(businessOrderId);
+  if (!supabase || !oid) return [];
+
+  const itemsRes = await supabase.from("order_items").select("*").eq("order_id", oid);
+  let lineRows = Array.isArray(itemsRes.data) ? itemsRes.data : [];
+  if (lineRows.length) return lineRows;
+
+  const fk = str(orderRow?.id ?? orderRow?.order_id ?? oid);
+  const q1 = await supabase.from("order_lines").select("*").eq("order_id", fk);
+  if (!q1.error && Array.isArray(q1.data)) lineRows = q1.data;
+
+  if (!lineRows.length) {
+    const q2 = await supabase.from("order_lines").select("*").eq("order_id", oid);
+    if (!q2.error && Array.isArray(q2.data)) lineRows = q2.data;
+  }
+
+  return lineRows;
+}
+
 function isMissingOrdersColumnError(err, columnName) {
   const msg = String(err?.message ?? err ?? "").toLowerCase();
   const col = String(columnName ?? "").toLowerCase();
@@ -6323,13 +6730,17 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
     const becomingFulfilled = nextStatus === "Fulfilled" && prevKey !== "fulfilled";
     const becomingCancelled = nextStatus === "Cancelled" && prevKey !== "cancelled";
 
+    if (nextStatus === "Fulfilled" && prevKey === "cancelled") {
+      return {
+        success: false,
+        error: "Cancelled orders cannot be fulfilled",
+        data: null,
+      };
+    }
+
     let fetchedLineItems = [];
     if (becomingFulfilled) {
-      const li = await supabase
-        .from("order_items")
-        .select("*")
-        .eq("order_id", businessOrderId);
-      fetchedLineItems = Array.isArray(li.data) ? li.data : [];
+      fetchedLineItems = await fetchOrderLineItemsForFulfillment(orderRow, businessOrderId);
     }
 
     const amtFromLines = (fetchedLineItems || []).reduce(
@@ -6364,21 +6775,34 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
             data: null,
           };
         }
-        await applyLabOrderInventoryDeduction({
+        const deductRes = await applyLabOrderInventoryDeduction({
           savedLineItems: fetchedLineItems,
           order_id: businessOrderId,
           tenant_id: str(orderRow.tenant_id ?? orderRow.tenantId) || null,
           created_by: str(orderRow.created_by ?? orderRow.createdBy) || null,
         });
+        if (!deductRes.success) {
+          return {
+            success: false,
+            error: deductRes.error || "Inventory deduction failed",
+            data: null,
+          };
+        }
         inventoryDoneFlag = Boolean(await ledgerHasOrderOutMovement(businessOrderId));
         if (!inventoryDoneFlag) {
-          hqDebugWarn(
-            "[updateOrderStatusWrite] Fulfilled but no ORDER_OUT ledger rows after deduction attempt:",
-            businessOrderId
-          );
+          return {
+            success: false,
+            error: "Fulfillment requires ORDER_OUT ledger movement",
+            data: null,
+          };
         }
-      } else {
-        hqDebugWarn("[updateOrderStatusWrite] Fulfilled — no order_items rows:", businessOrderId);
+      } else if (!inventoryDoneFlag && !hasLedgerOut) {
+        hqDebugWarn("[updateOrderStatusWrite] Fulfilled — no order line rows:", businessOrderId);
+        return {
+          success: false,
+          error: "Order has no line items to fulfill",
+          data: null,
+        };
       }
 
       if (!arDoneFlag && labId && orderAmt > 0) {

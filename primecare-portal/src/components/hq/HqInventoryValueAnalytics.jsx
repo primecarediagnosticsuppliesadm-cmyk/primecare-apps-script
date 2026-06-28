@@ -67,8 +67,9 @@ export default function HqInventoryValueAnalytics({
   return (
     <div style={{ marginBottom: 16 }}>
       <p style={{ fontSize: 12, color: "#475569", marginBottom: 10 }}>
-        Value analytics use unit cost from inventory records. When cost is missing, amounts show
-        &quot;Not enough cost data&quot; instead of estimates.
+        Value analytics use inventory unit cost when recorded, otherwise product catalog cost
+        (cost_price). When both are missing, amounts show &quot;Not enough cost data&quot; instead
+        of estimates.
       </p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
         <div style={cardStyle}>

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   getPurchaseOrders,
   getSmartReorder,
@@ -8,18 +8,20 @@ import {
 } from "@/api/primecareApi";
 import {
   createPurchaseOrderWrite,
+  getInventoryHealthRead,
   getPurchaseOrdersRead,
   getReorderForecastRead,
   receivePurchaseOrderWrite,
   cancelPurchaseOrderWrite,
   updatePurchaseOrderWrite,
+  getTenantActiveProductsRead,
 } from "@/api/primecareSupabaseApi";
-import { loadMasterCatalog } from "@/catalog/masterCatalogData.js";
+import { IS_DEV, IS_QA } from "@/config/environment.js";
 import { supabase } from "@/api/supabaseClient.js";
+import { useOperatingTenantId } from "@/tenant/useOperatingTenantId.js";
 import {
   logAppsScriptFallbackUsed,
   logAppsScriptPrimarySource,
-  logPartialMigrationWarning,
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { invalidateAdminDashboardCaches } from "@/utils/dashboardInvalidate.js";
@@ -81,8 +83,15 @@ function statusBadgeClass(status) {
   return "bg-slate-100 text-slate-700 border-slate-200";
 }
 
+function formatCatalogPickerLabel(product) {
+  const productId = String(product?.productId || "").trim();
+  const productName = String(product?.productName || productId).trim();
+  return productId ? `${productId} — ${productName}` : productName;
+}
+
 function formatTriggerBasis(triggerBasis) {
   const val = String(triggerBasis || "").trim();
+  if (val === "inventory_health_velocity") return "Inventory Health velocity";
   if (!val) return "-";
   return val
     .split("_")
@@ -96,10 +105,32 @@ function procurementUnitCost(item) {
     item?.cost_price ??
     item?.unitCost ??
     item?.unit_cost ??
+    item?.price ??
+    item?.defaultUnitCost ??
     "";
   if (raw === "" || raw == null) return "";
   const value = numberValue(raw);
-  return value >= 0 ? String(value) : "";
+  return value > 0 ? String(value) : "";
+}
+
+function resolveSuggestedOrderQty(item) {
+  const fields = [
+    item?.suggestedQty,
+    item?.suggestedOrderQty,
+    item?.reorderQty,
+    item?.quantity,
+  ];
+  for (const value of fields) {
+    if (value === "" || value == null) continue;
+    const qty = numberValue(value);
+    if (qty > 0) return qty;
+  }
+  return 0;
+}
+
+function resolveSuggestedOrderQtyString(item) {
+  const qty = resolveSuggestedOrderQty(item);
+  return qty > 0 ? String(qty) : "";
 }
 
 function procurementSupplier(item) {
@@ -113,29 +144,42 @@ function procurementSupplier(item) {
 }
 
 function buildCreateFormFromItem(item) {
-  const qty =
-    item?.suggestedQty ??
-    item?.suggestedOrderQty ??
-    item?.reorderQty ??
-    item?.quantity ??
-    "";
   return {
     productId: item?.productId || "",
     productName: item?.productName || "",
-    quantity: qty !== "" && qty != null ? String(qty) : "",
+    quantity: resolveSuggestedOrderQtyString(item),
     unitCost: procurementUnitCost(item),
     supplier: procurementSupplier(item),
     status: "Draft",
   };
 }
 
+function buildCreateFormFromCatalogProduct(product, procurementItem = null) {
+  const catalogCost = procurementUnitCost(product);
+  const itemCost = procurementUnitCost(procurementItem);
+  const catalogSupplier = procurementSupplier(product);
+  const itemSupplier = procurementSupplier(procurementItem);
+  const qty = resolveSuggestedOrderQtyString(procurementItem);
+
+  return {
+    productId: product?.productId || procurementItem?.productId || "",
+    productName: product?.productName || procurementItem?.productName || "",
+    quantity: qty || resolveSuggestedOrderQtyString(product),
+    unitCost: catalogCost || itemCost,
+    supplier: catalogSupplier || itemSupplier,
+    status: "Draft",
+  };
+}
+
 function candidateFromProcurementItem(item) {
   if (!item?.productId && !item?.productName) return null;
+  const suggestedQty = resolveSuggestedOrderQty(item);
+  const reorderQty = numberValue(item.reorderQty);
   return {
     productId: item.productId,
     productName: item.productName,
-    suggestedQty: item.suggestedQty ?? item.suggestedOrderQty,
-    reorderQty: item.reorderQty ?? item.suggestedOrderQty,
+    suggestedQty,
+    reorderQty: reorderQty > 0 ? reorderQty : suggestedQty,
   };
 }
 
@@ -160,13 +204,6 @@ function canReceivePurchaseOrder(po) {
 function canEditOrCancelPurchaseOrder(po) {
   const status = String(po.status || "").toLowerCase();
   return poReceivedQty(po) === 0 && (status === "draft" || status === "ordered");
-}
-
-function catalogProductCost(product) {
-  const raw = product?.costPrice ?? product?.cost_price ?? product?.unitCost ?? "";
-  if (raw === "" || raw == null) return "";
-  const value = numberValue(raw);
-  return value > 0 ? String(value) : "";
 }
 
 function ProductCatalogPicker({ products, value, onSelect, disabled = false, placeholder = "Search product by name or SKU…" }) {
@@ -199,7 +236,12 @@ function ProductCatalogPicker({ products, value, onSelect, disabled = false, pla
         value={value || ""}
         onChange={(e) => {
           const product = products.find((p) => p.productId === e.target.value);
-          if (product) onSelect(product);
+          if (product) {
+            if (IS_DEV || IS_QA) {
+              console.info("[ProductCatalogPicker] selected product", product);
+            }
+            onSelect(product);
+          }
         }}
         className="w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring"
         required
@@ -208,7 +250,7 @@ function ProductCatalogPicker({ products, value, onSelect, disabled = false, pla
         <option value="">Select a product from catalog…</option>
         {filtered.map((p) => (
           <option key={p.productId} value={p.productId}>
-            {p.productName} ({p.productId})
+            {formatCatalogPickerLabel(p)}
           </option>
         ))}
       </select>
@@ -223,8 +265,10 @@ function ProductCatalogPicker({ products, value, onSelect, disabled = false, pla
 
 /** Map Supabase reorder forecast row → PurchaseOrdersPage "Reorder Candidates" card shape. */
 function mapForecastToPurchaseReorderCandidate(f) {
-  const suggested = numberValue(f.suggestedOrderQty);
+  const suggested = resolveSuggestedOrderQty(f);
   const reorder = numberValue(f.reorderQty);
+  const resolvedSuggested = suggested > 0 ? suggested : reorder;
+  const resolvedReorder = reorder > 0 ? reorder : suggested;
   const unitCost = procurementUnitCost(f);
   return {
     productId: f.productId,
@@ -232,12 +276,40 @@ function mapForecastToPurchaseReorderCandidate(f) {
     stockHealth: f.stockHealth || f.urgency || "Reorder",
     currentStock: f.currentStock,
     minStock: numberValue(f.minStock),
-    reorderQty: reorder > 0 ? reorder : suggested,
-    suggestedQty: suggested > 0 ? suggested : reorder,
+    reorderQty: resolvedReorder,
+    suggestedQty: resolvedSuggested,
+    suggestedOrderQty: resolvedSuggested,
     costPrice: numberValue(f.costPrice ?? f.cost_price),
     preferredSupplier: procurementSupplier(f),
     unitCost,
     supplier: procurementSupplier(f),
+  };
+}
+
+/** Map Supabase reorder forecast row → Smart Reorder tab shape. */
+function mapForecastToSmartReorderItem(f) {
+  const candidate = mapForecastToPurchaseReorderCandidate(f);
+  const suggestedOrderQty = resolveSuggestedOrderQty(candidate);
+  const monthly = numberValue(f.monthlyDemand);
+  return {
+    ...candidate,
+    totalSoldLast30Days: monthly > 0 ? Math.round(monthly) : 0,
+    dailyConsumption: monthly > 0 ? Math.round((monthly / 30) * 100) / 100 : 0,
+    daysLeft: numberValue(f.daysLeft),
+    urgency: String(f.urgency || candidate.stockHealth || "Medium").toUpperCase(),
+    suggestedOrderQty,
+  };
+}
+
+function buildSmartReorderSummaryFromItems(items) {
+  const u = (s) => String(s || "").trim().toUpperCase();
+  return {
+    criticalCount: items.filter((t) => u(t.urgency) === "CRITICAL").length,
+    highUrgencyItems: items.filter(
+      (t) => u(t.urgency) === "HIGH" || u(t.urgency) === "WARNING"
+    ).length,
+    mediumUrgencyItems: items.filter((t) => u(t.urgency) === "MEDIUM").length,
+    totalSuggestedOrderQty: items.reduce((sum, t) => sum + resolveSuggestedOrderQty(t), 0),
   };
 }
 
@@ -283,6 +355,65 @@ function summarizePlaceholderTriggers(triggers) {
   };
 }
 
+/**
+ * Velocity-based forecast suggestions aligned with Inventory Health urgency rules.
+ */
+function buildAutoTriggersFromInventoryHealth(healthRows = [], purchaseOrders = []) {
+  const openPoByProduct = new Map();
+  for (const po of purchaseOrders) {
+    if (!canReceivePurchaseOrder(po)) continue;
+    const pid = String(po.productId || "").trim();
+    if (pid && !openPoByProduct.has(pid)) {
+      openPoByProduct.set(pid, po);
+    }
+  }
+
+  return (healthRows || [])
+    .filter((row) => {
+      const urgency = String(row.urgency || "");
+      if (urgency === "Critical" || urgency === "High" || urgency === "Medium") return true;
+      return row.projectedStockoutDays != null && numberValue(row.projectedStockoutDays) <= 30;
+    })
+    .map((row) => {
+      const openPo = openPoByProduct.get(row.productId);
+      const urgencyUpper = String(row.urgency || "Medium").toUpperCase();
+      const daysLeft =
+        row.projectedStockoutDays != null ? numberValue(row.projectedStockoutDays) : null;
+      const unitCost = numberValue(row.unitCost);
+      const suggestedOrderQty = numberValue(row.recommendedReorderQty);
+      const hasOpenPo = Boolean(openPo);
+      let autoTriggerReason = `Projected stockout in ${daysLeft ?? "—"} days (${urgencyUpper} urgency). Based on 30-day ORDER_OUT velocity — same rules as Inventory → Health.`;
+      if (urgencyUpper === "CRITICAL") {
+        autoTriggerReason = `Current stock (${row.currentStock}) is at or below minimum (${row.minStock}). ${autoTriggerReason}`;
+      }
+
+      return {
+        productId: row.productId,
+        productName: row.productName,
+        urgency: urgencyUpper,
+        hasOpenPo,
+        canAutoCreate: !hasOpenPo,
+        autoTriggerReason,
+        currentStock: numberValue(row.currentStock),
+        minStock: numberValue(row.minStock),
+        dailyConsumption: numberValue(row.avgDailyConsumption),
+        daysLeft: daysLeft ?? "—",
+        suggestedOrderQty,
+        unitCost,
+        supplier: "",
+        triggerBasis: "inventory_health_velocity",
+        openPoId: openPo?.poId || "",
+        openPoStatus: openPo?.status || "",
+        estimatedCost: suggestedOrderQty * unitCost,
+        projectedStockoutDays: daysLeft,
+      };
+    })
+    .sort((a, b) => {
+      const rank = { CRITICAL: 1, HIGH: 2, MEDIUM: 3, LOW: 4 };
+      return (rank[a.urgency] || 99) - (rank[b.urgency] || 99);
+    });
+}
+
 const PURCHASE_TAB_ORDER = [
   "triggers",
   "reorder",
@@ -296,8 +427,8 @@ const PURCHASE_TAB_ORDER = [
 const PURCHASE_TAB_META = {
   triggers: {
     label: "Forecast Suggestions",
-    shortDescription: "Projected demand based on sales/stock history.",
-    purposeSentence: "Review demand projections before purchasing.",
+    shortDescription: "Velocity-based suggestions from Inventory Health (30-day ORDER_OUT).",
+    purposeSentence: "Review projected stockouts before purchasing — aligned with Inventory → Health urgency.",
     nextStepLabel: "Reorder Candidates",
     nextStepTab: "reorder",
   },
@@ -402,28 +533,107 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   const [activeTab, setActiveTab] = useState("triggers");
   const [bulkCreating, setBulkCreating] = useState(false);
   const [catalogProducts, setCatalogProducts] = useState([]);
+  const [catalogProductsError, setCatalogProductsError] = useState("");
   const [editingPo, setEditingPo] = useState(null);
   const [editForm, setEditForm] = useState(emptyCreateForm);
   const [savingEdit, setSavingEdit] = useState(false);
   const [cancellingPoId, setCancellingPoId] = useState("");
 
-  const tenantId = currentUser?.tenantId || currentUser?.tenant_id || null;
+  const operatingTenantId = useOperatingTenantId(currentUser);
 
-  const loadCatalogProducts = async () => {
-    if (!supabase || !tenantId) {
+  const loadCatalogProducts = useCallback(async () => {
+    if (!supabase) {
       setCatalogProducts([]);
+      setCatalogProductsError("Supabase is not configured.");
       return;
     }
+    if (!operatingTenantId) {
+      setCatalogProducts([]);
+      setCatalogProductsError("Tenant not resolved");
+      if (IS_QA) {
+        console.info("[PurchaseOrders.catalogLoad] tenant unresolved", {
+          currentUser,
+          currentUserTenantId: currentUser?.tenantId ?? null,
+          currentUserTenant_id: currentUser?.tenant_id ?? null,
+          homeTenantId: operatingTenantId,
+          resolvedTenantId: null,
+          operatingTenantId: null,
+          table: "public.products",
+          filters: null,
+          returnedCount: 0,
+          returnedError: "Tenant not resolved",
+        });
+      }
+      return;
+    }
+
+    if (IS_QA) {
+      console.info("[PurchaseOrders.catalogLoad] start", {
+        currentUser,
+        currentUserTenantId: currentUser?.tenantId ?? null,
+        currentUserTenant_id: currentUser?.tenant_id ?? null,
+        homeTenantId: operatingTenantId,
+        resolvedTenantId: operatingTenantId,
+        operatingTenantId,
+        table: "public.products",
+        filters: { tenant_id: operatingTenantId, active: true },
+      });
+    }
+
     try {
-      const data = await loadMasterCatalog({ tenantId });
+      const res = await getTenantActiveProductsRead({ tenantId: operatingTenantId });
+      if (IS_QA) {
+        console.info("[PurchaseOrders.catalogLoad] result", {
+          currentUser,
+          currentUserTenantId: currentUser?.tenantId ?? null,
+          currentUserTenant_id: currentUser?.tenant_id ?? null,
+          homeTenantId: operatingTenantId,
+          resolvedTenantId: operatingTenantId,
+          operatingTenantId,
+          table: "public.products",
+          filters: { tenant_id: operatingTenantId, active: true },
+          returnedCount: res?.data?.products?.length ?? 0,
+          returnedError: res?.error || null,
+          queryMeta: res?.data?.queryMeta || null,
+        });
+      }
+      if (IS_DEV || IS_QA) {
+        console.info("PRODUCT PICKER SOURCE", {
+          source: res?.data?.source || "products",
+          tenantId: operatingTenantId,
+          count: res?.data?.products?.length ?? 0,
+          error: res?.error || null,
+        });
+      }
+      if (!res?.success) {
+        setCatalogProducts([]);
+        setCatalogProductsError(res?.error || "Failed to load products from catalog.");
+        return;
+      }
+      setCatalogProductsError("");
       setCatalogProducts(
-        (data.products || []).filter((p) => p.active !== false && String(p.productId || "").trim())
+        (res.data?.products || []).filter((p) => p.active !== false && String(p.productId || "").trim())
       );
     } catch (err) {
       console.warn("[PurchaseOrders] catalog load", err);
       setCatalogProducts([]);
+      setCatalogProductsError(err?.message || "Failed to load catalog products.");
+      if (IS_QA) {
+        console.info("[PurchaseOrders.catalogLoad] exception", {
+          currentUser,
+          currentUserTenantId: currentUser?.tenantId ?? null,
+          currentUserTenant_id: currentUser?.tenant_id ?? null,
+          homeTenantId: operatingTenantId,
+          resolvedTenantId: operatingTenantId,
+          operatingTenantId,
+          table: "public.products",
+          filters: { tenant_id: operatingTenantId, active: true },
+          returnedCount: 0,
+          returnedError: err?.message || String(err),
+        });
+      }
     }
-  };
+  }, [currentUser, operatingTenantId]);
 
   const loadPurchaseDashboard = async () => {
     setSupplierDashboard([]);
@@ -433,9 +643,19 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       logSupabaseFeatureSource("PurchaseOrders.reorderCandidates", {
         api: "getReorderForecastRead",
       });
-      const forecastRes = await getReorderForecastRead();
+      logSupabaseFeatureSource("PurchaseOrders.forecastTriggers", {
+        api: "getInventoryHealthRead",
+      });
+      const [forecastRes, healthRes, poResult] = await Promise.all([
+        getReorderForecastRead(),
+        getInventoryHealthRead(),
+        getPurchaseOrdersRead(),
+      ]);
       if (!forecastRes?.success) {
         throw new Error(forecastRes?.error || "Failed to load reorder candidates from Supabase");
+      }
+      if (!healthRes?.success) {
+        throw new Error(healthRes?.error || "Failed to load inventory health for forecast suggestions");
       }
 
       const forecast = forecastRes.data?.forecast || [];
@@ -443,28 +663,37 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       console.log("SUPABASE PURCHASE REORDER:", rows);
       setReorderCandidates(rows);
 
-      const triggerRows = buildPlaceholderAutoTriggersFromForecast(forecast);
-      console.log("SUPABASE AUTO PURCHASE TRIGGERS:", triggerRows);
+      const smartItems = forecast
+        .map(mapForecastToSmartReorderItem)
+        .filter((item) => resolveSuggestedOrderQty(item) > 0);
+      setSmartReorder(smartItems);
+      setSmartReorderSummary(buildSmartReorderSummaryFromItems(smartItems));
+      if (IS_DEV || IS_QA) {
+        console.info("[PurchaseOrders.smartReorder] supabase forecast items", smartItems);
+      }
+
+      const pos = poResult?.success
+        ? Array.isArray(poResult.data)
+          ? poResult.data
+          : Array.isArray(poResult.data?.purchaseOrders)
+            ? poResult.data.purchaseOrders
+            : []
+        : [];
+      const triggerRows = buildAutoTriggersFromInventoryHealth(
+        healthRes?.data?.rows || [],
+        pos
+      );
+      console.log("INVENTORY HEALTH AUTO PURCHASE TRIGGERS:", triggerRows);
       setAutoTriggers(triggerRows);
       setAutoTriggerSummary(summarizePlaceholderTriggers(triggerRows));
 
       logSupabaseFeatureSource("PurchaseOrders.purchaseOrders", { api: "getPurchaseOrdersRead" });
-      const poResult = await getPurchaseOrdersRead();
       if (poResult?.success) {
-        const d = poResult.data;
-        setPurchaseOrders(
-          Array.isArray(d) ? d : Array.isArray(d?.purchaseOrders) ? d.purchaseOrders : []
-        );
+        setPurchaseOrders(pos);
       } else {
         setPurchaseOrders([]);
         console.warn("[PurchaseOrders] getPurchaseOrdersRead:", poResult?.error);
       }
-      setSmartReorder([]);
-      setSmartReorderSummary(null);
-      logPartialMigrationWarning(
-        "PurchaseOrders.smartReorder",
-        "Smart reorder Apps Script read skipped while Supabase is configured; reorder forecast is the authoritative read path."
-      );
     } else {
       if (!ALLOW_LEGACY_APPS_SCRIPT) {
         throw new Error("Supabase purchase order reads are required for pilot access.");
@@ -497,11 +726,13 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
       if (smartResult.status === "fulfilled" && smartResult.value?.success) {
         const d = smartResult.value.data;
-        const items = Array.isArray(d?.items)
-          ? d.items
-          : Array.isArray(d?.smartReorder?.items)
-          ? d.smartReorder.items
-          : [];
+        const items = (
+          Array.isArray(d?.items)
+            ? d.items
+            : Array.isArray(d?.smartReorder?.items)
+            ? d.smartReorder.items
+            : []
+        ).filter((item) => resolveSuggestedOrderQty(item) > 0);
         setSmartReorder(items);
         setSmartReorderSummary(d?.summary || d?.smartReorder?.summary || null);
       } else {
@@ -526,7 +757,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       try {
         setLoading(true);
         setErrorMessage("");
-        await Promise.all([loadPurchaseDashboard(), loadCatalogProducts()]);
+        await loadPurchaseDashboard();
       } catch (err) {
         console.error(err);
         setErrorMessage(err?.message || "Failed to load purchase operations data.");
@@ -537,6 +768,10 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
     initialLoad();
   }, []);
+
+  useEffect(() => {
+    void loadCatalogProducts();
+  }, [loadCatalogProducts]);
 
   const filteredPurchaseOrders = useMemo(() => {
     return purchaseOrders.filter((po) => {
@@ -556,13 +791,17 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   }, [purchaseOrders, poSearch, poStatusFilter]);
 
   const poStats = useMemo(() => {
+    const receivedPos = purchaseOrders.filter(
+      (po) => String(po.status || "").toLowerCase() === "received"
+    );
+    const openPos = purchaseOrders.filter((po) => canReceivePurchaseOrder(po));
     return {
       total: purchaseOrders.length,
-      open: purchaseOrders.filter((po) => canReceivePurchaseOrder(po)).length,
-      received: purchaseOrders.filter(
-        (po) => String(po.status || "").toLowerCase() === "received"
-      ).length,
+      open: openPos.length,
+      received: receivedPos.length,
       totalValue: purchaseOrders.reduce((sum, po) => sum + numberValue(po.totalCost), 0),
+      openValue: openPos.reduce((sum, po) => sum + numberValue(po.totalCost), 0),
+      receivedValue: receivedPos.reduce((sum, po) => sum + numberValue(po.totalCost), 0),
     };
   }, [purchaseOrders]);
 
@@ -583,18 +822,38 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   const resolveCatalogProduct = (productId) =>
     catalogProducts.find((p) => p.productId === productId) || null;
 
-  const applyCatalogProductToCreateForm = (product) => {
+  const applyCatalogProductToCreateForm = (product, procurementItem = null) => {
     if (!product?.productId) return;
-    setCreateForm((prev) => ({
-      ...prev,
-      productId: product.productId,
-      productName: product.productName || product.productId,
-      unitCost: catalogProductCost(product) || prev.unitCost,
-    }));
-    setSelectedCandidate({
-      productId: product.productId,
-      productName: product.productName,
+    if (IS_DEV || IS_QA) {
+      console.info("[PurchaseOrders] applyCatalogProductToCreateForm", {
+        product,
+        procurementItem,
+      });
+    }
+    const nextForm = buildCreateFormFromCatalogProduct(product, procurementItem);
+    setCreateForm((prev) => {
+      const merged = {
+        ...prev,
+        ...nextForm,
+        unitCost: nextForm.unitCost || prev.unitCost,
+        supplier: nextForm.supplier || prev.supplier,
+        quantity: nextForm.quantity || prev.quantity,
+      };
+      if (IS_DEV || IS_QA) {
+        console.info("[PurchaseOrders] create PO form after catalog selection", merged);
+      }
+      return merged;
     });
+    setSelectedCandidate(
+      procurementItem
+        ? candidateFromProcurementItem(procurementItem)
+        : {
+            productId: product.productId,
+            productName: product.productName,
+            suggestedQty: 0,
+            reorderQty: 0,
+          }
+    );
   };
 
   const validateCreateForm = () => {
@@ -618,11 +877,18 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
   const handleCandidateSelect = (item) => {
     const product = catalogProducts.find((p) => p.productId === item?.productId);
+    if (IS_DEV || IS_QA) {
+      console.info("[PurchaseOrders] handleCandidateSelect", { item, catalogProduct: product || null });
+    }
     if (product) {
-      applyCatalogProductToCreateForm(product);
+      applyCatalogProductToCreateForm(product, item);
     } else {
-      setCreateForm(buildCreateFormFromItem(item));
+      const nextForm = buildCreateFormFromItem(item);
+      setCreateForm(nextForm);
       setSelectedCandidate(candidateFromProcurementItem(item));
+      if (IS_DEV || IS_QA) {
+        console.info("[PurchaseOrders] create PO form after procurement selection", nextForm);
+      }
     }
     setStatusMessage(`Create PO form prefilled for ${item?.productName || item?.productId || "candidate"}.`);
     setErrorMessage("");
@@ -748,7 +1014,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
               unitCost: numberValue(item.unitCost || procurementUnitCost(item)),
               supplier: item.supplier || procurementSupplier(item) || "",
               status: "Draft",
-              tenantId: currentUser?.tenantId || currentUser?.tenant_id || null,
+              tenantId: operatingTenantId,
             })
           )
         );
@@ -796,7 +1062,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
       const payload = {
         ...validateCreateForm(),
-        tenantId,
+        tenantId: operatingTenantId,
       };
 
       let res;
@@ -850,7 +1116,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
         remainingQty: Number(receiveForm.remainingQty || 0),
         receivedQty: Number(receiveForm.receivedQty || 0),
         grnNotes: receiveForm.grnNotes,
-        tenantId,
+        tenantId: operatingTenantId,
         receivedBy: currentUser?.email || currentUser?.name || currentUser?.id || null,
       };
       const orderedQty = Number(receiveForm.quantity || 0);
@@ -948,7 +1214,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
         unitCost,
         supplier: editForm.supplier,
         status: editForm.status,
-        tenantId,
+        tenantId: operatingTenantId,
       });
       if (!res?.success) throw new Error(res?.error || "Failed to update purchase order");
 
@@ -975,7 +1241,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       setCancellingPoId(po.poId);
       setStatusMessage("");
       setErrorMessage("");
-      const res = await cancelPurchaseOrderWrite(po.poId, { tenantId });
+      const res = await cancelPurchaseOrderWrite(po.poId, { tenantId: operatingTenantId });
       if (!res?.success) throw new Error(res?.error || "Failed to cancel purchase order");
       setStatusMessage(`Purchase order cancelled: ${po.poId}`);
       if (editingPo?.poId === po.poId) {
@@ -1009,7 +1275,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
         unitCost: numberValue(item.unitCost || procurementUnitCost(item)),
         supplier: item.supplier || procurementSupplier(item) || "",
         status: "Draft",
-        tenantId: currentUser?.tenantId || currentUser?.tenant_id || null,
+        tenantId: operatingTenantId,
       };
 
       let res;
@@ -1087,21 +1353,28 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
           <div className="text-xs text-slate-500">Total POs</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">All statuses · current tenant</div>
           <div className="mt-1 text-2xl font-semibold">{poStats.total}</div>
         </div>
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
           <div className="text-xs text-slate-500">Open POs</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">Awaiting receipt</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">
+            Ordered or Partially Received with remaining qty · {currency(poStats.openValue)}
+          </div>
           <div className="mt-1 text-2xl font-semibold">{poStats.open}</div>
         </div>
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
           <div className="text-xs text-slate-500">Received</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">Stock received</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">
+            Status = Received (lifetime) · {currency(poStats.receivedValue)}
+          </div>
           <div className="mt-1 text-2xl font-semibold">{poStats.received}</div>
         </div>
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
           <div className="text-xs text-slate-500">Total PO Value</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">Current PO value</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">
+            Sum of PO header total_cost · all statuses
+          </div>
           <div className="mt-1 text-2xl font-semibold">{currency(poStats.totalValue)}</div>
         </div>
       </div>
@@ -1139,6 +1412,12 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
       {activeTab === "triggers" && (
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
+          <p className="mb-3 text-xs text-slate-500">
+            Uses the same 30-day ORDER_OUT velocity and urgency thresholds as Inventory → Health:
+            Critical (at/below min stock), High (stockout within lead time + 7 days), Medium
+            (within 30 days). Reorder Candidates below still lists min-stock SKUs from{" "}
+            <code className="rounded bg-slate-100 px-1">v_reorder_candidates</code>.
+          </p>
           {autoTriggerSummary ? (
             <div className="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-5">
               <div className="rounded-xl border p-3">
@@ -1183,8 +1462,13 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
           <div className="space-y-3">
             {autoTriggers.length === 0 ? (
-              <div className="rounded-xl border border-dashed p-6 text-sm text-slate-500">
-                No reorder forecast suggestions right now.
+              <div className="space-y-2 rounded-xl border border-dashed p-6 text-sm text-slate-500">
+                <p>No reorder forecast suggestions right now.</p>
+                <p className="text-xs text-slate-400">
+                  No SKUs currently meet Inventory Health Critical, High, or Medium urgency. A
+                  projected stockout beyond 30 days (for example ~19 days with Low urgency) stays on
+                  Inventory → Health but does not appear here until urgency is Medium or higher.
+                </p>
               </div>
             ) : (
               autoTriggers.map((item) => (
@@ -1343,12 +1627,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
                     <button
                       type="button"
                       onClick={() => {
-                        setSelectedCandidate(candidateFromProcurementItem(item));
-                        setCreateForm(buildCreateFormFromItem(item));
-                        setStatusMessage(
-                          `Create PO form prefilled for ${item.productName || item.productId || "smart reorder item"}.`
-                        );
-                        setErrorMessage("");
+                        handleCandidateSelect(item);
                         setActiveTab("create");
                       }}
                       className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
@@ -1370,7 +1649,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
               <div className="font-medium">Selected Candidate</div>
               <div className="mt-1 text-slate-600">
                 {selectedCandidate.productName} ({selectedCandidate.productId}) — Suggested Qty:{" "}
-                {selectedCandidate.suggestedQty || selectedCandidate.reorderQty || 0}
+                {resolveSuggestedOrderQty(selectedCandidate)}
               </div>
             </div>
           ) : null}
@@ -1378,9 +1657,13 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
           <form onSubmit={handleCreatePurchaseOrder} className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <div className="lg:col-span-2">
               <label className="mb-1 block text-sm font-medium">Product</label>
-              {catalogProducts.length === 0 ? (
+              {catalogProductsError ? (
+                <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700">
+                  {catalogProductsError}
+                </p>
+              ) : catalogProducts.length === 0 ? (
                 <p className="rounded-xl border border-dashed px-3 py-3 text-sm text-slate-500">
-                  No catalog products found. Create products in Master Catalog first.
+                  No catalog products found for this tenant.
                 </p>
               ) : (
                 <ProductCatalogPicker
@@ -1716,11 +1999,14 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
                   products={catalogProducts}
                   value={editForm.productId}
                   onSelect={(product) => {
+                    if (IS_DEV || IS_QA) {
+                      console.info("[PurchaseOrders] edit PO catalog selection", product);
+                    }
                     setEditForm((prev) => ({
                       ...prev,
                       productId: product.productId,
                       productName: product.productName || product.productId,
-                      unitCost: catalogProductCost(product) || prev.unitCost,
+                      unitCost: procurementUnitCost(product) || prev.unitCost,
                     }));
                   }}
                 />

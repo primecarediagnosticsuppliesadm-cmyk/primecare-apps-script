@@ -655,11 +655,13 @@ export default function OrdersPage({
     if (!selectedOrderSummary) return null;
     const orderStatus = normalizeOrderStatusLabel(selectedOrderSummary.orderStatus);
     const cancelled = isCancelledStatus(orderStatus);
+    const fulfilled = orderStatus === "Fulfilled";
     const lines = details?.lines || [];
     const unitCount = lines.reduce((sum, line) => sum + Number(line.quantity || 0), 0);
     return {
       orderStatus,
       cancelled,
+      fulfilled,
       paymentLabel: orderPaymentLabel(selectedOrderSummary),
       productUnitLabel: formatProductUnitLabel(lines.length, unitCount),
       cancellationReason: cancelled
@@ -1287,7 +1289,12 @@ export default function OrdersPage({
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={updatingStatus || detailsLoading}
+                      disabled={
+                        updatingStatus ||
+                        detailsLoading ||
+                        selectedOrderUx?.cancelled ||
+                        selectedOrderUx?.fulfilled
+                      }
                       onClick={() => handleUpdateStatus("Processing")}
                     >
                       {updatingStatus ? (
@@ -1302,7 +1309,12 @@ export default function OrdersPage({
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={updatingStatus || detailsLoading}
+                      disabled={
+                        updatingStatus ||
+                        detailsLoading ||
+                        selectedOrderUx?.cancelled ||
+                        selectedOrderUx?.fulfilled
+                      }
                       onClick={() => handleUpdateStatus("Fulfilled")}
                     >
                       Mark Fulfilled
@@ -1310,7 +1322,12 @@ export default function OrdersPage({
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={updatingStatus || detailsLoading}
+                      disabled={
+                        updatingStatus ||
+                        detailsLoading ||
+                        selectedOrderUx?.cancelled ||
+                        selectedOrderUx?.fulfilled
+                      }
                       onClick={() => handleUpdateStatus("Placed")}
                     >
                       Reset to Placed
@@ -1319,7 +1336,12 @@ export default function OrdersPage({
                       variant="outline"
                       size="sm"
                       className="border-red-200 text-red-600 hover:bg-red-50"
-                      disabled={updatingStatus || detailsLoading}
+                      disabled={
+                        updatingStatus ||
+                        detailsLoading ||
+                        selectedOrderUx?.cancelled ||
+                        selectedOrderUx?.fulfilled
+                      }
                       onClick={() => handleUpdateStatus("Cancelled")}
                     >
                       Cancel Order

@@ -1,3 +1,5 @@
+import { resolveInventoryUnitCost } from "@/inventory/resolveInventoryUnitCost.js";
+
 const SLOW_MOVING_DAYS = 60;
 const DEAD_INVENTORY_DAYS = 120;
 const REORDER_EXPOSURE_RATIO_WARN = 0.25;
@@ -26,17 +28,42 @@ function skuKey(tenantId, productId) {
 }
 
 function normalizeInventoryRow(row = {}) {
+  const productId = str(row.productId ?? row.product_id);
   const currentStock = num(row.currentStock ?? row.current_stock);
   const minStock = num(row.minStock ?? row.min_stock);
-  const unitCost = num(row.unitCost ?? row.unit_cost ?? row.costPrice ?? row.cost_price);
+  const unitCostSource = str(row.unitCostSource);
+  const cost = unitCostSource
+    ? {
+        inventoryUnitCost: row.inventoryUnitCost ?? null,
+        productCostPrice: row.productCostPrice ?? null,
+        unitCost: num(row.unitCost),
+        source: unitCostSource,
+      }
+    : resolveInventoryUnitCost({
+        tenantId: str(row.tenantId ?? row.tenant_id),
+        productId,
+        currentStock,
+        inventoryUnitCost:
+          row.inventoryUnitCost ?? row.inventory_unit_cost ?? row.unit_cost ?? null,
+        productCostPrice:
+          row.productCostPrice ??
+          row.product_cost_price ??
+          row.costPrice ??
+          row.cost_price ??
+          null,
+      });
+  const unitCost = num(cost.unitCost);
   return {
-    productId: str(row.productId ?? row.product_id),
-    productName: str(row.productName ?? row.product_name ?? row.name) || str(row.productId),
+    productId,
+    productName: str(row.productName ?? row.product_name ?? row.name) || productId,
     tenantId: str(row.tenantId ?? row.tenant_id),
     currentStock,
     minStock,
     reorderQty: num(row.reorderQty ?? row.reorder_qty),
+    inventoryUnitCost: cost.inventoryUnitCost,
+    productCostPrice: cost.productCostPrice,
     unitCost,
+    unitCostSource: cost.source,
     inventoryValue: Math.round(currentStock * unitCost * 100) / 100,
     isLowStock: minStock > 0 ? currentStock < minStock : currentStock <= 0,
     reorderGapQty: Math.max(0, minStock - currentStock),

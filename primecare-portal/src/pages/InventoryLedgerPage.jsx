@@ -69,7 +69,7 @@ function formatSource(row) {
   return parts.length ? parts.join(" · ") : "—";
 }
 
-export default function InventoryLedgerPage() {
+export default function InventoryLedgerPage({ operatingTenantId = null }) {
   const [movements, setMovements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -87,7 +87,9 @@ export default function InventoryLedgerPage() {
       try {
         setLoading(true);
         setError("");
-        const res = await getInventoryLedgerRead();
+        const res = await getInventoryLedgerRead({
+          tenantId: operatingTenantId || undefined,
+        });
         if (!res?.success) {
           throw new Error(res?.error || "Failed to load inventory ledger");
         }
@@ -101,7 +103,7 @@ export default function InventoryLedgerPage() {
     }
 
     loadLedger();
-  }, []);
+  }, [operatingTenantId]);
 
   const movementTypes = useMemo(() => {
     return Array.from(new Set(movements.map((m) => m.movementType).filter(Boolean))).sort();
@@ -301,11 +303,20 @@ export default function InventoryLedgerPage() {
                       <tr key={`${key}-detail`} style={styles.detailRow}>
                         <td colSpan={7} style={styles.detailCell}>
                           <div style={styles.detailGrid}>
+                            <DetailItem label="Created" value={formatDate(row.createdAt)} />
+                            <DetailItem label="Tenant" value={row.tenantId || "—"} mono />
+                            <DetailItem label="Product ID" value={row.productId || "—"} mono />
+                            <DetailItem label="Movement type" value={movementLabel(row.movementType, row)} />
+                            <DetailItem label="Movement code" value={row.movementType || "—"} mono />
+                            <DetailItem
+                              label="Movement quantity"
+                              value={formatSignedQuantity(row.signedQuantity)}
+                            />
                             <DetailItem label="Stock before" value={row.stockBefore} />
                             <DetailItem label="Stock after" value={row.stockAfter} />
+                            <DetailItem label="Reference / PO / order" value={formatReference(row)} />
                             <DetailItem label="Source" value={formatSource(row)} />
-                            <DetailItem label="SKU" value={row.productId || "—"} mono />
-                            <DetailItem label="Movement code" value={row.movementType || "—"} mono />
+                            <DetailItem label="User" value={row.createdBy || "—"} />
                             <DetailItem label="Ledger ID" value={row.id || "—"} mono />
                             {row.referenceType ? (
                               <DetailItem label="Reference type" value={row.referenceType} mono />
@@ -313,6 +324,7 @@ export default function InventoryLedgerPage() {
                             {row.referenceId ? (
                               <DetailItem label="Reference ID" value={row.referenceId} mono />
                             ) : null}
+                            {row.notes ? <DetailItem label="Notes" value={row.notes} /> : null}
                           </div>
                         </td>
                       </tr>
