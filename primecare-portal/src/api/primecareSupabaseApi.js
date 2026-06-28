@@ -1020,14 +1020,18 @@ export async function createLabWrite(payload = {}) {
     return { success: false, error: "Supabase is not configured" };
   }
 
-  const tenantId = str(payload.tenantId || payload.tenant_id);
+  const hqMode = payload.hqMode === true;
   const homeTenantId = str(payload.homeTenantId || payload.home_tenant_id);
-  const distributorContextTenantId = str(
-    payload.distributorContextTenantId ||
-      payload.selectedDistributorTenantId ||
-      payload.contextTenantId
-  );
-  const forbidHomeTenant = payload.forbidHomeTenant === true;
+  const tenantId =
+    str(payload.tenantId || payload.tenant_id) || (hqMode && homeTenantId ? homeTenantId : "");
+  const distributorContextTenantId = hqMode
+    ? ""
+    : str(
+        payload.distributorContextTenantId ||
+          payload.selectedDistributorTenantId ||
+          payload.contextTenantId
+      );
+  const forbidHomeTenant = !hqMode && payload.forbidHomeTenant === true;
   const labName = str(payload.labName || payload.lab_name);
   const contactName = str(payload.contactName || payload.owner_name);
   const phone = str(payload.phone);
@@ -1037,9 +1041,12 @@ export async function createLabWrite(payload = {}) {
   const creditLimit = num(payload.creditLimit ?? payload.credit_limit);
 
   if (!tenantId) {
-    return { success: false, error: "Distributor is required" };
+    return {
+      success: false,
+      error: hqMode ? "Tenant context is required" : "Distributor is required",
+    };
   }
-  if (distributorContextTenantId && tenantId !== distributorContextTenantId) {
+  if (!hqMode && distributorContextTenantId && tenantId !== distributorContextTenantId) {
     return {
       success: false,
       error: "Lab must be created under the selected distributor tenant",
@@ -1131,6 +1138,8 @@ export async function createLabWrite(payload = {}) {
       labId,
       labName,
       tenantId,
+      distributorId: null,
+      distributorName: hqMode ? "PrimeCare HQ" : null,
       lab: insertedLab,
     },
   };
@@ -4375,7 +4384,21 @@ export async function createPurchaseOrderWrite(payload = {}) {
     const tenant_id = str(payload.tenantId ?? payload.tenant_id) || null;
 
     if (!productId) return { success: false, error: "productId is required", data: null };
+    if (!tenant_id) return { success: false, error: "tenant_id is required", data: null };
     if (quantity <= 0) return { success: false, error: "quantity must be greater than zero", data: null };
+    if (unitCost <= 0) return { success: false, error: "unit cost must be greater than zero", data: null };
+
+    const productCheck = await hqProductExists(tenant_id, productId);
+    if (productCheck.error) {
+      return { success: false, error: productCheck.error, data: null };
+    }
+    if (!productCheck.exists) {
+      return {
+        success: false,
+        error: "Select a valid product from catalog.",
+        data: null,
+      };
+    }
 
     const poPayload = {
       po_id: poId,
@@ -4487,6 +4510,258 @@ async function resolveInventoryRowForWrite(tenant_id, product_id) {
 }
 
 /**
+ * Ensure a tenant-scoped inventory row exists before stock receipt (creates zero row when product exists).
+ */
+async function ensureInventoryRowForWrite(tenant_id, product_id, product_name = "") {
+  const resolved = await resolveInventoryRowForWrite(tenant_id, product_id);
+  if (resolved.success) return resolved;
+
+  const tenantId = str(tenant_id);
+  const productId = str(product_id);
+  const productCheck = await hqProductExists(tenantId, productId);
+  if (productCheck.error) {
+    return { success: false, error: productCheck.error };
+  }
+  if (!productCheck.exists) {
+    return {
+      success: false,
+      error: `Product not found in catalog for tenant: ${productId}. Select a valid product from catalog.`,
+    };
+  }
+
+  const invIns = await supabase
+    .from("inventory")
+    .insert([
+      {
+        tenant_id: tenantId,
+        product_id: productId,
+        current_stock: 0,
+        min_stock: 0,
+        reorder_qty: 0,
+        stock_in: 0,
+        stock_out: 0,
+        updated_at: new Date().toISOString(),
+      },
+    ])
+    .select();
+  if (invIns.error) {
+    return { success: false, error: invIns.error.message || "Failed to create inventory row" };
+  }
+  const row = Array.isArray(invIns.data) ? invIns.data[0] : invIns.data;
+  if (!row) {
+    return { success: false, error: `Failed to initialize inventory for product ${productId}` };
+  }
+  hqDebugLog("INVENTORY ROW AUTO-CREATED FOR RECEIPT", { tenantId, productId, product_name });
+  return { success: true, row, tenantId, productId, error: null };
+}
+
+function isReceivablePurchaseOrderStatus(status) {
+  const lower = str(status).toLowerCase();
+  return lower === "ordered" || lower === "partially received";
+}
+
+async function loadPurchaseOrderBundle(poId) {
+  const id = str(poId);
+  if (!id) return { success: false, error: "poId is required" };
+
+  const poSel = await supabase.from("purchase_orders").select("*").eq("po_id", id).limit(1);
+  if (poSel.error) return { success: false, error: poSel.error.message };
+  const poRow = Array.isArray(poSel.data) && poSel.data[0];
+  if (!poRow) return { success: false, error: `Purchase order not found: ${id}` };
+
+  const itemSel = await supabase.from("purchase_order_items").select("*").eq("po_id", id).limit(1);
+  if (itemSel.error) return { success: false, error: itemSel.error.message };
+  const itemRow = Array.isArray(itemSel.data) && itemSel.data[0];
+  if (!itemRow) return { success: false, error: `Purchase order item not found: ${id}` };
+
+  return { success: true, poRow, itemRow };
+}
+
+/**
+ * Cancel a purchase order when nothing has been received (Draft or Ordered only).
+ */
+export async function cancelPurchaseOrderWrite(poId, payload = {}) {
+  traceSupabaseRead("PurchaseOrders.cancelPurchaseOrderWrite", { tables: ["purchase_orders", "purchase_order_items"] });
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+
+  try {
+    const bundle = await loadPurchaseOrderBundle(poId);
+    if (!bundle.success) return { success: false, error: bundle.error, data: null };
+
+    const { poRow, itemRow } = bundle;
+    const receivedQty = num(itemRow.received_qty ?? poRow.received_qty);
+    const status = normalizePurchaseOrderStatus(poRow.status);
+
+    if (receivedQty > 0) {
+      return {
+        success: false,
+        error: "Cannot cancel a purchase order after stock has been received.",
+        data: null,
+      };
+    }
+    if (status === "Cancelled") {
+      return { success: true, data: { poId: str(poId), status: "Cancelled" }, error: null };
+    }
+    if (status !== "Draft" && status !== "Ordered") {
+      return {
+        success: false,
+        error: `Cannot cancel purchase order with status ${status}.`,
+        data: null,
+      };
+    }
+
+    const updateTs = new Date().toISOString();
+    const itemUpdate = await supabase
+      .from("purchase_order_items")
+      .update({ updated_at: updateTs })
+      .eq("po_id", str(poId));
+    if (itemUpdate.error) return { success: false, error: itemUpdate.error.message, data: null };
+
+    const poUpdate = await supabase
+      .from("purchase_orders")
+      .update({ status: "Cancelled", updated_at: updateTs })
+      .eq("po_id", str(poId))
+      .select();
+    if (poUpdate.error) return { success: false, error: poUpdate.error.message, data: null };
+
+    const savedPo = Array.isArray(poUpdate.data) ? poUpdate.data[0] : poUpdate.data;
+    return {
+      success: true,
+      data: {
+        poId: str(poId),
+        status: "Cancelled",
+        purchaseOrder: mapPurchaseOrderRow(savedPo, new Map([[str(poId), [itemRow]]])),
+      },
+      error: null,
+    };
+  } catch (err) {
+    hqDebugWarn("[cancelPurchaseOrderWrite] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: null };
+  }
+}
+
+/**
+ * Edit a purchase order before any stock is received (Draft or Ordered only).
+ */
+export async function updatePurchaseOrderWrite(poId, payload = {}) {
+  traceSupabaseRead("PurchaseOrders.updatePurchaseOrderWrite", { tables: ["purchase_orders", "purchase_order_items"] });
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+
+  try {
+    const bundle = await loadPurchaseOrderBundle(poId);
+    if (!bundle.success) return { success: false, error: bundle.error, data: null };
+
+    const { poRow, itemRow } = bundle;
+    const id = str(poId);
+    const receivedQty = num(itemRow.received_qty ?? poRow.received_qty);
+    const currentStatus = normalizePurchaseOrderStatus(poRow.status);
+
+    if (receivedQty > 0) {
+      return {
+        success: false,
+        error: "Cannot edit product or quantity after stock has been received.",
+        data: null,
+      };
+    }
+    if (currentStatus === "Cancelled" || currentStatus === "Received") {
+      return {
+        success: false,
+        error: `Cannot edit purchase order with status ${currentStatus}.`,
+        data: null,
+      };
+    }
+    if (currentStatus !== "Draft" && currentStatus !== "Ordered") {
+      return {
+        success: false,
+        error: `Cannot edit purchase order with status ${currentStatus}.`,
+        data: null,
+      };
+    }
+
+    const tenant_id = str(itemRow.tenant_id ?? poRow.tenant_id ?? payload.tenantId ?? payload.tenant_id);
+    const nextProductId = str(payload.productId ?? payload.product_id ?? itemRow.product_id ?? poRow.product_id);
+    const nextProductName = str(
+      payload.productName ?? payload.product_name ?? itemRow.product_name ?? poRow.product_name ?? nextProductId
+    );
+    const nextQuantity = payload.quantity != null ? num(payload.quantity) : num(itemRow.quantity ?? poRow.quantity);
+    const nextUnitCost =
+      payload.unitCost != null || payload.unit_cost != null
+        ? num(payload.unitCost ?? payload.unit_cost)
+        : num(itemRow.unit_cost ?? poRow.unit_cost);
+    const nextSupplier = str(payload.supplier ?? poRow.supplier ?? "");
+    const nextStatus = payload.status != null ? normalizePurchaseOrderStatus(payload.status) : currentStatus;
+
+    if (!tenant_id) return { success: false, error: "tenant_id is required", data: null };
+    if (!nextProductId) return { success: false, error: "productId is required", data: null };
+    if (nextQuantity <= 0) return { success: false, error: "quantity must be greater than zero", data: null };
+    if (nextUnitCost <= 0) return { success: false, error: "unit cost must be greater than zero", data: null };
+
+    const productCheck = await hqProductExists(tenant_id, nextProductId);
+    if (productCheck.error) return { success: false, error: productCheck.error, data: null };
+    if (!productCheck.exists) {
+      return { success: false, error: "Select a valid product from catalog.", data: null };
+    }
+
+    const totalCost = Math.round(nextQuantity * nextUnitCost * 100) / 100;
+    const updateTs = new Date().toISOString();
+
+    const itemUpdate = await supabase
+      .from("purchase_order_items")
+      .update({
+        product_id: nextProductId,
+        product_name: nextProductName,
+        quantity: nextQuantity,
+        unit_cost: nextUnitCost,
+        total_cost: totalCost,
+        updated_at: updateTs,
+      })
+      .eq("po_id", id);
+    if (itemUpdate.error) return { success: false, error: itemUpdate.error.message, data: null };
+
+    const poUpdate = await supabase
+      .from("purchase_orders")
+      .update({
+        product_id: nextProductId,
+        product_name: nextProductName,
+        quantity: nextQuantity,
+        unit_cost: nextUnitCost,
+        total_cost: totalCost,
+        supplier: nextSupplier || null,
+        status: nextStatus,
+        updated_at: updateTs,
+      })
+      .eq("po_id", id)
+      .select();
+    if (poUpdate.error) return { success: false, error: poUpdate.error.message, data: null };
+
+    const savedPo = Array.isArray(poUpdate.data) ? poUpdate.data[0] : poUpdate.data;
+    const savedItem = {
+      ...itemRow,
+      product_id: nextProductId,
+      product_name: nextProductName,
+      quantity: nextQuantity,
+      unit_cost: nextUnitCost,
+      total_cost: totalCost,
+    };
+    return {
+      success: true,
+      data: {
+        poId: id,
+        purchaseOrder: mapPurchaseOrderRow(savedPo, new Map([[id, [savedItem]]])),
+      },
+      error: null,
+    };
+  } catch (err) {
+    hqDebugWarn("[updatePurchaseOrderWrite] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: null };
+  }
+}
+
+/**
  * Receive purchase stock: increments inventory.current_stock, appends PURCHASE_IN ledger, updates PO.
  */
 export async function receivePurchaseOrderWrite(poId, payload = {}) {
@@ -4509,6 +4784,15 @@ export async function receivePurchaseOrderWrite(poId, payload = {}) {
     const poRow = Array.isArray(poSel.data) && poSel.data[0];
     if (!poRow) return { success: false, error: `Purchase order not found: ${id}`, data: null };
 
+    const poStatus = normalizePurchaseOrderStatus(poRow.status);
+    if (!isReceivablePurchaseOrderStatus(poStatus)) {
+      return {
+        success: false,
+        error: `Cannot receive stock for purchase order with status ${poStatus}. Only Ordered or Partially Received POs can be received.`,
+        data: null,
+      };
+    }
+
     const itemSel = await supabase.from("purchase_order_items").select("*").eq("po_id", id).limit(1);
     if (itemSel.error) return { success: false, error: itemSel.error.message, data: null };
     const itemRow = Array.isArray(itemSel.data) && itemSel.data[0];
@@ -4527,7 +4811,18 @@ export async function receivePurchaseOrderWrite(poId, payload = {}) {
       };
     }
 
-    const inventoryResolved = await resolveInventoryRowForWrite(tenantId, productId);
+    const orderedQty = num(itemRow.quantity ?? poRow.quantity);
+    const previousReceived = num(itemRow.received_qty ?? poRow.received_qty);
+    const remainingQty = Math.max(0, orderedQty - previousReceived);
+    if (receivedQty > remainingQty) {
+      return {
+        success: false,
+        error: `Received quantity (${receivedQty}) cannot exceed remaining quantity (${remainingQty}).`,
+        data: null,
+      };
+    }
+
+    const inventoryResolved = await ensureInventoryRowForWrite(tenantId, productId, productName);
     if (!inventoryResolved.success) {
       return { success: false, error: inventoryResolved.error || "Inventory row resolution failed", data: null };
     }
@@ -4568,8 +4863,6 @@ export async function receivePurchaseOrderWrite(poId, payload = {}) {
     if (!ledger.success) return { success: false, error: ledger.error || "Purchase ledger insert failed", data: null };
     hqDebugLog("INVENTORY PURCHASE_IN LEDGER SAVED", ledger.data);
 
-    const orderedQty = num(itemRow.quantity ?? poRow.quantity);
-    const previousReceived = num(itemRow.received_qty ?? poRow.received_qty);
     const nextReceived = previousReceived + receivedQty;
     const nextStatus = nextReceived >= orderedQty ? "Received" : "Partially Received";
     const updateTs = new Date().toISOString();

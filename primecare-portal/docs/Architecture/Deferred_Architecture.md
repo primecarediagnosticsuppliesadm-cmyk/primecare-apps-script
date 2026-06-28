@@ -24,3 +24,15 @@ Remove `/api/primecare` dependency from production flows or guard all legacy cod
 
 ### Deferred Until
 After production smoke test unless it blocks normal workflows.
+
+## DA-003: Distributor OS and Supplier Master
+
+### Current
+Year-1 HQ pilot runs under PrimeCare HQ tenant. Distributor OS and `public.distributors` are not provisioned in production. PO supplier is free text.
+
+### Future
+- Distributor OS with tenant-scoped lab/catalog provisioning.
+- Supplier master for default unit costs and vendor history.
+
+### Deferred Until
+Post-pilot multi-distributor rollout.
