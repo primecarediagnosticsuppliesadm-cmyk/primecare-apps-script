@@ -44,6 +44,7 @@ import {
   coalesceOperatingTenantId,
   validateInventoryLedgerTenantScope,
 } from "@/tenant/resolveOperatingTenantId.js";
+import { resolveInventoryUnitCost } from "@/inventory/resolveInventoryUnitCost.js";
 import {
   clampLimit,
   HQ_AGENT_VISIT_COLUMNS,
@@ -4319,16 +4320,66 @@ function inventoryHealthUrgency({ currentStock, minStock, projectedStockoutDays,
   return "Low";
 }
 
+async function fetchProductCostPricesByTenantProduct(inventoryRawRows = []) {
+  const costByKey = new Map();
+  if (!supabase || !inventoryRawRows.length) return costByKey;
+
+  const byTenant = new Map();
+  for (const row of inventoryRawRows) {
+    const tenantId = str(row.tenant_id ?? row.tenantId);
+    const productId = str(row.product_id ?? row.productId);
+    if (!tenantId || !productId) continue;
+    if (!byTenant.has(tenantId)) byTenant.set(tenantId, new Set());
+    byTenant.get(tenantId).add(productId);
+  }
+
+  for (const [tenantId, productIds] of byTenant.entries()) {
+    const ids = [...productIds];
+    const { data, error } = await supabase
+      .from("products")
+      .select("tenant_id, product_id, cost_price")
+      .eq("tenant_id", tenantId)
+      .in("product_id", ids);
+
+    if (error) {
+      hqDebugWarn("[getInventoryHealthRead] product cost lookup failed:", error.message);
+      continue;
+    }
+
+    for (const productRow of data || []) {
+      const key = `${str(productRow.tenant_id)}::${str(productRow.product_id)}`;
+      costByKey.set(key, productRow.cost_price);
+    }
+  }
+
+  return costByKey;
+}
+
 function mapInventoryHealthRow(row) {
+  const productId = str(row.product_id ?? row.productId ?? row.Product_ID);
+  const tenantId = str(row.tenant_id ?? row.tenantId ?? row.Tenant_ID);
+  const currentStock = num(row.current_stock ?? row.currentStock ?? row.Current_Stock);
+  const cost = resolveInventoryUnitCost({
+    tenantId,
+    productId,
+    currentStock,
+    inventoryUnitCost: row.unit_cost ?? row.unitCost ?? null,
+    productCostPrice:
+      row.product_cost_price ?? row.cost_price ?? row.costPrice ?? null,
+  });
+
   return {
-    productId: str(row.product_id ?? row.productId ?? row.Product_ID),
+    productId,
     productName: str(row.product_name ?? row.productName ?? row.Product_Name ?? row.name),
-    tenantId: str(row.tenant_id ?? row.tenantId ?? row.Tenant_ID),
+    tenantId,
     category: str(row.category ?? row.Category),
-    currentStock: num(row.current_stock ?? row.currentStock ?? row.Current_Stock),
+    currentStock,
     minStock: num(row.min_stock ?? row.minStock ?? row.Min_Stock),
     reorderQty: num(row.reorder_qty ?? row.reorderQty ?? row.Reorder_Qty),
-    unitCost: num(row.unit_cost ?? row.unitCost ?? row.cost_price ?? row.costPrice),
+    inventoryUnitCost: cost.inventoryUnitCost,
+    productCostPrice: cost.productCostPrice,
+    unitCost: cost.unitCost,
+    unitCostSource: cost.source,
     leadTimeDays: num(row.lead_time_days ?? row.leadTimeDays ?? row.Lead_Time_Days),
     safetyDays: num(row.safety_days ?? row.safetyDays ?? row.Safety_Days ?? 7),
   };
@@ -4358,7 +4409,15 @@ export async function getInventoryHealthRead() {
       return { success: false, error: ledgerRes.error.message, data: { rows: [] } };
     }
 
-    const inventoryRows = (inventoryRes.data || []).map(mapInventoryHealthRow).filter((r) => r.productId);
+    const productCostByKey = await fetchProductCostPricesByTenantProduct(inventoryRes.data || []);
+    const inventoryRows = (inventoryRes.data || [])
+      .map((row) => {
+        const tenantId = str(row.tenant_id ?? row.tenantId);
+        const productId = str(row.product_id ?? row.productId);
+        const productCostPrice = productCostByKey.get(`${tenantId}::${productId}`) ?? null;
+        return mapInventoryHealthRow({ ...row, product_cost_price: productCostPrice });
+      })
+      .filter((r) => r.productId);
     const ledgerRows = (ledgerRes.data || []).map(mapInventoryLedgerRow);
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000);

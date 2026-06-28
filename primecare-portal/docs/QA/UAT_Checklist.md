@@ -14,6 +14,9 @@
 - [x] Master Catalog loads
 - [x] Create product
 - [x] Product appears in Inventory
+- [x] Inventory Stock tab — value KPI cards show numeric totals (not "Not enough cost data" when `cost_price` exists)
+- [x] Inventory valuation — `QA_SKU_003` contributes 110 × ₹200 = ₹22,000 (product cost fallback)
+- [x] Inventory valuation reconciliation — dashboard total equals Σ SKU `inventoryValue` logs
 - [ ] Create lab (HQ mode — no distributor picker; shows PrimeCare HQ)
 - [ ] Create PO — select product from catalog only (invalid SKU blocked)
 - [ ] Edit Draft/Ordered PO before receipt (qty, cost, supplier, status)

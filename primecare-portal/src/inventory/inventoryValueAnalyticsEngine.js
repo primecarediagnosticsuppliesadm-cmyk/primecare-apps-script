@@ -79,6 +79,33 @@ export function buildInventoryValueAnalytics(model, healthRows = [], options = {
 
   const lowStockSkuCount = econRows.filter((r) => r.isLowStock).length;
 
+  if (hasCostData) {
+    const rowValueSum = econRows.reduce((s, r) => s + num(r.inventoryValue), 0);
+    const stockTimesCostSum = econRows.reduce(
+      (s, r) => s + num(r.currentStock) * num(r.unitCost),
+      0
+    );
+    const skuKeys = econRows.map((r) => `${str(r.tenantId)}::${str(r.productId)}`);
+    const uniqueSkuKeys = new Set(skuKeys);
+    console.log("[inventoryValuationReconciliation]", {
+      tenantFilter,
+      homeTenantId,
+      skuCount: econRows.length,
+      uniqueSkuCount: uniqueSkuKeys.size,
+      duplicateSkus: skuKeys.length - uniqueSkuKeys.size,
+      rowValueSum: Math.round(rowValueSum * 100) / 100,
+      stockTimesCostSum: Math.round(stockTimesCostSum * 100) / 100,
+      totalInventoryValue: Math.round(num(totalInventoryValue) * 100) / 100,
+      reconciled:
+        Math.abs(rowValueSum - num(totalInventoryValue)) <= 0.01 &&
+        Math.abs(stockTimesCostSum - num(totalInventoryValue)) <= 0.01,
+      criticalValueAtRisk: Math.round(num(criticalValueAtRisk) * 100) / 100,
+      slowMovingValue: Math.round(num(slowMovingValue) * 100) / 100,
+      deadStockValue: Math.round(num(deadStockValue) * 100) / 100,
+      hasCostData,
+    });
+  }
+
   return {
     hasCostData,
     totalInventoryValue,

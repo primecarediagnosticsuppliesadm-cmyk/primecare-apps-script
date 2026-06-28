@@ -26,6 +26,7 @@ Tracks functional, UX, architecture, security, RLS, data, and production-readine
 | GAP-011 | Admin UAT / PO | Medium | Fixed | Cancelled/Received/Draft POs still showed Prefill Receive Form. |
 | GAP-012 | Admin UAT / Labs | High | Fixed | Add Lab showed placeholder “Selected distributor” in Year-1 HQ mode (no `distributors` table). |
 | GAP-013 | Supplier Master | Low | Deferred | Supplier master entity deferred; PO supplier remains free text this sprint. |
+| GAP-014 | Admin UAT / Inventory KPI | High | Fixed | Inventory value KPI cards showed "Not enough cost data" while stock rows loaded; economics read did not join `products.cost_price`. |
 
 ---
 
@@ -188,3 +189,42 @@ Architecture / Deferred
 
 ### Status
 **Deferred** — out of scope for this sprint.
+
+---
+
+## GAP-014: Inventory Dashboard KPI Missing Cost Data (Admin UAT)
+
+### Severity
+High
+
+### Type
+Data / Inventory valuation / KPI accuracy
+
+### Current Behavior (before fix)
+- Stock tab showed inventory rows correctly from `v_stock_dashboard`.
+- Value analytics KPI cards showed **"Not enough cost data"** for all amount fields.
+- `getInventoryHealthRead()` read `public.inventory` only; that table has no unit-cost column.
+- `products.cost_price` was never joined on the economics path.
+
+### Expected Behavior
+Valuation priority (Year-1 HQ):
+
+1. Inventory unit cost (when present on row)
+2. `products.cost_price` fallback
+3. **"Not enough cost data"** only when both are null/≤0
+
+No estimated values.
+
+### Fix (2026-06-28)
+- `resolveInventoryUnitCost.js` — central resolver + `[inventoryValuation]` per-SKU logs.
+- `getInventoryHealthRead()` — batch-fetch `products.cost_price` and resolve before economics.
+- `inventoryValueAnalyticsEngine.js` — `[inventoryValuationReconciliation]` dashboard total cross-check.
+- Verification: `node scripts/verify-inventory-dashboard-kpi.mjs` (QA Supabase live data).
+
+### Verification evidence (QA tenant `f168b98f-47a6-42c3-b788-24c00436fac2`)
+- `QA_SKU_003`: 110 × ₹200 = **₹22,000** (`source: product`)
+- HQ total reconciles: **₹31,956** = Σ(`current_stock × resolvedUnitCost`) across 4 SKUs
+- Fallback cases A/B/C pass; no duplicate SKU valuation
+
+### Status
+**Fixed**
