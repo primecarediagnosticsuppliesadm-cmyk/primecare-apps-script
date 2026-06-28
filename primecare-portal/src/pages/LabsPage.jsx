@@ -65,11 +65,14 @@ const EMPTY_LAB_FORM = {
   paymentTerms: "Net 30",
 };
 
+const HQ_ORG_LABEL = "PrimeCare HQ";
+
 function AddLabModal({
   distributors,
   defaultTenantId,
   defaultTenantName = "",
   lockDistributor = false,
+  hqMode = false,
   homeTenantId = "",
   distributorContextTenantId = "",
   isExecutive = false,
@@ -88,11 +91,12 @@ function AddLabModal({
       setForm((prev) => ({ ...prev, tenantId: defaultTenantId }));
     }
   }, [defaultTenantId]);
-  const showDistributorPicker = !lockDistributor && isExecutive && distributors.length > 1;
-  const lockedDistributorName =
-    defaultTenantName ||
-    distributors.find((d) => d.id === form.tenantId)?.name ||
-    "Selected distributor";
+  const showDistributorPicker = !hqMode && !lockDistributor && isExecutive && distributors.length > 1;
+  const lockedOrgName = hqMode
+    ? HQ_ORG_LABEL
+    : defaultTenantName ||
+      distributors.find((d) => d.id === form.tenantId)?.name ||
+      HQ_ORG_LABEL;
 
   function patch(fields) {
     setForm((prev) => ({ ...prev, ...fields }));
@@ -105,11 +109,17 @@ function AddLabModal({
     try {
       const res = await createLabWrite({
         ...form,
+        tenantId: hqMode ? homeTenantId || form.tenantId : form.tenantId,
         homeTenantId,
-        distributorContextTenantId:
-          distributorContextTenantId || (lockDistributor ? form.tenantId : ""),
-        selectedDistributorTenantId: distributorContextTenantId || form.tenantId,
+        hqMode,
+        distributorContextTenantId: hqMode
+          ? ""
+          : distributorContextTenantId || (lockDistributor ? form.tenantId : ""),
+        selectedDistributorTenantId: hqMode
+          ? ""
+          : distributorContextTenantId || form.tenantId,
         forbidHomeTenant:
+          !hqMode &&
           lockDistributor &&
           Boolean(distributorContextTenantId || form.tenantId) &&
           str(distributorContextTenantId || form.tenantId) !== str(homeTenantId),
@@ -139,10 +149,12 @@ function AddLabModal({
           </Button>
         </div>
         <div className="space-y-2 text-sm">
-          {lockDistributor ? (
+          {lockDistributor || hqMode ? (
             <div className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs">
-              <p className="font-semibold text-indigo-900">Creating lab under:</p>
-              <p className="text-indigo-800">{lockedDistributorName}</p>
+              <p className="font-semibold text-indigo-900">
+                {hqMode ? "Creating lab under:" : "Creating lab under:"}
+              </p>
+              <p className="text-indigo-800">{lockedOrgName}</p>
             </div>
           ) : null}
           <Input
@@ -151,13 +163,13 @@ function AddLabModal({
             onChange={(e) => patch({ labName: e.target.value })}
             required
           />
-          {lockDistributor ? (
+          {lockDistributor || hqMode ? (
             <label className="block text-xs text-slate-600">
-              Distributor
+              {hqMode ? "Organization" : "Distributor"}
               <input
                 type="text"
                 className="mt-1 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
-                value={lockedDistributorName}
+                value={lockedOrgName}
                 readOnly
                 aria-readonly="true"
               />
@@ -719,6 +731,12 @@ export default function LabsPage({
     ? selectedDistributorTenantId
     : str(homeTenantId || currentUser?.tenantId);
 
+  const hqLabMode = !isDistributorOs && canAddLab;
+
+  const defaultOrgName = isDistributorOs
+    ? selectedDistributorName || "Selected distributor"
+    : HQ_ORG_LABEL;
+
   return (
     <div
       className={cn(
@@ -772,8 +790,9 @@ export default function LabsPage({
         <AddLabModal
           distributors={distributors}
           defaultTenantId={defaultTenantId}
-          defaultTenantName={selectedDistributorName}
+          defaultTenantName={defaultOrgName}
           lockDistributor={lockDistributor && Boolean(defaultTenantId)}
+          hqMode={hqLabMode}
           homeTenantId={homeTenantId}
           distributorContextTenantId={selectedDistributorTenantId}
           isExecutive={isExecutive}

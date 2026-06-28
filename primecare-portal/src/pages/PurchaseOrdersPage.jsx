@@ -11,7 +11,10 @@ import {
   getPurchaseOrdersRead,
   getReorderForecastRead,
   receivePurchaseOrderWrite,
+  cancelPurchaseOrderWrite,
+  updatePurchaseOrderWrite,
 } from "@/api/primecareSupabaseApi";
+import { loadMasterCatalog } from "@/catalog/masterCatalogData.js";
 import { supabase } from "@/api/supabaseClient.js";
 import {
   logAppsScriptFallbackUsed,
@@ -136,10 +139,86 @@ function candidateFromProcurementItem(item) {
   };
 }
 
-const OPEN_PO_STATUSES = new Set(["draft", "ordered", "partially received"]);
+const RECEIVABLE_PO_STATUSES = new Set(["ordered", "partially received"]);
 
-function isOpenPurchaseOrderStatus(status) {
-  return OPEN_PO_STATUSES.has(String(status || "").toLowerCase());
+function isReceivablePurchaseOrderStatus(status) {
+  return RECEIVABLE_PO_STATUSES.has(String(status || "").toLowerCase());
+}
+
+function poReceivedQty(po) {
+  return numberValue(po.receivedQty ?? po.received_qty);
+}
+
+function poRemainingQty(po) {
+  return Math.max(0, numberValue(po.quantity) - poReceivedQty(po));
+}
+
+function canReceivePurchaseOrder(po) {
+  return isReceivablePurchaseOrderStatus(po.status) && poRemainingQty(po) > 0;
+}
+
+function canEditOrCancelPurchaseOrder(po) {
+  const status = String(po.status || "").toLowerCase();
+  return poReceivedQty(po) === 0 && (status === "draft" || status === "ordered");
+}
+
+function catalogProductCost(product) {
+  const raw = product?.costPrice ?? product?.cost_price ?? product?.unitCost ?? "";
+  if (raw === "" || raw == null) return "";
+  const value = numberValue(raw);
+  return value > 0 ? String(value) : "";
+}
+
+function ProductCatalogPicker({ products, value, onSelect, disabled = false, placeholder = "Search product by name or SKU…" }) {
+  const [query, setQuery] = useState("");
+  const selected = products.find((p) => p.productId === value) || null;
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return products.slice(0, 50);
+    return products
+      .filter(
+        (p) =>
+          String(p.productId || "").toLowerCase().includes(q) ||
+          String(p.productName || "").toLowerCase().includes(q)
+      )
+      .slice(0, 50);
+  }, [products, query]);
+
+  return (
+    <div className="space-y-2">
+      <input
+        type="search"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring"
+        disabled={disabled}
+      />
+      <select
+        value={value || ""}
+        onChange={(e) => {
+          const product = products.find((p) => p.productId === e.target.value);
+          if (product) onSelect(product);
+        }}
+        className="w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring"
+        required
+        disabled={disabled}
+      >
+        <option value="">Select a product from catalog…</option>
+        {filtered.map((p) => (
+          <option key={p.productId} value={p.productId}>
+            {p.productName} ({p.productId})
+          </option>
+        ))}
+      </select>
+      {selected ? (
+        <p className="text-xs text-slate-500">
+          Selected: {selected.productName} · SKU {selected.productId}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 /** Map Supabase reorder forecast row → PurchaseOrdersPage "Reorder Candidates" card shape. */
@@ -322,6 +401,29 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   const [poStatusFilter, setPoStatusFilter] = useState("");
   const [activeTab, setActiveTab] = useState("triggers");
   const [bulkCreating, setBulkCreating] = useState(false);
+  const [catalogProducts, setCatalogProducts] = useState([]);
+  const [editingPo, setEditingPo] = useState(null);
+  const [editForm, setEditForm] = useState(emptyCreateForm);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [cancellingPoId, setCancellingPoId] = useState("");
+
+  const tenantId = currentUser?.tenantId || currentUser?.tenant_id || null;
+
+  const loadCatalogProducts = async () => {
+    if (!supabase || !tenantId) {
+      setCatalogProducts([]);
+      return;
+    }
+    try {
+      const data = await loadMasterCatalog({ tenantId });
+      setCatalogProducts(
+        (data.products || []).filter((p) => p.active !== false && String(p.productId || "").trim())
+      );
+    } catch (err) {
+      console.warn("[PurchaseOrders] catalog load", err);
+      setCatalogProducts([]);
+    }
+  };
 
   const loadPurchaseDashboard = async () => {
     setSupplierDashboard([]);
@@ -412,7 +514,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   const refreshAll = async () => {
     try {
       setErrorMessage("");
-      await loadPurchaseDashboard();
+      await Promise.all([loadPurchaseDashboard(), loadCatalogProducts()]);
     } catch (err) {
       console.error(err);
       setErrorMessage(err?.message || "Failed to load purchase dashboard.");
@@ -424,7 +526,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       try {
         setLoading(true);
         setErrorMessage("");
-        await loadPurchaseDashboard();
+        await Promise.all([loadPurchaseDashboard(), loadCatalogProducts()]);
       } catch (err) {
         console.error(err);
         setErrorMessage(err?.message || "Failed to load purchase operations data.");
@@ -456,9 +558,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   const poStats = useMemo(() => {
     return {
       total: purchaseOrders.length,
-      open: purchaseOrders.filter((po) =>
-        ["draft", "ordered", "partially received"].includes(String(po.status || "").toLowerCase())
-      ).length,
+      open: purchaseOrders.filter((po) => canReceivePurchaseOrder(po)).length,
       received: purchaseOrders.filter(
         (po) => String(po.status || "").toLowerCase() === "received"
       ).length,
@@ -476,19 +576,54 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   );
 
   const openPurchaseOrders = useMemo(
-    () =>
-      purchaseOrders.filter((po) => {
-        if (!isOpenPurchaseOrderStatus(po.status)) return false;
-        const quantity = numberValue(po.quantity);
-        const receivedQty = numberValue(po.receivedQty ?? po.received_qty);
-        return Math.max(0, quantity - receivedQty) > 0;
-      }),
+    () => purchaseOrders.filter((po) => canReceivePurchaseOrder(po)),
     [purchaseOrders]
   );
 
+  const resolveCatalogProduct = (productId) =>
+    catalogProducts.find((p) => p.productId === productId) || null;
+
+  const applyCatalogProductToCreateForm = (product) => {
+    if (!product?.productId) return;
+    setCreateForm((prev) => ({
+      ...prev,
+      productId: product.productId,
+      productName: product.productName || product.productId,
+      unitCost: catalogProductCost(product) || prev.unitCost,
+    }));
+    setSelectedCandidate({
+      productId: product.productId,
+      productName: product.productName,
+    });
+  };
+
+  const validateCreateForm = () => {
+    const product = resolveCatalogProduct(createForm.productId);
+    if (!product) {
+      throw new Error("Select a valid product from catalog.");
+    }
+    const qty = Number(createForm.quantity || 0);
+    const unitCost = Number(createForm.unitCost || 0);
+    if (qty <= 0) throw new Error("Quantity must be greater than zero.");
+    if (unitCost <= 0) throw new Error("Unit cost must be greater than zero.");
+    return {
+      productId: product.productId,
+      productName: product.productName || product.productId,
+      quantity: qty,
+      unitCost,
+      supplier: createForm.supplier,
+      status: createForm.status || "Draft",
+    };
+  };
+
   const handleCandidateSelect = (item) => {
-    setSelectedCandidate(candidateFromProcurementItem(item));
-    setCreateForm(buildCreateFormFromItem(item));
+    const product = catalogProducts.find((p) => p.productId === item?.productId);
+    if (product) {
+      applyCatalogProductToCreateForm(product);
+    } else {
+      setCreateForm(buildCreateFormFromItem(item));
+      setSelectedCandidate(candidateFromProcurementItem(item));
+    }
     setStatusMessage(`Create PO form prefilled for ${item?.productName || item?.productId || "candidate"}.`);
     setErrorMessage("");
   };
@@ -516,6 +651,12 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
     console.log("APPLY RECEIVE PO SELECTION", po);
     setStatusMessage("");
     setErrorMessage("");
+
+    if (!canReceivePurchaseOrder(po)) {
+      throw new Error(
+        `Purchase order ${po?.poId || ""} cannot be received. Only Ordered or Partially Received POs with remaining quantity can be received.`
+      );
+    }
 
     const poId = String(po?.poId ?? po?.po_id ?? "").trim();
     const productId = String(po?.productId ?? po?.product_id ?? "").trim();
@@ -654,13 +795,8 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       setErrorMessage("");
 
       const payload = {
-        productId: createForm.productId,
-        productName: createForm.productName,
-        quantity: Number(createForm.quantity || 0),
-        unitCost: Number(createForm.unitCost || 0),
-        supplier: createForm.supplier,
-        status: createForm.status || "Draft",
-        tenantId: currentUser?.tenantId || currentUser?.tenant_id || null,
+        ...validateCreateForm(),
+        tenantId,
       };
 
       let res;
@@ -714,7 +850,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
         remainingQty: Number(receiveForm.remainingQty || 0),
         receivedQty: Number(receiveForm.receivedQty || 0),
         grnNotes: receiveForm.grnNotes,
-        tenantId: currentUser?.tenantId || currentUser?.tenant_id || null,
+        tenantId,
         receivedBy: currentUser?.email || currentUser?.name || currentUser?.id || null,
       };
       const orderedQty = Number(receiveForm.quantity || 0);
@@ -724,18 +860,21 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       if (!receiveForm.poId) {
         throw new Error("Select or enter a purchase order before receiving stock.");
       }
+      if (!selectedPurchaseOrder || !canReceivePurchaseOrder(selectedPurchaseOrder)) {
+        throw new Error(
+          "This purchase order cannot be received. Only Ordered or Partially Received POs with remaining quantity are eligible."
+        );
+      }
+      if (!resolveCatalogProduct(receiveForm.productId)) {
+        throw new Error("Select a valid product from catalog.");
+      }
       if (receivedQty <= 0) {
         throw new Error("Received quantity must be greater than zero.");
       }
       if (remainingQty > 0 && receivedQty > remainingQty) {
-        const confirmed =
-          typeof window !== "undefined" &&
-          window.confirm(
-            `Received quantity (${receivedQty}) exceeds remaining quantity (${remainingQty}) for ordered quantity ${orderedQty}. Continue with override?`
-          );
-        if (!confirmed) {
-          throw new Error("Receive cancelled. Received quantity cannot exceed remaining quantity without override confirmation.");
-        }
+        throw new Error(
+          `Received quantity (${receivedQty}) cannot exceed remaining quantity (${remainingQty}) for ordered quantity ${orderedQty}.`
+        );
       }
 
       let res;
@@ -769,6 +908,86 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       setErrorMessage(err?.message || "Failed to receive purchase order");
     } finally {
       setReceivingPo(false);
+    }
+  };
+
+  const handleStartEditPo = (po) => {
+    if (!canEditOrCancelPurchaseOrder(po)) return;
+    setEditingPo(po);
+    setEditForm({
+      productId: po.productId || "",
+      productName: po.productName || "",
+      quantity: String(po.quantity || ""),
+      unitCost: String(po.unitCost || ""),
+      supplier: po.supplier || "",
+      status: po.status || "Draft",
+    });
+    setErrorMessage("");
+    setStatusMessage("");
+  };
+
+  const handleSaveEditPo = async (e) => {
+    e.preventDefault();
+    if (!editingPo?.poId) return;
+    try {
+      setSavingEdit(true);
+      setStatusMessage("");
+      setErrorMessage("");
+
+      const product = resolveCatalogProduct(editForm.productId);
+      if (!product) throw new Error("Select a valid product from catalog.");
+      const qty = Number(editForm.quantity || 0);
+      const unitCost = Number(editForm.unitCost || 0);
+      if (qty <= 0) throw new Error("Quantity must be greater than zero.");
+      if (unitCost <= 0) throw new Error("Unit cost must be greater than zero.");
+
+      const res = await updatePurchaseOrderWrite(editingPo.poId, {
+        productId: product.productId,
+        productName: product.productName || product.productId,
+        quantity: qty,
+        unitCost,
+        supplier: editForm.supplier,
+        status: editForm.status,
+        tenantId,
+      });
+      if (!res?.success) throw new Error(res?.error || "Failed to update purchase order");
+
+      setStatusMessage(`Purchase order updated: ${editingPo.poId}`);
+      setEditingPo(null);
+      setEditForm(emptyCreateForm);
+      await refreshAll();
+    } catch (err) {
+      console.error(err);
+      setErrorMessage(err?.message || "Failed to update purchase order");
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleCancelPo = async (po) => {
+    if (!canEditOrCancelPurchaseOrder(po)) return;
+    const confirmed =
+      typeof window === "undefined" ||
+      window.confirm(`Cancel purchase order ${po.poId}? This cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      setCancellingPoId(po.poId);
+      setStatusMessage("");
+      setErrorMessage("");
+      const res = await cancelPurchaseOrderWrite(po.poId, { tenantId });
+      if (!res?.success) throw new Error(res?.error || "Failed to cancel purchase order");
+      setStatusMessage(`Purchase order cancelled: ${po.poId}`);
+      if (editingPo?.poId === po.poId) {
+        setEditingPo(null);
+        setEditForm(emptyCreateForm);
+      }
+      await refreshAll();
+    } catch (err) {
+      console.error(err);
+      setErrorMessage(err?.message || "Failed to cancel purchase order");
+    } finally {
+      setCancellingPoId("");
     }
   };
 
@@ -1157,24 +1376,52 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
           ) : null}
 
           <form onSubmit={handleCreatePurchaseOrder} className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-sm font-medium">Product ID</label>
-              <input type="text" value={createForm.productId} onChange={(e) => handleCreateFormChange("productId", e.target.value)} className="w-full rounded-xl border px-3 py-3 text-sm outline-none focus:ring" required />
+            <div className="lg:col-span-2">
+              <label className="mb-1 block text-sm font-medium">Product</label>
+              {catalogProducts.length === 0 ? (
+                <p className="rounded-xl border border-dashed px-3 py-3 text-sm text-slate-500">
+                  No catalog products found. Create products in Master Catalog first.
+                </p>
+              ) : (
+                <ProductCatalogPicker
+                  products={catalogProducts}
+                  value={createForm.productId}
+                  onSelect={applyCatalogProductToCreateForm}
+                />
+              )}
             </div>
 
             <div>
               <label className="mb-1 block text-sm font-medium">Product Name</label>
-              <input type="text" value={createForm.productName} onChange={(e) => handleCreateFormChange("productName", e.target.value)} className="w-full rounded-xl border px-3 py-3 text-sm outline-none focus:ring" required />
+              <input
+                type="text"
+                value={createForm.productName}
+                readOnly
+                className="w-full rounded-xl border bg-slate-50 px-3 py-3 text-sm text-slate-700 outline-none"
+                placeholder="Auto-filled from catalog"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-medium">Product ID</label>
+              <input
+                type="text"
+                value={createForm.productId}
+                readOnly
+                className="w-full rounded-xl border bg-slate-50 px-3 py-3 text-sm text-slate-700 outline-none"
+                placeholder="Auto-filled from catalog"
+              />
             </div>
 
             <div>
               <label className="mb-1 block text-sm font-medium">Quantity</label>
-              <input type="number" min="1" value={createForm.quantity} onChange={(e) => handleCreateFormChange("quantity", e.target.value)} className="w-full rounded-xl border px-3 py-3 text-sm outline-none focus:ring" required />
+              <input type="number" min="1" step="1" value={createForm.quantity} onChange={(e) => handleCreateFormChange("quantity", e.target.value)} className="w-full rounded-xl border px-3 py-3 text-sm outline-none focus:ring" required />
             </div>
 
             <div>
               <label className="mb-1 block text-sm font-medium">Unit Cost</label>
-              <input type="number" min="0" step="0.01" value={createForm.unitCost} onChange={(e) => handleCreateFormChange("unitCost", e.target.value)} className="w-full rounded-xl border px-3 py-3 text-sm outline-none focus:ring" required />
+              <input type="number" min="0.01" step="0.01" value={createForm.unitCost} onChange={(e) => handleCreateFormChange("unitCost", e.target.value)} className="w-full rounded-xl border px-3 py-3 text-sm outline-none focus:ring" required />
+              <p className="mt-1 text-xs text-slate-500">Defaults from product cost; override per order if supplier price differs.</p>
             </div>
 
             <div>
@@ -1358,13 +1605,36 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handlePrefillReceiveForm(po)}
-                      className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
-                    >
-                      Prefill Receive Form
-                    </button>
+                    <div className="flex w-full flex-col gap-2 lg:w-auto lg:min-w-[12rem]">
+                      {canReceivePurchaseOrder(po) ? (
+                        <button
+                          type="button"
+                          onClick={() => handlePrefillReceiveForm(po)}
+                          className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
+                        >
+                          Prefill Receive Form
+                        </button>
+                      ) : null}
+                      {canEditOrCancelPurchaseOrder(po) ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditPo(po)}
+                            className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleCancelPo(po)}
+                            disabled={cancellingPoId === po.poId}
+                            className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
+                          >
+                            {cancellingPoId === po.poId ? "Cancelling…" : "Cancel PO"}
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
               ))
@@ -1419,6 +1689,110 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
           </div>
         </div>
       )}
+
+      {editingPo ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <form
+            onSubmit={handleSaveEditPo}
+            className="w-full max-w-lg rounded-2xl border bg-white p-4 shadow-lg"
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900">Edit purchase order · {editingPo.poId}</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingPo(null);
+                  setEditForm(emptyCreateForm);
+                }}
+                className="text-sm text-slate-500 hover:text-slate-800"
+              >
+                Close
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1 block text-sm font-medium">Product</label>
+                <ProductCatalogPicker
+                  products={catalogProducts}
+                  value={editForm.productId}
+                  onSelect={(product) => {
+                    setEditForm((prev) => ({
+                      ...prev,
+                      productId: product.productId,
+                      productName: product.productName || product.productId,
+                      unitCost: catalogProductCost(product) || prev.unitCost,
+                    }));
+                  }}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Quantity</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={editForm.quantity}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, quantity: e.target.value }))}
+                    className="w-full rounded-xl border px-3 py-2 text-sm"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Unit Cost</label>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={editForm.unitCost}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, unitCost: e.target.value }))}
+                    className="w-full rounded-xl border px-3 py-2 text-sm"
+                    required
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Supplier</label>
+                <input
+                  type="text"
+                  value={editForm.supplier}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, supplier: e.target.value }))}
+                  className="w-full rounded-xl border px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Status</label>
+                <select
+                  value={editForm.status}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, status: e.target.value }))}
+                  className="w-full rounded-xl border px-3 py-2 text-sm"
+                >
+                  <option value="Draft">Draft</option>
+                  <option value="Ordered">Ordered</option>
+                </select>
+              </div>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingPo(null);
+                  setEditForm(emptyCreateForm);
+                }}
+                className="rounded-xl border px-4 py-2 text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingEdit}
+                className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {savingEdit ? "Saving…" : "Save changes"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </div>
   );
 }

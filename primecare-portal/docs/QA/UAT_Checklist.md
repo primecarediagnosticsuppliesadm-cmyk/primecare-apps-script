@@ -14,7 +14,12 @@
 - [x] Master Catalog loads
 - [x] Create product
 - [x] Product appears in Inventory
-- [ ] Create lab
+- [ ] Create lab (HQ mode — no distributor picker; shows PrimeCare HQ)
+- [ ] Create PO — select product from catalog only (invalid SKU blocked)
+- [ ] Edit Draft/Ordered PO before receipt (qty, cost, supplier, status)
+- [ ] Cancel Draft/Ordered PO before receipt
+- [ ] Receive Stock — only Ordered / Partially Received POs
+- [ ] Receive Stock blocked for Draft / Received / Cancelled with clear message
 - [ ] Create / edit AR credit terms
 - [ ] Create order as admin
 - [ ] Fulfill order
