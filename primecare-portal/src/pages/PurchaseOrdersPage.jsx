@@ -17,7 +17,7 @@ import {
 } from "@/api/primecareSupabaseApi";
 import { IS_DEV, IS_QA } from "@/config/environment.js";
 import { supabase } from "@/api/supabaseClient.js";
-import { useTenantView } from "@/context/TenantViewContext.jsx";
+import { useOperatingTenantId } from "@/tenant/useOperatingTenantId.js";
 import {
   logAppsScriptFallbackUsed,
   logAppsScriptPrimarySource,
@@ -80,13 +80,6 @@ function statusBadgeClass(status) {
     return "bg-red-100 text-red-700 border-red-200";
   }
   return "bg-slate-100 text-slate-700 border-slate-200";
-}
-
-function resolvePurchaseOrderTenantId(currentUser, tenantView = {}) {
-  const fromUser = String(currentUser?.tenantId || currentUser?.tenant_id || "").trim();
-  const homeTenantId = String(tenantView?.homeTenantId || fromUser || "").trim();
-  const viewTenantId = String(tenantView?.viewTenantId || "").trim();
-  return viewTenantId || homeTenantId || fromUser || null;
 }
 
 function formatCatalogPickerLabel(product) {
@@ -485,11 +478,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   const [savingEdit, setSavingEdit] = useState(false);
   const [cancellingPoId, setCancellingPoId] = useState("");
 
-  const { homeTenantId: contextHomeTenantId, viewTenantId } = useTenantView();
-  const resolvedTenantId = resolvePurchaseOrderTenantId(currentUser, {
-    homeTenantId: contextHomeTenantId,
-    viewTenantId,
-  });
+  const operatingTenantId = useOperatingTenantId(currentUser);
 
   const loadCatalogProducts = useCallback(async () => {
     if (!supabase) {
@@ -497,7 +486,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       setCatalogProductsError("Supabase is not configured.");
       return;
     }
-    if (!resolvedTenantId) {
+    if (!operatingTenantId) {
       setCatalogProducts([]);
       setCatalogProductsError("Tenant not resolved");
       if (IS_QA) {
@@ -505,8 +494,9 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
           currentUser,
           currentUserTenantId: currentUser?.tenantId ?? null,
           currentUserTenant_id: currentUser?.tenant_id ?? null,
-          homeTenantId: contextHomeTenantId || null,
+          homeTenantId: operatingTenantId,
           resolvedTenantId: null,
+          operatingTenantId: null,
           table: "public.products",
           filters: null,
           returnedCount: 0,
@@ -521,24 +511,26 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
         currentUser,
         currentUserTenantId: currentUser?.tenantId ?? null,
         currentUserTenant_id: currentUser?.tenant_id ?? null,
-        homeTenantId: contextHomeTenantId || null,
-        resolvedTenantId,
+        homeTenantId: operatingTenantId,
+        resolvedTenantId: operatingTenantId,
+        operatingTenantId,
         table: "public.products",
-        filters: { tenant_id: resolvedTenantId, active: true },
+        filters: { tenant_id: operatingTenantId, active: true },
       });
     }
 
     try {
-      const res = await getTenantActiveProductsRead({ tenantId: resolvedTenantId });
+      const res = await getTenantActiveProductsRead({ tenantId: operatingTenantId });
       if (IS_QA) {
         console.info("[PurchaseOrders.catalogLoad] result", {
           currentUser,
           currentUserTenantId: currentUser?.tenantId ?? null,
           currentUserTenant_id: currentUser?.tenant_id ?? null,
-          homeTenantId: contextHomeTenantId || null,
-          resolvedTenantId,
+          homeTenantId: operatingTenantId,
+          resolvedTenantId: operatingTenantId,
+          operatingTenantId,
           table: "public.products",
-          filters: { tenant_id: resolvedTenantId, active: true },
+          filters: { tenant_id: operatingTenantId, active: true },
           returnedCount: res?.data?.products?.length ?? 0,
           returnedError: res?.error || null,
           queryMeta: res?.data?.queryMeta || null,
@@ -547,7 +539,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       if (IS_DEV || IS_QA) {
         console.info("PRODUCT PICKER SOURCE", {
           source: res?.data?.source || "products",
-          tenantId: resolvedTenantId,
+          tenantId: operatingTenantId,
           count: res?.data?.products?.length ?? 0,
           error: res?.error || null,
         });
@@ -570,16 +562,17 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
           currentUser,
           currentUserTenantId: currentUser?.tenantId ?? null,
           currentUserTenant_id: currentUser?.tenant_id ?? null,
-          homeTenantId: contextHomeTenantId || null,
-          resolvedTenantId,
+          homeTenantId: operatingTenantId,
+          resolvedTenantId: operatingTenantId,
+          operatingTenantId,
           table: "public.products",
-          filters: { tenant_id: resolvedTenantId, active: true },
+          filters: { tenant_id: operatingTenantId, active: true },
           returnedCount: 0,
           returnedError: err?.message || String(err),
         });
       }
     }
-  }, [contextHomeTenantId, currentUser, resolvedTenantId]);
+  }, [currentUser, operatingTenantId]);
 
   const loadPurchaseDashboard = async () => {
     setSupplierDashboard([]);
@@ -940,7 +933,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
               unitCost: numberValue(item.unitCost || procurementUnitCost(item)),
               supplier: item.supplier || procurementSupplier(item) || "",
               status: "Draft",
-              tenantId: currentUser?.tenantId || currentUser?.tenant_id || null,
+              tenantId: operatingTenantId,
             })
           )
         );
@@ -988,7 +981,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
       const payload = {
         ...validateCreateForm(),
-        tenantId: resolvedTenantId,
+        tenantId: operatingTenantId,
       };
 
       let res;
@@ -1042,7 +1035,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
         remainingQty: Number(receiveForm.remainingQty || 0),
         receivedQty: Number(receiveForm.receivedQty || 0),
         grnNotes: receiveForm.grnNotes,
-        tenantId: resolvedTenantId,
+        tenantId: operatingTenantId,
         receivedBy: currentUser?.email || currentUser?.name || currentUser?.id || null,
       };
       const orderedQty = Number(receiveForm.quantity || 0);
@@ -1140,7 +1133,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
         unitCost,
         supplier: editForm.supplier,
         status: editForm.status,
-        tenantId: resolvedTenantId,
+        tenantId: operatingTenantId,
       });
       if (!res?.success) throw new Error(res?.error || "Failed to update purchase order");
 
@@ -1167,7 +1160,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       setCancellingPoId(po.poId);
       setStatusMessage("");
       setErrorMessage("");
-      const res = await cancelPurchaseOrderWrite(po.poId, { tenantId: resolvedTenantId });
+      const res = await cancelPurchaseOrderWrite(po.poId, { tenantId: operatingTenantId });
       if (!res?.success) throw new Error(res?.error || "Failed to cancel purchase order");
       setStatusMessage(`Purchase order cancelled: ${po.poId}`);
       if (editingPo?.poId === po.poId) {
@@ -1201,7 +1194,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
         unitCost: numberValue(item.unitCost || procurementUnitCost(item)),
         supplier: item.supplier || procurementSupplier(item) || "",
         status: "Draft",
-        tenantId: currentUser?.tenantId || currentUser?.tenant_id || null,
+        tenantId: operatingTenantId,
       };
 
       let res;

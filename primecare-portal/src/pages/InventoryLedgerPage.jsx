@@ -69,7 +69,7 @@ function formatSource(row) {
   return parts.length ? parts.join(" · ") : "—";
 }
 
-export default function InventoryLedgerPage() {
+export default function InventoryLedgerPage({ operatingTenantId = null }) {
   const [movements, setMovements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -87,7 +87,9 @@ export default function InventoryLedgerPage() {
       try {
         setLoading(true);
         setError("");
-        const res = await getInventoryLedgerRead();
+        const res = await getInventoryLedgerRead({
+          tenantId: operatingTenantId || undefined,
+        });
         if (!res?.success) {
           throw new Error(res?.error || "Failed to load inventory ledger");
         }
@@ -101,7 +103,7 @@ export default function InventoryLedgerPage() {
     }
 
     loadLedger();
-  }, []);
+  }, [operatingTenantId]);
 
   const movementTypes = useMemo(() => {
     return Array.from(new Set(movements.map((m) => m.movementType).filter(Boolean))).sort();

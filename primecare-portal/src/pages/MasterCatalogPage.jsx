@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ChevronDown, ChevronUp, Package, Pencil, Plus, Search, X } from "lucide-react";
+import { useOperatingTenantId } from "@/tenant/useOperatingTenantId.js";
 
 const EMPTY_ADD_FORM = {
   productId: "",
@@ -24,10 +25,6 @@ const EMPTY_ADD_FORM = {
   minStock: "0",
   reorderQty: "0",
 };
-
-function resolveTenantId(currentUser) {
-  return String(currentUser?.tenantId || currentUser?.tenant_id || "").trim() || null;
-}
 
 function resolveCreatedBy(currentUser) {
   return (
@@ -307,7 +304,7 @@ export default function MasterCatalogPage({ currentUser = null }) {
   const [sortField, setSortField] = useState("productId");
   const [sortDir, setSortDir] = useState("asc");
 
-  const tenantId = resolveTenantId(currentUser);
+  const tenantId = useOperatingTenantId(currentUser);
 
   const load = useCallback(async () => {
     try {

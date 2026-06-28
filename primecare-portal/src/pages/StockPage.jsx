@@ -13,6 +13,7 @@ import {
   loadInventoryEconomicsBundle,
 } from "@/inventory/inventoryEconomicsData.js";
 import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
+import { useOperatingTenantId } from "@/tenant/useOperatingTenantId.js";
 
 function hydrateStockFromCache() {
   const ui = readPageUiCache("inventory:stock");
@@ -120,7 +121,8 @@ export default function StockPage({ currentUser = null }) {
   const [economicsBundle, setEconomicsBundle] = useState(null);
   const [economicsLoading, setEconomicsLoading] = useState(false);
 
-  const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
+  const operatingTenantId = useOperatingTenantId(currentUser);
+  const homeTenantId = operatingTenantId;
 
   useEffect(() => {
     if (activeTab !== "stock") return;
@@ -153,7 +155,7 @@ export default function StockPage({ currentUser = null }) {
       else setListRefreshing(true);
       setError("");
       const [res, tenantsRes] = await Promise.all([
-        getStockDashboard({ force: silent }),
+        getStockDashboard({ force: silent, tenantId: operatingTenantId }),
         fetchDatabaseTenants(),
       ]);
 
@@ -180,7 +182,7 @@ export default function StockPage({ currentUser = null }) {
       setLoading(false);
       setListRefreshing(false);
     }
-  }, [data.inventory?.length]);
+  }, [data.inventory?.length, operatingTenantId]);
 
   useEffect(() => {
     void loadStock({ silent: hadCacheOnMount.current });
@@ -307,7 +309,7 @@ export default function StockPage({ currentUser = null }) {
       {activeTab === "health" ? (
         <InventoryHealthPage />
       ) : activeTab === "ledger" ? (
-        <InventoryLedgerPage />
+        <InventoryLedgerPage operatingTenantId={operatingTenantId} />
       ) : loading && !hasInventoryRows ? (
         <PageSkeleton kpiCount={4} kpiColumns={4} listRows={8} className="p-4" />
       ) : error && !hasInventoryRows ? (

@@ -41,6 +41,10 @@ import {
 } from "@/metrics/computeInventoryMetrics.js";
 import { IS_DEV, IS_QA } from "@/config/environment";
 import {
+  coalesceOperatingTenantId,
+  validateInventoryLedgerTenantScope,
+} from "@/tenant/resolveOperatingTenantId.js";
+import {
   clampLimit,
   HQ_AGENT_VISIT_COLUMNS,
   HQ_AR_COLUMNS,
@@ -1026,7 +1030,13 @@ export async function getStockDashboard(options = {}) {
   }
 
   const inventory = sortInventoryLikeLegacy(
-    (rawRows || []).map(mapStockDashboardRow).filter((item) => item.productId)
+    (rawRows || [])
+      .map(mapStockDashboardRow)
+      .filter((item) => item.productId)
+      .filter((item) => {
+        const scopedTenantId = str(options.tenantId ?? options.tenant_id);
+        return !scopedTenantId || str(item.tenantId) === scopedTenantId;
+      })
   );
 
   const stats = rollupStockDashboardMappedItems(inventory);
@@ -4198,12 +4208,21 @@ export async function createAgentVisitWrite(payload = {}) {
  * @param {object[]} ledgerRows
  * @returns {{ success: boolean, data?: object[], error?: string|null }}
  */
-export async function createInventoryLedgerWrite(ledgerRows) {
+export async function createInventoryLedgerWrite(ledgerRows, options = {}) {
   if (!supabase) {
     return { success: false, error: "Supabase is not configured", data: null };
   }
   if (!Array.isArray(ledgerRows) || !ledgerRows.length) {
     return { success: true, data: [], error: null };
+  }
+
+  const expectedTenantId =
+    str(options.tenantId ?? options.tenant_id) ||
+    str(ledgerRows[0]?.tenant_id ?? ledgerRows[0]?.tenantId);
+  const scopeError = validateInventoryLedgerTenantScope(ledgerRows, expectedTenantId);
+  if (scopeError) {
+    hqDebugWarn("[createInventoryLedgerWrite]", scopeError);
+    return { success: false, error: scopeError, data: null };
   }
 
   try {
@@ -4273,7 +4292,12 @@ export async function getInventoryLedgerRead(options = {}) {
       };
     }
 
-    const movements = (data || []).map(mapInventoryLedgerRow);
+    const movements = (data || [])
+      .map(mapInventoryLedgerRow)
+      .filter((row) => {
+        const scopedTenantId = str(options.tenantId ?? options.tenant_id);
+        return !scopedTenantId || str(row.tenantId) === scopedTenantId;
+      });
     hqDebugLog("SUPABASE INVENTORY LEDGER", { count: movements.length });
 
     return { success: true, data: { movements }, error: null };
@@ -4675,6 +4699,14 @@ async function resolveInventoryRowForWrite(tenant_id, product_id) {
     };
   }
 
+  const rowTenant = str(rows[0].tenant_id ?? rows[0].tenantId);
+  if (rowTenant && rowTenant !== tenantId) {
+    return {
+      success: false,
+      error: `Inventory row tenant mismatch: expected ${tenantId}, found ${rowTenant} for product_id=${productId}`,
+    };
+  }
+
   return { success: true, row: rows[0], tenantId, productId, error: null };
 }
 
@@ -4760,6 +4792,15 @@ export async function cancelPurchaseOrderWrite(poId, payload = {}) {
     if (!bundle.success) return { success: false, error: bundle.error, data: null };
 
     const { poRow, itemRow } = bundle;
+    const tenantResolved = coalesceOperatingTenantId(
+      payload,
+      str(itemRow.tenant_id ?? poRow.tenant_id),
+      "purchase order cancel"
+    );
+    if (tenantResolved.error) {
+      return { success: false, error: tenantResolved.error, data: null };
+    }
+
     const receivedQty = num(itemRow.received_qty ?? poRow.received_qty);
     const status = normalizePurchaseOrderStatus(poRow.status);
 
@@ -4851,7 +4892,16 @@ export async function updatePurchaseOrderWrite(poId, payload = {}) {
       };
     }
 
-    const tenant_id = str(itemRow.tenant_id ?? poRow.tenant_id ?? payload.tenantId ?? payload.tenant_id);
+    const tenantResolved = coalesceOperatingTenantId(
+      payload,
+      str(itemRow.tenant_id ?? poRow.tenant_id),
+      "purchase order update"
+    );
+    if (tenantResolved.error) {
+      return { success: false, error: tenantResolved.error, data: null };
+    }
+
+    const tenant_id = tenantResolved.tenantId;
     const nextProductId = str(payload.productId ?? payload.product_id ?? itemRow.product_id ?? poRow.product_id);
     const nextProductName = str(
       payload.productName ?? payload.product_name ?? itemRow.product_name ?? poRow.product_name ?? nextProductId
@@ -4971,14 +5021,15 @@ export async function receivePurchaseOrderWrite(poId, payload = {}) {
     const productName = str(itemRow.product_name ?? poRow.product_name ?? productId);
     if (!productId) return { success: false, error: "Purchase order item product_id is missing", data: null };
 
-    const tenantId = str(itemRow.tenant_id ?? poRow.tenant_id);
-    if (!tenantId) {
-      return {
-        success: false,
-        error: "Purchase order tenant_id is required for inventory receipt",
-        data: null,
-      };
+    const tenantResolved = coalesceOperatingTenantId(
+      payload,
+      str(itemRow.tenant_id ?? poRow.tenant_id),
+      "purchase order receipt"
+    );
+    if (tenantResolved.error) {
+      return { success: false, error: tenantResolved.error, data: null };
     }
+    const tenantId = tenantResolved.tenantId;
 
     const orderedQty = num(itemRow.quantity ?? poRow.quantity);
     const previousReceived = num(itemRow.received_qty ?? poRow.received_qty);
@@ -4996,7 +5047,14 @@ export async function receivePurchaseOrderWrite(poId, payload = {}) {
       return { success: false, error: inventoryResolved.error || "Inventory row resolution failed", data: null };
     }
     const inventoryRow = inventoryResolved.row;
-    const inventoryTenantId = str(inventoryRow.tenant_id ?? inventoryResolved.tenantId);
+    const inventoryTenantId = str(inventoryRow.tenant_id ?? inventoryResolved.tenantId ?? tenantId);
+    if (inventoryTenantId !== tenantId) {
+      return {
+        success: false,
+        error: `Inventory tenant mismatch: inventory row tenant ${inventoryTenantId} does not match operating tenant ${tenantId}.`,
+        data: null,
+      };
+    }
 
     const stockBefore = num(inventoryRow.current_stock ?? inventoryRow.currentStock);
     const stockAfter = stockBefore + receivedQty;
@@ -5028,7 +5086,7 @@ export async function receivePurchaseOrderWrite(poId, payload = {}) {
       created_by: str(payload.receivedBy ?? payload.createdBy ?? payload.created_by) || null,
       created_at: new Date().toISOString(),
     };
-    const ledger = await createInventoryLedgerWrite([ledgerRow]);
+    const ledger = await createInventoryLedgerWrite([ledgerRow], { tenantId: inventoryTenantId });
     if (!ledger.success) return { success: false, error: ledger.error || "Purchase ledger insert failed", data: null };
     hqDebugLog("INVENTORY PURCHASE_IN LEDGER SAVED", ledger.data);
 
@@ -5310,7 +5368,7 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
     };
   }
 
-  const led = await createInventoryLedgerWrite(ledgerBatch);
+  const led = await createInventoryLedgerWrite(ledgerBatch, { tenantId: scopedTenantId });
   if (!led.success) {
     hqDebugWarn(
       "[createOrderWrite] INVENTORY LEDGER insert failed — stock may already be updated; order is NOT rolled back:",
