@@ -39,7 +39,7 @@ import {
   rollupInventoryTableRows,
   rollupStockDashboardMappedItems,
 } from "@/metrics/computeInventoryMetrics.js";
-import { IS_QA } from "@/config/environment";
+import { IS_DEV, IS_QA } from "@/config/environment";
 import {
   clampLimit,
   HQ_AGENT_VISIT_COLUMNS,
@@ -780,21 +780,55 @@ export async function setHqProductActiveWrite(productId, active, payload = {}) {
   }
 }
 
+function optionalProductPrice(row = {}, ...keys) {
+  for (const key of keys) {
+    const raw = row[key];
+    if (raw == null || raw === "") continue;
+    const n = Number(raw);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
 /**
  * Map a public.products row to the picker / PO form shape.
  */
 export function mapTenantProductRow(row = {}) {
   const productId = str(row.product_id ?? row.productId);
-  return {
+  const costPrice = optionalProductPrice(
+    row,
+    "cost_price",
+    "costPrice",
+    "unit_cost",
+    "unitCost",
+    "price",
+    "defaultUnitCost"
+  );
+  const mapped = {
     productId,
     productName: str(row.product_name ?? row.productName) || productId,
-    costPrice: num(row.cost_price ?? row.costPrice),
-    sellingPrice: num(row.selling_price ?? row.sellingPrice),
+    costPrice,
+    cost_price: costPrice,
+    sellingPrice: optionalProductPrice(row, "selling_price", "sellingPrice"),
     category: str(row.category) || "Consumables",
     unit: str(row.unit) || null,
     preferredSupplier: str(row.preferred_supplier ?? row.preferredSupplier) || null,
     active: row.active !== false,
   };
+  if ((IS_QA || IS_DEV) && productId === "QA_SKU_003") {
+    console.info("[mapTenantProductRow] QA_SKU_003", {
+      rawCostFields: {
+        cost_price: row.cost_price,
+        costPrice: row.costPrice,
+        unit_cost: row.unit_cost,
+        unitCost: row.unitCost,
+        price: row.price,
+        defaultUnitCost: row.defaultUnitCost,
+      },
+      mapped,
+    });
+  }
+  return mapped;
 }
 
 /**
@@ -837,9 +871,27 @@ export async function getTenantActiveProductsRead(options = {}) {
       };
     }
 
-    const products = (data || [])
+    const rawRows = data || [];
+    if (IS_QA || IS_DEV) {
+      const qaRaw = rawRows.find((row) => str(row.product_id ?? row.productId) === "QA_SKU_003");
+      if (qaRaw) {
+        console.info("[getTenantActiveProductsRead] raw row QA_SKU_003", qaRaw);
+      }
+      rawRows.slice(0, 5).forEach((row, index) => {
+        console.info(`[getTenantActiveProductsRead] raw row[${index}]`, row);
+      });
+    }
+
+    const products = rawRows
       .map(mapTenantProductRow)
       .filter((p) => p.productId && p.active !== false);
+
+    if (IS_QA || IS_DEV) {
+      const qaMapped = products.find((p) => p.productId === "QA_SKU_003");
+      if (qaMapped) {
+        console.info("[getTenantActiveProductsRead] mapped QA_SKU_003", qaMapped);
+      }
+    }
 
     hqDebugLog("TENANT ACTIVE PRODUCTS", { tenantId, count: products.length });
 
@@ -1248,6 +1300,18 @@ function sortForecastRows(rows) {
 /**
  * Maps v_reorder_candidates (snake_case) to ReorderForecastPage item shape.
  */
+function resolveReorderSuggestedQty(row = {}) {
+  const explicit =
+    row.suggested_order_qty ??
+    row.suggestedOrderQty ??
+    row.suggested_reorder_qty ??
+    null;
+  if (explicit != null && explicit !== "" && num(explicit) > 0) {
+    return num(explicit);
+  }
+  return num(row.reorder_qty ?? row.reorderQty ?? row.Reorder_Qty);
+}
+
 export function mapReorderCandidateRow(row) {
   const daysLeft = num(
     row.days_left ?? row.daysLeft ?? row.Days_Left ?? row.days_until_stockout ?? row.days_to_stockout
@@ -1280,13 +1344,7 @@ export function mapReorderCandidateRow(row) {
     urgency: normalizeUrgencyLabel(urgencyRaw),
     minStock: num(row.min_stock ?? row.minStock ?? row.Min_Stock),
     reorderQty: num(row.reorder_qty ?? row.reorderQty ?? row.Reorder_Qty),
-    suggestedOrderQty: num(
-      row.suggested_order_qty ??
-        row.suggestedOrderQty ??
-        row.reorder_qty ??
-        row.Reorder_Qty ??
-        row.suggested_reorder_qty
-    ),
+    suggestedOrderQty: resolveReorderSuggestedQty(row),
     costPrice: num(row.cost_price ?? row.costPrice ?? row.unit_cost ?? row.unitCost),
     preferredSupplier: str(
       row.preferred_supplier ?? row.preferredSupplier ?? row.supplier ?? row.supplier_name

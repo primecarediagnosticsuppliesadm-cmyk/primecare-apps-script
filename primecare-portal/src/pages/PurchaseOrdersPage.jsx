@@ -20,7 +20,6 @@ import { supabase } from "@/api/supabaseClient.js";
 import {
   logAppsScriptFallbackUsed,
   logAppsScriptPrimarySource,
-  logPartialMigrationWarning,
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { invalidateAdminDashboardCaches } from "@/utils/dashboardInvalidate.js";
@@ -97,10 +96,32 @@ function procurementUnitCost(item) {
     item?.cost_price ??
     item?.unitCost ??
     item?.unit_cost ??
+    item?.price ??
+    item?.defaultUnitCost ??
     "";
   if (raw === "" || raw == null) return "";
   const value = numberValue(raw);
-  return value >= 0 ? String(value) : "";
+  return value > 0 ? String(value) : "";
+}
+
+function resolveSuggestedOrderQty(item) {
+  const fields = [
+    item?.suggestedQty,
+    item?.suggestedOrderQty,
+    item?.reorderQty,
+    item?.quantity,
+  ];
+  for (const value of fields) {
+    if (value === "" || value == null) continue;
+    const qty = numberValue(value);
+    if (qty > 0) return qty;
+  }
+  return 0;
+}
+
+function resolveSuggestedOrderQtyString(item) {
+  const qty = resolveSuggestedOrderQty(item);
+  return qty > 0 ? String(qty) : "";
 }
 
 function procurementSupplier(item) {
@@ -114,29 +135,42 @@ function procurementSupplier(item) {
 }
 
 function buildCreateFormFromItem(item) {
-  const qty =
-    item?.suggestedQty ??
-    item?.suggestedOrderQty ??
-    item?.reorderQty ??
-    item?.quantity ??
-    "";
   return {
     productId: item?.productId || "",
     productName: item?.productName || "",
-    quantity: qty !== "" && qty != null ? String(qty) : "",
+    quantity: resolveSuggestedOrderQtyString(item),
     unitCost: procurementUnitCost(item),
     supplier: procurementSupplier(item),
     status: "Draft",
   };
 }
 
+function buildCreateFormFromCatalogProduct(product, procurementItem = null) {
+  const catalogCost = procurementUnitCost(product);
+  const itemCost = procurementUnitCost(procurementItem);
+  const catalogSupplier = procurementSupplier(product);
+  const itemSupplier = procurementSupplier(procurementItem);
+  const qty = resolveSuggestedOrderQtyString(procurementItem);
+
+  return {
+    productId: product?.productId || procurementItem?.productId || "",
+    productName: product?.productName || procurementItem?.productName || "",
+    quantity: qty || resolveSuggestedOrderQtyString(product),
+    unitCost: catalogCost || itemCost,
+    supplier: catalogSupplier || itemSupplier,
+    status: "Draft",
+  };
+}
+
 function candidateFromProcurementItem(item) {
   if (!item?.productId && !item?.productName) return null;
+  const suggestedQty = resolveSuggestedOrderQty(item);
+  const reorderQty = numberValue(item.reorderQty);
   return {
     productId: item.productId,
     productName: item.productName,
-    suggestedQty: item.suggestedQty ?? item.suggestedOrderQty,
-    reorderQty: item.reorderQty ?? item.suggestedOrderQty,
+    suggestedQty,
+    reorderQty: reorderQty > 0 ? reorderQty : suggestedQty,
   };
 }
 
@@ -161,13 +195,6 @@ function canReceivePurchaseOrder(po) {
 function canEditOrCancelPurchaseOrder(po) {
   const status = String(po.status || "").toLowerCase();
   return poReceivedQty(po) === 0 && (status === "draft" || status === "ordered");
-}
-
-function catalogProductCost(product) {
-  const raw = product?.costPrice ?? product?.cost_price ?? product?.unitCost ?? "";
-  if (raw === "" || raw == null) return "";
-  const value = numberValue(raw);
-  return value > 0 ? String(value) : "";
 }
 
 function ProductCatalogPicker({ products, value, onSelect, disabled = false, placeholder = "Search product by name or SKU…" }) {
@@ -200,7 +227,12 @@ function ProductCatalogPicker({ products, value, onSelect, disabled = false, pla
         value={value || ""}
         onChange={(e) => {
           const product = products.find((p) => p.productId === e.target.value);
-          if (product) onSelect(product);
+          if (product) {
+            if (IS_DEV || IS_QA) {
+              console.info("[ProductCatalogPicker] selected product", product);
+            }
+            onSelect(product);
+          }
         }}
         className="w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring"
         required
@@ -224,8 +256,10 @@ function ProductCatalogPicker({ products, value, onSelect, disabled = false, pla
 
 /** Map Supabase reorder forecast row → PurchaseOrdersPage "Reorder Candidates" card shape. */
 function mapForecastToPurchaseReorderCandidate(f) {
-  const suggested = numberValue(f.suggestedOrderQty);
+  const suggested = resolveSuggestedOrderQty(f);
   const reorder = numberValue(f.reorderQty);
+  const resolvedSuggested = suggested > 0 ? suggested : reorder;
+  const resolvedReorder = reorder > 0 ? reorder : suggested;
   const unitCost = procurementUnitCost(f);
   return {
     productId: f.productId,
@@ -233,12 +267,40 @@ function mapForecastToPurchaseReorderCandidate(f) {
     stockHealth: f.stockHealth || f.urgency || "Reorder",
     currentStock: f.currentStock,
     minStock: numberValue(f.minStock),
-    reorderQty: reorder > 0 ? reorder : suggested,
-    suggestedQty: suggested > 0 ? suggested : reorder,
+    reorderQty: resolvedReorder,
+    suggestedQty: resolvedSuggested,
+    suggestedOrderQty: resolvedSuggested,
     costPrice: numberValue(f.costPrice ?? f.cost_price),
     preferredSupplier: procurementSupplier(f),
     unitCost,
     supplier: procurementSupplier(f),
+  };
+}
+
+/** Map Supabase reorder forecast row → Smart Reorder tab shape. */
+function mapForecastToSmartReorderItem(f) {
+  const candidate = mapForecastToPurchaseReorderCandidate(f);
+  const suggestedOrderQty = resolveSuggestedOrderQty(candidate);
+  const monthly = numberValue(f.monthlyDemand);
+  return {
+    ...candidate,
+    totalSoldLast30Days: monthly > 0 ? Math.round(monthly) : 0,
+    dailyConsumption: monthly > 0 ? Math.round((monthly / 30) * 100) / 100 : 0,
+    daysLeft: numberValue(f.daysLeft),
+    urgency: String(f.urgency || candidate.stockHealth || "Medium").toUpperCase(),
+    suggestedOrderQty,
+  };
+}
+
+function buildSmartReorderSummaryFromItems(items) {
+  const u = (s) => String(s || "").trim().toUpperCase();
+  return {
+    criticalCount: items.filter((t) => u(t.urgency) === "CRITICAL").length,
+    highUrgencyItems: items.filter(
+      (t) => u(t.urgency) === "HIGH" || u(t.urgency) === "WARNING"
+    ).length,
+    mediumUrgencyItems: items.filter((t) => u(t.urgency) === "MEDIUM").length,
+    totalSuggestedOrderQty: items.reduce((sum, t) => sum + resolveSuggestedOrderQty(t), 0),
   };
 }
 
@@ -466,6 +528,15 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       console.log("SUPABASE PURCHASE REORDER:", rows);
       setReorderCandidates(rows);
 
+      const smartItems = forecast
+        .map(mapForecastToSmartReorderItem)
+        .filter((item) => resolveSuggestedOrderQty(item) > 0);
+      setSmartReorder(smartItems);
+      setSmartReorderSummary(buildSmartReorderSummaryFromItems(smartItems));
+      if (IS_DEV || IS_QA) {
+        console.info("[PurchaseOrders.smartReorder] supabase forecast items", smartItems);
+      }
+
       const triggerRows = buildPlaceholderAutoTriggersFromForecast(forecast);
       console.log("SUPABASE AUTO PURCHASE TRIGGERS:", triggerRows);
       setAutoTriggers(triggerRows);
@@ -482,12 +553,6 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
         setPurchaseOrders([]);
         console.warn("[PurchaseOrders] getPurchaseOrdersRead:", poResult?.error);
       }
-      setSmartReorder([]);
-      setSmartReorderSummary(null);
-      logPartialMigrationWarning(
-        "PurchaseOrders.smartReorder",
-        "Smart reorder Apps Script read skipped while Supabase is configured; reorder forecast is the authoritative read path."
-      );
     } else {
       if (!ALLOW_LEGACY_APPS_SCRIPT) {
         throw new Error("Supabase purchase order reads are required for pilot access.");
@@ -520,11 +585,13 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
       if (smartResult.status === "fulfilled" && smartResult.value?.success) {
         const d = smartResult.value.data;
-        const items = Array.isArray(d?.items)
-          ? d.items
-          : Array.isArray(d?.smartReorder?.items)
-          ? d.smartReorder.items
-          : [];
+        const items = (
+          Array.isArray(d?.items)
+            ? d.items
+            : Array.isArray(d?.smartReorder?.items)
+            ? d.smartReorder.items
+            : []
+        ).filter((item) => resolveSuggestedOrderQty(item) > 0);
         setSmartReorder(items);
         setSmartReorderSummary(d?.summary || d?.smartReorder?.summary || null);
       } else {
@@ -606,18 +673,38 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   const resolveCatalogProduct = (productId) =>
     catalogProducts.find((p) => p.productId === productId) || null;
 
-  const applyCatalogProductToCreateForm = (product) => {
+  const applyCatalogProductToCreateForm = (product, procurementItem = null) => {
     if (!product?.productId) return;
-    setCreateForm((prev) => ({
-      ...prev,
-      productId: product.productId,
-      productName: product.productName || product.productId,
-      unitCost: catalogProductCost(product) || prev.unitCost,
-    }));
-    setSelectedCandidate({
-      productId: product.productId,
-      productName: product.productName,
+    if (IS_DEV || IS_QA) {
+      console.info("[PurchaseOrders] applyCatalogProductToCreateForm", {
+        product,
+        procurementItem,
+      });
+    }
+    const nextForm = buildCreateFormFromCatalogProduct(product, procurementItem);
+    setCreateForm((prev) => {
+      const merged = {
+        ...prev,
+        ...nextForm,
+        unitCost: nextForm.unitCost || prev.unitCost,
+        supplier: nextForm.supplier || prev.supplier,
+        quantity: nextForm.quantity || prev.quantity,
+      };
+      if (IS_DEV || IS_QA) {
+        console.info("[PurchaseOrders] create PO form after catalog selection", merged);
+      }
+      return merged;
     });
+    setSelectedCandidate(
+      procurementItem
+        ? candidateFromProcurementItem(procurementItem)
+        : {
+            productId: product.productId,
+            productName: product.productName,
+            suggestedQty: 0,
+            reorderQty: 0,
+          }
+    );
   };
 
   const validateCreateForm = () => {
@@ -641,11 +728,18 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
   const handleCandidateSelect = (item) => {
     const product = catalogProducts.find((p) => p.productId === item?.productId);
+    if (IS_DEV || IS_QA) {
+      console.info("[PurchaseOrders] handleCandidateSelect", { item, catalogProduct: product || null });
+    }
     if (product) {
-      applyCatalogProductToCreateForm(product);
+      applyCatalogProductToCreateForm(product, item);
     } else {
-      setCreateForm(buildCreateFormFromItem(item));
+      const nextForm = buildCreateFormFromItem(item);
+      setCreateForm(nextForm);
       setSelectedCandidate(candidateFromProcurementItem(item));
+      if (IS_DEV || IS_QA) {
+        console.info("[PurchaseOrders] create PO form after procurement selection", nextForm);
+      }
     }
     setStatusMessage(`Create PO form prefilled for ${item?.productName || item?.productId || "candidate"}.`);
     setErrorMessage("");
@@ -1366,12 +1460,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
                     <button
                       type="button"
                       onClick={() => {
-                        setSelectedCandidate(candidateFromProcurementItem(item));
-                        setCreateForm(buildCreateFormFromItem(item));
-                        setStatusMessage(
-                          `Create PO form prefilled for ${item.productName || item.productId || "smart reorder item"}.`
-                        );
-                        setErrorMessage("");
+                        handleCandidateSelect(item);
                         setActiveTab("create");
                       }}
                       className="rounded-xl border bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
@@ -1393,7 +1482,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
               <div className="font-medium">Selected Candidate</div>
               <div className="mt-1 text-slate-600">
                 {selectedCandidate.productName} ({selectedCandidate.productId}) — Suggested Qty:{" "}
-                {selectedCandidate.suggestedQty || selectedCandidate.reorderQty || 0}
+                {resolveSuggestedOrderQty(selectedCandidate)}
               </div>
             </div>
           ) : null}
@@ -1743,11 +1832,14 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
                   products={catalogProducts}
                   value={editForm.productId}
                   onSelect={(product) => {
+                    if (IS_DEV || IS_QA) {
+                      console.info("[PurchaseOrders] edit PO catalog selection", product);
+                    }
                     setEditForm((prev) => ({
                       ...prev,
                       productId: product.productId,
                       productName: product.productName || product.productId,
-                      unitCost: catalogProductCost(product) || prev.unitCost,
+                      unitCost: procurementUnitCost(product) || prev.unitCost,
                     }));
                   }}
                 />

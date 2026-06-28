@@ -96,15 +96,21 @@ seed_products AS (
     product_id,
     product_name,
     category,
+    selling_price,
+    cost_price,
     active
   )
-  SELECT tenant_id, 'QA_SKU_001', 'QA Test Kit A', 'Consumables', true FROM params
+  SELECT tenant_id, 'QA_SKU_001', 'QA Test Kit A', 'Consumables', 600, 100, true FROM params
   UNION ALL
-  SELECT tenant_id, 'QA_SKU_002', 'QA Test Kit B', 'Consumables', true FROM params
+  SELECT tenant_id, 'QA_SKU_002', 'QA Test Kit B', 'Consumables', 800, 150, true FROM params
   UNION ALL
-  SELECT tenant_id, 'QA_SKU_003', 'QA Test Kit C', 'Consumables', true FROM params
+  SELECT tenant_id, 'QA_SKU_003', 'QA Test Kit C', 'Consumables', 900, 200, true FROM params
   ON CONFLICT (tenant_id, product_id) DO UPDATE
-  SET product_name = EXCLUDED.product_name, active = EXCLUDED.active
+  SET
+    product_name = EXCLUDED.product_name,
+    selling_price = EXCLUDED.selling_price,
+    cost_price = EXCLUDED.cost_price,
+    active = EXCLUDED.active
   RETURNING product_id
 ),
 seed_orders AS (
@@ -350,6 +356,20 @@ SELECT
   (SELECT count(*) FROM seed_labs) AS labs_upserted,
   (SELECT count(*) FROM seed_orders) AS orders_upserted,
   (SELECT count(*) FROM seed_payments) AS payments_upserted;
+
+-- Backfill pricing when products were seeded before cost_price/selling_price columns were populated.
+UPDATE public.products p
+SET
+  selling_price = COALESCE(NULLIF(p.selling_price, 0), v.selling_price),
+  cost_price = COALESCE(NULLIF(p.cost_price, 0), v.cost_price)
+FROM (
+  VALUES
+    ('QA_SKU_001', 600::numeric, 100::numeric),
+    ('QA_SKU_002', 800::numeric, 150::numeric),
+    ('QA_SKU_003', 900::numeric, 200::numeric)
+) AS v(product_id, selling_price, cost_price)
+WHERE p.product_id = v.product_id
+  AND p.tenant_id = (SELECT id FROM public.tenants WHERE tenant_code = 'qa-tenant-001');
 
 -- ---------------------------------------------------------------------------
 -- RLS validation helpers
