@@ -854,20 +854,44 @@ export async function getTenantActiveProductsRead(options = {}) {
     };
   }
 
+  const queryMeta = {
+    table: "public.products",
+    filters: { tenant_id: tenantId, active: true },
+    select:
+      "tenant_id, product_id, product_name, cost_price, selling_price, category, unit, preferred_supplier, active",
+  };
+
+  if (IS_QA) {
+    console.info("[getTenantActiveProductsRead] query", {
+      table: queryMeta.table,
+      tenantId,
+      filters: queryMeta.filters,
+    });
+  }
+
   try {
     const { data, error } = await supabase
       .from("products")
-      .select(
-        "tenant_id, product_id, product_name, cost_price, selling_price, category, unit, preferred_supplier, active"
-      )
+      .select(queryMeta.select)
       .eq("tenant_id", tenantId)
+      .eq("active", true)
       .order("product_name");
+
+    if (IS_QA) {
+      console.info("[getTenantActiveProductsRead] result", {
+        table: queryMeta.table,
+        tenantId,
+        filters: queryMeta.filters,
+        returnedCount: Array.isArray(data) ? data.length : 0,
+        returnedError: error?.message || null,
+      });
+    }
 
     if (error) {
       return {
         success: false,
         error: error.message || "Failed to read products",
-        data: { products: [], source: "products", tenantId },
+        data: { products: [], source: "products", tenantId, queryMeta },
       };
     }
 
@@ -897,15 +921,24 @@ export async function getTenantActiveProductsRead(options = {}) {
 
     return {
       success: true,
-      data: { products, source: "products", tenantId },
+      data: { products, source: "products", tenantId, queryMeta },
       error: null,
     };
   } catch (err) {
     hqDebugWarn("[getTenantActiveProductsRead] failed:", err?.message || err);
+    if (IS_QA) {
+      console.info("[getTenantActiveProductsRead] exception", {
+        table: queryMeta.table,
+        tenantId,
+        filters: queryMeta.filters,
+        returnedCount: 0,
+        returnedError: err?.message || String(err),
+      });
+    }
     return {
       success: false,
       error: err?.message || String(err),
-      data: { products: [], source: "products", tenantId },
+      data: { products: [], source: "products", tenantId, queryMeta },
     };
   }
 }

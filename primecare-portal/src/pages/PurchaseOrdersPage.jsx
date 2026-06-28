@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   getPurchaseOrders,
   getSmartReorder,
@@ -17,6 +17,7 @@ import {
 } from "@/api/primecareSupabaseApi";
 import { IS_DEV, IS_QA } from "@/config/environment.js";
 import { supabase } from "@/api/supabaseClient.js";
+import { useTenantView } from "@/context/TenantViewContext.jsx";
 import {
   logAppsScriptFallbackUsed,
   logAppsScriptPrimarySource,
@@ -79,6 +80,19 @@ function statusBadgeClass(status) {
     return "bg-red-100 text-red-700 border-red-200";
   }
   return "bg-slate-100 text-slate-700 border-slate-200";
+}
+
+function resolvePurchaseOrderTenantId(currentUser, tenantView = {}) {
+  const fromUser = String(currentUser?.tenantId || currentUser?.tenant_id || "").trim();
+  const homeTenantId = String(tenantView?.homeTenantId || fromUser || "").trim();
+  const viewTenantId = String(tenantView?.viewTenantId || "").trim();
+  return viewTenantId || homeTenantId || fromUser || null;
+}
+
+function formatCatalogPickerLabel(product) {
+  const productId = String(product?.productId || "").trim();
+  const productName = String(product?.productName || productId).trim();
+  return productId ? `${productId} — ${productName}` : productName;
 }
 
 function formatTriggerBasis(triggerBasis) {
@@ -241,7 +255,7 @@ function ProductCatalogPicker({ products, value, onSelect, disabled = false, pla
         <option value="">Select a product from catalog…</option>
         {filtered.map((p) => (
           <option key={p.productId} value={p.productId}>
-            {p.productName} ({p.productId})
+            {formatCatalogPickerLabel(p)}
           </option>
         ))}
       </select>
@@ -471,25 +485,69 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   const [savingEdit, setSavingEdit] = useState(false);
   const [cancellingPoId, setCancellingPoId] = useState("");
 
-  const tenantId = currentUser?.tenantId || currentUser?.tenant_id || null;
+  const { homeTenantId: contextHomeTenantId, viewTenantId } = useTenantView();
+  const resolvedTenantId = resolvePurchaseOrderTenantId(currentUser, {
+    homeTenantId: contextHomeTenantId,
+    viewTenantId,
+  });
 
-  const loadCatalogProducts = async () => {
+  const loadCatalogProducts = useCallback(async () => {
     if (!supabase) {
       setCatalogProducts([]);
       setCatalogProductsError("Supabase is not configured.");
       return;
     }
-    if (!tenantId) {
+    if (!resolvedTenantId) {
       setCatalogProducts([]);
-      setCatalogProductsError("Tenant context missing — cannot load catalog products.");
+      setCatalogProductsError("Tenant not resolved");
+      if (IS_QA) {
+        console.info("[PurchaseOrders.catalogLoad] tenant unresolved", {
+          currentUser,
+          currentUserTenantId: currentUser?.tenantId ?? null,
+          currentUserTenant_id: currentUser?.tenant_id ?? null,
+          homeTenantId: contextHomeTenantId || null,
+          resolvedTenantId: null,
+          table: "public.products",
+          filters: null,
+          returnedCount: 0,
+          returnedError: "Tenant not resolved",
+        });
+      }
       return;
     }
+
+    if (IS_QA) {
+      console.info("[PurchaseOrders.catalogLoad] start", {
+        currentUser,
+        currentUserTenantId: currentUser?.tenantId ?? null,
+        currentUserTenant_id: currentUser?.tenant_id ?? null,
+        homeTenantId: contextHomeTenantId || null,
+        resolvedTenantId,
+        table: "public.products",
+        filters: { tenant_id: resolvedTenantId, active: true },
+      });
+    }
+
     try {
-      const res = await getTenantActiveProductsRead({ tenantId });
+      const res = await getTenantActiveProductsRead({ tenantId: resolvedTenantId });
+      if (IS_QA) {
+        console.info("[PurchaseOrders.catalogLoad] result", {
+          currentUser,
+          currentUserTenantId: currentUser?.tenantId ?? null,
+          currentUserTenant_id: currentUser?.tenant_id ?? null,
+          homeTenantId: contextHomeTenantId || null,
+          resolvedTenantId,
+          table: "public.products",
+          filters: { tenant_id: resolvedTenantId, active: true },
+          returnedCount: res?.data?.products?.length ?? 0,
+          returnedError: res?.error || null,
+          queryMeta: res?.data?.queryMeta || null,
+        });
+      }
       if (IS_DEV || IS_QA) {
         console.info("PRODUCT PICKER SOURCE", {
           source: res?.data?.source || "products",
-          tenantId,
+          tenantId: resolvedTenantId,
           count: res?.data?.products?.length ?? 0,
           error: res?.error || null,
         });
@@ -507,8 +565,21 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       console.warn("[PurchaseOrders] catalog load", err);
       setCatalogProducts([]);
       setCatalogProductsError(err?.message || "Failed to load catalog products.");
+      if (IS_QA) {
+        console.info("[PurchaseOrders.catalogLoad] exception", {
+          currentUser,
+          currentUserTenantId: currentUser?.tenantId ?? null,
+          currentUserTenant_id: currentUser?.tenant_id ?? null,
+          homeTenantId: contextHomeTenantId || null,
+          resolvedTenantId,
+          table: "public.products",
+          filters: { tenant_id: resolvedTenantId, active: true },
+          returnedCount: 0,
+          returnedError: err?.message || String(err),
+        });
+      }
     }
-  };
+  }, [contextHomeTenantId, currentUser, resolvedTenantId]);
 
   const loadPurchaseDashboard = async () => {
     setSupplierDashboard([]);
@@ -616,7 +687,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       try {
         setLoading(true);
         setErrorMessage("");
-        await Promise.all([loadPurchaseDashboard(), loadCatalogProducts()]);
+        await loadPurchaseDashboard();
       } catch (err) {
         console.error(err);
         setErrorMessage(err?.message || "Failed to load purchase operations data.");
@@ -627,6 +698,10 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
     initialLoad();
   }, []);
+
+  useEffect(() => {
+    void loadCatalogProducts();
+  }, [loadCatalogProducts]);
 
   const filteredPurchaseOrders = useMemo(() => {
     return purchaseOrders.filter((po) => {
@@ -913,7 +988,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
       const payload = {
         ...validateCreateForm(),
-        tenantId,
+        tenantId: resolvedTenantId,
       };
 
       let res;
@@ -967,7 +1042,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
         remainingQty: Number(receiveForm.remainingQty || 0),
         receivedQty: Number(receiveForm.receivedQty || 0),
         grnNotes: receiveForm.grnNotes,
-        tenantId,
+        tenantId: resolvedTenantId,
         receivedBy: currentUser?.email || currentUser?.name || currentUser?.id || null,
       };
       const orderedQty = Number(receiveForm.quantity || 0);
@@ -1065,7 +1140,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
         unitCost,
         supplier: editForm.supplier,
         status: editForm.status,
-        tenantId,
+        tenantId: resolvedTenantId,
       });
       if (!res?.success) throw new Error(res?.error || "Failed to update purchase order");
 
@@ -1092,7 +1167,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       setCancellingPoId(po.poId);
       setStatusMessage("");
       setErrorMessage("");
-      const res = await cancelPurchaseOrderWrite(po.poId, { tenantId });
+      const res = await cancelPurchaseOrderWrite(po.poId, { tenantId: resolvedTenantId });
       if (!res?.success) throw new Error(res?.error || "Failed to cancel purchase order");
       setStatusMessage(`Purchase order cancelled: ${po.poId}`);
       if (editingPo?.poId === po.poId) {
@@ -1496,7 +1571,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
                 </p>
               ) : catalogProducts.length === 0 ? (
                 <p className="rounded-xl border border-dashed px-3 py-3 text-sm text-slate-500">
-                  No active products found for this tenant. Create products in Master Catalog first.
+                  No catalog products found for this tenant.
                 </p>
               ) : (
                 <ProductCatalogPicker
