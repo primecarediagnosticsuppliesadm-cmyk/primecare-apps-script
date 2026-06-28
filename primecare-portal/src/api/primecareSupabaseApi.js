@@ -781,6 +781,84 @@ export async function setHqProductActiveWrite(productId, active, payload = {}) {
 }
 
 /**
+ * Map a public.products row to the picker / PO form shape.
+ */
+export function mapTenantProductRow(row = {}) {
+  const productId = str(row.product_id ?? row.productId);
+  return {
+    productId,
+    productName: str(row.product_name ?? row.productName) || productId,
+    costPrice: num(row.cost_price ?? row.costPrice),
+    sellingPrice: num(row.selling_price ?? row.sellingPrice),
+    category: str(row.category) || "Consumables",
+    unit: str(row.unit) || null,
+    preferredSupplier: str(row.preferred_supplier ?? row.preferredSupplier) || null,
+    active: row.active !== false,
+  };
+}
+
+/**
+ * Active tenant products from public.products (PO picker / procurement — no inventory row required).
+ * @param {{ tenantId?: string|null, tenant_id?: string|null }} [options]
+ */
+export async function getTenantActiveProductsRead(options = {}) {
+  traceSupabaseRead("PurchaseOrders.getTenantActiveProductsRead", { table: "products" });
+  if (!supabase) {
+    return {
+      success: false,
+      error: "Supabase is not configured",
+      data: { products: [], source: "products" },
+    };
+  }
+
+  const tenantId = str(options.tenantId ?? options.tenant_id);
+  if (!tenantId) {
+    return {
+      success: false,
+      error: "tenant_id is required",
+      data: { products: [], source: "products" },
+    };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("products")
+      .select(
+        "tenant_id, product_id, product_name, cost_price, selling_price, category, unit, preferred_supplier, active"
+      )
+      .eq("tenant_id", tenantId)
+      .order("product_name");
+
+    if (error) {
+      return {
+        success: false,
+        error: error.message || "Failed to read products",
+        data: { products: [], source: "products", tenantId },
+      };
+    }
+
+    const products = (data || [])
+      .map(mapTenantProductRow)
+      .filter((p) => p.productId && p.active !== false);
+
+    hqDebugLog("TENANT ACTIVE PRODUCTS", { tenantId, count: products.length });
+
+    return {
+      success: true,
+      data: { products, source: "products", tenantId },
+      error: null,
+    };
+  } catch (err) {
+    hqDebugWarn("[getTenantActiveProductsRead] failed:", err?.message || err);
+    return {
+      success: false,
+      error: err?.message || String(err),
+      data: { products: [], source: "products", tenantId },
+    };
+  }
+}
+
+/**
  * Merge products-table fields (unit, preferred_supplier) into catalog rows for HQ maintenance UI.
  */
 export async function enrichCatalogWithProductMetadata(products, tenantId) {

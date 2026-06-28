@@ -13,8 +13,9 @@ import {
   receivePurchaseOrderWrite,
   cancelPurchaseOrderWrite,
   updatePurchaseOrderWrite,
+  getTenantActiveProductsRead,
 } from "@/api/primecareSupabaseApi";
-import { loadMasterCatalog } from "@/catalog/masterCatalogData.js";
+import { IS_DEV, IS_QA } from "@/config/environment.js";
 import { supabase } from "@/api/supabaseClient.js";
 import {
   logAppsScriptFallbackUsed,
@@ -402,6 +403,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   const [activeTab, setActiveTab] = useState("triggers");
   const [bulkCreating, setBulkCreating] = useState(false);
   const [catalogProducts, setCatalogProducts] = useState([]);
+  const [catalogProductsError, setCatalogProductsError] = useState("");
   const [editingPo, setEditingPo] = useState(null);
   const [editForm, setEditForm] = useState(emptyCreateForm);
   const [savingEdit, setSavingEdit] = useState(false);
@@ -410,18 +412,39 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   const tenantId = currentUser?.tenantId || currentUser?.tenant_id || null;
 
   const loadCatalogProducts = async () => {
-    if (!supabase || !tenantId) {
+    if (!supabase) {
       setCatalogProducts([]);
+      setCatalogProductsError("Supabase is not configured.");
+      return;
+    }
+    if (!tenantId) {
+      setCatalogProducts([]);
+      setCatalogProductsError("Tenant context missing — cannot load catalog products.");
       return;
     }
     try {
-      const data = await loadMasterCatalog({ tenantId });
+      const res = await getTenantActiveProductsRead({ tenantId });
+      if (IS_DEV || IS_QA) {
+        console.info("PRODUCT PICKER SOURCE", {
+          source: res?.data?.source || "products",
+          tenantId,
+          count: res?.data?.products?.length ?? 0,
+          error: res?.error || null,
+        });
+      }
+      if (!res?.success) {
+        setCatalogProducts([]);
+        setCatalogProductsError(res?.error || "Failed to load products from catalog.");
+        return;
+      }
+      setCatalogProductsError("");
       setCatalogProducts(
-        (data.products || []).filter((p) => p.active !== false && String(p.productId || "").trim())
+        (res.data?.products || []).filter((p) => p.active !== false && String(p.productId || "").trim())
       );
     } catch (err) {
       console.warn("[PurchaseOrders] catalog load", err);
       setCatalogProducts([]);
+      setCatalogProductsError(err?.message || "Failed to load catalog products.");
     }
   };
 
@@ -1378,9 +1401,13 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
           <form onSubmit={handleCreatePurchaseOrder} className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <div className="lg:col-span-2">
               <label className="mb-1 block text-sm font-medium">Product</label>
-              {catalogProducts.length === 0 ? (
+              {catalogProductsError ? (
+                <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700">
+                  {catalogProductsError}
+                </p>
+              ) : catalogProducts.length === 0 ? (
                 <p className="rounded-xl border border-dashed px-3 py-3 text-sm text-slate-500">
-                  No catalog products found. Create products in Master Catalog first.
+                  No active products found for this tenant. Create products in Master Catalog first.
                 </p>
               ) : (
                 <ProductCatalogPicker
