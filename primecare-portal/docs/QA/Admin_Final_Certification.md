@@ -11,13 +11,15 @@
 
 This sweep reviewed all ten HQ Admin module areas against CRUD, reconciliation, tenant isolation, and existing automated verification scripts. **No open Critical defects** remain from the QA Gap Register (GAP-002–007 fixed). Core inventory, catalog, and procurement paths are **production-safe for Year-1 HQ** with documented Medium risks.
 
-**Verdict: NO-GO** for full production pilot until manual UAT completion (Labs, PO lifecycle UI, payment record), Agent login smoke test, and Predator certification failures are cleared.
+**Verdict: NO-GO** for full production pilot until manual UAT completion (PO lifecycle UI, payment record, create lab UI), Agent login smoke test, and Predator certification failures are cleared.
 
 **Verdict: CONDITIONAL GO** for continued HQ Admin UAT on inventory / catalog / procurement.
 
 **Admin Orders module: GO** (see §5; `verify-orders-admin-flow.mjs` 13/13 PASS).
 
 **Admin Credit & Risk module: GO** (see §6; `verify-credit-risk-admin-flow.mjs` 16/16 PASS, 1 WARN).
+
+**Admin Labs module: GO** (see §7; `verify-labs-admin-flow.mjs` 29/29 PASS, 6 WARN).
 
 > Per certification rule: Critical issues are resolved, but High/Medium operational gaps and incomplete end-to-end UAT prevent an unconditional GO.
 
@@ -39,6 +41,7 @@ This sweep reviewed all ten HQ Admin module areas against CRUD, reconciliation, 
 | `verify-procurement-inventory-flow.mjs` | **PASS** | Catalog stock 140 = inventory; pricing matrix OK |
 | `verify-orders-admin-flow.mjs` | **PASS** | 64 HQ orders; KPI reconcile; ORDER_OUT ledger match (GAP-017) |
 | `verify-credit-risk-admin-flow.mjs` | **PASS** | 16 PASS / 1 WARN; KPI ₹1,500 = AR; golden allocation (GAP-018) |
+| `verify-labs-admin-flow.mjs` | **PASS** | 29 PASS / 6 WARN; 26 labs tenant-scoped; ownership sync (GAP-019) |
 | `verify-inventory-reconciliation.mjs` | **PASS** | No negative stock (does not reconcile ledger Σ vs on-hand) |
 | `verify-financial-reconciliation.mjs` | **PASS** | 12/12 checks |
 | `verify-hq-rls-reads.mjs` | **PASS** | Admin broad reads OK |
@@ -195,14 +198,28 @@ This sweep reviewed all ten HQ Admin module areas against CRUD, reconciliation, 
 
 ---
 
-### 7. Labs — **PARTIAL**
+### 7. Labs — **GO** (GAP-019 certified)
 
 | Check | Status | Notes |
 |---|---|---|
-| CRUD | Pass (code) | HQ mode uses profile tenant (GAP-012) |
-| Qualification / Status | Pass (code) | |
-| Search / Filters | Pass (code) | |
-| Assignment | Not UAT'd | Checklist open |
+| Tenant isolation | Pass | 26 labs scoped to `qa-tenant-001`; RLS probe clean |
+| Lab directory read | Pass | `getLabsCredit()` / `v_labs_credit`; bounded 5,000 |
+| Filters / attention queue | Pass | Credit chips + OUTSTANDING/FOLLOWUPS/UNASSIGNED reconcile |
+| Portfolio KPIs | Pass | Outstanding ₹1,500 = Σ AR; attention cards reconcile |
+| Golden labs | Pass | `QA_LAB_001–003` present; AR row each; no dup AR |
+| Agent assignment | Pass | `labs.assigned_agent_id` = `lab_ownership` primary (52 ACTIVE rows) |
+| Add Lab (HQ) | Pass (code) | No distributor field; tenant + required field validation |
+| Edit Lab | Partial | No `updateLabWrite`; review drawer read-only |
+| Credit integration | Pass | Golden labs in Collections read |
+| Orders integration | Pass | Order lab_ids exist in labs directory |
+| RLS (agent / lab user) | Pass | Agent ownership-scoped; lab user sees `QA_LAB_001` only |
+| Loading / empty / error | Pass | `PageSkeleton`, `DataFetchError`, filter empty states |
+
+**WARN:** No text search/pagination; golden labs `status=PROSPECT` (active KPI undercounts); manual create-lab UAT open.
+
+**Regression:** `node scripts/verify-labs-admin-flow.mjs` — **29 PASS, 6 WARN, 0 FAIL**.
+
+**Admin Labs verdict: GO**
 
 ---
 
@@ -258,6 +275,11 @@ This sweep reviewed all ten HQ Admin module areas against CRUD, reconciliation, 
 | CERT-012 | **Medium** | Credit & Risk | 22 inactive AR rows (`ar_row_no_activity`) on non-golden labs | WARN in verify script |
 | CERT-013 | **Medium** | Credit & Risk | `days_overdue` not recomputed from invoices in app code | Stored field only |
 | CERT-014 | **Low** | Credit & Risk | Aging UI uses 1–15/16–30/31+ not 30/60/90 calendar buckets | By design in `creditRiskHqEngine` |
+| CERT-015 | **Medium** | Labs | No `updateLabWrite` / HQ edit form for lab profile fields | Read-only review drawer |
+| CERT-016 | **Medium** | Labs | No text search or pagination on Labs directory | Credit/attention filters only |
+| CERT-017 | **Medium** | Labs | Golden labs `status=PROSPECT`; active KPI uses `status===active` only | `labs.active=true` operationally |
+| CERT-018 | **Low** | Labs | Duplicate lab names allowed — `(tenant_id, lab_id)` uniqueness only | Document for operators |
+| CERT-019 | **Low** | Labs | Orders lab filter from orders list — no inactive-lab exclusion | Historical orders remain visible |
 
 **Critical issues from QA Gap Register:** 0 open (GAP-002–007 fixed).
 
@@ -308,11 +330,17 @@ Reasons:
 
 ### Required before full GO
 
-1. Complete manual UAT items in `UAT_Checklist.md` (Labs, PO UI, payment record).
+1. Complete manual UAT items in `UAT_Checklist.md` (PO UI, payment record, create lab UI).
 2. Agent login smoke test.
 3. Resolve Predator certification failures (re-run `run-hq-predator-certification.mjs`).
 4. Fix or skip-with-document `verify-provisioning-role-guard.mjs` Node alias issue.
 5. Operator briefing on Stock vs Health "Critical" definitions and dual forecast paths.
+
+### Admin Labs module — **GO**
+
+Certified 2026-06-28 via `verify-labs-admin-flow.mjs` (29/29 PASS, 6 WARN). Manual create-lab UI UAT and lab edit workflow remain open but do not block Labs module certification.
+
+---
 
 ### Admin Orders module — **GO**
 
@@ -325,7 +353,7 @@ Certified 2026-06-28 via `verify-orders-admin-flow.mjs` (13/13) + GAP-017 fulfil
 - Gap register: `docs/QA/QA_Gap_Register.md`
 - UAT checklist: `docs/QA/UAT_Checklist.md`
 - Production readiness: `docs/QA/Production_Readiness.md`
-- Key scripts: `scripts/verify-inventory-dashboard-kpi.mjs`, `scripts/verify-procurement-inventory-flow.mjs`, `scripts/verify-orders-admin-flow.mjs`, `scripts/verify-credit-risk-admin-flow.mjs`, `scripts/verify-hq-rls-reads.mjs`, `scripts/verify-financial-reconciliation.mjs`
+- Key scripts: `scripts/verify-inventory-dashboard-kpi.mjs`, `scripts/verify-procurement-inventory-flow.mjs`, `scripts/verify-orders-admin-flow.mjs`, `scripts/verify-credit-risk-admin-flow.mjs`, `scripts/verify-labs-admin-flow.mjs`, `scripts/verify-hq-rls-reads.mjs`, `scripts/verify-financial-reconciliation.mjs`
 
 ---
 

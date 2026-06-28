@@ -31,6 +31,7 @@ Tracks functional, UX, architecture, security, RLS, data, and production-readine
 | GAP-016 | Admin UAT / Procurement UX | Medium | Fixed | Forecast Suggestions used min-stock view only; contradicted Inventory Health velocity. KPI basis labels missing. |
 | GAP-017 | Admin UAT / Orders | Medium | Fixed | Fulfillment could mark Fulfilled without ORDER_OUT; cancelled orders could re-fulfill; item counts double-counted from order_lines + order_items. |
 | GAP-018 | Admin UAT / Credit & Risk | Medium | Certified | KPI/AR reconcile on golden labs; 22 inactive AR rows; aging buckets 1–15/16–30/31+ (not 30/60/90 DB-driven). |
+| GAP-019 | Admin UAT / Labs | Medium | Certified | Tenant isolation, ownership sync, KPI/AR reconcile; no edit API; PROSPECT status on golden labs; filters only (no text search/pagination). |
 
 ---
 
@@ -349,3 +350,37 @@ Financial integrity / AR reconciliation / UX clarity
 
 ### Status
 **Certified** (GO for Credit & Risk module; payment recording manual UAT recommended)
+
+---
+
+## GAP-019: Admin Labs Certification (Admin UAT)
+
+### Severity
+Medium
+
+### Type
+Tenant isolation / lab lifecycle / assignment integrity / UX completeness
+
+### Current Behavior (certified 2026-06-28)
+- HQ Labs directory reads `v_labs_credit` via `getLabsCredit()` — **26 labs** scoped to `qa-tenant-001`; RLS blocks foreign tenants.
+- Portfolio outstanding **₹1,500** reconciles with Σ `ar_credit_control.outstanding`.
+- Golden labs (`QA_LAB_001–003`) present; `labs.assigned_agent_id` matches ACTIVE `lab_ownership.primary_agent_id`.
+- Agent visibility driven by `lab_ownership` RLS (agent sees owned labs only; lab user sees `QA_LAB_001` only).
+- Add Lab HQ mode: `createLabWrite` validates required fields and operating tenant; defaults `status=ACTIVE` on insert.
+- Credit/Orders integration: golden labs visible in Collections read; order `lab_id`s exist in labs directory.
+
+### Residual risks (non-blocking)
+- **No `updateLabWrite` / HQ edit form** — review drawer read-only; status/contact/credit limit edits require Ops Center or DB.
+- **No text search or pagination** on Labs directory — credit/attention filters only; bounded full list (5,000 cap).
+- Golden labs live with `status=PROSPECT` while `labs.active=true` — portfolio “active labs” KPI undercounts (uses `status===active` only).
+- Duplicate lab **names** allowed — uniqueness is `(tenant_id, lab_id)` only.
+- Orders lab filter built from orders in scope — does not exclude inactive labs from historical orders.
+- Manual “Create lab” UI UAT still open in checklist.
+
+### Verification
+- `node scripts/verify-labs-admin-flow.mjs` — **29 PASS, 6 WARN, 0 FAIL**
+- `node scripts/verify-hq-rls-reads.mjs` — Labs module matrix
+- `node scripts/verify-collection-inconsistencies.mjs` — golden labs clean
+
+### Status
+**Certified** (GO for Labs module; manual create-lab UAT and edit workflow remain open)

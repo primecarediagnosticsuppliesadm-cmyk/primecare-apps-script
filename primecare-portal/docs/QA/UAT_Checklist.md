@@ -27,7 +27,10 @@
 - [x] Orders — tenant isolation (qa-tenant-001 only); KPI cards reconcile with list
 - [x] Orders — header total reconciles with order_items; fulfilled orders have ORDER_OUT ledger
 - [x] Orders — duplicate fulfillment blocked (RPC idempotency); cancelled orders cannot re-fulfill
-- [ ] Create lab (HQ mode — no distributor picker; shows PrimeCare HQ)
+- [x] Labs — tenant isolation (26 labs, qa-tenant-001); portfolio outstanding ₹1,500 = AR
+- [x] Labs — golden labs present; `lab_ownership` sync with assigned agent
+- [x] Labs — agent/lab-user RLS scoped (ownership + own-lab)
+- [ ] Create lab (HQ mode — no distributor picker; shows PrimeCare HQ) — manual UI UAT
 - [ ] Create PO — select product from catalog only (invalid SKU blocked)
 - [ ] Edit Draft/Ordered PO before receipt (qty, cost, supplier, status)
 - [ ] Cancel Draft/Ordered PO before receipt
