@@ -70,6 +70,7 @@ export function pipelineStageToVariant(stage) {
 export function paymentStatusToVariant(status) {
   const s = String(status || "").trim().toLowerCase();
   if (s === "paid" || s === "current") return "success";
+  if (s === "credit hold") return "danger";
   if (s === "partially paid" || s === "partial") return "warning";
   if (s === "pending" || s === "outstanding" || s === "open" || s === "sent" || s === "unpaid") {
     return "info";

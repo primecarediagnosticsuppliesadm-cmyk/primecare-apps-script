@@ -54,6 +54,12 @@ export function collectionsNavLabelForRole(role) {
   return "Collections";
 }
 
+export function navigateToLabInvoiceCenter(setActivePage) {
+  if (!setActivePage) return false;
+  hqNavigate(setActivePage, { page: "labInvoices" });
+  return true;
+}
+
 export function navigateToCollections(
   setActivePage,
   { labId = "", focusSection = "details", role = "" } = {}

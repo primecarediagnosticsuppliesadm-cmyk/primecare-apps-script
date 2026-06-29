@@ -7,6 +7,7 @@ function normalizeStatus(status) {
 
 function statusVariant(status) {
   const key = normalizeStatus(status);
+  if (key === "credit hold") return "danger";
   if (key === "paid") return "success";
   if (key === "overdue") return "danger";
   if (key === "partially paid" || key === "partially_paid" || key === "partial") return "warning";

@@ -21,7 +21,7 @@ import LabCollectionPanel from "@/components/collections/LabCollectionPanel.jsx"
 import HqObjectLink from "@/components/hq/HqObjectLink.jsx";
 import HqCreditRiskCommandCenter from "@/components/hq/HqCreditRiskCommandCenter.jsx";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
-import { navigateToLabs } from "@/operations/hqWorkflowNav.js";
+import { navigateToLabs, navigateToLabInvoiceCenter } from "@/operations/hqWorkflowNav.js";
 import { supabase } from "@/api/supabaseClient.js";
 import {
   logAppsScriptFallbackUsed,
@@ -56,7 +56,7 @@ import {
   deriveAccountHealthStatus,
   deriveInvoiceAccountStatus,
   invoiceStatusTone,
-  LAB_INVOICE_TABLE_GRID,
+  LAB_OPEN_INVOICE_SUMMARY_GRID,
 } from "@/collections/invoiceAccountStatus.js";
 import {
   buildLabAccountActivityTimeline,
@@ -119,12 +119,9 @@ import {
   ShieldAlert,
   Wallet,
   FileText,
-  Download,
-  LifeBuoy,
   ArrowRight,
   Building2,
   CalendarClock,
-  MoreHorizontal,
 } from "lucide-react";
 import AgentCollectionPaymentDrawer from "@/components/agent/AgentCollectionPaymentDrawer.jsx";
 import { AgentRouteStopBadge } from "@/components/agent/AgentOsSections.jsx";
@@ -214,6 +211,7 @@ function displayPaymentStatus(item) {
     totalPaid: item?.totalPaid,
     totalAllocated: item?.totalAllocated,
     overdueDays: item?.overdueDays,
+    creditHold: item?.creditHold ?? item?.credit_hold,
   });
 }
 
@@ -321,6 +319,7 @@ function financialStatusSummary(item, invoices = []) {
     totalAllocated,
     overdueDays: item?.overdueDays,
     riskStatus: item?.riskStatus,
+    creditHold: item?.creditHold ?? item?.credit_hold,
   });
 }
 
@@ -394,69 +393,38 @@ function activityKindDotClass(kind) {
   return "bg-blue-500";
 }
 
-function LabOutstandingInvoiceRow({
+function LabOpenInvoiceSummaryRow({
   invoice,
   rowId,
-  labId,
   invoiceDownloadKey,
   onView,
-  onAllocations,
-  onRecordPayment,
   onDownload,
+  onSubmitAdvice,
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const total = Number(invoice.totalAmount ?? invoice.amount ?? 0);
-  const allocated = Number(invoice.allocatedAmount ?? 0);
-  const openBalance = Number(invoice.openBalance ?? Math.max(0, total - allocated));
+  const openBalance = Number(invoice.openBalance ?? invoice.amount ?? 0);
   const downloadKey = invoice.invoiceDbId || invoice.orderId || rowId;
   const downloading = invoiceDownloadKey === downloadKey;
 
   return (
-    <div className="rounded-md border border-border/70 px-2 py-2 transition hover:border-slate-300">
-      <div className={cn("hidden xl:grid", LAB_INVOICE_TABLE_GRID)}>
+    <div className="rounded-md border border-border/70 px-2.5 py-2">
+      <div className={cn("hidden sm:grid", LAB_OPEN_INVOICE_SUMMARY_GRID)}>
         <div className="min-w-0">
-          <span
-            className="block truncate font-mono text-[10px] font-semibold text-slate-900"
-            title={invoice.invoiceId}
-          >
+          <p className="truncate font-mono text-[11px] font-semibold text-slate-900" title={invoice.invoiceId}>
             {invoice.invoiceId}
-          </span>
+          </p>
+          <p className="text-[10px] text-muted-foreground">Due {formatShortDate(invoice.dueDate)}</p>
         </div>
-        <div className="min-w-0">
-          <span
-            className="block truncate font-mono text-[10px] text-slate-600"
-            title={invoice.orderId || "—"}
-          >
-            {invoice.orderId || "—"}
-          </span>
-        </div>
-        <div className="text-right text-[10px] font-semibold tabular-nums text-slate-900">
-          {formatMoney(total)}
-        </div>
-        <div className="text-right text-[10px] tabular-nums text-emerald-700">
-          {formatMoney(allocated)}
-        </div>
-        <div className="text-right text-[10px] tabular-nums text-amber-700">
-          {formatMoney(openBalance)}
-        </div>
-        <div>
-          <span
-            className={cn(
-              "inline-block max-w-full truncate rounded px-1 py-0.5 text-[10px] font-medium",
-              invoiceStatusTone(invoice.status)
-            )}
-          >
-            {invoice.status}
-          </span>
-        </div>
+        <p className="text-right text-sm font-bold tabular-nums text-amber-700">{formatMoney(openBalance)}</p>
+        <span
+          className={cn(
+            "inline-block max-w-full truncate rounded px-1.5 py-0.5 text-center text-[10px] font-medium",
+            invoiceStatusTone(invoice.status)
+          )}
+        >
+          {invoice.status}
+        </span>
         <div className="flex items-center justify-end gap-0.5">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-7 px-2 text-[10px]"
-            onClick={() => onView(invoice)}
-          >
+          <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => onView(invoice)}>
             View
           </Button>
           <Button
@@ -474,99 +442,47 @@ function LabOutstandingInvoiceRow({
             size="sm"
             variant="outline"
             className="h-7 px-2 text-[10px]"
-            disabled={!invoice.orderId || openBalance <= 0}
-            onClick={() => onRecordPayment({ ...invoice, labId })}
+            disabled={openBalance <= 0}
+            onClick={() => onSubmitAdvice?.(invoice)}
           >
-            Pay
+            Advice
           </Button>
-          <div className="relative">
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-7 w-7 p-0"
-              aria-label="More invoice actions"
-              onClick={() => setMenuOpen((open) => !open)}
-            >
-              <MoreHorizontal className="h-3.5 w-3.5" />
-            </Button>
-            {menuOpen ? (
-              <div className="absolute right-0 top-full z-20 mt-0.5 min-w-[7.5rem] rounded-md border border-border bg-card py-1 shadow-md">
-                <button
-                  type="button"
-                  className="block w-full px-2.5 py-1.5 text-left text-[10px] text-slate-700 hover:bg-muted"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onAllocations(invoice);
-                  }}
-                >
-                  Allocations
-                </button>
-              </div>
-            ) : null}
-          </div>
         </div>
       </div>
-
-      <div className="space-y-2 xl:hidden">
+      <div className="space-y-2 sm:hidden">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className="truncate font-mono text-sm font-semibold text-slate-900" title={invoice.invoiceId}>
-              {invoice.invoiceId}
-            </p>
-            <p className="truncate font-mono text-xs text-slate-600" title={invoice.orderId || "—"}>
-              Order {invoice.orderId || "—"}
-            </p>
+            <p className="truncate font-mono text-sm font-semibold">{invoice.invoiceId}</p>
+            <p className="text-xs text-muted-foreground">Due {formatShortDate(invoice.dueDate)}</p>
           </div>
-          <span
-            className={cn(
-              "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium",
-              invoiceStatusTone(invoice.status)
-            )}
-          >
+          <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", invoiceStatusTone(invoice.status))}>
             {invoice.status}
           </span>
         </div>
-        <dl className="grid grid-cols-3 gap-2 text-xs">
-          <div>
-            <dt className="text-muted-foreground">Total</dt>
-            <dd className="text-right font-semibold tabular-nums">{formatMoney(total)}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">Allocated</dt>
-            <dd className="text-right font-semibold tabular-nums text-emerald-700">{formatMoney(allocated)}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">Open</dt>
-            <dd className="text-right font-semibold tabular-nums text-amber-700">{formatMoney(openBalance)}</dd>
-          </div>
-        </dl>
+        <p className="text-lg font-bold tabular-nums text-amber-700">{formatMoney(openBalance)}</p>
         <div className="flex flex-wrap gap-1">
-          <Button type="button" size="sm" variant="outline" className="h-8 px-2.5 text-xs" onClick={() => onView(invoice)}>
+          <Button type="button" size="sm" variant="outline" className="h-8 px-2 text-xs" onClick={() => onView(invoice)}>
             View
           </Button>
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="h-8 px-2.5 text-xs"
+            className="h-8 px-2 text-xs"
             disabled={downloading}
             onClick={() => void onDownload(invoice)}
           >
-            {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "PDF"}
+            PDF
           </Button>
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="h-8 px-2.5 text-xs"
-            disabled={!invoice.orderId || openBalance <= 0}
-            onClick={() => onRecordPayment({ ...invoice, labId })}
+            className="h-8 px-2 text-xs"
+            disabled={openBalance <= 0}
+            onClick={() => onSubmitAdvice?.(invoice)}
           >
-            Pay
-          </Button>
-          <Button type="button" size="sm" variant="ghost" className="h-8 px-2.5 text-xs" onClick={() => onAllocations(invoice)}>
-            Allocations
+            Submit Advice
           </Button>
         </div>
       </div>
@@ -597,7 +513,7 @@ function LabAccountTimeline({
   copy,
   collectionDetails,
   setActivePage,
-  onRecordInvoicePayment,
+  onSubmitPaymentAdvice,
   tenantId,
 }) {
   const { showToast } = usePortalToast();
@@ -618,42 +534,6 @@ function LabAccountTimeline({
   const [serverInvoices, setServerInvoices] = useState([]);
   const [invoiceDownloadKey, setInvoiceDownloadKey] = useState("");
   const labId = item?.labId || item?.lab_id || "";
-
-  const handleWorkspaceAction = useCallback(
-    (action) => {
-      const storageKey = labIdKey(labId) ? `lab-ordering-handoff:${labIdKey(labId)}` : "";
-      if (action === "view_orders") {
-        setActivePage?.("labOrders");
-        return;
-      }
-      if (action === "download_statement") {
-        setActiveFinanceTab("statements");
-        return;
-      }
-      if (action === "repeat_last_order") {
-        if (storageKey) {
-          try {
-            window.localStorage.setItem(
-              storageKey,
-              JSON.stringify({
-                message: "Open Previous Orders to repeat your latest order.",
-                openOrdersTab: true,
-              })
-            );
-          } catch {
-            // ignore storage failures
-          }
-        }
-        setActivePage?.("labOrders");
-        return;
-      }
-      if (action === "contact_support") {
-        setActivePage?.("notifications");
-        showToast("success", "Activity Center opened — track orders and payment updates here.");
-      }
-    },
-    [labId, setActivePage, showToast]
-  );
 
   useEffect(() => {
     let cancelled = false;
@@ -723,16 +603,24 @@ function LabAccountTimeline({
   const availableCredit =
     creditLimit > 0 ? Math.max(0, creditLimit - creditUsed) : null;
   const creditRemainingLabel = formatCreditRemainingLabel(creditLimit, outstanding, formatMoney);
-  const topInvoices = invoices.slice(0, 12);
+  const lastPaymentDate = deriveLastPaymentDateFromHistory(history);
+  const openInvoicesTop = useMemo(
+    () =>
+      invoices
+        .filter((inv) => Number(inv.openBalance ?? inv.amount ?? 0) > 0.009)
+        .sort((a, b) => str(b.dueDate).localeCompare(str(a.dueDate)))
+        .slice(0, 5),
+    [invoices]
+  );
   const statementRows = useMemo(
     () =>
-      topInvoices.map((invoice, idx) => ({
+      invoices.slice(0, 12).map((invoice, idx) => ({
         id: `${invoice.invoiceId}-${idx}`,
         title: `${invoice.invoiceId}`,
         detail: `Order ${invoice.orderId || "—"} · ${formatMoney(invoice.amount)}`,
         date: invoice.dueDate,
       })),
-    [topInvoices]
+    [invoices]
   );
   const creditHistoryRows = useMemo(
     () => [
@@ -803,128 +691,110 @@ function LabAccountTimeline({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.5fr)_minmax(16rem,0.85fr)]">
-        <section className="min-w-0 rounded-lg border border-border bg-card p-3 shadow-sm">
-          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Outstanding Invoices ({topInvoices.length})
-          </h3>
-          {topInvoices.length ? (
-            <>
-              <div
-                className={cn(
-                  "mb-1 hidden border-b border-border/60 pb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500 xl:grid",
-                  LAB_INVOICE_TABLE_GRID
-                )}
-              >
-                <span>Invoice</span>
-                <span>Order</span>
-                <span className="text-right">Total</span>
-                <span className="text-right">Allocated</span>
-                <span className="text-right">Open</span>
-                <span>Status</span>
-                <span className="text-right">Actions</span>
-              </div>
-              <div className="space-y-1.5">
-                {topInvoices.map((invoice, idx) => (
-                  <LabOutstandingInvoiceRow
-                    key={`${invoice.invoiceId}-${idx}`}
-                    invoice={invoice}
-                    rowId={`${invoice.invoiceId}-${idx}`}
-                    labId={labId}
-                    invoiceDownloadKey={invoiceDownloadKey}
-                    onView={setInvoiceDrawer}
-                    onAllocations={setAllocationsDrawer}
-                    onRecordPayment={onRecordInvoicePayment}
-                    onDownload={handleInvoiceDownload}
-                  />
-                ))}
-              </div>
-            </>
-          ) : (
-            <p className="rounded-md border border-dashed px-2 py-2 text-[11px] text-muted-foreground">
-              No outstanding invoices right now.
-            </p>
-          )}
-        </section>
-
-        <aside className="rounded-lg border border-border bg-card p-3 shadow-sm">
-          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Account Health
-          </h3>
-          <div className="grid gap-3 sm:grid-cols-2">
+    <div className="space-y-4">
+      <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
+        <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Account Health
+        </h3>
+        <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div>
               <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Outstanding</p>
-              <p className="text-xl font-bold tabular-nums text-foreground">{formatMoney(outstanding)}</p>
-              <p className="mt-0.5 text-[10px] text-muted-foreground">Paid {formatMoney(totalPaid)}</p>
+              <p className="text-xl font-bold tabular-nums">{formatMoney(outstanding)}</p>
             </div>
-            <div className="sm:text-right">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Status</p>
-              <span className={cn("mt-0.5 inline-block rounded border px-2 py-0.5 text-[10px] font-medium", health.tone)}>
-                {health.label}
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Paid</p>
+              <p className="text-xl font-bold tabular-nums text-emerald-700">{formatMoney(totalPaid)}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Credit limit</p>
+              <p className="text-sm font-semibold tabular-nums">
+                {creditLimit > 0 ? formatMoney(creditLimit) : "Not configured"}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Credit remaining</p>
+              <p className="text-sm font-semibold tabular-nums">{creditRemainingLabel}</p>
+            </div>
+          </div>
+          <div className="text-left lg:text-right">
+            <span className={cn("inline-block rounded border px-2 py-0.5 text-[10px] font-medium", health.tone)}>
+              {health.label}
+            </span>
+            <p className="mt-1 text-[10px] text-muted-foreground">Risk: {riskLabel}</p>
+          </div>
+        </div>
+        <div className="mt-3 grid gap-2 border-t border-border/60 pt-3 text-[10px] text-slate-600 sm:grid-cols-3">
+          <div>Behavior: {overdueDays > 0 ? `Delayed by ${overdueDays}d` : "On track"}</div>
+          <div>Next payment: {formatShortDate(dueDate)}</div>
+          <div>Last payment: {lastPaymentDate ? formatShortDate(lastPaymentDate) : "—"}</div>
+        </div>
+        {utilizationPct != null ? (
+          <div className="mt-3">
+            <div className="mb-1 flex items-center justify-between text-[10px] text-slate-600">
+              <span>Credit used</span>
+              <span className="tabular-nums">
+                {formatMoney(creditUsed)} / {formatMoney(creditLimit)}
               </span>
-              <p className="mt-1 text-[10px] text-muted-foreground">Risk: {riskLabel}</p>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+              <div
+                className={cn(
+                  "h-full rounded-full",
+                  utilizationPct >= 85 ? "bg-red-500" : utilizationPct >= 65 ? "bg-amber-500" : "bg-emerald-500"
+                )}
+                style={{ width: `${utilizationPct}%` }}
+              />
             </div>
           </div>
-          <div className="mt-3 grid gap-1.5 border-t border-border/60 pt-3 text-[10px] text-slate-600">
-            <div className="flex items-center justify-between gap-2">
-              <span>Credit remaining</span>
-              <span className="font-medium tabular-nums text-slate-800">{creditRemainingLabel}</span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span>Behavior</span>
-              <span>{overdueDays > 0 ? `Delayed by ${overdueDays}d` : "On track"}</span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span>Next payment</span>
-              <span>{formatShortDate(dueDate)}</span>
-            </div>
-          </div>
-          {utilizationPct != null ? (
-            <div className="mt-2">
-              <div className="mb-1 flex items-center justify-between text-[10px] text-slate-600">
-                <span>Credit used</span>
-                <span className="tabular-nums">
-                  {formatMoney(creditUsed)} / {formatMoney(creditLimit)}
-                </span>
-              </div>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className={cn(
-                    "h-full rounded-full",
-                    utilizationPct >= 85
-                      ? "bg-red-500"
-                      : utilizationPct >= 65
-                        ? "bg-amber-500"
-                        : "bg-emerald-500"
-                  )}
-                  style={{ width: `${utilizationPct}%` }}
-                />
-              </div>
-            </div>
-          ) : null}
-          <p className="mt-2 text-[10px] text-muted-foreground">{accountStandingSummary}</p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => handleWorkspaceAction("view_orders")}>
-              <FileText className="mr-1 h-3 w-3" />
-              Orders
-            </Button>
-            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => handleWorkspaceAction("download_statement")}>
-              <Download className="mr-1 h-3 w-3" />
-              Statements
-            </Button>
-            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => handleWorkspaceAction("repeat_last_order")}>
-              Repeat
-            </Button>
-            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => handleWorkspaceAction("contact_support")}>
-              <LifeBuoy className="mr-1 h-3 w-3" />
-              Support
-            </Button>
-          </div>
-        </aside>
-      </div>
+        ) : null}
+        <p className="mt-2 text-[10px] text-muted-foreground">{accountStandingSummary}</p>
+      </section>
 
-      <section className="rounded-lg border border-border bg-card p-2.5 shadow-sm">
+      <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Open Invoices ({openInvoicesTop.length})
+          </h3>
+          <Button
+            type="button"
+            variant="link"
+            className="h-auto p-0 text-[11px] font-medium"
+            onClick={() => navigateToLabInvoiceCenter(setActivePage)}
+          >
+            View all invoices →
+          </Button>
+        </div>
+        {openInvoicesTop.length ? (
+          <div className="space-y-1.5">
+            {openInvoicesTop.map((invoice, idx) => (
+              <LabOpenInvoiceSummaryRow
+                key={`${invoice.invoiceId}-${idx}`}
+                invoice={invoice}
+                rowId={`${invoice.invoiceId}-${idx}`}
+                invoiceDownloadKey={invoiceDownloadKey}
+                onView={setInvoiceDrawer}
+                onDownload={handleInvoiceDownload}
+                onSubmitAdvice={onSubmitPaymentAdvice}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-md border border-dashed px-3 py-4 text-[11px] text-muted-foreground">
+            No open invoice balances. Browse the{" "}
+            <button
+              type="button"
+              className="font-medium text-[var(--pc-brand-primary)] underline-offset-2 hover:underline"
+              onClick={() => navigateToLabInvoiceCenter(setActivePage)}
+            >
+              Invoice Center
+            </button>{" "}
+            for paid or historical documents.
+          </p>
+        )}
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-3 shadow-sm">
         <div className="mb-2 flex flex-wrap gap-1.5">
           {[
             { id: "activity", label: "Payment Activity" },
@@ -990,7 +860,13 @@ function LabAccountTimeline({
           <p className="rounded-md border border-dashed px-2 py-2 text-[11px] text-muted-foreground">
             {activeFinanceTab === "activity"
               ? "No payment or invoice activity recorded yet."
-              : "No entries in this tab yet."}
+              : activeFinanceTab === "statements"
+                ? "Statement summaries appear here from your invoice history. Download documents from Invoice Center."
+                : activeFinanceTab === "credit"
+                  ? "Credit usage and limit events will appear here when configured for your lab."
+                  : activeFinanceTab === "notes"
+                    ? "Account notes from PrimeCare finance will appear here."
+                    : "No entries in this tab yet."}
           </p>
         )}
       </section>
@@ -2763,6 +2639,15 @@ export default function CollectionsPage({
     return null;
   }
 
+  function handleLabSubmitPaymentAdvice(invoice) {
+    const invoiceLabel = str(invoice?.invoiceId ?? invoice?.invoiceNumber ?? "invoice");
+    showToast(
+      "info",
+      `Payment advice for ${invoiceLabel} is reviewed by PrimeCare finance before your account is updated. Open Activity Center to track status.`
+    );
+    setActivePage?.("notifications");
+  }
+
   function handleRecordInvoicePayment(invoice) {
     const orderId = str(invoice?.orderId ?? invoice?.order_id);
     const openBalance = Number(invoice?.openBalance ?? invoice?.amount ?? 0);
@@ -2867,7 +2752,7 @@ export default function CollectionsPage({
             distributorScope?.tenantId
               ? `Collections for ${distributorScope.tenantName || "selected distributor"} only.`
               : isLabAccount
-                ? "Operational financial workspace for your lab: account health, invoices, and payment activity."
+                ? "Your account dashboard — balances, health, payment activity, and open invoice summary."
                 : isAgentView
                   ? "Who to collect from, how much is owed, and what to do next."
                   : isHqCreditRisk
@@ -2938,7 +2823,7 @@ export default function CollectionsPage({
         />
       ) : null}
 
-      <div className={isLabAccount ? "mx-auto max-w-5xl" : ""}>
+      <div className={isLabAccount ? "mx-auto max-w-7xl" : ""}>
         {isLabAccount ? (
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
             <CompactAccountKpi
@@ -3090,7 +2975,7 @@ export default function CollectionsPage({
           />
         )
       ) : isLabAccount ? (
-        <div className="mx-auto max-w-5xl space-y-3" role="list">
+        <div className="mx-auto max-w-7xl space-y-4" role="list">
           {labDisplayCollections.map((item) => {
             const key = labIdKey(item.labId);
             const isExpanded = expandedLabId === key;
@@ -3109,7 +2994,7 @@ export default function CollectionsPage({
                     : item
                 }
                 setActivePage={setActivePage}
-                onRecordInvoicePayment={handleRecordInvoicePayment}
+                onSubmitPaymentAdvice={handleLabSubmitPaymentAdvice}
               />
             );
           })}

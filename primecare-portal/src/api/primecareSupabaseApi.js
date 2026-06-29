@@ -177,13 +177,19 @@ export function deriveCollectionPaymentStatus({
   totalAllocated = 0,
   overdueDays = 0,
   explicitStatus = "",
+  creditHold = "",
 }) {
   const outstanding = num(outstandingAmount);
   const paid = num(totalPaid);
   const allocated = num(totalAllocated);
   const overdue = num(overdueDays);
+  const hold = str(creditHold).toUpperCase();
   const explicit = str(explicitStatus).trim();
   const explicitLower = explicit.toLowerCase();
+
+  if (hold === "HOLD" || hold === "YES") {
+    return "Credit Hold";
+  }
 
   let derived;
   if (outstanding <= 0.009) {
