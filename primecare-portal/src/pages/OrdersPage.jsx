@@ -26,9 +26,10 @@ import {
   StatusBadge,
   PageHeader,
   DataFetchError,
+  usePortalToast,
 } from "@/components/ux";
 import { orderStatusToVariant, paymentStatusToVariant } from "@/utils/statusTokens";
-import { Loader2, AlertTriangle, Download, Eye } from "lucide-react";
+import { Loader2, AlertTriangle, Download, Eye, CircleDollarSign } from "lucide-react";
 import { ROLES } from "@/config/roles";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import {
@@ -115,12 +116,36 @@ function formatDateTime(value) {
   });
 }
 
-function orderPaymentLabel(order) {
+function orderPaymentLabel(order, invoice = null) {
+  if (invoice?.displayStatus) {
+    const key = String(invoice.displayStatus).toLowerCase();
+    if (key === "paid") return "Paid";
+    if (key === "partially paid") return "Partial";
+    if (key === "overdue" || key === "outstanding" || key === "sent" || key === "open") {
+      return "Pending";
+    }
+  }
+  if (invoice && Number(invoice.openBalance ?? 0) <= 0.009) return "Paid";
   return formatOrderPaymentLabel({
     orderStatus: order.orderStatus,
     paymentStatus: order.paymentStatus,
-    invoiceStatus: order.invoiceStatus,
+    invoiceStatus: invoice?.status ?? order.invoiceStatus,
   });
+}
+
+function resolveOrderOutstanding(order, invoice) {
+  if (invoice?.openBalance != null) return Number(invoice.openBalance);
+  const total = Number(order?.orderTotal || 0);
+  if (invoice) {
+    const allocated = Number(invoice.allocatedAmount || 0);
+    return Math.max(0, total - allocated);
+  }
+  return total;
+}
+
+function canRecordOrderPayment(order, invoice, orderUx) {
+  if (!order || orderUx?.cancelled || !orderUx?.fulfilled) return false;
+  return resolveOrderOutstanding(order, invoice) > 0.009;
 }
 
 function OrdersDetailEmptyState({
@@ -305,6 +330,8 @@ export default function OrdersPage({
   const [invoiceDrawer, setInvoiceDrawer] = useState(null);
   const [invoiceDownloadKey, setInvoiceDownloadKey] = useState("");
 
+  const { showToast } = usePortalToast();
+
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
 
   useEffect(() => {
@@ -486,6 +513,9 @@ export default function OrdersPage({
         setStatusNote("");
         await loadOrders({ silent: true });
         await openOrder(id, { preserveSuccess: true });
+        if (nextStatus === "Fulfilled") {
+          await refreshInvoicesForOrders([id]);
+        }
         invalidateAdminDashboardCaches();
         return;
       }
@@ -618,6 +648,15 @@ export default function OrdersPage({
     return invoiceByOrderId[selectedOrderSummary.orderId] || null;
   }, [selectedOrderSummary, invoiceByOrderId]);
 
+  async function refreshInvoicesForOrders(orderIds = []) {
+    const ids = [...new Set((orderIds || []).map((id) => str(id)).filter(Boolean))];
+    if (!ids.length) return;
+    const res = await getInvoicesByOrderIdsRead(ids, { tenantId: homeTenantId });
+    if (res.success) {
+      setInvoiceByOrderId((prev) => ({ ...prev, ...(res.byOrderId || {}) }));
+    }
+  }
+
   async function handleInvoiceDownload(invoice, orderId) {
     const key = invoice?.id || orderId || "invoice";
     setInvoiceDownloadKey(key);
@@ -626,10 +665,41 @@ export default function OrdersPage({
         invoiceId: invoice?.id,
         orderId: invoice?.orderId || orderId,
         tenantId: homeTenantId,
+        onPhase: (phase, detail) => {
+          if (phase === "error") {
+            showToast("error", detail || "Unable to download invoice PDF.");
+          }
+          if (phase === "success") {
+            showToast("success", "Invoice download started.");
+          }
+        },
       });
     } finally {
       setInvoiceDownloadKey("");
     }
+  }
+
+  function handleRecordOrderPayment() {
+    if (!selectedOrderSummary?.labId || !canNavigateToCollections(currentUser?.role)) return;
+    const outstanding = resolveOrderOutstanding(selectedOrderSummary, selectedOrderInvoice);
+    navigateToCollections(setActivePage, {
+      labId: selectedOrderSummary.labId,
+      orderId: selectedOrderSummary.orderId,
+      focusSection: "payment",
+      paymentAmount: outstanding > 0.009 ? outstanding : selectedOrderSummary.orderTotal,
+      role: currentUser?.role,
+    });
+  }
+
+  function handleOpenCreditRisk() {
+    if (!selectedOrderSummary?.labId || !canNavigateToCollections(currentUser?.role)) return;
+    navigateToCollections(setActivePage, {
+      labId: selectedOrderSummary.labId,
+      orderId: selectedOrderSummary.orderId,
+      focusSection: "payment",
+      paymentAmount: resolveOrderOutstanding(selectedOrderSummary, selectedOrderInvoice),
+      role: currentUser?.role,
+    });
   }
 
   function openInvoiceDrawer(invoice) {
@@ -664,7 +734,12 @@ export default function OrdersPage({
       orderStatus,
       cancelled,
       fulfilled,
-      paymentLabel: orderPaymentLabel(selectedOrderSummary),
+      paymentLabel: orderPaymentLabel(selectedOrderSummary, selectedOrderInvoice),
+      outstandingAmount: resolveOrderOutstanding(selectedOrderSummary, selectedOrderInvoice),
+      canRecordPayment: canRecordOrderPayment(selectedOrderSummary, selectedOrderInvoice, {
+        cancelled,
+        fulfilled,
+      }),
       productUnitLabel: formatProductUnitLabel(lines.length, unitCount),
       cancellationReason: cancelled
         ? extractLatestCancellationNote(
@@ -679,7 +754,7 @@ export default function OrdersPage({
         "",
       cancelledByLabel: resolveCancelledByLabel(selectedOrderSummary.createdBy),
     };
-  }, [selectedOrderSummary, details?.lines]);
+  }, [selectedOrderSummary, selectedOrderInvoice, details?.lines]);
 
   return (
     <div className={embedded ? "space-y-4" : "space-y-5"}>
@@ -853,8 +928,8 @@ export default function OrdersPage({
                   <tbody>
                     {filteredOrders.map((order) => {
                       const orderStatus = normalizeOrderStatusLabel(order.orderStatus);
-                      const payStatus = orderPaymentLabel(order);
                       const orderInvoice = resolveOrderInvoice(order);
+                      const payStatus = orderPaymentLabel(order, orderInvoice);
                       const isSelected = selectedOrder === order.orderId;
                       const cancelled = isCancelledStatus(orderStatus);
                       return (
@@ -954,8 +1029,8 @@ export default function OrdersPage({
               <div className="space-y-2 xl:hidden">
                 {filteredOrders.map((order) => {
                   const orderStatus = normalizeOrderStatusLabel(order.orderStatus);
-                  const payStatus = orderPaymentLabel(order);
                   const orderInvoice = resolveOrderInvoice(order);
+                  const payStatus = orderPaymentLabel(order, orderInvoice);
                   return (
                     <div
                       key={order.orderId}
@@ -1239,42 +1314,86 @@ export default function OrdersPage({
                   )}
                 </section>
 
-                {selectedOrderInvoice ? (
-                  <section className="space-y-2">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Invoice
-                    </h3>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 text-xs"
-                        onClick={() => openInvoiceDrawer(selectedOrderInvoice)}
-                      >
-                        <Eye className="mr-1.5 h-3.5 w-3.5" />
-                        View Invoice
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 text-xs"
-                        disabled={invoiceDownloadKey === selectedOrderInvoice.id}
-                        onClick={() =>
-                          void handleInvoiceDownload(
-                            selectedOrderInvoice,
-                            selectedOrderSummary.orderId
-                          )
-                        }
-                      >
-                        {invoiceDownloadKey === selectedOrderInvoice.id ? (
-                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Download className="mr-1.5 h-3.5 w-3.5" />
-                        )}
-                        Download Invoice
-                      </Button>
+                {selectedOrderUx?.fulfilled && !selectedOrderUx?.cancelled ? (
+                  <section className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+                    <div>
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Invoice
+                      </h3>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {selectedOrderInvoice ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-9 text-xs"
+                            onClick={() => openInvoiceDrawer(selectedOrderInvoice)}
+                          >
+                            <Eye className="mr-1.5 h-3.5 w-3.5" />
+                            View Invoice
+                          </Button>
+                        ) : null}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-9 text-xs"
+                          disabled={
+                            invoiceDownloadKey ===
+                            (selectedOrderInvoice?.id || selectedOrderSummary.orderId)
+                          }
+                          onClick={() =>
+                            void handleInvoiceDownload(
+                              selectedOrderInvoice,
+                              selectedOrderSummary.orderId
+                            )
+                          }
+                        >
+                          {invoiceDownloadKey ===
+                          (selectedOrderInvoice?.id || selectedOrderSummary.orderId) ? (
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Download className="mr-1.5 h-3.5 w-3.5" />
+                          )}
+                          Download Invoice
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-slate-200 pt-3">
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Payment
+                      </h3>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <StatusBadge variant={paymentStatusToVariant(selectedOrderUx.paymentLabel)}>
+                          {selectedOrderUx.paymentLabel}
+                        </StatusBadge>
+                        <span className="text-sm font-bold tabular-nums text-slate-900">
+                          {formatCurrency(selectedOrderUx.outstandingAmount)}
+                        </span>
+                      </div>
+                      {selectedOrderUx.canRecordPayment && canNavigateToCollections(currentUser?.role) ? (
+                        <div className="mt-2.5 flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-9 text-xs"
+                            onClick={handleRecordOrderPayment}
+                          >
+                            <CircleDollarSign className="mr-1.5 h-3.5 w-3.5" />
+                            Record Payment
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-9 text-xs"
+                            onClick={handleOpenCreditRisk}
+                          >
+                            Open in {collectionsNavLabelForRole(currentUser?.role)}
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
                   </section>
                 ) : null}
@@ -1397,6 +1516,10 @@ export default function OrdersPage({
         orderId={invoiceDrawer?.orderId}
         tenantId={homeTenantId}
         invoicePreview={invoiceDrawer}
+        onDownloadPhase={(phase, detail) => {
+          if (phase === "error") showToast("error", detail || "Unable to download invoice PDF.");
+          if (phase === "success") showToast("success", "Invoice download started.");
+        }}
       />
     </div>
   );

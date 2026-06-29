@@ -14,6 +14,7 @@ import {
   getLabRecentOrdersRead,
   updateCollectionNotesWrite,
   deriveCollectionPaymentStatus,
+  invalidateOrdersReadCache,
 } from "@/api/primecareSupabaseApi";
 import { selectOpenOrdersForLab } from "@/collections/collectionsOpenOrders.js";
 import { loadLabPaymentHistoryForDisplay } from "@/collections/collectionsPaymentHistory.js";
@@ -2125,6 +2126,12 @@ export default function CollectionsPage({
     const targetId = labIdKey(ctx.labId);
     if (isHqCreditRiskView(currentUser, isLabAccount, isAgentView)) {
       setHqFocusLabId(targetId);
+      if (ctx.orderId) setPaymentOrderId(str(ctx.orderId));
+      if (ctx.paymentAmount) setAmountCollected(String(ctx.paymentAmount));
+      if (ctx.focusSection === "payment") {
+        if (!collections.length) return;
+        void openCollectionPanel(ctx.labId, "payment");
+      }
       window.setTimeout(() => {
         document.getElementById(`hq-credit-lab-${targetId}`)?.scrollIntoView({
           behavior: "smooth",
@@ -2134,6 +2141,8 @@ export default function CollectionsPage({
       return;
     }
     if (!collections.length) return;
+    if (ctx.orderId) setPaymentOrderId(str(ctx.orderId));
+    if (ctx.paymentAmount) setAmountCollected(String(ctx.paymentAmount));
     void openCollectionPanel(ctx.labId, ctx.focusSection || "details");
   }, [loading, collections.length, isLabAccount, currentUser, isAgentView]);
 
@@ -2483,9 +2492,10 @@ export default function CollectionsPage({
             const paidDate = localDateYmd(new Date());
             setLastPaymentByLabId((prev) => ({ ...prev, [paidLabKey]: paidDate }));
             setPaymentOrderId("");
+            invalidateOrdersReadCache();
 
             await loadCollections();
-            if (isAgentView && paymentDrawerLabId) {
+            if ((isAgentView || isHqCreditRisk) && paymentDrawerLabId) {
               setPaymentDrawerLabId("");
               setSelectedCollection(null);
               setHistory([]);
@@ -2741,7 +2751,7 @@ export default function CollectionsPage({
     if (focusSection !== "payment") {
       setPaymentOrderId("");
     }
-    if (isAgentView && focusSection === "payment") {
+    if ((isAgentView || isHqCreditRisk) && focusSection === "payment") {
       setPaymentDrawerLabId(key);
       void openCollection(labId, { focusSection, suppressExpand: true });
       return;
@@ -3033,6 +3043,7 @@ export default function CollectionsPage({
           currentUser={currentUser}
           onReviewLab={handleOpenLabReview}
           onOpenCollections={handleHqOpenCollections}
+          onRecordPayment={(labId) => openCollectionPanel(labId, "payment")}
         />
       ) : labDisplayCollections.length === 0 ? (
         isLabAccount ? (
@@ -3158,7 +3169,7 @@ export default function CollectionsPage({
         </div>
       )}
 
-      {isAgentView ? (
+      {(isAgentView || isHqCreditRisk) ? (
         <AgentCollectionPaymentDrawer
           open={Boolean(paymentDrawerLabId)}
           onClose={() => {
@@ -3180,7 +3191,7 @@ export default function CollectionsPage({
               readOnly={false}
               copy={accountLabels}
               focusSection="payment"
-              isAgentView
+              isAgentView={isAgentView}
               {...formProps}
             />
           ) : null}

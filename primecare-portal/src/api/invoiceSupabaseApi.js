@@ -273,8 +273,9 @@ export async function getInvoicesByOrderIdsRead(orderIds, options = {}) {
       console.warn("[getInvoicesByOrderIdsRead]", error.message);
       return { success: false, error: error.message, byOrderId };
     }
+    const allocationTotals = await fetchAllocatedTotalsByInvoiceId((data || []).map((r) => r.id));
     for (const row of data || []) {
-      const mapped = mapInvoiceRow(row);
+      const mapped = mapInvoiceRow(row, allocationTotals);
       if (mapped?.orderId) byOrderId[mapped.orderId] = mapped;
     }
   }

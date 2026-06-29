@@ -85,6 +85,7 @@ function WorkspaceLabRow({
   directoryUsers,
   onReviewLab,
   onOpenCollections,
+  onRecordPayment,
   onContactAgent,
   onNavigate,
 }) {
@@ -154,7 +155,15 @@ function WorkspaceLabRow({
           className="h-8 text-xs"
           onClick={() => onOpenCollections(item.labId)}
         >
-          Open Collections
+          Review Collections
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          className="h-8 text-xs"
+          onClick={() => onRecordPayment?.(item.labId)}
+        >
+          Record Payment
         </Button>
         <Button
           type="button"
@@ -200,6 +209,7 @@ export default function HqCreditRiskCommandCenter({
   currentUser,
   onReviewLab,
   onOpenCollections,
+  onRecordPayment,
 }) {
   const [attentionFilter, setAttentionFilter] = useState(
     () => str(initialAttentionFilter) || "ALL"
@@ -292,7 +302,9 @@ export default function HqCreditRiskCommandCenter({
     if (kind === "collections") {
       navigateToCollections(setActivePage, {
         labId: payload.labId,
+        orderId: payload.orderId,
         focusSection: payload.focusSection || "details",
+        paymentAmount: payload.paymentAmount,
         role: currentUser?.role,
       });
     }
@@ -598,6 +610,7 @@ export default function HqCreditRiskCommandCenter({
                         directoryUsers={directoryUsers}
                         onReviewLab={handleReviewLab}
                         onOpenCollections={onOpenCollections}
+                        onRecordPayment={onRecordPayment}
                         onContactAgent={handleContactAgent}
                         onNavigate={handleHqNavigate}
                       />
@@ -624,6 +637,7 @@ export default function HqCreditRiskCommandCenter({
                   directoryUsers={directoryUsers}
                   onReviewLab={handleReviewLab}
                   onOpenCollections={onOpenCollections}
+                  onRecordPayment={onRecordPayment}
                   onContactAgent={handleContactAgent}
                   onNavigate={handleHqNavigate}
                 />
