@@ -753,6 +753,7 @@ export default function OrdersPage({
   }
 
   function handleRecordOrderPayment() {
+    if (hqFrozen) return;
     if (!selectedOrderSummary?.labId || !canNavigateToCollections(currentUser?.role)) return;
     const outstanding = resolveOrderOutstanding(selectedOrderSummary, selectedOrderInvoice);
     navigateToCollections(setActivePage, {
@@ -858,7 +859,7 @@ export default function OrdersPage({
           className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
           role="status"
         >
-          HQ Orders is in read-only mode for this certified release. Status changes are disabled.
+          HQ Orders is in read-only mode for this certified release. Review and invoice actions stay available; status changes and payment recording are disabled.
         </div>
       ) : null}
 
@@ -1104,7 +1105,7 @@ export default function OrdersPage({
                               variant="outline"
                               size="sm"
                               className="h-7 px-2 text-[11px]"
-                              disabled={updatingStatus || hqFrozen}
+                              disabled={updatingStatus}
                               onClick={() => openOrder(order.orderId)}
                             >
                               Review
@@ -1157,7 +1158,7 @@ export default function OrdersPage({
                         variant="outline"
                         size="sm"
                         className="mt-2 h-9 w-full rounded-lg text-xs"
-                        disabled={updatingStatus || hqFrozen}
+                        disabled={updatingStatus}
                         onClick={() => openOrder(order.orderId)}
                       >
                         Review order
@@ -1482,6 +1483,7 @@ export default function OrdersPage({
                             type="button"
                             size="sm"
                             className="h-9 text-xs"
+                            disabled={hqFrozen}
                             onClick={handleRecordOrderPayment}
                           >
                             <CircleDollarSign className="mr-1.5 h-3.5 w-3.5" />
@@ -1531,6 +1533,7 @@ export default function OrdersPage({
                       size="sm"
                       disabled={
                         updatingStatus ||
+                        hqFrozen ||
                         detailsLoading ||
                         selectedOrderUx?.cancelled ||
                         selectedOrderUx?.fulfilled
@@ -1551,6 +1554,7 @@ export default function OrdersPage({
                       size="sm"
                       disabled={
                         updatingStatus ||
+                        hqFrozen ||
                         detailsLoading ||
                         selectedOrderUx?.cancelled ||
                         selectedOrderUx?.fulfilled
@@ -1564,6 +1568,7 @@ export default function OrdersPage({
                       size="sm"
                       disabled={
                         updatingStatus ||
+                        hqFrozen ||
                         detailsLoading ||
                         selectedOrderUx?.cancelled ||
                         selectedOrderUx?.fulfilled
@@ -1578,6 +1583,7 @@ export default function OrdersPage({
                       className="border-red-200 text-red-600 hover:bg-red-50"
                       disabled={
                         updatingStatus ||
+                        hqFrozen ||
                         detailsLoading ||
                         selectedOrderUx?.cancelled ||
                         selectedOrderUx?.fulfilled

@@ -379,6 +379,29 @@ async function main() {
     );
   }
 
+  const ordersPage = readFileSync(resolve(root, "src/pages/OrdersPage.jsx"), "utf8");
+  if (ordersPage.includes("isHqAdminFrozen") && !ordersPage.includes("disabled={updatingStatus || hqFrozen}")) {
+    pass("ui.freeze_review", "Review button is not disabled by HQ freeze");
+  } else {
+    fail("ui.freeze_review", "Review button incorrectly tied to hqFrozen disabled state");
+  }
+  if (
+    /onClick=\{\(\) => openOrder\(order\.orderId\)\}/.test(ordersPage) &&
+    /Status Actions[\s\S]{0,1200}hqFrozen/.test(ordersPage)
+  ) {
+    pass("ui.freeze_writes", "Status mutation buttons remain disabled when HQ is frozen");
+  } else {
+    fail("ui.freeze_writes", "Status mutation buttons missing HQ freeze guard");
+  }
+  if (
+    /disabled=\{hqFrozen\}[\s\S]{0,240}handleRecordOrderPayment/.test(ordersPage) &&
+    /function handleRecordOrderPayment\(\) \{[\s\S]{0,80}if \(hqFrozen\) return;/.test(ordersPage)
+  ) {
+    pass("ui.freeze_payment", "Record Payment disabled when HQ is frozen");
+  } else {
+    fail("ui.freeze_payment", "Record Payment missing HQ freeze guard");
+  }
+
   console.log("\n=== Summary ===");
   const failed = results.filter((r) => r.status === "FAIL");
   console.log(`PASS: ${results.filter((r) => r.status === "PASS").length}`);

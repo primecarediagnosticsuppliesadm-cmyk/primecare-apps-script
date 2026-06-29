@@ -44,5 +44,12 @@ assert(/Payment History/.test(invoiceCenter), "Invoice Center Payment History ac
 assert(/paidAmount/.test(orders), "Orders shows paid amount in payment panel");
 assert(/isHqCreditRisk[\s\S]*paymentDrawerLabId/.test(collections), "HQ credit risk payment drawer");
 assert(/onRecordPayment/.test(creditRisk), "Credit & Risk Record Payment action");
+assert(/isHqAdminFrozen/.test(orders), "Orders uses HQ freeze policy");
+assert(!/disabled=\{updatingStatus \|\| hqFrozen\}/.test(orders), "Review not disabled by HQ freeze");
+assert(/onClick=\{\(\) => openOrder\(order\.orderId\)\}/.test(orders), "Review opens order details");
+const ordersStatusActions = orders.slice(orders.indexOf("Status Actions"));
+assert(/Mark Processing/.test(ordersStatusActions) && /hqFrozen/.test(ordersStatusActions), "Status writes respect HQ freeze");
+assert(/function handleRecordOrderPayment\(\) \{[\s\S]{0,80}if \(hqFrozen\) return;/.test(orders), "Record Payment handler respects HQ freeze");
+assert(/disabled=\{hqFrozen\}[\s\S]{0,240}handleRecordOrderPayment/.test(orders), "Record Payment button respects HQ freeze");
 
 console.log("PASS — order payment sync wiring");
