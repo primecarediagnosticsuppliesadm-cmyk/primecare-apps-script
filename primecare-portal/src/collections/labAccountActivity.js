@@ -7,14 +7,34 @@ function str(v) {
   return String(v ?? "").trim();
 }
 
+function isRecord(v) {
+  return v != null && typeof v === "object";
+}
+
 function paymentMethodLabel(mode) {
   const m = str(mode);
   if (!m) return "";
   return m.charAt(0).toUpperCase() + m.slice(1);
 }
 
-function invoiceLabel(inv = {}) {
+function invoiceLabel(inv) {
+  if (!isRecord(inv)) return "";
   return str(inv.invoiceId ?? inv.invoiceNumber);
+}
+
+/** Drop null timeline rows and rows missing a title. */
+export function sanitizeTimelineEvents(events = []) {
+  return (events || []).filter((row) => isRecord(row) && str(row.title));
+}
+
+/** Drop null/invalid invoice rows before timeline or summary use. */
+export function filterValidInvoices(invoices = []) {
+  return (invoices || []).filter(isRecord);
+}
+
+/** Drop null/invalid payment history rows. */
+export function filterValidPaymentHistory(history = []) {
+  return (history || []).filter(isRecord);
 }
 
 function buildInvoiceLifecycleEvents({
@@ -24,7 +44,7 @@ function buildInvoiceLifecycleEvents({
   const events = [];
   const seen = new Set();
 
-  for (const inv of invoices) {
+  for (const inv of filterValidInvoices(invoices)) {
     const label = invoiceLabel(inv);
     const orderId = str(inv.orderId);
     const total = num(inv.totalAmount ?? inv.amount);
@@ -87,6 +107,12 @@ function buildInvoiceLifecycleEvents({
   return events;
 }
 
+function paymentAppliedLine(invoiceNum, orderId) {
+  if (invoiceNum) return `Applied to Invoice ${invoiceNum}`;
+  if (orderId) return `Applied to order ${orderId}`;
+  return null;
+}
+
 function buildPaymentActivityEvents({
   history = [],
   invoices = [],
@@ -95,35 +121,33 @@ function buildPaymentActivityEvents({
 } = {}) {
   const outstandingNow = num(item?.outstandingAmount);
   const invoiceByOrder = new Map();
-  for (const inv of invoices || []) {
+  for (const inv of filterValidInvoices(invoices)) {
     const oid = str(inv.orderId);
     if (oid) invoiceByOrder.set(oid, inv);
   }
 
   const events = [];
-  for (const entry of history || []) {
+  for (const entry of filterValidPaymentHistory(history)) {
     const amount = num(entry.amountCollected ?? entry.amount);
     if (amount <= 0) continue;
 
     const orderId = str(entry.orderId ?? entry.order_id);
-    const linkedInvoice = orderId ? invoiceByOrder.get(orderId) : null;
+    const linkedInvoice = orderId ? invoiceByOrder.get(orderId) ?? null : null;
     const invoiceNum =
-      str(entry.invoiceId ?? entry.invoice_id) || invoiceLabel(linkedInvoice);
+      str(entry.invoiceId ?? entry.invoice_id) ||
+      (linkedInvoice ? invoiceLabel(linkedInvoice) : "");
     const paymentDate = entry.paymentDate ?? entry.sortAt ?? entry.updatedAt ?? "";
     const mode = paymentMethodLabel(entry.paymentMode ?? entry.mode);
     const paymentId = str(entry.paymentId ?? entry.payment_id);
     const outstandingAfter = num(entry.outstandingAfter ?? entry.outstanding_after);
     const reducedTo = Number.isFinite(outstandingAfter) ? outstandingAfter : outstandingNow;
+    const appliedLine = paymentAppliedLine(invoiceNum, orderId);
 
     events.push({
       id: paymentId ? `pay-${paymentId}` : `pay-${paymentDate}-${amount}-${orderId}`,
       title: "Payment received",
       amount: formatMoney(amount),
-      lines: [
-        invoiceNum ? `Applied to Invoice ${invoiceNum}` : null,
-        orderId ? `Order ${orderId}` : null,
-        mode ? `Method ${mode}` : null,
-      ].filter(Boolean),
+      lines: [appliedLine, mode ? `Method ${mode}` : null].filter(Boolean),
       trailingLabel: "Outstanding after payment",
       trailingAmount: formatMoney(reducedTo),
       date: paymentDate,
@@ -158,35 +182,41 @@ export function buildLabAccountActivityTimeline({
 } = {}) {
   void formatShortDate;
 
-  const lifecycle = buildInvoiceLifecycleEvents({ invoices, formatMoney });
-  const payments = buildPaymentActivityEvents({ history, invoices, item, formatMoney });
-  const merged = [...lifecycle, ...payments];
+  try {
+    const lifecycle = buildInvoiceLifecycleEvents({ invoices, formatMoney });
+    const payments = buildPaymentActivityEvents({ history, invoices, item, formatMoney });
+    const merged = [...lifecycle, ...payments];
 
-  if (merged.length) {
-    const seen = new Set();
-    return merged
-      .filter((row) => {
-        const key = `${row.id}|${row.title}|${row.sortKey}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return Boolean(str(row.sortKey) || str(row.date));
-      })
-      .sort((a, b) => str(b.sortKey).localeCompare(str(a.sortKey)));
-  }
+    if (merged.length) {
+      const seen = new Set();
+      return sanitizeTimelineEvents(
+        merged
+          .filter((row) => {
+            const key = `${row.id}|${row.title}|${row.sortKey}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return Boolean(str(row.sortKey) || str(row.date));
+          })
+          .sort((a, b) => str(b.sortKey).localeCompare(str(a.sortKey)))
+      );
+    }
 
-  const outstandingNow = num(item?.outstandingAmount);
-  if (outstandingNow > 0.009) {
-    return [
-      {
-        id: "account-open",
-        title: "Outstanding balance on account",
-        lines: ["No payment recorded yet"],
-        trailingAmount: formatMoney(outstandingNow),
-        date: str(item?.dueDate ?? item?.nextFollowUp),
-        kind: "pending",
-        sortKey: str(item?.dueDate ?? item?.nextFollowUp),
-      },
-    ];
+    const outstandingNow = num(item?.outstandingAmount);
+    if (outstandingNow > 0.009) {
+      return sanitizeTimelineEvents([
+        {
+          id: "account-open",
+          title: "Outstanding balance on account",
+          lines: ["No payment recorded yet"],
+          trailingAmount: formatMoney(outstandingNow),
+          date: str(item?.dueDate ?? item?.nextFollowUp),
+          kind: "pending",
+          sortKey: str(item?.dueDate ?? item?.nextFollowUp),
+        },
+      ]);
+    }
+  } catch (err) {
+    console.warn("[buildLabAccountActivityTimeline]", err?.message || err);
   }
 
   return [];

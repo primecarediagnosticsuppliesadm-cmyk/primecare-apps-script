@@ -84,16 +84,18 @@ export default function InvoicePaymentHistoryModal({
 
         const paymentsById = new Map();
         for (const row of historyRows || []) {
-          if (row.paymentId) paymentsById.set(row.paymentId, row);
+          if (!row?.paymentId) continue;
+          paymentsById.set(row.paymentId, row);
         }
 
         const orderKey = String(orderId || "").trim();
         const rows = (allocRes.rows || [])
+          .filter((alloc) => alloc && typeof alloc === "object")
           .map((alloc) => {
-            const payment = paymentsById.get(alloc.paymentId);
+            const payment = alloc.paymentId ? paymentsById.get(alloc.paymentId) : null;
             if (orderKey && payment?.orderId && payment.orderId !== orderKey) return null;
             return {
-              id: alloc.id,
+              id: alloc.id || `${alloc.paymentId}-${alloc.createdAt}`,
               date: payment?.paymentDate || payment?.sortAt || alloc.createdAt,
               method: payment?.paymentMode || "—",
               amount: alloc.allocatedAmount,

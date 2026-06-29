@@ -36,9 +36,14 @@ export function parseCollectionsNotesTimeline(collectionsNotes) {
   return events;
 }
 
+function isRecord(v) {
+  return v != null && typeof v === "object";
+}
+
 function buildPaymentActivityEvents(history = []) {
-  return (history || []).map((entry, index) => {
+  return (history || []).filter(isRecord).map((entry, index) => {
     const amount = num(entry.amountCollected ?? entry.amount ?? 0);
+    if (amount <= 0) return null;
     const date = str(entry.paymentDate ?? entry.payment_date ?? entry.sortAt ?? "").slice(0, 10);
     const paymentId = str(entry.paymentId ?? entry.payment_id ?? "") || `PAY-${index + 1}`;
     const mode = str(entry.paymentMode ?? entry.mode ?? "");
@@ -53,8 +58,7 @@ function buildPaymentActivityEvents(history = []) {
       title: "Payment received",
       amount: formatInr(amount),
       lines: [
-        invoiceId ? `Applied to Invoice ${invoiceId}` : null,
-        orderId ? `Order ${orderId}` : null,
+        invoiceId ? `Applied to Invoice ${invoiceId}` : orderId ? `Applied to order ${orderId}` : null,
         mode ? `Method ${mode}` : null,
       ].filter(Boolean),
       trailingLabel: outstandingAfter || outstandingAfter === 0 ? "Outstanding after payment" : null,
@@ -68,7 +72,7 @@ function buildPaymentActivityEvents(history = []) {
       orderId,
       kind: "payment",
     };
-  });
+  }).filter(isRecord);
 }
 
 /**
@@ -77,7 +81,7 @@ function buildPaymentActivityEvents(history = []) {
 export function buildNonPaymentActivityEvents({ collectionsNotes = "", openOrders = [] } = {}) {
   const events = [...parseCollectionsNotesTimeline(collectionsNotes)];
 
-  for (const order of openOrders || []) {
+  for (const order of (openOrders || []).filter(isRecord)) {
     const date = str(order.fulfilledAt ?? order.updatedAt ?? order.orderDate ?? order.createdAt).slice(
       0,
       10

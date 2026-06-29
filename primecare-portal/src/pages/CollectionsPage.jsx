@@ -63,6 +63,8 @@ import {
 } from "@/collections/invoiceAccountStatus.js";
 import {
   buildLabAccountActivityTimeline,
+  filterValidInvoices,
+  sanitizeTimelineEvents,
 } from "@/collections/labAccountActivity.js";
 import InvoiceStatusBadge from "@/components/invoice/InvoiceStatusBadge.jsx";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
@@ -364,8 +366,8 @@ function labTopCreditKpiDisplay({ labLedgerKpis, collectionRow }) {
 }
 
 function financialStatusSummary(item, invoices = []) {
-  const totalAllocated = invoices.reduce(
-    (sum, inv) => sum + Number(inv.allocatedAmount ?? 0),
+  const totalAllocated = filterValidInvoices(invoices).reduce(
+    (sum, inv) => sum + Number(inv?.allocatedAmount ?? 0),
     0
   );
   return deriveAccountHealthStatus({
@@ -403,6 +405,7 @@ function buildInvoiceRows(item, history) {
   }
 
   for (const entry of history || []) {
+    if (!entry || typeof entry !== "object") continue;
     const invoiceId = String(entry.invoiceId || entry.invoice_id || "").trim();
     const orderId = String(entry.orderId || entry.order_id || "").trim();
     const amount = Number(
@@ -450,6 +453,11 @@ function splitActivityMetaLines(subline, trailing) {
 }
 
 function LabActivityTimelineEntry({ entry }) {
+  if (!entry || typeof entry !== "object") {
+    return (
+      <p className="text-[10px] text-muted-foreground">Activity entry unavailable</p>
+    );
+  }
   const isPayment = entry.kind === "payment";
   const metaLines = Array.isArray(entry.lines)
     ? entry.lines
@@ -495,6 +503,7 @@ function LabOpenInvoiceSummaryRow({
   onDownload,
   onSubmitAdvice,
 }) {
+  if (!invoice || typeof invoice !== "object") return null;
   const openBalance = Number(invoice.openBalance ?? invoice.amount ?? 0);
   const downloadKey = invoice.invoiceDbId || invoice.orderId || rowId;
   const downloading = invoiceDownloadKey === downloadKey;
@@ -592,7 +601,7 @@ function LabOpenInvoiceSummaryRow({
 function groupTimelineByDate(events) {
   const buckets = [];
   const byLabel = new Map();
-  for (const event of events || []) {
+  for (const event of sanitizeTimelineEvents(events)) {
     const label = formatShortDate(event.date || "");
     if (!byLabel.has(label)) {
       const next = { label, items: [] };
@@ -649,7 +658,9 @@ function LabAccountTimeline({
 
   const invoices = useMemo(() => {
     if (serverInvoices.length) {
-      return serverInvoices.map((inv) => ({
+      return serverInvoices
+        .filter((inv) => inv && typeof inv === "object")
+        .map((inv) => ({
         invoiceId: inv.invoiceNumber || inv.id,
         invoiceDbId: inv.id,
         orderId: inv.orderId,
@@ -676,23 +687,26 @@ function LabAccountTimeline({
         }),
       }));
     }
-    return buildInvoiceRows(collectionDetails || item, history);
+    return filterValidInvoices(buildInvoiceRows(collectionDetails || item, history));
   }, [serverInvoices, collectionDetails, item, history]);
   const health = useMemo(
     () => financialStatusSummary(item, invoices),
     [item, invoices]
   );
-  const financialTimeline = useMemo(
-    () =>
-      buildLabAccountActivityTimeline({
+  const financialTimeline = useMemo(() => {
+    try {
+      return buildLabAccountActivityTimeline({
         item: collectionDetails || item,
         history,
         invoices,
         formatMoney,
         formatShortDate,
-      }),
-    [collectionDetails, item, history, invoices]
-  );
+      });
+    } catch (err) {
+      console.warn("CollectionsPage financialTimeline:", err?.message || err);
+      return [];
+    }
+  }, [collectionDetails, item, history, invoices]);
   const timelineGroups = useMemo(() => groupTimelineByDate(financialTimeline), [financialTimeline]);
   const accountStandingSummary =
     overdueDays > 0
@@ -705,7 +719,7 @@ function LabAccountTimeline({
   const lastPaymentDate = deriveLastPaymentDateFromHistory(history);
   const openInvoicesTop = useMemo(
     () =>
-      invoices
+      filterValidInvoices(invoices)
         .filter(isCustomerFacingOpenInvoice)
         .sort((a, b) => str(b.dueDate).localeCompare(str(a.dueDate)))
         .slice(0, 5),
@@ -713,11 +727,13 @@ function LabAccountTimeline({
   );
   const statementRows = useMemo(
     () =>
-      invoices.slice(0, 12).map((invoice, idx) => ({
-        id: `${invoice.invoiceId}-${idx}`,
-        title: `${invoice.invoiceId}`,
-        detail: `Order ${invoice.orderId || "—"} · ${formatMoney(invoice.amount)}`,
-        date: invoice.dueDate,
+      filterValidInvoices(invoices)
+        .slice(0, 12)
+        .map((invoice, idx) => ({
+        id: `${invoice?.invoiceId || "invoice"}-${idx}`,
+        title: `${invoice?.invoiceId || "Invoice"}`,
+        detail: `Order ${invoice?.orderId || "—"} · ${formatMoney(invoice?.amount)}`,
+        date: invoice?.dueDate,
       })),
     [invoices]
   );
@@ -753,7 +769,7 @@ function LabAccountTimeline({
   );
   const tabRows =
     activeFinanceTab === "activity"
-      ? financialTimeline.map((entry) => ({
+      ? sanitizeTimelineEvents(financialTimeline).map((entry) => ({
           id: entry.id,
           title: entry.title,
           amount: entry.amount,
@@ -867,9 +883,9 @@ function LabAccountTimeline({
           <div className="space-y-1.5">
             {openInvoicesTop.map((invoice, idx) => (
               <LabOpenInvoiceSummaryRow
-                key={`${invoice.invoiceId}-${idx}`}
+                key={`${invoice?.invoiceId || "invoice"}-${idx}`}
                 invoice={invoice}
-                rowId={`${invoice.invoiceId}-${idx}`}
+                rowId={`${invoice?.invoiceId || "invoice"}-${idx}`}
                 invoiceDownloadKey={invoiceDownloadKey}
                 onView={setInvoiceDrawer}
                 onDownload={handleInvoiceDownload}
