@@ -33,6 +33,7 @@ Tracks functional, UX, architecture, security, RLS, data, and production-readine
 | GAP-018 | Admin UAT / Credit & Risk | Medium | Certified | KPI/AR reconcile on golden labs; 22 inactive AR rows; aging buckets 1–15/16–30/31+ (not 30/60/90 DB-driven). |
 | GAP-019 | Admin UAT / Labs | Medium | Certified | Tenant isolation, ownership sync, KPI/AR reconcile; no edit API; PROSPECT status on golden labs; filters only (no text search/pagination). |
 | GAP-020 | Admin UAT / Operations Center | Medium | Certified | Bundle/RLS/ownership reconcile; role escalation blocked; 26 distributor pilot ownership rows; profiles unbounded read. |
+| GAP-021 | Invoice Payment Lifecycle | Critical | Fixed | AR updated without `invoice_payment_allocations` when fulfilled-order invoice remained internal `draft` (PDF/send step skipped before payment). |
 
 ---
 
@@ -418,3 +419,44 @@ User provisioning / role guards / lab ownership integrity / RLS
 
 ### Status
 **Certified** (GO for Operations Center module; manual provisioning UAT recommended)
+
+---
+
+## GAP-021: AR Updated Without Invoice Allocation (Draft Invoice Payment)
+
+### Severity
+Critical
+
+### Type
+Financial sync / Invoice lifecycle / Data integrity
+
+### Current Behavior (before fix)
+- `create_invoice_for_fulfilled_order` creates invoice with `status = draft` (internal snapshot).
+- `generate-invoice-pdf` edge function is the only path to `draft → sent` (+ PDF + `sent_at`).
+- `createPaymentWrite` could record payment and update `ar_credit_control` while invoice remained `draft`.
+- `autoAllocatePaymentToOrderInvoice` skipped allocation (`invoice_not_allocatable`).
+- Result: Payments & Account showed correct AR outstanding; Orders / Invoice Center showed allocated ₹0 and open ₹360.
+
+### Example
+- Invoice `INV-2026-000047` / order `ORD-1782741100435-jpjjec`
+- Payment `PAY-1782742370049-nwvk5e` ₹350 recorded; zero `invoice_payment_allocations` rows.
+
+### Expected Behavior (strict lifecycle)
+1. Fulfillment → internal `draft` invoice.
+2. First payment (or explicit download) → finalize PDF → `sent`.
+3. Payment write → `post_collection_payment` → `allocate_payment_to_invoice`.
+4. All modules read allocation-based invoice summary; AR and allocations reconcile.
+
+### Fix
+- `finalizeInvoiceForOrderPayment` before `post_collection_payment` when order-linked invoice exists.
+- Block payment if PDF finalization fails.
+- Compensate AR + delete payment if allocation fails on newly created payment.
+- `logFinancialDriftDetected` when drift detected on idempotent/orphan paths.
+- Repair script: `scripts/repair-invoice-payment-drift.mjs`.
+
+### Verification
+- `node scripts/verify-partial-payment-sync.mjs`
+- `node scripts/repair-invoice-payment-drift.mjs` (existing drift)
+
+### Status
+**Fixed** (strict lifecycle; no draft allocation SQL relaxation)

@@ -13,9 +13,16 @@ export default function PageHeader({
   secondaryActions = null,
   freshness = null,
   className,
+  compact = false,
 }) {
   return (
-    <header className={cn("flex flex-wrap items-start justify-between gap-3", className)}>
+    <header
+      className={cn(
+        "flex flex-wrap items-start justify-between",
+        compact ? "gap-2" : "gap-3",
+        className
+      )}
+    >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           {Icon ? (
@@ -23,7 +30,9 @@ export default function PageHeader({
           ) : null}
           <h1 className={typography.pageTitle}>{title}</h1>
         </div>
-        {subtitle ? <p className={cn(typography.pageSubtitle, "mt-0.5")}>{subtitle}</p> : null}
+        {subtitle ? (
+          <p className={cn(typography.pageSubtitle, compact ? "mt-0" : "mt-0.5")}>{subtitle}</p>
+        ) : null}
         {freshness}
       </div>
       {actions || secondaryActions ? (

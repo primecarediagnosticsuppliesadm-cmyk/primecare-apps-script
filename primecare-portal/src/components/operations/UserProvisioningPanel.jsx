@@ -29,22 +29,36 @@ import {
   formatOpsDate,
   isAgentRole,
   labAssignmentKey,
-  labsForAgent,
   matchesSearch,
   platformRoleLabel,
   distributorsForAgent,
   requiresDistributorScope,
 } from "@/operations/operationsCenterAdminEngine.js";
 import {
+  DIRECTORY_AUDIENCE_FILTERS,
+  DIRECTORY_DEFAULT_AUDIENCE,
+  buildDirectoryAudienceFilterOptions,
+  computeDirectoryAudienceCounts,
   filterDirectoryUsers,
   isLoginEnabledRole,
+  resolveDirectoryRowActions,
   sortDirectoryUsers,
   suggestAgentId,
   territoryOptionsFromDistributors,
+  USER_DIRECTORY_CLASS,
 } from "@/operations/userProvisioningEngine.js";
+import { labsForAgentPortalAligned } from "@/operations/userDirectoryIntegrityEngine.js";
+import {
+  buildOperationsAttentionItems,
+  buildOperationsHealthItems,
+  buildOperationsReadinessFooterState,
+  formatLastRefreshLabel,
+} from "@/operations/operationsCenterCertificationUi.js";
+import { navigateToCreditRisk } from "@/operations/hqWorkflowNav.js";
+import { IS_DEV, IS_QA } from "@/config/environment.js";
 import { ROLES } from "@/config/roles.js";
 import { cn } from "@/lib/utils";
-import { Plus, Search, Copy, X } from "lucide-react";
+import { Plus, Search, Copy, X, ChevronDown } from "lucide-react";
 import UserDetailDrawer from "@/components/operations/UserDetailDrawer.jsx";
 import LabOwnershipPanel from "@/components/operations/LabOwnershipPanel.jsx";
 import PilotOnboardingImportPanel from "@/components/operations/PilotOnboardingImportPanel.jsx";
@@ -197,6 +211,38 @@ function formatLabList(labs, limit = 5) {
   return lines.join("\n");
 }
 
+function NotAssignedBadge() {
+  return (
+    <Badge variant="outline" className="text-[10px] font-normal text-slate-500">
+      Not assigned
+    </Badge>
+  );
+}
+
+function UserClassBadge({ userClass }) {
+  if (userClass === USER_DIRECTORY_CLASS.PROBE_DEBUG) {
+    return (
+      <Badge className="ml-1 bg-amber-100 text-[10px] font-medium text-amber-900 hover:bg-amber-100">
+        Probe
+      </Badge>
+    );
+  }
+  if (userClass === USER_DIRECTORY_CLASS.QA_TEST) {
+    return (
+      <Badge variant="secondary" className="ml-1 text-[10px] font-normal">
+        QA
+      </Badge>
+    );
+  }
+  return null;
+}
+
+function DirectoryValueCell({ value }) {
+  const text = String(value ?? "").trim();
+  if (!text) return <NotAssignedBadge />;
+  return <span>{text}</span>;
+}
+
 function SearchInput({ value, onChange, placeholder }) {
   return (
     <div className="relative min-w-[200px] flex-1">
@@ -204,9 +250,420 @@ function SearchInput({ value, onChange, placeholder }) {
       <Input
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
+        placeholder={
+          placeholder ||
+          "Search name, username, email, phone, agent ID, lab ID, territory, distributor, tenant…"
+        }
         className="h-8 pl-8 text-xs"
       />
+    </div>
+  );
+}
+
+function OperationsKpiCard({ value, label, hint, onClick, className }) {
+  const clickable = typeof onClick === "function";
+  const Comp = clickable ? "button" : "div";
+  return (
+    <Comp
+      type={clickable ? "button" : undefined}
+      onClick={onClick}
+      aria-label={clickable ? `${label}: ${value ?? 0}. Click to navigate.` : undefined}
+      className={cn(
+        "rounded-lg border bg-white p-2.5 text-left shadow-sm transition-all duration-200",
+        clickable &&
+          "cursor-pointer hover:-translate-y-0.5 hover:border-indigo-300 hover:bg-indigo-50/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-1",
+        className
+      )}
+    >
+      <p className="text-lg font-bold tabular-nums text-slate-900">{value ?? 0}</p>
+      <p className="text-[11px] font-medium text-slate-600">{label}</p>
+      {hint ? <p className="mt-0.5 text-[10px] text-slate-400">{hint}</p> : null}
+      {clickable ? (
+        <p className="mt-1 text-[10px] font-medium text-indigo-600/80">View →</p>
+      ) : null}
+    </Comp>
+  );
+}
+
+function EnvironmentSummaryBanner({ counts = {} }) {
+  const items = [
+    { label: "Total Users", value: counts.total },
+    { label: "Production Users", value: counts.production },
+    { label: "QA Users", value: counts.qa },
+    { label: "Probe Users", value: counts.probe },
+    { label: "Inactive Users", value: counts.inactive },
+  ];
+  return (
+    <section
+      className="rounded-lg border border-indigo-100 bg-indigo-50/40 px-4 py-3"
+      aria-label="Environment summary"
+    >
+      <h3 className="text-xs font-semibold text-slate-900">Environment Summary</h3>
+      <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-3 lg:grid-cols-5">
+        {items.map((item) => (
+          <div key={item.label} className="flex justify-between gap-2 sm:block">
+            <dt className="text-slate-600">{item.label}</dt>
+            <dd className="font-semibold tabular-nums text-slate-900 sm:mt-0.5">{item.value ?? 0}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function OperationalAttentionStrip({ items = [], onNavigateItem }) {
+  if (!items.length) return null;
+  return (
+    <section
+      className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm"
+      aria-label="Operational attention"
+    >
+      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+        Requires Action
+      </h3>
+      <div className="flex flex-wrap gap-2">
+        {items.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => onNavigateItem?.(item)}
+            className={cn(
+              "inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50/80 px-2.5 py-1.5 text-left text-xs font-medium text-slate-900",
+              "cursor-pointer transition-all hover:-translate-y-0.5 hover:border-indigo-300 hover:bg-indigo-50/60 hover:shadow-sm",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-1"
+            )}
+            aria-label={`${item.label}: ${item.count}. Click to review.`}
+          >
+            <span aria-hidden="true">{item.emoji}</span>
+            <span>{item.label}</span>
+            <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-indigo-700 ring-1 ring-indigo-100">
+              {item.count}
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function OperationsHealthPanel({ items = [], onNavigateItem }) {
+  if (!items.length) return null;
+  const allPass = items.every((item) => item.status === "pass");
+  return (
+    <section
+      className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+      aria-label="Operations health"
+    >
+      <h3 className="mb-2 text-xs font-semibold text-slate-900">Operations Health</h3>
+      <ul className="space-y-1">
+        {items.map((item) => {
+          const icon = item.status === "pass" ? "✓" : "⚠";
+          const clickable = typeof onNavigateItem === "function" && item.status === "warn";
+          const Comp = clickable ? "button" : "div";
+          return (
+            <li key={item.id}>
+              <Comp
+                type={clickable ? "button" : undefined}
+                onClick={clickable ? () => onNavigateItem(item) : undefined}
+                className={cn(
+                  "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs",
+                  clickable &&
+                    "cursor-pointer transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400",
+                  item.status === "warn" ? "text-amber-900" : "text-slate-800"
+                )}
+                aria-label={`${item.label}: ${item.status === "pass" ? "pass" : "warning"}${item.detail ? `, ${item.detail}` : ""}`}
+              >
+                <span>
+                  <span className="mr-1.5" aria-hidden="true">
+                    {icon}
+                  </span>
+                  {item.label}
+                  {item.detail ? (
+                    <span className="ml-1 text-slate-500">{item.detail}</span>
+                  ) : null}
+                </span>
+                {clickable ? (
+                  <span className="text-[10px] font-medium text-indigo-600">View →</span>
+                ) : null}
+              </Comp>
+            </li>
+          );
+        })}
+      </ul>
+      {allPass ? (
+        <p className="mt-2 rounded-md border border-dashed border-emerald-200 bg-emerald-50/50 px-2 py-1.5 text-[11px] text-emerald-900">
+          No integrity issues detected. All ownership relationships are synchronized.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function OperationsReadinessFooter({ footer = {}, loadedAt = null }) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!loadedAt) return undefined;
+    const id = window.setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => window.clearInterval(id);
+  }, [loadedAt]);
+  void tick;
+
+  const rows = [
+    ["Environment", footer.environmentLabel],
+    ["Users", footer.usersCount],
+    ["Ownership", footer.ownershipLabel],
+    ["Assignments", footer.assignmentsLabel],
+    ["Integrity", footer.integrityLabel],
+    ["Last Refresh", formatLastRefreshLabel(loadedAt)],
+    ["Overall", footer.overallLabel],
+  ];
+  return (
+    <footer
+      className="mt-6 rounded-lg border border-slate-200 bg-slate-50/80 px-4 py-3"
+      aria-label="Operations Center status"
+    >
+      <p className="text-xs font-semibold text-slate-900">Operations Center Status</p>
+      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-3 lg:grid-cols-7">
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <dt className="text-slate-500">{label}</dt>
+            <dd
+              className={cn(
+                "mt-0.5 font-medium tabular-nums text-slate-900",
+                label === "Overall" &&
+                  (footer.ready ? "text-emerald-700" : "text-amber-800"),
+                (label === "Ownership" || label === "Assignments" || label === "Integrity") &&
+                  value === "Attention" &&
+                  "text-amber-800"
+              )}
+            >
+              {value ?? "—"}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {footer.buildMetadata ? (
+        <p className="mt-2 text-[10px] text-slate-400">{footer.buildMetadata}</p>
+      ) : null}
+    </footer>
+  );
+}
+
+function IntegrityWarningsBanner({
+  warnings = [],
+  ignoredKeys = new Set(),
+  onReviewUser,
+  onTransferUser,
+  onIgnore,
+}) {
+  const visible = (warnings || []).filter((w) => !ignoredKeys.has(w.id));
+  if (!visible.length) return null;
+
+  return (
+    <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-950" id="ops-integrity-warnings">
+      <p className="font-semibold">Directory integrity — action required</p>
+      {visible.map((warning) => (
+        <div key={warning.id} className="rounded-md border border-amber-200/80 bg-white/60 p-2">
+          <p className="font-medium">{warning.title}</p>
+          <p className="text-amber-900/90">{warning.detail}</p>
+          {(warning.items || []).slice(0, 5).map((item) => {
+            const itemKey = `${warning.id}::${item.userId || item.labId || item.key}`;
+            if (ignoredKeys.has(itemKey)) return null;
+            const label =
+              item.name && item.assignedLabsCount != null
+                ? `${item.name} — ${item.assignedLabsCount} lab(s)`
+                : item.labId || item.key || "Issue";
+            return (
+              <div
+                key={itemKey}
+                className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-amber-100 pt-2"
+              >
+                <span className="text-amber-950">{label}</span>
+                <div className="flex flex-wrap gap-1">
+                  {item.userId && onReviewUser ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-[10px]"
+                      onClick={() => onReviewUser(item.userId)}
+                    >
+                      Review
+                    </Button>
+                  ) : null}
+                  {item.userId && onTransferUser ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-[10px]"
+                      onClick={() => onTransferUser(item.userId)}
+                    >
+                      Transfer
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-[10px] text-slate-600"
+                    onClick={() => onIgnore(itemKey)}
+                  >
+                    Ignore
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+          <div className="mt-2 flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-[10px] text-slate-600"
+              onClick={() => onIgnore(warning.id)}
+            >
+              Dismiss banner
+            </Button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DirectoryRowActionsMenu({
+  user,
+  rowActions,
+  busyId,
+  resettingUserId,
+  onReview,
+  onAssign,
+  onDeactivate,
+  onReactivate,
+  onTransferLab,
+  onResetPassword,
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef(null);
+  const firstItemRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (event) => {
+      if (!menuRef.current?.contains(event.target)) setOpen(false);
+    };
+    const handleKey = (event) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    window.setTimeout(() => firstItemRef.current?.focus(), 0);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [open]);
+
+  const secondaryItems = [];
+  if (rowActions.assign) {
+    secondaryItems.push({ key: "assign", label: "Assign Labs", onClick: () => onAssign(user) });
+  }
+  if (rowActions.assignLab) {
+    secondaryItems.push({ key: "assignLab", label: "Assign Lab", onClick: () => onAssign(user) });
+  }
+  if (rowActions.transferLab) {
+    secondaryItems.push({
+      key: "transfer",
+      label: "Transfer Labs",
+      onClick: () => onTransferLab(user),
+    });
+  }
+  if (rowActions.resetPassword) {
+    secondaryItems.push({
+      key: "reset",
+      label: "Reset Password",
+      onClick: () => onResetPassword(user),
+      disabled: resettingUserId === user.userId,
+    });
+  }
+  if (rowActions.reactivate) {
+    secondaryItems.push({
+      key: "reactivate",
+      label: "Activate",
+      onClick: () => onReactivate(user),
+      disabled: busyId === user.userId,
+    });
+  }
+  if (rowActions.deactivate) {
+    secondaryItems.push({
+      key: "deactivate",
+      label: "Deactivate",
+      onClick: () => onDeactivate(user),
+      destructive: true,
+      disabled: busyId === user.userId,
+    });
+  }
+
+  return (
+    <div className="relative flex items-center gap-1" ref={menuRef}>
+      {rowActions.review ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 px-2 text-[10px]"
+          onClick={() => onReview(user)}
+        >
+          Review
+        </Button>
+      ) : null}
+      {secondaryItems.length > 0 ? (
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 gap-0.5 px-2 text-[10px]"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            aria-haspopup="menu"
+            aria-label={`More actions for ${user.displayName || user.name}`}
+          >
+            More
+            <ChevronDown className={cn("h-3 w-3 transition-transform", open && "rotate-180")} />
+          </Button>
+          {open ? (
+            <div
+              role="menu"
+              className="absolute right-0 top-full z-20 mt-1 min-w-[9rem] rounded-md border border-slate-200 bg-white py-1 shadow-lg"
+            >
+              {secondaryItems.map((item, index) => (
+                <button
+                  key={item.key}
+                  ref={index === 0 ? firstItemRef : undefined}
+                  type="button"
+                  role="menuitem"
+                  disabled={item.disabled}
+                  className={cn(
+                    "block w-full px-3 py-1.5 text-left text-[11px] hover:bg-slate-50 disabled:opacity-50",
+                    item.destructive ? "text-red-700" : "text-slate-800"
+                  )}
+                  onClick={() => {
+                    setOpen(false);
+                    item.onClick();
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </>
+      ) : null}
+      {rowActions.probeRestricted ? (
+        <span className="text-[10px] text-amber-800">Review only</span>
+      ) : null}
     </div>
   );
 }
@@ -633,6 +1090,7 @@ function UserAssignmentDrawer({
   user,
   agents,
   labAssignments,
+  ownershipRows = [],
   distributors,
   tenantId,
   actorRole = "",
@@ -643,7 +1101,9 @@ function UserAssignmentDrawer({
   roleOptions,
 }) {
   const [role, setRole] = useState(user?.role || "agent");
-  const agentLabs = isAgentRole(role) ? labsForAgent(user, labAssignments) : [];
+  const agentLabs = isAgentRole(role)
+    ? labsForAgentPortalAligned(user, labAssignments, ownershipRows)
+    : [];
   const agentDists = isAgentRole(role) ? distributorsForAgent(user, distributors) : [];
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
@@ -1500,6 +1960,7 @@ export default function UserProvisioningPanel({
   openAssignDrawer = false,
   focusLabId = "",
   initialTab = "",
+  loadedAt = null,
   onNavIntentHandled,
   onReload,
   onError,
@@ -1510,6 +1971,8 @@ export default function UserProvisioningPanel({
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [audienceFilter, setAudienceFilter] = useState(DIRECTORY_DEFAULT_AUDIENCE);
+  const [ownershipScrollUnassigned, setOwnershipScrollUnassigned] = useState(false);
   const [sortKey, setSortKey] = useState("name");
   const [sortDir, setSortDir] = useState("asc");
   const [busyId, setBusyId] = useState("");
@@ -1523,6 +1986,8 @@ export default function UserProvisioningPanel({
   const [resettingUserId, setResettingUserId] = useState("");
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [reviewUser, setReviewUser] = useState(null);
+  const [ignoredIntegrityKeys, setIgnoredIntegrityKeys] = useState(() => new Set());
+  const integrityBannerRef = useRef(null);
 
   const roleOptions = useMemo(
     () => filterPlatformRoleOptionsForActor(actorRole || bundle?.actorRole || ROLES.ADMIN),
@@ -1531,18 +1996,63 @@ export default function UserProvisioningPanel({
   const agents = bundle?.agents || [];
   const directoryUsers = bundle?.directoryUsers || [];
   const labAssignments = bundle?.labAssignments || [];
+  const ownershipRows = bundle?.ownershipRows || [];
   const distributorAssignments = bundle?.distributorAssignments || [];
   const auditEvents = bundle?.auditEvents || [];
   const kpis = bundle?.kpis || {};
+  const directoryIntegrity = bundle?.directoryIntegrity || { warnings: [], summary: {} };
+  const allowProbeActions = IS_DEV || IS_QA;
+
+  const audienceCounts = useMemo(
+    () => computeDirectoryAudienceCounts(directoryUsers),
+    [directoryUsers]
+  );
+  const audienceFilterOptions = useMemo(
+    () => buildDirectoryAudienceFilterOptions(directoryUsers),
+    [directoryUsers]
+  );
+
+  const operationsHealthItems = useMemo(
+    () =>
+      buildOperationsHealthItems({
+        directoryIntegrity,
+        kpis,
+        ownershipMetrics: bundle?.ownershipMetrics,
+      }),
+    [directoryIntegrity, kpis, bundle?.ownershipMetrics]
+  );
+
+  const readinessFooter = useMemo(
+    () =>
+      buildOperationsReadinessFooterState({
+        directoryIntegrity,
+        kpis,
+        ownershipMetrics: bundle?.ownershipMetrics,
+        loadedAt,
+      }),
+    [directoryIntegrity, kpis, bundle?.ownershipMetrics, loadedAt]
+  );
+
+  const attentionItems = useMemo(
+    () =>
+      buildOperationsAttentionItems({
+        labAssignments,
+        kpis,
+        directoryUsers,
+        directoryIntegrity,
+      }),
+    [labAssignments, kpis, directoryUsers, directoryIntegrity]
+  );
 
   const filteredUsers = useMemo(() => {
     const filtered = filterDirectoryUsers(directoryUsers, {
       search,
       role: roleFilter,
       status: statusFilter,
+      audience: audienceFilter,
     });
     return sortDirectoryUsers(filtered, sortKey, sortDir);
-  }, [directoryUsers, search, roleFilter, statusFilter, sortKey, sortDir]);
+  }, [directoryUsers, search, roleFilter, statusFilter, audienceFilter, sortKey, sortDir]);
 
   useEffect(() => {
     if (!focusUserId || loading) return;
@@ -1650,6 +2160,83 @@ export default function UserProvisioningPanel({
     });
   }
 
+  function handleIntegrityReview(userId) {
+    const user = directoryUsers.find((u) => str(u.userId) === str(userId));
+    if (user) {
+      setTab("directory");
+      setReviewUser(user);
+    }
+  }
+
+  function handleIntegrityTransfer(userId) {
+    const user = directoryUsers.find((u) => str(u.userId) === str(userId));
+    if (!user) return;
+    const firstLab = labsForAgentPortalAligned(user, labAssignments, ownershipRows)[0];
+    if (firstLab) setTransferLab(firstLab);
+    else onError?.("No laboratories available to transfer for this user");
+  }
+
+  function handleIgnoreIntegrity(key) {
+    setIgnoredIntegrityKeys((prev) => {
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+  }
+
+  function handleHealthNavigate(item) {
+    if (!item) return;
+    if (item.navigate === "labOwnership") {
+      navigateToLabOwnership({ scrollToUnassigned: Boolean(item.scrollUnassigned) });
+      return;
+    }
+    if (item.navigate === "directory") {
+      navigateToDirectory({
+        audience: item.audience ?? "",
+        role: "",
+        status: "",
+      });
+    }
+  }
+
+  function handleAttentionNavigate(item) {
+    if (!item) return;
+    if (item.navigate === "creditRisk") {
+      navigateToCreditRisk(setActivePage, { attentionFilter: item.filter || "" });
+      return;
+    }
+    if (item.navigate === "labOwnership") {
+      navigateToLabOwnership({ scrollToUnassigned: Boolean(item.scrollUnassigned) });
+      return;
+    }
+    if (item.navigate === "directory") {
+      navigateToDirectory({
+        audience: item.audience ?? "",
+        role: "",
+        status: "",
+      });
+      return;
+    }
+    if (item.navigate === "integrity") {
+      setTab("directory");
+      window.setTimeout(() => {
+        integrityBannerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 120);
+    }
+  }
+
+  function navigateToDirectory(filters = {}) {
+    setTab("directory");
+    if (filters.audience !== undefined) setAudienceFilter(filters.audience);
+    if (filters.role !== undefined) setRoleFilter(filters.role);
+    if (filters.status !== undefined) setStatusFilter(filters.status);
+  }
+
+  function navigateToLabOwnership(options = {}) {
+    setTab("labOwnership");
+    setOwnershipScrollUnassigned(Boolean(options.scrollToUnassigned));
+  }
+
   function toggleSort(key) {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else {
@@ -1662,20 +2249,80 @@ export default function UserProvisioningPanel({
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3 lg:grid-cols-6">
-        {[
-          ["Users", kpis.totalUsers],
-          ["Active Users", kpis.activeUsers],
-          ["Agents", kpis.agents],
-          ["Labs Assigned", kpis.labsAssigned],
-          ["Inactive Users", kpis.inactiveUsers],
-          ["Unassigned Labs", kpis.unassignedLabs],
-        ].map(([label, value]) => (
-          <div key={label} className="rounded-lg border bg-white p-2">
-            <p className="text-slate-500">{label}</p>
-            <p className="text-lg font-bold tabular-nums">{value ?? 0}</p>
-          </div>
-        ))}
+      <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:grid-cols-8">
+        <OperationsKpiCard
+          value={kpis.totalUsers}
+          label="Total Users"
+          hint="All profiles"
+          onClick={() => navigateToDirectory({ audience: "", role: "", status: "" })}
+        />
+        <OperationsKpiCard
+          value={kpis.productionUsers ?? kpis.realUsers}
+          label="Production Users"
+          hint="Non-QA, non-probe"
+          onClick={() => navigateToDirectory({ audience: "real", role: "", status: "" })}
+        />
+        <OperationsKpiCard
+          value={kpis.qaUsers ?? kpis.qaTestUsers}
+          label="QA Users"
+          onClick={() => navigateToDirectory({ audience: "qa_test", role: "", status: "" })}
+        />
+        <OperationsKpiCard
+          value={kpis.probeUsers ?? kpis.probeDebugUsers}
+          label="Probe Users"
+          onClick={() => navigateToDirectory({ audience: "probe_debug", role: "", status: "" })}
+        />
+        <OperationsKpiCard
+          value={kpis.fieldAgents ?? kpis.agents}
+          label="Field Agents"
+          onClick={() => navigateToDirectory({ audience: "", role: "agent", status: "" })}
+        />
+        <OperationsKpiCard
+          value={kpis.labUsers}
+          label="Lab Users"
+          onClick={() => navigateToDirectory({ audience: "", role: "lab", status: "" })}
+        />
+        <OperationsKpiCard
+          value={kpis.hqAdmins}
+          label="HQ Admins"
+          onClick={() => navigateToDirectory({ audience: "", role: "admin", status: "" })}
+        />
+        <OperationsKpiCard
+          value={kpis.inactiveAccounts ?? kpis.inactiveUsers}
+          label="Inactive Accounts"
+          onClick={() => navigateToDirectory({ audience: "inactive", role: "", status: "" })}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-2">
+        <OperationsKpiCard
+          value={kpis.labsAssigned}
+          label="Assigned Laboratories"
+          hint="Labs with an owner"
+          onClick={() => navigateToLabOwnership({ scrollToUnassigned: false })}
+        />
+        <OperationsKpiCard
+          value={kpis.unassignedLabs}
+          label="Unassigned Laboratories"
+          hint="Scroll to unassigned list"
+          onClick={() => navigateToLabOwnership({ scrollToUnassigned: true })}
+        />
+      </div>
+
+      <EnvironmentSummaryBanner counts={audienceCounts} />
+
+      <OperationalAttentionStrip items={attentionItems} onNavigateItem={handleAttentionNavigate} />
+
+      <OperationsHealthPanel items={operationsHealthItems} onNavigateItem={handleHealthNavigate} />
+
+      <div ref={integrityBannerRef}>
+        <IntegrityWarningsBanner
+        warnings={directoryIntegrity.warnings}
+        ignoredKeys={ignoredIntegrityKeys}
+        onReviewUser={handleIntegrityReview}
+        onTransferUser={handleIntegrityTransfer}
+        onIgnore={handleIgnoreIntegrity}
+      />
       </div>
 
       <div className="flex flex-wrap gap-1 border-b border-slate-200 pb-1">
@@ -1685,7 +2332,7 @@ export default function UserProvisioningPanel({
             type="button"
             onClick={() => setTab(t.id)}
             className={cn(
-              "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+              "rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-1",
               tab === t.id ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"
             )}
           >
@@ -1700,7 +2347,19 @@ export default function UserProvisioningPanel({
       {tab === "directory" ? (
         <>
           <div className="flex flex-wrap items-center gap-2">
-            <SearchInput value={search} onChange={setSearch} placeholder="Search users…" />
+            <SearchInput value={search} onChange={setSearch} />
+            <select
+              className="h-8 rounded-md border border-slate-200 px-2 text-xs"
+              value={audienceFilter}
+              onChange={(e) => setAudienceFilter(e.target.value)}
+              aria-label="Filter users by audience"
+            >
+              {audienceFilterOptions.map((opt) => (
+                <option key={opt.id || "all"} value={opt.id}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
             <select
               className="h-8 rounded-md border border-slate-200 px-2 text-xs"
               value={roleFilter}
@@ -1764,118 +2423,108 @@ export default function UserProvisioningPanel({
               <tbody>
                 {filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-2 py-6 text-center text-slate-500">
-                      No users match your filters.
+                    <td colSpan={10} className="px-4 py-10 text-center text-xs text-slate-500">
+                      <p className="font-medium text-slate-700">No operators match your filters.</p>
+                      <p className="mt-1">
+                        Try clearing search, switching audience to All, or adjusting role/status filters.
+                      </p>
                     </td>
                   </tr>
                 ) : (
-                  filteredUsers.map((user) => (
+                  filteredUsers.map((user) => {
+                    const rowActions = resolveDirectoryRowActions(user, { allowProbeActions });
+                    const isProbeRow = user.userClass === USER_DIRECTORY_CLASS.PROBE_DEBUG;
+                    return (
                     <tr
                       key={user.userId}
                       id={`hq-user-row-${user.userId}`}
                       className={cn(
                         "border-b border-slate-100",
+                        isProbeRow && "bg-slate-50/90 text-slate-600",
                         focusUserId && user.userId === focusUserId &&
                           "bg-indigo-50/70 ring-1 ring-inset ring-indigo-300"
                       )}
                     >
                       <td className="px-2 py-2 font-medium text-slate-900">
-                        {user.displayName || user.name}
+                        <span className={cn(isProbeRow && "text-slate-700")}>
+                          {user.displayName || user.name}
+                        </span>
+                        <UserClassBadge userClass={user.userClass} />
                         {!user.loginEnabled ? (
                           <span className="ml-1 text-[10px] text-amber-700">(no login)</span>
+                        ) : null}
+                        {user.labCountMismatch ? (
+                          <span
+                            className="mt-0.5 block text-[10px] text-amber-700"
+                            title="Lab count differs between assignment sources"
+                          >
+                            Lab count mismatch
+                          </span>
+                        ) : null}
+                        {isProbeRow && Number(user.assignedLabsCount) > 0 ? (
+                          <span className="mt-0.5 block text-[10px] font-medium text-amber-800">
+                            Probe user has {user.assignedLabsCount} assigned lab(s)
+                          </span>
                         ) : null}
                       </td>
                       <td className="px-2 py-2">{user.email || EMAIL_NOT_ADDED}</td>
                       <td className="px-2 py-2">{user.roleLabel}</td>
-                      <td className="px-2 py-2">{user.distributorName}</td>
-                      <td className="px-2 py-2">{user.territory}</td>
-                      <td className="px-2 py-2 tabular-nums">{user.assignedLabsCount ?? 0}</td>
+                      <td className="px-2 py-2">
+                        <DirectoryValueCell value={user.distributorName} />
+                      </td>
+                      <td className="px-2 py-2">
+                        <DirectoryValueCell value={user.territory} />
+                      </td>
+                      <td className="px-2 py-2 tabular-nums">
+                        {user.assignedLabsCount ?? 0}
+                        {user.labCountMismatch ? (
+                          <span className="block text-[10px] text-amber-700">
+                            {user.assignedLabsFromAssignments !== user.assignedLabsCount
+                              ? `labs: ${user.assignedLabsFromAssignments}`
+                              : null}
+                            {user.assignedLabsFromOwnership !== user.assignedLabsCount
+                              ? `${user.assignedLabsFromAssignments !== user.assignedLabsCount ? " · " : ""}ownership: ${user.assignedLabsFromOwnership}`
+                              : null}
+                          </span>
+                        ) : null}
+                      </td>
                       <td className="px-2 py-2">
                         <StatusBadge active={user.active} />
                       </td>
                       <td
                         className={cn(
                           "px-2 py-2",
-                          user.lastLogin === "—" ? "text-slate-400" : "text-slate-700"
+                          user.lastLogin === "Never" ? "text-slate-400" : "text-slate-700"
                         )}
                       >
                         {user.lastLogin}
                       </td>
                       <td className="px-2 py-2">{formatOpsDate(user.createdAt)}</td>
                       <td className="px-2 py-2">
-                        <div className="flex flex-wrap gap-1">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-7 px-2 text-[10px]"
-                            onClick={() => setReviewUser(user)}
-                          >
-                            Review
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-7 px-2 text-[10px]"
-                            onClick={() => setAssignmentUser(user)}
-                          >
-                            Assign
-                          </Button>
-                          {user.active ? (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-7 px-2 text-[10px] text-red-700"
-                              disabled={busyId === user.userId}
-                              onClick={() => setDeactivateUser(user)}
-                            >
-                              Deactivate
-                            </Button>
-                          ) : (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-7 px-2 text-[10px]"
-                              disabled={busyId === user.userId}
-                              onClick={() => promptReactivate(user)}
-                            >
-                              Reactivate
-                            </Button>
-                          )}
-                          {isAgentRole(user.role) ? (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-7 px-2 text-[10px]"
-                              onClick={() => {
-                                const firstLab = labsForAgent(user, labAssignments)[0];
-                                if (firstLab) setTransferLab(firstLab);
-                                else onError?.("Assign a lab first before transfer");
-                              }}
-                            >
-                              Transfer Lab
-                            </Button>
-                          ) : null}
-                          {user.loginEnabled ? (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-7 px-2 text-[10px]"
-                              disabled={resettingUserId === user.userId}
-                              onClick={() => promptResetPassword(user)}
-                            >
-                              {resettingUserId === user.userId ? "Resetting…" : "Reset Pwd"}
-                            </Button>
-                          ) : null}
-                        </div>
+                        <DirectoryRowActionsMenu
+                          user={user}
+                          rowActions={rowActions}
+                          busyId={busyId}
+                          resettingUserId={resettingUserId}
+                          onReview={(u) => setReviewUser(u)}
+                          onAssign={(u) => setAssignmentUser(u)}
+                          onDeactivate={(u) => setDeactivateUser(u)}
+                          onReactivate={(u) => promptReactivate(u)}
+                          onResetPassword={(u) => promptResetPassword(u)}
+                          onTransferLab={(u) => {
+                            const firstLab = labsForAgentPortalAligned(
+                              u,
+                              labAssignments,
+                              ownershipRows
+                            )[0];
+                            if (firstLab) setTransferLab(firstLab);
+                            else onError?.("Assign a lab first before transfer");
+                          }}
+                        />
                       </td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -1890,6 +2539,7 @@ export default function UserProvisioningPanel({
           loading={loading}
           focusLabId={focusLabId}
           openAssignDrawer={openAssignDrawer}
+          scrollToUnassigned={ownershipScrollUnassigned}
           onReload={onReload}
           onError={onError}
           onStatus={onStatus}
@@ -2002,6 +2652,8 @@ export default function UserProvisioningPanel({
         </div>
       ) : null}
 
+      <OperationsReadinessFooter footer={readinessFooter} loadedAt={loadedAt} />
+
       {confirmDialog ? (
         <ConfirmActionModal
           title={confirmDialog.title}
@@ -2059,6 +2711,9 @@ export default function UserProvisioningPanel({
           user={reviewUser}
           auditEvents={auditEvents}
           labAssignments={labAssignments}
+          ownershipRows={ownershipRows}
+          distributorAssignments={distributorAssignments}
+          allowProbeActions={allowProbeActions}
           busyId={busyId}
           resettingUserId={resettingUserId}
           onClose={() => setReviewUser(null)}
@@ -2080,6 +2735,7 @@ export default function UserProvisioningPanel({
           user={assignmentUser}
           agents={agents}
           labAssignments={labAssignments}
+          ownershipRows={ownershipRows}
           distributors={distributorAssignments}
           tenantId={tenantId}
           actorRole={actorRole}

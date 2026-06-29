@@ -14,6 +14,7 @@ import KpiSkeleton from "./KpiSkeleton";
  *   className?: string,
  *   dataTestId?: string,
  *   kpiRawValue?: number|null,
+ *   highlight?: boolean,
  * }} props
  */
 export default function KpiCard({
@@ -26,6 +27,7 @@ export default function KpiCard({
   className,
   dataTestId,
   kpiRawValue,
+  highlight = false,
 }) {
   if (loading) {
     return <KpiSkeleton className={className} />;
@@ -41,7 +43,8 @@ export default function KpiCard({
   return (
     <div
       className={cn(
-        "rounded-2xl border border-border bg-card p-4 shadow-[var(--pc-shadow-card)]",
+        "rounded-2xl border border-border bg-card p-4 shadow-[var(--pc-shadow-card)] transition-shadow duration-300",
+        highlight && "ring-2 ring-emerald-400/70 shadow-md",
         className
       )}
     >

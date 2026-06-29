@@ -1,6 +1,11 @@
 import { getAgentActiveLabOwnershipRowsRead } from "@/api/labOwnershipApi.js";
 import { supabase } from "./supabaseClient.js";
-import { autoAllocatePaymentToOrderInvoice } from "@/api/invoiceSupabaseApi.js";
+import {
+  autoAllocatePaymentToOrderInvoice,
+  finalizeInvoiceForOrderPayment,
+  getInvoiceByOrderRead,
+  INVOICE_PAYMENT_FINALIZE_ERROR,
+} from "@/api/invoiceSupabaseApi.js";
 import { fetchOrderDetailLinesForOrder } from "@/api/orderLineMetricsSupport.js";
 import {
   filterCollectionsForUser,
@@ -88,6 +93,7 @@ import {
   loadReorderCandidatesBoundedRows,
 } from "@/api/hqBoundedReads.js";
 import { hqDebugLog, hqDebugWarn, isHqDebugLogEnabled } from "@/utils/hqDebugLog.js";
+import { logFinancialDriftDetected } from "@/utils/financialDriftLog.js";
 import { recordPredatorCacheEvent } from "@/predator/cacheDiagnostics.js";
 import {
   estimatePayloadBytes,
@@ -174,37 +180,50 @@ export function deriveCollectionPaymentStatus({
   outstandingAmount,
   totalPaid,
   totalDelivered = 0,
+  totalAllocated = 0,
+  overdueDays = 0,
   explicitStatus = "",
+  creditHold = "",
 }) {
   const outstanding = num(outstandingAmount);
   const paid = num(totalPaid);
-  const delivered = num(totalDelivered);
+  const allocated = num(totalAllocated);
+  const overdue = num(overdueDays);
+  const hold = str(creditHold).toUpperCase();
   const explicit = str(explicitStatus).trim();
   const explicitLower = explicit.toLowerCase();
 
+  if (hold === "HOLD" || hold === "YES") {
+    return "Credit Hold";
+  }
+
   let derived;
-  if (outstanding > 0) {
-    derived = paid > 0 ? "Partially Paid" : delivered > 0 ? "Pending" : "Pending";
-  } else if (paid > 0) {
-    derived = "Paid";
+  if (outstanding <= 0.009) {
+    derived = paid > 0.009 || allocated > 0.009 ? "Paid" : "Current";
+  } else if (overdue > 0) {
+    derived = "Overdue";
+  } else if (paid > 0.009 || allocated > 0.009) {
+    derived = "Partially Paid";
   } else {
-    derived = "Current";
+    derived = "Outstanding";
   }
 
   if (explicit) {
-    if (explicitLower === "paid" && outstanding > 0) {
-      derived = paid > 0 ? "Partially Paid" : "Pending";
-    } else if (explicitLower === "pending" && outstanding <= 0) {
-      derived = paid > 0 ? "Paid" : "Current";
+    if (explicitLower === "paid" && outstanding > 0.009) {
+      derived = paid > 0.009 || allocated > 0.009 ? "Partially Paid" : "Outstanding";
+    } else if (explicitLower === "pending" && outstanding <= 0.009) {
+      derived = paid > 0.009 || allocated > 0.009 ? "Paid" : "Current";
     } else if (explicitLower === "partially paid" || explicitLower === "partial") {
-      derived = outstanding > 0 && paid > 0 ? "Partially Paid" : derived;
+      derived =
+        outstanding > 0.009 && (paid > 0.009 || allocated > 0.009) ? "Partially Paid" : derived;
     } else if (
       explicitLower !== "paid" &&
       explicitLower !== "pending" &&
-      explicitLower !== "current"
+      explicitLower !== "current" &&
+      explicitLower !== "outstanding"
     ) {
       derived = explicit;
-    } else if (explicitLower === "paid" && paid <= 0 && outstanding <= 0) {
+    } else if (explicitLower === "paid" && paid <= 0.009 && allocated <= 0.009 && outstanding <= 0.009) {
       derived = "Current";
     }
   }
@@ -1794,6 +1813,175 @@ async function insertPaymentsRow(paymentRow) {
  * Records a collection payment in `payments` and rolls `ar_credit_control` forward for the lab.
  * Payload: { labId, amountReceived | amountCollected, paymentMode | mode, paymentDate?, orderId?, tenantId?, outstandingBefore?, collectedBy? }
  */
+function orderPaymentAllocationSucceeded(allocRes) {
+  if (!allocRes?.success) return false;
+  if (!allocRes.skipped) return true;
+  return allocRes.reason === "zero_open_balance";
+}
+
+async function compensateFailedOrderPaymentWrite({
+  tenantId,
+  labId,
+  paymentId,
+  amountReceived,
+  driftContext = {},
+}) {
+  logFinancialDriftDetected({
+    source: "createPaymentWrite",
+    tenantId,
+    labId,
+    paymentId,
+    amountReceived,
+    ...driftContext,
+  });
+
+  const tid = str(tenantId);
+  const lid = normalizeLabIdKey(labId);
+  const pid = str(paymentId);
+  const amount = num(amountReceived);
+  if (!supabase || !tid || !lid || !pid || amount <= 0) {
+    return { success: false, error: "compensation_args_invalid" };
+  }
+
+  const { data: arRow, error: arSelErr } = await supabase
+    .from("ar_credit_control")
+    .select("outstanding,total_paid")
+    .eq("tenant_id", tid)
+    .eq("lab_id", lid)
+    .maybeSingle();
+
+  if (arSelErr) {
+    hqDebugWarn("[compensateFailedOrderPaymentWrite] AR read:", arSelErr.message);
+    return { success: false, error: arSelErr.message };
+  }
+
+  const reversePatch = {
+    outstanding: num(arRow?.outstanding) + amount,
+    total_paid: Math.max(0, num(arRow?.total_paid) - amount),
+    updated_at: new Date().toISOString(),
+  };
+  const arUpd = await supabase
+    .from("ar_credit_control")
+    .update(reversePatch)
+    .eq("tenant_id", tid)
+    .eq("lab_id", lid);
+  if (arUpd.error) {
+    hqDebugWarn("[compensateFailedOrderPaymentWrite] AR reverse:", arUpd.error.message);
+    return { success: false, error: arUpd.error.message };
+  }
+
+  const payDel = await supabase
+    .from("payments")
+    .delete()
+    .eq("tenant_id", tid)
+    .eq("payment_id", pid);
+  if (payDel.error) {
+    hqDebugWarn("[compensateFailedOrderPaymentWrite] payment delete:", payDel.error.message);
+    return { success: false, error: payDel.error.message };
+  }
+
+  return { success: true, error: null };
+}
+
+async function resolveOrderInvoiceForPayment({ tenantId, orderId }) {
+  const oid = str(orderId);
+  const tid = str(tenantId);
+  if (!oid || !tid) {
+    return { invoice: null, error: null };
+  }
+  const invoiceRes = await getInvoiceByOrderRead(oid, { tenantId: tid });
+  if (!invoiceRes.success || !invoiceRes.data?.id) {
+    return { invoice: null, error: null };
+  }
+  const finalize = await finalizeInvoiceForOrderPayment({
+    tenantId: tid,
+    orderId: oid,
+    invoice: invoiceRes.data,
+  });
+  if (!finalize.success) {
+    return {
+      invoice: null,
+      error: finalize.error || INVOICE_PAYMENT_FINALIZE_ERROR,
+    };
+  }
+  return { invoice: finalize.invoice || invoiceRes.data, error: null };
+}
+
+async function completeOrderLinkedPaymentAllocation({
+  tenantId,
+  labId,
+  orderId,
+  paymentId,
+  amountReceived,
+  actorId,
+  orderInvoice,
+  paymentJustCreated,
+}) {
+  if (!orderInvoice?.id) {
+    return { success: true, allocation: null, error: null };
+  }
+
+  const allocRes = await autoAllocatePaymentToOrderInvoice({
+    tenantId,
+    paymentId,
+    orderId,
+    amountReceived,
+    actorId,
+  });
+
+  if (orderPaymentAllocationSucceeded(allocRes)) {
+    return {
+      success: true,
+      allocation: allocRes.skipped ? null : allocRes.data,
+      error: null,
+    };
+  }
+
+  const driftContext = {
+    orderId,
+    invoiceId: orderInvoice.id,
+    allocReason: allocRes.reason,
+    allocError: allocRes.error,
+    paymentJustCreated,
+  };
+
+  if (paymentJustCreated) {
+    const compensated = await compensateFailedOrderPaymentWrite({
+      tenantId,
+      labId,
+      paymentId,
+      amountReceived,
+      driftContext,
+    });
+    const suffix = compensated.success
+      ? " The payment was reversed."
+      : " Payment reversal may have failed — reconcile manually.";
+    return {
+      success: false,
+      allocation: null,
+      error: `Payment could not be allocated to the invoice.${suffix}`,
+      drift: true,
+    };
+  }
+
+  logFinancialDriftDetected({
+    source: "createPaymentWrite",
+    tenantId,
+    labId,
+    paymentId,
+    amountReceived,
+    ...driftContext,
+  });
+  return {
+    success: false,
+    allocation: null,
+    error:
+      allocRes.error ||
+      "Payment exists but invoice allocation failed. Finalize the invoice and run payment drift repair.",
+    drift: true,
+  };
+}
+
 export async function createPaymentWrite(payload = {}) {
   return predatorTrace("Collections", "save.payment", async () => {
   traceSupabaseRead("Collections.createPaymentWrite", { tables: ["payments", "ar_credit_control"] });
@@ -1846,6 +2034,18 @@ export async function createPaymentWrite(payload = {}) {
     const note = str(payload.note);
     const collected_by = str(payload.collectedBy ?? payload.collected_by);
 
+    let orderInvoice = null;
+    if (order_id) {
+      const prep = await resolveOrderInvoiceForPayment({
+        tenantId: scoped_tenant_id,
+        orderId: order_id,
+      });
+      if (prep.error) {
+        return { success: false, error: prep.error, data: null };
+      }
+      orderInvoice = prep.invoice;
+    }
+
     const rpcPay = await supabase.rpc("post_collection_payment", {
       p_tenant_id: scoped_tenant_id,
       p_lab_id: lab_id,
@@ -1862,20 +2062,33 @@ export async function createPaymentWrite(payload = {}) {
       const rpcBody = rpcPay.data;
       const savedPay = rpcBody.payment || null;
       const arPatch = rpcBody.ar || {};
-      let allocation = null;
-      if (order_id) {
-        const allocRes = await autoAllocatePaymentToOrderInvoice({
-          tenantId: scoped_tenant_id,
-          paymentId: payment_id,
-          orderId: order_id,
-          amountReceived: amount_received,
-          actorId: collected_by || payload.actorId,
-        });
-        allocation = allocRes.skipped ? null : allocRes.data;
-        if (!allocRes.success && !allocRes.skipped) {
-          hqDebugWarn("[createPaymentWrite] invoice auto-allocation failed:", allocRes.error);
-        }
+      const paymentJustCreated = !Boolean(rpcBody.idempotent);
+
+      const allocWrap = await completeOrderLinkedPaymentAllocation({
+        tenantId: scoped_tenant_id,
+        labId: lab_id,
+        orderId: order_id,
+        paymentId: payment_id,
+        amountReceived: amount_received,
+        actorId: collected_by || payload.actorId,
+        orderInvoice,
+        paymentJustCreated,
+      });
+
+      if (!allocWrap.success) {
+        return {
+          success: false,
+          error: allocWrap.error,
+          data: {
+            payment: savedPay,
+            ar: { lab_id, ...arPatch },
+            allocation: null,
+            drift: Boolean(allocWrap.drift),
+          },
+        };
       }
+
+      const allocation = allocWrap.allocation;
       fireNotificationEvent(
         {
           eventType: "payment_received",
@@ -1992,19 +2205,31 @@ export async function createPaymentWrite(payload = {}) {
     }
 
     let allocation = null;
-    if (order_id) {
-      const allocRes = await autoAllocatePaymentToOrderInvoice({
-        tenantId: scoped_tenant_id,
-        paymentId: payment_id,
-        orderId: order_id,
-        amountReceived: amount_received,
-        actorId: collected_by || payload.actorId,
-      });
-      allocation = allocRes.skipped ? null : allocRes.data;
-      if (!allocRes.success && !allocRes.skipped) {
-        hqDebugWarn("[createPaymentWrite] invoice auto-allocation failed:", allocRes.error);
-      }
+    const allocWrap = await completeOrderLinkedPaymentAllocation({
+      tenantId: scoped_tenant_id,
+      labId: lab_id,
+      orderId: order_id,
+      paymentId: payment_id,
+      amountReceived: amount_received,
+      actorId: collected_by || payload.actorId,
+      orderInvoice,
+      paymentJustCreated: true,
+    });
+
+    if (!allocWrap.success) {
+      return {
+        success: false,
+        error: allocWrap.error,
+        data: {
+          payment: savedPay,
+          ar: { lab_id, ...arPatch },
+          allocation: null,
+          drift: Boolean(allocWrap.drift),
+        },
+      };
     }
+
+    allocation = allocWrap.allocation;
 
     fireNotificationEvent(
       {

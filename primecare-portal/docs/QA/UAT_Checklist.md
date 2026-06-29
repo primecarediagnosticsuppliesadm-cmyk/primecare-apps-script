@@ -47,7 +47,9 @@
 - [x] Credit & Risk — KPI outstanding reconciles with AR (₹1,500 live)
 - [x] Credit & Risk — aging buckets sum to KPI total; golden labs audit-clean
 - [x] Credit & Risk — payment allocation golden path (full allocate, open balance ₹0)
-- [ ] Record payment (manual UAT)
+- [ ] Partial payment strict lifecycle — ₹350 on ₹360 invoice; all modules show ₹10 open (GAP-021 UAT)
+- [ ] Record payment — draft invoice auto-finalizes PDF before allocation
+- [ ] Record payment blocked with clear error if PDF generation fails
 
 ## Agent
 - [ ] Login as agent
@@ -74,8 +76,9 @@
 - [ ] Assign product catalog / stock
 - [ ] Lab places order
 - [ ] HQ/Admin fulfills order
-- [ ] Invoice generated
-- [ ] Payment recorded
-- [ ] AR updates
+- [ ] Invoice generated (internal draft)
+- [ ] PDF finalized (status sent) on first payment or download
+- [ ] Payment recorded and allocated to invoice
+- [ ] AR updates and matches invoice open balance
 - [ ] Inventory decreases
 - [ ] Executive KPIs update

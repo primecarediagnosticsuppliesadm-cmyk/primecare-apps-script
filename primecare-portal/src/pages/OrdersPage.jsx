@@ -26,9 +26,10 @@ import {
   StatusBadge,
   PageHeader,
   DataFetchError,
+  usePortalToast,
 } from "@/components/ux";
 import { orderStatusToVariant, paymentStatusToVariant } from "@/utils/statusTokens";
-import { Loader2, AlertTriangle, Download, Eye } from "lucide-react";
+import { Loader2, AlertTriangle, Download, Eye, CircleDollarSign } from "lucide-react";
 import { ROLES } from "@/config/roles";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import {
@@ -72,6 +73,8 @@ import HqOrdersOperationsQueue from "@/components/hq/HqOrdersOperationsQueue.jsx
 import InvoiceDetailsDrawer from "@/components/invoice/InvoiceDetailsDrawer.jsx";
 import InvoiceStatusBadge from "@/components/invoice/InvoiceStatusBadge.jsx";
 import { getInvoicesByOrderIdsRead } from "@/api/invoiceSupabaseApi.js";
+import { onFinancialSyncCompleted } from "@/operations/financialSyncEvents.js";
+import { useFinancialSyncPulse } from "@/hooks/useFinancialSyncPulse.js";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
 import {
   ORDER_QUEUE_KEYS,
@@ -115,12 +118,78 @@ function formatDateTime(value) {
   });
 }
 
-function orderPaymentLabel(order) {
+function orderPaymentLabel(order, invoice = null) {
+  if (invoice?.displayStatus) {
+    const key = String(invoice.displayStatus).toLowerCase();
+    if (key === "paid") return "Paid";
+    if (key === "partially paid") return "Partially Paid";
+    if (key === "overdue") return "Overdue";
+    if (key === "outstanding" || key === "sent" || key === "open") return "Outstanding";
+  }
+  if (invoice && Number(invoice.openBalance ?? 0) <= 0.009) return "Paid";
   return formatOrderPaymentLabel({
     orderStatus: order.orderStatus,
     paymentStatus: order.paymentStatus,
-    invoiceStatus: order.invoiceStatus,
+    invoiceStatus: invoice?.displayStatus ?? invoice?.status ?? order.invoiceStatus,
   });
+}
+
+function localDateYmd(d = new Date()) {
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${day}`;
+}
+
+function formatRelativePaymentDay(value) {
+  const raw = str(value).slice(0, 10);
+  if (!raw) return null;
+  if (raw === localDateYmd()) return "Today";
+  const d = new Date(`${raw}T12:00:00`);
+  if (!Number.isFinite(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function resolveOrderPaymentBadgeDate(order, invoice) {
+  const label = orderPaymentLabel(order, invoice);
+  if (label !== "Paid" && label !== "Partially Paid") return null;
+  return formatRelativePaymentDay(invoice?.paidAt || invoice?.sentAt || invoice?.invoiceDate);
+}
+
+function OrderPaymentBadge({ order, invoice }) {
+  const label = orderPaymentLabel(order, invoice);
+  const dateHint = resolveOrderPaymentBadgeDate(order, invoice);
+  return (
+    <div className="inline-flex flex-col items-start gap-0.5">
+      <StatusBadge variant={paymentStatusToVariant(label)} compact>
+        {label}
+      </StatusBadge>
+      {dateHint ? (
+        <span className="text-[9px] leading-none text-muted-foreground">{dateHint}</span>
+      ) : null}
+    </div>
+  );
+}
+
+function resolveOrderPaidAmount(order, invoice) {
+  if (invoice?.allocatedAmount != null) return Number(invoice.allocatedAmount);
+  const total = Number(invoice?.totalAmount ?? order?.orderTotal ?? 0);
+  return Math.max(0, total - resolveOrderOutstanding(order, invoice));
+}
+
+function resolveOrderOutstanding(order, invoice) {
+  if (invoice?.openBalance != null) return Number(invoice.openBalance);
+  const total = Number(order?.orderTotal || 0);
+  if (invoice) {
+    const allocated = Number(invoice.allocatedAmount || 0);
+    return Math.max(0, total - allocated);
+  }
+  return total;
+}
+
+function canRecordOrderPayment(order, invoice, orderUx) {
+  if (!order || orderUx?.cancelled || !orderUx?.fulfilled) return false;
+  return resolveOrderOutstanding(order, invoice) > 0.009;
 }
 
 function OrdersDetailEmptyState({
@@ -305,6 +374,8 @@ export default function OrdersPage({
   const [invoiceDrawer, setInvoiceDrawer] = useState(null);
   const [invoiceDownloadKey, setInvoiceDownloadKey] = useState("");
 
+  const { showToast } = usePortalToast();
+
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
 
   useEffect(() => {
@@ -486,6 +557,9 @@ export default function OrdersPage({
         setStatusNote("");
         await loadOrders({ silent: true });
         await openOrder(id, { preserveSuccess: true });
+        if (nextStatus === "Fulfilled") {
+          await refreshInvoicesForOrders([id]);
+        }
         invalidateAdminDashboardCaches();
         return;
       }
@@ -547,6 +621,7 @@ export default function OrdersPage({
   }, [orders, search, status, paymentStatus, labFilter, dateFrom, dateTo, sortKey, activeQueueKey]);
 
   const kpis = useMemo(() => computeOrdersKpis(orders), [orders]);
+  const financialSyncPulse = useFinancialSyncPulse();
   const operationsQueue = useMemo(
     () => buildOrdersOperationsQueue(orders, kpis),
     [orders, kpis]
@@ -556,6 +631,15 @@ export default function OrdersPage({
     const bucket = operationsQueue.find((q) => q.id === activeQueueKey);
     return new Set(bucket?.orderIds || []);
   }, [activeQueueKey, operationsQueue]);
+
+  async function refreshInvoicesForOrders(orderIds = []) {
+    const ids = [...new Set((orderIds || []).map((id) => str(id)).filter(Boolean))];
+    if (!ids.length) return;
+    const res = await getInvoicesByOrderIdsRead(ids, { tenantId: homeTenantId });
+    if (res.success) {
+      setInvoiceByOrderId((prev) => ({ ...prev, ...(res.byOrderId || {}) }));
+    }
+  }
 
   useEffect(() => {
     const orderIds = filteredOrders.map((order) => str(order.orderId)).filter(Boolean);
@@ -572,6 +656,15 @@ export default function OrdersPage({
     return () => {
       cancelled = true;
     };
+  }, [filteredOrders, homeTenantId]);
+
+  useEffect(() => {
+    return onFinancialSyncCompleted((detail) => {
+      const orderIds = detail?.orderId
+        ? [str(detail.orderId)]
+        : filteredOrders.map((order) => str(order.orderId)).filter(Boolean);
+      if (orderIds.length) void refreshInvoicesForOrders(orderIds);
+    });
   }, [filteredOrders, homeTenantId]);
 
   function handleQueueSelect(queueKey) {
@@ -626,10 +719,41 @@ export default function OrdersPage({
         invoiceId: invoice?.id,
         orderId: invoice?.orderId || orderId,
         tenantId: homeTenantId,
+        onPhase: (phase, detail) => {
+          if (phase === "error") {
+            showToast("error", detail || "Unable to download invoice PDF.");
+          }
+          if (phase === "success") {
+            showToast("success", "Invoice download started.");
+          }
+        },
       });
     } finally {
       setInvoiceDownloadKey("");
     }
+  }
+
+  function handleRecordOrderPayment() {
+    if (!selectedOrderSummary?.labId || !canNavigateToCollections(currentUser?.role)) return;
+    const outstanding = resolveOrderOutstanding(selectedOrderSummary, selectedOrderInvoice);
+    navigateToCollections(setActivePage, {
+      labId: selectedOrderSummary.labId,
+      orderId: selectedOrderSummary.orderId,
+      focusSection: "payment",
+      paymentAmount: outstanding > 0.009 ? outstanding : selectedOrderSummary.orderTotal,
+      role: currentUser?.role,
+    });
+  }
+
+  function handleOpenCreditRisk() {
+    if (!selectedOrderSummary?.labId || !canNavigateToCollections(currentUser?.role)) return;
+    navigateToCollections(setActivePage, {
+      labId: selectedOrderSummary.labId,
+      orderId: selectedOrderSummary.orderId,
+      focusSection: "payment",
+      paymentAmount: resolveOrderOutstanding(selectedOrderSummary, selectedOrderInvoice),
+      role: currentUser?.role,
+    });
   }
 
   function openInvoiceDrawer(invoice) {
@@ -660,11 +784,27 @@ export default function OrdersPage({
     const fulfilled = orderStatus === "Fulfilled";
     const lines = details?.lines || [];
     const unitCount = lines.reduce((sum, line) => sum + Number(line.quantity || 0), 0);
+    const outstandingAmount = resolveOrderOutstanding(selectedOrderSummary, selectedOrderInvoice);
+    const paidAmount = resolveOrderPaidAmount(selectedOrderSummary, selectedOrderInvoice);
+    const totalAmount = Number(
+      selectedOrderInvoice?.totalAmount ?? selectedOrderSummary.orderTotal ?? 0
+    );
     return {
       orderStatus,
       cancelled,
       fulfilled,
-      paymentLabel: orderPaymentLabel(selectedOrderSummary),
+      paymentLabel: orderPaymentLabel(selectedOrderSummary, selectedOrderInvoice),
+      paidAmount,
+      outstandingAmount,
+      totalAmount,
+      canRecordPayment: canRecordOrderPayment(selectedOrderSummary, selectedOrderInvoice, {
+        cancelled,
+        fulfilled,
+      }),
+      isFullyPaid:
+        fulfilled &&
+        !cancelled &&
+        resolveOrderOutstanding(selectedOrderSummary, selectedOrderInvoice) <= 0.009,
       productUnitLabel: formatProductUnitLabel(lines.length, unitCount),
       cancellationReason: cancelled
         ? extractLatestCancellationNote(
@@ -679,7 +819,7 @@ export default function OrdersPage({
         "",
       cancelledByLabel: resolveCancelledByLabel(selectedOrderSummary.createdBy),
     };
-  }, [selectedOrderSummary, details?.lines]);
+  }, [selectedOrderSummary, selectedOrderInvoice, details?.lines]);
 
   return (
     <div className={embedded ? "space-y-4" : "space-y-5"}>
@@ -721,7 +861,7 @@ export default function OrdersPage({
         <KpiCard title="Processing" value={kpis.processing} loading={loading} />
         <KpiCard title="Fulfilled" value={kpis.fulfilled} loading={loading} />
         <KpiCard title="Cancelled" value={kpis.cancelled} loading={loading} />
-        <KpiCard title="Pending Payment" value={kpis.pendingPayment} loading={loading} />
+        <KpiCard title="Pending Payment" value={kpis.pendingPayment} loading={loading} highlight={financialSyncPulse} />
         <KpiCard
           title="Active Order Value"
           value={formatCurrency(kpis.totalOrderValue)}
@@ -853,7 +993,6 @@ export default function OrdersPage({
                   <tbody>
                     {filteredOrders.map((order) => {
                       const orderStatus = normalizeOrderStatusLabel(order.orderStatus);
-                      const payStatus = orderPaymentLabel(order);
                       const orderInvoice = resolveOrderInvoice(order);
                       const isSelected = selectedOrder === order.orderId;
                       const cancelled = isCancelledStatus(orderStatus);
@@ -910,9 +1049,7 @@ export default function OrdersPage({
                             </StatusBadge>
                           </td>
                           <td className="px-2 py-2">
-                            <StatusBadge variant={paymentStatusToVariant(payStatus)} compact>
-                              {payStatus}
-                            </StatusBadge>
+                            <OrderPaymentBadge order={order} invoice={orderInvoice} />
                           </td>
                           <td className="px-2 py-2 font-mono text-[10px] text-slate-700">
                             {orderInvoice?.invoiceNumber || (order.invoiceId ? "Linked" : "—")}
@@ -954,9 +1091,8 @@ export default function OrdersPage({
               <div className="space-y-2 xl:hidden">
                 {filteredOrders.map((order) => {
                   const orderStatus = normalizeOrderStatusLabel(order.orderStatus);
-                  const payStatus = orderPaymentLabel(order);
-                  const orderInvoice = resolveOrderInvoice(order);
-                  return (
+                      const orderInvoice = resolveOrderInvoice(order);
+                      return (
                     <div
                       key={order.orderId}
                       className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
@@ -980,9 +1116,7 @@ export default function OrdersPage({
                           <StatusBadge variant={orderStatusToVariant(orderStatus)} compact>
                             {orderStatus}
                           </StatusBadge>
-                          <StatusBadge variant={paymentStatusToVariant(payStatus)} compact>
-                            {payStatus}
-                          </StatusBadge>
+                          <OrderPaymentBadge order={order} invoice={orderInvoice} />
                         </div>
                       </div>
                       {orderInvoice?.invoiceNumber ? (
@@ -1239,42 +1373,115 @@ export default function OrdersPage({
                   )}
                 </section>
 
-                {selectedOrderInvoice ? (
-                  <section className="space-y-2">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Invoice
-                    </h3>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 text-xs"
-                        onClick={() => openInvoiceDrawer(selectedOrderInvoice)}
-                      >
-                        <Eye className="mr-1.5 h-3.5 w-3.5" />
-                        View Invoice
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 text-xs"
-                        disabled={invoiceDownloadKey === selectedOrderInvoice.id}
-                        onClick={() =>
-                          void handleInvoiceDownload(
-                            selectedOrderInvoice,
-                            selectedOrderSummary.orderId
-                          )
-                        }
-                      >
-                        {invoiceDownloadKey === selectedOrderInvoice.id ? (
-                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Download className="mr-1.5 h-3.5 w-3.5" />
-                        )}
-                        Download Invoice
-                      </Button>
+                {selectedOrderUx?.fulfilled && !selectedOrderUx?.cancelled ? (
+                  <section className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+                    <div>
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Invoice
+                      </h3>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {selectedOrderInvoice ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-9 text-xs"
+                            onClick={() => openInvoiceDrawer(selectedOrderInvoice)}
+                          >
+                            <Eye className="mr-1.5 h-3.5 w-3.5" />
+                            View Invoice
+                          </Button>
+                        ) : null}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-9 text-xs"
+                          disabled={
+                            invoiceDownloadKey ===
+                            (selectedOrderInvoice?.id || selectedOrderSummary.orderId)
+                          }
+                          onClick={() =>
+                            void handleInvoiceDownload(
+                              selectedOrderInvoice,
+                              selectedOrderSummary.orderId
+                            )
+                          }
+                        >
+                          {invoiceDownloadKey ===
+                          (selectedOrderInvoice?.id || selectedOrderSummary.orderId) ? (
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Download className="mr-1.5 h-3.5 w-3.5" />
+                          )}
+                          Download Invoice
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-slate-200 pt-3">
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Payment
+                      </h3>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <StatusBadge variant={paymentStatusToVariant(selectedOrderUx.paymentLabel)}>
+                          {selectedOrderUx.paymentLabel}
+                        </StatusBadge>
+                      </div>
+                      <dl className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                        <div>
+                          <dt className="text-slate-500">Invoice Total</dt>
+                          <dd className="font-semibold tabular-nums text-slate-900">
+                            {formatCurrency(selectedOrderUx.totalAmount)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-slate-500">Paid</dt>
+                          <dd className="font-semibold tabular-nums text-emerald-700">
+                            {formatCurrency(selectedOrderUx.paidAmount)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-slate-500">Outstanding</dt>
+                          <dd className="font-semibold tabular-nums text-amber-700">
+                            {formatCurrency(selectedOrderUx.outstandingAmount)}
+                          </dd>
+                        </div>
+                      </dl>
+                      {selectedOrderUx.canRecordPayment && canNavigateToCollections(currentUser?.role) ? (
+                        <div className="mt-2.5 flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-9 text-xs"
+                            onClick={handleRecordOrderPayment}
+                          >
+                            <CircleDollarSign className="mr-1.5 h-3.5 w-3.5" />
+                            Record Payment
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-9 text-xs"
+                            onClick={handleOpenCreditRisk}
+                          >
+                            Open in {collectionsNavLabelForRole(currentUser?.role)}
+                          </Button>
+                        </div>
+                      ) : selectedOrderUx.isFullyPaid ? (
+                        <div className="mt-2.5">
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-9 text-xs"
+                            disabled
+                            aria-label="Fully paid"
+                          >
+                            ✓ Fully Paid
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
                   </section>
                 ) : null}
@@ -1397,6 +1604,10 @@ export default function OrdersPage({
         orderId={invoiceDrawer?.orderId}
         tenantId={homeTenantId}
         invoicePreview={invoiceDrawer}
+        onDownloadPhase={(phase, detail) => {
+          if (phase === "error") showToast("error", detail || "Unable to download invoice PDF.");
+          if (phase === "success") showToast("success", "Invoice download started.");
+        }}
       />
     </div>
   );

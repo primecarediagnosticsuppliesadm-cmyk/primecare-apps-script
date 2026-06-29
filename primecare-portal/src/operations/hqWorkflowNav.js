@@ -54,28 +54,53 @@ export function collectionsNavLabelForRole(role) {
   return "Collections";
 }
 
+export function navigateToLabInvoiceCenter(setActivePage) {
+  if (!setActivePage) return false;
+  hqNavigate(setActivePage, { page: "labInvoices" });
+  return true;
+}
+
 export function navigateToCollections(
   setActivePage,
-  { labId = "", focusSection = "details", role = "" } = {}
+  {
+    labId = "",
+    orderId = "",
+    focusSection = "details",
+    paymentAmount = "",
+    role = "",
+  } = {}
 ) {
   const page = resolveCollectionsPageForRole(role);
   if (!page || !setActivePage) return false;
   hqNavigate(setActivePage, {
     page,
     labId: str(labId),
+    orderId: str(orderId),
     focusSection: str(focusSection) || "details",
+    paymentAmount:
+      paymentAmount !== "" && paymentAmount != null ? String(paymentAmount) : "",
   });
   return true;
 }
 
 export function navigateToCreditRisk(
   setActivePage,
-  { labId = "", attentionFilter = "" } = {}
+  {
+    labId = "",
+    orderId = "",
+    attentionFilter = "",
+    focusSection = "details",
+    paymentAmount = "",
+  } = {}
 ) {
   hqNavigate(setActivePage, {
     page: "risk",
     labId: str(labId),
+    orderId: str(orderId),
     attentionFilter: str(attentionFilter),
+    focusSection: str(focusSection) || "details",
+    paymentAmount:
+      paymentAmount !== "" && paymentAmount != null ? String(paymentAmount) : "",
   });
 }
 

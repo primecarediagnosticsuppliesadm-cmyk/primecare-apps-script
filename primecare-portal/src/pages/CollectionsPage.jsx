@@ -14,6 +14,8 @@ import {
   getLabRecentOrdersRead,
   updateCollectionNotesWrite,
   deriveCollectionPaymentStatus,
+  invalidateOrdersReadCache,
+  invalidateCollectionsReadCache,
 } from "@/api/primecareSupabaseApi";
 import { selectOpenOrdersForLab } from "@/collections/collectionsOpenOrders.js";
 import { loadLabPaymentHistoryForDisplay } from "@/collections/collectionsPaymentHistory.js";
@@ -21,7 +23,7 @@ import LabCollectionPanel from "@/components/collections/LabCollectionPanel.jsx"
 import HqObjectLink from "@/components/hq/HqObjectLink.jsx";
 import HqCreditRiskCommandCenter from "@/components/hq/HqCreditRiskCommandCenter.jsx";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
-import { navigateToLabs } from "@/operations/hqWorkflowNav.js";
+import { navigateToLabs, navigateToLabInvoiceCenter } from "@/operations/hqWorkflowNav.js";
 import { supabase } from "@/api/supabaseClient.js";
 import {
   logAppsScriptFallbackUsed,
@@ -52,6 +54,19 @@ import { labIdKey } from "@/utils/labId.js";
 import { getInvoicesForLabRead } from "@/api/invoiceSupabaseApi.js";
 import { HQ_INVOICE_LIST_MAX_LIMIT } from "@/api/hqReadBounds.js";
 import { buildLabAccountLedger } from "@/collections/labAccountLedger.js";
+import {
+  deriveAccountHealthStatus,
+  deriveOpenInvoiceWidgetStatus,
+  isCustomerFacingOpenInvoice,
+  isInternalDraftInvoice,
+  LAB_OPEN_INVOICE_SUMMARY_GRID,
+} from "@/collections/invoiceAccountStatus.js";
+import {
+  buildLabAccountActivityTimeline,
+  filterValidInvoices,
+  sanitizeTimelineEvents,
+} from "@/collections/labAccountActivity.js";
+import InvoiceStatusBadge from "@/components/invoice/InvoiceStatusBadge.jsx";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
 import InvoiceDetailsDrawer from "@/components/invoice/InvoiceDetailsDrawer.jsx";
 import InvoiceAllocationsDrawer from "@/components/invoice/InvoiceAllocationsDrawer.jsx";
@@ -63,6 +78,11 @@ import { ROLES } from "@/config/roles";
 import { getAgentActiveLabOwnershipRowsRead } from "@/api/labOwnershipApi.js";
 import { filterCollectionsForUser } from "@/utils/accessFilters.js";
 import { notifyAgentWorkspaceRefresh } from "@/pages/agentVisitContext.js";
+import {
+  notifyFinancialSyncCompleted,
+  onFinancialSyncCompleted,
+} from "@/operations/financialSyncEvents.js";
+import { useFinancialSyncPulse } from "@/hooks/useFinancialSyncPulse.js";
 import { startVisitFromWorkspaceItem } from "@/pages/agentVisitContext.js";
 import {
   countMediumHighRisk,
@@ -109,8 +129,6 @@ import {
   ShieldAlert,
   Wallet,
   FileText,
-  Download,
-  LifeBuoy,
   ArrowRight,
   Building2,
   CalendarClock,
@@ -201,7 +219,9 @@ function displayPaymentStatus(item) {
   return deriveCollectionPaymentStatus({
     outstandingAmount: item?.outstandingAmount,
     totalPaid: item?.totalPaid,
-    totalDelivered: item?.totalDelivered,
+    totalAllocated: item?.totalAllocated,
+    overdueDays: item?.overdueDays,
+    creditHold: item?.creditHold ?? item?.credit_hold,
   });
 }
 
@@ -278,15 +298,23 @@ function SummaryMetric({ label, children }) {
   );
 }
 
+const LAB_DASHBOARD_CARD =
+  "rounded-lg border border-border bg-card p-3 shadow-sm";
+
+const LAB_OPEN_INVOICE_ACTION_BTN =
+  "h-9 min-w-[3.25rem] px-2 text-[10px]";
+
+function displayKpiValue(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  return value;
+}
+
 function CompactAccountKpi({ title, value, icon: Icon }) {
   return (
-    <div className="rounded-lg border border-border bg-card px-2.5 py-2 shadow-sm">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="truncate text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            {title}
-          </div>
-          <div className="truncate text-sm font-semibold tabular-nums text-foreground">{value}</div>
+    <div className={cn(LAB_DASHBOARD_CARD, "flex h-[4.25rem] flex-col justify-between py-2.5")}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="truncate text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          {title}
         </div>
         {Icon ? (
           <div className="shrink-0 rounded-md bg-muted p-1.5">
@@ -294,18 +322,62 @@ function CompactAccountKpi({ title, value, icon: Icon }) {
           </div>
         ) : null}
       </div>
+      <div className="truncate text-sm font-semibold leading-tight tabular-nums text-foreground">
+        {displayKpiValue(value)}
+      </div>
     </div>
   );
 }
 
-function financialStatusSummary(item) {
-  const risk = String(item?.riskStatus || "").toLowerCase();
-  const overdueDays = Number(item?.overdueDays || 0);
-  const outstanding = Number(item?.outstandingAmount || 0);
-  if (overdueDays > 0) return { label: "Overdue", tone: "text-red-700 bg-red-50 border-red-200" };
-  if (risk.includes("high")) return { label: "Medium Risk", tone: "text-amber-700 bg-amber-50 border-amber-200" };
-  if (outstanding <= 0) return { label: "Good Standing", tone: "text-emerald-700 bg-emerald-50 border-emerald-200" };
-  return { label: "Partially Paid", tone: "text-blue-700 bg-blue-50 border-blue-200" };
+function AccountHealthMetric({ label, value, emphasize = false }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p
+        className={cn(
+          "truncate tabular-nums",
+          emphasize ? "text-base font-bold text-foreground" : "text-sm font-semibold text-foreground"
+        )}
+      >
+        {displayKpiValue(value)}
+      </p>
+    </div>
+  );
+}
+
+function labTopCreditKpiDisplay({ labLedgerKpis, collectionRow }) {
+  const creditLimit = Number(
+    labLedgerKpis?.creditLimit ??
+      collectionRow?.creditLimit ??
+      collectionRow?.credit_limit ??
+      collectionRow?.creditApproved ??
+      0
+  );
+  const outstanding = Number(
+    labLedgerKpis?.outstanding ?? collectionRow?.outstandingAmount ?? 0
+  );
+  if (creditLimit <= 0) {
+    return { label: "Credit", value: "Not configured" };
+  }
+  return {
+    label: "Available Credit",
+    value: formatMoney(Math.max(0, creditLimit - outstanding)),
+  };
+}
+
+function financialStatusSummary(item, invoices = []) {
+  const totalAllocated = filterValidInvoices(invoices).reduce(
+    (sum, inv) => sum + Number(inv?.allocatedAmount ?? 0),
+    0
+  );
+  return deriveAccountHealthStatus({
+    outstandingAmount: item?.outstandingAmount,
+    totalPaid: Number(item?.totalPaid ?? 0),
+    totalAllocated,
+    overdueDays: item?.overdueDays,
+    riskStatus: item?.riskStatus,
+    creditHold: item?.creditHold ?? item?.credit_hold,
+  });
 }
 
 function buildInvoiceRows(item, history) {
@@ -333,6 +405,7 @@ function buildInvoiceRows(item, history) {
   }
 
   for (const entry of history || []) {
+    if (!entry || typeof entry !== "object") continue;
     const invoiceId = String(entry.invoiceId || entry.invoice_id || "").trim();
     const orderId = String(entry.orderId || entry.order_id || "").trim();
     const amount = Number(
@@ -356,30 +429,179 @@ function buildInvoiceRows(item, history) {
   return rows.slice(0, 8);
 }
 
-function buildFinancialTimeline(item, history) {
-  const outstandingNow = Number(item?.outstandingAmount || 0);
-  return (history || []).map((entry) => {
-    const amount = Number(entry.amountCollected || entry.amount || 0);
-    const invoiceId = String(entry.invoiceId || entry.invoice_id || "").trim();
-    const paymentDate = entry.paymentDate || entry.updatedAt || "";
-    const mode = entry.paymentMode || entry.mode || "";
-    const outstandingAfter = Number(entry.outstandingAfter || entry.outstanding_after || NaN);
-    const reducedTo = Number.isFinite(outstandingAfter) ? outstandingAfter : outstandingNow;
-    return {
-      id: entry.paymentId || `${paymentDate}-${amount}-${invoiceId}`,
-      title: amount > 0 ? `${formatMoney(amount)} payment received` : "Account update",
-      subline: `Applied to ${invoiceId || "latest invoice"}${mode ? ` · ${mode}` : ""}`,
-      trailing: `Outstanding ${formatMoney(reducedTo)}`,
-      date: paymentDate,
-      kind: amount > 0 ? "payment" : "update",
-    };
-  });
+function activityKindDotClass(kind) {
+  if (kind === "payment") return "bg-emerald-500";
+  if (kind === "pending") return "bg-amber-500";
+  if (kind === "fulfillment") return "bg-violet-500";
+  if (kind === "invoice") return "bg-sky-500";
+  return "bg-blue-500";
+}
+
+function splitActivityMetaLines(subline, trailing) {
+  const lines = [];
+  const rawSubline = String(subline || "").trim();
+  if (rawSubline) {
+    const methodSplit = rawSubline.split(" · Method:");
+    lines.push(methodSplit[0].trim());
+    if (methodSplit[1]) lines.push(`Method: ${methodSplit[1].trim()}`);
+  }
+  const rawTrailing = String(trailing || "").trim();
+  if (rawTrailing) {
+    lines.push(rawTrailing.replace(/^Outstanding balance /i, "Outstanding "));
+  }
+  return lines;
+}
+
+function LabActivityTimelineEntry({ entry }) {
+  if (!entry || typeof entry !== "object") {
+    return (
+      <p className="text-[10px] text-muted-foreground">Activity entry unavailable</p>
+    );
+  }
+  const isPayment = entry.kind === "payment";
+  const metaLines = Array.isArray(entry.lines)
+    ? entry.lines
+    : entry.subline || entry.trailing
+      ? splitActivityMetaLines(entry.subline, entry.trailing)
+      : entry.detail
+        ? [entry.detail]
+        : [];
+
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] font-medium text-slate-900">{entry.title}</p>
+        {isPayment && entry.amount ? (
+          <p className="text-sm font-bold tabular-nums text-foreground">{entry.amount}</p>
+        ) : null}
+        {metaLines.map((line) => (
+          <p key={line} className="text-[10px] text-muted-foreground">
+            {line}
+          </p>
+        ))}
+        {entry.trailingLabel && entry.trailingAmount ? (
+          <>
+            <p className="mt-1 text-[10px] text-muted-foreground">{entry.trailingLabel}</p>
+            <p className="text-sm font-bold tabular-nums text-foreground">{entry.trailingAmount}</p>
+          </>
+        ) : entry.trailing && !entry.trailingLabel ? (
+          <p className="text-[10px] text-muted-foreground">{entry.trailing}</p>
+        ) : null}
+      </div>
+      <span className="shrink-0 pt-0.5 text-[10px] text-muted-foreground">
+        {formatShortDate(entry.date)}
+      </span>
+    </div>
+  );
+}
+
+function LabOpenInvoiceSummaryRow({
+  invoice,
+  rowId,
+  invoiceDownloadKey,
+  onView,
+  onDownload,
+  onSubmitAdvice,
+}) {
+  if (!invoice || typeof invoice !== "object") return null;
+  const openBalance = Number(invoice.openBalance ?? invoice.amount ?? 0);
+  const downloadKey = invoice.invoiceDbId || invoice.orderId || rowId;
+  const downloading = invoiceDownloadKey === downloadKey;
+
+  return (
+    <div className="rounded-md border border-border/70 px-2.5 py-2">
+      <div className={cn("hidden sm:grid", LAB_OPEN_INVOICE_SUMMARY_GRID)}>
+        <div className="min-w-0">
+          <p className="truncate font-mono text-[11px] font-semibold text-slate-900" title={invoice.invoiceId}>
+            {invoice.invoiceId}
+          </p>
+          <p className="text-[10px] text-muted-foreground">Due {formatShortDate(invoice.dueDate)}</p>
+        </div>
+        <p className="text-right text-base font-bold tabular-nums text-amber-700">{formatMoney(openBalance)}</p>
+        <span className="justify-self-start">
+          <InvoiceStatusBadge status={invoice.rawStatus || invoice.status} displayStatus={invoice.status} />
+        </span>
+        <div className="flex items-center justify-end gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className={LAB_OPEN_INVOICE_ACTION_BTN}
+            onClick={() => onView(invoice)}
+          >
+            View
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className={LAB_OPEN_INVOICE_ACTION_BTN}
+            disabled={downloading}
+            onClick={() => void onDownload(invoice)}
+          >
+            {downloading ? <Loader2 className="h-3 w-3 animate-spin" /> : "PDF"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className={LAB_OPEN_INVOICE_ACTION_BTN}
+            disabled={openBalance <= 0}
+            onClick={() => onSubmitAdvice?.(invoice)}
+          >
+            Advice
+          </Button>
+        </div>
+      </div>
+      <div className="space-y-2 sm:hidden">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="truncate font-mono text-sm font-semibold">{invoice.invoiceId}</p>
+            <p className="text-xs text-muted-foreground">Due {formatShortDate(invoice.dueDate)}</p>
+          </div>
+          <InvoiceStatusBadge status={invoice.rawStatus || invoice.status} displayStatus={invoice.status} />
+        </div>
+        <p className="text-lg font-bold tabular-nums text-amber-700">{formatMoney(openBalance)}</p>
+        <div className="flex justify-end gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className={cn(LAB_OPEN_INVOICE_ACTION_BTN, "flex-1 sm:flex-none")}
+            onClick={() => onView(invoice)}
+          >
+            View
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className={cn(LAB_OPEN_INVOICE_ACTION_BTN, "flex-1 sm:flex-none")}
+            disabled={downloading}
+            onClick={() => void onDownload(invoice)}
+          >
+            PDF
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className={cn(LAB_OPEN_INVOICE_ACTION_BTN, "flex-1 sm:flex-none")}
+            disabled={openBalance <= 0}
+            onClick={() => onSubmitAdvice?.(invoice)}
+          >
+            Advice
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function groupTimelineByDate(events) {
   const buckets = [];
   const byLabel = new Map();
-  for (const event of events || []) {
+  for (const event of sanitizeTimelineEvents(events)) {
     const label = formatShortDate(event.date || "");
     if (!byLabel.has(label)) {
       const next = { label, items: [] };
@@ -399,7 +621,7 @@ function LabAccountTimeline({
   copy,
   collectionDetails,
   setActivePage,
-  onRecordInvoicePayment,
+  onSubmitPaymentAdvice,
   tenantId,
 }) {
   const { showToast } = usePortalToast();
@@ -408,56 +630,18 @@ function LabAccountTimeline({
   const overdueDays = Number(item.overdueDays || 0);
   const paymentLabel = displayPaymentStatus(item);
   const riskLabel = item.riskStatus || "Low";
-  const health = financialStatusSummary(item);
   const dueDate = item.nextFollowUp || item.dueDate || "";
   const creditLimit = Number(
     item.creditLimit || item.credit_limit || item.creditApproved || item.credit_limit_amount || 0
   );
   const creditUsed = Math.max(0, outstanding);
   const utilizationPct = creditLimit > 0 ? Math.min(100, Math.round((creditUsed / creditLimit) * 100)) : null;
-  const [expandedInvoiceId, setExpandedInvoiceId] = useState("");
   const [invoiceDrawer, setInvoiceDrawer] = useState(null);
   const [allocationsDrawer, setAllocationsDrawer] = useState(null);
   const [activeFinanceTab, setActiveFinanceTab] = useState("activity");
   const [serverInvoices, setServerInvoices] = useState([]);
   const [invoiceDownloadKey, setInvoiceDownloadKey] = useState("");
   const labId = item?.labId || item?.lab_id || "";
-
-  const handleWorkspaceAction = useCallback(
-    (action) => {
-      const storageKey = labIdKey(labId) ? `lab-ordering-handoff:${labIdKey(labId)}` : "";
-      if (action === "view_orders") {
-        setActivePage?.("labOrders");
-        return;
-      }
-      if (action === "download_statement") {
-        setActiveFinanceTab("statements");
-        return;
-      }
-      if (action === "repeat_last_order") {
-        if (storageKey) {
-          try {
-            window.localStorage.setItem(
-              storageKey,
-              JSON.stringify({
-                message: "Open Previous Orders to repeat your latest order.",
-                openOrdersTab: true,
-              })
-            );
-          } catch {
-            // ignore storage failures
-          }
-        }
-        setActivePage?.("labOrders");
-        return;
-      }
-      if (action === "contact_support") {
-        setActivePage?.("notifications");
-        showToast("success", "Activity Center opened — track orders and payment updates here.");
-      }
-    },
-    [labId, setActivePage, showToast]
-  );
 
   useEffect(() => {
     let cancelled = false;
@@ -474,7 +658,9 @@ function LabAccountTimeline({
 
   const invoices = useMemo(() => {
     if (serverInvoices.length) {
-      return serverInvoices.map((inv) => ({
+      return serverInvoices
+        .filter((inv) => inv && typeof inv === "object")
+        .map((inv) => ({
         invoiceId: inv.invoiceNumber || inv.id,
         invoiceDbId: inv.id,
         orderId: inv.orderId,
@@ -486,18 +672,41 @@ function LabAccountTimeline({
         openBalance: inv.openBalance,
         invoiceDate: inv.invoiceDate,
         dueDate: inv.dueDate,
-        status: inv.displayStatus || inv.status,
+        sentAt: inv.sentAt,
         rawStatus: inv.status,
         hasPdf: inv.hasPdf,
+        pdfGeneratedAt: inv.pdfGeneratedAt,
         labId: inv.labId,
+        status: deriveOpenInvoiceWidgetStatus({
+          status: inv.status,
+          openBalance: inv.openBalance,
+          paidAmount: inv.allocatedAmount,
+          allocatedAmount: inv.allocatedAmount,
+          dueDate: inv.dueDate,
+          sentAt: inv.sentAt,
+        }),
       }));
     }
-    return buildInvoiceRows(collectionDetails || item, history);
+    return filterValidInvoices(buildInvoiceRows(collectionDetails || item, history));
   }, [serverInvoices, collectionDetails, item, history]);
-  const financialTimeline = useMemo(
-    () => buildFinancialTimeline(collectionDetails || item, history),
-    [collectionDetails, item, history]
+  const health = useMemo(
+    () => financialStatusSummary(item, invoices),
+    [item, invoices]
   );
+  const financialTimeline = useMemo(() => {
+    try {
+      return buildLabAccountActivityTimeline({
+        item: collectionDetails || item,
+        history,
+        invoices,
+        formatMoney,
+        formatShortDate,
+      });
+    } catch (err) {
+      console.warn("CollectionsPage financialTimeline:", err?.message || err);
+      return [];
+    }
+  }, [collectionDetails, item, history, invoices]);
   const timelineGroups = useMemo(() => groupTimelineByDate(financialTimeline), [financialTimeline]);
   const accountStandingSummary =
     overdueDays > 0
@@ -505,17 +714,28 @@ function LabAccountTimeline({
       : outstanding <= 0
         ? "Account is in good standing with no pending balance."
         : "Account is active with pending balance under monitoring.";
-  const availableCredit = creditLimit > 0 ? Math.max(0, creditLimit - creditUsed) : null;
-  const topInvoices = invoices.slice(0, 12);
+  const availableCredit =
+    creditLimit > 0 ? Math.max(0, creditLimit - creditUsed) : null;
+  const lastPaymentDate = deriveLastPaymentDateFromHistory(history);
+  const openInvoicesTop = useMemo(
+    () =>
+      filterValidInvoices(invoices)
+        .filter(isCustomerFacingOpenInvoice)
+        .sort((a, b) => str(b.dueDate).localeCompare(str(a.dueDate)))
+        .slice(0, 5),
+    [invoices]
+  );
   const statementRows = useMemo(
     () =>
-      topInvoices.map((invoice, idx) => ({
-        id: `${invoice.invoiceId}-${idx}`,
-        title: `${invoice.invoiceId}`,
-        detail: `Order ${invoice.orderId || "—"} · ${formatMoney(invoice.amount)}`,
-        date: invoice.dueDate,
+      filterValidInvoices(invoices)
+        .slice(0, 12)
+        .map((invoice, idx) => ({
+        id: `${invoice?.invoiceId || "invoice"}-${idx}`,
+        title: `${invoice?.invoiceId || "Invoice"}`,
+        detail: `Order ${invoice?.orderId || "—"} · ${formatMoney(invoice?.amount)}`,
+        date: invoice?.dueDate,
       })),
-    [topInvoices]
+    [invoices]
   );
   const creditHistoryRows = useMemo(
     () => [
@@ -549,10 +769,15 @@ function LabAccountTimeline({
   );
   const tabRows =
     activeFinanceTab === "activity"
-      ? financialTimeline.map((entry) => ({
+      ? sanitizeTimelineEvents(financialTimeline).map((entry) => ({
           id: entry.id,
           title: entry.title,
-          detail: `${entry.subline} · ${entry.trailing}`,
+          amount: entry.amount,
+          lines: entry.lines,
+          subline: entry.subline,
+          trailing: entry.trailing,
+          trailingLabel: entry.trailingLabel,
+          trailingAmount: entry.trailingAmount,
           date: entry.date,
           kind: entry.kind,
         }))
@@ -586,281 +811,110 @@ function LabAccountTimeline({
   }
 
   return (
-    <div className="space-y-2">
-      <div className="grid gap-2 lg:grid-cols-[1.35fr_0.9fr]">
-        <section className="min-w-0 rounded-lg border border-border bg-card p-2 shadow-sm">
-          <div className="mb-1.5 flex items-center justify-between">
-            <h3 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Outstanding Invoices
-            </h3>
-            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-slate-600">
-              {topInvoices.length}
-            </span>
-          </div>
-          {topInvoices.length ? (
-            <>
-              <div className="hidden text-[10px] font-medium uppercase tracking-wide text-slate-500 xl:grid xl:grid-cols-[1fr_0.9fr_0.8fr_0.8fr_0.8fr_0.7fr_1.2fr] xl:gap-2 xl:px-2 xl:py-1">
-                <span>Invoice</span>
-                <span>Order</span>
-                <span>Total</span>
-                <span>Allocated</span>
-                <span>Open</span>
-                <span>Status</span>
-                <span>Actions</span>
-              </div>
-              <div className="space-y-1">
-                {topInvoices.map((invoice, idx) => {
-                  const id = `${invoice.invoiceId}-${idx}`;
-                  const total = Number(invoice.totalAmount ?? invoice.amount ?? 0);
-                  const allocated = Number(invoice.allocatedAmount ?? 0);
-                  const openBalance = Number(
-                    invoice.openBalance ?? Math.max(0, total - allocated)
-                  );
-                  return (
-                    <div
-                      key={id}
-                      className="rounded-md border border-border/70 px-2 py-1.5 transition hover:border-slate-300"
-                    >
-                      <div className="hidden items-center gap-1 xl:grid xl:grid-cols-[1fr_0.9fr_0.8fr_0.8fr_0.8fr_0.7fr_1.2fr] xl:gap-2">
-                        <div className="min-w-0 text-[11px] font-semibold text-slate-900">{invoice.invoiceId}</div>
-                        <div className="min-w-0 text-[10px] text-slate-600">{invoice.orderId || "—"}</div>
-                        <div className="text-[11px] font-semibold tabular-nums text-slate-900">{formatMoney(total)}</div>
-                        <div className="text-[10px] tabular-nums text-emerald-700">{formatMoney(allocated)}</div>
-                        <div className="text-[10px] tabular-nums text-amber-700">{formatMoney(openBalance)}</div>
-                        <div className="text-[10px]">
-                          <span
-                            className={cn(
-                              "rounded px-1 py-0.5",
-                              invoice.status === "paid" || invoice.status === "Paid"
-                                ? "bg-emerald-50 text-emerald-700"
-                                : invoice.status === "overdue"
-                                  ? "bg-red-50 text-red-700"
-                                  : "bg-amber-50 text-amber-700"
-                            )}
-                          >
-                            {invoice.status}
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap gap-1">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-6 px-1.5 text-[10px]"
-                            onClick={() => setInvoiceDrawer(invoice)}
-                          >
-                            View Invoice
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-6 px-1.5 text-[10px]"
-                            onClick={() => setAllocationsDrawer(invoice)}
-                          >
-                            Allocations
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-6 px-1.5 text-[10px]"
-                            disabled={!invoice.orderId || openBalance <= 0}
-                            onClick={() =>
-                              onRecordInvoicePayment?.({
-                                ...invoice,
-                                labId,
-                              })
-                            }
-                          >
-                            Record Payment
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-6 px-1.5 text-[10px]"
-                            disabled={invoiceDownloadKey === (invoice.invoiceDbId || invoice.orderId || id)}
-                            onClick={() => void handleInvoiceDownload(invoice)}
-                          >
-                            {invoiceDownloadKey === (invoice.invoiceDbId || invoice.orderId || id) ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              "Download"
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="space-y-2 xl:hidden">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-slate-900">{invoice.invoiceId}</p>
-                            <p className="text-xs text-slate-600">Order {invoice.orderId || "—"}</p>
-                          </div>
-                          <span
-                            className={cn(
-                              "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium",
-                              invoice.status === "paid" || invoice.status === "Paid"
-                                ? "bg-emerald-50 text-emerald-700"
-                                : invoice.status === "overdue"
-                                  ? "bg-red-50 text-red-700"
-                                  : "bg-amber-50 text-amber-700"
-                            )}
-                          >
-                            {invoice.status}
-                          </span>
-                        </div>
-                        <dl className="grid grid-cols-3 gap-2 text-xs">
-                          <div>
-                            <dt className="text-muted-foreground">Total</dt>
-                            <dd className="font-semibold tabular-nums">{formatMoney(total)}</dd>
-                          </div>
-                          <div>
-                            <dt className="text-muted-foreground">Allocated</dt>
-                            <dd className="font-semibold tabular-nums text-emerald-700">{formatMoney(allocated)}</dd>
-                          </div>
-                          <div>
-                            <dt className="text-muted-foreground">Open</dt>
-                            <dd className="font-semibold tabular-nums text-amber-700">{formatMoney(openBalance)}</dd>
-                          </div>
-                        </dl>
-                        <div className="flex flex-wrap gap-1.5">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-9 rounded-lg text-xs"
-                            onClick={() => setInvoiceDrawer(invoice)}
-                          >
-                            View Invoice
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-9 rounded-lg text-xs"
-                            onClick={() => setAllocationsDrawer(invoice)}
-                          >
-                            Allocations
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-9 rounded-lg text-xs"
-                            disabled={!invoice.orderId || openBalance <= 0}
-                            onClick={() =>
-                              onRecordInvoicePayment?.({
-                                ...invoice,
-                                labId,
-                              })
-                            }
-                          >
-                            Record Payment
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-9 rounded-lg text-xs"
-                            disabled={invoiceDownloadKey === (invoice.invoiceDbId || invoice.orderId || id)}
-                            onClick={() => void handleInvoiceDownload(invoice)}
-                          >
-                            {invoiceDownloadKey === (invoice.invoiceDbId || invoice.orderId || id) ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              "Download"
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                      {expandedInvoiceId === id ? (
-                        <div className="mt-1.5 rounded border border-dashed border-border px-2 py-1 text-[10px] text-slate-600">
-                          <div>Order {invoice.orderId || "—"} <ArrowRight className="mx-0.5 inline h-2.5 w-2.5" /> {invoice.invoiceId}</div>
-                          <div>
-                            Allocated {formatMoney(allocated)} · Open {formatMoney(openBalance)} · Due{" "}
-                            {formatShortDate(invoice.dueDate)} · {invoice.status}
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          ) : (
-            <p className="rounded-md border border-dashed px-2 py-2 text-[11px] text-muted-foreground">
-              No outstanding invoices right now.
-            </p>
-          )}
-        </section>
-
-        <aside className="rounded-lg border border-border bg-card p-2.5 shadow-sm">
-          <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+    <div className="space-y-3">
+      <section className={LAB_DASHBOARD_CARD}>
+        <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             Account Health
           </h3>
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <p className="text-[10px] text-slate-500">Outstanding</p>
-              <p className="text-lg font-bold tabular-nums text-foreground">{formatMoney(outstanding)}</p>
-              <p className="text-[10px] text-muted-foreground">Paid {formatMoney(totalPaid)}</p>
-            </div>
-            <div className="text-right">
-              <span className={cn("rounded border px-1.5 py-0.5 text-[10px] font-medium", health.tone)}>
-                {health.label}
+          <span className={cn("inline-block rounded border px-2 py-0.5 text-[10px] font-medium", health.tone)}>
+            {health.label}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+          <AccountHealthMetric label="Outstanding" value={formatMoney(outstanding)} emphasize />
+          <AccountHealthMetric label="Paid" value={formatMoney(totalPaid)} emphasize />
+          <AccountHealthMetric
+            label="Credit Limit"
+            value={creditLimit > 0 ? formatMoney(creditLimit) : "Not configured"}
+          />
+          <AccountHealthMetric
+            label="Available Credit"
+            value={availableCredit == null ? "—" : formatMoney(availableCredit)}
+          />
+          <AccountHealthMetric
+            label="Last Payment"
+            value={lastPaymentDate ? formatShortDate(lastPaymentDate) : "—"}
+          />
+          <AccountHealthMetric label="Next Payment" value={dueDate ? formatShortDate(dueDate) : "—"} />
+          <AccountHealthMetric
+            label="Behavior"
+            value={overdueDays > 0 ? `Delayed by ${overdueDays}d` : "On track"}
+          />
+          <AccountHealthMetric label="Risk" value={riskLabel || "—"} />
+        </div>
+        {utilizationPct != null ? (
+          <div className="mt-2.5 border-t border-border/60 pt-2.5">
+            <div className="mb-1 flex items-center justify-between text-[10px] text-muted-foreground">
+              <span>Credit used</span>
+              <span className="tabular-nums">
+                {formatMoney(creditUsed)} / {formatMoney(creditLimit)}
               </span>
-              <p className="mt-1 text-[10px] text-muted-foreground">Risk: {riskLabel}</p>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+              <div
+                className={cn(
+                  "h-full rounded-full",
+                  utilizationPct >= 85 ? "bg-red-500" : utilizationPct >= 65 ? "bg-amber-500" : "bg-emerald-500"
+                )}
+                style={{ width: `${utilizationPct}%` }}
+              />
             </div>
           </div>
-          <div className="mt-2 text-[10px] text-slate-600">
-            <div>Behavior: {overdueDays > 0 ? `Delayed by ${overdueDays}d` : "On track"}</div>
-            <div>Next payment: {formatShortDate(dueDate)}</div>
-          </div>
-          {utilizationPct != null ? (
-            <div className="mt-2">
-              <div className="mb-1 flex items-center justify-between text-[10px] text-slate-600">
-                <span>Credit used</span>
-                <span className="tabular-nums">
-                  {formatMoney(creditUsed)} / {formatMoney(creditLimit)}
-                </span>
-              </div>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className={cn(
-                    "h-full rounded-full",
-                    utilizationPct >= 85
-                      ? "bg-red-500"
-                      : utilizationPct >= 65
-                        ? "bg-amber-500"
-                        : "bg-emerald-500"
-                  )}
-                  style={{ width: `${utilizationPct}%` }}
-                />
-              </div>
-            </div>
-          ) : null}
-          <p className="mt-2 text-[10px] text-muted-foreground">{accountStandingSummary}</p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => handleWorkspaceAction("view_orders")}>
-              <FileText className="mr-1 h-3 w-3" />
-              Orders
-            </Button>
-            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => handleWorkspaceAction("download_statement")}>
-              <Download className="mr-1 h-3 w-3" />
-              Statements
-            </Button>
-            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => handleWorkspaceAction("repeat_last_order")}>
-              Repeat
-            </Button>
-            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => handleWorkspaceAction("contact_support")}>
-              <LifeBuoy className="mr-1 h-3 w-3" />
-              Support
-            </Button>
-          </div>
-        </aside>
-      </div>
+        ) : null}
+        <p className="mt-2 text-[10px] text-muted-foreground">{accountStandingSummary}</p>
+      </section>
 
-      <section className="rounded-lg border border-border bg-card p-2.5 shadow-sm">
+      <section className={LAB_DASHBOARD_CARD}>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Open Invoices
+          </h3>
+          <Button
+            type="button"
+            variant="link"
+            className="h-auto p-0 text-[11px] font-medium"
+            onClick={() => navigateToLabInvoiceCenter(setActivePage)}
+          >
+            View all invoices →
+          </Button>
+        </div>
+        {openInvoicesTop.length ? (
+          <div className="space-y-1.5">
+            {openInvoicesTop.map((invoice, idx) => (
+              <LabOpenInvoiceSummaryRow
+                key={`${invoice?.invoiceId || "invoice"}-${idx}`}
+                invoice={invoice}
+                rowId={`${invoice?.invoiceId || "invoice"}-${idx}`}
+                invoiceDownloadKey={invoiceDownloadKey}
+                onView={setInvoiceDrawer}
+                onDownload={handleInvoiceDownload}
+                onSubmitAdvice={onSubmitPaymentAdvice}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-md border border-dashed border-border/80 px-3 py-3 text-[11px] text-muted-foreground">
+            <div className="flex items-center gap-1.5 font-medium text-emerald-700">
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              No outstanding invoices
+            </div>
+            <p className="mt-1">
+              Browse the{" "}
+              <button
+                type="button"
+                className="font-medium text-[var(--pc-brand-primary)] underline-offset-2 hover:underline"
+                onClick={() => navigateToLabInvoiceCenter(setActivePage)}
+              >
+                Invoice Center
+              </button>{" "}
+              for historical invoices.
+            </p>
+          </div>
+        )}
+      </section>
+
+      <section className={LAB_DASHBOARD_CARD}>
         <div className="mb-2 flex flex-wrap gap-1.5">
           {[
             { id: "activity", label: "Payment Activity" },
@@ -899,23 +953,15 @@ function LabAccountTimeline({
                 <ul className="relative space-y-0 pl-2.5">
                   <div className="absolute bottom-1 left-[4px] top-1 w-px bg-border" aria-hidden />
                   {group.items.map((entry) => (
-                    <li key={entry.id} className="relative border-b border-border/50 py-1.5 pl-3 last:border-b-0">
+                    <li key={entry.id} className="relative border-b border-border/50 py-2 pl-3 last:border-b-0">
                       <span
                         className={cn(
-                          "absolute left-0 top-2.5 h-1.5 w-1.5 rounded-full border border-background",
-                          entry.kind === "payment" ? "bg-emerald-500" : "bg-blue-500"
+                          "absolute left-0 top-3 h-1.5 w-1.5 rounded-full border border-background",
+                          activityKindDotClass(entry.kind)
                         )}
                         aria-hidden
                       />
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="text-[11px] font-medium text-slate-900">{entry.title}</p>
-                          <p className="text-[10px] text-slate-600">{entry.detail}</p>
-                        </div>
-                        <span className="shrink-0 text-[10px] text-muted-foreground">
-                          {formatShortDate(entry.date)}
-                        </span>
-                      </div>
+                      <LabActivityTimelineEntry entry={entry} />
                     </li>
                   ))}
                 </ul>
@@ -924,7 +970,15 @@ function LabAccountTimeline({
           </div>
         ) : (
           <p className="rounded-md border border-dashed px-2 py-2 text-[11px] text-muted-foreground">
-            No entries in this tab yet.
+            {activeFinanceTab === "activity"
+              ? "No payment or invoice activity recorded yet."
+              : activeFinanceTab === "statements"
+                ? "Statement summaries appear here from your invoice history. Download documents from Invoice Center."
+                : activeFinanceTab === "credit"
+                  ? "Credit usage and limit events will appear here when configured for your lab."
+                  : activeFinanceTab === "notes"
+                    ? "Account notes from PrimeCare finance will appear here."
+                    : "No entries in this tab yet."}
           </p>
         )}
       </section>
@@ -1833,6 +1887,8 @@ export default function CollectionsPage({
 
   const [loadError, setLoadError] = useState("");
 
+  const financialSyncPulse = useFinancialSyncPulse();
+
   const [amountCollected, setAmountCollected] = useState("");
   const [paymentMode, setPaymentMode] = useState("Cash");
   const [note, setNote] = useState("");
@@ -2090,6 +2146,15 @@ export default function CollectionsPage({
   }, [authToken, tenantId, profileLabId, isLabAccount]);
 
   useEffect(() => {
+    return onFinancialSyncCompleted(() => {
+      void loadCollections({ silent: true });
+      if (isLabAccount && profileLabId) {
+        void loadLabAccountLedger();
+      }
+    });
+  }, [loadCollections, loadLabAccountLedger, isLabAccount, profileLabId]);
+
+  useEffect(() => {
     if (loading || isLabAccount) return;
     const ctx =
       consumeHqNavContext("risk") ||
@@ -2104,6 +2169,12 @@ export default function CollectionsPage({
     const targetId = labIdKey(ctx.labId);
     if (isHqCreditRiskView(currentUser, isLabAccount, isAgentView)) {
       setHqFocusLabId(targetId);
+      if (ctx.orderId) setPaymentOrderId(str(ctx.orderId));
+      if (ctx.paymentAmount) setAmountCollected(String(ctx.paymentAmount));
+      if (ctx.focusSection === "payment") {
+        if (!collections.length) return;
+        void openCollectionPanel(ctx.labId, "payment");
+      }
       window.setTimeout(() => {
         document.getElementById(`hq-credit-lab-${targetId}`)?.scrollIntoView({
           behavior: "smooth",
@@ -2113,6 +2184,8 @@ export default function CollectionsPage({
       return;
     }
     if (!collections.length) return;
+    if (ctx.orderId) setPaymentOrderId(str(ctx.orderId));
+    if (ctx.paymentAmount) setAmountCollected(String(ctx.paymentAmount));
     void openCollectionPanel(ctx.labId, ctx.focusSection || "details");
   }, [loading, collections.length, isLabAccount, currentUser, isAgentView]);
 
@@ -2460,11 +2533,19 @@ export default function CollectionsPage({
 
             const paidLabKey = labIdKey(selectedLabId);
             const paidDate = localDateYmd(new Date());
+            const paidOrderId = paymentOrderId || basePayload.orderId || "";
             setLastPaymentByLabId((prev) => ({ ...prev, [paidLabKey]: paidDate }));
             setPaymentOrderId("");
+            invalidateOrdersReadCache();
+            invalidateCollectionsReadCache();
+            notifyFinancialSyncCompleted({
+              source: "collection_payment",
+              labId: selectedLabId,
+              orderId: paidOrderId,
+            });
 
             await loadCollections();
-            if (isAgentView && paymentDrawerLabId) {
+            if ((isAgentView || isHqCreditRisk) && paymentDrawerLabId) {
               setPaymentDrawerLabId("");
               setSelectedCollection(null);
               setHistory([]);
@@ -2697,6 +2778,15 @@ export default function CollectionsPage({
     return null;
   }
 
+  function handleLabSubmitPaymentAdvice(invoice) {
+    const invoiceLabel = str(invoice?.invoiceId ?? invoice?.invoiceNumber ?? "invoice");
+    showToast(
+      "info",
+      `Payment advice for ${invoiceLabel} is reviewed by PrimeCare finance before your account is updated. Open Activity Center to track status.`
+    );
+    setActivePage?.("notifications");
+  }
+
   function handleRecordInvoicePayment(invoice) {
     const orderId = str(invoice?.orderId ?? invoice?.order_id);
     const openBalance = Number(invoice?.openBalance ?? invoice?.amount ?? 0);
@@ -2711,7 +2801,7 @@ export default function CollectionsPage({
     if (focusSection !== "payment") {
       setPaymentOrderId("");
     }
-    if (isAgentView && focusSection === "payment") {
+    if ((isAgentView || isHqCreditRisk) && focusSection === "payment") {
       setPaymentDrawerLabId(key);
       void openCollection(labId, { focusSection, suppressExpand: true });
       return;
@@ -2784,12 +2874,14 @@ export default function CollectionsPage({
   return (
     <div
       className={cn(
-        "space-y-3 pb-6",
+        "pb-6",
+        isLabAccount ? "space-y-2" : "space-y-3",
         isAgentView && !embedded && "mx-auto w-full max-w-[1360px]"
       )}
     >
       {!embedded ? (
         <PageHeader
+          compact={isLabAccount}
           title={
             isLabAccount
               ? "Payments & Account"
@@ -2801,7 +2893,7 @@ export default function CollectionsPage({
             distributorScope?.tenantId
               ? `Collections for ${distributorScope.tenantName || "selected distributor"} only.`
               : isLabAccount
-                ? "Operational financial workspace for your lab: account health, invoices, and payment activity."
+                ? "Your account dashboard — balances, health, payment activity, and open invoice summary."
                 : isAgentView
                   ? "Who to collect from, how much is owed, and what to do next."
                   : isHqCreditRisk
@@ -2813,7 +2905,7 @@ export default function CollectionsPage({
             <DataFreshnessLabel
               loadedAt={dataLoadedAt}
               refreshing={loading || listRefreshing}
-              className="mt-1 block"
+              className={cn("block", isLabAccount ? "mt-0 text-[10px]" : "mt-1")}
             />
           }
           actions={
@@ -2872,7 +2964,7 @@ export default function CollectionsPage({
         />
       ) : null}
 
-      <div className={isLabAccount ? "mx-auto max-w-2xl" : ""}>
+      <div className={isLabAccount ? "mx-auto max-w-7xl" : ""}>
         {isLabAccount ? (
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <CompactAccountKpi
@@ -2903,30 +2995,15 @@ export default function CollectionsPage({
               )}
               icon={Wallet}
             />
-            <CompactAccountKpi
-              title="Credit remaining"
-              value={
-                labLedgerKpis?.creditRemaining != null
-                  ? formatMoney(labLedgerKpis.creditRemaining)
-                  : Number(
-                        filteredCollections[0]?.creditLimit ||
-                          filteredCollections[0]?.credit_limit ||
-                          0
-                      ) > 0
-                    ? formatMoney(
-                        Math.max(
-                          0,
-                          Number(
-                            filteredCollections[0]?.creditLimit ||
-                              filteredCollections[0]?.credit_limit ||
-                              0
-                          ) - Number(filteredCollections[0]?.outstandingAmount || 0)
-                        )
-                      )
-                    : "—"
-              }
-              icon={ShieldAlert}
-            />
+            {(() => {
+              const creditKpi = labTopCreditKpiDisplay({
+                labLedgerKpis,
+                collectionRow: filteredCollections[0],
+              });
+              return (
+                <CompactAccountKpi title={creditKpi.label} value={creditKpi.value} icon={ShieldAlert} />
+              );
+            })()}
           </div>
         ) : isAgentView ? (
           <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
@@ -2957,6 +3034,7 @@ export default function CollectionsPage({
               title="Outstanding balance"
               value={formatMoney(summary.totalOutstanding)}
               icon={IndianRupee}
+              highlight={financialSyncPulse}
             />
             <KpiCard
               title="Overdue labs"
@@ -2972,6 +3050,7 @@ export default function CollectionsPage({
               title="Today's collections"
               value={formatMoney(summary.todayCollections)}
               icon={Wallet}
+              highlight={financialSyncPulse}
             />
           </KpiCardGrid>
         )}
@@ -3016,6 +3095,7 @@ export default function CollectionsPage({
           currentUser={currentUser}
           onReviewLab={handleOpenLabReview}
           onOpenCollections={handleHqOpenCollections}
+          onRecordPayment={(labId) => openCollectionPanel(labId, "payment")}
         />
       ) : labDisplayCollections.length === 0 ? (
         isLabAccount ? (
@@ -3040,7 +3120,7 @@ export default function CollectionsPage({
           />
         )
       ) : isLabAccount ? (
-        <div className="mx-auto max-w-2xl space-y-2" role="list">
+        <div className="mx-auto max-w-7xl space-y-4" role="list">
           {labDisplayCollections.map((item) => {
             const key = labIdKey(item.labId);
             const isExpanded = expandedLabId === key;
@@ -3059,7 +3139,7 @@ export default function CollectionsPage({
                     : item
                 }
                 setActivePage={setActivePage}
-                onRecordInvoicePayment={handleRecordInvoicePayment}
+                onSubmitPaymentAdvice={handleLabSubmitPaymentAdvice}
               />
             );
           })}
@@ -3141,7 +3221,7 @@ export default function CollectionsPage({
         </div>
       )}
 
-      {isAgentView ? (
+      {(isAgentView || isHqCreditRisk) ? (
         <AgentCollectionPaymentDrawer
           open={Boolean(paymentDrawerLabId)}
           onClose={() => {
@@ -3163,7 +3243,7 @@ export default function CollectionsPage({
               readOnly={false}
               copy={accountLabels}
               focusSection="payment"
-              isAgentView
+              isAgentView={isAgentView}
               {...formProps}
             />
           ) : null}

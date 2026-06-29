@@ -1,0 +1,215 @@
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function str(v) {
+  return String(v ?? "").trim();
+}
+
+function todayYmd() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * Per-invoice display status for lab account / collections UI.
+ */
+export function deriveInvoiceAccountStatus({
+  status = "",
+  openBalance = 0,
+  paidAmount = 0,
+  allocatedAmount = 0,
+  dueDate = "",
+  sentAt = "",
+  creditHold = "",
+} = {}) {
+  const open = num(openBalance);
+  const paid = num(paidAmount);
+  const allocated = num(allocatedAmount);
+  const raw = str(status).toLowerCase();
+  const due = str(dueDate).slice(0, 10);
+  const sent = str(sentAt);
+  const today = todayYmd();
+  const hold = str(creditHold).toUpperCase();
+
+  if (hold === "HOLD" || hold === "YES") return "Credit Hold";
+  if (raw === "cancelled") return "Cancelled";
+  if (raw === "failed") return "Failed";
+  if (open <= 0.009) return "Paid";
+  if (due && due < today && open > 0.009) return "Overdue";
+  if ((paid > 0.009 || allocated > 0.009) && open > 0.009) return "Partially Paid";
+  if (raw === "draft" && !sent) return "Draft";
+  if (raw === "sent" || sent) return "Sent";
+  if (raw === "draft") return "Draft";
+  return "Open";
+}
+
+/** Internal draft = not sent to customer; exclude from lab open-invoice widgets. */
+export function isInternalDraftInvoice({
+  status = "",
+  sentAt = "",
+  hasPdf = false,
+  pdfGeneratedAt = "",
+} = {}) {
+  const raw = str(status).toLowerCase();
+  const sent = str(sentAt) || str(pdfGeneratedAt);
+  return raw === "draft" && !sent && !hasPdf;
+}
+
+/** Customer-facing open invoice: positive open balance, not internal draft. */
+export function isCustomerFacingOpenInvoice(inv = {}) {
+  const open = num(inv.openBalance ?? inv.open_balance ?? inv.amount);
+  if (open <= 0.009) return false;
+  return !isInternalDraftInvoice({
+    status: inv.rawStatus ?? inv.status,
+    sentAt: inv.sentAt ?? inv.sent_at,
+    hasPdf: inv.hasPdf ?? inv.has_pdf,
+    pdfGeneratedAt: inv.pdfGeneratedAt ?? inv.pdf_generated_at,
+  });
+}
+
+/**
+ * Canonical per-invoice financial summary (allocation-based).
+ * allocated = SUM(payment_allocations); open = total - allocated.
+ */
+export function summarizeInvoiceFinancials(row = {}, allocationHint = {}) {
+  const id = str(row.id);
+  const totalAmount = num(row.total_amount ?? row.totalAmount ?? row.total);
+  const hintAllocated =
+    allocationHint[id] != null
+      ? num(allocationHint[id])
+      : allocationHint.allocatedAmount != null
+        ? num(allocationHint.allocatedAmount)
+        : null;
+  const allocatedAmount =
+    hintAllocated != null ? hintAllocated : num(row.allocated_amount ?? row.allocatedAmount);
+  const openBalance = Math.max(0, totalAmount - allocatedAmount);
+  const status = str(row.status ?? row.rawStatus);
+  const dueDate = str(row.due_date ?? row.dueDate).slice(0, 10);
+  const sentAt = str(row.sent_at ?? row.sentAt);
+  const hasPdf = Boolean(str(row.pdf_storage_path ?? row.pdfStoragePath));
+  const displayStatus = deriveOpenInvoiceWidgetStatus({
+    status,
+    openBalance,
+    paidAmount: allocatedAmount,
+    allocatedAmount,
+    dueDate,
+    sentAt,
+    hasPdf,
+    pdfGeneratedAt: str(row.pdf_generated_at ?? row.pdfGeneratedAt),
+  });
+  return { totalAmount, allocatedAmount, openBalance, displayStatus, status };
+}
+
+/** Customer-facing invoice ready for payment allocation (strict lifecycle). */
+export function isInvoiceCustomerFacingForPayment(invoice = {}) {
+  const raw = str(invoice.status ?? invoice.rawStatus).toLowerCase();
+  if (raw === "paid") return true;
+  if (!["sent", "partially_paid"].includes(raw)) return false;
+  const hasPdf = Boolean(invoice.hasPdf ?? invoice.pdf_storage_path ?? invoice.pdfStoragePath);
+  const sentAt = str(
+    invoice.sentAt ?? invoice.sent_at ?? invoice.pdfGeneratedAt ?? invoice.pdf_generated_at
+  );
+  return hasPdf && Boolean(sentAt);
+}
+
+/** Whether payment may allocate to this invoice (sent/partially_paid + PDF + sent_at). */
+export function isInvoiceAllocatableForOrderPayment(invoice = {}) {
+  const raw = str(invoice.status ?? invoice.rawStatus).toLowerCase();
+  if (["cancelled", "failed", "paid"].includes(raw)) return false;
+  if (!["sent", "partially_paid"].includes(raw)) return false;
+  return isInvoiceCustomerFacingForPayment(invoice);
+}
+
+/** Open Invoices widget status — never show Draft for customer-facing open balances. */
+export function deriveOpenInvoiceWidgetStatus(params = {}) {
+  const status = deriveInvoiceAccountStatus(params);
+  const open = num(params.openBalance);
+  const allocated = num(params.allocatedAmount ?? params.paidAmount);
+  if (status === "Draft" && (open > 0.009 || allocated > 0.009)) {
+    if (allocated > 0.009 && open > 0.009) return "Partially Paid";
+    if (allocated <= 0.009 && open > 0.009) return "Outstanding";
+  }
+  if (status === "Draft" && open > 0.009) return "Outstanding";
+  if (status === "Sent" && open > 0.009) {
+    const paid = num(params.paidAmount);
+    const allocated = num(params.allocatedAmount);
+    if (paid <= 0.009 && allocated <= 0.009) return "Outstanding";
+  }
+  return status;
+}
+
+/**
+ * Account Health panel label + tone.
+ */
+export function deriveAccountHealthStatus({
+  outstandingAmount = 0,
+  totalPaid = 0,
+  totalAllocated = 0,
+  overdueDays = 0,
+  riskStatus = "",
+  creditHold = "",
+} = {}) {
+  const outstanding = num(outstandingAmount);
+  const paid = num(totalPaid);
+  const allocated = num(totalAllocated);
+  const risk = str(riskStatus).toLowerCase();
+  const hold = str(creditHold).toUpperCase();
+
+  if (hold === "HOLD" || hold === "YES") {
+    return { label: "Credit Hold", tone: "text-red-900 bg-red-100 border-red-300" };
+  }
+  if (outstanding <= 0.009) {
+    return { label: "Good Standing", tone: "text-emerald-700 bg-emerald-50 border-emerald-200" };
+  }
+  if (num(overdueDays) > 0) {
+    return { label: "Overdue", tone: "text-red-700 bg-red-50 border-red-200" };
+  }
+  if (paid > 0.009 || allocated > 0.009) {
+    return { label: "Partially Paid", tone: "text-amber-800 bg-amber-50 border-amber-200" };
+  }
+  if (risk.includes("high")) {
+    return { label: "Medium Risk", tone: "text-amber-700 bg-amber-50 border-amber-200" };
+  }
+  return { label: "Outstanding", tone: "text-sky-800 bg-sky-50 border-sky-200" };
+}
+
+/** Collection row payment status (lab account ledger + HQ collections). */
+export function deriveLabPaymentStatus({
+  outstandingAmount = 0,
+  totalPaid = 0,
+  totalAllocated = 0,
+  overdueDays = 0,
+} = {}) {
+  const outstanding = num(outstandingAmount);
+  const paid = num(totalPaid);
+  const allocated = num(totalAllocated);
+  if (outstanding <= 0.009) return paid > 0.009 || allocated > 0.009 ? "Paid" : "Current";
+  if (num(overdueDays) > 0) return "Overdue";
+  if (paid > 0.009 || allocated > 0.009) return "Partially Paid";
+  return "Outstanding";
+}
+
+export function invoiceStatusTone(label) {
+  const key = str(label).toLowerCase();
+  if (key === "credit hold") return "bg-red-100 text-red-900 border border-red-300";
+  if (key === "paid" || key === "good standing") return "bg-emerald-50 text-emerald-700 border border-emerald-200";
+  if (key === "overdue") return "bg-red-50 text-red-700 border border-red-200";
+  if (key === "partially paid") return "bg-amber-50 text-amber-800 border border-amber-200";
+  if (key === "draft") return "bg-slate-100 text-slate-600 border border-slate-200";
+  if (key === "sent" || key === "open" || key === "outstanding" || key === "unpaid") {
+    return "bg-sky-50 text-sky-800 border border-sky-200";
+  }
+  return "bg-slate-50 text-slate-700 border border-slate-200";
+}
+
+/** Invoice Center document table grid */
+export const LAB_INVOICE_CENTER_GRID =
+  "grid grid-cols-[minmax(0,1.1fr)_minmax(4.5rem,0.55fr)_minmax(0,1fr)_minmax(3.5rem,0.65fr)_4rem_4rem_4rem_3.5rem_auto] items-center gap-x-2";
+
+/** Payments & Account open-invoice summary (compact) */
+export const LAB_OPEN_INVOICE_SUMMARY_GRID =
+  "grid grid-cols-[minmax(0,1.2fr)_minmax(4rem,0.5fr)_minmax(3.5rem,0.55fr)_auto] items-center gap-x-3";
+
+export const LAB_INVOICE_TABLE_GRID =
+  "grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_4.25rem_4.25rem_4.25rem_minmax(3.75rem,0.75fr)_auto] items-center gap-x-2";

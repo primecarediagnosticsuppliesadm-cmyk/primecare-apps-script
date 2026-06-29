@@ -1,15 +1,8 @@
+import { deriveLabPaymentStatus } from "./invoiceAccountStatus.js";
+
 function num(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
-}
-
-function deriveLabPaymentStatus({ outstandingAmount = 0, totalPaid = 0, totalDelivered = 0 } = {}) {
-  const outstanding = num(outstandingAmount);
-  const paid = num(totalPaid);
-  const delivered = num(totalDelivered);
-  if (outstanding <= 0.009) return paid > 0 || delivered > 0 ? "Paid" : "Current";
-  if (paid > 0) return "Partially Paid";
-  return "Outstanding";
 }
 
 function str(v) {
@@ -41,12 +34,14 @@ export function buildLabAccountLedger({
   labName = "",
 } = {}) {
   let openBalance = 0;
+  let totalAllocated = 0;
   let invoicedTotal = 0;
   let maxOverdueDays = 0;
   const today = new Date().toISOString().slice(0, 10);
 
   for (const inv of invoices) {
     openBalance += num(inv.openBalance ?? inv.open_balance);
+    totalAllocated += num(inv.allocatedAmount ?? inv.allocated_amount);
     invoicedTotal += num(inv.totalAmount ?? inv.total_amount);
     if (isOverdueInvoice(inv)) {
       const due = str(inv.dueDate ?? inv.due_date).slice(0, 10);
@@ -79,6 +74,7 @@ export function buildLabAccountLedger({
     arOutstanding > 0 ? arOutstanding : openBalance > 0 ? openBalance : openBalance;
   const totalPaid = arTotalPaid > 0 ? arTotalPaid : paymentSum > 0 ? paymentSum : paidFromInvoices;
   const creditRemaining = creditLimit > 0 ? Math.max(0, creditLimit - outstanding) : null;
+  const overdueDays = num(arRow?.overdueDays ?? arRow?.days_overdue) || maxOverdueDays;
 
   const recentPayments = [...(paymentHistory || [])]
     .sort((a, b) => str(b.paymentDate ?? b.payment_date).localeCompare(str(a.paymentDate ?? a.payment_date)))
@@ -97,13 +93,15 @@ export function buildLabAccountLedger({
     labName: str(labName || arRow?.labName || arRow?.lab_name),
     outstandingAmount: outstanding,
     totalPaid,
+    totalAllocated,
     creditLimit,
-    overdueDays: num(arRow?.overdueDays ?? arRow?.days_overdue) || maxOverdueDays,
+    overdueDays,
     riskStatus: str(arRow?.riskStatus || arRow?.credit_status || "Low"),
     paymentStatus: deriveLabPaymentStatus({
       outstandingAmount: outstanding,
       totalPaid,
-      totalDelivered: num(arRow?.totalDelivered ?? arRow?.total_delivered ?? invoicedTotal),
+      totalAllocated,
+      overdueDays,
     }),
     nextFollowUp: str(arRow?.nextFollowUp ?? arRow?.next_follow_up ?? ""),
     dueDate: str(arRow?.dueDate ?? arRow?.due_date ?? ""),
@@ -112,9 +110,10 @@ export function buildLabAccountLedger({
   return {
     outstanding,
     totalPaid,
+    totalAllocated,
     creditLimit,
     creditRemaining,
-    overdueDays: collectionItem.overdueDays,
+    overdueDays,
     invoiceCount: invoices.length,
     paymentCount: (paymentHistory || []).length,
     recentPayments,

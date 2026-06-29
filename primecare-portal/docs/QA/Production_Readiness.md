@@ -25,6 +25,7 @@
 | Admin Credit & Risk | ✅ | KPI/AR reconcile, aging buckets, allocation golden path (GAP-018). |
 | Admin Labs | ✅ | Tenant isolation, ownership sync, KPI/AR reconcile (GAP-019). |
 | Admin Operations Center | ✅ | User bundle, role guards, ownership sync, RLS (GAP-020). |
+| Invoice payment strict lifecycle | ✅ | Finalize PDF before order-linked payment; allocation compensation (GAP-021). |
 | Procurement forecast alignment | ✅ | Forecast Suggestions use Inventory Health velocity; PO KPI basis labels (GAP-016). |
 | Admin PO product validation | ✅ | Catalog picker + API validation (GAP-009). |
 | Admin PO cancel/edit | ✅ | Draft/Ordered PO recovery before receipt (GAP-010). |
@@ -44,4 +45,4 @@
 - Lab: see assigned catalog, place order, view invoices/payments.
 - Agent: see assigned labs, visits, collections only.
 - Executive: see financials, credit risk, operations, dashboards.
-- End-to-end: order -> fulfillment -> invoice -> payment -> AR -> inventory update.
+- End-to-end: order -> fulfillment -> invoice (draft) -> PDF finalize (sent) -> payment -> allocation -> AR -> inventory update.

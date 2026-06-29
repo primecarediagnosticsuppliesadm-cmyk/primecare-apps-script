@@ -42,6 +42,8 @@ import {
 import { adminDashboardModelFromMerge } from "@/pages/adminDashboardState.js";
 import AdminDashboardQaValidationPanel from "@/components/qa/AdminDashboardQaValidationPanel.jsx";
 import HqPrioritiesStrip from "@/components/hq/HqPrioritiesStrip.jsx";
+import { onFinancialSyncCompleted } from "@/operations/financialSyncEvents.js";
+import { useFinancialSyncPulse } from "@/hooks/useFinancialSyncPulse.js";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
 import { hqDebugLog } from "@/utils/hqDebugLog.js";
 import {
@@ -790,6 +792,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   const apiKpisRef = useRef(null);
   const lastRawReadRef = useRef(null);
   const summaryDataRef = useRef(summaryData);
+  const financialSyncPulse = useFinancialSyncPulse();
   const executiveDataRef = useRef(executiveData);
 
   useEffect(() => {
@@ -1129,6 +1132,12 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   }, []);
 
   useEffect(() => {
+    return onFinancialSyncCompleted(() => {
+      void loadAll({ force: true });
+    });
+  }, []);
+
+  useEffect(() => {
     perfMark("AdminDashboard.route.mount");
     let mounted = true;
 
@@ -1338,6 +1347,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
             icon={Wallet}
             dataTestId={ADMIN_DASHBOARD_KPI_TEST_IDS.outstanding_receivables}
             kpiRawValue={displayKpis.outstandingReceivables}
+            highlight={financialSyncPulse}
           />
           <KpiCard
             title="Credit Risk Labs"

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { RefreshCw, ExternalLink } from "lucide-react";
@@ -16,6 +16,22 @@ function statusClass(status) {
   if (status === "PASS") return "bg-emerald-100 text-emerald-800 border-emerald-200";
   if (status === "WARN") return "bg-amber-100 text-amber-900 border-amber-200";
   return "bg-red-100 text-red-800 border-red-200";
+}
+
+function SummaryTile({ value, label, tone = "default" }) {
+  return (
+    <div
+      className={cn(
+        "rounded-lg border bg-white p-3 text-center",
+        tone === "pass" && "border-emerald-200 bg-emerald-50/50",
+        tone === "warn" && "border-amber-200 bg-amber-50/50",
+        tone === "fail" && "border-red-200 bg-red-50/50"
+      )}
+    >
+      <p className="text-xl font-bold tabular-nums text-slate-900">{value ?? 0}</p>
+      <p className="mt-1 text-[11px] font-medium text-slate-500">{label}</p>
+    </div>
+  );
 }
 
 export default function PilotHardeningChecksPanel({
@@ -38,13 +54,26 @@ export default function PilotHardeningChecksPanel({
       });
       setResult(data);
       setLastRunAt(new Date());
-      onStatus?.(`Pilot checks: ${data.status} · ${data.checks.filter((c) => c.status === "FAIL").length} fail`);
+      onStatus?.(
+        `Certification: ${data.status} · ${data.checks.filter((c) => c.status === "FAIL").length} failure(s)`
+      );
     } catch (err) {
-      onError?.(err?.message || "Failed to run pilot checks");
+      onError?.(err?.message || "Failed to run pilot certification");
     } finally {
       setRunning(false);
     }
   }, [tenantId, onError, onStatus]);
+
+  const summaryCounts = useMemo(() => {
+    if (!result?.checks?.length) {
+      return { passed: 0, warnings: 0, failures: 0 };
+    }
+    return {
+      passed: result.checks.filter((c) => c.status === "PASS").length,
+      warnings: result.checks.filter((c) => c.status === "WARN").length,
+      failures: result.checks.filter((c) => c.status === "FAIL").length,
+    };
+  }, [result]);
 
   function handleFix(check) {
     const action = check.fixAction;
@@ -59,15 +88,10 @@ export default function PilotHardeningChecksPanel({
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-white p-3">
         <div>
-          <p className="text-sm font-semibold text-slate-900">Pilot readiness runner</p>
+          <p className="text-sm font-semibold text-slate-900">Deployment Readiness</p>
           <p className="text-[11px] text-slate-600">
-            Executable gates before first live pilot — labs, ownership, agents, contracts, stock, RLS.
+            Certification gates before go-live — HQ, distributor, regional, and pilot scopes.
           </p>
-          {lastRunAt ? (
-            <p className="mt-1 text-[10px] text-slate-500">
-              Last run: {lastRunAt.toLocaleString("en-IN")}
-            </p>
-          ) : null}
         </div>
         <div className="flex items-center gap-2">
           {result ? (
@@ -75,14 +99,26 @@ export default function PilotHardeningChecksPanel({
           ) : null}
           <Button type="button" size="sm" onClick={() => void runChecks()} disabled={running}>
             <RefreshCw className={cn("mr-1 h-3.5 w-3.5", running && "animate-spin")} />
-            {running ? "Running…" : "Run checks"}
+            {running ? "Running…" : "Run Certification"}
           </Button>
         </div>
       </div>
 
+      {result ? (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <SummaryTile value={summaryCounts.passed} label="Passed" tone="pass" />
+          <SummaryTile value={summaryCounts.warnings} label="Warnings" tone="warn" />
+          <SummaryTile value={summaryCounts.failures} label="Failures" tone="fail" />
+          <SummaryTile
+            value={lastRunAt ? lastRunAt.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "—"}
+            label="Last Run"
+          />
+        </div>
+      ) : null}
+
       {!result && !running ? (
         <p className="text-xs text-slate-500">
-          Click Run checks to evaluate pilot readiness against current HQ data.
+          Run deployment readiness certification against current HQ data.
         </p>
       ) : null}
 
@@ -151,9 +187,9 @@ export default function PilotHardeningChecksPanel({
             ["Qualified", result.summary.qualifiedLabCount],
             ["SKUs in stock", result.summary.skusInStock],
           ].map(([label, value]) => (
-            <div key={label} className="rounded-lg border bg-slate-50 p-2">
-              <p className="text-slate-500">{label}</p>
-              <p className="text-lg font-bold tabular-nums">{value ?? 0}</p>
+            <div key={label} className="rounded-lg border bg-slate-50 p-2 text-center">
+              <p className="text-lg font-bold tabular-nums text-slate-900">{value ?? 0}</p>
+              <p className="mt-0.5 text-[11px] text-slate-500">{label}</p>
             </div>
           ))}
         </div>

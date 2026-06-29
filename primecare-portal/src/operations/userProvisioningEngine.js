@@ -7,28 +7,54 @@ import {
   normalizePlatformRole,
   platformRoleLabel,
 } from "@/operations/operationsCenterAdminEngine.js";
+import {
+  classifyDirectoryUser,
+  isRealDirectoryUser,
+  USER_DIRECTORY_CLASS,
+  USER_DIRECTORY_CLASS_LABELS,
+} from "@/operations/userDirectoryClassification.js";
+import { countOwnershipLabsForAgent, countAgentLabsPortalAligned } from "@/operations/userDirectoryIntegrityEngine.js";
 
 function str(v) {
   return String(v ?? "").trim();
 }
 
+export { USER_DIRECTORY_CLASS, USER_DIRECTORY_CLASS_LABELS };
+
 export function isLoginEnabledRole(role) {
   return matrixIsLoginEnabledRole(normalizePlatformRole(role));
+}
+
+function formatDistributorDisplay(value) {
+  const v = str(value);
+  if (!v || v === "—") return "";
+  return v;
+}
+
+function formatTerritoryDisplay(value) {
+  const v = str(value);
+  if (!v || v === "—") return "";
+  return v;
 }
 
 export function enrichDirectoryUsers(users = [], options = {}) {
   const distributorNameById = options.distributorNameById || new Map();
   const labAssignments = options.labAssignments || [];
   const distributorAssignments = options.distributorAssignments || [];
+  const ownershipRows = options.ownershipRows || [];
 
   return users.map((user) => {
     const role = normalizePlatformRole(user.role);
     let assignedLabsCount = 0;
+    let assignedLabsFromAssignments = 0;
+    let assignedLabsFromOwnership = 0;
     let distributorName = "";
     let distributorId = str(user.distributorId);
 
     if (isAgentRole(role)) {
-      assignedLabsCount = labsForAgent(user, labAssignments).length;
+      assignedLabsFromAssignments = labsForAgent(user, labAssignments).length;
+      assignedLabsFromOwnership = countOwnershipLabsForAgent(user, ownershipRows, { labAssignments });
+      assignedLabsCount = countAgentLabsPortalAligned(user, labAssignments, ownershipRows);
       const dist = distributorAssignments.find(
         (d) => str(d.assignedAgentUserId).toLowerCase() === str(user.userId).toLowerCase()
       );
@@ -42,47 +68,148 @@ export function enrichDirectoryUsers(users = [], options = {}) {
       assignedLabsCount = user.labId ? 1 : 0;
     }
 
+    const userClass = classifyDirectoryUser(user);
+    const labCountMismatch =
+      isAgentRole(role) &&
+      (assignedLabsFromAssignments !== assignedLabsCount ||
+        assignedLabsFromOwnership !== assignedLabsCount);
+
     return {
       ...user,
       role,
       roleLabel: platformRoleLabel(role),
+      userClass,
+      userClassLabel: USER_DIRECTORY_CLASS_LABELS[userClass] || "User",
+      isRealUser: userClass === USER_DIRECTORY_CLASS.REAL,
       distributorId,
-      distributorName: distributorName || "—",
-      territory: str(user.territory) || "—",
+      distributorName: formatDistributorDisplay(distributorName),
+      territory: formatTerritoryDisplay(user.territory),
       assignedLabsCount,
+      assignedLabsFromAssignments,
+      assignedLabsFromOwnership,
+      labCountMismatch,
       lastLoginAt: user.lastLoginAt ?? user.last_login_at ?? null,
       lastLogin: formatLastLogin(user.lastLoginAt ?? user.last_login_at),
       loginEnabled: isLoginEnabledRole(role),
+      hasStoredEmail: Boolean(str(user.email ?? user.storedEmail)),
       createdAt: user.createdAt ?? null,
     };
   });
 }
 
 export function computeProvisioningKpis(users = [], labAssignments = []) {
+  const realUsers = users.filter(isRealDirectoryUser);
   const totalUsers = users.length;
-  const activeUsers = users.filter((u) => u.active !== false).length;
-  const agents = users.filter((u) => isAgentRole(u.role)).length;
-  const inactiveUsers = users.filter((u) => u.active === false).length;
-  const labsAssigned = labAssignments.filter((l) => str(l.assignedAgentId)).length;
-  const unassignedLabs = labAssignments.filter((l) => !str(l.assignedAgentId)).length;
+  const productionUsers = realUsers.length;
+  const realActiveUsers = realUsers.filter((u) => u.active !== false).length;
+  const qaTestUsers = users.filter((u) => classifyDirectoryUser(u) === USER_DIRECTORY_CLASS.QA_TEST).length;
+  const probeDebugUsers = users.filter(
+    (u) => classifyDirectoryUser(u) === USER_DIRECTORY_CLASS.PROBE_DEBUG
+  ).length;
+  const fieldAgents = users.filter((u) => isAgentRole(u.role)).length;
+  const labUsers = users.filter((u) => normalizePlatformRole(u.role) === ROLES.LAB).length;
+  const hqAdmins = users.filter((u) => {
+    const role = normalizePlatformRole(u.role);
+    return role === ROLES.ADMIN || role === ROLES.EXECUTIVE;
+  }).length;
+  const inactiveAccounts = users.filter((u) => u.active === false).length;
+  const inactiveUsers = realUsers.filter((u) => u.active === false).length;
+  const labsAssigned = labAssignments.filter((l) => str(l.assignedAgentId ?? l.primaryAgentId)).length;
+  const unassignedLabs = labAssignments.filter((l) => !str(l.assignedAgentId ?? l.primaryAgentId)).length;
 
   return {
     totalUsers,
-    activeUsers,
-    agents,
+    productionUsers,
+    qaUsers: qaTestUsers,
+    probeUsers: probeDebugUsers,
+    fieldAgents,
+    labUsers,
+    hqAdmins,
+    inactiveAccounts,
     labsAssigned,
-    inactiveUsers,
     unassignedLabs,
+    /** Legacy aliases used by existing certification scripts */
+    realUsers: productionUsers,
+    realActiveUsers,
+    inactiveUsers,
+    probeDebugUsers,
+    qaTestUsers,
+    activeUsers: realActiveUsers,
+    agents: fieldAgents,
   };
+}
+
+export function computeDirectoryAudienceCounts(users = []) {
+  const list = users || [];
+  return {
+    total: list.length,
+    production: list.filter((u) => classifyDirectoryUser(u) === USER_DIRECTORY_CLASS.REAL).length,
+    qa: list.filter((u) => classifyDirectoryUser(u) === USER_DIRECTORY_CLASS.QA_TEST).length,
+    probe: list.filter((u) => classifyDirectoryUser(u) === USER_DIRECTORY_CLASS.PROBE_DEBUG).length,
+    inactive: list.filter((u) => u.active === false).length,
+  };
+}
+
+export function buildDirectoryAudienceFilterOptions(users = []) {
+  const counts = computeDirectoryAudienceCounts(users);
+  return [
+    { id: "", label: `All Users (${counts.total})` },
+    { id: "real", label: `Production Users (${counts.production})` },
+    { id: "qa_test", label: `QA Users (${counts.qa})` },
+    { id: "probe_debug", label: `Probe / Debug Users (${counts.probe})` },
+    { id: "inactive", label: `Inactive (${counts.inactive})` },
+    { id: "with_labs", label: "With Assigned Labs" },
+    { id: "without_labs", label: "Without Assigned Labs" },
+  ];
+}
+
+export const DIRECTORY_AUDIENCE_FILTERS = [
+  { id: "", label: "All Users" },
+  { id: "real", label: "Production Users" },
+  { id: "qa_test", label: "QA Users" },
+  { id: "probe_debug", label: "Probe / Debug Users" },
+  { id: "inactive", label: "Inactive" },
+  { id: "with_labs", label: "With Assigned Labs" },
+  { id: "without_labs", label: "Without Assigned Labs" },
+];
+
+/** Default audience — all users visible (probe/QA remain in directory). */
+export const DIRECTORY_DEFAULT_AUDIENCE = "";
+
+/** Active login-enabled users missing credentials or scope assignment (read-only directory signal). */
+export function isUserAwaitingProvisioning(user = {}) {
+  if (user.active === false) return false;
+  if (!user.loginEnabled) return false;
+  const missingCredentials = !str(user.email) || user.hasStoredEmail === false;
+  const role = normalizePlatformRole(user.role);
+  const missingAssignment =
+    (isAgentRole(role) || role === ROLES.LAB) && (Number(user.assignedLabsCount) || 0) === 0;
+  return missingCredentials || missingAssignment;
+}
+
+export function countUsersAwaitingProvisioning(users = []) {
+  return (users || []).filter(isUserAwaitingProvisioning).length;
 }
 
 export function filterDirectoryUsers(users = [], filters = {}) {
   const roleFilter = str(filters.role).toLowerCase();
   const statusFilter = str(filters.status).toLowerCase();
+  const audienceFilter = str(filters.audience).toLowerCase();
   const distributorFilter = str(filters.distributorId);
   const search = str(filters.search);
 
   return users.filter((user) => {
+    const userClass = classifyDirectoryUser(user);
+    const labs = Number(user.assignedLabsCount) || 0;
+
+    if (audienceFilter === "real" && userClass !== USER_DIRECTORY_CLASS.REAL) return false;
+    if (audienceFilter === "qa_test" && userClass !== USER_DIRECTORY_CLASS.QA_TEST) return false;
+    if (audienceFilter === "probe_debug" && userClass !== USER_DIRECTORY_CLASS.PROBE_DEBUG) return false;
+    if (audienceFilter === "inactive" && user.active !== false) return false;
+    if (audienceFilter === "with_labs" && labs <= 0) return false;
+    if (audienceFilter === "without_labs" && labs > 0) return false;
+    if (audienceFilter === "awaiting_provisioning" && !isUserAwaitingProvisioning(user)) return false;
+
     if (roleFilter && normalizePlatformRole(user.role) !== roleFilter) return false;
     if (statusFilter === "active" && user.active === false) return false;
     if (statusFilter === "inactive" && user.active !== false) return false;
@@ -91,20 +218,86 @@ export function filterDirectoryUsers(users = [], filters = {}) {
       !matchesSearch(search, [
         user.name,
         user.displayName,
+        user.username,
         user.email,
+        user.phone,
         user.roleLabel,
         user.role,
+        user.userClassLabel,
         user.distributorName,
+        user.distributorId,
         user.territory,
+        user.tenantId,
         user.agentId,
         user.labId,
-        user.username,
       ])
     ) {
       return false;
     }
     return true;
   });
+}
+
+/**
+ * Role-aware directory row actions (presentation only).
+ */
+export function resolveDirectoryRowActions(user = {}, { allowProbeActions = false } = {}) {
+  const role = normalizePlatformRole(user.role);
+  const userClass = classifyDirectoryUser(user);
+  const isProbe = userClass === USER_DIRECTORY_CLASS.PROBE_DEBUG;
+  const canReset =
+    user.loginEnabled && user.hasStoredEmail !== false && Boolean(str(user.email));
+
+  if (isProbe && !allowProbeActions) {
+    return {
+      review: true,
+      assign: false,
+      assignLab: false,
+      transferLab: false,
+      resetPassword: false,
+      deactivate: false,
+      reactivate: false,
+      probeRestricted: true,
+    };
+  }
+
+  const base = {
+    review: true,
+    assign: false,
+    assignLab: false,
+    transferLab: false,
+    resetPassword: canReset,
+    deactivate: user.active !== false,
+    reactivate: user.active === false,
+    probeRestricted: false,
+  };
+
+  if (isAgentRole(role)) {
+    return {
+      ...base,
+      assign: true,
+      transferLab: true,
+    };
+  }
+
+  if (role === ROLES.LAB) {
+    return {
+      ...base,
+      assignLab: true,
+    };
+  }
+
+  if (
+    role === ROLES.ADMIN ||
+    role === ROLES.EXECUTIVE ||
+    role === ROLES.DISTRIBUTOR_ADMIN ||
+    role === ROLES.DISTRIBUTOR_MANAGER ||
+    role === ROLES.READ_ONLY_AUDITOR
+  ) {
+    return base;
+  }
+
+  return base;
 }
 
 export function sortDirectoryUsers(users = [], sortKey = "name", sortDir = "asc") {
@@ -299,14 +492,33 @@ export function validateProvisioningEventPayload(eventType, payload = {}) {
 }
 
 export function formatLastLogin(value) {
-  if (!value) return "—";
+  if (!value) return "Never";
   const d = new Date(value);
-  if (!Number.isFinite(d.getTime())) return "—";
+  if (!Number.isFinite(d.getTime())) return "Never";
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+
+  if (d >= startOfToday) {
+    const diffMs = now.getTime() - d.getTime();
+    const hours = Math.floor(diffMs / 3600000);
+    if (hours < 1) {
+      const minutes = Math.floor(diffMs / 60000);
+      if (minutes <= 1) return "Just now";
+      return `${minutes} minutes ago`;
+    }
+    if (hours === 1) return "1 hour ago";
+    if (hours < 12) return `${hours} hours ago`;
+    return "Today";
+  }
+
+  if (d >= startOfYesterday) return "Yesterday";
+
   return d.toLocaleString("en-IN", {
     day: "2-digit",
     month: "short",
     year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
   });
 }

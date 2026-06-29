@@ -1,5 +1,6 @@
 import { formatLastPaymentAge } from "@/collections/collectionsCockpitMetrics.js";
 import { resolveLabAgent } from "@/operations/labAgentResolver.js";
+import { labIdKey } from "@/utils/labId.js";
 
 function num(v) {
   const n = Number(v);
@@ -165,6 +166,24 @@ export function filterCollectionsForCreditRiskView(collections = [], filter = "A
   }
   if (f === "exposure") return collections.filter(isHighExposure);
   return collections;
+}
+
+function localDateYmd(d = new Date()) {
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${day}`;
+}
+
+/** Labs cleared today — outstanding zero with a payment recorded today (not in active queue). */
+export function buildClearedTodayLabs(collections = [], lastPaymentByLabId = {}) {
+  const today = localDateYmd();
+  return collections.filter((c) => {
+    if (num(c.outstandingAmount) > 0.009) return false;
+    const key = labIdKey(c.labId);
+    const lastPay = str(lastPaymentByLabId[key] || c.lastPaymentDate || "").slice(0, 10);
+    return lastPay === today;
+  });
 }
 
 export function buildTopExposureLabs(collections = [], limit = 10, directoryUsers = []) {
