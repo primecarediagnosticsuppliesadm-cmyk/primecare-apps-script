@@ -26,8 +26,13 @@ function statusLabel(status) {
 
 export default function InvoiceStatusBadge({ status, displayStatus, compact = true }) {
   const resolved = normalizeStatus(displayStatus || status);
+  const isCreditHold = resolved === "credit hold";
   return (
-    <StatusBadge variant={statusVariant(resolved)} compact={compact}>
+    <StatusBadge
+      variant={statusVariant(resolved)}
+      compact={compact}
+      className={isCreditHold ? "border-red-900 bg-red-950 text-red-50" : undefined}
+    >
       {statusLabel(resolved)}
     </StatusBadge>
   );

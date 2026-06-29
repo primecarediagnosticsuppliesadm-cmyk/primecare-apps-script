@@ -41,12 +41,14 @@ function formatDate(value) {
   return raw.slice(0, 10);
 }
 
+const INVOICE_CENTER_ACTION_BTN = "h-9 min-w-[2.75rem] px-2 text-[10px]";
+
 function InvoiceCenterRow({ invoice, busy, onView, onDownload }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const label = invoice.invoiceNumber || invoice.id;
 
   return (
-    <div className="rounded-md border border-border/70 px-2 py-1.5 transition hover:border-slate-300">
+    <div className="rounded-md border border-border/70 px-2 py-1 transition hover:border-slate-300">
       <div className={cn("hidden xl:grid", LAB_INVOICE_CENTER_GRID)}>
         <span className="truncate font-mono text-[10px] font-semibold text-slate-900" title={label}>
           {label}
@@ -62,19 +64,25 @@ function InvoiceCenterRow({ invoice, busy, onView, onDownload }) {
         <span className="text-right text-[10px] tabular-nums text-emerald-700">
           {formatMoney(invoice.allocatedAmount)}
         </span>
-        <span className="text-right text-[10px] tabular-nums text-amber-700">
+        <span className="text-right text-[10px] font-semibold tabular-nums text-amber-700">
           {formatMoney(invoice.openBalance)}
         </span>
         <span className="text-[10px] text-slate-600">{invoice.hasPdf ? "Ready" : "On demand"}</span>
-        <div className="flex items-center justify-end gap-0.5">
-          <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => onView(invoice)}>
+        <div className="flex items-center justify-end gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className={INVOICE_CENTER_ACTION_BTN}
+            onClick={() => onView(invoice)}
+          >
             View
           </Button>
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="h-7 px-2 text-[10px]"
+            className={INVOICE_CENTER_ACTION_BTN}
             disabled={busy}
             onClick={() => void onDownload(invoice)}
           >
@@ -84,8 +92,8 @@ function InvoiceCenterRow({ invoice, busy, onView, onDownload }) {
             <Button
               type="button"
               size="sm"
-              variant="ghost"
-              className="h-7 w-7 p-0"
+              variant="outline"
+              className="h-9 w-9 p-0"
               aria-label="More"
               onClick={() => setMenuOpen((o) => !o)}
             >
@@ -133,14 +141,20 @@ function InvoiceCenterRow({ invoice, busy, onView, onDownload }) {
           </div>
         </dl>
         <div className="flex gap-1.5">
-          <Button type="button" size="sm" variant="outline" className="h-8 flex-1 text-xs" onClick={() => onView(invoice)}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className={cn(INVOICE_CENTER_ACTION_BTN, "flex-1")}
+            onClick={() => onView(invoice)}
+          >
             View
           </Button>
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="h-8 flex-1 text-xs"
+            className={cn(INVOICE_CENTER_ACTION_BTN, "flex-1")}
             disabled={busy}
             onClick={() => void onDownload(invoice)}
           >
@@ -226,14 +240,20 @@ export default function LabInvoiceCenterPage({ currentUser }) {
     setPage(1);
   }, [search, statusFilter, dateFrom, dateTo]);
 
-  const summaryLabel = useMemo(() => {
-    if (loading) return "Loading invoices…";
-    if (error) return "Invoice list unavailable";
-    if (!total) return "No invoices found";
+  const headerSummary = useMemo(() => {
+    if (loading) return { headline: "Loading invoices…", detail: "" };
+    if (error) return { headline: "Invoice list unavailable", detail: "" };
+    if (!total) return { headline: "No invoices found", detail: "" };
     const start = (page - 1) * pageSize + 1;
     const end = Math.min(page * pageSize, total);
-    return `${total} invoice${total === 1 ? "" : "s"} · Showing ${start}–${end}`;
-  }, [loading, error, total, page, pageSize]);
+    return {
+      headline: `${total} invoice${total === 1 ? "" : "s"}`,
+      detail: `Showing ${start}–${end}`,
+      pageLabel: `Page ${page} of ${totalPages}`,
+    };
+  }, [loading, error, total, page, pageSize, totalPages]);
+
+  const footerSummary = headerSummary.detail || headerSummary.pageLabel || headerSummary.headline;
 
   function openDrawer(invoice) {
     setSelectedInvoice(invoice);
@@ -272,40 +292,46 @@ export default function LabInvoiceCenterPage({ currentUser }) {
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-4 pb-6">
+    <div className="mx-auto max-w-7xl space-y-3 pb-6">
       <PageHeader
+        compact
         title="Invoice Center"
         subtitle="Search, review, and download invoice documents for your laboratory."
         icon={FileText}
         secondaryActions={
-          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+          <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs text-slate-600 shadow-sm">
             <div className="font-medium text-slate-900">{labId}</div>
-            <div>{summaryLabel}</div>
+            <div className="font-medium text-slate-800">{headerSummary.headline}</div>
+            {headerSummary.detail ? (
+              <div className="text-[10px] text-muted-foreground">{headerSummary.detail}</div>
+            ) : null}
           </div>
         }
       />
 
-      <section className="rounded-xl border border-border bg-card p-3 shadow-sm">
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-end">
+      <section className="rounded-lg border border-border bg-card p-3 shadow-sm">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
           <div className="min-w-0 flex-1">
-            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-              Search
-            </label>
             <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 placeholder="Invoice number or order number"
                 className="h-9 pl-9 pr-9 text-sm"
+                aria-label="Search invoices"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") setSearch(searchInput.trim());
+                  if (e.key === "Escape") {
+                    setSearchInput("");
+                    setSearch("");
+                  }
                 }}
               />
               {searchInput ? (
                 <button
                   type="button"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:text-slate-600"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-label="Clear search"
                   onClick={() => {
                     setSearchInput("");
@@ -363,7 +389,7 @@ export default function LabInvoiceCenterPage({ currentUser }) {
         </div>
       </section>
 
-      <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <section className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         {loading && !rows.length ? (
           <div className="p-3">
             <PageSkeleton kpiCount={0} showList listRows={8} />
@@ -393,8 +419,8 @@ export default function LabInvoiceCenterPage({ currentUser }) {
                 />
               </div>
             ) : null}
-            <div className="hidden border-b border-border/60 px-2 py-2 xl:block">
-              <div className={cn("text-[10px] font-medium uppercase tracking-wide text-slate-500", LAB_INVOICE_CENTER_GRID)}>
+            <div className="hidden border-b border-border/60 px-2 py-1.5 xl:block">
+              <div className={cn("text-[10px] font-medium uppercase tracking-wide text-muted-foreground", LAB_INVOICE_CENTER_GRID)}>
                 <span>Invoice</span>
                 <span>Date</span>
                 <span>Order</span>
@@ -419,7 +445,12 @@ export default function LabInvoiceCenterPage({ currentUser }) {
             </div>
 
             <div className="flex items-center justify-between border-t px-3 py-2">
-              <span className="text-xs text-slate-500">{summaryLabel}</span>
+              <div className="text-xs text-muted-foreground">
+                {footerSummary}
+                {headerSummary.pageLabel && total > 0 ? (
+                  <span className="hidden sm:inline"> · {headerSummary.pageLabel}</span>
+                ) : null}
+              </div>
               <div className="flex items-center gap-1">
                 <Button
                   type="button"

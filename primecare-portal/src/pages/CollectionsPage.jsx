@@ -61,7 +61,6 @@ import {
 } from "@/collections/invoiceAccountStatus.js";
 import {
   buildLabAccountActivityTimeline,
-  formatCreditKpiDisplay,
 } from "@/collections/labAccountActivity.js";
 import InvoiceStatusBadge from "@/components/invoice/InvoiceStatusBadge.jsx";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
@@ -290,15 +289,23 @@ function SummaryMetric({ label, children }) {
   );
 }
 
+const LAB_DASHBOARD_CARD =
+  "rounded-lg border border-border bg-card p-3 shadow-sm";
+
+const LAB_OPEN_INVOICE_ACTION_BTN =
+  "h-9 min-w-[3.25rem] px-2 text-[10px]";
+
+function displayKpiValue(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  return value;
+}
+
 function CompactAccountKpi({ title, value, icon: Icon }) {
   return (
-    <div className="rounded-lg border border-border bg-card px-2.5 py-2 shadow-sm">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="truncate text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            {title}
-          </div>
-          <div className="truncate text-sm font-semibold tabular-nums text-foreground">{value}</div>
+    <div className={cn(LAB_DASHBOARD_CARD, "flex h-[4.25rem] flex-col justify-between py-2.5")}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="truncate text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          {title}
         </div>
         {Icon ? (
           <div className="shrink-0 rounded-md bg-muted p-1.5">
@@ -306,8 +313,47 @@ function CompactAccountKpi({ title, value, icon: Icon }) {
           </div>
         ) : null}
       </div>
+      <div className="truncate text-sm font-semibold leading-tight tabular-nums text-foreground">
+        {displayKpiValue(value)}
+      </div>
     </div>
   );
+}
+
+function AccountHealthMetric({ label, value, emphasize = false }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p
+        className={cn(
+          "truncate tabular-nums",
+          emphasize ? "text-base font-bold text-foreground" : "text-sm font-semibold text-foreground"
+        )}
+      >
+        {displayKpiValue(value)}
+      </p>
+    </div>
+  );
+}
+
+function labTopCreditKpiDisplay({ labLedgerKpis, collectionRow }) {
+  const creditLimit = Number(
+    labLedgerKpis?.creditLimit ??
+      collectionRow?.creditLimit ??
+      collectionRow?.credit_limit ??
+      collectionRow?.creditApproved ??
+      0
+  );
+  const outstanding = Number(
+    labLedgerKpis?.outstanding ?? collectionRow?.outstandingAmount ?? 0
+  );
+  if (creditLimit <= 0) {
+    return { label: "Credit", value: "Not configured" };
+  }
+  return {
+    label: "Available Credit",
+    value: formatMoney(Math.max(0, creditLimit - outstanding)),
+  };
 }
 
 function financialStatusSummary(item, invoices = []) {
@@ -323,20 +369,6 @@ function financialStatusSummary(item, invoices = []) {
     riskStatus: item?.riskStatus,
     creditHold: item?.creditHold ?? item?.credit_hold,
   });
-}
-
-function labCreditKpiDisplay({ labLedgerKpis, collectionRow }) {
-  const creditLimit = Number(
-    labLedgerKpis?.creditLimit ??
-      collectionRow?.creditLimit ??
-      collectionRow?.credit_limit ??
-      collectionRow?.creditApproved ??
-      0
-  );
-  const outstanding = Number(
-    labLedgerKpis?.outstanding ?? collectionRow?.outstandingAmount ?? 0
-  );
-  return formatCreditKpiDisplay(creditLimit, outstanding, formatMoney);
 }
 
 function buildInvoiceRows(item, history) {
@@ -395,6 +427,53 @@ function activityKindDotClass(kind) {
   return "bg-blue-500";
 }
 
+function splitActivityMetaLines(subline, trailing) {
+  const lines = [];
+  const rawSubline = String(subline || "").trim();
+  if (rawSubline) {
+    const methodSplit = rawSubline.split(" · Method:");
+    lines.push(methodSplit[0].trim());
+    if (methodSplit[1]) lines.push(`Method: ${methodSplit[1].trim()}`);
+  }
+  const rawTrailing = String(trailing || "").trim();
+  if (rawTrailing) {
+    lines.push(rawTrailing.replace(/^Outstanding balance /i, "Outstanding "));
+  }
+  return lines;
+}
+
+function LabActivityTimelineEntry({ entry }) {
+  const isPayment = entry.kind === "payment";
+  const titleParts = isPayment ? String(entry.title || "").split(" — ") : [];
+  const paymentTitle = titleParts[0] || entry.title;
+  const paymentAmount = titleParts[1] || "";
+  const metaLines =
+    entry.subline || entry.trailing
+      ? splitActivityMetaLines(entry.subline, entry.trailing)
+      : entry.detail
+        ? [entry.detail]
+        : [];
+
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] font-medium text-slate-900">{paymentTitle}</p>
+        {isPayment && paymentAmount ? (
+          <p className="text-sm font-bold tabular-nums text-foreground">{paymentAmount}</p>
+        ) : null}
+        {metaLines.map((line) => (
+          <p key={line} className="text-[10px] text-muted-foreground">
+            {line}
+          </p>
+        ))}
+      </div>
+      <span className="shrink-0 pt-0.5 text-[10px] text-muted-foreground">
+        {formatShortDate(entry.date)}
+      </span>
+    </div>
+  );
+}
+
 function LabOpenInvoiceSummaryRow({
   invoice,
   rowId,
@@ -416,19 +495,25 @@ function LabOpenInvoiceSummaryRow({
           </p>
           <p className="text-[10px] text-muted-foreground">Due {formatShortDate(invoice.dueDate)}</p>
         </div>
-        <p className="text-right text-sm font-bold tabular-nums text-amber-700">{formatMoney(openBalance)}</p>
+        <p className="text-right text-base font-bold tabular-nums text-amber-700">{formatMoney(openBalance)}</p>
         <span className="justify-self-start">
           <InvoiceStatusBadge status={invoice.rawStatus || invoice.status} displayStatus={invoice.status} />
         </span>
-        <div className="flex items-center justify-end gap-0.5">
-          <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => onView(invoice)}>
+        <div className="flex items-center justify-end gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className={LAB_OPEN_INVOICE_ACTION_BTN}
+            onClick={() => onView(invoice)}
+          >
             View
           </Button>
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="h-7 px-2 text-[10px]"
+            className={LAB_OPEN_INVOICE_ACTION_BTN}
             disabled={downloading}
             onClick={() => void onDownload(invoice)}
           >
@@ -438,7 +523,7 @@ function LabOpenInvoiceSummaryRow({
             type="button"
             size="sm"
             variant="outline"
-            className="h-7 px-2 text-[10px]"
+            className={LAB_OPEN_INVOICE_ACTION_BTN}
             disabled={openBalance <= 0}
             onClick={() => onSubmitAdvice?.(invoice)}
           >
@@ -455,15 +540,21 @@ function LabOpenInvoiceSummaryRow({
           <InvoiceStatusBadge status={invoice.rawStatus || invoice.status} displayStatus={invoice.status} />
         </div>
         <p className="text-lg font-bold tabular-nums text-amber-700">{formatMoney(openBalance)}</p>
-        <div className="flex flex-wrap gap-1">
-          <Button type="button" size="sm" variant="outline" className="h-8 px-2 text-xs" onClick={() => onView(invoice)}>
+        <div className="flex justify-end gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className={cn(LAB_OPEN_INVOICE_ACTION_BTN, "flex-1 sm:flex-none")}
+            onClick={() => onView(invoice)}
+          >
             View
           </Button>
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="h-8 px-2 text-xs"
+            className={cn(LAB_OPEN_INVOICE_ACTION_BTN, "flex-1 sm:flex-none")}
             disabled={downloading}
             onClick={() => void onDownload(invoice)}
           >
@@ -473,11 +564,11 @@ function LabOpenInvoiceSummaryRow({
             type="button"
             size="sm"
             variant="outline"
-            className="h-8 px-2 text-xs"
+            className={cn(LAB_OPEN_INVOICE_ACTION_BTN, "flex-1 sm:flex-none")}
             disabled={openBalance <= 0}
             onClick={() => onSubmitAdvice?.(invoice)}
           >
-            Submit Advice
+            Advice
           </Button>
         </div>
       </div>
@@ -598,7 +689,6 @@ function LabAccountTimeline({
         : "Account is active with pending balance under monitoring.";
   const availableCredit =
     creditLimit > 0 ? Math.max(0, creditLimit - creditUsed) : null;
-  const creditKpi = formatCreditKpiDisplay(creditLimit, outstanding, formatMoney);
   const lastPaymentDate = deriveLastPaymentDateFromHistory(history);
   const openInvoicesTop = useMemo(
     () =>
@@ -688,9 +778,9 @@ function LabAccountTimeline({
   }
 
   return (
-    <div className="space-y-4">
-      <section className="rounded-lg border border-border bg-card p-3 shadow-sm">
-        <div className="mb-2.5 flex flex-wrap items-start justify-between gap-2">
+    <div className="space-y-3">
+      <section className={LAB_DASHBOARD_CARD}>
+        <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
           <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             Account Health
           </h3>
@@ -698,47 +788,31 @@ function LabAccountTimeline({
             {health.label}
           </span>
         </div>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3 lg:grid-cols-4">
-          <div className="min-w-0">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Outstanding</p>
-            <p className="truncate text-sm font-semibold tabular-nums">{formatMoney(outstanding)}</p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Paid</p>
-            <p className="truncate text-sm font-semibold tabular-nums text-emerald-700">{formatMoney(totalPaid)}</p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Credit Limit</p>
-            <p className="truncate text-sm font-semibold tabular-nums">
-              {creditLimit > 0 ? formatMoney(creditLimit) : "Not configured"}
-            </p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{creditKpi.label}</p>
-            <p className="truncate text-sm font-semibold tabular-nums">{creditKpi.value}</p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Last Payment</p>
-            <p className="truncate text-sm font-semibold">{lastPaymentDate ? formatShortDate(lastPaymentDate) : "—"}</p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Next Payment</p>
-            <p className="truncate text-sm font-semibold">{formatShortDate(dueDate)}</p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Risk</p>
-            <p className="truncate text-sm font-semibold">{riskLabel}</p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Behavior</p>
-            <p className="truncate text-sm font-semibold">
-              {overdueDays > 0 ? `Delayed by ${overdueDays}d` : "On track"}
-            </p>
-          </div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+          <AccountHealthMetric label="Outstanding" value={formatMoney(outstanding)} emphasize />
+          <AccountHealthMetric label="Paid" value={formatMoney(totalPaid)} emphasize />
+          <AccountHealthMetric
+            label="Credit Limit"
+            value={creditLimit > 0 ? formatMoney(creditLimit) : "Not configured"}
+          />
+          <AccountHealthMetric
+            label="Available Credit"
+            value={availableCredit == null ? "—" : formatMoney(availableCredit)}
+          />
+          <AccountHealthMetric
+            label="Last Payment"
+            value={lastPaymentDate ? formatShortDate(lastPaymentDate) : "—"}
+          />
+          <AccountHealthMetric label="Next Payment" value={dueDate ? formatShortDate(dueDate) : "—"} />
+          <AccountHealthMetric
+            label="Behavior"
+            value={overdueDays > 0 ? `Delayed by ${overdueDays}d` : "On track"}
+          />
+          <AccountHealthMetric label="Risk" value={riskLabel || "—"} />
         </div>
         {utilizationPct != null ? (
           <div className="mt-2.5 border-t border-border/60 pt-2.5">
-            <div className="mb-1 flex items-center justify-between text-[10px] text-slate-600">
+            <div className="mb-1 flex items-center justify-between text-[10px] text-muted-foreground">
               <span>Credit used</span>
               <span className="tabular-nums">
                 {formatMoney(creditUsed)} / {formatMoney(creditLimit)}
@@ -758,10 +832,10 @@ function LabAccountTimeline({
         <p className="mt-2 text-[10px] text-muted-foreground">{accountStandingSummary}</p>
       </section>
 
-      <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <section className={LAB_DASHBOARD_CARD}>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Open Invoices ({openInvoicesTop.length})
+            Open Invoices
           </h3>
           <Button
             type="button"
@@ -787,21 +861,27 @@ function LabAccountTimeline({
             ))}
           </div>
         ) : (
-          <p className="rounded-md border border-dashed px-3 py-4 text-[11px] text-muted-foreground">
-            No open invoice balances. Browse the{" "}
-            <button
-              type="button"
-              className="font-medium text-[var(--pc-brand-primary)] underline-offset-2 hover:underline"
-              onClick={() => navigateToLabInvoiceCenter(setActivePage)}
-            >
-              Invoice Center
-            </button>{" "}
-            for paid or historical documents.
-          </p>
+          <div className="rounded-md border border-dashed border-border/80 px-3 py-3 text-[11px] text-muted-foreground">
+            <div className="flex items-center gap-1.5 font-medium text-emerald-700">
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              No outstanding invoices
+            </div>
+            <p className="mt-1">
+              Browse the{" "}
+              <button
+                type="button"
+                className="font-medium text-[var(--pc-brand-primary)] underline-offset-2 hover:underline"
+                onClick={() => navigateToLabInvoiceCenter(setActivePage)}
+              >
+                Invoice Center
+              </button>{" "}
+              for historical invoices.
+            </p>
+          </div>
         )}
       </section>
 
-      <section className="rounded-lg border border-border bg-card p-3 shadow-sm">
+      <section className={LAB_DASHBOARD_CARD}>
         <div className="mb-2 flex flex-wrap gap-1.5">
           {[
             { id: "activity", label: "Payment Activity" },
@@ -840,30 +920,15 @@ function LabAccountTimeline({
                 <ul className="relative space-y-0 pl-2.5">
                   <div className="absolute bottom-1 left-[4px] top-1 w-px bg-border" aria-hidden />
                   {group.items.map((entry) => (
-                    <li key={entry.id} className="relative border-b border-border/50 py-1.5 pl-3 last:border-b-0">
+                    <li key={entry.id} className="relative border-b border-border/50 py-2 pl-3 last:border-b-0">
                       <span
                         className={cn(
-                          "absolute left-0 top-2.5 h-1.5 w-1.5 rounded-full border border-background",
+                          "absolute left-0 top-3 h-1.5 w-1.5 rounded-full border border-background",
                           activityKindDotClass(entry.kind)
                         )}
                         aria-hidden
                       />
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="text-[11px] font-medium text-slate-900">{entry.title}</p>
-                          {entry.subline ? (
-                            <p className="text-[10px] text-slate-600">{entry.subline}</p>
-                          ) : entry.detail ? (
-                            <p className="text-[10px] text-slate-600">{entry.detail}</p>
-                          ) : null}
-                          {entry.trailing ? (
-                            <p className="text-[10px] text-muted-foreground">{entry.trailing}</p>
-                          ) : null}
-                        </div>
-                        <span className="shrink-0 text-[10px] text-muted-foreground">
-                          {formatShortDate(entry.date)}
-                        </span>
-                      </div>
+                      <LabActivityTimelineEntry entry={entry} />
                     </li>
                   ))}
                 </ul>
@@ -2749,12 +2814,14 @@ export default function CollectionsPage({
   return (
     <div
       className={cn(
-        "space-y-3 pb-6",
+        "pb-6",
+        isLabAccount ? "space-y-2" : "space-y-3",
         isAgentView && !embedded && "mx-auto w-full max-w-[1360px]"
       )}
     >
       {!embedded ? (
         <PageHeader
+          compact={isLabAccount}
           title={
             isLabAccount
               ? "Payments & Account"
@@ -2778,7 +2845,7 @@ export default function CollectionsPage({
             <DataFreshnessLabel
               loadedAt={dataLoadedAt}
               refreshing={loading || listRefreshing}
-              className="mt-1 block"
+              className={cn("block", isLabAccount ? "mt-0 text-[10px]" : "mt-1")}
             />
           }
           actions={
@@ -2839,7 +2906,7 @@ export default function CollectionsPage({
 
       <div className={isLabAccount ? "mx-auto max-w-7xl" : ""}>
         {isLabAccount ? (
-          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <CompactAccountKpi
               title="Outstanding"
               value={formatMoney(
@@ -2869,7 +2936,7 @@ export default function CollectionsPage({
               icon={Wallet}
             />
             {(() => {
-              const creditKpi = labCreditKpiDisplay({
+              const creditKpi = labTopCreditKpiDisplay({
                 labLedgerKpis,
                 collectionRow: filteredCollections[0],
               });
