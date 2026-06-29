@@ -44,6 +44,43 @@ export function deriveInvoiceAccountStatus({
   return "Open";
 }
 
+/** Internal draft = not sent to customer; exclude from lab open-invoice widgets. */
+export function isInternalDraftInvoice({
+  status = "",
+  sentAt = "",
+  hasPdf = false,
+  pdfGeneratedAt = "",
+} = {}) {
+  const raw = str(status).toLowerCase();
+  const sent = str(sentAt) || str(pdfGeneratedAt);
+  return raw === "draft" && !sent && !hasPdf;
+}
+
+/** Customer-facing open invoice: positive open balance, not internal draft. */
+export function isCustomerFacingOpenInvoice(inv = {}) {
+  const open = num(inv.openBalance ?? inv.open_balance ?? inv.amount);
+  if (open <= 0.009) return false;
+  return !isInternalDraftInvoice({
+    status: inv.rawStatus ?? inv.status,
+    sentAt: inv.sentAt ?? inv.sent_at,
+    hasPdf: inv.hasPdf ?? inv.has_pdf,
+    pdfGeneratedAt: inv.pdfGeneratedAt ?? inv.pdf_generated_at,
+  });
+}
+
+/** Open Invoices widget status — never show Draft for customer-facing open balances. */
+export function deriveOpenInvoiceWidgetStatus(params = {}) {
+  const status = deriveInvoiceAccountStatus(params);
+  const open = num(params.openBalance);
+  if (status === "Draft" && open > 0.009) return "Outstanding";
+  if (status === "Sent" && open > 0.009) {
+    const paid = num(params.paidAmount);
+    const allocated = num(params.allocatedAmount);
+    if (paid <= 0.009 && allocated <= 0.009) return "Outstanding";
+  }
+  return status;
+}
+
 /**
  * Account Health panel label + tone.
  */

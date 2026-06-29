@@ -6,9 +6,15 @@ import {
   deriveInvoiceAccountStatus,
   deriveAccountHealthStatus,
   deriveLabPaymentStatus,
+  deriveOpenInvoiceWidgetStatus,
+  isCustomerFacingOpenInvoice,
+  isInternalDraftInvoice,
 } from "../src/collections/invoiceAccountStatus.js";
 import { buildLabAccountLedger } from "../src/collections/labAccountLedger.js";
-import { buildLabAccountActivityTimeline } from "../src/collections/labAccountActivity.js";
+import {
+  buildLabAccountActivityTimeline,
+  formatCreditKpiDisplay,
+} from "../src/collections/labAccountActivity.js";
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);
@@ -77,6 +83,64 @@ const activity = buildLabAccountActivityTimeline({
   formatShortDate: (v) => String(v).slice(0, 10),
 });
 assert(activity.length > 0, "activity timeline should include invoice lifecycle");
+assert(
+  activity.some((row) => row.title.includes("Invoice sent")),
+  "activity should include invoice sent event"
+);
+assert(
+  activity.some((row) => row.subline && row.trailing),
+  "activity rows should have structured subline and trailing"
+);
+
+const internalDraft = isInternalDraftInvoice({ status: "draft", sentAt: "", hasPdf: false });
+assert(internalDraft === true, "unsent draft is internal");
+
+const customerOpen = isCustomerFacingOpenInvoice({
+  status: "draft",
+  openBalance: 100,
+  sentAt: "",
+  hasPdf: false,
+});
+assert(customerOpen === false, "internal draft excluded from open invoices");
+
+const sentOpen = isCustomerFacingOpenInvoice({
+  status: "sent",
+  openBalance: 100,
+  sentAt: "2026-06-01",
+});
+assert(sentOpen === true, "sent open invoice is customer-facing");
+
+const widgetStatus = deriveOpenInvoiceWidgetStatus({
+  status: "sent",
+  openBalance: 100,
+  paidAmount: 0,
+  allocatedAmount: 0,
+  dueDate: "2026-07-15",
+  sentAt: "2026-06-01",
+});
+assert(widgetStatus === "Outstanding", `expected Outstanding widget status, got ${widgetStatus}`);
+
+const creditKpi = formatCreditKpiDisplay(0, 100, (v) => `₹${v}`);
+assert(creditKpi.label === "Credit Policy", "no limit uses Credit Policy label");
+assert(creditKpi.value === "Not configured", "no limit shows Not configured");
+
+const creditAvail = formatCreditKpiDisplay(50000, 10000, (v) => `₹${v}`);
+assert(creditAvail.label === "Available Credit", "limit uses Available Credit label");
+
+const paymentActivity = buildLabAccountActivityTimeline({
+  item: { outstandingAmount: 0 },
+  history: [{ amountCollected: 100, paymentMode: "cash", invoiceId: "INV-2026-000046", paymentDate: "2026-06-15" }],
+  invoices: [],
+  formatMoney: (v) => `₹${v}`,
+});
+assert(
+  paymentActivity[0].title.includes("Payment received"),
+  "payment activity uses descriptive title"
+);
+assert(
+  paymentActivity[0].subline.includes("INV-2026-000046"),
+  "payment activity references invoice"
+);
 
 const ledger = buildLabAccountLedger({
   invoices: [

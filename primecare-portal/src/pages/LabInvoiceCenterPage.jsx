@@ -19,6 +19,7 @@ import {
   Loader2,
   MoreHorizontal,
   Search,
+  X,
 } from "lucide-react";
 
 const STATUS_FILTERS = [
@@ -45,7 +46,7 @@ function InvoiceCenterRow({ invoice, busy, onView, onDownload }) {
   const label = invoice.invoiceNumber || invoice.id;
 
   return (
-    <div className="rounded-md border border-border/70 px-2 py-2 transition hover:border-slate-300">
+    <div className="rounded-md border border-border/70 px-2 py-1.5 transition hover:border-slate-300">
       <div className={cn("hidden xl:grid", LAB_INVOICE_CENTER_GRID)}>
         <span className="truncate font-mono text-[10px] font-semibold text-slate-900" title={label}>
           {label}
@@ -231,7 +232,7 @@ export default function LabInvoiceCenterPage({ currentUser }) {
     if (!total) return "No invoices found";
     const start = (page - 1) * pageSize + 1;
     const end = Math.min(page * pageSize, total);
-    return `Showing ${start}–${end} of ${total}`;
+    return `${total} invoice${total === 1 ? "" : "s"} · Showing ${start}–${end}`;
   }, [loading, error, total, page, pageSize]);
 
   function openDrawer(invoice) {
@@ -290,24 +291,30 @@ export default function LabInvoiceCenterPage({ currentUser }) {
             <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
               Search
             </label>
-            <div className="flex gap-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 placeholder="Invoice number or order number"
-                className="h-9 text-sm"
+                className="h-9 pl-9 pr-9 text-sm"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") setSearch(searchInput.trim());
                 }}
               />
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 shrink-0 px-3"
-                onClick={() => setSearch(searchInput.trim())}
-              >
-                <Search className="h-4 w-4" />
-              </Button>
+              {searchInput ? (
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:text-slate-600"
+                  aria-label="Clear search"
+                  onClick={() => {
+                    setSearchInput("");
+                    setSearch("");
+                  }}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
             </div>
           </div>
           <div>

@@ -54,14 +54,16 @@ import { HQ_INVOICE_LIST_MAX_LIMIT } from "@/api/hqReadBounds.js";
 import { buildLabAccountLedger } from "@/collections/labAccountLedger.js";
 import {
   deriveAccountHealthStatus,
-  deriveInvoiceAccountStatus,
-  invoiceStatusTone,
+  deriveOpenInvoiceWidgetStatus,
+  isCustomerFacingOpenInvoice,
+  isInternalDraftInvoice,
   LAB_OPEN_INVOICE_SUMMARY_GRID,
 } from "@/collections/invoiceAccountStatus.js";
 import {
   buildLabAccountActivityTimeline,
-  formatCreditRemainingLabel,
+  formatCreditKpiDisplay,
 } from "@/collections/labAccountActivity.js";
+import InvoiceStatusBadge from "@/components/invoice/InvoiceStatusBadge.jsx";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
 import InvoiceDetailsDrawer from "@/components/invoice/InvoiceDetailsDrawer.jsx";
 import InvoiceAllocationsDrawer from "@/components/invoice/InvoiceAllocationsDrawer.jsx";
@@ -323,7 +325,7 @@ function financialStatusSummary(item, invoices = []) {
   });
 }
 
-function labCreditRemainingDisplay({ labLedgerKpis, collectionRow }) {
+function labCreditKpiDisplay({ labLedgerKpis, collectionRow }) {
   const creditLimit = Number(
     labLedgerKpis?.creditLimit ??
       collectionRow?.creditLimit ??
@@ -334,7 +336,7 @@ function labCreditRemainingDisplay({ labLedgerKpis, collectionRow }) {
   const outstanding = Number(
     labLedgerKpis?.outstanding ?? collectionRow?.outstandingAmount ?? 0
   );
-  return formatCreditRemainingLabel(creditLimit, outstanding, formatMoney);
+  return formatCreditKpiDisplay(creditLimit, outstanding, formatMoney);
 }
 
 function buildInvoiceRows(item, history) {
@@ -415,13 +417,8 @@ function LabOpenInvoiceSummaryRow({
           <p className="text-[10px] text-muted-foreground">Due {formatShortDate(invoice.dueDate)}</p>
         </div>
         <p className="text-right text-sm font-bold tabular-nums text-amber-700">{formatMoney(openBalance)}</p>
-        <span
-          className={cn(
-            "inline-block max-w-full truncate rounded px-1.5 py-0.5 text-center text-[10px] font-medium",
-            invoiceStatusTone(invoice.status)
-          )}
-        >
-          {invoice.status}
+        <span className="justify-self-start">
+          <InvoiceStatusBadge status={invoice.rawStatus || invoice.status} displayStatus={invoice.status} />
         </span>
         <div className="flex items-center justify-end gap-0.5">
           <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => onView(invoice)}>
@@ -455,9 +452,7 @@ function LabOpenInvoiceSummaryRow({
             <p className="truncate font-mono text-sm font-semibold">{invoice.invoiceId}</p>
             <p className="text-xs text-muted-foreground">Due {formatShortDate(invoice.dueDate)}</p>
           </div>
-          <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", invoiceStatusTone(invoice.status))}>
-            {invoice.status}
-          </span>
+          <InvoiceStatusBadge status={invoice.rawStatus || invoice.status} displayStatus={invoice.status} />
         </div>
         <p className="text-lg font-bold tabular-nums text-amber-700">{formatMoney(openBalance)}</p>
         <div className="flex flex-wrap gap-1">
@@ -563,7 +558,11 @@ function LabAccountTimeline({
         invoiceDate: inv.invoiceDate,
         dueDate: inv.dueDate,
         sentAt: inv.sentAt,
-        status: deriveInvoiceAccountStatus({
+        rawStatus: inv.status,
+        hasPdf: inv.hasPdf,
+        pdfGeneratedAt: inv.pdfGeneratedAt,
+        labId: inv.labId,
+        status: deriveOpenInvoiceWidgetStatus({
           status: inv.status,
           openBalance: inv.openBalance,
           paidAmount: inv.allocatedAmount,
@@ -571,9 +570,6 @@ function LabAccountTimeline({
           dueDate: inv.dueDate,
           sentAt: inv.sentAt,
         }),
-        rawStatus: inv.status,
-        hasPdf: inv.hasPdf,
-        labId: inv.labId,
       }));
     }
     return buildInvoiceRows(collectionDetails || item, history);
@@ -602,12 +598,12 @@ function LabAccountTimeline({
         : "Account is active with pending balance under monitoring.";
   const availableCredit =
     creditLimit > 0 ? Math.max(0, creditLimit - creditUsed) : null;
-  const creditRemainingLabel = formatCreditRemainingLabel(creditLimit, outstanding, formatMoney);
+  const creditKpi = formatCreditKpiDisplay(creditLimit, outstanding, formatMoney);
   const lastPaymentDate = deriveLastPaymentDateFromHistory(history);
   const openInvoicesTop = useMemo(
     () =>
       invoices
-        .filter((inv) => Number(inv.openBalance ?? inv.amount ?? 0) > 0.009)
+        .filter(isCustomerFacingOpenInvoice)
         .sort((a, b) => str(b.dueDate).localeCompare(str(a.dueDate)))
         .slice(0, 5),
     [invoices]
@@ -657,7 +653,8 @@ function LabAccountTimeline({
       ? financialTimeline.map((entry) => ({
           id: entry.id,
           title: entry.title,
-          detail: `${entry.subline} · ${entry.trailing}`,
+          subline: entry.subline,
+          trailing: entry.trailing,
           date: entry.date,
           kind: entry.kind,
         }))
@@ -692,45 +689,55 @@ function LabAccountTimeline({
 
   return (
     <div className="space-y-4">
-      <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
-        <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Account Health
-        </h3>
-        <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div>
-              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Outstanding</p>
-              <p className="text-xl font-bold tabular-nums">{formatMoney(outstanding)}</p>
-            </div>
-            <div>
-              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Paid</p>
-              <p className="text-xl font-bold tabular-nums text-emerald-700">{formatMoney(totalPaid)}</p>
-            </div>
-            <div>
-              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Credit limit</p>
-              <p className="text-sm font-semibold tabular-nums">
-                {creditLimit > 0 ? formatMoney(creditLimit) : "Not configured"}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Credit remaining</p>
-              <p className="text-sm font-semibold tabular-nums">{creditRemainingLabel}</p>
-            </div>
-          </div>
-          <div className="text-left lg:text-right">
-            <span className={cn("inline-block rounded border px-2 py-0.5 text-[10px] font-medium", health.tone)}>
-              {health.label}
-            </span>
-            <p className="mt-1 text-[10px] text-muted-foreground">Risk: {riskLabel}</p>
-          </div>
+      <section className="rounded-lg border border-border bg-card p-3 shadow-sm">
+        <div className="mb-2.5 flex flex-wrap items-start justify-between gap-2">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Account Health
+          </h3>
+          <span className={cn("inline-block rounded border px-2 py-0.5 text-[10px] font-medium", health.tone)}>
+            {health.label}
+          </span>
         </div>
-        <div className="mt-3 grid gap-2 border-t border-border/60 pt-3 text-[10px] text-slate-600 sm:grid-cols-3">
-          <div>Behavior: {overdueDays > 0 ? `Delayed by ${overdueDays}d` : "On track"}</div>
-          <div>Next payment: {formatShortDate(dueDate)}</div>
-          <div>Last payment: {lastPaymentDate ? formatShortDate(lastPaymentDate) : "—"}</div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3 lg:grid-cols-4">
+          <div className="min-w-0">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Outstanding</p>
+            <p className="truncate text-sm font-semibold tabular-nums">{formatMoney(outstanding)}</p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Paid</p>
+            <p className="truncate text-sm font-semibold tabular-nums text-emerald-700">{formatMoney(totalPaid)}</p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Credit Limit</p>
+            <p className="truncate text-sm font-semibold tabular-nums">
+              {creditLimit > 0 ? formatMoney(creditLimit) : "Not configured"}
+            </p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{creditKpi.label}</p>
+            <p className="truncate text-sm font-semibold tabular-nums">{creditKpi.value}</p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Last Payment</p>
+            <p className="truncate text-sm font-semibold">{lastPaymentDate ? formatShortDate(lastPaymentDate) : "—"}</p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Next Payment</p>
+            <p className="truncate text-sm font-semibold">{formatShortDate(dueDate)}</p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Risk</p>
+            <p className="truncate text-sm font-semibold">{riskLabel}</p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Behavior</p>
+            <p className="truncate text-sm font-semibold">
+              {overdueDays > 0 ? `Delayed by ${overdueDays}d` : "On track"}
+            </p>
+          </div>
         </div>
         {utilizationPct != null ? (
-          <div className="mt-3">
+          <div className="mt-2.5 border-t border-border/60 pt-2.5">
             <div className="mb-1 flex items-center justify-between text-[10px] text-slate-600">
               <span>Credit used</span>
               <span className="tabular-nums">
@@ -844,7 +851,14 @@ function LabAccountTimeline({
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-[11px] font-medium text-slate-900">{entry.title}</p>
-                          <p className="text-[10px] text-slate-600">{entry.detail}</p>
+                          {entry.subline ? (
+                            <p className="text-[10px] text-slate-600">{entry.subline}</p>
+                          ) : entry.detail ? (
+                            <p className="text-[10px] text-slate-600">{entry.detail}</p>
+                          ) : null}
+                          {entry.trailing ? (
+                            <p className="text-[10px] text-muted-foreground">{entry.trailing}</p>
+                          ) : null}
                         </div>
                         <span className="shrink-0 text-[10px] text-muted-foreground">
                           {formatShortDate(entry.date)}
@@ -2854,14 +2868,15 @@ export default function CollectionsPage({
               )}
               icon={Wallet}
             />
-            <CompactAccountKpi
-              title="Credit remaining"
-              value={labCreditRemainingDisplay({
+            {(() => {
+              const creditKpi = labCreditKpiDisplay({
                 labLedgerKpis,
                 collectionRow: filteredCollections[0],
-              })}
-              icon={ShieldAlert}
-            />
+              });
+              return (
+                <CompactAccountKpi title={creditKpi.label} value={creditKpi.value} icon={ShieldAlert} />
+              );
+            })()}
           </div>
         ) : isAgentView ? (
           <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
