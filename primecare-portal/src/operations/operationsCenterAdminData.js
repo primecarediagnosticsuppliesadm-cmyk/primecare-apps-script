@@ -19,6 +19,7 @@ import {
   enrichDirectoryUsers,
   mapProvisioningEventRow,
 } from "@/operations/userProvisioningEngine.js";
+import { computeUserDirectoryIntegrityWarnings } from "@/operations/userDirectoryIntegrityEngine.js";
 import {
   buildAccessAuditContext,
   enrichAccessAuditEvents,
@@ -131,6 +132,7 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
     distributorNameById,
     labAssignments,
     distributorAssignments,
+    ownershipRows: ownershipRes?.data?.rows || [],
   });
 
   const enrichedLabAssignments = enrichLabAssignmentsWithAgentNames(
@@ -159,6 +161,12 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
     hqTenantId: tid,
   });
 
+  const directoryIntegrity = computeUserDirectoryIntegrityWarnings({
+    directoryUsers,
+    labAssignments: ownershipMetrics.enrichedLabs,
+    ownershipRows,
+  });
+
   return {
     ok:
       usersRes?.success !== false &&
@@ -176,6 +184,7 @@ export async function loadOperationsCenterAdminBundle(tenantId) {
     kpis,
     ownershipRows,
     ownershipMetrics,
+    directoryIntegrity,
   };
 }
 

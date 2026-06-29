@@ -224,7 +224,16 @@ async function main() {
 
   const recomputedKpis = userEngine.computeProvisioningKpis(directoryUsers, labAssignments);
   const kpis = bundle?.kpis || {};
-  const kpiFields = ["totalUsers", "activeUsers", "agents", "labsAssigned", "inactiveUsers", "unassignedLabs"];
+  const kpiFields = [
+    "totalUsers",
+    "realActiveUsers",
+    "activeUsers",
+    "fieldAgents",
+    "agents",
+    "labsAssigned",
+    "inactiveUsers",
+    "unassignedLabs",
+  ];
   let kpiMismatch = 0;
   for (const field of kpiFields) {
     if (Number(recomputedKpis[field]) !== Number(kpis[field])) kpiMismatch += 1;
@@ -234,7 +243,7 @@ async function main() {
   } else {
     pass(
       "kpi.reconcile",
-      `${kpis.totalUsers} users; ${kpis.agents} agents; ${kpis.labsAssigned} labs assigned`
+      `${kpis.totalUsers} total (${kpis.realUsers ?? "?"} real); ${kpis.fieldAgents ?? kpis.agents} field agents; ${kpis.labsAssigned} labs assigned`
     );
   }
 

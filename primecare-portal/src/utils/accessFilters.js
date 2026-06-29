@@ -111,7 +111,7 @@ function labScopeKey(lab = {}) {
   return `${normalize(lab.tenantId ?? lab.tenant_id)}|${labIdKey(lab.labId ?? lab.lab_id)}`;
 }
 
-function ownedLabKeysFromOwnershipRows(ownershipRows = [], agentId = "") {
+export function ownedLabKeysFromOwnershipRows(ownershipRows = [], agentId = "") {
   const keys = new Set();
   const aid = normalizeAgentIdKey(agentId);
   if (!aid) return keys;
