@@ -13,6 +13,7 @@ import {
   USER_DIRECTORY_CLASS,
   USER_DIRECTORY_CLASS_LABELS,
 } from "@/operations/userDirectoryClassification.js";
+import { getDirectoryDefaultAudience, showQaProbeComplexity } from "@/config/hqReleasePolicy.js";
 import { countOwnershipLabsForAgent, countAgentLabsPortalAligned } from "@/operations/userDirectoryIntegrityEngine.js";
 
 function str(v) {
@@ -150,17 +151,26 @@ export function computeDirectoryAudienceCounts(users = []) {
   };
 }
 
-export function buildDirectoryAudienceFilterOptions(users = []) {
+export function buildDirectoryAudienceFilterOptions(users = [], options = {}) {
+  const showQa = options.showQaComplexity ?? showQaProbeComplexity();
   const counts = computeDirectoryAudienceCounts(users);
-  return [
+  const optionsList = [
     { id: "", label: `All Users (${counts.total})` },
     { id: "real", label: `Production Users (${counts.production})` },
-    { id: "qa_test", label: `QA Users (${counts.qa})` },
-    { id: "probe_debug", label: `Probe / Debug Users (${counts.probe})` },
+  ];
+  if (showQa) {
+    optionsList.push(
+      { id: "qa_test", label: `QA Users (${counts.qa})` },
+      { id: "probe_debug", label: `Probe / Debug Users (${counts.probe})` }
+    );
+  }
+  optionsList.push(
     { id: "inactive", label: `Inactive (${counts.inactive})` },
     { id: "with_labs", label: "With Assigned Labs" },
     { id: "without_labs", label: "Without Assigned Labs" },
-  ];
+    { id: "awaiting_provisioning", label: "Awaiting Provisioning" }
+  );
+  return optionsList;
 }
 
 export const DIRECTORY_AUDIENCE_FILTERS = [
@@ -173,8 +183,8 @@ export const DIRECTORY_AUDIENCE_FILTERS = [
   { id: "without_labs", label: "Without Assigned Labs" },
 ];
 
-/** Default audience — all users visible (probe/QA remain in directory). */
-export const DIRECTORY_DEFAULT_AUDIENCE = "";
+/** Default audience — production users in daily ops; all users when QA complexity is shown. */
+export const DIRECTORY_DEFAULT_AUDIENCE = getDirectoryDefaultAudience();
 
 /** Active login-enabled users missing credentials or scope assignment (read-only directory signal). */
 export function isUserAwaitingProvisioning(user = {}) {

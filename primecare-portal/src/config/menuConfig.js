@@ -16,7 +16,7 @@ export const HQ_ADMIN_MENU_SECTIONS = [
   {
     id: "operations",
     label: "OPERATIONS",
-    keys: ["labs", "orders", "risk", "visits"],
+    keys: ["labs", "orders", "risk"],
   },
   {
     id: "inventory",
@@ -89,7 +89,6 @@ const ADMIN_HQ_MENU_KEYS = new Set([
   "orders",
   "risk",
   "purchase",
-  "visits",
   "notifications",
   "predatorDebug",
 ]);

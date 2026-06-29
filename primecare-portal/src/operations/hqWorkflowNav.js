@@ -1,4 +1,5 @@
 import { persistHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
+import { canAccessAgentVisitFlow } from "@/config/hqReleasePolicy.js";
 import { ROLES } from "@/config/roles.js";
 
 function str(v) {
@@ -104,11 +105,16 @@ export function navigateToCreditRisk(
   });
 }
 
-export function navigateToVisits(setActivePage, { labId = "" } = {}) {
+export function navigateToVisits(setActivePage, { labId = "", role = "" } = {}) {
+  if (!canAccessAgentVisitFlow(role)) {
+    hqNavigate(setActivePage, { page: "dashboard" });
+    return false;
+  }
   hqNavigate(setActivePage, {
     page: "visits",
     labId: str(labId),
   });
+  return true;
 }
 
 export function navigateToOperationsCenter(

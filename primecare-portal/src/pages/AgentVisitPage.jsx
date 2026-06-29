@@ -98,6 +98,7 @@ import {
 } from "@/api/primecareSupabaseApi";
 import { supabase } from "@/api/supabaseClient.js";
 import { ROLES } from "@/config/roles";
+import { canAccessAgentVisitFlow, agentVisitBlockedMessage } from "@/config/hqReleasePolicy.js";
 import { labIdKey } from "@/utils/labId";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import {
@@ -938,6 +939,7 @@ function VisitSaveSuccessPanel({
 
 export default function AgentVisitPage({ currentUser, authToken, setActivePage }) {
   const { showToast } = usePortalToast();
+  const visitAccessAllowed = canAccessAgentVisitFlow(currentUser?.role);
   const [labs, setLabs] = useState([]);
   /** Last agent workspace payload when loaded via getAgentWorkspaceRead (Supabase). */
   const [agentWorkspace, setAgentWorkspace] = useState(null);
@@ -1122,8 +1124,12 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
   }, [currentUser]);
 
   useEffect(() => {
+    if (!visitAccessAllowed) {
+      setLoading(false);
+      return;
+    }
     loadPageData();
-  }, [loadUserKey, loadPageData]);
+  }, [loadUserKey, loadPageData, visitAccessAllowed]);
 
   useEffect(() => {
     setForm((prev) => ({
@@ -2077,6 +2083,24 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
     clearAgentVisitDraft(currentUser);
     setDraftBannerVisible(false);
     showToast("info", "Draft cleared.");
+  }
+
+  if (!visitAccessAllowed) {
+    return (
+      <div className="mx-auto max-w-lg py-8">
+        <EmptyState
+          title="Agent Visits unavailable"
+          description={agentVisitBlockedMessage(currentUser?.role)}
+          action={
+            setActivePage ? (
+              <Button type="button" onClick={() => setActivePage("dashboard")}>
+                Back to Dashboard
+              </Button>
+            ) : null
+          }
+        />
+      </div>
+    );
   }
 
   if (loading) {

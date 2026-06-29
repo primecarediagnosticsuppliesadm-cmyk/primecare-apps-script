@@ -190,11 +190,7 @@ export default function PrimeCareWebPortal({
 
       case "visits":
         return (
-          <AgentVisitPage
-            currentUser={currentUser}
-            authToken={authToken}
-            setActivePage={setActivePage}
-          />
+          <PageRedirect setActivePage={setActivePage} target="dashboard" />
         );
 
       case "purchase":

@@ -55,6 +55,12 @@ import {
   formatLastRefreshLabel,
 } from "@/operations/operationsCenterCertificationUi.js";
 import { navigateToCreditRisk } from "@/operations/hqWorkflowNav.js";
+import {
+  getDirectoryDefaultAudience,
+  isHqAdminFrozen,
+  isOperationsCenterDailyViewDefault,
+  showQaProbeComplexity,
+} from "@/config/hqReleasePolicy.js";
 import { IS_DEV, IS_QA } from "@/config/environment.js";
 import { ROLES } from "@/config/roles.js";
 import { cn } from "@/lib/utils";
@@ -285,14 +291,18 @@ function OperationsKpiCard({ value, label, hint, onClick, className }) {
   );
 }
 
-function EnvironmentSummaryBanner({ counts = {} }) {
+function EnvironmentSummaryBanner({ counts = {}, showQaComplexity = false }) {
   const items = [
     { label: "Total Users", value: counts.total },
     { label: "Production Users", value: counts.production },
-    { label: "QA Users", value: counts.qa },
-    { label: "Probe Users", value: counts.probe },
-    { label: "Inactive Users", value: counts.inactive },
   ];
+  if (showQaComplexity) {
+    items.push(
+      { label: "QA Users", value: counts.qa },
+      { label: "Probe Users", value: counts.probe }
+    );
+  }
+  items.push({ label: "Inactive Users", value: counts.inactive });
   return (
     <section
       className="rounded-lg border border-indigo-100 bg-indigo-50/40 px-4 py-3"
@@ -1988,6 +1998,9 @@ export default function UserProvisioningPanel({
   const [reviewUser, setReviewUser] = useState(null);
   const [ignoredIntegrityKeys, setIgnoredIntegrityKeys] = useState(() => new Set());
   const integrityBannerRef = useRef(null);
+  const hqFrozen = isHqAdminFrozen();
+  const showQaComplexity = showQaProbeComplexity();
+  const [dailyView, setDailyView] = useState(isOperationsCenterDailyViewDefault());
 
   const roleOptions = useMemo(
     () => filterPlatformRoleOptionsForActor(actorRole || bundle?.actorRole || ROLES.ADMIN),
@@ -2008,9 +2021,19 @@ export default function UserProvisioningPanel({
     [directoryUsers]
   );
   const audienceFilterOptions = useMemo(
-    () => buildDirectoryAudienceFilterOptions(directoryUsers),
-    [directoryUsers]
+    () => buildDirectoryAudienceFilterOptions(directoryUsers, { showQaComplexity }),
+    [directoryUsers, showQaComplexity]
   );
+
+  const visibleTabs = useMemo(() => {
+    if (!dailyView) return OPERATIONS_CENTER_TABS;
+    return OPERATIONS_CENTER_TABS.filter((t) => ["directory", "labOwnership"].includes(t.id));
+  }, [dailyView]);
+
+  useEffect(() => {
+    if (!dailyView) return;
+    if (!visibleTabs.some((t) => t.id === tab)) setTab("directory");
+  }, [dailyView, visibleTabs, tab]);
 
   const operationsHealthItems = useMemo(
     () =>
@@ -2249,6 +2272,61 @@ export default function UserProvisioningPanel({
 
   return (
     <>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setDailyView(true)}
+            className={cn(
+              "rounded-md px-2.5 py-1 text-[11px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400",
+              dailyView ? "bg-indigo-600 text-white" : "border border-slate-200 text-slate-600 hover:bg-slate-50"
+            )}
+          >
+            Daily view
+          </button>
+          <button
+            type="button"
+            onClick={() => setDailyView(false)}
+            className={cn(
+              "rounded-md px-2.5 py-1 text-[11px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400",
+              !dailyView ? "bg-indigo-600 text-white" : "border border-slate-200 text-slate-600 hover:bg-slate-50"
+            )}
+          >
+            Advanced
+          </button>
+        </div>
+        {hqFrozen ? (
+          <p className="text-[11px] font-medium text-slate-600" role="status">
+            HQ certified — read-only. Review and navigate only.
+          </p>
+        ) : null}
+      </div>
+
+      {dailyView ? (
+        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+          <OperationsKpiCard
+            value={kpis.productionUsers ?? kpis.realUsers}
+            label="Production Users"
+            onClick={() => navigateToDirectory({ audience: "real", role: "", status: "" })}
+          />
+          <OperationsKpiCard
+            value={kpis.fieldAgents ?? kpis.agents}
+            label="Field Agents"
+            onClick={() => navigateToDirectory({ audience: "", role: "agent", status: "" })}
+          />
+          <OperationsKpiCard
+            value={kpis.unassignedLabs}
+            label="Unassigned Laboratories"
+            onClick={() => navigateToLabOwnership({ scrollToUnassigned: true })}
+          />
+          <OperationsKpiCard
+            value={kpis.inactiveAccounts ?? kpis.inactiveUsers}
+            label="Inactive Accounts"
+            onClick={() => navigateToDirectory({ audience: "inactive", role: "", status: "" })}
+          />
+        </div>
+      ) : (
+        <>
       <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:grid-cols-8">
         <OperationsKpiCard
           value={kpis.totalUsers}
@@ -2262,6 +2340,8 @@ export default function UserProvisioningPanel({
           hint="Non-QA, non-probe"
           onClick={() => navigateToDirectory({ audience: "real", role: "", status: "" })}
         />
+        {showQaComplexity ? (
+          <>
         <OperationsKpiCard
           value={kpis.qaUsers ?? kpis.qaTestUsers}
           label="QA Users"
@@ -2272,6 +2352,8 @@ export default function UserProvisioningPanel({
           label="Probe Users"
           onClick={() => navigateToDirectory({ audience: "probe_debug", role: "", status: "" })}
         />
+          </>
+        ) : null}
         <OperationsKpiCard
           value={kpis.fieldAgents ?? kpis.agents}
           label="Field Agents"
@@ -2308,8 +2390,12 @@ export default function UserProvisioningPanel({
           onClick={() => navigateToLabOwnership({ scrollToUnassigned: true })}
         />
       </div>
+        </>
+      )}
 
-      <EnvironmentSummaryBanner counts={audienceCounts} />
+      {!dailyView ? (
+        <>
+      <EnvironmentSummaryBanner counts={audienceCounts} showQaComplexity={showQaComplexity} />
 
       <OperationalAttentionStrip items={attentionItems} onNavigateItem={handleAttentionNavigate} />
 
@@ -2324,9 +2410,11 @@ export default function UserProvisioningPanel({
         onIgnore={handleIgnoreIntegrity}
       />
       </div>
+        </>
+      ) : null}
 
       <div className="flex flex-wrap gap-1 border-b border-slate-200 pb-1">
-        {OPERATIONS_CENTER_TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t.id}
             type="button"
@@ -2381,7 +2469,7 @@ export default function UserProvisioningPanel({
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
             </select>
-            <Button type="button" size="sm" className="gap-1" onClick={() => setCreateOpen(true)}>
+            <Button type="button" size="sm" className="gap-1" onClick={() => setCreateOpen(true)} disabled={hqFrozen}>
               <Plus className="h-4 w-4" />
               Create User
             </Button>
@@ -2432,7 +2520,9 @@ export default function UserProvisioningPanel({
                   </tr>
                 ) : (
                   filteredUsers.map((user) => {
-                    const rowActions = resolveDirectoryRowActions(user, { allowProbeActions });
+                    const rowActions = hqFrozen
+                      ? { review: true, assign: false, assignLab: false, transferLab: false, resetPassword: false, deactivate: false, reactivate: false, probeRestricted: true }
+                      : resolveDirectoryRowActions(user, { allowProbeActions });
                     const isProbeRow = user.userClass === USER_DIRECTORY_CLASS.PROBE_DEBUG;
                     return (
                     <tr
@@ -2652,7 +2742,9 @@ export default function UserProvisioningPanel({
         </div>
       ) : null}
 
-      <OperationsReadinessFooter footer={readinessFooter} loadedAt={loadedAt} />
+      {!dailyView ? (
+        <OperationsReadinessFooter footer={readinessFooter} loadedAt={loadedAt} />
+      ) : null}
 
       {confirmDialog ? (
         <ConfirmActionModal

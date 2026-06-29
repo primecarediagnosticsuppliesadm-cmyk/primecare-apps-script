@@ -5,6 +5,7 @@ import {
   getOrderDetailsRead,
   updateOrderStatusWrite,
   peekOrdersReadCache,
+  getOperationsLabAssignmentsRead,
 } from "@/api/primecareSupabaseApi";
 import { supabase } from "@/api/supabaseClient.js";
 import {
@@ -14,6 +15,7 @@ import {
 import { invalidateAdminDashboardCaches } from "@/utils/dashboardInvalidate.js";
 import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
+import { isHqAdminFrozen } from "@/config/hqReleasePolicy.js";
 import { isPredatorAutoValidationEnabled } from "@/predator/predatorGuards.js";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -67,7 +69,7 @@ import {
   navigateToOperationsCenter,
   navigateToOrders,
 } from "@/operations/hqWorkflowNav.js";
-import { loadOperationsCenterAdminBundle } from "@/operations/operationsCenterAdminData.js";
+import { mapLabAssignmentRow } from "@/operations/operationsCenterAdminEngine.js";
 import { resolveLabAgentForLabId } from "@/operations/labAgentResolver.js";
 import HqOrdersOperationsQueue from "@/components/hq/HqOrdersOperationsQueue.jsx";
 import InvoiceDetailsDrawer from "@/components/invoice/InvoiceDetailsDrawer.jsx";
@@ -87,6 +89,8 @@ import { cn } from "@/lib/utils";
 function str(v) {
   return String(v ?? "").trim();
 }
+
+const ORDERS_INVOICE_PREFETCH_LIMIT = 48;
 
 function orderStatusSuccessMessage(nextStatus) {
   switch (nextStatus) {
@@ -368,7 +372,6 @@ export default function OrdersPage({
   const [ordersReadOk, setOrdersReadOk] = useState(() => hydratedOrders?.ordersReadOk ?? true);
   const [successMessage, setSuccessMessage] = useState("");
   const [labAssignments, setLabAssignments] = useState([]);
-  const [directoryUsers, setDirectoryUsers] = useState([]);
   const [activeQueueKey, setActiveQueueKey] = useState("");
   const [invoiceByOrderId, setInvoiceByOrderId] = useState({});
   const [invoiceDrawer, setInvoiceDrawer] = useState(null);
@@ -377,22 +380,21 @@ export default function OrdersPage({
   const { showToast } = usePortalToast();
 
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
+  const hqFrozen = isHqAdminFrozen();
 
   useEffect(() => {
     const orderLabId = details?.order?.labId;
-    if (!homeTenantId || !setActivePage || !orderLabId) return;
-    if (labAssignments.length > 0 || directoryUsers.length > 0) return;
+    if (!homeTenantId || !orderLabId || labAssignments.length > 0) return;
     let cancelled = false;
-    void loadOperationsCenterAdminBundle(homeTenantId).then((bundle) => {
-      if (!cancelled) {
-        setLabAssignments(bundle?.labAssignments || []);
-        setDirectoryUsers(bundle?.directoryUsers || []);
-      }
+    void getOperationsLabAssignmentsRead({ tenantId: homeTenantId }).then((res) => {
+      if (cancelled || res?.success === false) return;
+      const labs = (res?.data?.labs || []).map((row) => mapLabAssignmentRow(row));
+      setLabAssignments(labs);
     });
     return () => {
       cancelled = true;
     };
-  }, [homeTenantId, setActivePage, details?.order?.labId, labAssignments.length, directoryUsers.length]);
+  }, [homeTenantId, details?.order?.labId, labAssignments.length]);
 
   useEffect(() => {
     void loadOrders({ silent: hadCacheOnMount.current });
@@ -533,6 +535,10 @@ export default function OrdersPage({
 
   async function handleUpdateStatus(nextStatus) {
     if (!selectedOrder) return;
+    if (hqFrozen) {
+      setError("Order updates are frozen for this certified HQ release.");
+      return;
+    }
 
     const id = selectedOrder;
 
@@ -641,22 +647,35 @@ export default function OrdersPage({
     }
   }
 
+  const invoicePrefetchIds = useMemo(() => {
+    const ids = filteredOrders
+      .slice(0, ORDERS_INVOICE_PREFETCH_LIMIT)
+      .map((order) => str(order.orderId))
+      .filter(Boolean);
+    if (selectedOrder && !ids.includes(selectedOrder)) {
+      ids.unshift(selectedOrder);
+    }
+    return ids;
+  }, [filteredOrders, selectedOrder]);
+
   useEffect(() => {
-    const orderIds = filteredOrders.map((order) => str(order.orderId)).filter(Boolean);
-    if (!orderIds.length) {
+    if (!invoicePrefetchIds.length) {
       setInvoiceByOrderId({});
       return undefined;
     }
     let cancelled = false;
-    void getInvoicesByOrderIdsRead(orderIds, { tenantId: homeTenantId }).then((res) => {
-      if (!cancelled && res.success) {
-        setInvoiceByOrderId(res.byOrderId || {});
-      }
-    });
+    const timer = window.setTimeout(() => {
+      void getInvoicesByOrderIdsRead(invoicePrefetchIds, { tenantId: homeTenantId }).then((res) => {
+        if (!cancelled && res.success) {
+          setInvoiceByOrderId(res.byOrderId || {});
+        }
+      });
+    }, 200);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [filteredOrders, homeTenantId]);
+  }, [invoicePrefetchIds.join("|"), homeTenantId]);
 
   useEffect(() => {
     return onFinancialSyncCompleted((detail) => {
@@ -768,14 +787,14 @@ export default function OrdersPage({
 
   const selectedLabAgent = useMemo(() => {
     if (!selectedOrderSummary?.labId) {
-      return resolveLabAgentForLabId("", labAssignments, directoryUsers);
+      return resolveLabAgentForLabId("", labAssignments, []);
     }
     return resolveLabAgentForLabId(
       selectedOrderSummary.labId,
       labAssignments,
-      directoryUsers
+      []
     );
-  }, [selectedOrderSummary, labAssignments, directoryUsers]);
+  }, [selectedOrderSummary, labAssignments]);
 
   const selectedOrderUx = useMemo(() => {
     if (!selectedOrderSummary) return null;
@@ -832,6 +851,15 @@ export default function OrdersPage({
               : "PrimeCare HQ orders — scan status, payment, and fulfillment at a glance."
           }
         />
+      ) : null}
+
+      {hqFrozen ? (
+        <div
+          className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+          role="status"
+        >
+          HQ Orders is in read-only mode for this certified release. Status changes are disabled.
+        </div>
       ) : null}
 
       {error ? (
@@ -1076,7 +1104,7 @@ export default function OrdersPage({
                               variant="outline"
                               size="sm"
                               className="h-7 px-2 text-[11px]"
-                              disabled={updatingStatus}
+                              disabled={updatingStatus || hqFrozen}
                               onClick={() => openOrder(order.orderId)}
                             >
                               Review
@@ -1129,7 +1157,7 @@ export default function OrdersPage({
                         variant="outline"
                         size="sm"
                         className="mt-2 h-9 w-full rounded-lg text-xs"
-                        disabled={updatingStatus}
+                        disabled={updatingStatus || hqFrozen}
                         onClick={() => openOrder(order.orderId)}
                       >
                         Review order
@@ -1494,7 +1522,7 @@ export default function OrdersPage({
                     placeholder="Optional note for this status update…"
                     value={statusNote}
                     onChange={(e) => setStatusNote(e.target.value)}
-                    disabled={updatingStatus || detailsLoading}
+                    disabled={updatingStatus || hqFrozen || detailsLoading}
                     className="min-h-[72px] rounded-lg text-sm"
                   />
                   <div className="grid grid-cols-2 gap-2">

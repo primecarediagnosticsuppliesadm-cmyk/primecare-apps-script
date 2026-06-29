@@ -62,7 +62,7 @@ async function loadModules(server) {
 function staticUiChecks() {
   const panel = readFileSync(resolve(root, "src/components/operations/UserProvisioningPanel.jsx"), "utf8");
   assert(/DIRECTORY_AUDIENCE_FILTERS/.test(panel), "audience filter wired");
-  assert(/DIRECTORY_DEFAULT_AUDIENCE/.test(panel), "default all users audience");
+  assert(/DIRECTORY_DEFAULT_AUDIENCE/.test(panel), "default directory audience filter");
   assert(/EnvironmentSummaryBanner/.test(panel), "environment summary banner");
   assert(/OperationsHealthPanel/.test(panel), "operations health panel");
   assert(/OperationalAttentionStrip/.test(panel), "operational attention strip");

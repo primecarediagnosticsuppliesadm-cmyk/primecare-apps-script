@@ -1499,10 +1499,10 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
           rightAction={
             <button
               type="button"
-              onClick={() => setActivePage?.("visits")}
+              onClick={() => setActivePage?.("labs")}
               className="min-h-10 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted/50"
             >
-              Open Visits
+              View Labs
             </button>
           }
         >
