@@ -1,4 +1,5 @@
 import { persistHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
+import { ROLES } from "@/config/roles.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -33,15 +34,38 @@ export function navigateToOrders(setActivePage, { labId = "", orderId = "" } = {
   });
 }
 
+/** Role-aware collections destination (never returns a page the role cannot access). */
+export function resolveCollectionsPageForRole(role) {
+  const r = str(role).toLowerCase();
+  if (r === ROLES.LAB) return "labAccount";
+  if (r === ROLES.EXECUTIVE || r === ROLES.ADMIN) return "risk";
+  if (r === ROLES.AGENT || r === ROLES.READ_ONLY_AUDITOR) return "collections";
+  return null;
+}
+
+export function canNavigateToCollections(role) {
+  return Boolean(resolveCollectionsPageForRole(role));
+}
+
+export function collectionsNavLabelForRole(role) {
+  const r = str(role).toLowerCase();
+  if (r === ROLES.LAB) return "Payments & Account";
+  if (r === ROLES.EXECUTIVE || r === ROLES.ADMIN) return "Credit & Risk";
+  return "Collections";
+}
+
 export function navigateToCollections(
   setActivePage,
-  { labId = "", focusSection = "details" } = {}
+  { labId = "", focusSection = "details", role = "" } = {}
 ) {
+  const page = resolveCollectionsPageForRole(role);
+  if (!page || !setActivePage) return false;
   hqNavigate(setActivePage, {
-    page: "collections",
+    page,
     labId: str(labId),
     focusSection: str(focusSection) || "details",
   });
+  return true;
 }
 
 export function navigateToCreditRisk(

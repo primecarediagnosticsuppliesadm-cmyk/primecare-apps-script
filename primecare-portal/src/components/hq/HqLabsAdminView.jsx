@@ -397,7 +397,11 @@ export default function HqLabsAdminView({
       return;
     }
     if (action === "collections") {
-      navigateToCollections(setActivePage, { labId: lab?.labId, focusSection: "details" });
+      navigateToCollections(setActivePage, {
+        labId: lab?.labId,
+        focusSection: "details",
+        role: currentUser?.role,
+      });
       return;
     }
     if (action === "orders") {
@@ -418,7 +422,8 @@ export default function HqLabsAdminView({
 
   function handleHqNavigate(kind, payload = {}) {
     if (kind === "orders") navigateToOrders(setActivePage, payload);
-    else if (kind === "collections") navigateToCollections(setActivePage, payload);
+    else if (kind === "collections")
+      navigateToCollections(setActivePage, { ...payload, role: currentUser?.role });
     else if (kind === "visits") navigateToVisits(setActivePage, payload);
     else if (kind === "agent") {
       navigateToOperationsCenter(setActivePage, {

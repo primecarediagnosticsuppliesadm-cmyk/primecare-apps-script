@@ -2,7 +2,7 @@
 /**
  * Lab Payments & Account fallback summary checks.
  */
-import { buildLabAccountFallbackSummary } from "../src/collections/labAccountFallbackSummary.js";
+import { buildLabAccountFallbackSummary } from "../src/collections/labAccountLedger.js";
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);

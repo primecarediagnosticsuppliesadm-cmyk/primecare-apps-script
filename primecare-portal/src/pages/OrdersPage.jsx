@@ -59,6 +59,8 @@ import { collectOrderRowIds } from "@/metrics/computeRevenueMetrics.js";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import HqObjectLink from "@/components/hq/HqObjectLink.jsx";
 import {
+  canNavigateToCollections,
+  collectionsNavLabelForRole,
   navigateToCollections,
   navigateToLabs,
   navigateToOperationsCenter,
@@ -1085,20 +1087,23 @@ export default function OrdersPage({
                       >
                         All lab orders
                       </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-8 text-xs"
-                        onClick={() =>
-                          navigateToCollections(setActivePage, {
-                            labId: selectedOrderSummary.labId,
-                            focusSection: "details",
-                          })
-                        }
-                      >
-                        Collections
-                      </Button>
+                      {canNavigateToCollections(currentUser?.role) ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs"
+                          onClick={() =>
+                            navigateToCollections(setActivePage, {
+                              labId: selectedOrderSummary.labId,
+                              focusSection: "details",
+                              role: currentUser?.role,
+                            })
+                          }
+                        >
+                          {collectionsNavLabelForRole(currentUser?.role)}
+                        </Button>
+                      ) : null}
                     </div>
                   ) : null}
                   <div className="mt-2 flex flex-wrap gap-2">
