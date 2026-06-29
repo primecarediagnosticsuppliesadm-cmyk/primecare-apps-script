@@ -51,7 +51,7 @@ import { cn } from "@/lib/utils";
 import { labIdKey } from "@/utils/labId.js";
 import { getInvoicesForLabRead } from "@/api/invoiceSupabaseApi.js";
 import { HQ_INVOICE_LIST_MAX_LIMIT } from "@/api/hqReadBounds.js";
-import { buildLabAccountFallbackSummary } from "@/collections/labAccountFallbackSummary.js";
+import { buildLabAccountLedger } from "@/collections/labAccountLedger.js";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
 import InvoiceDetailsDrawer from "@/components/invoice/InvoiceDetailsDrawer.jsx";
 import InvoiceAllocationsDrawer from "@/components/invoice/InvoiceAllocationsDrawer.jsx";
@@ -294,80 +294,6 @@ function CompactAccountKpi({ title, value, icon: Icon }) {
           </div>
         ) : null}
       </div>
-    </div>
-  );
-}
-
-function LabAccountFallbackPanel({ summary, invoices, setActivePage }) {
-  const topInvoices = (invoices || []).slice(0, 5);
-  const standingTone = summary.fullyPaid
-    ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-    : "border-blue-200 bg-blue-50 text-blue-900";
-
-  return (
-    <div className="mx-auto max-w-2xl space-y-3">
-      <Card className={cn("border p-4 shadow-sm", standingTone)}>
-        <div className="flex items-start gap-3">
-          <div className="rounded-lg bg-white/70 p-2">
-            {summary.fullyPaid ? (
-              <CheckCircle2 className="h-5 w-5 text-emerald-700" />
-            ) : (
-              <LifeBuoy className="h-5 w-5 text-blue-700" />
-            )}
-          </div>
-          <div className="min-w-0 flex-1 space-y-1">
-            <h2 className="text-base font-semibold">
-              {summary.fullyPaid ? "Account in good standing" : "Account summary is syncing"}
-            </h2>
-            <p className="text-sm opacity-90">
-              {summary.fullyPaid
-                ? "No payment action required. Your recent invoices are fully paid."
-                : "Your invoices are available in Invoice Center. A full account summary will appear here once ledger sync completes."}
-            </p>
-            {!summary.fullyPaid && summary.openBalance > 0 ? (
-              <p className="text-sm font-medium">
-                Open invoice balance: {formatMoney(summary.openBalance)}
-              </p>
-            ) : null}
-            {summary.totalPaid > 0 ? (
-              <p className="text-sm">
-                Total paid recorded: <span className="font-medium">{formatMoney(summary.totalPaid)}</span>
-              </p>
-            ) : null}
-          </div>
-        </div>
-      </Card>
-
-      {topInvoices.length ? (
-        <Card className="border border-border p-3 shadow-sm">
-          <h3 className="mb-2 text-sm font-semibold text-foreground">Recent invoices</h3>
-          <ul className="space-y-2">
-            {topInvoices.map((inv) => (
-              <li
-                key={inv.id || inv.invoiceNumber}
-                className="flex items-center justify-between gap-2 text-sm"
-              >
-                <span className="min-w-0 truncate font-medium">
-                  {inv.invoiceNumber || inv.invoice_number || "Invoice"}
-                </span>
-                <span className="shrink-0 tabular-nums text-muted-foreground">
-                  {formatMoney(inv.totalAmount ?? inv.total_amount)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      ) : null}
-
-      <Button
-        type="button"
-        className="w-full sm:w-auto"
-        onClick={() => setActivePage?.("labInvoices")}
-      >
-        <FileText className="mr-2 h-4 w-4" />
-        Open Invoice Center
-        <ArrowRight className="ml-2 h-4 w-4" />
-      </Button>
     </div>
   );
 }
@@ -1938,7 +1864,7 @@ export default function CollectionsPage({
     currentUser?.tenant_id ||
     "";
   const profileLabId = labIdKey(currentUser?.labId || currentUser?.lab_id || "");
-  const [labAccountFallback, setLabAccountFallback] = useState(null);
+  const [labAccountLedger, setLabAccountLedger] = useState(null);
   const [collectionEvidence, setCollectionEvidence] = useState([]);
 
   useEffect(() => {
@@ -2552,54 +2478,60 @@ export default function CollectionsPage({
     );
   }, [collections, search, isLabAccount, isAgentView, orderByLabId]);
 
-  const labFallbackActive = useMemo(
-    () =>
-      isLabAccount &&
-      filteredCollections.length === 0 &&
-      labAccountFallback?.status === "ready" &&
-      labAccountFallback.invoiceCount > 0,
-    [isLabAccount, filteredCollections.length, labAccountFallback]
-  );
+  const labDisplayCollections = useMemo(() => {
+    if (!isLabAccount) return filteredCollections;
+    if (filteredCollections.length) return filteredCollections;
+    if (
+      labAccountLedger?.status === "ready" &&
+      labAccountLedger.hasLedgerData &&
+      labAccountLedger.collectionItem?.labId
+    ) {
+      return [labAccountLedger.collectionItem];
+    }
+    return [];
+  }, [isLabAccount, filteredCollections, labAccountLedger]);
+
+  const labLedgerKpis = useMemo(() => {
+    if (!isLabAccount || filteredCollections.length) return null;
+    if (labAccountLedger?.status !== "ready") return null;
+    return labAccountLedger;
+  }, [isLabAccount, filteredCollections.length, labAccountLedger]);
 
   useEffect(() => {
     if (!isLabAccount || loading || listRefreshing) return undefined;
-    if (collections.length > 0) {
-      setLabAccountFallback(null);
-      return undefined;
-    }
     if (!profileLabId) return undefined;
 
     let cancelled = false;
-    setLabAccountFallback({ status: "loading" });
+    setLabAccountLedger({ status: "loading" });
 
     void (async () => {
       try {
-        const [invoiceRes, historyRes] = await Promise.all([
+        const [invoiceRes, historyRes, detailRes] = await Promise.all([
           getInvoicesForLabRead(profileLabId, {
             tenantId,
             pageSize: HQ_INVOICE_LIST_MAX_LIMIT,
           }),
           getCollectionHistoryRead(profileLabId),
+          getCollectionDetailRead(profileLabId),
         ]);
         if (cancelled) return;
 
-        const invoices = invoiceRes?.rows || [];
-        const history = historyRes?.data?.history || [];
-        const summaryPayload = buildLabAccountFallbackSummary(
-          invoices,
-          history,
-          invoiceRes?.total
-        );
+        const ledger = buildLabAccountLedger({
+          invoices: invoiceRes?.rows || [],
+          paymentHistory: historyRes?.data?.history || [],
+          arRow: detailRes?.data?.collection,
+          labId: profileLabId,
+          labName: str(currentUser?.labName || currentUser?.lab_name || ""),
+        });
 
-        setLabAccountFallback({
+        setLabAccountLedger({
           status: "ready",
-          ...summaryPayload,
-          invoices,
+          ...ledger,
         });
       } catch (err) {
         if (!cancelled) {
-          console.warn("CollectionsPage labAccountFallback:", err);
-          setLabAccountFallback({ status: "ready", invoiceCount: 0, invoices: [] });
+          console.warn("CollectionsPage labAccountLedger:", err);
+          setLabAccountLedger({ status: "ready", hasLedgerData: false, collectionItem: null });
         }
       }
     })();
@@ -2607,14 +2539,15 @@ export default function CollectionsPage({
     return () => {
       cancelled = true;
     };
-  }, [
-    isLabAccount,
-    loading,
-    listRefreshing,
-    collections.length,
-    profileLabId,
-    tenantId,
-  ]);
+  }, [isLabAccount, loading, listRefreshing, profileLabId, tenantId, currentUser?.labName, currentUser?.lab_name]);
+
+  useEffect(() => {
+    if (!isLabAccount || loading || !labDisplayCollections.length) return;
+    if (filteredCollections.length) return;
+    const key = labIdKey(labDisplayCollections[0].labId);
+    if (expandedLabId === key) return;
+    void openCollection(labDisplayCollections[0].labId);
+  }, [isLabAccount, loading, labDisplayCollections, filteredCollections.length, expandedLabId]);
 
   const agentQueueSummary = useMemo(() => {
     if (!isAgentView) return null;
@@ -2864,43 +2797,53 @@ export default function CollectionsPage({
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <CompactAccountKpi
               title="Outstanding"
-              value={
-                labFallbackActive
-                  ? formatMoney(labAccountFallback.openBalance)
-                  : formatMoney(summary.totalOutstanding)
-              }
+              value={formatMoney(
+                labLedgerKpis?.outstanding ??
+                  summary.totalOutstanding ??
+                  filteredCollections[0]?.outstandingAmount ??
+                  0
+              )}
               icon={IndianRupee}
             />
             <CompactAccountKpi
               title="Overdue"
               value={
-                filteredCollections[0]?.overdueDays
-                  ? `${Number(filteredCollections[0].overdueDays)}d`
+                (labLedgerKpis?.overdueDays ?? filteredCollections[0]?.overdueDays)
+                  ? `${Number(labLedgerKpis?.overdueDays ?? filteredCollections[0]?.overdueDays)}d`
                   : "—"
               }
               icon={AlertTriangle}
             />
             <CompactAccountKpi
               title="Total paid"
-              value={
-                labFallbackActive
-                  ? formatMoney(labAccountFallback.totalPaid)
-                  : formatMoney(filteredCollections[0]?.totalPaid)
-              }
+              value={formatMoney(
+                labLedgerKpis?.totalPaid ??
+                  filteredCollections[0]?.totalPaid ??
+                  0
+              )}
               icon={Wallet}
             />
             <CompactAccountKpi
-              title="Credit left"
+              title="Credit remaining"
               value={
-                Number(filteredCollections[0]?.creditLimit || filteredCollections[0]?.credit_limit || 0) > 0
-                  ? formatMoney(
-                      Math.max(
-                        0,
-                        Number(filteredCollections[0]?.creditLimit || filteredCollections[0]?.credit_limit || 0) -
-                          Number(filteredCollections[0]?.outstandingAmount || 0)
+                labLedgerKpis?.creditRemaining != null
+                  ? formatMoney(labLedgerKpis.creditRemaining)
+                  : Number(
+                        filteredCollections[0]?.creditLimit ||
+                          filteredCollections[0]?.credit_limit ||
+                          0
+                      ) > 0
+                    ? formatMoney(
+                        Math.max(
+                          0,
+                          Number(
+                            filteredCollections[0]?.creditLimit ||
+                              filteredCollections[0]?.credit_limit ||
+                              0
+                          ) - Number(filteredCollections[0]?.outstandingAmount || 0)
+                        )
                       )
-                    )
-                  : "—"
+                    : "—"
               }
               icon={ShieldAlert}
             />
@@ -2994,18 +2937,12 @@ export default function CollectionsPage({
           onReviewLab={handleOpenLabReview}
           onOpenCollections={handleHqOpenCollections}
         />
-      ) : filteredCollections.length === 0 ? (
+      ) : labDisplayCollections.length === 0 ? (
         isLabAccount ? (
-          labAccountFallback?.status === "loading" ? (
+          labAccountLedger?.status === "loading" ? (
             <div className="mx-auto max-w-2xl">
               <ListSkeleton rows={4} />
             </div>
-          ) : labFallbackActive ? (
-            <LabAccountFallbackPanel
-              summary={labAccountFallback}
-              invoices={labAccountFallback.invoices}
-              setActivePage={setActivePage}
-            />
           ) : (
             <EmptyState
               title="No account records"
@@ -3024,7 +2961,7 @@ export default function CollectionsPage({
         )
       ) : isLabAccount ? (
         <div className="mx-auto max-w-2xl space-y-2" role="list">
-          {filteredCollections.map((item) => {
+          {labDisplayCollections.map((item) => {
             const key = labIdKey(item.labId);
             const isExpanded = expandedLabId === key;
             return (

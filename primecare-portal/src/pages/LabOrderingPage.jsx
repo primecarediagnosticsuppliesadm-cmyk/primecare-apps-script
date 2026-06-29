@@ -29,13 +29,15 @@ import {
 } from "@/api/primecareApi";
 import {
   createOrderWrite,
+  getCollectionHistoryRead,
   getCollectionsRead,
   getLabCatalogRead,
   getLabRecentOrdersRead,
   mapOrderRow,
 } from "@/api/primecareSupabaseApi";
 import { supabase } from "@/api/supabaseClient.js";
-import { filterCollectionsForUser } from "@/utils/accessFilters.js";
+import { getInvoicesForLabRead } from "@/api/invoiceSupabaseApi.js";
+import { buildLabAccountLedger } from "@/collections/labAccountLedger.js";
 import { labIdKey } from "@/utils/labId.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import {
@@ -327,7 +329,7 @@ function buildCartHash(items) {
   );
 }
 
-export default function LabOrderingPage({ currentUser }) {
+export default function LabOrderingPage({ currentUser, setActivePage }) {
   const [activeTab, setActiveTab] = useState("catalog");
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [cartSections, setCartSections] = useState({
@@ -585,13 +587,30 @@ export default function LabOrderingPage({ currentUser }) {
 
   async function loadAccountOutstanding() {
     try {
+      const tenantId = currentUser?.tenantId || currentUser?.tenant_id || null;
       const res = await getCollectionsRead();
       const allRows = Array.isArray(res?.data?.collections) ? res.data.collections : [];
       const rows = filterCollectionsForUser(allRows, currentUser);
       const own = rows[0];
       const amount = Number(own?.outstandingAmount ?? own?.outstanding_amount ?? 0);
-      if (Number.isFinite(amount)) {
+      if (Number.isFinite(amount) && amount > 0) {
         setOutstandingBalance(amount);
+        return;
+      }
+
+      const [invoiceRes, historyRes] = await Promise.all([
+        getInvoicesForLabRead(labId, { tenantId }),
+        getCollectionHistoryRead(labId),
+      ]);
+      const ledger = buildLabAccountLedger({
+        invoices: invoiceRes?.rows || [],
+        paymentHistory: historyRes?.data?.history || [],
+        arRow: own,
+        labId,
+        labName,
+      });
+      if (ledger.outstanding > 0) {
+        setOutstandingBalance(ledger.outstanding);
       }
     } catch (e) {
       console.warn("[LabOrderingPage] loadAccountOutstanding:", e?.message || e);
@@ -1268,7 +1287,18 @@ export default function LabOrderingPage({ currentUser }) {
         subtitle={
           <>
             {labName} — place orders for your lab. Outstanding and payments are under{" "}
-            <span className="font-medium text-slate-700">Payments &amp; Account</span>.
+            {setActivePage ? (
+              <button
+                type="button"
+                className="font-medium text-[var(--pc-brand-primary)] underline-offset-2 hover:underline"
+                onClick={() => setActivePage("labAccount")}
+              >
+                Payments &amp; Account
+              </button>
+            ) : (
+              <span className="font-medium text-slate-700">Payments &amp; Account</span>
+            )}
+            .
           </>
         }
         icon={ShoppingCart}

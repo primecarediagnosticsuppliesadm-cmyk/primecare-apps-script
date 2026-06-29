@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { X, Loader2, MapPin } from "lucide-react";
 import EvidenceContextActions from "@/components/evidence/EvidenceContextActions.jsx";
 import { formatLabsCurrency, formatLabsDate } from "@/operations/labsHqEngine.js";
-import { labAssignedAgentId, resolveLabAgent } from "@/operations/labAgentResolver.js";
+import { canNavigateToCollections } from "@/operations/hqWorkflowNav.js";
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -248,14 +248,16 @@ export default function OperationalLabDrawer({
                   className="h-8 w-full text-xs"
                 />
               ) : null}
-              <Button
-                type="button"
-                size="sm"
-                className="w-full"
-                onClick={() => onAction("collections", snapshot)}
-              >
-                Open Collections
-              </Button>
+              {canNavigateToCollections(currentUser?.role) ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => onAction("collections", snapshot)}
+                >
+                  Open Collections
+                </Button>
+              ) : null}
             </div>
           ) : null}
 

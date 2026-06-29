@@ -498,7 +498,7 @@ export default function PrimeCareWebPortal({
       case "lab-ordering":
       case "ordering":
       case "orders":
-        return <LabOrderingPage currentUser={currentUser} authToken={authToken} />;
+        return <LabOrderingPage currentUser={currentUser} authToken={authToken} setActivePage={setActivePage} />;
 
       case "labInvoices":
       case "lab-invoices":
@@ -511,6 +511,7 @@ export default function PrimeCareWebPortal({
             currentUser={currentUser}
             authToken={authToken}
             viewMode="labAccount"
+            setActivePage={setActivePage}
           />
         );
 

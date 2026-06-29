@@ -18,7 +18,6 @@ import {
   HQ_LABS_CREDIT_LIMIT,
   HQ_LAB_CATALOG_LIMIT,
   HQ_LAB_CATALOG_LIST_COLUMNS,
-  HQ_ORDER_LINE_METRIC_COLUMNS,
   HQ_ORDER_LIST_COLUMNS,
   HQ_PAYMENT_COLUMNS,
   HQ_PAYMENTS_RECENT_DAYS,
@@ -40,7 +39,11 @@ import {
   HQ_V_STOCK_DASHBOARD_COLUMNS,
   clampLimit,
   recentDateYmd,
-} from "./hqReadBounds.js";
+} from "@/api/hqReadBounds.js";
+import {
+  ORDER_LINES_METRIC_COLUMNS,
+  fetchOrderLineMetricsForOrders,
+} from "@/api/orderLineMetricsSupport.js";
 import { collectOrderRowIds } from "../metrics/computeRevenueMetrics.js";
 import { perfLog, perfTime } from "../utils/perfLog.js";
 
@@ -324,36 +327,8 @@ function str(v) {
  * @param {import('@supabase/supabase-js').SupabaseClient} client
  * @param {string[]} orderIds
  */
-async function fetchOrderLineMetricsForOrders(client, orderIds) {
-  const rows = [];
-  if (!client || !orderIds?.length) return rows;
-
-  const ids = [...new Set(orderIds.map(str).filter(Boolean))];
-  const chunkSize = 200;
-
-  for (let i = 0; i < ids.length; i += chunkSize) {
-    const chunk = ids.slice(i, i + chunkSize);
-    try {
-      const { data, error } = await client
-        .from("order_lines")
-        .select(HQ_ORDER_LINE_METRIC_COLUMNS)
-        .in("order_id", chunk);
-      if (!error && Array.isArray(data)) rows.push(...data);
-    } catch {
-      /* optional */
-    }
-    try {
-      const { data, error } = await client
-        .from("order_items")
-        .select(HQ_ORDER_LINE_METRIC_COLUMNS)
-        .in("order_id", chunk);
-      if (!error && Array.isArray(data)) rows.push(...data);
-    } catch {
-      /* optional */
-    }
-  }
-
-  return rows;
+async function fetchOrderLineMetricsForOrdersBounded(client, orderIds) {
+  return fetchOrderLineMetricsForOrders(client, orderIds);
 }
 
 /**
@@ -462,7 +437,7 @@ export async function fetchOrderLinesBoundedRows(client, options = {}) {
   const limit = clampLimit(options.limit, 5000, 5000);
   return client
     .from("order_lines")
-    .select(HQ_ORDER_LINE_METRIC_COLUMNS)
+    .select(ORDER_LINES_METRIC_COLUMNS)
     .order("order_id", { ascending: false })
     .limit(limit);
 }
@@ -645,7 +620,7 @@ async function loadAdminDashboardBoundedSourceRows(client, empty) {
   let orderLinesRaw = [];
   if (orderIds.length) {
     const endLines = perfTime("fetchAdminDashboardBoundedSourceRows.orderLines");
-    orderLinesRaw = await fetchOrderLineMetricsForOrders(client, orderIds);
+    orderLinesRaw = await fetchOrderLineMetricsForOrdersBounded(client, orderIds);
     endLines({ orderIds: orderIds.length, lines: orderLinesRaw.length });
   }
 

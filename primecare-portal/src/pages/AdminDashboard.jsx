@@ -1421,7 +1421,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
           <div className="grid grid-cols-2 gap-2 sm:gap-3">
             {[
               { label: "Orders Monitor", page: "orders" },
-              { label: "Collections", page: "collections" },
+              { label: "Credit & Risk", page: "risk" },
               { label: "Purchase & Reorder", page: "purchase" },
               { label: "Labs", page: "labs" },
             ].map(({ label, page }) => (

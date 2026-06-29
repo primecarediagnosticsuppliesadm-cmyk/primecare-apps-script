@@ -293,6 +293,7 @@ export default function HqCreditRiskCommandCenter({
       navigateToCollections(setActivePage, {
         labId: payload.labId,
         focusSection: payload.focusSection || "details",
+        role: currentUser?.role,
       });
     }
   }

@@ -5,12 +5,30 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { PDFDocument, StandardFonts, rgb } from "https://esm.sh/pdf-lib@1.17.1";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+const ALLOWED_ORIGINS = new Set([
+  "https://primecare-portal-prod.vercel.app",
+  "https://primecare-portal.vercel.app",
+  "http://localhost:5173",
+  "http://localhost:3000",
+  "http://127.0.0.1:5173",
+  "http://127.0.0.1:3000",
+]);
 
-const BUCKET = "invoice-pdfs";
+const CORS_ALLOW_HEADERS = "authorization, x-client-info, apikey, content-type";
+const CORS_ALLOW_METHODS = "POST, OPTIONS";
+
+function corsHeadersFor(req: Request): Record<string, string> {
+  const origin = req.headers.get("Origin") ?? "";
+  const headers: Record<string, string> = {
+    "Access-Control-Allow-Headers": CORS_ALLOW_HEADERS,
+    "Access-Control-Allow-Methods": CORS_ALLOW_METHODS,
+    Vary: "Origin",
+  };
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    headers["Access-Control-Allow-Origin"] = origin;
+  }
+  return headers;
+}
 
 type Body = { invoiceId?: string; force?: boolean };
 
@@ -23,10 +41,12 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function jsonResponse(body: Record<string, unknown>, status = 200) {
+const BUCKET = "invoice-pdfs";
+
+function jsonResponse(req: Request, body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...corsHeadersFor(req), "Content-Type": "application/json" },
   });
 }
 
@@ -182,10 +202,10 @@ async function buildInvoicePdfBytes(payload: {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return new Response("ok", { status: 200, headers: corsHeadersFor(req) });
   }
   if (req.method !== "POST") {
-    return jsonResponse({ success: false, error: "Method not allowed" }, 405);
+    return jsonResponse(req, { success: false, error: "Method not allowed" }, 405);
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
@@ -193,25 +213,25 @@ Deno.serve(async (req) => {
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 
   if (!supabaseUrl || !serviceRoleKey || !anonKey) {
-    return jsonResponse({ success: false, error: "Server configuration missing" }, 500);
+    return jsonResponse(req,{ success: false, error: "Server configuration missing" }, 500);
   }
 
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
-    return jsonResponse({ success: false, error: "Missing authorization" }, 401);
+    return jsonResponse(req,{ success: false, error: "Missing authorization" }, 401);
   }
 
   let body: Body;
   try {
     body = await req.json();
   } catch {
-    return jsonResponse({ success: false, error: "Invalid JSON body" }, 400);
+    return jsonResponse(req,{ success: false, error: "Invalid JSON body" }, 400);
   }
 
   const invoiceId = str(body.invoiceId);
   const force = Boolean(body.force);
   if (!invoiceId) {
-    return jsonResponse({ success: false, error: "invoiceId is required" }, 400);
+    return jsonResponse(req,{ success: false, error: "invoiceId is required" }, 400);
   }
 
   const userClient = createClient(supabaseUrl, anonKey, {
@@ -220,7 +240,7 @@ Deno.serve(async (req) => {
 
   const { data: authData, error: authErr } = await userClient.auth.getUser();
   if (authErr || !authData?.user) {
-    return jsonResponse({ success: false, error: "Invalid session" }, 401);
+    return jsonResponse(req,{ success: false, error: "Invalid session" }, 401);
   }
 
   const { data: invoice, error: invErr } = await userClient
@@ -232,22 +252,22 @@ Deno.serve(async (req) => {
     .maybeSingle();
 
   if (invErr) {
-    return jsonResponse({ success: false, error: invErr.message }, 403);
+    return jsonResponse(req,{ success: false, error: invErr.message }, 403);
   }
   if (!invoice) {
-    return jsonResponse({ success: false, error: "Invoice not found or access denied" }, 403);
+    return jsonResponse(req,{ success: false, error: "Invoice not found or access denied" }, 403);
   }
 
   const status = str(invoice.status).toLowerCase();
   if (status === "cancelled") {
-    return jsonResponse({ success: false, error: "Cannot generate PDF for cancelled invoice" }, 400);
+    return jsonResponse(req,{ success: false, error: "Cannot generate PDF for cancelled invoice" }, 400);
   }
 
   const tenantId = str(invoice.tenant_id);
   const path = storagePath(tenantId, invoiceId);
 
   if (!force && str(invoice.pdf_storage_path)) {
-    return jsonResponse({
+    return jsonResponse(req,{
       success: true,
       invoiceId,
       pdf_storage_path: str(invoice.pdf_storage_path),
@@ -268,7 +288,7 @@ Deno.serve(async (req) => {
     .order("line_number", { ascending: true });
 
   if (lineErr) {
-    return jsonResponse({ success: false, error: lineErr.message }, 500);
+    return jsonResponse(req,{ success: false, error: lineErr.message }, 500);
   }
 
   const labId = str(invoice.lab_id);
@@ -317,7 +337,7 @@ Deno.serve(async (req) => {
   });
 
   if (uploadErr) {
-    return jsonResponse({ success: false, error: uploadErr.message }, 500);
+    return jsonResponse(req,{ success: false, error: uploadErr.message }, 500);
   }
 
   const nowIso = new Date().toISOString();
@@ -338,10 +358,10 @@ Deno.serve(async (req) => {
     .eq("id", invoiceId);
 
   if (updateErr) {
-    return jsonResponse({ success: false, error: updateErr.message }, 500);
+    return jsonResponse(req,{ success: false, error: updateErr.message }, 500);
   }
 
-  return jsonResponse({
+  return jsonResponse(req,{
     success: true,
     invoiceId,
     pdf_storage_path: path,

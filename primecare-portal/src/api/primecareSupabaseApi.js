@@ -1,6 +1,7 @@
 import { getAgentActiveLabOwnershipRowsRead } from "@/api/labOwnershipApi.js";
 import { supabase } from "./supabaseClient.js";
 import { autoAllocatePaymentToOrderInvoice } from "@/api/invoiceSupabaseApi.js";
+import { fetchOrderDetailLinesForOrder } from "@/api/orderLineMetricsSupport.js";
 import {
   filterCollectionsForUser,
   filterLabsForUser,
@@ -5746,7 +5747,11 @@ export async function createOrderWrite(payload = {}) {
               ar_posted: Boolean(bump.success && !bump.skipped),
               updated_at: new Date().toISOString(),
             };
-            await supabase.from("orders").update(flagPatch).eq("order_id", order_id).select();
+            await supabase
+              .from("orders")
+              .update(flagPatch)
+              .eq("order_id", order_id)
+              .select(HQ_ORDER_LIST_COLUMNS);
             await createInvoiceForFulfilledOrderWrite({
               tenantId: tenant_id,
               orderId: order_id,
@@ -5885,7 +5890,11 @@ export async function createOrderWrite(payload = {}) {
         ar_posted: Boolean(bump.success && !bump.skipped),
         updated_at: new Date().toISOString(),
       };
-      const uf = await supabase.from("orders").update(flagPatch).eq("order_id", order_id).select();
+      const uf = await supabase
+        .from("orders")
+        .update(flagPatch)
+        .eq("order_id", order_id)
+        .select(HQ_ORDER_LIST_COLUMNS);
       if (uf.error) {
         hqDebugWarn("[createOrderWrite] Fulfillment flags update:", uf.error.message);
       }
@@ -6422,7 +6431,11 @@ export async function getOrderDetailsRead(orderId) {
     if (!oid) return empty;
 
     let orderRow = null;
-    const byBusinessId = await supabase.from("orders").select("*").eq("order_id", oid).limit(1);
+    const byBusinessId = await supabase
+      .from("orders")
+      .select(HQ_ORDER_LIST_COLUMNS)
+      .eq("order_id", oid)
+      .limit(1);
     if (!byBusinessId.error && Array.isArray(byBusinessId.data) && byBusinessId.data[0]) {
       orderRow = byBusinessId.data[0];
     } else if (byBusinessId.error) {
@@ -6430,7 +6443,7 @@ export async function getOrderDetailsRead(orderId) {
     }
 
     if (!orderRow) {
-      const byPk = await supabase.from("orders").select("*").eq("id", oid).limit(1);
+      const byPk = await supabase.from("orders").select(HQ_ORDER_LIST_COLUMNS).eq("id", oid).limit(1);
       if (!byPk.error && Array.isArray(byPk.data) && byPk.data[0]) orderRow = byPk.data[0];
       else if (byPk.error) {
         hqDebugWarn("[getOrderDetailsRead] orders by id:", byPk.error.message);
@@ -6445,31 +6458,11 @@ export async function getOrderDetailsRead(orderId) {
     const labId = str(orderRow.lab_id ?? orderRow.labId);
     const order = mapOrderRow(orderRow, labMap.get(labId) || "");
 
-    const fk = orderRow.id ?? orderRow.order_id;
-    let lineRows = [];
-
-    const q1 = await supabase.from("order_lines").select("*").eq("order_id", str(fk));
-    if (!q1.error && Array.isArray(q1.data)) {
-      lineRows = q1.data;
-    } else if (q1.error) {
-      hqDebugWarn("[getOrderDetailsRead] order_lines:", q1.error.message);
+    const lineFetch = await fetchOrderDetailLinesForOrder(supabase, orderRow);
+    if (lineFetch.error) {
+      hqDebugWarn("[getOrderDetailsRead] order lines:", lineFetch.error.message);
     }
-
-    if (!lineRows.length && str(orderRow.order_id)) {
-      const q2 = await supabase.from("order_lines").select("*").eq("order_id", str(orderRow.order_id));
-      if (!q2.error && Array.isArray(q2.data)) lineRows = q2.data;
-    }
-
-    if (!lineRows.length && str(orderRow.order_id)) {
-      const qi = await supabase
-        .from("order_items")
-        .select("*")
-        .eq("order_id", str(orderRow.order_id));
-      if (!qi.error && Array.isArray(qi.data)) lineRows = qi.data;
-      else if (qi.error) {
-        hqDebugWarn("[getOrderDetailsRead] order_items:", qi.error.message);
-      }
-    }
+    const lineRows = lineFetch.lines || [];
 
     const lines = (lineRows || []).map(mapOrderLineRow).filter((l) => l.productId || l.productName);
 
@@ -6662,7 +6655,11 @@ async function resolveOrderRowForUpdate(orderId) {
   const oid = str(orderId);
   if (!oid) return { orderRow: null, updateKey: null, updateValue: null };
 
-  const byBusinessId = await supabase.from("orders").select("*").eq("order_id", oid).limit(1);
+  const byBusinessId = await supabase
+    .from("orders")
+    .select(HQ_ORDER_LIST_COLUMNS)
+    .eq("order_id", oid)
+    .limit(1);
   if (!byBusinessId.error && Array.isArray(byBusinessId.data) && byBusinessId.data[0]) {
     return {
       orderRow: byBusinessId.data[0],
@@ -6671,7 +6668,7 @@ async function resolveOrderRowForUpdate(orderId) {
     };
   }
 
-  const byPk = await supabase.from("orders").select("*").eq("id", oid).limit(1);
+  const byPk = await supabase.from("orders").select(HQ_ORDER_LIST_COLUMNS).eq("id", oid).limit(1);
   if (!byPk.error && Array.isArray(byPk.data) && byPk.data[0]) {
     return {
       orderRow: byPk.data[0],
@@ -6684,7 +6681,8 @@ async function resolveOrderRowForUpdate(orderId) {
 }
 
 async function patchOrderRow(updateKey, updateValue, patch) {
-  const attempt = (p) => supabase.from("orders").update(p).eq(updateKey, updateValue).select();
+  const attempt = (p) =>
+    supabase.from("orders").update(p).eq(updateKey, updateValue).select(HQ_ORDER_LIST_COLUMNS);
 
   let res = await attempt(patch);
   if (!res.error) return res;
