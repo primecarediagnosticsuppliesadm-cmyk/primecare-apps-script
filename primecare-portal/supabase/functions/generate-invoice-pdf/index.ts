@@ -1,6 +1,12 @@
 // PrimeCare Invoice Phase 3 — generate invoice PDF from immutable snapshot.
 // Deploy: supabase functions deploy generate-invoice-pdf
 // Secrets: SUPABASE_SERVICE_ROLE_KEY (auto), SUPABASE_ANON_KEY
+//
+// Auth model:
+//   1) userClient (anon + caller Authorization JWT) — validate session + RLS access gate only.
+//   2) adminClient (SUPABASE_SERVICE_ROLE_KEY) — invoice/line/lab reads, storage upload,
+//      invoices UPDATE. Requires service_role table GRANTs
+//      (production_invoice_pdf_service_role_grants.sql).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { PDFDocument, StandardFonts, rgb } from "https://esm.sh/pdf-lib@1.17.1";
@@ -243,7 +249,25 @@ Deno.serve(async (req) => {
     return jsonResponse(req,{ success: false, error: "Invalid session" }, 401);
   }
 
-  const { data: invoice, error: invErr } = await userClient
+  // RLS gate: caller must be allowed to see this invoice (lab/admin tenant isolation).
+  const { data: accessRow, error: accessErr } = await userClient
+    .from("invoices")
+    .select("id")
+    .eq("id", invoiceId)
+    .maybeSingle();
+
+  if (accessErr) {
+    return jsonResponse(req,{ success: false, error: accessErr.message }, 403);
+  }
+  if (!accessRow) {
+    return jsonResponse(req,{ success: false, error: "Invoice not found or access denied" }, 403);
+  }
+
+  const adminClient = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  const { data: invoice, error: invErr } = await adminClient
     .from("invoices")
     .select(
       "id,tenant_id,lab_id,order_id,invoice_number,invoice_date,subtotal,tax_amount,total_amount,status,pdf_storage_path,pdf_generated_at"
@@ -252,10 +276,10 @@ Deno.serve(async (req) => {
     .maybeSingle();
 
   if (invErr) {
-    return jsonResponse(req,{ success: false, error: invErr.message }, 403);
+    return jsonResponse(req,{ success: false, error: invErr.message }, 500);
   }
   if (!invoice) {
-    return jsonResponse(req,{ success: false, error: "Invoice not found or access denied" }, 403);
+    return jsonResponse(req,{ success: false, error: "Invoice not found" }, 404);
   }
 
   const status = str(invoice.status).toLowerCase();
@@ -275,10 +299,6 @@ Deno.serve(async (req) => {
     });
   }
 
-  const adminClient = createClient(supabaseUrl, serviceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
   const { data: lines, error: lineErr } = await adminClient
     .from("invoice_line_items")
     .select(
@@ -288,7 +308,7 @@ Deno.serve(async (req) => {
     .order("line_number", { ascending: true });
 
   if (lineErr) {
-    return jsonResponse(req,{ success: false, error: lineErr.message }, 500);
+    return jsonResponse(req, { success: false, error: lineErr.message }, 500);
   }
 
   const labId = str(invoice.lab_id);
