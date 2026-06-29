@@ -1285,6 +1285,55 @@ export async function createLabWrite(payload = {}) {
     payload.labId || `LAB-${slug || "lab"}-${Date.now().toString(36).slice(-4)}`
   );
 
+  const collectionsNotes = `contact_email:${email}`;
+
+  const rpcRes = await supabase.rpc("create_lab_with_ar_credit", {
+    p_tenant_id: tenantId,
+    p_lab_id: labId,
+    p_lab_name: labName,
+    p_owner_name: contactName,
+    p_phone: phone,
+    p_area: cityTerritory,
+    p_credit_terms: paymentTerms,
+    p_credit_limit: creditLimit,
+    p_collections_notes: collectionsNotes,
+    p_status: "ACTIVE",
+  });
+
+  if (!rpcRes.error && rpcRes.data?.success === true) {
+    const insertedLab = rpcRes.data.lab ?? null;
+    const persistedLabId = normalizeLabIdKey(
+      insertedLab?.lab_id ?? insertedLab?.labId ?? labId
+    );
+    const persistedTenantId = str(insertedLab?.tenant_id ?? insertedLab?.tenantId ?? tenantId);
+    return {
+      success: true,
+      data: {
+        labId: persistedLabId,
+        labName,
+        tenantId: persistedTenantId,
+        distributorId: null,
+        distributorName: hqMode ? "PrimeCare HQ" : null,
+        lab: insertedLab,
+      },
+    };
+  }
+
+  if (rpcRes.error && !isMissingSupabaseRpcError(rpcRes.error, "create_lab_with_ar_credit")) {
+    const rpcMsg = String(rpcRes.error.message || "");
+    if (/forbidden/i.test(rpcMsg)) {
+      return { success: false, error: "You do not have permission to create a lab for this tenant" };
+    }
+    if (/lab_already_exists/i.test(rpcMsg)) {
+      return { success: false, error: "A lab with this ID already exists" };
+    }
+    return { success: false, error: rpcMsg || "Failed to create lab" };
+  }
+
+  if (rpcRes.error) {
+    hqDebugWarn("[createLabWrite] create_lab_with_ar_credit unavailable; using legacy two-step insert");
+  }
+
   const labRow = {
     tenant_id: tenantId,
     lab_id: labId,
@@ -1306,20 +1355,29 @@ export async function createLabWrite(payload = {}) {
     return { success: false, error: labErr.message || "Failed to create lab" };
   }
 
+  const persistedTenantId = str(insertedLab?.tenant_id ?? insertedLab?.tenantId ?? tenantId);
+  const persistedLabId = normalizeLabIdKey(
+    insertedLab?.lab_id ?? insertedLab?.labId ?? labId
+  );
+
   const arRow = {
-    tenant_id: tenantId,
-    lab_id: labId,
+    tenant_id: persistedTenantId,
+    lab_id: persistedLabId,
     lab_name: labName,
     credit_limit: creditLimit,
     outstanding: 0,
     total_delivered: 0,
     total_paid: 0,
-    collections_notes: `contact_email:${email}`,
+    collections_notes: collectionsNotes,
   };
 
   const { error: arErr } = await supabase.from("ar_credit_control").insert([arRow]);
   if (arErr) {
-    await supabase.from("labs").delete().eq("tenant_id", tenantId).eq("lab_id", labId);
+    await supabase
+      .from("labs")
+      .delete()
+      .eq("tenant_id", persistedTenantId)
+      .eq("lab_id", persistedLabId);
     return {
       success: false,
       error: arErr.message || "Lab created but credit record failed",
@@ -1329,9 +1387,9 @@ export async function createLabWrite(payload = {}) {
   return {
     success: true,
     data: {
-      labId,
+      labId: persistedLabId,
       labName,
-      tenantId,
+      tenantId: persistedTenantId,
       distributorId: null,
       distributorName: hqMode ? "PrimeCare HQ" : null,
       lab: insertedLab,
