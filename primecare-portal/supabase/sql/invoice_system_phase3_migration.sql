@@ -21,3 +21,12 @@ SET
 
 COMMENT ON COLUMN public.invoices.pdf_storage_path IS
   'Relative path in invoice-pdfs bucket: {tenant_id}/{invoice_id}.pdf';
+
+-- Edge function generate-invoice-pdf: user JWT RLS gate; service_role for PDF data reads.
+GRANT SELECT ON TABLE public.invoices TO service_role;
+GRANT UPDATE ON TABLE public.invoices TO service_role;
+GRANT SELECT ON TABLE public.invoice_line_items TO service_role;
+GRANT SELECT ON TABLE public.labs TO service_role;
+GRANT SELECT ON TABLE public.orders TO service_role;
+GRANT SELECT ON TABLE public.order_items TO service_role;
+GRANT SELECT ON TABLE public.order_lines TO service_role;
