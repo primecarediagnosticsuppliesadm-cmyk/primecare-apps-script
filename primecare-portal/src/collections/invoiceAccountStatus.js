@@ -68,10 +68,68 @@ export function isCustomerFacingOpenInvoice(inv = {}) {
   });
 }
 
+/**
+ * Canonical per-invoice financial summary (allocation-based).
+ * allocated = SUM(payment_allocations); open = total - allocated.
+ */
+export function summarizeInvoiceFinancials(row = {}, allocationHint = {}) {
+  const id = str(row.id);
+  const totalAmount = num(row.total_amount ?? row.totalAmount ?? row.total);
+  const hintAllocated =
+    allocationHint[id] != null
+      ? num(allocationHint[id])
+      : allocationHint.allocatedAmount != null
+        ? num(allocationHint.allocatedAmount)
+        : null;
+  const allocatedAmount =
+    hintAllocated != null ? hintAllocated : num(row.allocated_amount ?? row.allocatedAmount);
+  const openBalance = Math.max(0, totalAmount - allocatedAmount);
+  const status = str(row.status ?? row.rawStatus);
+  const dueDate = str(row.due_date ?? row.dueDate).slice(0, 10);
+  const sentAt = str(row.sent_at ?? row.sentAt);
+  const hasPdf = Boolean(str(row.pdf_storage_path ?? row.pdfStoragePath));
+  const displayStatus = deriveOpenInvoiceWidgetStatus({
+    status,
+    openBalance,
+    paidAmount: allocatedAmount,
+    allocatedAmount,
+    dueDate,
+    sentAt,
+    hasPdf,
+    pdfGeneratedAt: str(row.pdf_generated_at ?? row.pdfGeneratedAt),
+  });
+  return { totalAmount, allocatedAmount, openBalance, displayStatus, status };
+}
+
+/** Customer-facing invoice ready for payment allocation (strict lifecycle). */
+export function isInvoiceCustomerFacingForPayment(invoice = {}) {
+  const raw = str(invoice.status ?? invoice.rawStatus).toLowerCase();
+  if (raw === "paid") return true;
+  if (!["sent", "partially_paid"].includes(raw)) return false;
+  const hasPdf = Boolean(invoice.hasPdf ?? invoice.pdf_storage_path ?? invoice.pdfStoragePath);
+  const sentAt = str(
+    invoice.sentAt ?? invoice.sent_at ?? invoice.pdfGeneratedAt ?? invoice.pdf_generated_at
+  );
+  return hasPdf && Boolean(sentAt);
+}
+
+/** Whether payment may allocate to this invoice (sent/partially_paid + PDF + sent_at). */
+export function isInvoiceAllocatableForOrderPayment(invoice = {}) {
+  const raw = str(invoice.status ?? invoice.rawStatus).toLowerCase();
+  if (["cancelled", "failed", "paid"].includes(raw)) return false;
+  if (!["sent", "partially_paid"].includes(raw)) return false;
+  return isInvoiceCustomerFacingForPayment(invoice);
+}
+
 /** Open Invoices widget status — never show Draft for customer-facing open balances. */
 export function deriveOpenInvoiceWidgetStatus(params = {}) {
   const status = deriveInvoiceAccountStatus(params);
   const open = num(params.openBalance);
+  const allocated = num(params.allocatedAmount ?? params.paidAmount);
+  if (status === "Draft" && (open > 0.009 || allocated > 0.009)) {
+    if (allocated > 0.009 && open > 0.009) return "Partially Paid";
+    if (allocated <= 0.009 && open > 0.009) return "Outstanding";
+  }
   if (status === "Draft" && open > 0.009) return "Outstanding";
   if (status === "Sent" && open > 0.009) {
     const paid = num(params.paidAmount);

@@ -26,6 +26,8 @@ assert(/autoAllocatePaymentToOrderInvoice/.test(primeApi), "payment auto-allocat
 assert(/allocate_payment_to_invoice/.test(sql), "allocate_payment_to_invoice RPC in SQL");
 assert(/allocatePaymentToInvoiceWrite/.test(invoiceApi), "allocatePaymentToInvoiceWrite");
 assert(/autoAllocatePaymentToOrderInvoice/.test(invoiceApi), "autoAllocatePaymentToOrderInvoice");
+assert(/finalizeInvoiceForOrderPayment/.test(invoiceApi), "finalize invoice before payment");
+assert(/resolveOrderInvoiceForPayment/.test(primeApi), "createPaymentWrite pre-finalize gate");
 assert(/createPaymentWrite\(/.test(collections), "Collections uses createPaymentWrite");
 assert(/resolvePaymentOrderIdForLab/.test(collections), "order-linked payment resolution");
 assert(/paymentOrderId/.test(collections), "payment order context wired");

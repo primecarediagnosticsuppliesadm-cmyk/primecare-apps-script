@@ -15,6 +15,7 @@ import {
   updateCollectionNotesWrite,
   deriveCollectionPaymentStatus,
   invalidateOrdersReadCache,
+  invalidateCollectionsReadCache,
 } from "@/api/primecareSupabaseApi";
 import { selectOpenOrdersForLab } from "@/collections/collectionsOpenOrders.js";
 import { loadLabPaymentHistoryForDisplay } from "@/collections/collectionsPaymentHistory.js";
@@ -75,6 +76,7 @@ import { ROLES } from "@/config/roles";
 import { getAgentActiveLabOwnershipRowsRead } from "@/api/labOwnershipApi.js";
 import { filterCollectionsForUser } from "@/utils/accessFilters.js";
 import { notifyAgentWorkspaceRefresh } from "@/pages/agentVisitContext.js";
+import { notifyFinancialSyncRefresh } from "@/operations/financialSyncEvents.js";
 import { startVisitFromWorkspaceItem } from "@/pages/agentVisitContext.js";
 import {
   countMediumHighRisk,
@@ -2490,9 +2492,16 @@ export default function CollectionsPage({
 
             const paidLabKey = labIdKey(selectedLabId);
             const paidDate = localDateYmd(new Date());
+            const paidOrderId = paymentOrderId || basePayload.orderId || "";
             setLastPaymentByLabId((prev) => ({ ...prev, [paidLabKey]: paidDate }));
             setPaymentOrderId("");
             invalidateOrdersReadCache();
+            invalidateCollectionsReadCache();
+            notifyFinancialSyncRefresh({
+              source: "collection_payment",
+              labId: selectedLabId,
+              orderId: paidOrderId,
+            });
 
             await loadCollections();
             if ((isAgentView || isHqCreditRisk) && paymentDrawerLabId) {

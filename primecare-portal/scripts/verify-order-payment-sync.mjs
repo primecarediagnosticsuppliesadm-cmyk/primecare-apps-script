@@ -16,6 +16,7 @@ function assert(cond, msg) {
 const orders = readFileSync(resolve(root, "src/pages/OrdersPage.jsx"), "utf8");
 const collections = readFileSync(resolve(root, "src/pages/CollectionsPage.jsx"), "utf8");
 const invoiceApi = readFileSync(resolve(root, "src/api/invoiceSupabaseApi.js"), "utf8");
+const primeApi = readFileSync(resolve(root, "src/api/primecareSupabaseApi.js"), "utf8");
 const nav = readFileSync(resolve(root, "src/operations/hqWorkflowNav.js"), "utf8");
 const creditRisk = readFileSync(
   resolve(root, "src/components/hq/HqCreditRiskCommandCenter.jsx"),
@@ -28,10 +29,13 @@ assert(/Record Payment/.test(orders), "Orders Record Payment action");
 assert(/focusSection:\s*"payment"/.test(orders), "Orders navigates with payment focus");
 assert(/orderId:/.test(nav), "hqWorkflowNav passes orderId context");
 assert(/paymentAmount/.test(nav), "hqWorkflowNav passes paymentAmount context");
-assert(/fetchAllocatedTotalsByInvoiceId/.test(invoiceApi), "batch invoice read uses allocations");
-assert(/getInvoicesByOrderIdsRead[\s\S]*fetchAllocatedTotalsByInvoiceId/.test(invoiceApi),
-  "order invoice batch includes allocation totals");
+assert(/finalizeInvoiceForOrderPayment/.test(invoiceApi), "finalize before payment");
+assert(/financial_drift_detected|logFinancialDriftDetected/.test(primeApi), "drift detection");
 assert(/invalidateOrdersReadCache/.test(collections), "payment invalidates orders cache");
+assert(/invalidateCollectionsReadCache/.test(collections), "payment invalidates collections cache");
+assert(/notifyFinancialSyncRefresh/.test(collections), "payment notifies financial sync");
+assert(/onFinancialSyncRefresh/.test(orders), "Orders listens for financial sync");
+assert(/paidAmount/.test(orders), "Orders shows paid amount in payment panel");
 assert(/isHqCreditRisk[\s\S]*paymentDrawerLabId/.test(collections), "HQ credit risk payment drawer");
 assert(/onRecordPayment/.test(creditRisk), "Credit & Risk Record Payment action");
 

@@ -6,6 +6,7 @@ import { usePortalToast } from "@/components/ux";
 import InvoiceDetailsDrawer from "@/components/invoice/InvoiceDetailsDrawer.jsx";
 import InvoiceStatusBadge from "@/components/invoice/InvoiceStatusBadge.jsx";
 import { getInvoicesForLabRead } from "@/api/invoiceSupabaseApi.js";
+import { onFinancialSyncRefresh } from "@/operations/financialSyncEvents.js";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
 import { HQ_INVOICE_LIST_DEFAULT_LIMIT } from "@/api/hqReadBounds.js";
 import { LAB_INVOICE_CENTER_GRID } from "@/collections/invoiceAccountStatus.js";
@@ -235,6 +236,13 @@ export default function LabInvoiceCenterPage({ currentUser }) {
   useEffect(() => {
     void loadInvoices();
   }, [loadInvoices]);
+
+  useEffect(() => {
+    return onFinancialSyncRefresh((detail) => {
+      if (detail?.labId && detail.labId !== labId) return;
+      void loadInvoices();
+    });
+  }, [labId, loadInvoices]);
 
   useEffect(() => {
     setPage(1);

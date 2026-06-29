@@ -73,6 +73,7 @@ import HqOrdersOperationsQueue from "@/components/hq/HqOrdersOperationsQueue.jsx
 import InvoiceDetailsDrawer from "@/components/invoice/InvoiceDetailsDrawer.jsx";
 import InvoiceStatusBadge from "@/components/invoice/InvoiceStatusBadge.jsx";
 import { getInvoicesByOrderIdsRead } from "@/api/invoiceSupabaseApi.js";
+import { onFinancialSyncRefresh } from "@/operations/financialSyncEvents.js";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
 import {
   ORDER_QUEUE_KEYS,
@@ -120,17 +121,22 @@ function orderPaymentLabel(order, invoice = null) {
   if (invoice?.displayStatus) {
     const key = String(invoice.displayStatus).toLowerCase();
     if (key === "paid") return "Paid";
-    if (key === "partially paid") return "Partial";
-    if (key === "overdue" || key === "outstanding" || key === "sent" || key === "open") {
-      return "Pending";
-    }
+    if (key === "partially paid") return "Partially Paid";
+    if (key === "overdue") return "Overdue";
+    if (key === "outstanding" || key === "sent" || key === "open") return "Outstanding";
   }
   if (invoice && Number(invoice.openBalance ?? 0) <= 0.009) return "Paid";
   return formatOrderPaymentLabel({
     orderStatus: order.orderStatus,
     paymentStatus: order.paymentStatus,
-    invoiceStatus: invoice?.status ?? order.invoiceStatus,
+    invoiceStatus: invoice?.displayStatus ?? invoice?.status ?? order.invoiceStatus,
   });
+}
+
+function resolveOrderPaidAmount(order, invoice) {
+  if (invoice?.allocatedAmount != null) return Number(invoice.allocatedAmount);
+  const total = Number(invoice?.totalAmount ?? order?.orderTotal ?? 0);
+  return Math.max(0, total - resolveOrderOutstanding(order, invoice));
 }
 
 function resolveOrderOutstanding(order, invoice) {
@@ -587,6 +593,15 @@ export default function OrdersPage({
     return new Set(bucket?.orderIds || []);
   }, [activeQueueKey, operationsQueue]);
 
+  async function refreshInvoicesForOrders(orderIds = []) {
+    const ids = [...new Set((orderIds || []).map((id) => str(id)).filter(Boolean))];
+    if (!ids.length) return;
+    const res = await getInvoicesByOrderIdsRead(ids, { tenantId: homeTenantId });
+    if (res.success) {
+      setInvoiceByOrderId((prev) => ({ ...prev, ...(res.byOrderId || {}) }));
+    }
+  }
+
   useEffect(() => {
     const orderIds = filteredOrders.map((order) => str(order.orderId)).filter(Boolean);
     if (!orderIds.length) {
@@ -602,6 +617,15 @@ export default function OrdersPage({
     return () => {
       cancelled = true;
     };
+  }, [filteredOrders, homeTenantId]);
+
+  useEffect(() => {
+    return onFinancialSyncRefresh((detail) => {
+      const orderIds = detail?.orderId
+        ? [str(detail.orderId)]
+        : filteredOrders.map((order) => str(order.orderId)).filter(Boolean);
+      if (orderIds.length) void refreshInvoicesForOrders(orderIds);
+    });
   }, [filteredOrders, homeTenantId]);
 
   function handleQueueSelect(queueKey) {
@@ -647,15 +671,6 @@ export default function OrdersPage({
     if (!selectedOrderSummary?.orderId) return null;
     return invoiceByOrderId[selectedOrderSummary.orderId] || null;
   }, [selectedOrderSummary, invoiceByOrderId]);
-
-  async function refreshInvoicesForOrders(orderIds = []) {
-    const ids = [...new Set((orderIds || []).map((id) => str(id)).filter(Boolean))];
-    if (!ids.length) return;
-    const res = await getInvoicesByOrderIdsRead(ids, { tenantId: homeTenantId });
-    if (res.success) {
-      setInvoiceByOrderId((prev) => ({ ...prev, ...(res.byOrderId || {}) }));
-    }
-  }
 
   async function handleInvoiceDownload(invoice, orderId) {
     const key = invoice?.id || orderId || "invoice";
@@ -730,12 +745,19 @@ export default function OrdersPage({
     const fulfilled = orderStatus === "Fulfilled";
     const lines = details?.lines || [];
     const unitCount = lines.reduce((sum, line) => sum + Number(line.quantity || 0), 0);
+    const outstandingAmount = resolveOrderOutstanding(selectedOrderSummary, selectedOrderInvoice);
+    const paidAmount = resolveOrderPaidAmount(selectedOrderSummary, selectedOrderInvoice);
+    const totalAmount = Number(
+      selectedOrderInvoice?.totalAmount ?? selectedOrderSummary.orderTotal ?? 0
+    );
     return {
       orderStatus,
       cancelled,
       fulfilled,
       paymentLabel: orderPaymentLabel(selectedOrderSummary, selectedOrderInvoice),
-      outstandingAmount: resolveOrderOutstanding(selectedOrderSummary, selectedOrderInvoice),
+      paidAmount,
+      outstandingAmount,
+      totalAmount,
       canRecordPayment: canRecordOrderPayment(selectedOrderSummary, selectedOrderInvoice, {
         cancelled,
         fulfilled,
@@ -1368,10 +1390,27 @@ export default function OrdersPage({
                         <StatusBadge variant={paymentStatusToVariant(selectedOrderUx.paymentLabel)}>
                           {selectedOrderUx.paymentLabel}
                         </StatusBadge>
-                        <span className="text-sm font-bold tabular-nums text-slate-900">
-                          {formatCurrency(selectedOrderUx.outstandingAmount)}
-                        </span>
                       </div>
+                      <dl className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                        <div>
+                          <dt className="text-slate-500">Paid</dt>
+                          <dd className="font-semibold tabular-nums text-emerald-700">
+                            {formatCurrency(selectedOrderUx.paidAmount)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-slate-500">Outstanding</dt>
+                          <dd className="font-semibold tabular-nums text-amber-700">
+                            {formatCurrency(selectedOrderUx.outstandingAmount)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-slate-500">Total</dt>
+                          <dd className="font-semibold tabular-nums text-slate-900">
+                            {formatCurrency(selectedOrderUx.totalAmount)}
+                          </dd>
+                        </div>
+                      </dl>
                       {selectedOrderUx.canRecordPayment && canNavigateToCollections(currentUser?.role) ? (
                         <div className="mt-2.5 flex flex-wrap gap-2">
                           <Button

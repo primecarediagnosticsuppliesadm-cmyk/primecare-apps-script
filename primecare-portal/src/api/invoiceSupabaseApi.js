@@ -8,7 +8,15 @@ import {
   HQ_INVOICE_ORDER_LOOKUP_CHUNK,
   clampLimit,
 } from "@/api/hqReadBounds.js";
-import { deriveInvoiceAccountStatus } from "@/collections/invoiceAccountStatus.js";
+import {
+  isInternalDraftInvoice,
+  isInvoiceAllocatableForOrderPayment,
+  isInvoiceCustomerFacingForPayment,
+  summarizeInvoiceFinancials,
+} from "@/collections/invoiceAccountStatus.js";
+
+export const INVOICE_PAYMENT_FINALIZE_ERROR =
+  "Invoice must be finalized before payment can be recorded. PDF generation failed.";
 
 export const INVOICE_PDF_BUCKET = "invoice-pdfs";
 export const INVOICE_SIGNED_URL_TTL_SEC = 300;
@@ -36,28 +44,9 @@ export function mapInvoiceRow(row, allocationHint = {}) {
   if (!row) return null;
   const dueDate = str(row.due_date ?? row.dueDate).slice(0, 10);
   const invoiceDate = str(row.invoice_date ?? row.invoiceDate).slice(0, 10);
-  const status = str(row.status);
   const id = str(row.id);
-  const totalAmount = num(row.total_amount ?? row.totalAmount);
-  const allocatedAmount = num(
-    row.allocated_amount ??
-      row.allocatedAmount ??
-      allocationHint[id] ??
-      allocationHint.allocatedAmount ??
-      0
-  );
-  const openBalance = num(
-    row.open_balance ?? row.openBalance ?? Math.max(0, totalAmount - allocatedAmount)
-  );
-  const sentAt = str(row.sent_at ?? row.sentAt);
-  const displayStatus = deriveInvoiceAccountStatus({
-    status,
-    openBalance,
-    paidAmount: allocatedAmount,
-    allocatedAmount,
-    dueDate,
-    sentAt,
-  });
+  const { totalAmount, allocatedAmount, openBalance, displayStatus, status } =
+    summarizeInvoiceFinancials(row, allocationHint);
   return {
     id,
     tenantId: str(row.tenant_id ?? row.tenantId),
@@ -430,7 +419,7 @@ export async function autoAllocatePaymentToOrderInvoice({
   }
 
   const invoice = invoiceRes.data;
-  if (!["sent", "partially_paid"].includes(str(invoice.status))) {
+  if (!isInvoiceAllocatableForOrderPayment(invoice)) {
     return { success: true, skipped: true, reason: "invoice_not_allocatable", data: null };
   }
 
@@ -455,6 +444,98 @@ export async function autoAllocatePaymentToOrderInvoice({
   }
 
   return { success: true, skipped: false, data: allocRes.data, error: null };
+}
+
+/**
+ * Promote internal draft invoice to customer-facing sent (PDF edge function).
+ * Required before order-linked payment allocation (strict lifecycle).
+ */
+export async function finalizeInvoiceForOrderPayment({
+  tenantId,
+  orderId,
+  invoice: invoiceIn,
+} = {}) {
+  const tid = str(tenantId);
+  const oid = str(orderId);
+  if (!tid || !oid) {
+    return { success: false, error: "tenant_id and order_id are required", invoice: null };
+  }
+
+  let invoice = invoiceIn;
+  if (!invoice?.id) {
+    const invoiceRes = await getInvoiceByOrderRead(oid, { tenantId: tid });
+    if (!invoiceRes.success || !invoiceRes.data?.id) {
+      return { success: true, skipped: true, reason: "no_invoice", invoice: null, error: null };
+    }
+    invoice = invoiceRes.data;
+  }
+
+  if (isInvoiceCustomerFacingForPayment(invoice)) {
+    return { success: true, skipped: true, reason: "already_finalized", invoice, error: null };
+  }
+
+  if (
+    !isInternalDraftInvoice({
+      status: invoice.status,
+      sentAt: invoice.sentAt,
+      hasPdf: invoice.hasPdf,
+      pdfGeneratedAt: invoice.pdfGeneratedAt,
+    })
+  ) {
+    return {
+      success: false,
+      error:
+        "Invoice must be finalized before payment can be recorded. Invoice is not in a payable state.",
+      invoice,
+    };
+  }
+
+  const gen = await generateInvoicePdf(invoice.id, { force: false });
+  if (!gen.success) {
+    return {
+      success: false,
+      error: INVOICE_PAYMENT_FINALIZE_ERROR,
+      detail: gen.error,
+      invoice,
+    };
+  }
+
+  const refreshed = await getInvoiceByOrderRead(oid, { tenantId: tid });
+  if (!refreshed.success || !refreshed.data) {
+    return { success: false, error: INVOICE_PAYMENT_FINALIZE_ERROR, invoice };
+  }
+  if (!isInvoiceCustomerFacingForPayment(refreshed.data)) {
+    return {
+      success: false,
+      error: INVOICE_PAYMENT_FINALIZE_ERROR,
+      invoice: refreshed.data,
+    };
+  }
+
+  return { success: true, skipped: false, invoice: refreshed.data, error: null };
+}
+
+/**
+ * Repair drift: finalize draft invoice then allocate an existing order-linked payment.
+ */
+export async function repairOrderInvoicePaymentDrift({
+  tenantId,
+  paymentId,
+  orderId,
+  amountReceived,
+  actorId,
+} = {}) {
+  const fin = await finalizeInvoiceForOrderPayment({ tenantId, orderId });
+  if (!fin.success) {
+    return { success: false, error: fin.error, data: null };
+  }
+  return autoAllocatePaymentToOrderInvoice({
+    tenantId,
+    paymentId,
+    orderId,
+    amountReceived,
+    actorId,
+  });
 }
 
 /**
@@ -486,7 +567,8 @@ export async function getInvoiceByOrderRead(orderId, options = {}) {
   if (!data) {
     return { success: false, error: "Invoice not found for order", data: null };
   }
-  return { success: true, data: mapInvoiceRow(data), error: null };
+  const allocationTotals = await fetchAllocatedTotalsByInvoiceId([data.id]);
+  return { success: true, data: mapInvoiceRow(data, allocationTotals), error: null };
 }
 
 /**
@@ -524,10 +606,12 @@ export async function getInvoiceDetailRead(invoiceId) {
     return { success: false, error: lErr.message, data: null };
   }
 
+  const allocationTotals = await fetchAllocatedTotalsByInvoiceId([header.id]);
+
   return {
     success: true,
     data: {
-      invoice: mapInvoiceRow(header),
+      invoice: mapInvoiceRow(header, allocationTotals),
       lines: (lines || []).map(mapInvoiceLineRow),
     },
     error: null,
