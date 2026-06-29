@@ -53,21 +53,36 @@ async function loadModules(server) {
   );
   const opsEngine = await server.ssrLoadModule("/src/operations/operationsCenterAdminEngine.js");
   const adminData = await server.ssrLoadModule("/src/operations/operationsCenterAdminData.js");
-  return { classification, userEngine, integrityEngine, opsEngine, adminData };
+  const certificationUi = await server.ssrLoadModule(
+    "/src/operations/operationsCenterCertificationUi.js"
+  );
+  return { classification, userEngine, integrityEngine, opsEngine, adminData, certificationUi };
 }
 
 function staticUiChecks() {
   const panel = readFileSync(resolve(root, "src/components/operations/UserProvisioningPanel.jsx"), "utf8");
   assert(/DIRECTORY_AUDIENCE_FILTERS/.test(panel), "audience filter wired");
+  assert(/DIRECTORY_DEFAULT_AUDIENCE/.test(panel), "default all users audience");
+  assert(/EnvironmentSummaryBanner/.test(panel), "environment summary banner");
+  assert(/OperationsHealthPanel/.test(panel), "operations health panel");
+  assert(/OperationalAttentionStrip/.test(panel), "operational attention strip");
+  assert(/buildOperationsAttentionItems/.test(panel), "attention strip items");
+  assert(/buildOperationsReadinessFooterState/.test(panel), "readiness footer state");
+  assert(!/OperationsCertificationFooter/.test(panel), "certification footer removed");
+  assert(!/VITE_OPS_BUILD_SHA/.test(readFileSync(resolve(root, "vite.config.js"), "utf8")), "no build sha in vite config");
+  assert(/Agent Workload Health/.test(readFileSync(resolve(root, "src/components/operations/LabOwnershipPanel.jsx"), "utf8")), "agent workload health table");
+  assert(/summarizeAgentWorkloadRow/.test(readFileSync(resolve(root, "src/components/operations/LabOwnershipPanel.jsx"), "utf8")), "agent workload row summary");
+  assert(/IntegrityWarningsBanner/.test(panel), "actionable integrity warnings");
+  assert(/Deployment Readiness/.test(readFileSync(resolve(root, "src/components/operations/PilotHardeningChecksPanel.jsx"), "utf8")), "deployment readiness panel");
   assert(/resolveDirectoryRowActions/.test(panel), "role-aware row actions");
-  assert(/Real active users/.test(panel), "real active users KPI");
+  assert(/Production Users/.test(panel), "production users KPI");
   assert(/Not assigned/.test(panel), "not assigned badge");
   assert(/Never/.test(panel) || /formatLastLogin/.test(panel), "last login never state");
   assert(/Probe/.test(panel), "probe badge");
   pass("UDI-10", "User Directory UI wiring");
 }
 
-async function staticEngineChecks({ classification, userEngine, integrityEngine }) {
+async function staticEngineChecks({ classification, userEngine, integrityEngine, certificationUi }) {
   const { USER_DIRECTORY_CLASS, classifyDirectoryUser } = classification;
   const {
     computeProvisioningKpis,
@@ -125,7 +140,7 @@ async function staticEngineChecks({ classification, userEngine, integrityEngine 
   const enriched = enrichDirectoryUsers(users, { labAssignments: [], distributorAssignments: [] });
   const kpis = computeProvisioningKpis(enriched, []);
   assert(kpis.totalUsers === 3, "total users all");
-  assert(kpis.realUsers === 1, "real users separated");
+  assert(kpis.productionUsers === 1 || kpis.realUsers === 1, "production users separated");
   assert(kpis.probeDebugUsers === 1, "probe counted");
   assert(kpis.realActiveUsers === 1, "real active excludes probe/qa");
 
@@ -139,11 +154,26 @@ async function staticEngineChecks({ classification, userEngine, integrityEngine 
   });
   assert(Array.isArray(integrity.warnings), "integrity warnings array");
 
+  const { buildOperationsAttentionItems } = certificationUi;
+  const attention = buildOperationsAttentionItems({
+    labAssignments: [
+      { labId: "L1", creditStatus: "HOLD", outstanding: 100, daysOverdue: 0 },
+      { labId: "L2", outstanding: 50, daysOverdue: 3 },
+    ],
+    kpis: { unassignedLabs: 1 },
+    directoryUsers: enriched,
+    directoryIntegrity: integrity,
+  });
+  assert(attention.some((a) => a.id === "credit_hold"), "attention credit hold");
+  assert(attention.some((a) => a.id === "unassigned_labs"), "attention unassigned");
+  assert(!attention.some((a) => a.count === 0), "zero-count attention hidden");
+
   pass("UDI-11", "Classification, KPI, filter, and integrity engine");
 }
 
 async function liveChecks(bundle, modules) {
-  const { userEngine, opsEngine } = modules;
+  const { userEngine, opsEngine, certificationUi } = modules;
+  const { buildOperationsAttentionItems } = certificationUi;
   const { computeProvisioningKpis } = userEngine;
   const { labsForAgent } = opsEngine;
   const { classifyDirectoryUser, USER_DIRECTORY_CLASS } = modules.classification;
@@ -161,8 +191,13 @@ async function liveChecks(bundle, modules) {
   const recomputed = computeProvisioningKpis(directoryUsers, labAssignments);
   for (const field of [
     "totalUsers",
+    "productionUsers",
+    "realUsers",
     "realActiveUsers",
     "fieldAgents",
+    "labUsers",
+    "hqAdmins",
+    "inactiveAccounts",
     "labsAssigned",
     "inactiveUsers",
     "unassignedLabs",
@@ -173,6 +208,22 @@ async function liveChecks(bundle, modules) {
     );
   }
   pass("UDI-21", `KPIs reconcile: ${recomputed.realUsers} real / ${recomputed.totalUsers} total`);
+
+  const attention = buildOperationsAttentionItems({
+    labAssignments,
+    kpis: recomputed,
+    directoryUsers,
+    directoryIntegrity: integrity,
+  });
+  const unassignedCard = attention.find((item) => item.id === "unassigned_labs");
+  if (unassignedCard) {
+    assert(
+      unassignedCard.count === recomputed.unassignedLabs,
+      "attention unassigned matches KPI unassignedLabs"
+    );
+  }
+  assert(!attention.some((item) => item.count === 0), "live attention strip hides zero counts");
+  pass("UDI-21a", `Attention strip: ${attention.length} active item(s)`);
 
   const agents = directoryUsers.filter((u) => str(u.role).toLowerCase() === "agent");
   let mismatchCount = 0;

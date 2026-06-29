@@ -230,6 +230,10 @@ export function mapLabAssignmentRow(row = {}, tenantNameById = new Map()) {
   );
   const tenantId = str(row.tenantId ?? row.tenant_id);
   const status = str(row.status ?? row.activeFlag) || "—";
+  const outstanding = Number(row.outstanding ?? row.outstandingAmount ?? row.outstanding_amount);
+  const lastVisit = str(row.lastVisit ?? row.last_visit ?? row.Last_Visit);
+  const nextFollowUp = str(row.nextFollowUp ?? row.next_follow_up ?? row.Next_Follow_Up);
+  const territory = str(row.area ?? row.Area ?? row.territory);
   return {
     labId: str(row.labId ?? row.lab_id),
     labName: str(row.labName ?? row.lab_name) || str(row.labId ?? row.lab_id),
@@ -240,6 +244,18 @@ export function mapLabAssignmentRow(row = {}, tenantNameById = new Map()) {
       str(row.tenantName ?? row.tenant_name) || tenantNameById.get(tenantId) || "",
     status,
     active: row.active !== false && str(row.activeFlag).toLowerCase() !== "inactive",
+    territory: territory && territory !== "-" ? territory : "",
+    outstanding: Number.isFinite(outstanding) ? outstanding : null,
+    lastVisit: lastVisit && lastVisit !== "-" ? lastVisit : "",
+    nextFollowUp: nextFollowUp && nextFollowUp !== "-" ? nextFollowUp : "",
+    daysOverdue: Number.isFinite(Number(row.daysOverdue ?? row.overdueDays))
+      ? Number(row.daysOverdue ?? row.overdueDays)
+      : null,
+    creditHold: str(row.creditHold ?? row.credit_hold),
+    creditStatus: str(row.creditStatus ?? row.credit_status),
+    creditLimit: Number.isFinite(Number(row.creditLimit ?? row.credit_limit))
+      ? Number(row.creditLimit ?? row.credit_limit)
+      : null,
   };
 }
 

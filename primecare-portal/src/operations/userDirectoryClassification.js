@@ -9,8 +9,8 @@ export const USER_DIRECTORY_CLASS = {
 };
 
 export const USER_DIRECTORY_CLASS_LABELS = {
-  [USER_DIRECTORY_CLASS.REAL]: "Real user",
-  [USER_DIRECTORY_CLASS.QA_TEST]: "QA / Test",
+  [USER_DIRECTORY_CLASS.REAL]: "Production user",
+  [USER_DIRECTORY_CLASS.QA_TEST]: "QA user",
   [USER_DIRECTORY_CLASS.PROBE_DEBUG]: "Probe / Debug",
 };
 

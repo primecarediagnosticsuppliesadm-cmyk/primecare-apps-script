@@ -100,39 +100,96 @@ export function enrichDirectoryUsers(users = [], options = {}) {
 export function computeProvisioningKpis(users = [], labAssignments = []) {
   const realUsers = users.filter(isRealDirectoryUser);
   const totalUsers = users.length;
+  const productionUsers = realUsers.length;
   const realActiveUsers = realUsers.filter((u) => u.active !== false).length;
-  const fieldAgents = realUsers.filter((u) => isAgentRole(u.role)).length;
-  const inactiveUsers = realUsers.filter((u) => u.active === false).length;
-  const probeDebugUsers = users.filter((u) => classifyDirectoryUser(u) === USER_DIRECTORY_CLASS.PROBE_DEBUG).length;
   const qaTestUsers = users.filter((u) => classifyDirectoryUser(u) === USER_DIRECTORY_CLASS.QA_TEST).length;
+  const probeDebugUsers = users.filter(
+    (u) => classifyDirectoryUser(u) === USER_DIRECTORY_CLASS.PROBE_DEBUG
+  ).length;
+  const fieldAgents = users.filter((u) => isAgentRole(u.role)).length;
+  const labUsers = users.filter((u) => normalizePlatformRole(u.role) === ROLES.LAB).length;
+  const hqAdmins = users.filter((u) => {
+    const role = normalizePlatformRole(u.role);
+    return role === ROLES.ADMIN || role === ROLES.EXECUTIVE;
+  }).length;
+  const inactiveAccounts = users.filter((u) => u.active === false).length;
+  const inactiveUsers = realUsers.filter((u) => u.active === false).length;
   const labsAssigned = labAssignments.filter((l) => str(l.assignedAgentId ?? l.primaryAgentId)).length;
   const unassignedLabs = labAssignments.filter((l) => !str(l.assignedAgentId ?? l.primaryAgentId)).length;
 
   return {
     totalUsers,
-    realUsers: realUsers.length,
-    realActiveUsers,
+    productionUsers,
+    qaUsers: qaTestUsers,
+    probeUsers: probeDebugUsers,
     fieldAgents,
+    labUsers,
+    hqAdmins,
+    inactiveAccounts,
     labsAssigned,
-    inactiveUsers,
     unassignedLabs,
+    /** Legacy aliases used by existing certification scripts */
+    realUsers: productionUsers,
+    realActiveUsers,
+    inactiveUsers,
     probeDebugUsers,
     qaTestUsers,
-    /** Legacy aliases used by existing certification scripts */
     activeUsers: realActiveUsers,
     agents: fieldAgents,
   };
 }
 
+export function computeDirectoryAudienceCounts(users = []) {
+  const list = users || [];
+  return {
+    total: list.length,
+    production: list.filter((u) => classifyDirectoryUser(u) === USER_DIRECTORY_CLASS.REAL).length,
+    qa: list.filter((u) => classifyDirectoryUser(u) === USER_DIRECTORY_CLASS.QA_TEST).length,
+    probe: list.filter((u) => classifyDirectoryUser(u) === USER_DIRECTORY_CLASS.PROBE_DEBUG).length,
+    inactive: list.filter((u) => u.active === false).length,
+  };
+}
+
+export function buildDirectoryAudienceFilterOptions(users = []) {
+  const counts = computeDirectoryAudienceCounts(users);
+  return [
+    { id: "", label: `All Users (${counts.total})` },
+    { id: "real", label: `Production Users (${counts.production})` },
+    { id: "qa_test", label: `QA Users (${counts.qa})` },
+    { id: "probe_debug", label: `Probe / Debug Users (${counts.probe})` },
+    { id: "inactive", label: `Inactive (${counts.inactive})` },
+    { id: "with_labs", label: "With Assigned Labs" },
+    { id: "without_labs", label: "Without Assigned Labs" },
+  ];
+}
+
 export const DIRECTORY_AUDIENCE_FILTERS = [
-  { id: "", label: "All users" },
-  { id: "real", label: "Real users" },
-  { id: "qa_test", label: "QA / Test users" },
-  { id: "probe_debug", label: "Probe / debug users" },
+  { id: "", label: "All Users" },
+  { id: "real", label: "Production Users" },
+  { id: "qa_test", label: "QA Users" },
+  { id: "probe_debug", label: "Probe / Debug Users" },
   { id: "inactive", label: "Inactive" },
-  { id: "with_labs", label: "Users with labs" },
-  { id: "without_labs", label: "Users without labs" },
+  { id: "with_labs", label: "With Assigned Labs" },
+  { id: "without_labs", label: "Without Assigned Labs" },
 ];
+
+/** Default audience — all users visible (probe/QA remain in directory). */
+export const DIRECTORY_DEFAULT_AUDIENCE = "";
+
+/** Active login-enabled users missing credentials or scope assignment (read-only directory signal). */
+export function isUserAwaitingProvisioning(user = {}) {
+  if (user.active === false) return false;
+  if (!user.loginEnabled) return false;
+  const missingCredentials = !str(user.email) || user.hasStoredEmail === false;
+  const role = normalizePlatformRole(user.role);
+  const missingAssignment =
+    (isAgentRole(role) || role === ROLES.LAB) && (Number(user.assignedLabsCount) || 0) === 0;
+  return missingCredentials || missingAssignment;
+}
+
+export function countUsersAwaitingProvisioning(users = []) {
+  return (users || []).filter(isUserAwaitingProvisioning).length;
+}
 
 export function filterDirectoryUsers(users = [], filters = {}) {
   const roleFilter = str(filters.role).toLowerCase();
@@ -151,6 +208,7 @@ export function filterDirectoryUsers(users = [], filters = {}) {
     if (audienceFilter === "inactive" && user.active !== false) return false;
     if (audienceFilter === "with_labs" && labs <= 0) return false;
     if (audienceFilter === "without_labs" && labs > 0) return false;
+    if (audienceFilter === "awaiting_provisioning" && !isUserAwaitingProvisioning(user)) return false;
 
     if (roleFilter && normalizePlatformRole(user.role) !== roleFilter) return false;
     if (statusFilter === "active" && user.active === false) return false;
@@ -160,15 +218,18 @@ export function filterDirectoryUsers(users = [], filters = {}) {
       !matchesSearch(search, [
         user.name,
         user.displayName,
+        user.username,
         user.email,
+        user.phone,
         user.roleLabel,
         user.role,
         user.userClassLabel,
         user.distributorName,
+        user.distributorId,
         user.territory,
+        user.tenantId,
         user.agentId,
         user.labId,
-        user.username,
       ])
     ) {
       return false;
@@ -434,11 +495,30 @@ export function formatLastLogin(value) {
   if (!value) return "Never";
   const d = new Date(value);
   if (!Number.isFinite(d.getTime())) return "Never";
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+
+  if (d >= startOfToday) {
+    const diffMs = now.getTime() - d.getTime();
+    const hours = Math.floor(diffMs / 3600000);
+    if (hours < 1) {
+      const minutes = Math.floor(diffMs / 60000);
+      if (minutes <= 1) return "Just now";
+      return `${minutes} minutes ago`;
+    }
+    if (hours === 1) return "1 hour ago";
+    if (hours < 12) return `${hours} hours ago`;
+    return "Today";
+  }
+
+  if (d >= startOfYesterday) return "Yesterday";
+
   return d.toLocaleString("en-IN", {
     day: "2-digit",
     month: "short",
     year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
   });
 }

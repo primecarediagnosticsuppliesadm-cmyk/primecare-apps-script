@@ -18,6 +18,7 @@ export default function OperationsCenterAdminPage({ currentUser = null, setActiv
   const tenantId = resolveTenantId(currentUser);
   const [loading, setLoading] = useState(true);
   const [bundle, setBundle] = useState(null);
+  const [dataLoadedAt, setDataLoadedAt] = useState(null);
   const [error, setError] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const [focusUserId, setFocusUserId] = useState("");
@@ -30,6 +31,7 @@ export default function OperationsCenterAdminPage({ currentUser = null, setActiv
       setError("");
       const data = await loadOperationsCenterAdminBundle(tenantId);
       setBundle(data);
+      setDataLoadedAt(Date.now());
       if (!data.ok && data.error) setError(data.error);
       else if (data.warning) setError(data.warning);
     } catch (err) {
@@ -101,6 +103,7 @@ export default function OperationsCenterAdminPage({ currentUser = null, setActiv
         tenantId={tenantId}
         bundle={bundle}
         loading={loading}
+        loadedAt={dataLoadedAt}
         error={error}
         statusMessage={statusMessage}
         actorRole={currentUser?.role}

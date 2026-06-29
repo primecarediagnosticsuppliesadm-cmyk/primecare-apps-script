@@ -226,10 +226,17 @@ async function main() {
   const kpis = bundle?.kpis || {};
   const kpiFields = [
     "totalUsers",
+    "productionUsers",
+    "realUsers",
     "realActiveUsers",
     "activeUsers",
+    "qaUsers",
+    "probeUsers",
     "fieldAgents",
     "agents",
+    "labUsers",
+    "hqAdmins",
+    "inactiveAccounts",
     "labsAssigned",
     "inactiveUsers",
     "unassignedLabs",
