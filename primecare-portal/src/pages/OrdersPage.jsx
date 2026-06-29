@@ -73,7 +73,8 @@ import HqOrdersOperationsQueue from "@/components/hq/HqOrdersOperationsQueue.jsx
 import InvoiceDetailsDrawer from "@/components/invoice/InvoiceDetailsDrawer.jsx";
 import InvoiceStatusBadge from "@/components/invoice/InvoiceStatusBadge.jsx";
 import { getInvoicesByOrderIdsRead } from "@/api/invoiceSupabaseApi.js";
-import { onFinancialSyncRefresh } from "@/operations/financialSyncEvents.js";
+import { onFinancialSyncCompleted } from "@/operations/financialSyncEvents.js";
+import { useFinancialSyncPulse } from "@/hooks/useFinancialSyncPulse.js";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
 import {
   ORDER_QUEUE_KEYS,
@@ -131,6 +132,43 @@ function orderPaymentLabel(order, invoice = null) {
     paymentStatus: order.paymentStatus,
     invoiceStatus: invoice?.displayStatus ?? invoice?.status ?? order.invoiceStatus,
   });
+}
+
+function localDateYmd(d = new Date()) {
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${day}`;
+}
+
+function formatRelativePaymentDay(value) {
+  const raw = str(value).slice(0, 10);
+  if (!raw) return null;
+  if (raw === localDateYmd()) return "Today";
+  const d = new Date(`${raw}T12:00:00`);
+  if (!Number.isFinite(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function resolveOrderPaymentBadgeDate(order, invoice) {
+  const label = orderPaymentLabel(order, invoice);
+  if (label !== "Paid" && label !== "Partially Paid") return null;
+  return formatRelativePaymentDay(invoice?.paidAt || invoice?.sentAt || invoice?.invoiceDate);
+}
+
+function OrderPaymentBadge({ order, invoice }) {
+  const label = orderPaymentLabel(order, invoice);
+  const dateHint = resolveOrderPaymentBadgeDate(order, invoice);
+  return (
+    <div className="inline-flex flex-col items-start gap-0.5">
+      <StatusBadge variant={paymentStatusToVariant(label)} compact>
+        {label}
+      </StatusBadge>
+      {dateHint ? (
+        <span className="text-[9px] leading-none text-muted-foreground">{dateHint}</span>
+      ) : null}
+    </div>
+  );
 }
 
 function resolveOrderPaidAmount(order, invoice) {
@@ -583,6 +621,7 @@ export default function OrdersPage({
   }, [orders, search, status, paymentStatus, labFilter, dateFrom, dateTo, sortKey, activeQueueKey]);
 
   const kpis = useMemo(() => computeOrdersKpis(orders), [orders]);
+  const financialSyncPulse = useFinancialSyncPulse();
   const operationsQueue = useMemo(
     () => buildOrdersOperationsQueue(orders, kpis),
     [orders, kpis]
@@ -620,7 +659,7 @@ export default function OrdersPage({
   }, [filteredOrders, homeTenantId]);
 
   useEffect(() => {
-    return onFinancialSyncRefresh((detail) => {
+    return onFinancialSyncCompleted((detail) => {
       const orderIds = detail?.orderId
         ? [str(detail.orderId)]
         : filteredOrders.map((order) => str(order.orderId)).filter(Boolean);
@@ -762,6 +801,10 @@ export default function OrdersPage({
         cancelled,
         fulfilled,
       }),
+      isFullyPaid:
+        fulfilled &&
+        !cancelled &&
+        resolveOrderOutstanding(selectedOrderSummary, selectedOrderInvoice) <= 0.009,
       productUnitLabel: formatProductUnitLabel(lines.length, unitCount),
       cancellationReason: cancelled
         ? extractLatestCancellationNote(
@@ -818,7 +861,7 @@ export default function OrdersPage({
         <KpiCard title="Processing" value={kpis.processing} loading={loading} />
         <KpiCard title="Fulfilled" value={kpis.fulfilled} loading={loading} />
         <KpiCard title="Cancelled" value={kpis.cancelled} loading={loading} />
-        <KpiCard title="Pending Payment" value={kpis.pendingPayment} loading={loading} />
+        <KpiCard title="Pending Payment" value={kpis.pendingPayment} loading={loading} highlight={financialSyncPulse} />
         <KpiCard
           title="Active Order Value"
           value={formatCurrency(kpis.totalOrderValue)}
@@ -951,7 +994,6 @@ export default function OrdersPage({
                     {filteredOrders.map((order) => {
                       const orderStatus = normalizeOrderStatusLabel(order.orderStatus);
                       const orderInvoice = resolveOrderInvoice(order);
-                      const payStatus = orderPaymentLabel(order, orderInvoice);
                       const isSelected = selectedOrder === order.orderId;
                       const cancelled = isCancelledStatus(orderStatus);
                       return (
@@ -1007,9 +1049,7 @@ export default function OrdersPage({
                             </StatusBadge>
                           </td>
                           <td className="px-2 py-2">
-                            <StatusBadge variant={paymentStatusToVariant(payStatus)} compact>
-                              {payStatus}
-                            </StatusBadge>
+                            <OrderPaymentBadge order={order} invoice={orderInvoice} />
                           </td>
                           <td className="px-2 py-2 font-mono text-[10px] text-slate-700">
                             {orderInvoice?.invoiceNumber || (order.invoiceId ? "Linked" : "—")}
@@ -1051,9 +1091,8 @@ export default function OrdersPage({
               <div className="space-y-2 xl:hidden">
                 {filteredOrders.map((order) => {
                   const orderStatus = normalizeOrderStatusLabel(order.orderStatus);
-                  const orderInvoice = resolveOrderInvoice(order);
-                  const payStatus = orderPaymentLabel(order, orderInvoice);
-                  return (
+                      const orderInvoice = resolveOrderInvoice(order);
+                      return (
                     <div
                       key={order.orderId}
                       className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
@@ -1077,9 +1116,7 @@ export default function OrdersPage({
                           <StatusBadge variant={orderStatusToVariant(orderStatus)} compact>
                             {orderStatus}
                           </StatusBadge>
-                          <StatusBadge variant={paymentStatusToVariant(payStatus)} compact>
-                            {payStatus}
-                          </StatusBadge>
+                          <OrderPaymentBadge order={order} invoice={orderInvoice} />
                         </div>
                       </div>
                       {orderInvoice?.invoiceNumber ? (
@@ -1393,6 +1430,12 @@ export default function OrdersPage({
                       </div>
                       <dl className="mt-2 grid grid-cols-3 gap-2 text-xs">
                         <div>
+                          <dt className="text-slate-500">Invoice Total</dt>
+                          <dd className="font-semibold tabular-nums text-slate-900">
+                            {formatCurrency(selectedOrderUx.totalAmount)}
+                          </dd>
+                        </div>
+                        <div>
                           <dt className="text-slate-500">Paid</dt>
                           <dd className="font-semibold tabular-nums text-emerald-700">
                             {formatCurrency(selectedOrderUx.paidAmount)}
@@ -1402,12 +1445,6 @@ export default function OrdersPage({
                           <dt className="text-slate-500">Outstanding</dt>
                           <dd className="font-semibold tabular-nums text-amber-700">
                             {formatCurrency(selectedOrderUx.outstandingAmount)}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt className="text-slate-500">Total</dt>
-                          <dd className="font-semibold tabular-nums text-slate-900">
-                            {formatCurrency(selectedOrderUx.totalAmount)}
                           </dd>
                         </div>
                       </dl>
@@ -1430,6 +1467,18 @@ export default function OrdersPage({
                             onClick={handleOpenCreditRisk}
                           >
                             Open in {collectionsNavLabelForRole(currentUser?.role)}
+                          </Button>
+                        </div>
+                      ) : selectedOrderUx.isFullyPaid ? (
+                        <div className="mt-2.5">
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-9 text-xs"
+                            disabled
+                            aria-label="Fully paid"
+                          >
+                            ✓ Fully Paid
                           </Button>
                         </div>
                       ) : null}

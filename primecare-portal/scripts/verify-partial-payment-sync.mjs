@@ -115,7 +115,7 @@ function staticWiringChecks() {
   );
   assert(summary.displayStatus === "Partially Paid", `expected Partially Paid, got ${summary.displayStatus}`);
 
-  assert(/notifyFinancialSyncRefresh/.test(collections), "financial sync refresh");
+  assert(/notifyFinancialSyncCompleted|notifyFinancialSyncRefresh/.test(collections), "financial sync refresh");
   assert(/paidAmount/.test(orders), "Orders payment panel split");
   pass("PPS-10", "Strict lifecycle wiring");
 }

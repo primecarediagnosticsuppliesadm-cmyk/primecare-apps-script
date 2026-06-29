@@ -1,22 +1,30 @@
+/** Single cross-module financial refresh event (payment / allocation writes). */
+export const FINANCIAL_SYNC_COMPLETED_EVENT = "primecare:FinancialSyncCompleted";
+
 /**
- * Cross-module cache refresh after payment / allocation writes.
  * @param {Record<string, unknown>} [detail]
  */
-export function notifyFinancialSyncRefresh(detail = {}) {
+export function notifyFinancialSyncCompleted(detail = {}) {
   if (typeof window === "undefined") return;
   window.dispatchEvent(
-    new CustomEvent("primecare:financialSyncRefresh", { detail: { ...detail } })
+    new CustomEvent(FINANCIAL_SYNC_COMPLETED_EVENT, { detail: { ...detail } })
   );
 }
 
 /**
  * @param {(detail: Record<string, unknown>) => void} handler
  */
-export function onFinancialSyncRefresh(handler) {
+export function onFinancialSyncCompleted(handler) {
   if (typeof window === "undefined") return () => {};
   const listener = (event) => {
     handler(event?.detail || {});
   };
-  window.addEventListener("primecare:financialSyncRefresh", listener);
-  return () => window.removeEventListener("primecare:financialSyncRefresh", listener);
+  window.addEventListener(FINANCIAL_SYNC_COMPLETED_EVENT, listener);
+  return () => window.removeEventListener(FINANCIAL_SYNC_COMPLETED_EVENT, listener);
 }
+
+/** @deprecated Use notifyFinancialSyncCompleted */
+export const notifyFinancialSyncRefresh = notifyFinancialSyncCompleted;
+
+/** @deprecated Use onFinancialSyncCompleted */
+export const onFinancialSyncRefresh = onFinancialSyncCompleted;

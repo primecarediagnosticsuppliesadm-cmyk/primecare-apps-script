@@ -43,21 +43,26 @@ function buildPaymentActivityEvents(history = []) {
     const paymentId = str(entry.paymentId ?? entry.payment_id ?? "") || `PAY-${index + 1}`;
     const mode = str(entry.paymentMode ?? entry.mode ?? "");
     const orderId = str(entry.orderId ?? entry.order_id ?? "");
+    const invoiceId = str(entry.invoiceId ?? entry.invoice_id ?? "");
     const note = str(entry.note);
-
-    const refs = [
-      paymentId !== `PAY-${index + 1}` ? paymentId : null,
-      mode || null,
-      orderId ? `Order ${orderId}` : null,
-    ].filter(Boolean);
+    const outstandingAfter = num(entry.outstandingAfter ?? entry.outstanding_after);
 
     return {
       id: `payment-${paymentId}-${date}-${index}`,
       date,
       title: "Payment received",
-      detail: `${formatInr(amount)}${refs.length ? ` · ${refs.join(" · ")}` : ""}`,
+      amount: formatInr(amount),
+      lines: [
+        invoiceId ? `Applied to Invoice ${invoiceId}` : null,
+        orderId ? `Order ${orderId}` : null,
+        mode ? `Method ${mode}` : null,
+      ].filter(Boolean),
+      trailingLabel: outstandingAfter || outstandingAfter === 0 ? "Outstanding after payment" : null,
+      trailingAmount:
+        outstandingAfter || outstandingAfter === 0 ? formatInr(outstandingAfter) : null,
+      detail: `${formatInr(amount)}${orderId ? ` · Order ${orderId}` : ""}`,
       subdetail: note || null,
-      amount,
+      amountRaw: amount,
       paymentId,
       paymentMode: mode,
       orderId,

@@ -6,6 +6,7 @@ import { resolveLabAgent } from "@/operations/labAgentResolver.js";
 import {
   buildCreditRiskAttentionCards,
   buildCreditRiskPortfolioStrip,
+  buildClearedTodayLabs,
   buildInterventionLabs,
   buildTopExposureLabs,
   filterCollectionsForCreditRiskView,
@@ -14,6 +15,7 @@ import {
   OVERDUE_BUCKET_LABELS,
   OVERDUE_BUCKET_ORDER,
 } from "@/operations/creditRiskHqEngine.js";
+import { useFinancialSyncPulse } from "@/hooks/useFinancialSyncPulse.js";
 import { formatLastPaymentAge } from "@/collections/collectionsCockpitMetrics.js";
 import {
   navigateToCollections,
@@ -216,6 +218,7 @@ export default function HqCreditRiskCommandCenter({
   );
   const [workspaceBucket, setWorkspaceBucket] = useState("ALL");
   const [directoryUsers, setDirectoryUsers] = useState([]);
+  const financialSyncPulse = useFinancialSyncPulse();
 
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
 
@@ -259,6 +262,10 @@ export default function HqCreditRiskCommandCenter({
   const interventions = useMemo(
     () => buildInterventionLabs(collections, lastPaymentByLabId, directoryUsers),
     [collections, lastPaymentByLabId, directoryUsers]
+  );
+  const clearedToday = useMemo(
+    () => buildClearedTodayLabs(collections, lastPaymentByLabId),
+    [collections, lastPaymentByLabId]
   );
 
   const workspaceRows = useMemo(() => {
@@ -358,9 +365,12 @@ export default function HqCreditRiskCommandCenter({
               <article
                 key={card.id}
                 className={cn(
-                  "flex flex-col rounded-xl border p-3 shadow-sm",
+                  "flex flex-col rounded-xl border p-3 shadow-sm transition-shadow duration-300",
                   SEVERITY_STYLES[card.severity] || SEVERITY_STYLES.healthy,
-                  isActive && "ring-2 ring-indigo-400/70"
+                  isActive && "ring-2 ring-indigo-400/70",
+                  financialSyncPulse &&
+                    (card.id === "collections" || card.id === "exposure") &&
+                    "ring-2 ring-emerald-400/70 shadow-md"
                 )}
               >
                 <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -407,8 +417,46 @@ export default function HqCreditRiskCommandCenter({
         ) : null}
       </section>
 
+      {clearedToday.length > 0 ? (
+        <section aria-label="Recently cleared today">
+          <h2 className="mb-2 text-sm font-semibold text-slate-900">Closed Today</h2>
+          <p className="mb-2 text-xs text-slate-600">
+            Accounts cleared today — not in the active collections queue.
+          </p>
+          <div className="space-y-2">
+            {clearedToday.map((item) => (
+              <article
+                key={labIdKey(item.labId)}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-emerald-900">
+                    {item.labName || item.labId}
+                  </p>
+                  <p className="text-[10px] text-emerald-800">Outstanding ₹0 · cleared today</p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs"
+                  onClick={() => handleReviewLab(item.labId)}
+                >
+                  Review
+                </Button>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <section aria-label="Portfolio at a glance">
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm">
+        <div
+          className={cn(
+            "flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm transition-shadow duration-300",
+            financialSyncPulse && "ring-2 ring-emerald-400/70 shadow-md"
+          )}
+        >
           <div className="flex items-center gap-1.5">
             <IndianRupee className="h-4 w-4 text-slate-500" />
             <span className="text-slate-600">Outstanding</span>

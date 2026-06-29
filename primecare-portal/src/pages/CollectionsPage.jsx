@@ -76,7 +76,11 @@ import { ROLES } from "@/config/roles";
 import { getAgentActiveLabOwnershipRowsRead } from "@/api/labOwnershipApi.js";
 import { filterCollectionsForUser } from "@/utils/accessFilters.js";
 import { notifyAgentWorkspaceRefresh } from "@/pages/agentVisitContext.js";
-import { notifyFinancialSyncRefresh } from "@/operations/financialSyncEvents.js";
+import {
+  notifyFinancialSyncCompleted,
+  onFinancialSyncCompleted,
+} from "@/operations/financialSyncEvents.js";
+import { useFinancialSyncPulse } from "@/hooks/useFinancialSyncPulse.js";
 import { startVisitFromWorkspaceItem } from "@/pages/agentVisitContext.js";
 import {
   countMediumHighRisk,
@@ -447,11 +451,9 @@ function splitActivityMetaLines(subline, trailing) {
 
 function LabActivityTimelineEntry({ entry }) {
   const isPayment = entry.kind === "payment";
-  const titleParts = isPayment ? String(entry.title || "").split(" — ") : [];
-  const paymentTitle = titleParts[0] || entry.title;
-  const paymentAmount = titleParts[1] || "";
-  const metaLines =
-    entry.subline || entry.trailing
+  const metaLines = Array.isArray(entry.lines)
+    ? entry.lines
+    : entry.subline || entry.trailing
       ? splitActivityMetaLines(entry.subline, entry.trailing)
       : entry.detail
         ? [entry.detail]
@@ -460,15 +462,23 @@ function LabActivityTimelineEntry({ entry }) {
   return (
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0 flex-1">
-        <p className="text-[11px] font-medium text-slate-900">{paymentTitle}</p>
-        {isPayment && paymentAmount ? (
-          <p className="text-sm font-bold tabular-nums text-foreground">{paymentAmount}</p>
+        <p className="text-[11px] font-medium text-slate-900">{entry.title}</p>
+        {isPayment && entry.amount ? (
+          <p className="text-sm font-bold tabular-nums text-foreground">{entry.amount}</p>
         ) : null}
         {metaLines.map((line) => (
           <p key={line} className="text-[10px] text-muted-foreground">
             {line}
           </p>
         ))}
+        {entry.trailingLabel && entry.trailingAmount ? (
+          <>
+            <p className="mt-1 text-[10px] text-muted-foreground">{entry.trailingLabel}</p>
+            <p className="text-sm font-bold tabular-nums text-foreground">{entry.trailingAmount}</p>
+          </>
+        ) : entry.trailing && !entry.trailingLabel ? (
+          <p className="text-[10px] text-muted-foreground">{entry.trailing}</p>
+        ) : null}
       </div>
       <span className="shrink-0 pt-0.5 text-[10px] text-muted-foreground">
         {formatShortDate(entry.date)}
@@ -746,8 +756,12 @@ function LabAccountTimeline({
       ? financialTimeline.map((entry) => ({
           id: entry.id,
           title: entry.title,
+          amount: entry.amount,
+          lines: entry.lines,
           subline: entry.subline,
           trailing: entry.trailing,
+          trailingLabel: entry.trailingLabel,
+          trailingAmount: entry.trailingAmount,
           date: entry.date,
           kind: entry.kind,
         }))
@@ -1857,6 +1871,8 @@ export default function CollectionsPage({
 
   const [loadError, setLoadError] = useState("");
 
+  const financialSyncPulse = useFinancialSyncPulse();
+
   const [amountCollected, setAmountCollected] = useState("");
   const [paymentMode, setPaymentMode] = useState("Cash");
   const [note, setNote] = useState("");
@@ -2112,6 +2128,15 @@ export default function CollectionsPage({
     // Initial load only — Refresh calls handleRefresh explicitly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken, tenantId, profileLabId, isLabAccount]);
+
+  useEffect(() => {
+    return onFinancialSyncCompleted(() => {
+      void loadCollections({ silent: true });
+      if (isLabAccount && profileLabId) {
+        void loadLabAccountLedger();
+      }
+    });
+  }, [loadCollections, loadLabAccountLedger, isLabAccount, profileLabId]);
 
   useEffect(() => {
     if (loading || isLabAccount) return;
@@ -2497,7 +2522,7 @@ export default function CollectionsPage({
             setPaymentOrderId("");
             invalidateOrdersReadCache();
             invalidateCollectionsReadCache();
-            notifyFinancialSyncRefresh({
+            notifyFinancialSyncCompleted({
               source: "collection_payment",
               labId: selectedLabId,
               orderId: paidOrderId,
@@ -2993,6 +3018,7 @@ export default function CollectionsPage({
               title="Outstanding balance"
               value={formatMoney(summary.totalOutstanding)}
               icon={IndianRupee}
+              highlight={financialSyncPulse}
             />
             <KpiCard
               title="Overdue labs"
@@ -3008,6 +3034,7 @@ export default function CollectionsPage({
               title="Today's collections"
               value={formatMoney(summary.todayCollections)}
               icon={Wallet}
+              highlight={financialSyncPulse}
             />
           </KpiCardGrid>
         )}

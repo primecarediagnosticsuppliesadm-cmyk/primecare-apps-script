@@ -4,9 +4,10 @@ import { Input } from "@/components/ui/input";
 import { ListSkeleton, PageSkeleton, PageHeader, DataFetchError } from "@/components/ux";
 import { usePortalToast } from "@/components/ux";
 import InvoiceDetailsDrawer from "@/components/invoice/InvoiceDetailsDrawer.jsx";
+import InvoicePaymentHistoryModal from "@/components/invoice/InvoicePaymentHistoryModal.jsx";
 import InvoiceStatusBadge from "@/components/invoice/InvoiceStatusBadge.jsx";
 import { getInvoicesForLabRead } from "@/api/invoiceSupabaseApi.js";
-import { onFinancialSyncRefresh } from "@/operations/financialSyncEvents.js";
+import { onFinancialSyncCompleted } from "@/operations/financialSyncEvents.js";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
 import { HQ_INVOICE_LIST_DEFAULT_LIMIT } from "@/api/hqReadBounds.js";
 import { LAB_INVOICE_CENTER_GRID } from "@/collections/invoiceAccountStatus.js";
@@ -44,7 +45,7 @@ function formatDate(value) {
 
 const INVOICE_CENTER_ACTION_BTN = "h-9 min-w-[2.75rem] px-2 text-[10px]";
 
-function InvoiceCenterRow({ invoice, busy, onView, onDownload }) {
+function InvoiceCenterRow({ invoice, busy, onView, onDownload, onPaymentHistory }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const label = invoice.invoiceNumber || invoice.id;
 
@@ -102,6 +103,16 @@ function InvoiceCenterRow({ invoice, busy, onView, onDownload }) {
             </Button>
             {menuOpen ? (
               <div className="absolute right-0 top-full z-20 mt-0.5 min-w-[8rem] rounded-md border border-border bg-card py-1 shadow-md">
+                <button
+                  type="button"
+                  className="block w-full px-2.5 py-1.5 text-left text-[10px] text-slate-700 hover:bg-muted"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onPaymentHistory(invoice);
+                  }}
+                >
+                  Payment History
+                </button>
                 <button
                   type="button"
                   className="block w-full px-2.5 py-1.5 text-left text-[10px] text-slate-700 hover:bg-muted"
@@ -185,6 +196,7 @@ export default function LabInvoiceCenterPage({ currentUser }) {
   const [dateTo, setDateTo] = useState("");
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [paymentHistoryInvoice, setPaymentHistoryInvoice] = useState(null);
   const [downloadKey, setDownloadKey] = useState("");
   const hadRowsRef = useRef(false);
 
@@ -238,7 +250,7 @@ export default function LabInvoiceCenterPage({ currentUser }) {
   }, [loadInvoices]);
 
   useEffect(() => {
-    return onFinancialSyncRefresh((detail) => {
+    return onFinancialSyncCompleted((detail) => {
       if (detail?.labId && detail.labId !== labId) return;
       void loadInvoices();
     });
@@ -271,6 +283,14 @@ export default function LabInvoiceCenterPage({ currentUser }) {
   function closeDrawer() {
     setDrawerOpen(false);
     setSelectedInvoice(null);
+  }
+
+  function openPaymentHistory(invoice) {
+    setPaymentHistoryInvoice(invoice);
+  }
+
+  function closePaymentHistory() {
+    setPaymentHistoryInvoice(null);
   }
 
   async function handleDownload(invoice) {
@@ -448,6 +468,7 @@ export default function LabInvoiceCenterPage({ currentUser }) {
                   busy={downloadKey === (invoice.id || invoice.orderId)}
                   onView={openDrawer}
                   onDownload={handleDownload}
+                  onPaymentHistory={openPaymentHistory}
                 />
               ))}
             </div>
@@ -505,6 +526,18 @@ export default function LabInvoiceCenterPage({ currentUser }) {
           if (phase === "error") showToast("error", detail || "Unable to download invoice PDF.");
           if (phase === "success") showToast("success", "Invoice download started.");
         }}
+      />
+
+      <InvoicePaymentHistoryModal
+        open={Boolean(paymentHistoryInvoice)}
+        onClose={closePaymentHistory}
+        invoiceId={paymentHistoryInvoice?.id}
+        invoiceNumber={paymentHistoryInvoice?.invoiceNumber}
+        orderId={paymentHistoryInvoice?.orderId}
+        labId={labId}
+        totalAmount={paymentHistoryInvoice?.totalAmount}
+        allocatedAmount={paymentHistoryInvoice?.allocatedAmount}
+        openBalance={paymentHistoryInvoice?.openBalance}
       />
     </div>
   );

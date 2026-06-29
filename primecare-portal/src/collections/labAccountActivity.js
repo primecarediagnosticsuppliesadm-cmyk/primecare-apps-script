@@ -13,6 +13,139 @@ function paymentMethodLabel(mode) {
   return m.charAt(0).toUpperCase() + m.slice(1);
 }
 
+function invoiceLabel(inv = {}) {
+  return str(inv.invoiceId ?? inv.invoiceNumber);
+}
+
+function buildInvoiceLifecycleEvents({
+  invoices = [],
+  formatMoney = (v) => String(v),
+} = {}) {
+  const events = [];
+  const seen = new Set();
+
+  for (const inv of invoices) {
+    const label = invoiceLabel(inv);
+    const orderId = str(inv.orderId);
+    const total = num(inv.totalAmount ?? inv.amount);
+    const open = num(inv.openBalance ?? Math.max(0, total - num(inv.allocatedAmount)));
+    const invoiceDate = str(inv.invoiceDate);
+    const sentAt = str(inv.sentAt);
+    const paidAt = str(inv.paidAt);
+    const invKey = str(inv.invoiceDbId ?? inv.id ?? label);
+
+    if (label && invoiceDate) {
+      const id = `created-${invKey}`;
+      if (!seen.has(id)) {
+        seen.add(id);
+        events.push({
+          id,
+          title: "Invoice Created",
+          lines: [
+            label,
+            orderId ? `Order ${orderId}` : null,
+            total > 0 ? `Total ${formatMoney(total)}` : null,
+          ].filter(Boolean),
+          date: invoiceDate,
+          kind: "invoice-created",
+          sortKey: invoiceDate,
+        });
+      }
+    }
+
+    if (label && sentAt) {
+      const id = `sent-${invKey}`;
+      if (!seen.has(id)) {
+        seen.add(id);
+        events.push({
+          id,
+          title: "Invoice Sent",
+          lines: [label, orderId ? `Order ${orderId}` : null].filter(Boolean),
+          date: sentAt,
+          kind: "invoice-sent",
+          sortKey: sentAt,
+        });
+      }
+    }
+
+    if (label && open <= 0.009 && total > 0) {
+      const id = `fully-paid-${invKey}`;
+      if (!seen.has(id)) {
+        seen.add(id);
+        events.push({
+          id,
+          title: "Invoice Fully Paid",
+          lines: [label, orderId ? `Order ${orderId}` : null, formatMoney(total)].filter(Boolean),
+          date: paidAt || sentAt || invoiceDate,
+          kind: "invoice-paid",
+          sortKey: paidAt || sentAt || invoiceDate,
+        });
+      }
+    }
+  }
+
+  return events;
+}
+
+function buildPaymentActivityEvents({
+  history = [],
+  invoices = [],
+  item = {},
+  formatMoney = (v) => String(v),
+} = {}) {
+  const outstandingNow = num(item?.outstandingAmount);
+  const invoiceByOrder = new Map();
+  for (const inv of invoices || []) {
+    const oid = str(inv.orderId);
+    if (oid) invoiceByOrder.set(oid, inv);
+  }
+
+  const events = [];
+  for (const entry of history || []) {
+    const amount = num(entry.amountCollected ?? entry.amount);
+    if (amount <= 0) continue;
+
+    const orderId = str(entry.orderId ?? entry.order_id);
+    const linkedInvoice = orderId ? invoiceByOrder.get(orderId) : null;
+    const invoiceNum =
+      str(entry.invoiceId ?? entry.invoice_id) || invoiceLabel(linkedInvoice);
+    const paymentDate = entry.paymentDate ?? entry.sortAt ?? entry.updatedAt ?? "";
+    const mode = paymentMethodLabel(entry.paymentMode ?? entry.mode);
+    const paymentId = str(entry.paymentId ?? entry.payment_id);
+    const outstandingAfter = num(entry.outstandingAfter ?? entry.outstanding_after);
+    const reducedTo = Number.isFinite(outstandingAfter) ? outstandingAfter : outstandingNow;
+
+    events.push({
+      id: paymentId ? `pay-${paymentId}` : `pay-${paymentDate}-${amount}-${orderId}`,
+      title: "Payment received",
+      amount: formatMoney(amount),
+      lines: [
+        invoiceNum ? `Applied to Invoice ${invoiceNum}` : null,
+        orderId ? `Order ${orderId}` : null,
+        mode ? `Method ${mode}` : null,
+      ].filter(Boolean),
+      trailingLabel: "Outstanding after payment",
+      trailingAmount: formatMoney(reducedTo),
+      date: paymentDate,
+      kind: "payment",
+      sortKey: paymentDate,
+    });
+
+    if (invoiceNum) {
+      events.push({
+        id: paymentId ? `alloc-${paymentId}` : `alloc-${paymentDate}-${amount}`,
+        title: "Payment Allocated",
+        lines: [invoiceNum, formatMoney(amount)],
+        date: paymentDate,
+        kind: "allocation",
+        sortKey: paymentDate,
+      });
+    }
+  }
+
+  return events;
+}
+
 /**
  * Payment + invoice lifecycle timeline for lab account Payment Activity tab.
  */
@@ -23,112 +156,32 @@ export function buildLabAccountActivityTimeline({
   formatMoney = (v) => String(v),
   formatShortDate = (v) => str(v).slice(0, 10) || "—",
 } = {}) {
-  const outstandingNow = num(item?.outstandingAmount);
-  const paymentEntries = (history || []).map((entry) => {
-    const amount = num(entry.amountCollected ?? entry.amount);
-    const invoiceId = str(entry.invoiceId ?? entry.invoice_id);
-    const orderId = str(entry.orderId ?? entry.order_id);
-    const paymentDate = entry.paymentDate ?? entry.updatedAt ?? "";
-    const mode = paymentMethodLabel(entry.paymentMode ?? entry.mode);
-    const outstandingAfter = num(entry.outstandingAfter ?? entry.outstanding_after);
-    const reducedTo = Number.isFinite(outstandingAfter) ? outstandingAfter : outstandingNow;
-    const appliedRef = [
-      invoiceId ? `INV ${invoiceId}` : "",
-      orderId ? `Order ${orderId}` : "",
-    ]
-      .filter(Boolean)
-      .join(" · ");
-    return {
-      id: entry.paymentId || `pay-${paymentDate}-${amount}-${invoiceId}`,
-      title: amount > 0 ? `Payment received — ${formatMoney(amount)}` : "Account update",
-      subline: appliedRef
-        ? `Applied to ${appliedRef}${mode ? ` · Method: ${mode}` : ""}`
-        : mode
-          ? `Method: ${mode}`
-          : "Account balance updated",
-      trailing:
-        amount > 0
-          ? `Outstanding balance ${formatMoney(reducedTo)}`
-          : `Balance ${formatMoney(reducedTo)}`,
-      date: paymentDate,
-      kind: amount > 0 ? "payment" : "update",
-      sortKey: paymentDate,
-    };
-  });
+  void formatShortDate;
 
-  if (paymentEntries.length) {
-    return paymentEntries.sort((a, b) => str(b.sortKey).localeCompare(str(a.sortKey)));
-  }
+  const lifecycle = buildInvoiceLifecycleEvents({ invoices, formatMoney });
+  const payments = buildPaymentActivityEvents({ history, invoices, item, formatMoney });
+  const merged = [...lifecycle, ...payments];
 
-  const lifecycle = [];
-  for (const inv of invoices || []) {
-    const invoiceLabel = str(inv.invoiceId ?? inv.invoiceNumber);
-    const orderId = str(inv.orderId);
-    const total = num(inv.totalAmount ?? inv.amount);
-    const open = num(inv.openBalance ?? Math.max(0, total - num(inv.allocatedAmount)));
-    const invoiceDate = str(inv.invoiceDate);
-    const sentAt = str(inv.sentAt);
-    const dueDate = str(inv.dueDate);
-    const rawStatus = str(inv.rawStatus ?? inv.status).toLowerCase();
-    const isSent = Boolean(sentAt) || rawStatus === "sent";
-
-    if (orderId && (invoiceDate || sentAt)) {
-      lifecycle.push({
-        id: `fulfill-${orderId}-${invoiceLabel}`,
-        title: `Order fulfilled — ${orderId}`,
-        subline: invoiceLabel ? `Invoice ${invoiceLabel} generated` : "Invoice generated",
-        trailing: total > 0 ? `Total ${formatMoney(total)}` : "",
-        date: invoiceDate || sentAt,
-        kind: "fulfillment",
-        sortKey: invoiceDate || sentAt,
-      });
-    }
-
-    if (invoiceLabel && isSent) {
-      lifecycle.push({
-        id: `invoice-${inv.invoiceDbId || invoiceLabel}`,
-        title: `Invoice sent — ${invoiceLabel}`,
-        subline:
-          open > 0.009
-            ? `Awaiting payment${dueDate ? ` · due ${formatShortDate(dueDate)}` : ""}`
-            : "Paid in full",
-        trailing: open > 0.009 ? `Open ${formatMoney(open)}` : formatMoney(total),
-        date: sentAt || invoiceDate,
-        kind: "invoice",
-        sortKey: sentAt || invoiceDate,
-      });
-    } else if (invoiceLabel && open > 0.009) {
-      lifecycle.push({
-        id: `invoice-${inv.invoiceDbId || invoiceLabel}`,
-        title: `Invoice issued — ${invoiceLabel}`,
-        subline: orderId ? `Order ${orderId}` : "Awaiting payment",
-        trailing: `Open ${formatMoney(open)}`,
-        date: invoiceDate || sentAt,
-        kind: "invoice",
-        sortKey: invoiceDate || sentAt,
-      });
-    }
-  }
-
-  if (lifecycle.length) {
+  if (merged.length) {
     const seen = new Set();
-    return lifecycle
+    return merged
       .filter((row) => {
-        const key = `${row.id}|${row.title}`;
+        const key = `${row.id}|${row.title}|${row.sortKey}`;
         if (seen.has(key)) return false;
         seen.add(key);
-        return true;
+        return Boolean(str(row.sortKey) || str(row.date));
       })
       .sort((a, b) => str(b.sortKey).localeCompare(str(a.sortKey)));
   }
 
+  const outstandingNow = num(item?.outstandingAmount);
   if (outstandingNow > 0.009) {
     return [
       {
         id: "account-open",
         title: "Outstanding balance on account",
-        subline: "No payment recorded yet",
-        trailing: formatMoney(outstandingNow),
+        lines: ["No payment recorded yet"],
+        trailingAmount: formatMoney(outstandingNow),
         date: str(item?.dueDate ?? item?.nextFollowUp),
         kind: "pending",
         sortKey: str(item?.dueDate ?? item?.nextFollowUp),

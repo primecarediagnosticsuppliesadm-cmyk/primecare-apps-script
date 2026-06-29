@@ -15,6 +15,8 @@ function assert(cond, msg) {
 
 const orders = readFileSync(resolve(root, "src/pages/OrdersPage.jsx"), "utf8");
 const collections = readFileSync(resolve(root, "src/pages/CollectionsPage.jsx"), "utf8");
+const invoiceCenter = readFileSync(resolve(root, "src/pages/LabInvoiceCenterPage.jsx"), "utf8");
+const syncEvents = readFileSync(resolve(root, "src/operations/financialSyncEvents.js"), "utf8");
 const invoiceApi = readFileSync(resolve(root, "src/api/invoiceSupabaseApi.js"), "utf8");
 const primeApi = readFileSync(resolve(root, "src/api/primecareSupabaseApi.js"), "utf8");
 const nav = readFileSync(resolve(root, "src/operations/hqWorkflowNav.js"), "utf8");
@@ -33,8 +35,12 @@ assert(/finalizeInvoiceForOrderPayment/.test(invoiceApi), "finalize before payme
 assert(/financial_drift_detected|logFinancialDriftDetected/.test(primeApi), "drift detection");
 assert(/invalidateOrdersReadCache/.test(collections), "payment invalidates orders cache");
 assert(/invalidateCollectionsReadCache/.test(collections), "payment invalidates collections cache");
-assert(/notifyFinancialSyncRefresh/.test(collections), "payment notifies financial sync");
-assert(/onFinancialSyncRefresh/.test(orders), "Orders listens for financial sync");
+assert(/notifyFinancialSyncCompleted|notifyFinancialSyncRefresh/.test(collections), "payment notifies financial sync");
+assert(/onFinancialSyncCompleted|onFinancialSyncRefresh/.test(orders), "Orders listens for financial sync");
+assert(/FinancialSyncCompleted/.test(syncEvents), "FinancialSyncCompleted event defined");
+assert(/Invoice Total/.test(orders), "Orders payment panel shows Invoice Total");
+assert(/Fully Paid/.test(orders), "Orders Fully Paid disabled state");
+assert(/Payment History/.test(invoiceCenter), "Invoice Center Payment History action");
 assert(/paidAmount/.test(orders), "Orders shows paid amount in payment panel");
 assert(/isHqCreditRisk[\s\S]*paymentDrawerLabId/.test(collections), "HQ credit risk payment drawer");
 assert(/onRecordPayment/.test(creditRisk), "Credit & Risk Record Payment action");
