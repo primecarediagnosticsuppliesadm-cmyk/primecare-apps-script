@@ -174,37 +174,44 @@ export function deriveCollectionPaymentStatus({
   outstandingAmount,
   totalPaid,
   totalDelivered = 0,
+  totalAllocated = 0,
+  overdueDays = 0,
   explicitStatus = "",
 }) {
   const outstanding = num(outstandingAmount);
   const paid = num(totalPaid);
-  const delivered = num(totalDelivered);
+  const allocated = num(totalAllocated);
+  const overdue = num(overdueDays);
   const explicit = str(explicitStatus).trim();
   const explicitLower = explicit.toLowerCase();
 
   let derived;
-  if (outstanding > 0) {
-    derived = paid > 0 ? "Partially Paid" : delivered > 0 ? "Pending" : "Pending";
-  } else if (paid > 0) {
-    derived = "Paid";
+  if (outstanding <= 0.009) {
+    derived = paid > 0.009 || allocated > 0.009 ? "Paid" : "Current";
+  } else if (overdue > 0) {
+    derived = "Overdue";
+  } else if (paid > 0.009 || allocated > 0.009) {
+    derived = "Partially Paid";
   } else {
-    derived = "Current";
+    derived = "Outstanding";
   }
 
   if (explicit) {
-    if (explicitLower === "paid" && outstanding > 0) {
-      derived = paid > 0 ? "Partially Paid" : "Pending";
-    } else if (explicitLower === "pending" && outstanding <= 0) {
-      derived = paid > 0 ? "Paid" : "Current";
+    if (explicitLower === "paid" && outstanding > 0.009) {
+      derived = paid > 0.009 || allocated > 0.009 ? "Partially Paid" : "Outstanding";
+    } else if (explicitLower === "pending" && outstanding <= 0.009) {
+      derived = paid > 0.009 || allocated > 0.009 ? "Paid" : "Current";
     } else if (explicitLower === "partially paid" || explicitLower === "partial") {
-      derived = outstanding > 0 && paid > 0 ? "Partially Paid" : derived;
+      derived =
+        outstanding > 0.009 && (paid > 0.009 || allocated > 0.009) ? "Partially Paid" : derived;
     } else if (
       explicitLower !== "paid" &&
       explicitLower !== "pending" &&
-      explicitLower !== "current"
+      explicitLower !== "current" &&
+      explicitLower !== "outstanding"
     ) {
       derived = explicit;
-    } else if (explicitLower === "paid" && paid <= 0 && outstanding <= 0) {
+    } else if (explicitLower === "paid" && paid <= 0.009 && allocated <= 0.009 && outstanding <= 0.009) {
       derived = "Current";
     }
   }

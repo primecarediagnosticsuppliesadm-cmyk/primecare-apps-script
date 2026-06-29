@@ -52,6 +52,16 @@ import { labIdKey } from "@/utils/labId.js";
 import { getInvoicesForLabRead } from "@/api/invoiceSupabaseApi.js";
 import { HQ_INVOICE_LIST_MAX_LIMIT } from "@/api/hqReadBounds.js";
 import { buildLabAccountLedger } from "@/collections/labAccountLedger.js";
+import {
+  deriveAccountHealthStatus,
+  deriveInvoiceAccountStatus,
+  invoiceStatusTone,
+  LAB_INVOICE_TABLE_GRID,
+} from "@/collections/invoiceAccountStatus.js";
+import {
+  buildLabAccountActivityTimeline,
+  formatCreditRemainingLabel,
+} from "@/collections/labAccountActivity.js";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
 import InvoiceDetailsDrawer from "@/components/invoice/InvoiceDetailsDrawer.jsx";
 import InvoiceAllocationsDrawer from "@/components/invoice/InvoiceAllocationsDrawer.jsx";
@@ -114,6 +124,7 @@ import {
   ArrowRight,
   Building2,
   CalendarClock,
+  MoreHorizontal,
 } from "lucide-react";
 import AgentCollectionPaymentDrawer from "@/components/agent/AgentCollectionPaymentDrawer.jsx";
 import { AgentRouteStopBadge } from "@/components/agent/AgentOsSections.jsx";
@@ -201,7 +212,8 @@ function displayPaymentStatus(item) {
   return deriveCollectionPaymentStatus({
     outstandingAmount: item?.outstandingAmount,
     totalPaid: item?.totalPaid,
-    totalDelivered: item?.totalDelivered,
+    totalAllocated: item?.totalAllocated,
+    overdueDays: item?.overdueDays,
   });
 }
 
@@ -298,14 +310,32 @@ function CompactAccountKpi({ title, value, icon: Icon }) {
   );
 }
 
-function financialStatusSummary(item) {
-  const risk = String(item?.riskStatus || "").toLowerCase();
-  const overdueDays = Number(item?.overdueDays || 0);
-  const outstanding = Number(item?.outstandingAmount || 0);
-  if (overdueDays > 0) return { label: "Overdue", tone: "text-red-700 bg-red-50 border-red-200" };
-  if (risk.includes("high")) return { label: "Medium Risk", tone: "text-amber-700 bg-amber-50 border-amber-200" };
-  if (outstanding <= 0) return { label: "Good Standing", tone: "text-emerald-700 bg-emerald-50 border-emerald-200" };
-  return { label: "Partially Paid", tone: "text-blue-700 bg-blue-50 border-blue-200" };
+function financialStatusSummary(item, invoices = []) {
+  const totalAllocated = invoices.reduce(
+    (sum, inv) => sum + Number(inv.allocatedAmount ?? 0),
+    0
+  );
+  return deriveAccountHealthStatus({
+    outstandingAmount: item?.outstandingAmount,
+    totalPaid: Number(item?.totalPaid ?? 0),
+    totalAllocated,
+    overdueDays: item?.overdueDays,
+    riskStatus: item?.riskStatus,
+  });
+}
+
+function labCreditRemainingDisplay({ labLedgerKpis, collectionRow }) {
+  const creditLimit = Number(
+    labLedgerKpis?.creditLimit ??
+      collectionRow?.creditLimit ??
+      collectionRow?.credit_limit ??
+      collectionRow?.creditApproved ??
+      0
+  );
+  const outstanding = Number(
+    labLedgerKpis?.outstanding ?? collectionRow?.outstandingAmount ?? 0
+  );
+  return formatCreditRemainingLabel(creditLimit, outstanding, formatMoney);
 }
 
 function buildInvoiceRows(item, history) {
@@ -356,24 +386,192 @@ function buildInvoiceRows(item, history) {
   return rows.slice(0, 8);
 }
 
-function buildFinancialTimeline(item, history) {
-  const outstandingNow = Number(item?.outstandingAmount || 0);
-  return (history || []).map((entry) => {
-    const amount = Number(entry.amountCollected || entry.amount || 0);
-    const invoiceId = String(entry.invoiceId || entry.invoice_id || "").trim();
-    const paymentDate = entry.paymentDate || entry.updatedAt || "";
-    const mode = entry.paymentMode || entry.mode || "";
-    const outstandingAfter = Number(entry.outstandingAfter || entry.outstanding_after || NaN);
-    const reducedTo = Number.isFinite(outstandingAfter) ? outstandingAfter : outstandingNow;
-    return {
-      id: entry.paymentId || `${paymentDate}-${amount}-${invoiceId}`,
-      title: amount > 0 ? `${formatMoney(amount)} payment received` : "Account update",
-      subline: `Applied to ${invoiceId || "latest invoice"}${mode ? ` · ${mode}` : ""}`,
-      trailing: `Outstanding ${formatMoney(reducedTo)}`,
-      date: paymentDate,
-      kind: amount > 0 ? "payment" : "update",
-    };
-  });
+function activityKindDotClass(kind) {
+  if (kind === "payment") return "bg-emerald-500";
+  if (kind === "pending") return "bg-amber-500";
+  if (kind === "fulfillment") return "bg-violet-500";
+  if (kind === "invoice") return "bg-sky-500";
+  return "bg-blue-500";
+}
+
+function LabOutstandingInvoiceRow({
+  invoice,
+  rowId,
+  labId,
+  invoiceDownloadKey,
+  onView,
+  onAllocations,
+  onRecordPayment,
+  onDownload,
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const total = Number(invoice.totalAmount ?? invoice.amount ?? 0);
+  const allocated = Number(invoice.allocatedAmount ?? 0);
+  const openBalance = Number(invoice.openBalance ?? Math.max(0, total - allocated));
+  const downloadKey = invoice.invoiceDbId || invoice.orderId || rowId;
+  const downloading = invoiceDownloadKey === downloadKey;
+
+  return (
+    <div className="rounded-md border border-border/70 px-2 py-2 transition hover:border-slate-300">
+      <div className={cn("hidden xl:grid", LAB_INVOICE_TABLE_GRID)}>
+        <div className="min-w-0">
+          <span
+            className="block truncate font-mono text-[10px] font-semibold text-slate-900"
+            title={invoice.invoiceId}
+          >
+            {invoice.invoiceId}
+          </span>
+        </div>
+        <div className="min-w-0">
+          <span
+            className="block truncate font-mono text-[10px] text-slate-600"
+            title={invoice.orderId || "—"}
+          >
+            {invoice.orderId || "—"}
+          </span>
+        </div>
+        <div className="text-right text-[10px] font-semibold tabular-nums text-slate-900">
+          {formatMoney(total)}
+        </div>
+        <div className="text-right text-[10px] tabular-nums text-emerald-700">
+          {formatMoney(allocated)}
+        </div>
+        <div className="text-right text-[10px] tabular-nums text-amber-700">
+          {formatMoney(openBalance)}
+        </div>
+        <div>
+          <span
+            className={cn(
+              "inline-block max-w-full truncate rounded px-1 py-0.5 text-[10px] font-medium",
+              invoiceStatusTone(invoice.status)
+            )}
+          >
+            {invoice.status}
+          </span>
+        </div>
+        <div className="flex items-center justify-end gap-0.5">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-[10px]"
+            onClick={() => onView(invoice)}
+          >
+            View
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-[10px]"
+            disabled={downloading}
+            onClick={() => void onDownload(invoice)}
+          >
+            {downloading ? <Loader2 className="h-3 w-3 animate-spin" /> : "PDF"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-[10px]"
+            disabled={!invoice.orderId || openBalance <= 0}
+            onClick={() => onRecordPayment({ ...invoice, labId })}
+          >
+            Pay
+          </Button>
+          <div className="relative">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              aria-label="More invoice actions"
+              onClick={() => setMenuOpen((open) => !open)}
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </Button>
+            {menuOpen ? (
+              <div className="absolute right-0 top-full z-20 mt-0.5 min-w-[7.5rem] rounded-md border border-border bg-card py-1 shadow-md">
+                <button
+                  type="button"
+                  className="block w-full px-2.5 py-1.5 text-left text-[10px] text-slate-700 hover:bg-muted"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onAllocations(invoice);
+                  }}
+                >
+                  Allocations
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-2 xl:hidden">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="truncate font-mono text-sm font-semibold text-slate-900" title={invoice.invoiceId}>
+              {invoice.invoiceId}
+            </p>
+            <p className="truncate font-mono text-xs text-slate-600" title={invoice.orderId || "—"}>
+              Order {invoice.orderId || "—"}
+            </p>
+          </div>
+          <span
+            className={cn(
+              "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium",
+              invoiceStatusTone(invoice.status)
+            )}
+          >
+            {invoice.status}
+          </span>
+        </div>
+        <dl className="grid grid-cols-3 gap-2 text-xs">
+          <div>
+            <dt className="text-muted-foreground">Total</dt>
+            <dd className="text-right font-semibold tabular-nums">{formatMoney(total)}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Allocated</dt>
+            <dd className="text-right font-semibold tabular-nums text-emerald-700">{formatMoney(allocated)}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Open</dt>
+            <dd className="text-right font-semibold tabular-nums text-amber-700">{formatMoney(openBalance)}</dd>
+          </div>
+        </dl>
+        <div className="flex flex-wrap gap-1">
+          <Button type="button" size="sm" variant="outline" className="h-8 px-2.5 text-xs" onClick={() => onView(invoice)}>
+            View
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 px-2.5 text-xs"
+            disabled={downloading}
+            onClick={() => void onDownload(invoice)}
+          >
+            {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "PDF"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 px-2.5 text-xs"
+            disabled={!invoice.orderId || openBalance <= 0}
+            onClick={() => onRecordPayment({ ...invoice, labId })}
+          >
+            Pay
+          </Button>
+          <Button type="button" size="sm" variant="ghost" className="h-8 px-2.5 text-xs" onClick={() => onAllocations(invoice)}>
+            Allocations
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function groupTimelineByDate(events) {
@@ -408,14 +606,12 @@ function LabAccountTimeline({
   const overdueDays = Number(item.overdueDays || 0);
   const paymentLabel = displayPaymentStatus(item);
   const riskLabel = item.riskStatus || "Low";
-  const health = financialStatusSummary(item);
   const dueDate = item.nextFollowUp || item.dueDate || "";
   const creditLimit = Number(
     item.creditLimit || item.credit_limit || item.creditApproved || item.credit_limit_amount || 0
   );
   const creditUsed = Math.max(0, outstanding);
   const utilizationPct = creditLimit > 0 ? Math.min(100, Math.round((creditUsed / creditLimit) * 100)) : null;
-  const [expandedInvoiceId, setExpandedInvoiceId] = useState("");
   const [invoiceDrawer, setInvoiceDrawer] = useState(null);
   const [allocationsDrawer, setAllocationsDrawer] = useState(null);
   const [activeFinanceTab, setActiveFinanceTab] = useState("activity");
@@ -486,7 +682,15 @@ function LabAccountTimeline({
         openBalance: inv.openBalance,
         invoiceDate: inv.invoiceDate,
         dueDate: inv.dueDate,
-        status: inv.displayStatus || inv.status,
+        sentAt: inv.sentAt,
+        status: deriveInvoiceAccountStatus({
+          status: inv.status,
+          openBalance: inv.openBalance,
+          paidAmount: inv.allocatedAmount,
+          allocatedAmount: inv.allocatedAmount,
+          dueDate: inv.dueDate,
+          sentAt: inv.sentAt,
+        }),
         rawStatus: inv.status,
         hasPdf: inv.hasPdf,
         labId: inv.labId,
@@ -494,9 +698,20 @@ function LabAccountTimeline({
     }
     return buildInvoiceRows(collectionDetails || item, history);
   }, [serverInvoices, collectionDetails, item, history]);
+  const health = useMemo(
+    () => financialStatusSummary(item, invoices),
+    [item, invoices]
+  );
   const financialTimeline = useMemo(
-    () => buildFinancialTimeline(collectionDetails || item, history),
-    [collectionDetails, item, history]
+    () =>
+      buildLabAccountActivityTimeline({
+        item: collectionDetails || item,
+        history,
+        invoices,
+        formatMoney,
+        formatShortDate,
+      }),
+    [collectionDetails, item, history, invoices]
   );
   const timelineGroups = useMemo(() => groupTimelineByDate(financialTimeline), [financialTimeline]);
   const accountStandingSummary =
@@ -505,7 +720,9 @@ function LabAccountTimeline({
       : outstanding <= 0
         ? "Account is in good standing with no pending balance."
         : "Account is active with pending balance under monitoring.";
-  const availableCredit = creditLimit > 0 ? Math.max(0, creditLimit - creditUsed) : null;
+  const availableCredit =
+    creditLimit > 0 ? Math.max(0, creditLimit - creditUsed) : null;
+  const creditRemainingLabel = formatCreditRemainingLabel(creditLimit, outstanding, formatMoney);
   const topInvoices = invoices.slice(0, 12);
   const statementRows = useMemo(
     () =>
@@ -586,206 +803,42 @@ function LabAccountTimeline({
   }
 
   return (
-    <div className="space-y-2">
-      <div className="grid gap-2 lg:grid-cols-[1.35fr_0.9fr]">
-        <section className="min-w-0 rounded-lg border border-border bg-card p-2 shadow-sm">
-          <div className="mb-1.5 flex items-center justify-between">
-            <h3 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Outstanding Invoices
-            </h3>
-            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-slate-600">
-              {topInvoices.length}
-            </span>
-          </div>
+    <div className="space-y-3">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.5fr)_minmax(16rem,0.85fr)]">
+        <section className="min-w-0 rounded-lg border border-border bg-card p-3 shadow-sm">
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Outstanding Invoices ({topInvoices.length})
+          </h3>
           {topInvoices.length ? (
             <>
-              <div className="hidden text-[10px] font-medium uppercase tracking-wide text-slate-500 xl:grid xl:grid-cols-[1fr_0.9fr_0.8fr_0.8fr_0.8fr_0.7fr_1.2fr] xl:gap-2 xl:px-2 xl:py-1">
+              <div
+                className={cn(
+                  "mb-1 hidden border-b border-border/60 pb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500 xl:grid",
+                  LAB_INVOICE_TABLE_GRID
+                )}
+              >
                 <span>Invoice</span>
                 <span>Order</span>
-                <span>Total</span>
-                <span>Allocated</span>
-                <span>Open</span>
+                <span className="text-right">Total</span>
+                <span className="text-right">Allocated</span>
+                <span className="text-right">Open</span>
                 <span>Status</span>
-                <span>Actions</span>
+                <span className="text-right">Actions</span>
               </div>
-              <div className="space-y-1">
-                {topInvoices.map((invoice, idx) => {
-                  const id = `${invoice.invoiceId}-${idx}`;
-                  const total = Number(invoice.totalAmount ?? invoice.amount ?? 0);
-                  const allocated = Number(invoice.allocatedAmount ?? 0);
-                  const openBalance = Number(
-                    invoice.openBalance ?? Math.max(0, total - allocated)
-                  );
-                  return (
-                    <div
-                      key={id}
-                      className="rounded-md border border-border/70 px-2 py-1.5 transition hover:border-slate-300"
-                    >
-                      <div className="hidden items-center gap-1 xl:grid xl:grid-cols-[1fr_0.9fr_0.8fr_0.8fr_0.8fr_0.7fr_1.2fr] xl:gap-2">
-                        <div className="min-w-0 text-[11px] font-semibold text-slate-900">{invoice.invoiceId}</div>
-                        <div className="min-w-0 text-[10px] text-slate-600">{invoice.orderId || "—"}</div>
-                        <div className="text-[11px] font-semibold tabular-nums text-slate-900">{formatMoney(total)}</div>
-                        <div className="text-[10px] tabular-nums text-emerald-700">{formatMoney(allocated)}</div>
-                        <div className="text-[10px] tabular-nums text-amber-700">{formatMoney(openBalance)}</div>
-                        <div className="text-[10px]">
-                          <span
-                            className={cn(
-                              "rounded px-1 py-0.5",
-                              invoice.status === "paid" || invoice.status === "Paid"
-                                ? "bg-emerald-50 text-emerald-700"
-                                : invoice.status === "overdue"
-                                  ? "bg-red-50 text-red-700"
-                                  : "bg-amber-50 text-amber-700"
-                            )}
-                          >
-                            {invoice.status}
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap gap-1">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-6 px-1.5 text-[10px]"
-                            onClick={() => setInvoiceDrawer(invoice)}
-                          >
-                            View Invoice
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-6 px-1.5 text-[10px]"
-                            onClick={() => setAllocationsDrawer(invoice)}
-                          >
-                            Allocations
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-6 px-1.5 text-[10px]"
-                            disabled={!invoice.orderId || openBalance <= 0}
-                            onClick={() =>
-                              onRecordInvoicePayment?.({
-                                ...invoice,
-                                labId,
-                              })
-                            }
-                          >
-                            Record Payment
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-6 px-1.5 text-[10px]"
-                            disabled={invoiceDownloadKey === (invoice.invoiceDbId || invoice.orderId || id)}
-                            onClick={() => void handleInvoiceDownload(invoice)}
-                          >
-                            {invoiceDownloadKey === (invoice.invoiceDbId || invoice.orderId || id) ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              "Download"
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="space-y-2 xl:hidden">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-slate-900">{invoice.invoiceId}</p>
-                            <p className="text-xs text-slate-600">Order {invoice.orderId || "—"}</p>
-                          </div>
-                          <span
-                            className={cn(
-                              "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium",
-                              invoice.status === "paid" || invoice.status === "Paid"
-                                ? "bg-emerald-50 text-emerald-700"
-                                : invoice.status === "overdue"
-                                  ? "bg-red-50 text-red-700"
-                                  : "bg-amber-50 text-amber-700"
-                            )}
-                          >
-                            {invoice.status}
-                          </span>
-                        </div>
-                        <dl className="grid grid-cols-3 gap-2 text-xs">
-                          <div>
-                            <dt className="text-muted-foreground">Total</dt>
-                            <dd className="font-semibold tabular-nums">{formatMoney(total)}</dd>
-                          </div>
-                          <div>
-                            <dt className="text-muted-foreground">Allocated</dt>
-                            <dd className="font-semibold tabular-nums text-emerald-700">{formatMoney(allocated)}</dd>
-                          </div>
-                          <div>
-                            <dt className="text-muted-foreground">Open</dt>
-                            <dd className="font-semibold tabular-nums text-amber-700">{formatMoney(openBalance)}</dd>
-                          </div>
-                        </dl>
-                        <div className="flex flex-wrap gap-1.5">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-9 rounded-lg text-xs"
-                            onClick={() => setInvoiceDrawer(invoice)}
-                          >
-                            View Invoice
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-9 rounded-lg text-xs"
-                            onClick={() => setAllocationsDrawer(invoice)}
-                          >
-                            Allocations
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-9 rounded-lg text-xs"
-                            disabled={!invoice.orderId || openBalance <= 0}
-                            onClick={() =>
-                              onRecordInvoicePayment?.({
-                                ...invoice,
-                                labId,
-                              })
-                            }
-                          >
-                            Record Payment
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-9 rounded-lg text-xs"
-                            disabled={invoiceDownloadKey === (invoice.invoiceDbId || invoice.orderId || id)}
-                            onClick={() => void handleInvoiceDownload(invoice)}
-                          >
-                            {invoiceDownloadKey === (invoice.invoiceDbId || invoice.orderId || id) ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              "Download"
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                      {expandedInvoiceId === id ? (
-                        <div className="mt-1.5 rounded border border-dashed border-border px-2 py-1 text-[10px] text-slate-600">
-                          <div>Order {invoice.orderId || "—"} <ArrowRight className="mx-0.5 inline h-2.5 w-2.5" /> {invoice.invoiceId}</div>
-                          <div>
-                            Allocated {formatMoney(allocated)} · Open {formatMoney(openBalance)} · Due{" "}
-                            {formatShortDate(invoice.dueDate)} · {invoice.status}
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
+              <div className="space-y-1.5">
+                {topInvoices.map((invoice, idx) => (
+                  <LabOutstandingInvoiceRow
+                    key={`${invoice.invoiceId}-${idx}`}
+                    invoice={invoice}
+                    rowId={`${invoice.invoiceId}-${idx}`}
+                    labId={labId}
+                    invoiceDownloadKey={invoiceDownloadKey}
+                    onView={setInvoiceDrawer}
+                    onAllocations={setAllocationsDrawer}
+                    onRecordPayment={onRecordInvoicePayment}
+                    onDownload={handleInvoiceDownload}
+                  />
+                ))}
               </div>
             </>
           ) : (
@@ -795,26 +848,37 @@ function LabAccountTimeline({
           )}
         </section>
 
-        <aside className="rounded-lg border border-border bg-card p-2.5 shadow-sm">
-          <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <aside className="rounded-lg border border-border bg-card p-3 shadow-sm">
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             Account Health
           </h3>
-          <div className="flex items-start justify-between gap-2">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <p className="text-[10px] text-slate-500">Outstanding</p>
-              <p className="text-lg font-bold tabular-nums text-foreground">{formatMoney(outstanding)}</p>
-              <p className="text-[10px] text-muted-foreground">Paid {formatMoney(totalPaid)}</p>
+              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Outstanding</p>
+              <p className="text-xl font-bold tabular-nums text-foreground">{formatMoney(outstanding)}</p>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">Paid {formatMoney(totalPaid)}</p>
             </div>
-            <div className="text-right">
-              <span className={cn("rounded border px-1.5 py-0.5 text-[10px] font-medium", health.tone)}>
+            <div className="sm:text-right">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Status</p>
+              <span className={cn("mt-0.5 inline-block rounded border px-2 py-0.5 text-[10px] font-medium", health.tone)}>
                 {health.label}
               </span>
               <p className="mt-1 text-[10px] text-muted-foreground">Risk: {riskLabel}</p>
             </div>
           </div>
-          <div className="mt-2 text-[10px] text-slate-600">
-            <div>Behavior: {overdueDays > 0 ? `Delayed by ${overdueDays}d` : "On track"}</div>
-            <div>Next payment: {formatShortDate(dueDate)}</div>
+          <div className="mt-3 grid gap-1.5 border-t border-border/60 pt-3 text-[10px] text-slate-600">
+            <div className="flex items-center justify-between gap-2">
+              <span>Credit remaining</span>
+              <span className="font-medium tabular-nums text-slate-800">{creditRemainingLabel}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span>Behavior</span>
+              <span>{overdueDays > 0 ? `Delayed by ${overdueDays}d` : "On track"}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span>Next payment</span>
+              <span>{formatShortDate(dueDate)}</span>
+            </div>
           </div>
           {utilizationPct != null ? (
             <div className="mt-2">
@@ -903,7 +967,7 @@ function LabAccountTimeline({
                       <span
                         className={cn(
                           "absolute left-0 top-2.5 h-1.5 w-1.5 rounded-full border border-background",
-                          entry.kind === "payment" ? "bg-emerald-500" : "bg-blue-500"
+                          activityKindDotClass(entry.kind)
                         )}
                         aria-hidden
                       />
@@ -924,7 +988,9 @@ function LabAccountTimeline({
           </div>
         ) : (
           <p className="rounded-md border border-dashed px-2 py-2 text-[11px] text-muted-foreground">
-            No entries in this tab yet.
+            {activeFinanceTab === "activity"
+              ? "No payment or invoice activity recorded yet."
+              : "No entries in this tab yet."}
           </p>
         )}
       </section>
@@ -2872,9 +2938,9 @@ export default function CollectionsPage({
         />
       ) : null}
 
-      <div className={isLabAccount ? "mx-auto max-w-2xl" : ""}>
+      <div className={isLabAccount ? "mx-auto max-w-5xl" : ""}>
         {isLabAccount ? (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
             <CompactAccountKpi
               title="Outstanding"
               value={formatMoney(
@@ -2905,26 +2971,10 @@ export default function CollectionsPage({
             />
             <CompactAccountKpi
               title="Credit remaining"
-              value={
-                labLedgerKpis?.creditRemaining != null
-                  ? formatMoney(labLedgerKpis.creditRemaining)
-                  : Number(
-                        filteredCollections[0]?.creditLimit ||
-                          filteredCollections[0]?.credit_limit ||
-                          0
-                      ) > 0
-                    ? formatMoney(
-                        Math.max(
-                          0,
-                          Number(
-                            filteredCollections[0]?.creditLimit ||
-                              filteredCollections[0]?.credit_limit ||
-                              0
-                          ) - Number(filteredCollections[0]?.outstandingAmount || 0)
-                        )
-                      )
-                    : "—"
-              }
+              value={labCreditRemainingDisplay({
+                labLedgerKpis,
+                collectionRow: filteredCollections[0],
+              })}
               icon={ShieldAlert}
             />
           </div>
@@ -3040,7 +3090,7 @@ export default function CollectionsPage({
           />
         )
       ) : isLabAccount ? (
-        <div className="mx-auto max-w-2xl space-y-2" role="list">
+        <div className="mx-auto max-w-5xl space-y-3" role="list">
           {labDisplayCollections.map((item) => {
             const key = labIdKey(item.labId);
             const isExpanded = expandedLabId === key;

@@ -9,8 +9,8 @@ function statusVariant(status) {
   const key = normalizeStatus(status);
   if (key === "paid") return "success";
   if (key === "overdue") return "danger";
-  if (key === "partially_paid" || key === "partial") return "warning";
-  if (key === "sent") return "warning";
+  if (key === "partially paid" || key === "partially_paid" || key === "partial") return "warning";
+  if (key === "sent" || key === "open" || key === "outstanding" || key === "unpaid") return "info";
   if (key === "draft") return "neutral";
   if (key === "cancelled" || key === "failed") return "danger";
   return "neutral";
@@ -19,7 +19,6 @@ function statusVariant(status) {
 function statusLabel(status) {
   const key = normalizeStatus(status);
   if (!key) return "—";
-  if (key === "overdue") return "Overdue";
   if (key === "partially_paid") return "Partially paid";
   return key.charAt(0).toUpperCase() + key.slice(1);
 }

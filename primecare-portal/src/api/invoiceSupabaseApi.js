@@ -8,6 +8,7 @@ import {
   HQ_INVOICE_ORDER_LOOKUP_CHUNK,
   clampLimit,
 } from "@/api/hqReadBounds.js";
+import { deriveInvoiceAccountStatus } from "@/collections/invoiceAccountStatus.js";
 
 export const INVOICE_PDF_BUCKET = "invoice-pdfs";
 export const INVOICE_SIGNED_URL_TTL_SEC = 300;
@@ -48,12 +49,15 @@ export function mapInvoiceRow(row, allocationHint = {}) {
   const openBalance = num(
     row.open_balance ?? row.openBalance ?? Math.max(0, totalAmount - allocatedAmount)
   );
-  const today = todayYmd();
-  const isOverdue =
-    (status === "sent" || status === "partially_paid") &&
-    dueDate &&
-    dueDate < today &&
-    openBalance > 0.009;
+  const sentAt = str(row.sent_at ?? row.sentAt);
+  const displayStatus = deriveInvoiceAccountStatus({
+    status,
+    openBalance,
+    paidAmount: allocatedAmount,
+    allocatedAmount,
+    dueDate,
+    sentAt,
+  });
   return {
     id,
     tenantId: str(row.tenant_id ?? row.tenantId),
@@ -68,7 +72,7 @@ export function mapInvoiceRow(row, allocationHint = {}) {
     allocatedAmount,
     openBalance,
     status,
-    displayStatus: isOverdue ? "overdue" : status,
+    displayStatus,
     pdfStoragePath: str(row.pdf_storage_path ?? row.pdfStoragePath) || null,
     pdfGeneratedAt: str(row.pdf_generated_at ?? row.pdfGeneratedAt) || null,
     sentAt: str(row.sent_at ?? row.sentAt) || null,
