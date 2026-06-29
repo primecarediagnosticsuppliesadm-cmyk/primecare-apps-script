@@ -47,12 +47,17 @@ export function mapLabPaymentHistoryRows(rawPayments, labId) {
  */
 export async function loadLabPaymentHistoryForDisplay(supabase, labId) {
   if (!supabase || !labId) return [];
-  const { data, error } = await fetchPaymentsForLabBoundedRows(supabase, labId);
-  if (error) {
-    console.warn("[loadLabPaymentHistoryForDisplay] payments:", error.message);
+  try {
+    const { data, error } = await fetchPaymentsForLabBoundedRows(supabase, labId);
+    if (error) {
+      console.warn("[loadLabPaymentHistoryForDisplay] payments:", error.message);
+      return [];
+    }
+    return mapLabPaymentHistoryRows(data || [], labId);
+  } catch (err) {
+    console.warn("[loadLabPaymentHistoryForDisplay] payments:", err?.message || err);
     return [];
   }
-  return mapLabPaymentHistoryRows(data || [], labId);
 }
 
 export function sumPaymentHistoryTotal(history) {

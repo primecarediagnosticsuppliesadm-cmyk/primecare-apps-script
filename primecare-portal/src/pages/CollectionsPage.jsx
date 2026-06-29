@@ -395,6 +395,7 @@ function LabAccountTimeline({
   item,
   history,
   detailsLoading,
+  detailsError,
   copy,
   collectionDetails,
   setActivePage,
@@ -884,6 +885,10 @@ function LabAccountTimeline({
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading activity…
           </div>
+        ) : detailsError ? (
+          <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-2 text-[11px] text-amber-900">
+            {detailsError}
+          </p>
         ) : tabRows.length ? (
           <div className="space-y-2">
             {groupedTabRows.map((group) => (
@@ -1822,6 +1827,7 @@ export default function CollectionsPage({
   const [listRefreshing, setListRefreshing] = useState(false);
   const [dataLoadedAt, setDataLoadedAt] = useState(() => (hydratedCollections ? Date.now() : null));
   const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsError, setDetailsError] = useState("");
   const [saving, setSaving] = useState(false);
   const [completingTask, setCompletingTask] = useState(false);
 
@@ -1864,7 +1870,14 @@ export default function CollectionsPage({
     currentUser?.tenant_id ||
     "";
   const profileLabId = labIdKey(currentUser?.labId || currentUser?.lab_id || "");
+  const userRole = str(currentUser?.role || "").toLowerCase();
   const [labAccountLedger, setLabAccountLedger] = useState(null);
+  const collectionsLengthRef = useRef(collections.length);
+  const openCollectionRequestRef = useRef(0);
+  const openCollectionInflightRef = useRef("");
+  const labAutoOpenedRef = useRef("");
+  const labLedgerLoadKeyRef = useRef("");
+  collectionsLengthRef.current = collections.length;
   const [collectionEvidence, setCollectionEvidence] = useState([]);
 
   useEffect(() => {
@@ -1944,7 +1957,7 @@ export default function CollectionsPage({
   const loadCollections = useCallback(async ({ silent = false } = {}) => {
     return predatorTrace("Collections", "page.load", async () => {
       try {
-        const hasRows = collections.length > 0 || hadCacheOnMount.current;
+        const hasRows = collectionsLengthRef.current > 0 || hadCacheOnMount.current;
         if (silent || hasRows) setListRefreshing(true);
         else setLoading(true);
         setLoadError("");
@@ -1952,9 +1965,9 @@ export default function CollectionsPage({
         logSupabaseFeatureSource("Collections.list", { api: "getCollectionsRead" });
         const [res, ownershipRes] = await Promise.all([
           getCollectionsRead({
-            force: currentUser?.role === ROLES.AGENT ? true : silent,
+            force: userRole === ROLES.AGENT ? true : silent,
           }),
-          currentUser?.role === ROLES.AGENT
+          userRole === ROLES.AGENT
             ? getAgentActiveLabOwnershipRowsRead()
             : Promise.resolve({ data: { rows: [] } }),
         ]);
@@ -1980,7 +1993,7 @@ export default function CollectionsPage({
         const rows = built.collections;
         if (
           !isLabAccount &&
-          String(currentUser?.role || "").toLowerCase() !== ROLES.AGENT &&
+          userRole !== ROLES.AGENT &&
           supabase &&
           rows.length
         ) {
@@ -2011,7 +2024,7 @@ export default function CollectionsPage({
               "Failed to load account information"
             )
         );
-        if (!collections.length && !hadCacheOnMount.current) {
+        if (!collectionsLengthRef.current && !hadCacheOnMount.current) {
           setSummary({
             totalOutstanding: 0,
             overdueCount: 0,
@@ -2026,11 +2039,55 @@ export default function CollectionsPage({
         setDataLoadedAt(Date.now());
       }
     });
-  }, [currentUser, isLabAccount, distributorScope, collections.length, collectionsCacheKey]);
+  }, [
+    userRole,
+    isLabAccount,
+    distributorScope?.tenantId,
+    tenantId,
+    collectionsCacheKey,
+    currentUser,
+  ]);
+
+  const loadLabAccountLedger = useCallback(async () => {
+    if (!isLabAccount || !profileLabId) return;
+    const loadKey = `${tenantId}:${profileLabId}`;
+
+    setLabAccountLedger({ status: "loading" });
+
+    try {
+      const [invoiceRes, historyRes, detailRes] = await Promise.all([
+        getInvoicesForLabRead(profileLabId, {
+          tenantId,
+          pageSize: HQ_INVOICE_LIST_MAX_LIMIT,
+        }),
+        getCollectionHistoryRead(profileLabId),
+        getCollectionDetailRead(profileLabId),
+      ]);
+
+      const ledger = buildLabAccountLedger({
+        invoices: invoiceRes?.rows || [],
+        paymentHistory: historyRes?.data?.history || [],
+        arRow: detailRes?.data?.collection,
+        labId: profileLabId,
+        labName: str(currentUser?.labName || currentUser?.lab_name || ""),
+      });
+
+      labLedgerLoadKeyRef.current = loadKey;
+      setLabAccountLedger({
+        status: "ready",
+        ...ledger,
+      });
+    } catch (err) {
+      console.warn("CollectionsPage labAccountLedger:", err);
+      setLabAccountLedger({ status: "ready", hasLedgerData: false, collectionItem: null });
+    }
+  }, [isLabAccount, profileLabId, tenantId, currentUser?.labName, currentUser?.lab_name]);
 
   useEffect(() => {
     void loadCollections({ silent: hadCacheOnMount.current });
-  }, [loadCollections, authToken]);
+    // Initial load only — Refresh calls handleRefresh explicitly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken, tenantId, profileLabId, isLabAccount]);
 
   useEffect(() => {
     if (loading || isLabAccount) return;
@@ -2066,15 +2123,25 @@ export default function CollectionsPage({
 
   async function openCollection(labId, options = {}) {
     const listMatch = findCollectionByLabId(collections, labId);
-    const canonicalLabId = listMatch?.labId ?? labId;
+    const ledgerMatch =
+      !listMatch && isLabAccount && labAccountLedger?.collectionItem?.labId
+        ? labAccountLedger.collectionItem
+        : null;
+    const canonicalLabId = listMatch?.labId ?? ledgerMatch?.labId ?? labId;
     const canonicalKey = labIdKey(canonicalLabId);
+    if (!canonicalKey) return;
+
+    if (openCollectionInflightRef.current === canonicalKey && !options?.force) return;
+    openCollectionInflightRef.current = canonicalKey;
+    const requestId = ++openCollectionRequestRef.current;
 
     try {
       setDetailsLoading(true);
+      setDetailsError("");
 
-      if (listMatch && !options?.suppressExpand) {
+      if ((listMatch || ledgerMatch) && !options?.suppressExpand) {
         setExpandedLabId(canonicalKey);
-        setSelectedCollection(listMatch);
+        setSelectedCollection(listMatch || ledgerMatch);
       } else if (!options?.suppressExpand) {
         setExpandedLabId(canonicalKey);
       }
@@ -2087,17 +2154,27 @@ export default function CollectionsPage({
       let sbHistoryOk = false;
 
       if (supabase) {
-        logSupabaseFeatureSource("Collections.history", {
-          api: "loadLabPaymentHistoryForDisplay",
-        });
-        historyRows = await loadLabPaymentHistoryForDisplay(supabase, canonicalLabId);
-        sbHistoryOk = true;
+        try {
+          logSupabaseFeatureSource("Collections.history", {
+            api: "loadLabPaymentHistoryForDisplay",
+          });
+          historyRows = await loadLabPaymentHistoryForDisplay(supabase, canonicalLabId);
+          sbHistoryOk = true;
+        } catch (histErr) {
+          console.warn("CollectionsPage payment history:", histErr);
+        }
 
-        logSupabaseFeatureSource("Collections.details", { api: "getCollectionDetailRead" });
-        const detailRead = await getCollectionDetailRead(canonicalLabId);
-        sbDetailOk = Boolean(detailRead?.success);
-        sbDetail = detailRead?.data?.collection ?? null;
+        try {
+          logSupabaseFeatureSource("Collections.details", { api: "getCollectionDetailRead" });
+          const detailRead = await getCollectionDetailRead(canonicalLabId);
+          sbDetailOk = Boolean(detailRead?.success);
+          sbDetail = detailRead?.data?.collection ?? null;
+        } catch (detailErr) {
+          console.warn("CollectionsPage collection detail:", detailErr);
+        }
       }
+
+      if (requestId !== openCollectionRequestRef.current) return;
 
       let apiCollection = sbDetail;
       const useAppsScriptDetail = !sbDetailOk && !import.meta.env.DEV;
@@ -2129,21 +2206,24 @@ export default function CollectionsPage({
         historyRows = Array.isArray(historyPayload.history) ? historyPayload.history : [];
       }
 
-      let collection = listMatch || null;
+      if (requestId !== openCollectionRequestRef.current) return;
+
+      let collection = listMatch || ledgerMatch || null;
       if (apiCollection) {
         const mergedNotes =
           apiCollection.collectionsNotes ??
           apiCollection.note ??
           listMatch?.collectionsNotes ??
+          ledgerMatch?.collectionsNotes ??
           "";
         collection = {
-          ...listMatch,
+          ...(listMatch || ledgerMatch || {}),
           ...apiCollection,
           labId: labIdKey(apiCollection.labId ?? canonicalLabId),
           collectionsNotes: mergedNotes,
           nextFollowUp:
-            apiCollection.nextFollowUp ?? listMatch?.nextFollowUp ?? "",
-          nextAction: apiCollection.nextAction ?? listMatch?.nextAction ?? "",
+            apiCollection.nextFollowUp ?? listMatch?.nextFollowUp ?? ledgerMatch?.nextFollowUp ?? "",
+          nextAction: apiCollection.nextAction ?? listMatch?.nextAction ?? ledgerMatch?.nextAction ?? "",
         };
       }
 
@@ -2152,6 +2232,10 @@ export default function CollectionsPage({
       }
       setSelectedCollection(collection);
       setHistory(historyRows);
+
+      if (!historyRows.length && !sbHistoryOk && isLabAccount) {
+        setDetailsError("Payment activity is temporarily unavailable. Try Refresh.");
+      }
 
       if (supabase && !isLabAccount && !isAgentView) {
         setLabOrdersLoadingByLabId((prev) => ({ ...prev, [canonicalKey]: true }));
@@ -2189,19 +2273,44 @@ export default function CollectionsPage({
         );
       }
     } catch (err) {
-      if (listMatch) {
-        setExpandedLabId(canonicalKey);
-        setSelectedCollection(listMatch);
-        setHistory([]);
-      } else {
+      if (requestId !== openCollectionRequestRef.current) return;
+      console.warn("CollectionsPage openCollection:", err);
+      const fallback = listMatch || ledgerMatch;
+      setExpandedLabId(canonicalKey);
+      setSelectedCollection(
+        fallback || {
+          labId: canonicalLabId,
+          labName: str(currentUser?.labName || currentUser?.lab_name || ""),
+        }
+      );
+      setHistory([]);
+      setDetailsError(err?.message || "Failed to load payment activity.");
+      if (!isLabAccount && !fallback) {
         showToast("error", err.message || "Failed to load collection details");
         setExpandedLabId("");
         setSelectedCollection(null);
       }
     } finally {
-      setDetailsLoading(false);
+      if (requestId === openCollectionRequestRef.current) {
+        if (openCollectionInflightRef.current === canonicalKey) {
+          openCollectionInflightRef.current = "";
+        }
+        setDetailsLoading(false);
+      }
     }
   }
+
+  const handleRefresh = useCallback(async () => {
+    labAutoOpenedRef.current = "";
+    labLedgerLoadKeyRef.current = "";
+    openCollectionInflightRef.current = "";
+    await loadCollections({ silent: true });
+    if (isLabAccount && profileLabId) {
+      await loadLabAccountLedger();
+      labAutoOpenedRef.current = "";
+      await openCollection(profileLabId, { force: true });
+    }
+  }, [loadCollections, loadLabAccountLedger, isLabAccount, profileLabId]);
 
   function hydratePendingCollectionTask() {
     const raw = sessionStorage.getItem("primecare_pending_collection_task");
@@ -2498,56 +2607,34 @@ export default function CollectionsPage({
   }, [isLabAccount, filteredCollections.length, labAccountLedger]);
 
   useEffect(() => {
-    if (!isLabAccount || loading || listRefreshing) return undefined;
-    if (!profileLabId) return undefined;
-
-    let cancelled = false;
-    setLabAccountLedger({ status: "loading" });
-
-    void (async () => {
-      try {
-        const [invoiceRes, historyRes, detailRes] = await Promise.all([
-          getInvoicesForLabRead(profileLabId, {
-            tenantId,
-            pageSize: HQ_INVOICE_LIST_MAX_LIMIT,
-          }),
-          getCollectionHistoryRead(profileLabId),
-          getCollectionDetailRead(profileLabId),
-        ]);
-        if (cancelled) return;
-
-        const ledger = buildLabAccountLedger({
-          invoices: invoiceRes?.rows || [],
-          paymentHistory: historyRes?.data?.history || [],
-          arRow: detailRes?.data?.collection,
-          labId: profileLabId,
-          labName: str(currentUser?.labName || currentUser?.lab_name || ""),
-        });
-
-        setLabAccountLedger({
-          status: "ready",
-          ...ledger,
-        });
-      } catch (err) {
-        if (!cancelled) {
-          console.warn("CollectionsPage labAccountLedger:", err);
-          setLabAccountLedger({ status: "ready", hasLedgerData: false, collectionItem: null });
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isLabAccount, loading, listRefreshing, profileLabId, tenantId, currentUser?.labName, currentUser?.lab_name]);
+    if (!isLabAccount || !profileLabId) return undefined;
+    const loadKey = `${tenantId}:${profileLabId}`;
+    if (labLedgerLoadKeyRef.current === loadKey) return undefined;
+    void loadLabAccountLedger();
+  }, [isLabAccount, profileLabId, tenantId, loadLabAccountLedger]);
 
   useEffect(() => {
-    if (!isLabAccount || loading || !labDisplayCollections.length) return;
-    if (filteredCollections.length) return;
-    const key = labIdKey(labDisplayCollections[0].labId);
-    if (expandedLabId === key) return;
-    void openCollection(labDisplayCollections[0].labId);
-  }, [isLabAccount, loading, labDisplayCollections, filteredCollections.length, expandedLabId]);
+    if (!isLabAccount || loading || !profileLabId) return;
+    if (!filteredCollections.length && labAccountLedger?.status !== "ready") return;
+    const targetLabId =
+      filteredCollections[0]?.labId ||
+      (labAccountLedger?.status === "ready" ? labAccountLedger.collectionItem?.labId : "") ||
+      profileLabId;
+    if (!targetLabId) return;
+    const key = labIdKey(targetLabId);
+    if (labAutoOpenedRef.current === key) return;
+    labAutoOpenedRef.current = key;
+    void openCollection(targetLabId);
+    // Auto-open lab account details once per lab session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    isLabAccount,
+    loading,
+    profileLabId,
+    filteredCollections.length,
+    labAccountLedger?.status,
+    labAccountLedger?.collectionItem?.labId,
+  ]);
 
   const agentQueueSummary = useMemo(() => {
     if (!isAgentView) return null;
@@ -2562,13 +2649,6 @@ export default function CollectionsPage({
       totalCollected,
     };
   }, [isAgentView, filteredCollections, summary.totalOutstanding]);
-
-  useEffect(() => {
-    if (!isLabAccount || loading || collections.length !== 1) return;
-    const key = labIdKey(collections[0].labId);
-    if (expandedLabId === key) return;
-    void openCollection(collections[0].labId);
-  }, [isLabAccount, loading, collections, expandedLabId]);
 
   useEffect(() => {
     if (
@@ -2742,7 +2822,7 @@ export default function CollectionsPage({
               variant="outline"
               size="sm"
               className="h-10 rounded-lg"
-              onClick={() => loadCollections()}
+              onClick={() => void handleRefresh()}
               disabled={loading || listRefreshing}
             >
               <RefreshCw className={cn("mr-2 h-4 w-4", (loading || listRefreshing) && "animate-spin")} />
@@ -2784,7 +2864,7 @@ export default function CollectionsPage({
       {loadError ? (
         <DataFetchError
           message={loadError}
-          onRetry={() => loadCollections()}
+              onRetry={() => void handleRefresh()}
           retrying={loading || listRefreshing}
           staleDataNote={
             collections.length > 0 ? "Showing the last account data loaded successfully." : ""
@@ -2970,6 +3050,7 @@ export default function CollectionsPage({
                 item={item}
                 history={isExpanded ? history : []}
                 detailsLoading={isExpanded && detailsLoading}
+                detailsError={isExpanded ? detailsError : ""}
                 copy={accountLabels}
                 tenantId={tenantId}
                 collectionDetails={
