@@ -6,14 +6,24 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { StatusBadge } from "@/components/ux";
 import ShipmentTimeline from "@/components/logistics/ShipmentTimeline.jsx";
 import {
+  getLogisticsCouriersRead,
   getShipmentEventsRead,
   transitionShipmentStatusWrite,
   updateShipmentAssignmentWrite,
 } from "@/api/logisticsSupabaseApi.js";
 import {
-  ASSIGNEE_TYPE_OPTIONS,
+  ASSIGNMENT_TYPE,
+  ASSIGNMENT_TYPE_OPTIONS,
+  assignmentTypeLabel,
+  assignmentTypeToDeliveryFields,
+  deliveryMethodToAssignmentType,
+  isCustomerPickupAssignment,
+  isExternalCourierAssignment,
+  validateShipmentAssignment,
+} from "@/logistics/logisticsCourierEngine.js";
+import {
   buildShipmentTimeline,
-  DELIVERY_METHOD_OPTIONS,
+  dispatchActionLabel,
   nextShipmentStatusOptions,
   shipmentStatusLabel,
   SHIPMENT_STATUS,
@@ -22,6 +32,20 @@ import { Loader2 } from "lucide-react";
 
 function str(v) {
   return String(v ?? "").trim();
+}
+
+function formatDateTime(value) {
+  const raw = str(value);
+  if (!raw) return "—";
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export default function ShipmentDetailDrawer({
@@ -34,20 +58,17 @@ export default function ShipmentDetailDrawer({
   onUpdated,
 }) {
   const [events, setEvents] = useState([]);
+  const [couriers, setCouriers] = useState([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
-    deliveryMethod: "",
-    assignedToType: "",
-    assignedToId: "",
+    assignmentType: "",
+    courierId: "",
     assignedToName: "",
-    courierName: "",
     trackingNumber: "",
-    vehicleRef: "",
-    expectedDispatchBy: "",
     expectedDeliveryBy: "",
-    deliveryNotes: "",
+    dispatchNotes: "",
     receiverName: "",
     receiverPhone: "",
     deliveredAt: "",
@@ -57,17 +78,15 @@ export default function ShipmentDetailDrawer({
 
   useEffect(() => {
     if (!open || !shipment) return;
+    const assignmentType =
+      deliveryMethodToAssignmentType(shipment.deliveryMethod, shipment.assignedToType) || "";
     setForm({
-      deliveryMethod: shipment.deliveryMethod || "",
-      assignedToType: shipment.assignedToType || "",
-      assignedToId: shipment.assignedToId || "",
+      assignmentType,
+      courierId: shipment.courierId || "",
       assignedToName: shipment.assignedToName || "",
-      courierName: shipment.courierName || "",
       trackingNumber: shipment.trackingNumber || "",
-      vehicleRef: shipment.vehicleRef || "",
-      expectedDispatchBy: shipment.expectedDispatchBy || "",
       expectedDeliveryBy: shipment.expectedDeliveryBy || "",
-      deliveryNotes: shipment.deliveryNotes || "",
+      dispatchNotes: shipment.dispatchNotes || "",
       receiverName: shipment.receiverName || "",
       receiverPhone: shipment.receiverPhone || "",
       deliveredAt: shipment.deliveredAt
@@ -78,6 +97,13 @@ export default function ShipmentDetailDrawer({
     });
     setError("");
   }, [open, shipment]);
+
+  useEffect(() => {
+    if (!open || !tenantId) return;
+    void getLogisticsCouriersRead({ tenantId, activeOnly: true }).then((res) => {
+      if (res.success) setCouriers(res.couriers || []);
+    });
+  }, [open, tenantId]);
 
   useEffect(() => {
     if (!open || !shipment?.shipmentId) return;
@@ -103,40 +129,68 @@ export default function ShipmentDetailDrawer({
     [shipment?.dispatchStatus]
   );
 
+  const selectedCourier = useMemo(
+    () => couriers.find((c) => c.courierId === form.courierId),
+    [couriers, form.courierId]
+  );
+
+  const externalCourier = isExternalCourierAssignment(form.assignmentType);
+  const customerPickup = isCustomerPickupAssignment(form.assignmentType);
+
   if (!open || !shipment) return null;
 
+  function buildAssignmentPayload() {
+    const mapped = assignmentTypeToDeliveryFields(form.assignmentType);
+    const courier = couriers.find((c) => c.courierId === form.courierId);
+    return {
+      deliveryMethod: mapped.deliveryMethod,
+      assignedToType: mapped.assignedToType || null,
+      assignedToName: customerPickup ? null : str(form.assignedToName) || null,
+      courierId: externalCourier ? str(form.courierId) || null : null,
+      courierName: externalCourier ? courier?.name || shipment.courierName || null : null,
+      trackingNumber: externalCourier ? str(form.trackingNumber) || null : null,
+      expectedDeliveryBy: str(form.expectedDeliveryBy) || null,
+      dispatchNotes: str(form.dispatchNotes) || null,
+    };
+  }
+
   async function saveAssignment() {
-    if (readOnly) return;
+    if (readOnly) return false;
+    const validation = validateShipmentAssignment({
+      assignmentType: form.assignmentType,
+      courierId: form.courierId,
+      assignedToName: form.assignedToName,
+      trackingNumber: form.trackingNumber,
+    });
+    if (!validation.valid) {
+      setError(validation.error);
+      return false;
+    }
     setSaving(true);
     setError("");
-    const res = await updateShipmentAssignmentWrite(shipment.shipmentId, {
-      deliveryMethod: form.deliveryMethod,
-      assignedToType: form.assignedToType,
-      assignedToId: form.assignedToId,
-      assignedToName: form.assignedToName,
-      courierName: form.courierName,
-      trackingNumber: form.trackingNumber,
-      vehicleRef: form.vehicleRef,
-      expectedDispatchBy: form.expectedDispatchBy,
-      expectedDeliveryBy: form.expectedDeliveryBy,
-      deliveryNotes: form.deliveryNotes,
-    });
+    const res = await updateShipmentAssignmentWrite(shipment.shipmentId, buildAssignmentPayload());
     setSaving(false);
     if (!res.success) {
       setError(res.error || "Failed to save assignment");
-      return;
+      return false;
     }
     onUpdated?.(res.data);
+    return true;
   }
 
   async function handleTransition(toStatus) {
     if (readOnly) return;
+    const needsAssignment =
+      toStatus === SHIPMENT_STATUS.ASSIGNED || toStatus === SHIPMENT_STATUS.OUT;
+    if (needsAssignment) {
+      const saved = await saveAssignment();
+      if (!saved) return;
+    }
     setSaving(true);
     setError("");
     const pod = {
       receiverName: form.receiverName,
       receiverPhone: form.receiverPhone,
-      deliveryNotes: form.deliveryNotes,
       deliveredAt: form.deliveredAt ? new Date(form.deliveredAt).toISOString() : undefined,
       failureReason: form.failureReason,
       rescheduledFor: form.rescheduledFor,
@@ -180,121 +234,169 @@ export default function ShipmentDetailDrawer({
           {error ? <p className="text-xs text-amber-700">{error}</p> : null}
 
           <section className="space-y-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Assignment</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Dispatch Assignment
+            </h3>
             <Select
-              value={form.deliveryMethod || "unset"}
-              onValueChange={(v) => setForm((f) => ({ ...f, deliveryMethod: v === "unset" ? "" : v }))}
+              value={form.assignmentType || "unset"}
+              onValueChange={(v) =>
+                setForm((f) => ({
+                  ...f,
+                  assignmentType: v === "unset" ? "" : v,
+                  courierId: v === ASSIGNMENT_TYPE.EXTERNAL_COURIER ? f.courierId : "",
+                  trackingNumber:
+                    v === ASSIGNMENT_TYPE.CUSTOMER_PICKUP ? "" : f.trackingNumber,
+                }))
+              }
               disabled={readOnly}
             >
               <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="Delivery method" />
+                <SelectValue placeholder="Assignment type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="unset">Select method</SelectItem>
-                {DELIVERY_METHOD_OPTIONS.map((o) => (
+                <SelectItem value="unset">Select assignment type</SelectItem>
+                {ASSIGNMENT_TYPE_OPTIONS.map((o) => (
                   <SelectItem key={o.id} value={o.id}>
                     {o.label}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <Select
-              value={form.assignedToType || "unset"}
-              onValueChange={(v) => setForm((f) => ({ ...f, assignedToType: v === "unset" ? "" : v }))}
-              disabled={readOnly}
-            >
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="Assignee type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="unset">Assignee type</SelectItem>
-                {ASSIGNEE_TYPE_OPTIONS.map((o) => (
-                  <SelectItem key={o.id} value={o.id}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Input
-              className="h-8 text-xs"
-              placeholder="Assigned to name"
-              value={form.assignedToName}
-              onChange={(e) => setForm((f) => ({ ...f, assignedToName: e.target.value }))}
-              disabled={readOnly}
-            />
-            <Input
-              className="h-8 text-xs"
-              placeholder="Courier"
-              value={form.courierName}
-              onChange={(e) => setForm((f) => ({ ...f, courierName: e.target.value }))}
-              disabled={readOnly}
-            />
-            <Input
-              className="h-8 text-xs"
-              placeholder="Tracking number"
-              value={form.trackingNumber}
-              onChange={(e) => setForm((f) => ({ ...f, trackingNumber: e.target.value }))}
-              disabled={readOnly}
-            />
-            <Input
-              className="h-8 text-xs"
-              placeholder="Vehicle (optional)"
-              value={form.vehicleRef}
-              onChange={(e) => setForm((f) => ({ ...f, vehicleRef: e.target.value }))}
-              disabled={readOnly}
-            />
-            <div className="grid grid-cols-2 gap-2">
+
+            {!customerPickup ? (
               <Input
-                type="date"
                 className="h-8 text-xs"
-                value={form.expectedDispatchBy}
-                onChange={(e) => setForm((f) => ({ ...f, expectedDispatchBy: e.target.value }))}
+                placeholder="Assigned person *"
+                value={form.assignedToName}
+                onChange={(e) => setForm((f) => ({ ...f, assignedToName: e.target.value }))}
                 disabled={readOnly}
-                aria-label="Expected dispatch by"
               />
-              <Input
-                type="date"
-                className="h-8 text-xs"
-                value={form.expectedDeliveryBy}
-                onChange={(e) => setForm((f) => ({ ...f, expectedDeliveryBy: e.target.value }))}
-                disabled={readOnly}
-                aria-label="Expected delivery by"
-              />
-            </div>
+            ) : null}
+
+            {externalCourier ? (
+              <>
+                <Select
+                  value={form.courierId || "unset"}
+                  onValueChange={(v) =>
+                    setForm((f) => ({ ...f, courierId: v === "unset" ? "" : v }))
+                  }
+                  disabled={readOnly}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Assigned courier *" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unset">Select courier</SelectItem>
+                    {couriers.map((c) => (
+                      <SelectItem key={c.courierId} value={c.courierId}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedCourier ? (
+                  <p className="text-[10px] text-slate-500">
+                    {selectedCourier.contactPerson || "—"} · {selectedCourier.phone || "—"}
+                  </p>
+                ) : null}
+                <Input
+                  className="h-8 text-xs"
+                  placeholder="Tracking number *"
+                  value={form.trackingNumber}
+                  onChange={(e) => setForm((f) => ({ ...f, trackingNumber: e.target.value }))}
+                  disabled={readOnly}
+                />
+              </>
+            ) : null}
+
+            <Input
+              type="date"
+              className="h-8 text-xs"
+              value={form.expectedDeliveryBy}
+              onChange={(e) => setForm((f) => ({ ...f, expectedDeliveryBy: e.target.value }))}
+              disabled={readOnly}
+              aria-label="Expected delivery date"
+            />
             <Textarea
               className="min-h-[60px] text-xs"
-              placeholder="Delivery notes"
-              value={form.deliveryNotes}
-              onChange={(e) => setForm((f) => ({ ...f, deliveryNotes: e.target.value }))}
+              placeholder="Dispatch notes"
+              value={form.dispatchNotes}
+              onChange={(e) => setForm((f) => ({ ...f, dispatchNotes: e.target.value }))}
               disabled={readOnly}
             />
             {!readOnly ? (
-              <Button type="button" size="sm" className="h-8 text-xs" disabled={saving} onClick={() => void saveAssignment()}>
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 text-xs"
+                disabled={saving}
+                onClick={() => void saveAssignment()}
+              >
                 Save assignment
               </Button>
             ) : null}
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Courier Information
+            </h3>
+            <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs text-slate-700">
+              <p>
+                <span className="text-slate-500">Type:</span>{" "}
+                {assignmentTypeLabel(form.assignmentType) || "—"}
+              </p>
+              <p>
+                <span className="text-slate-500">Courier:</span>{" "}
+                {selectedCourier?.name || shipment.courierName || "—"}
+              </p>
+              <p>
+                <span className="text-slate-500">Tracking:</span> {form.trackingNumber || "—"}
+              </p>
+              <p>
+                <span className="text-slate-500">Expected delivery:</span>{" "}
+                {form.expectedDeliveryBy || "—"}
+              </p>
+              <p>
+                <span className="text-slate-500">Actual delivery:</span>{" "}
+                {formatDateTime(shipment.deliveredAt)}
+              </p>
+            </div>
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Receiver</h3>
+            <Input
+              className="h-8 text-xs"
+              placeholder="Receiver name"
+              value={form.receiverName}
+              onChange={(e) => setForm((f) => ({ ...f, receiverName: e.target.value }))}
+              disabled={readOnly}
+            />
+            <Input
+              className="h-8 text-xs"
+              placeholder="Receiver phone"
+              value={form.receiverPhone}
+              onChange={(e) => setForm((f) => ({ ...f, receiverPhone: e.target.value }))}
+              disabled={readOnly}
+            />
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Delivery Proof
+            </h3>
+            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-6 text-center text-xs text-slate-500">
+              Photo and signature capture will be available in a future phase.
+            </div>
           </section>
 
           {(shipment.dispatchStatus === SHIPMENT_STATUS.DELIVERED ||
             nextStatuses.some((s) => s.id === SHIPMENT_STATUS.DELIVERED)) && (
             <section className="space-y-2">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Proof of delivery
+                Delivered timestamp
               </h3>
-              <Input
-                className="h-8 text-xs"
-                placeholder="Receiver name"
-                value={form.receiverName}
-                onChange={(e) => setForm((f) => ({ ...f, receiverName: e.target.value }))}
-                disabled={readOnly}
-              />
-              <Input
-                className="h-8 text-xs"
-                placeholder="Receiver phone"
-                value={form.receiverPhone}
-                onChange={(e) => setForm((f) => ({ ...f, receiverPhone: e.target.value }))}
-                disabled={readOnly}
-              />
               <Input
                 type="datetime-local"
                 className="h-8 text-xs"
@@ -308,7 +410,9 @@ export default function ShipmentDetailDrawer({
 
           {!readOnly && nextStatuses.length ? (
             <section className="space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</h3>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Dispatch Actions
+              </h3>
               <div className="flex flex-wrap gap-2">
                 {nextStatuses.map((opt) => (
                   <Button
@@ -321,7 +425,7 @@ export default function ShipmentDetailDrawer({
                     onClick={() => void handleTransition(opt.id)}
                   >
                     {saving ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
-                    {opt.label}
+                    {dispatchActionLabel(opt.id)}
                   </Button>
                 ))}
               </div>

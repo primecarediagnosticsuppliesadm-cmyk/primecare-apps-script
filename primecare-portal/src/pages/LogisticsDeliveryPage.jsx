@@ -19,6 +19,7 @@ import {
   sortShipmentsByCreatedDesc,
 } from "@/logistics/logisticsShipmentEngine.js";
 import ShipmentDetailDrawer from "@/components/logistics/ShipmentDetailDrawer.jsx";
+import CourierManagementPanel from "@/components/logistics/CourierManagementPanel.jsx";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import { ROLES } from "@/config/roles.js";
 import { cn } from "@/lib/utils";
@@ -30,6 +31,8 @@ import {
   AlertTriangle,
   RefreshCw,
   Search,
+  UserCheck,
+  ShoppingBag,
 } from "lucide-react";
 
 function str(v) {
@@ -84,6 +87,7 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
   const [search, setSearch] = useState("");
   const [selectedShipment, setSelectedShipment] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("dispatch");
 
   const load = useCallback(
     async ({ force = false } = {}) => {
@@ -196,13 +200,43 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
         </p>
       ) : null}
 
-      <KpiCardGrid columns={4}>
+      <div className="flex gap-2 border-b border-slate-200 pb-1">
+        {[
+          { id: "dispatch", label: "Dispatch Queue" },
+          { id: "couriers", label: "Courier Management" },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            className={cn(
+              "rounded-t-lg px-3 py-2 text-xs font-medium transition",
+              activeTab === tab.id
+                ? "border border-b-white border-slate-200 bg-white text-slate-900"
+                : "text-slate-500 hover:text-slate-800"
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "dispatch" ? (
+        <>
+      <KpiCardGrid columns={3} className="sm:grid-cols-2 lg:grid-cols-6">
         <KpiCard
-          title="Ready For Dispatch"
+          title="Ready"
           value={kpis.readyForDispatch}
           subtitle="Awaiting assignment"
           icon={Package}
           onClick={() => setStatusFilter("ready_for_dispatch")}
+        />
+        <KpiCard
+          title="Assigned"
+          value={kpis.assigned}
+          subtitle="Courier / driver set"
+          icon={UserCheck}
+          onClick={() => setStatusFilter("assigned")}
         />
         <KpiCard
           title="Out For Delivery"
@@ -214,16 +248,23 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
         <KpiCard
           title="Delivered Today"
           value={kpis.deliveredToday}
-          subtitle="Completed today"
+          subtitle="By delivered_at date"
           icon={CheckCircle2}
           onClick={() => setStatusFilter("delivered")}
         />
         <KpiCard
-          title="Failed Deliveries"
+          title="Delivery Failed"
           value={kpis.failedDeliveries}
           subtitle="Needs attention"
           icon={AlertTriangle}
           onClick={() => setStatusFilter("delivery_failed")}
+        />
+        <KpiCard
+          title="Customer Pickup"
+          value={kpis.customerPickup}
+          subtitle="Pickup assignments"
+          icon={ShoppingBag}
+          onClick={() => setStatusFilter("customer_pickup")}
         />
       </KpiCardGrid>
 
@@ -319,6 +360,14 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
           </table>
         </div>
       </section>
+        </>
+      ) : (
+        <CourierManagementPanel
+          tenantId={tenantId}
+          currentUser={currentUser}
+          readOnly={readOnly}
+        />
+      )}
 
       <ShipmentDetailDrawer
         open={drawerOpen}

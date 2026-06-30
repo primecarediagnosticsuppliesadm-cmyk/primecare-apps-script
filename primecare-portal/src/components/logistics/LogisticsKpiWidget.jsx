@@ -3,14 +3,23 @@ import { KpiCard, KpiCardGrid } from "@/components/ux";
 import { getLogisticsShipmentsRead } from "@/api/logisticsSupabaseApi.js";
 import { computeLogisticsKpis } from "@/logistics/logisticsShipmentEngine.js";
 import { navigateToLogisticsDelivery } from "@/operations/hqWorkflowNav.js";
-import { Package, Navigation, CheckCircle2, AlertTriangle } from "lucide-react";
+import {
+  Package,
+  Navigation,
+  CheckCircle2,
+  AlertTriangle,
+  UserCheck,
+  ShoppingBag,
+} from "lucide-react";
 
 export default function LogisticsKpiWidget({ tenantId, setActivePage }) {
   const [kpis, setKpis] = useState({
     readyForDispatch: 0,
+    assigned: 0,
     outForDelivery: 0,
     deliveredToday: 0,
     failedDeliveries: 0,
+    customerPickup: 0,
   });
 
   useEffect(() => {
@@ -47,13 +56,20 @@ export default function LogisticsKpiWidget({ tenantId, setActivePage }) {
           </button>
         ) : null}
       </div>
-      <KpiCardGrid columns={4}>
+      <KpiCardGrid columns={3} className="sm:grid-cols-2 lg:grid-cols-6">
         <KpiCard
           title="Ready"
           value={kpis.readyForDispatch}
-          subtitle="Awaiting dispatch"
+          subtitle="Awaiting assignment"
           icon={Package}
           onClick={() => open("ready_for_dispatch")}
+        />
+        <KpiCard
+          title="Assigned"
+          value={kpis.assigned}
+          subtitle="Assigned shipments"
+          icon={UserCheck}
+          onClick={() => open("assigned")}
         />
         <KpiCard
           title="Out For Delivery"
@@ -65,7 +81,7 @@ export default function LogisticsKpiWidget({ tenantId, setActivePage }) {
         <KpiCard
           title="Delivered Today"
           value={kpis.deliveredToday}
-          subtitle="Completed today"
+          subtitle="By delivered_at"
           icon={CheckCircle2}
           onClick={() => open("delivered")}
         />
@@ -75,6 +91,13 @@ export default function LogisticsKpiWidget({ tenantId, setActivePage }) {
           subtitle="Needs attention"
           icon={AlertTriangle}
           onClick={() => open("delivery_failed")}
+        />
+        <KpiCard
+          title="Customer Pickup"
+          value={kpis.customerPickup}
+          subtitle="Pickup queue"
+          icon={ShoppingBag}
+          onClick={() => open("customer_pickup")}
         />
       </KpiCardGrid>
     </div>

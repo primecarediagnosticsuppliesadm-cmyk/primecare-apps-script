@@ -77,8 +77,22 @@ export function nextShipmentStatusOptions(currentStatus) {
   const from = str(currentStatus).toLowerCase();
   return (VALID_TRANSITIONS[from] || []).map((id) => ({
     id,
-    label: shipmentStatusLabel(id),
+    label: dispatchActionLabel(id),
   }));
+}
+
+/** User-facing dispatch action labels (Phase 2 workflow). */
+export function dispatchActionLabel(statusId) {
+  const key = str(statusId).toLowerCase();
+  const labels = {
+    [SHIPMENT_STATUS.ASSIGNED]: "Assign",
+    [SHIPMENT_STATUS.OUT]: "Out For Delivery",
+    [SHIPMENT_STATUS.DELIVERED]: "Delivered",
+    [SHIPMENT_STATUS.FAILED]: "Delivery Failed",
+    [SHIPMENT_STATUS.RESCHEDULED]: "Rescheduled",
+    [SHIPMENT_STATUS.RETURNED]: "Returned",
+  };
+  return labels[key] || shipmentStatusLabel(statusId);
 }
 
 export function buildShipmentIdForOrder(orderId) {
@@ -104,6 +118,7 @@ export function mapShipmentRow(row) {
     assignedToId: str(row.assigned_to_id ?? row.assignedToId),
     assignedToName: str(row.assigned_to_name ?? row.assignedToName),
     courierName: str(row.courier_name ?? row.courierName),
+    courierId: str(row.courier_id ?? row.courierId),
     trackingNumber: str(row.tracking_number ?? row.trackingNumber),
     vehicleRef: str(row.vehicle_ref ?? row.vehicleRef),
     dispatchDate: str(row.dispatch_date ?? row.dispatchDate),
@@ -113,6 +128,7 @@ export function mapShipmentRow(row) {
     receiverName: str(row.receiver_name ?? row.receiverName),
     receiverPhone: str(row.receiver_phone ?? row.receiverPhone),
     deliveryNotes: str(row.delivery_notes ?? row.deliveryNotes),
+    dispatchNotes: str(row.dispatch_notes ?? row.dispatchNotes),
     failureReason: str(row.failure_reason ?? row.failureReason),
     rescheduledFor: str(row.rescheduled_for ?? row.rescheduledFor),
     createdBy: str(row.created_by ?? row.createdBy),
@@ -150,15 +166,18 @@ export function computeLogisticsKpis(shipments = []) {
   let failed = 0;
   let returned = 0;
   let assigned = 0;
+  let customerPickup = 0;
 
   for (const s of list) {
     const status = str(s.dispatchStatus ?? s.dispatch_status).toLowerCase();
+    const method = str(s.deliveryMethod ?? s.delivery_method).toLowerCase();
     if (status === SHIPMENT_STATUS.READY) ready += 1;
     if (status === SHIPMENT_STATUS.ASSIGNED) assigned += 1;
     if (status === SHIPMENT_STATUS.OUT) out += 1;
     if (status === SHIPMENT_STATUS.FAILED) failed += 1;
     if (status === SHIPMENT_STATUS.RETURNED) returned += 1;
-    if (status === SHIPMENT_STATUS.DELIVERED && isToday(s.deliveredAt ?? s.delivered_at)) {
+    if (method === "customer_pickup") customerPickup += 1;
+    if (isToday(s.deliveredAt ?? s.delivered_at)) {
       deliveredToday += 1;
     }
   }
@@ -170,6 +189,7 @@ export function computeLogisticsKpis(shipments = []) {
     deliveredToday,
     failedDeliveries: failed,
     returned,
+    customerPickup,
     total: list.length,
   };
 }
@@ -207,6 +227,7 @@ export function filterShipments(shipments, { statusFilter = "", search = "" } = 
       str(row.labName).toLowerCase().includes(q) ||
       str(row.labCity).toLowerCase().includes(q) ||
       str(row.assignedToName).toLowerCase().includes(q) ||
+      str(row.courierName).toLowerCase().includes(q) ||
       str(row.trackingNumber).toLowerCase().includes(q)
     );
   });

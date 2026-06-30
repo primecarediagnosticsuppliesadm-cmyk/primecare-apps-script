@@ -82,17 +82,22 @@ function isToday(isoOrDate) {
 
 function computeKpis(shipments) {
   let ready = 0;
+  let assigned = 0;
   let out = 0;
   let deliveredToday = 0;
   let failed = 0;
+  let customerPickup = 0;
   for (const s of shipments) {
     const status = str(s.dispatch_status).toLowerCase();
+    const method = str(s.delivery_method).toLowerCase();
     if (status === "ready_for_dispatch") ready += 1;
+    if (status === "assigned") assigned += 1;
     if (status === "out_for_delivery") out += 1;
     if (status === "delivery_failed") failed += 1;
-    if (status === "delivered" && isToday(s.delivered_at)) deliveredToday += 1;
+    if (method === "customer_pickup") customerPickup += 1;
+    if (isToday(s.delivered_at)) deliveredToday += 1;
   }
-  return { ready, out, deliveredToday, failed };
+  return { ready, assigned, out, deliveredToday, failed, customerPickup };
 }
 
 async function signIn(sb, email, password) {
@@ -187,6 +192,40 @@ function runStaticChecks() {
   }
   if (financeRegression) {
     pass("static.finance_isolation", "Payments/collections modules untouched by logistics");
+  }
+
+  const courierEngine = readSrc("src/logistics/logisticsCourierEngine.js");
+  const courierPanel = readSrc("src/components/logistics/CourierManagementPanel.jsx");
+  if (
+    existsSync(resolve(root, "supabase/migrations/20260630120000_logistics_phase2_couriers.sql")) &&
+    courierEngine.includes("validateShipmentAssignment") &&
+    courierPanel.includes("Courier Management")
+  ) {
+    pass("static.phase2_couriers", "Phase 2 courier management wired");
+  } else {
+    fail("static.phase2_couriers", "Phase 2 courier module incomplete");
+  }
+
+  if (
+    logisticsApi.includes("getLogisticsCouriersRead") &&
+    logisticsApi.includes("upsertLogisticsCourierWrite")
+  ) {
+    pass("static.courier_api", "Courier read/write APIs present in logisticsSupabaseApi");
+  } else {
+    fail("static.courier_api", "Courier APIs missing from logisticsSupabaseApi");
+  }
+
+  const shipmentEngine = readSrc("src/logistics/logisticsShipmentEngine.js");
+  if (shipmentEngine.includes("customerPickup") && shipmentEngine.includes("dispatchActionLabel")) {
+    pass("static.phase2_kpis", "Phase 2 KPI fields and dispatch action labels present");
+  } else {
+    fail("static.phase2_kpis", "Phase 2 KPI/action label updates missing");
+  }
+
+  if (!primeApi.includes("logistics_couriers") && !ordersPage.includes("CourierManagementPanel")) {
+    pass("static.orders_untouched", "Orders page not modified for Phase 2 couriers");
+  } else {
+    fail("static.orders_untouched", "Orders module unexpectedly modified");
   }
 }
 
@@ -295,16 +334,35 @@ async function runLiveChecks(sb) {
 
   const kpis = computeKpis(rows);
   const readyDb = rows.filter((r) => str(r.dispatch_status) === "ready_for_dispatch").length;
+  const assignedDb = rows.filter((r) => str(r.dispatch_status) === "assigned").length;
   const outDb = rows.filter((r) => str(r.dispatch_status) === "out_for_delivery").length;
-  if (kpis.ready === readyDb && kpis.out === outDb) {
-    pass("live.kpis", `KPI counts match DB (ready=${readyDb}, out=${outDb})`);
+  const deliveredTodayDb = rows.filter((r) => isToday(r.delivered_at)).length;
+  if (
+    kpis.ready === readyDb &&
+    kpis.assigned === assignedDb &&
+    kpis.out === outDb &&
+    kpis.deliveredToday === deliveredTodayDb
+  ) {
+    pass(
+      "live.kpis",
+      `KPI counts match DB (ready=${readyDb}, assigned=${assignedDb}, out=${outDb}, deliveredToday=${deliveredTodayDb})`
+    );
   } else {
     fail("live.kpis", "KPI computation drift vs database rows");
+  }
+
+  const { error: courierErr } = await sb.from("logistics_couriers").select("courier_id").limit(1);
+  if (courierErr && /does not exist|schema cache/i.test(courierErr.message)) {
+    warn("live.couriers_table", "logistics_couriers not deployed — apply Phase 2 migration");
+  } else if (courierErr) {
+    fail("live.couriers_table", courierErr.message);
+  } else {
+    pass("live.couriers_table", "logistics_couriers readable");
   }
 }
 
 async function main() {
-  console.log("\n=== Logistics Phase 1A Certification ===\n");
+  console.log("\n=== Logistics Certification (Phase 1A + 2) ===\n");
   console.log(`Tenant: ${HQ}\n`);
 
   runStaticChecks();

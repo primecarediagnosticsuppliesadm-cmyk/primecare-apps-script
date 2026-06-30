@@ -11,6 +11,11 @@ import {
   mapShipmentRow,
   SHIPMENT_STATUS,
 } from "@/logistics/logisticsShipmentEngine.js";
+import {
+  buildCourierId,
+  mapCourierRow,
+  validateCourierForm,
+} from "@/logistics/logisticsCourierEngine.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -24,6 +29,11 @@ function num(v) {
 function isMissingTableError(error) {
   const msg = str(error?.message).toLowerCase();
   return msg.includes("order_shipments") && (msg.includes("does not exist") || msg.includes("schema cache"));
+}
+
+function isMissingCourierTableError(error) {
+  const msg = str(error?.message).toLowerCase();
+  return msg.includes("logistics_couriers") && (msg.includes("does not exist") || msg.includes("schema cache"));
 }
 
 async function resolveLabContext(labId, tenantId) {
@@ -247,6 +257,7 @@ export async function updateShipmentAssignmentWrite(shipmentId, payload = {}) {
   if (payload.assignedToId !== undefined) patch.assigned_to_id = str(payload.assignedToId) || null;
   if (payload.assignedToName !== undefined) patch.assigned_to_name = str(payload.assignedToName) || null;
   if (payload.courierName !== undefined) patch.courier_name = str(payload.courierName) || null;
+  if (payload.courierId !== undefined) patch.courier_id = str(payload.courierId) || null;
   if (payload.trackingNumber !== undefined) patch.tracking_number = str(payload.trackingNumber) || null;
   if (payload.vehicleRef !== undefined) patch.vehicle_ref = str(payload.vehicleRef) || null;
   if (payload.expectedDispatchBy !== undefined) {
@@ -256,6 +267,7 @@ export async function updateShipmentAssignmentWrite(shipmentId, payload = {}) {
     patch.expected_delivery_by = str(payload.expectedDeliveryBy) || null;
   }
   if (payload.deliveryNotes !== undefined) patch.delivery_notes = str(payload.deliveryNotes) || null;
+  if (payload.dispatchNotes !== undefined) patch.dispatch_notes = str(payload.dispatchNotes) || null;
   if (payload.dispatchDate !== undefined) patch.dispatch_date = str(payload.dispatchDate) || null;
 
   const { data, error } = await supabase
@@ -346,4 +358,110 @@ export async function transitionShipmentStatusWrite({
   ]);
 
   return { success: true, data: mapShipmentRow(updated), error: null };
+}
+
+export async function getLogisticsCouriersRead({ tenantId, activeOnly = false } = {}) {
+  if (!supabase) return { success: false, error: "Supabase not configured", couriers: [] };
+  const tid = str(tenantId);
+  if (!tid) return { success: false, error: "tenantId required", couriers: [] };
+
+  logSupabaseFeatureSource("Logistics.getLogisticsCouriersRead", { table: "logistics_couriers" });
+  let query = supabase
+    .from("logistics_couriers")
+    .select("*")
+    .eq("tenant_id", tid)
+    .order("name", { ascending: true });
+
+  if (activeOnly) {
+    query = query.eq("is_active", true);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    if (isMissingCourierTableError(error)) {
+      return { success: true, couriers: [], warning: "logistics_couriers table not deployed" };
+    }
+    return { success: false, error: error.message, couriers: [] };
+  }
+
+  return { success: true, couriers: (data || []).map(mapCourierRow), error: null };
+}
+
+export async function upsertLogisticsCourierWrite({
+  tenantId,
+  courierId = "",
+  name = "",
+  contactPerson = "",
+  phone = "",
+  email = "",
+  vehicleType = "",
+  isActive = true,
+  notes = "",
+  actorId = "",
+} = {}) {
+  if (!supabase) return { success: false, error: "Supabase not configured", data: null };
+  const tid = str(tenantId);
+  if (!tid) return { success: false, error: "tenantId required", data: null };
+
+  const validation = validateCourierForm({ name });
+  if (!validation.valid) return { success: false, error: validation.error, data: null };
+
+  const cid = str(courierId) || buildCourierId();
+  const now = new Date().toISOString();
+  const row = {
+    courier_id: cid,
+    tenant_id: tid,
+    name: str(name),
+    contact_person: str(contactPerson) || null,
+    phone: str(phone) || null,
+    email: str(email) || null,
+    vehicle_type: str(vehicleType) || null,
+    is_active: Boolean(isActive),
+    notes: str(notes) || null,
+    updated_at: now,
+  };
+
+  const { data: existing } = await supabase
+    .from("logistics_couriers")
+    .select("courier_id")
+    .eq("courier_id", cid)
+    .maybeSingle();
+
+  let result;
+  if (existing?.courier_id) {
+    result = await supabase.from("logistics_couriers").update(row).eq("courier_id", cid).select().single();
+  } else {
+    result = await supabase
+      .from("logistics_couriers")
+      .insert([{ ...row, created_by: str(actorId) || null, created_at: now }])
+      .select()
+      .single();
+  }
+
+  if (result.error) {
+    if (isMissingCourierTableError(result.error)) {
+      return { success: false, error: "logistics_couriers table not deployed", data: null };
+    }
+    return { success: false, error: result.error.message, data: null };
+  }
+
+  return { success: true, data: mapCourierRow(result.data), error: null };
+}
+
+export async function setLogisticsCourierActiveWrite(courierId, isActive, tenantId) {
+  if (!supabase) return { success: false, error: "Supabase not configured", data: null };
+  const cid = str(courierId);
+  const tid = str(tenantId);
+  if (!cid || !tid) return { success: false, error: "courierId and tenantId required", data: null };
+
+  const { data, error } = await supabase
+    .from("logistics_couriers")
+    .update({ is_active: Boolean(isActive), updated_at: new Date().toISOString() })
+    .eq("courier_id", cid)
+    .eq("tenant_id", tid)
+    .select()
+    .single();
+
+  if (error) return { success: false, error: error.message, data: null };
+  return { success: true, data: mapCourierRow(data), error: null };
 }
