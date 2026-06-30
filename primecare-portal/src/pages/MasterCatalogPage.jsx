@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ChevronDown, ChevronUp, Package, Pencil, Plus, Search, X } from "lucide-react";
 import { useOperatingTenantId } from "@/tenant/useOperatingTenantId.js";
+import { isHqCatalogWriteBlocked, getHqFreezeBannerMessage } from "@/config/hqReleasePolicy.js";
 
 const EMPTY_ADD_FORM = {
   productId: "",
@@ -305,6 +306,7 @@ export default function MasterCatalogPage({ currentUser = null }) {
   const [sortDir, setSortDir] = useState("asc");
 
   const tenantId = useOperatingTenantId(currentUser);
+  const catalogWriteBlocked = isHqCatalogWriteBlocked();
 
   const load = useCallback(async () => {
     try {
@@ -326,6 +328,7 @@ export default function MasterCatalogPage({ currentUser = null }) {
   }, [load]);
 
   async function handleToggleActive(product) {
+    if (catalogWriteBlocked) return;
     if (!product?.productId || !tenantId) return;
     const nextActive = !product.active;
     const label = nextActive ? "enable" : "disable";
@@ -354,11 +357,13 @@ export default function MasterCatalogPage({ currentUser = null }) {
   }
 
   function openAdd() {
+    if (catalogWriteBlocked) return;
     setEditingProduct(null);
     setFormMode("add");
   }
 
   function openEdit(product) {
+    if (catalogWriteBlocked) return;
     setEditingProduct(product);
     setFormMode("edit");
   }
@@ -403,11 +408,17 @@ export default function MasterCatalogPage({ currentUser = null }) {
             PrimeCare HQ owns the master product list. Distributors assign products from this catalog only.
           </p>
         </div>
-        <Button type="button" size="sm" onClick={openAdd} className="gap-1">
+        <Button type="button" size="sm" onClick={openAdd} className="gap-1" disabled={catalogWriteBlocked}>
           <Plus className="h-4 w-4" />
           Add Product
         </Button>
       </header>
+
+      {catalogWriteBlocked ? (
+        <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700" role="status">
+          {getHqFreezeBannerMessage("catalog")}
+        </p>
+      ) : null}
 
       {error ? <p className="text-xs text-amber-700">{error}</p> : null}
       {statusMessage ? <p className="text-xs text-green-700">{statusMessage}</p> : null}
@@ -519,6 +530,7 @@ export default function MasterCatalogPage({ currentUser = null }) {
                       variant="outline"
                       size="sm"
                       className="h-7 gap-1 px-2 text-[10px]"
+                      disabled={catalogWriteBlocked}
                       onClick={() => openEdit(p)}
                     >
                       <Pencil className="h-3 w-3" />
@@ -529,7 +541,7 @@ export default function MasterCatalogPage({ currentUser = null }) {
                       variant="outline"
                       size="sm"
                       className="h-7 px-2 text-[10px]"
-                      disabled={togglingId === p.productId}
+                      disabled={catalogWriteBlocked || togglingId === p.productId}
                       onClick={() => void handleToggleActive(p)}
                     >
                       {p.active ? "Disable" : "Enable"}

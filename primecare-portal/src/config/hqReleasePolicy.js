@@ -1,6 +1,6 @@
 /**
- * HQ Year-1 release policy — daily ops view, QA visibility, visit access, post-cert freeze.
- * UI/UX guards only; no business logic changes.
+ * HQ Year-1 release policy — structural freeze vs daily operations.
+ * UI/UX guards only; no business logic, SQL, RLS, or API changes.
  */
 
 import { IS_DEV, IS_PROD, IS_QA } from "@/config/environment.js";
@@ -14,10 +14,52 @@ function envFlag(name, defaultValue) {
   return normalized === "true" || normalized === "1";
 }
 
-/** Production defaults to frozen after HQ certification — provisioning writes disabled. */
+/** Production defaults to frozen after HQ certification — structural/config writes disabled. */
 export function isHqAdminFrozen() {
   if (IS_PROD) return envFlag("VITE_HQ_ADMIN_FROZEN", true);
   return envFlag("VITE_HQ_ADMIN_FROZEN", false);
+}
+
+export const HQ_FREEZE_BANNER_DEFAULT =
+  "HQ configuration is frozen. Daily operations such as review, invoices, and payment collection remain available.";
+
+/** Scope-specific freeze banner copy. */
+export function getHqFreezeBannerMessage(scope = "default") {
+  switch (scope) {
+    case "orders":
+      return `${HQ_FREEZE_BANNER_DEFAULT} Order status changes and reversals are disabled.`;
+    case "operations":
+      return `${HQ_FREEZE_BANNER_DEFAULT} User provisioning and ownership changes are disabled.`;
+    case "catalog":
+      return `${HQ_FREEZE_BANNER_DEFAULT} Master catalog edits are disabled.`;
+    case "procurement":
+      return "Frozen: procurement writes disabled. Review inventory and PO history remains available.";
+    default:
+      return HQ_FREEZE_BANNER_DEFAULT;
+  }
+}
+
+/** Order status mutations (fulfill, cancel, reset) blocked during freeze. */
+export function isHqOrderStatusWriteBlocked() {
+  return isHqAdminFrozen();
+}
+
+/** User provisioning, ownership, security, and tenant structural writes. */
+export function isHqStructuralWriteBlocked() {
+  return isHqAdminFrozen();
+}
+
+/** Master catalog create/edit/enable-disable blocked during freeze. */
+export function isHqCatalogWriteBlocked() {
+  return isHqAdminFrozen();
+}
+
+/**
+ * Procurement PO/receive writes — allowed by default during freeze (daily stock ops).
+ * Set VITE_HQ_PROCUREMENT_FROZEN=true to block PO create/receive/cancel.
+ */
+export function isHqProcurementWriteBlocked() {
+  return envFlag("VITE_HQ_PROCUREMENT_FROZEN", false);
 }
 
 /** Hide probe/QA/debug filters and KPIs unless explicitly enabled. */

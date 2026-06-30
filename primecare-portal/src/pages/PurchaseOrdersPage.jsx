@@ -26,6 +26,7 @@ import {
 } from "@/utils/migrationTrace.js";
 import { invalidateAdminDashboardCaches } from "@/utils/dashboardInvalidate.js";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
+import { isHqProcurementWriteBlocked, getHqFreezeBannerMessage } from "@/config/hqReleasePolicy.js";
 import PageSkeleton from "@/components/ux/PageSkeleton";
 
 const emptyCreateForm = {
@@ -540,6 +541,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   const [cancellingPoId, setCancellingPoId] = useState("");
 
   const operatingTenantId = useOperatingTenantId(currentUser);
+  const procurementWriteBlocked = isHqProcurementWriteBlocked();
 
   const loadCatalogProducts = useCallback(async () => {
     if (!supabase) {
@@ -995,6 +997,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   };
 
   const handleBulkCreateCriticalDraftPos = async () => {
+    if (procurementWriteBlocked) return;
     try {
       setBulkCreating(true);
       setStatusMessage("");
@@ -1055,6 +1058,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
   const handleCreatePurchaseOrder = async (e) => {
     e.preventDefault();
+    if (procurementWriteBlocked) return;
     try {
       setCreatingPo(true);
       setStatusMessage("");
@@ -1100,6 +1104,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
   const handleReceivePurchaseOrder = async (e) => {
     e.preventDefault();
+    if (procurementWriteBlocked) return;
     try {
       setReceivingPo(true);
       setStatusMessage("");
@@ -1194,6 +1199,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
   const handleSaveEditPo = async (e) => {
     e.preventDefault();
+    if (procurementWriteBlocked) return;
     if (!editingPo?.poId) return;
     try {
       setSavingEdit(true);
@@ -1231,6 +1237,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   };
 
   const handleCancelPo = async (po) => {
+    if (procurementWriteBlocked) return;
     if (!canEditOrCancelPurchaseOrder(po)) return;
     const confirmed =
       typeof window === "undefined" ||
@@ -1258,6 +1265,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   };
 
   const handleCreateDraftPoFromTrigger = async (item) => {
+    if (procurementWriteBlocked) return;
     try {
       if (!item?.canAutoCreate) {
         setErrorMessage("Open PO already exists for this product.");
@@ -1347,6 +1355,12 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       {errorMessage ? (
         <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {errorMessage}
+        </div>
+      ) : null}
+
+      {procurementWriteBlocked ? (
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700" role="status">
+          {getHqFreezeBannerMessage("procurement")}
         </div>
       ) : null}
 
@@ -1450,7 +1464,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
               <button
                 type="button"
                 onClick={handleBulkCreateCriticalDraftPos}
-                disabled={bulkCreating}
+                disabled={procurementWriteBlocked || bulkCreating}
                 className="rounded-xl bg-black px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
               >
                 {bulkCreating
@@ -1523,7 +1537,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
                       <button
                         type="button"
                         onClick={() => handleCreateDraftPoFromTrigger(item)}
-                        disabled={creatingAutoPoId === item.productId || !item.canAutoCreate}
+                        disabled={procurementWriteBlocked || creatingAutoPoId === item.productId || !item.canAutoCreate}
                         className="rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50"
                       >
                         {creatingAutoPoId === item.productId
@@ -1721,7 +1735,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
             </div>
 
             <div className="lg:col-span-2 flex flex-col gap-3 sm:flex-row">
-              <button type="submit" disabled={creatingPo} className="rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50">
+              <button type="submit" disabled={procurementWriteBlocked || creatingPo} className="rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50">
                 {creatingPo ? "Creating..." : "Create Purchase Order"}
               </button>
 
@@ -1825,7 +1839,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
             </div>
 
             <div className="lg:col-span-2 flex flex-col gap-3 sm:flex-row">
-              <button type="submit" disabled={receivingPo || !selectedPurchaseOrder || !receiveForm.poId || Number(receiveForm.receivedQty || 0) <= 0} className="rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50">
+              <button type="submit" disabled={procurementWriteBlocked || receivingPo || !selectedPurchaseOrder || !receiveForm.poId || Number(receiveForm.receivedQty || 0) <= 0} className="rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50">
                 {receivingPo ? "Receiving..." : "Receive Purchase Order"}
               </button>
 
@@ -1910,7 +1924,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
                           <button
                             type="button"
                             onClick={() => void handleCancelPo(po)}
-                            disabled={cancellingPoId === po.poId}
+                            disabled={procurementWriteBlocked || cancellingPoId === po.poId}
                             className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
                           >
                             {cancellingPoId === po.poId ? "Cancelling…" : "Cancel PO"}
@@ -2070,7 +2084,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
               </button>
               <button
                 type="submit"
-                disabled={savingEdit}
+                disabled={procurementWriteBlocked || savingEdit}
                 className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
                 {savingEdit ? "Saving…" : "Save changes"}

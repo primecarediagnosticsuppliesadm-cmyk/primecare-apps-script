@@ -380,26 +380,32 @@ async function main() {
   }
 
   const ordersPage = readFileSync(resolve(root, "src/pages/OrdersPage.jsx"), "utf8");
-  if (ordersPage.includes("isHqAdminFrozen") && !ordersPage.includes("disabled={updatingStatus || hqFrozen}")) {
+  const opsPage = readFileSync(resolve(root, "src/components/operations/UserProvisioningPanel.jsx"), "utf8");
+  if (ordersPage.includes("isHqOrderStatusWriteBlocked") && !ordersPage.includes("disabled={updatingStatus || hqFrozen}")) {
     pass("ui.freeze_review", "Review button is not disabled by HQ freeze");
   } else {
     fail("ui.freeze_review", "Review button incorrectly tied to hqFrozen disabled state");
   }
   if (
     /onClick=\{\(\) => openOrder\(order\.orderId\)\}/.test(ordersPage) &&
-    /Status Actions[\s\S]{0,1200}hqFrozen/.test(ordersPage)
+    /Status Actions[\s\S]{0,1200}hqStatusWriteBlocked/.test(ordersPage)
   ) {
     pass("ui.freeze_writes", "Status mutation buttons remain disabled when HQ is frozen");
   } else {
     fail("ui.freeze_writes", "Status mutation buttons missing HQ freeze guard");
   }
   if (
-    /disabled=\{hqFrozen\}[\s\S]{0,240}handleRecordOrderPayment/.test(ordersPage) &&
-    /function handleRecordOrderPayment\(\) \{[\s\S]{0,80}if \(hqFrozen\) return;/.test(ordersPage)
+    !/disabled=\{hqFrozen\}[\s\S]{0,240}handleRecordOrderPayment/.test(ordersPage) &&
+    !/function handleRecordOrderPayment\(\) \{[\s\S]{0,80}if \(hqFrozen\) return;/.test(ordersPage)
   ) {
-    pass("ui.freeze_payment", "Record Payment disabled when HQ is frozen");
+    pass("ui.freeze_payment", "Record Payment remains available during HQ freeze");
   } else {
-    fail("ui.freeze_payment", "Record Payment missing HQ freeze guard");
+    fail("ui.freeze_payment", "Record Payment incorrectly blocked by HQ freeze");
+  }
+  if (/disabled=\{hqFrozen\}/.test(opsPage) && /Create User/.test(opsPage)) {
+    pass("ui.freeze_provisioning", "User provisioning writes blocked when HQ is frozen");
+  } else {
+    fail("ui.freeze_provisioning", "User provisioning missing HQ freeze guard");
   }
 
   console.log("\n=== Summary ===");

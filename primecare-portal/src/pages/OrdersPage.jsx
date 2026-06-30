@@ -15,7 +15,7 @@ import {
 import { invalidateAdminDashboardCaches } from "@/utils/dashboardInvalidate.js";
 import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
-import { isHqAdminFrozen } from "@/config/hqReleasePolicy.js";
+import { isHqOrderStatusWriteBlocked, getHqFreezeBannerMessage } from "@/config/hqReleasePolicy.js";
 import { isPredatorAutoValidationEnabled } from "@/predator/predatorGuards.js";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -380,7 +380,7 @@ export default function OrdersPage({
   const { showToast } = usePortalToast();
 
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
-  const hqFrozen = isHqAdminFrozen();
+  const hqStatusWriteBlocked = isHqOrderStatusWriteBlocked();
 
   useEffect(() => {
     const orderLabId = details?.order?.labId;
@@ -535,8 +535,8 @@ export default function OrdersPage({
 
   async function handleUpdateStatus(nextStatus) {
     if (!selectedOrder) return;
-    if (hqFrozen) {
-      setError("Order updates are frozen for this certified HQ release.");
+    if (hqStatusWriteBlocked) {
+      setError("Order status changes are frozen for this certified HQ release.");
       return;
     }
 
@@ -753,7 +753,6 @@ export default function OrdersPage({
   }
 
   function handleRecordOrderPayment() {
-    if (hqFrozen) return;
     if (!selectedOrderSummary?.labId || !canNavigateToCollections(currentUser?.role)) return;
     const outstanding = resolveOrderOutstanding(selectedOrderSummary, selectedOrderInvoice);
     navigateToCollections(setActivePage, {
@@ -854,12 +853,12 @@ export default function OrdersPage({
         />
       ) : null}
 
-      {hqFrozen ? (
+      {hqStatusWriteBlocked ? (
         <div
           className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
           role="status"
         >
-          HQ Orders is in read-only mode for this certified release. Review and invoice actions stay available; status changes and payment recording are disabled.
+          {getHqFreezeBannerMessage("orders")}
         </div>
       ) : null}
 
@@ -1483,7 +1482,6 @@ export default function OrdersPage({
                             type="button"
                             size="sm"
                             className="h-9 text-xs"
-                            disabled={hqFrozen}
                             onClick={handleRecordOrderPayment}
                           >
                             <CircleDollarSign className="mr-1.5 h-3.5 w-3.5" />
@@ -1524,7 +1522,7 @@ export default function OrdersPage({
                     placeholder="Optional note for this status update…"
                     value={statusNote}
                     onChange={(e) => setStatusNote(e.target.value)}
-                    disabled={updatingStatus || hqFrozen || detailsLoading}
+                    disabled={updatingStatus || hqStatusWriteBlocked || detailsLoading}
                     className="min-h-[72px] rounded-lg text-sm"
                   />
                   <div className="grid grid-cols-2 gap-2">
@@ -1533,7 +1531,7 @@ export default function OrdersPage({
                       size="sm"
                       disabled={
                         updatingStatus ||
-                        hqFrozen ||
+                        hqStatusWriteBlocked ||
                         detailsLoading ||
                         selectedOrderUx?.cancelled ||
                         selectedOrderUx?.fulfilled
@@ -1554,7 +1552,7 @@ export default function OrdersPage({
                       size="sm"
                       disabled={
                         updatingStatus ||
-                        hqFrozen ||
+                        hqStatusWriteBlocked ||
                         detailsLoading ||
                         selectedOrderUx?.cancelled ||
                         selectedOrderUx?.fulfilled
@@ -1568,7 +1566,7 @@ export default function OrdersPage({
                       size="sm"
                       disabled={
                         updatingStatus ||
-                        hqFrozen ||
+                        hqStatusWriteBlocked ||
                         detailsLoading ||
                         selectedOrderUx?.cancelled ||
                         selectedOrderUx?.fulfilled
@@ -1583,7 +1581,7 @@ export default function OrdersPage({
                       className="border-red-200 text-red-600 hover:bg-red-50"
                       disabled={
                         updatingStatus ||
-                        hqFrozen ||
+                        hqStatusWriteBlocked ||
                         detailsLoading ||
                         selectedOrderUx?.cancelled ||
                         selectedOrderUx?.fulfilled

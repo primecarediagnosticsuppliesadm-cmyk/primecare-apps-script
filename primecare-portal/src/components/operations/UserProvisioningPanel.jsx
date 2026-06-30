@@ -57,7 +57,8 @@ import {
 import { navigateToCreditRisk } from "@/operations/hqWorkflowNav.js";
 import {
   getDirectoryDefaultAudience,
-  isHqAdminFrozen,
+  getHqFreezeBannerMessage,
+  isHqStructuralWriteBlocked,
   isOperationsCenterDailyViewDefault,
   showQaProbeComplexity,
 } from "@/config/hqReleasePolicy.js";
@@ -1998,7 +1999,7 @@ export default function UserProvisioningPanel({
   const [reviewUser, setReviewUser] = useState(null);
   const [ignoredIntegrityKeys, setIgnoredIntegrityKeys] = useState(() => new Set());
   const integrityBannerRef = useRef(null);
-  const hqFrozen = isHqAdminFrozen();
+  const hqFrozen = isHqStructuralWriteBlocked();
   const showQaComplexity = showQaProbeComplexity();
   const [dailyView, setDailyView] = useState(isOperationsCenterDailyViewDefault());
 
@@ -2297,7 +2298,7 @@ export default function UserProvisioningPanel({
         </div>
         {hqFrozen ? (
           <p className="text-[11px] font-medium text-slate-600" role="status">
-            HQ certified — read-only. Review and navigate only.
+            {getHqFreezeBannerMessage("operations")}
           </p>
         ) : null}
       </div>

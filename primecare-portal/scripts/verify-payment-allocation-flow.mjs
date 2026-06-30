@@ -32,4 +32,11 @@ assert(/createPaymentWrite\(/.test(collections), "Collections uses createPayment
 assert(/resolvePaymentOrderIdForLab/.test(collections), "order-linked payment resolution");
 assert(/paymentOrderId/.test(collections), "payment order context wired");
 
+const policy = readFileSync(resolve(root, "src/config/hqReleasePolicy.js"), "utf8");
+const orders = readFileSync(resolve(root, "src/pages/OrdersPage.jsx"), "utf8");
+assert(/isHqOrderStatusWriteBlocked/.test(policy), "HQ freeze policy defines order status guard");
+assert(/HQ configuration is frozen/.test(policy), "HQ freeze banner copy defined");
+assert(/isHqOrderStatusWriteBlocked/.test(orders), "Orders uses scoped status freeze");
+assert(!/disabled=\{hqFrozen\}[\s\S]{0,240}handleRecordOrderPayment/.test(orders), "payment collection not blocked by freeze");
+
 console.log("PASS — payment allocation flow wiring");

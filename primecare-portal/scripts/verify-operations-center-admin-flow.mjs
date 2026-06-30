@@ -536,6 +536,19 @@ async function main() {
 
   await server?.close?.();
 
+  const ordersPage = readFileSync(resolve(root, "src/pages/OrdersPage.jsx"), "utf8");
+  const opsPage = readFileSync(resolve(root, "src/components/operations/UserProvisioningPanel.jsx"), "utf8");
+  if (/isHqStructuralWriteBlocked/.test(opsPage) && /disabled=\{hqFrozen\}/.test(opsPage)) {
+    pass("ui.freeze_structural", "Operations Center structural writes blocked when frozen");
+  } else {
+    fail("ui.freeze_structural", "Operations Center missing structural freeze guard");
+  }
+  if (!/disabled=\{hqFrozen\}[\s\S]{0,240}handleRecordOrderPayment/.test(ordersPage)) {
+    pass("ui.freeze_daily_payment", "Orders payment collection not blocked by structural freeze");
+  } else {
+    fail("ui.freeze_daily_payment", "Orders payment incorrectly blocked by freeze");
+  }
+
   console.log("\n=== Summary ===");
   const failed = results.filter((r) => r.status === "FAIL");
   const warned = results.filter((r) => r.status === "WARN");
