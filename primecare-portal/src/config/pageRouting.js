@@ -66,6 +66,9 @@ export function normalizePageKey(page) {
     case "founderFinancialIntelligence":
     case "financial-intelligence":
       return "founderFinancialIntelligence";
+    case "executive-financial-intelligence":
+    case "executiveFinancialIntelligence":
+      return "executiveFinancialIntelligence";
     case "revenue-funnel":
     case "revenueFunnel":
       return "revenueFunnel";

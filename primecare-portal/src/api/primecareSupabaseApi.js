@@ -1,5 +1,10 @@
 import { getAgentActiveLabOwnershipRowsRead } from "@/api/labOwnershipApi.js";
 import { createShipmentForFulfilledOrderWrite } from "@/api/logisticsSupabaseApi.js";
+import {
+  getOrderDeliverySnapshotRead,
+  persistOrderDeliverySnapshotWrite,
+} from "@/api/deliveryChargeSupabaseApi.js";
+import { DELIVERY_METHOD_INTENT } from "@/logistics/deliveryChargeEngine.js";
 import { supabase } from "./supabaseClient.js";
 import {
   autoAllocatePaymentToOrderInvoice,
@@ -5945,6 +5950,16 @@ export async function createOrderWrite(payload = {}) {
           hqDebugLog("SUPABASE ORDER SAVED (RPC)", savedOrder);
           await getLabRecentOrdersRead(lab_id);
 
+          await tryPersistOrderDeliverySnapshot({
+            tenant_id,
+            order_id,
+            lab_id,
+            merchandiseSubtotal: total_amount,
+            deliveryMethodIntent:
+              str(payload.deliveryMethodIntent ?? payload.delivery_method_intent) ||
+              DELIVERY_METHOD_INTENT.DELIVERY,
+          });
+
           if (str(status).toLowerCase() === "fulfilled") {
             const itemsRes = await supabase
               .from("order_items")
@@ -6081,6 +6096,16 @@ export async function createOrderWrite(payload = {}) {
     }
 
     hqDebugLog("SUPABASE ORDER ITEMS SAVED", itemsData);
+
+    await tryPersistOrderDeliverySnapshot({
+      tenant_id,
+      order_id,
+      lab_id,
+      merchandiseSubtotal: total_amount,
+      deliveryMethodIntent:
+        str(payload.deliveryMethodIntent ?? payload.delivery_method_intent) ||
+        DELIVERY_METHOD_INTENT.DELIVERY,
+    });
 
     if (str(status).toLowerCase() === "fulfilled") {
       hqDebugLog("ORDER STATUS BUSINESS RULE", {
@@ -6838,6 +6863,31 @@ async function bumpArOutstandingForFulfillment({ lab_id, tenant_id, deltaAmount 
   return { success: false, error: upd.error.message, skipped: true };
 }
 
+async function tryPersistOrderDeliverySnapshot({
+  tenant_id,
+  order_id,
+  lab_id,
+  merchandiseSubtotal,
+  deliveryMethodIntent = DELIVERY_METHOD_INTENT.DELIVERY,
+}) {
+  try {
+    const res = await persistOrderDeliverySnapshotWrite({
+      tenantId: tenant_id,
+      orderId: order_id,
+      labId: lab_id,
+      merchandiseSubtotal,
+      deliveryMethodIntent,
+    });
+    if (!res.success && !res.skipped) {
+      hqDebugWarn("[createOrderWrite] delivery snapshot:", res.error);
+    }
+    return res;
+  } catch (err) {
+    hqDebugWarn("[createOrderWrite] delivery snapshot threw:", err?.message || err);
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
 /**
  * Operational shipment row after fulfill — idempotent, non-blocking, no finance effects.
  */
@@ -6848,11 +6898,18 @@ async function tryCreateShipmentAfterFulfill({
   actorId,
   createdSource = "tryCreateShipmentAfterFulfill",
 } = {}) {
+  const deliveryRes = await getOrderDeliverySnapshotRead({
+    tenantId: str(tenantId ?? orderRow.tenant_id ?? orderRow.tenantId),
+    orderId: str(orderId ?? orderRow.order_id ?? orderRow.orderId),
+  });
+  const delivery = deliveryRes.delivery || {};
   const res = await createShipmentForFulfilledOrderWrite({
     tenantId: str(tenantId ?? orderRow.tenant_id ?? orderRow.tenantId),
     orderId: str(orderId ?? orderRow.order_id ?? orderRow.orderId),
     labId: str(orderRow.lab_id ?? orderRow.labId),
     orderValue: Number(orderRow.total_amount ?? orderRow.totalAmount ?? orderRow.orderTotal ?? 0),
+    deliveryChargeAmount: Number(delivery.deliveryChargeAmount ?? 0),
+    deliveryChargeReason: str(delivery.deliveryChargeReason),
     actorId: str(actorId),
     createdSource,
   });

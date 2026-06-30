@@ -12,6 +12,15 @@ import {
   updateShipmentAssignmentWrite,
 } from "@/api/logisticsSupabaseApi.js";
 import {
+  applyOrderDeliveryOverrideWrite,
+  getOrderDeliverySnapshotRead,
+  getOrderInvoiceForDeliveryOverrideRead,
+} from "@/api/deliveryChargeSupabaseApi.js";
+import {
+  canEditDeliveryChargeOverride,
+  deliveryChargeReasonLabel,
+} from "@/logistics/deliveryChargeEngine.js";
+import {
   ASSIGNMENT_TYPE,
   ASSIGNMENT_TYPE_OPTIONS,
   assignmentTypeLabel,
@@ -75,6 +84,11 @@ export default function ShipmentDetailDrawer({
     failureReason: "",
     rescheduledFor: "",
   });
+  const [orderDelivery, setOrderDelivery] = useState(null);
+  const [canOverrideDelivery, setCanOverrideDelivery] = useState(false);
+  const [overrideAmount, setOverrideAmount] = useState("");
+  const [overrideReason, setOverrideReason] = useState("");
+  const [savingOverride, setSavingOverride] = useState(false);
 
   useEffect(() => {
     if (!open || !shipment) return;
@@ -118,6 +132,33 @@ export default function ShipmentDetailDrawer({
       cancelled = true;
     };
   }, [open, shipment?.shipmentId, tenantId]);
+
+  useEffect(() => {
+    if (!open || !tenantId || !shipment?.orderId) return;
+    let cancelled = false;
+    void (async () => {
+      const [deliveryRes, invRes] = await Promise.all([
+        getOrderDeliverySnapshotRead({ tenantId, orderId: shipment.orderId }),
+        getOrderInvoiceForDeliveryOverrideRead({ tenantId, orderId: shipment.orderId }),
+      ]);
+      if (cancelled) return;
+      const delivery = deliveryRes.delivery;
+      setOrderDelivery(delivery);
+      setCanOverrideDelivery(canEditDeliveryChargeOverride(invRes.invoice || {}));
+      if (delivery?.hasHqOverride) {
+        setOverrideAmount(String(delivery.overrideAmount ?? delivery.deliveryChargeAmount ?? ""));
+        setOverrideReason(delivery.overrideReason || "");
+      } else {
+        setOverrideAmount(
+          delivery?.deliveryChargeAmount != null ? String(delivery.deliveryChargeAmount) : ""
+        );
+        setOverrideReason("");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, tenantId, shipment?.orderId, shipment?.deliveryChargeAmount]);
 
   const timeline = useMemo(
     () => buildShipmentTimeline(events, shipment?.dispatchStatus),
@@ -178,6 +219,41 @@ export default function ShipmentDetailDrawer({
     return true;
   }
 
+  async function saveDeliveryOverride() {
+    if (readOnly || !canOverrideDelivery) return false;
+    const reason = str(overrideReason);
+    if (!reason) {
+      setError("Override reason is required");
+      return false;
+    }
+    if (overrideAmount === "" || overrideAmount == null) {
+      setError("Override amount is required");
+      return false;
+    }
+    setSavingOverride(true);
+    setError("");
+    const res = await applyOrderDeliveryOverrideWrite({
+      tenantId,
+      orderId: shipment.orderId,
+      labId: shipment.labId,
+      overrideAmount: Number(overrideAmount),
+      overrideReason: reason,
+      actorId: currentUser?.id || currentUser?.userId || currentUser?.email,
+    });
+    setSavingOverride(false);
+    if (!res.success) {
+      setError(res.error || "Failed to save delivery override");
+      return false;
+    }
+    setOrderDelivery(res.data);
+    onUpdated?.({
+      ...shipment,
+      deliveryChargeAmount: res.data?.deliveryChargeAmount ?? 0,
+      deliveryChargeReason: res.data?.deliveryChargeReason ?? "",
+    });
+    return true;
+  }
+
   async function handleTransition(toStatus) {
     if (readOnly) return;
     const needsAssignment =
@@ -232,6 +308,65 @@ export default function ShipmentDetailDrawer({
           </div>
 
           {error ? <p className="text-xs text-amber-700">{error}</p> : null}
+
+          <section className="space-y-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Delivery Charge (operational)
+            </h3>
+            <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs text-slate-700">
+              <p>
+                <span className="text-slate-500">Charge:</span>{" "}
+                ₹{Number(shipment.deliveryChargeAmount ?? orderDelivery?.deliveryChargeAmount ?? 0).toLocaleString("en-IN")}
+              </p>
+              <p>
+                <span className="text-slate-500">Reason:</span>{" "}
+                {deliveryChargeReasonLabel(
+                  shipment.deliveryChargeReason || orderDelivery?.deliveryChargeReason
+                )}
+              </p>
+              {orderDelivery?.hasHqOverride ? (
+                <p className="mt-1 text-[10px] text-slate-500">
+                  HQ override by {orderDelivery.overrideBy || "—"}
+                </p>
+              ) : null}
+            </div>
+            {!readOnly && canOverrideDelivery ? (
+              <div className="space-y-2 rounded-lg border border-dashed border-slate-300 p-3">
+                <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                  HQ override (before invoice sent)
+                </p>
+                <Input
+                  type="number"
+                  min="0"
+                  step="1"
+                  className="h-8 text-xs"
+                  placeholder="Override amount (₹)"
+                  value={overrideAmount}
+                  onChange={(e) => setOverrideAmount(e.target.value)}
+                />
+                <Textarea
+                  className="min-h-[52px] text-xs"
+                  placeholder="Override reason *"
+                  value={overrideReason}
+                  onChange={(e) => setOverrideReason(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs"
+                  disabled={savingOverride}
+                  onClick={() => void saveDeliveryOverride()}
+                >
+                  {savingOverride ? "Saving…" : "Apply override"}
+                </Button>
+              </div>
+            ) : !readOnly && !canOverrideDelivery ? (
+              <p className="text-[10px] text-slate-500">
+                Delivery override locked — invoice has already been sent.
+              </p>
+            ) : null}
+          </section>
 
           <section className="space-y-2">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">

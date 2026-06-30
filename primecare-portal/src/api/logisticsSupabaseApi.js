@@ -16,6 +16,7 @@ import {
   mapCourierRow,
   validateCourierForm,
 } from "@/logistics/logisticsCourierEngine.js";
+import { reconcileDeliveryChargeForShipmentWrite } from "@/api/deliveryChargeSupabaseApi.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -61,6 +62,8 @@ export async function createShipmentForFulfilledOrderWrite({
   labName = "",
   labCity = "",
   orderValue = 0,
+  deliveryChargeAmount = 0,
+  deliveryChargeReason = "",
   distributorId = "",
   actorId = "",
   createdSource = "createShipmentForFulfilledOrderWrite",
@@ -130,6 +133,8 @@ export async function createShipmentForFulfilledOrderWrite({
       lab_city: resolvedLabCity || null,
       distributor_id: str(distributorId) || null,
       order_value: num(orderValue),
+      delivery_charge_amount: num(deliveryChargeAmount),
+      delivery_charge_reason: str(deliveryChargeReason) || null,
       dispatch_status: SHIPMENT_STATUS.READY,
       created_by: str(actorId) || null,
       created_at: now,
@@ -278,6 +283,23 @@ export async function updateShipmentAssignmentWrite(shipmentId, payload = {}) {
     .single();
 
   if (error) return { success: false, error: error.message, data: null };
+
+  const deliveryMethod = str(payload.deliveryMethod);
+  if (deliveryMethod && data?.order_id && data?.tenant_id) {
+    await reconcileDeliveryChargeForShipmentWrite({
+      tenantId: data.tenant_id,
+      orderId: data.order_id,
+      labId: data.lab_id,
+      deliveryMethod,
+    });
+    const { data: refreshed } = await supabase
+      .from("order_shipments")
+      .select("*")
+      .eq("shipment_id", sid)
+      .maybeSingle();
+    return { success: true, data: mapShipmentRow(refreshed || data), error: null };
+  }
+
   return { success: true, data: mapShipmentRow(data), error: null };
 }
 

@@ -18,6 +18,7 @@ const ExecutiveControlTower = lazy(() => import("./pages/ExecutiveControlTower")
 const FounderNavigationPage = lazy(() => import("./pages/FounderNavigationPage"));
 const FounderStrategyPage = lazy(() => import("./pages/FounderStrategyPage"));
 const FounderFinancialIntelligencePage = lazy(() => import("./pages/FounderFinancialIntelligencePage"));
+const ExecutiveFinancialIntelligencePage = lazy(() => import("./pages/ExecutiveFinancialIntelligencePage"));
 const TenantManagementPage = lazy(() => import("./pages/TenantManagementPage"));
 const DistributorManagementPage = lazy(() => import("./pages/DistributorManagementPage"));
 const DistributorOsPage = lazy(() => import("./pages/DistributorOsPage"));
@@ -349,6 +350,14 @@ export default function PrimeCareWebPortal({
       case "founderFinancialIntelligence":
         return (
           <FounderFinancialIntelligencePage
+            setActivePage={setActivePage}
+            currentUser={currentUser}
+          />
+        );
+
+      case "executiveFinancialIntelligence":
+        return (
+          <ExecutiveFinancialIntelligencePage
             setActivePage={setActivePage}
             currentUser={currentUser}
           />

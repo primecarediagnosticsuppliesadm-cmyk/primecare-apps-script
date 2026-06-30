@@ -28,3 +28,9 @@ export const REQUIRE_SUPABASE_AUTH = IS_QA || IS_PROD;
 
 /** Agent task queue completion (Apps Script only until Supabase agent_tasks exists). */
 export const AGENT_TASK_COMPLETION_ENABLED = ALLOW_LEGACY_APPS_SCRIPT;
+
+/** Phase 3B — wire delivery charge into invoice/AR (disabled in Phase 3A). */
+export const LOGISTICS_DELIVERY_CHARGE_FINANCE_ENABLED = envFlag(
+  "VITE_LOGISTICS_DELIVERY_CHARGE_FINANCE_ENABLED",
+  false
+);

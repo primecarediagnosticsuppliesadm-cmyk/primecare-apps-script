@@ -47,6 +47,11 @@ import {
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
+import { buildDeliveryQuoteForLabOrder } from "@/api/deliveryChargeSupabaseApi.js";
+import {
+  DELIVERY_METHOD_INTENT,
+  deliveryChargeReasonLabel,
+} from "@/logistics/deliveryChargeEngine.js";
 import { cn } from "@/lib/utils";
 import { hqDebugLog } from "@/utils/hqDebugLog.js";
 import OrderTrackingDrawer from "@/components/lab/OrderTrackingDrawer.jsx";
@@ -353,6 +358,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
   const [loadingOrders, setLoadingOrders] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState(null);
+  const [deliveryQuote, setDeliveryQuote] = useState(null);
   const submitLockRef = useRef(false);
   const hydratedDraftRef = useRef(false);
   const lastSubmittedHashRef = useRef("");
@@ -913,6 +919,30 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
       return sum + Number(item.quantity || 0) * Number(item.unitPrice || 0);
     }, 0);
   }, [cartItems]);
+
+  const tenantId = String(currentUser?.tenantId || currentUser?.tenant_id || "").trim();
+
+  useEffect(() => {
+    if (!labId || !tenantId || cartSubTotal <= 0) {
+      setDeliveryQuote(null);
+      return;
+    }
+    let cancelled = false;
+    void buildDeliveryQuoteForLabOrder({
+      tenantId,
+      labId,
+      merchandiseSubtotal: cartSubTotal,
+      deliveryMethodIntent: DELIVERY_METHOD_INTENT.DELIVERY,
+    }).then((res) => {
+      if (!cancelled && res.success) setDeliveryQuote(res.quote);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [labId, tenantId, cartSubTotal]);
+
+  const estimatedDeliveryCharge = Number(deliveryQuote?.amount ?? 0);
+  const estimatedOrderTotal = cartSubTotal + estimatedDeliveryCharge;
 
   const cartQtyByProduct = useMemo(() => {
     const map = new Map();
@@ -1910,10 +1940,30 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
                     <span>Items</span>
                     <span className="tabular-nums font-medium">{cartCount}</span>
                   </div>
-                  <div className="flex justify-between font-semibold text-slate-900">
-                    <span>Subtotal</span>
-                    <span className="tabular-nums">₹{cartSubTotal.toLocaleString()}</span>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Merchandise subtotal</span>
+                    <span className="tabular-nums">₹{cartSubTotal.toLocaleString("en-IN")}</span>
                   </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Estimated delivery</span>
+                    <span className="tabular-nums">
+                      ₹{estimatedDeliveryCharge.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                  {deliveryQuote?.reason ? (
+                    <p className="text-[10px] text-slate-500">
+                      {deliveryChargeReasonLabel(deliveryQuote.reason)}
+                    </p>
+                  ) : null}
+                  <div className="flex justify-between font-semibold text-slate-900">
+                    <span>Estimated total</span>
+                    <span className="tabular-nums">
+                      ₹{estimatedOrderTotal.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                  <p className="text-[10px] leading-snug text-slate-500">
+                    Delivery charge shown for planning; billing integration comes later.
+                  </p>
                 </div>
               </CollapsibleSection>
               <div className="flex gap-2 px-3 pt-2 pb-[max(calc(6rem+env(safe-area-inset-bottom)),1.25rem)] md:pb-[max(0.75rem,env(safe-area-inset-bottom))]">

@@ -37,7 +37,7 @@ export const HQ_EXECUTIVE_MENU_SECTIONS = [
   {
     id: "founder",
     label: "FOUNDER",
-    keys: ["founderFinancialIntelligence", "revenueFunnel"],
+    keys: ["executiveFinancialIntelligence", "founderFinancialIntelligence", "revenueFunnel"],
   },
   {
     id: "operations",
@@ -59,6 +59,7 @@ const EXECUTIVE_HQ_MENU_KEYS = new Set([
   "founderNavigation",
   "founderStrategy",
   "founderFinancialIntelligence",
+  "executiveFinancialIntelligence",
   "revenueFunnel",
   "qualificationReview",
   "pilotReadiness",
@@ -118,6 +119,7 @@ export const MENU_ITEMS = [
   { key: "founderNavigation", label: "Founder Navigation", icon: "Compass" },
   { key: "founderStrategy", label: "Founder Strategy", icon: "Target" },
   { key: "founderFinancialIntelligence", label: "Financial Intelligence", icon: "BarChart3" },
+  { key: "executiveFinancialIntelligence", label: "Executive Financial Intelligence", icon: "LineChart" },
   { key: "revenueFunnel", label: "Revenue Funnel", icon: "TrendingUp" },
   {
     key: "qualificationReview",
@@ -167,6 +169,7 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "founderNavigation",
   "founderStrategy",
   "founderFinancialIntelligence",
+  "executiveFinancialIntelligence",
   "revenueFunnel",
   "pilotReadiness",
   "tenantManagement",

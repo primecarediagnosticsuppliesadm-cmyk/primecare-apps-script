@@ -131,6 +131,8 @@ export function mapShipmentRow(row) {
     dispatchNotes: str(row.dispatch_notes ?? row.dispatchNotes),
     failureReason: str(row.failure_reason ?? row.failureReason),
     rescheduledFor: str(row.rescheduled_for ?? row.rescheduledFor),
+    deliveryChargeAmount: Number(row.delivery_charge_amount ?? row.deliveryChargeAmount ?? 0),
+    deliveryChargeReason: str(row.delivery_charge_reason ?? row.deliveryChargeReason),
     createdBy: str(row.created_by ?? row.createdBy),
     createdAt: str(row.created_at ?? row.createdAt),
     updatedAt: str(row.updated_at ?? row.updatedAt),
@@ -182,6 +184,11 @@ export function computeLogisticsKpis(shipments = []) {
     }
   }
 
+  let estimatedDeliveryRevenue = 0;
+  for (const s of list) {
+    estimatedDeliveryRevenue += Number(s.deliveryChargeAmount ?? s.delivery_charge_amount ?? 0);
+  }
+
   return {
     readyForDispatch: ready,
     assigned,
@@ -190,6 +197,7 @@ export function computeLogisticsKpis(shipments = []) {
     failedDeliveries: failed,
     returned,
     customerPickup,
+    estimatedDeliveryRevenue,
     total: list.length,
   };
 }

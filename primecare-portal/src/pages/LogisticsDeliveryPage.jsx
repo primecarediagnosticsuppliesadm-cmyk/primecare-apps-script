@@ -20,6 +20,7 @@ import {
 } from "@/logistics/logisticsShipmentEngine.js";
 import ShipmentDetailDrawer from "@/components/logistics/ShipmentDetailDrawer.jsx";
 import CourierManagementPanel from "@/components/logistics/CourierManagementPanel.jsx";
+import DeliveryPolicyPanel from "@/components/logistics/DeliveryPolicyPanel.jsx";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import { ROLES } from "@/config/roles.js";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,7 @@ import {
   Search,
   UserCheck,
   ShoppingBag,
+  IndianRupee,
 } from "lucide-react";
 
 function str(v) {
@@ -204,6 +206,7 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
         {[
           { id: "dispatch", label: "Dispatch Queue" },
           { id: "couriers", label: "Courier Management" },
+          { id: "policy", label: "Delivery Policy" },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -223,7 +226,7 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
 
       {activeTab === "dispatch" ? (
         <>
-      <KpiCardGrid columns={3} className="sm:grid-cols-2 lg:grid-cols-6">
+      <KpiCardGrid columns={3} className="sm:grid-cols-2 lg:grid-cols-7">
         <KpiCard
           title="Ready"
           value={kpis.readyForDispatch}
@@ -265,6 +268,12 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
           subtitle="Pickup assignments"
           icon={ShoppingBag}
           onClick={() => setStatusFilter("customer_pickup")}
+        />
+        <KpiCard
+          title="Est. Delivery Revenue"
+          value={formatCurrency(kpis.estimatedDeliveryRevenue)}
+          subtitle="Operational quotes only"
+          icon={IndianRupee}
         />
       </KpiCardGrid>
 
@@ -316,6 +325,7 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
                 <th className="px-3 py-2">Lab</th>
                 <th className="px-3 py-2">City</th>
                 <th className="px-3 py-2 text-right">Order Value</th>
+                <th className="px-3 py-2 text-right">Delivery Charge</th>
                 <th className="px-3 py-2">Delivery Method</th>
                 <th className="px-3 py-2">Assigned To</th>
                 <th className="px-3 py-2">Status</th>
@@ -326,7 +336,7 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
             <tbody className="divide-y divide-slate-100">
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-3 py-8 text-center text-slate-500">
+                  <td colSpan={11} className="px-3 py-8 text-center text-slate-500">
                     No shipments match this filter.
                   </td>
                 </tr>
@@ -343,6 +353,9 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
                     <td className="px-3 py-2">{row.labCity || "—"}</td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       {formatCurrency(row.orderValue)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {formatCurrency(row.deliveryChargeAmount)}
                     </td>
                     <td className="px-3 py-2">{deliveryMethodLabel(row.deliveryMethod)}</td>
                     <td className="px-3 py-2">{row.assignedToName || "—"}</td>
@@ -361,12 +374,14 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
         </div>
       </section>
         </>
-      ) : (
+      ) : activeTab === "couriers" ? (
         <CourierManagementPanel
           tenantId={tenantId}
           currentUser={currentUser}
           readOnly={readOnly}
         />
+      ) : (
+        <DeliveryPolicyPanel tenantId={tenantId} currentUser={currentUser} readOnly={readOnly} />
       )}
 
       <ShipmentDetailDrawer
