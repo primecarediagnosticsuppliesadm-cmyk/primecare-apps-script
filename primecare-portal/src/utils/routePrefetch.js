@@ -5,14 +5,16 @@ import { ROLES } from "@/config/roles.js";
 
 const PREFETCH_BY_ROLE = {
   [ROLES.EXECUTIVE]: {
-    dashboard: ["orders", "risk", "operationsCenter", "qualificationReview"],
-    orders: ["collections", "risk"],
+    dashboard: ["orders", "logisticsDelivery", "risk", "operationsCenter", "qualificationReview"],
+    orders: ["logisticsDelivery", "collections", "risk"],
+    logisticsDelivery: ["orders", "risk"],
     risk: ["collections", "orders"],
     operationsCenter: ["orders", "accessAudit"],
   },
   [ROLES.ADMIN]: {
-    dashboard: ["orders", "labs", "visits", "inventory"],
-    orders: ["labs", "collections"],
+    dashboard: ["orders", "logisticsDelivery", "labs", "visits", "inventory"],
+    orders: ["logisticsDelivery", "labs", "collections"],
+    logisticsDelivery: ["orders", "labs"],
     labs: ["orders", "visits"],
     inventory: ["masterCatalog", "purchase"],
   },
@@ -29,6 +31,7 @@ const PREFETCH_BY_ROLE = {
 /** @type {Record<string, () => Promise<unknown>>} */
 const PAGE_LOADERS = {
   orders: () => import("@/pages/OrdersPage.jsx"),
+  logisticsDelivery: () => import("@/pages/LogisticsDeliveryPage.jsx"),
   collections: () => import("@/pages/CollectionsPage.jsx"),
   risk: () => import("@/pages/CollectionsPage.jsx"),
   inventory: () => import("@/pages/StockPage.jsx"),

@@ -42,6 +42,7 @@ import {
 import { adminDashboardModelFromMerge } from "@/pages/adminDashboardState.js";
 import AdminDashboardQaValidationPanel from "@/components/qa/AdminDashboardQaValidationPanel.jsx";
 import HqPrioritiesStrip from "@/components/hq/HqPrioritiesStrip.jsx";
+import LogisticsKpiWidget from "@/components/logistics/LogisticsKpiWidget.jsx";
 import { onFinancialSyncCompleted } from "@/operations/financialSyncEvents.js";
 import { useFinancialSyncPulse } from "@/hooks/useFinancialSyncPulse.js";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
@@ -1322,6 +1323,11 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       ) : null}
 
       <HqPrioritiesStrip
+        tenantId={currentUser?.tenantId ?? currentUser?.tenant_id ?? null}
+        setActivePage={setActivePage}
+      />
+
+      <LogisticsKpiWidget
         tenantId={currentUser?.tenantId ?? currentUser?.tenant_id ?? null}
         setActivePage={setActivePage}
       />

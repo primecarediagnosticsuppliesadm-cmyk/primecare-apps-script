@@ -1,4 +1,5 @@
 import { getAgentActiveLabOwnershipRowsRead } from "@/api/labOwnershipApi.js";
+import { createShipmentForFulfilledOrderWrite } from "@/api/logisticsSupabaseApi.js";
 import { supabase } from "./supabaseClient.js";
 import {
   autoAllocatePaymentToOrderInvoice,
@@ -5983,6 +5984,13 @@ export async function createOrderWrite(payload = {}) {
               actorId: created_by,
               createdSource: "createOrderWrite",
             });
+            await tryCreateShipmentAfterFulfill({
+              orderRow: savedOrder,
+              orderId: order_id,
+              tenantId: tenant_id,
+              actorId: created_by,
+              createdSource: "createOrderWrite.rpc",
+            });
           }
 
           return {
@@ -6140,6 +6148,13 @@ export async function createOrderWrite(payload = {}) {
           skipped: Boolean(invoiceRes.skipped),
         });
       }
+      await tryCreateShipmentAfterFulfill({
+        orderRow: savedOrder,
+        orderId: order_id,
+        tenantId: tenant_id,
+        actorId: created_by,
+        createdSource: "createOrderWrite.legacy",
+      });
     }
 
     const notifyBase = {
@@ -6824,6 +6839,35 @@ async function bumpArOutstandingForFulfillment({ lab_id, tenant_id, deltaAmount 
 }
 
 /**
+ * Operational shipment row after fulfill — idempotent, non-blocking, no finance effects.
+ */
+async function tryCreateShipmentAfterFulfill({
+  orderRow = {},
+  orderId,
+  tenantId,
+  actorId,
+  createdSource = "tryCreateShipmentAfterFulfill",
+} = {}) {
+  const res = await createShipmentForFulfilledOrderWrite({
+    tenantId: str(tenantId ?? orderRow.tenant_id ?? orderRow.tenantId),
+    orderId: str(orderId ?? orderRow.order_id ?? orderRow.orderId),
+    labId: str(orderRow.lab_id ?? orderRow.labId),
+    orderValue: Number(orderRow.total_amount ?? orderRow.totalAmount ?? orderRow.orderTotal ?? 0),
+    actorId: str(actorId),
+    createdSource,
+  });
+  if (!res.success && !res.skipped) {
+    hqDebugWarn(`[${createdSource}] Shipment creation after fulfill failed:`, res.error);
+  } else if (res.data?.shipmentId) {
+    hqDebugLog("SHIPMENT LINKED TO FULFILLED ORDER", {
+      orderId: str(orderId ?? orderRow.order_id ?? orderRow.orderId),
+      shipmentId: res.data.shipmentId,
+      skipped: Boolean(res.skipped),
+    });
+  }
+}
+
+/**
  * Invoke server-side invoice creation for a fulfilled order (idempotent RPC).
  * Does not modify AR/collections; failures are logged and do not roll back fulfill.
  */
@@ -7174,6 +7218,13 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
           skipped: Boolean(invoiceRes.skipped),
         });
       }
+      await tryCreateShipmentAfterFulfill({
+        orderRow,
+        orderId: businessOrderId,
+        tenantId: invoiceTenantId,
+        actorId: str(payload.actorId ?? payload.actor_id ?? payload.updatedBy ?? ""),
+        createdSource: "updateOrderStatusWrite",
+      });
     }
 
     return {

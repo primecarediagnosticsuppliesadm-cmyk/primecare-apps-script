@@ -107,6 +107,9 @@ export function normalizePageKey(page) {
     case "lab-invoices":
     case "invoices":
       return "labInvoices";
+    case "logistics-delivery":
+    case "logisticsDelivery":
+      return "logisticsDelivery";
     default:
       return page;
   }

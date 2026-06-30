@@ -25,6 +25,7 @@ import {
   Radio,
   Shield,
   TrendingUp,
+  Truck,
 } from "lucide-react";
 
 const ICONS = {
@@ -49,6 +50,7 @@ const ICONS = {
   masterCatalog: Package,
   inventory: Boxes,
   orders: ShoppingCart,
+  logisticsDelivery: Truck,
   risk: AlertTriangle,
   qualificationReview: ClipboardCheck,
   performance: BarChart3,

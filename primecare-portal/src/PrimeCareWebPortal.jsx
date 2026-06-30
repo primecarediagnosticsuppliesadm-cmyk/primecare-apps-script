@@ -38,6 +38,7 @@ const PredatorDebugConsole = lazy(() => import("./pages/PredatorDebugConsole"));
 const NotificationCenterPage = lazy(() => import("./pages/NotificationCenterPage"));
 const OperationsCommandCenter = lazy(() => import("./pages/OperationsCommandCenter"));
 const OperationsCenterAdminPage = lazy(() => import("./pages/OperationsCenterAdminPage"));
+const LogisticsDeliveryPage = lazy(() => import("./pages/LogisticsDeliveryPage"));
 const AccessAuditPage = lazy(() => import("./pages/AccessAuditPage"));
 const QACommandCenterPage = lazy(() => import("./pages/QACommandCenterPage"));
 const PilotReadinessPage = lazy(() => import("./pages/PilotReadinessPage"));
@@ -277,6 +278,15 @@ export default function PrimeCareWebPortal({
           />
         );
 
+      case "logisticsDelivery":
+      case "logistics-delivery":
+        return (
+          <LogisticsDeliveryPage
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+          />
+        );
+
       case "accessAudit":
       case "access-audit":
         return <AccessAuditPage currentUser={currentUser} />;
@@ -392,6 +402,15 @@ export default function PrimeCareWebPortal({
       case "operations-center":
         return (
           <OperationsCommandCenter
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+          />
+        );
+
+      case "logisticsDelivery":
+      case "logistics-delivery":
+        return (
+          <LogisticsDeliveryPage
             currentUser={currentUser}
             setActivePage={setActivePage}
           />

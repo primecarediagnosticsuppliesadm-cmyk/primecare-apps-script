@@ -139,6 +139,19 @@ export function navigateToOperationsCenter(
   });
 }
 
+export function navigateToLogisticsDelivery(
+  setActivePage,
+  { orderId = "", shipmentId = "", statusFilter = "", search = "" } = {}
+) {
+  hqNavigate(setActivePage, {
+    page: "logisticsDelivery",
+    orderId: str(orderId),
+    shipmentId: str(shipmentId),
+    statusFilter: str(statusFilter),
+    search: str(search),
+  });
+}
+
 /** Resolve Activity Center event → navigation target (read-only). */
 export function resolveActivityEventNav(event = {}) {
   const raw = event.raw || {};

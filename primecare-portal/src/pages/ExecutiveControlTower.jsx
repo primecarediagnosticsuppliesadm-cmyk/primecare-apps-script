@@ -51,6 +51,7 @@ import { executeExecutiveActionPlan } from "@/operations/executiveActionQueueHan
 import { ACTION_PLAN_TYPES, ACTION_QUEUE_SOURCE_MODULES } from "@/operations/executiveActionQueueTypes.js";
 import { labIdKey } from "@/utils/labId.js";
 import { getInvoiceTenantKpisRead } from "@/api/invoiceSupabaseApi.js";
+import LogisticsKpiWidget from "@/components/logistics/LogisticsKpiWidget.jsx";
 
 const INTERVENTION_TOAST = {
   assign_owner: "Owner assigned",
@@ -815,6 +816,11 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
           />
         </KpiCardGrid>
       </section>
+
+      <LogisticsKpiWidget
+        tenantId={currentUser?.tenantId ?? currentUser?.tenant_id ?? null}
+        setActivePage={setActivePage}
+      />
 
       <section aria-label="Operational health" className="rounded-lg border border-slate-200 bg-white px-3 py-2">
         <button

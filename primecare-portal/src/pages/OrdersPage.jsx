@@ -78,6 +78,7 @@ import { getInvoicesByOrderIdsRead } from "@/api/invoiceSupabaseApi.js";
 import { onFinancialSyncCompleted } from "@/operations/financialSyncEvents.js";
 import { useFinancialSyncPulse } from "@/hooks/useFinancialSyncPulse.js";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
+import OrdersLogisticsPanel from "@/components/logistics/OrdersLogisticsPanel.jsx";
 import {
   ORDER_QUEUE_KEYS,
   buildOrdersOperationsQueue,
@@ -1512,6 +1513,15 @@ export default function OrdersPage({
                       ) : null}
                     </div>
                   </section>
+                ) : null}
+
+                {selectedOrderUx?.fulfilled ? (
+                  <OrdersLogisticsPanel
+                    orderId={selectedOrderSummary?.orderId || selectedOrderSummary?.order_id}
+                    tenantId={homeTenantId}
+                    setActivePage={setActivePage}
+                    orderFulfilled
+                  />
                 ) : null}
 
                 <section className="space-y-2">
