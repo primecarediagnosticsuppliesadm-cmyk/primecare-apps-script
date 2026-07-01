@@ -60,9 +60,11 @@ import OrderProgressMini from "@/components/lab/OrderProgressMini.jsx";
 import { StatusBadge, usePortalToast, PageHeader, DataFetchError } from "@/components/ux";
 import {
   fetchScopedOrderDetails,
+  findLocalOrderForTracking,
   formatOrderPaymentLabel,
   isCancelledStatus,
   logOrderTrackingEvent,
+  mapLocalOrderRowToTrackingDetails,
   orderStatusChipVariant,
 } from "@/utils/orderTracking.js";
 import { paymentStatusToVariant } from "@/utils/statusTokens.js";
@@ -362,6 +364,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
   const submitLockRef = useRef(false);
   const hydratedDraftRef = useRef(false);
   const lastSubmittedHashRef = useRef("");
+  const lastCheckoutOrderRef = useRef(null);
 
   const [trackingOpen, setTrackingOpen] = useState(false);
   const [trackingOrder, setTrackingOrder] = useState(null);
@@ -677,7 +680,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
     }
   }
 
-  async function loadRecentOrders() {
+  async function loadRecentOrders(mergeOrders = []) {
     try {
       setLoadingOrders(true);
       setOrdersFetchError("");
@@ -702,15 +705,16 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
       }
 
       const byId = new Map();
-      for (const o of [...supabaseOrders, ...scriptOrders]) {
+      const seedOrders = Array.isArray(mergeOrders) ? mergeOrders : [];
+      for (const o of [...seedOrders, ...supabaseOrders, ...scriptOrders]) {
         const id = String(o?.orderId || o?.order_id || "").trim();
         if (!id) continue;
         if (!byId.has(id)) byId.set(id, o);
       }
 
       const merged = Array.from(byId.values()).sort((a, b) => {
-        const da = String(a.orderDate || a.order_date || a.date || "");
-        const db = String(b.orderDate || b.order_date || b.date || "");
+        const da = String(a.orderDate || a.order_date || a.date || a.createdAt || a.created_at || "");
+        const db = String(b.orderDate || b.order_date || b.date || b.createdAt || b.created_at || "");
         return db.localeCompare(da);
       });
 
@@ -723,15 +727,38 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
     }
   }
 
+  function resolveLocalTrackingOrder(orderId) {
+    return findLocalOrderForTracking(orderId, [
+      lastCheckoutOrderRef.current,
+      submitResult?.orderSnapshot,
+      scopedRecentOrders,
+      recentOrders,
+    ]);
+  }
+
   async function openOrderTracking(orderId) {
-    if (!orderId) return null;
+    const oid = String(orderId || "").trim();
+    if (!oid) return null;
+
+    const localRow = resolveLocalTrackingOrder(oid);
+    const localDetails = mapLocalOrderRowToTrackingDetails(localRow);
+
     try {
       setTrackingOpen(true);
       setTrackingLoading(true);
       setTrackingError("");
-      setTrackingOrder(null);
-      logOrderTrackingEvent("order_tracking.drawer_open", { orderId, source: "lab_ordering" });
-      const details = await fetchScopedOrderDetails(orderId, profileLabKey);
+      setTrackingOrder(localDetails);
+      logOrderTrackingEvent("order_tracking.drawer_open", {
+        orderId: oid,
+        source: "lab_ordering",
+        hadLocalSnapshot: Boolean(localDetails),
+      });
+
+      const details = await fetchScopedOrderDetails(oid, {
+        labKey: profileLabKey,
+        labId,
+        tenantId: currentUser?.tenantId || currentUser?.tenant_id || null,
+      });
       setTrackingOrder(details);
       logOrderTrackingEvent("order_tracking.status_render", {
         orderId: details.orderId,
@@ -740,7 +767,12 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
       return details;
     } catch (error) {
       console.error("Failed to load order tracking", error);
-      setTrackingError(error.message || "Unable to load order details right now.");
+      if (localDetails) {
+        setTrackingOrder(localDetails);
+        setTrackingError("");
+        return localDetails;
+      }
+      setTrackingError(error.message || `Order not found: ${oid}`);
       return null;
     } finally {
       setTrackingLoading(false);
@@ -1233,9 +1265,16 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
         if (sbRes?.success) {
           const orderId =
             sbRes.data?.orderId ?? sbRes.data?.order?.order_id ?? "";
+          const orderSnapshot = sbRes.data?.order
+            ? mapOrderRow(sbRes.data.order, labName, 0)
+            : null;
+          if (orderSnapshot) {
+            lastCheckoutOrderRef.current = orderSnapshot;
+          }
           setSubmitResult({
             success: true,
             orderId,
+            orderSnapshot,
             invoiceId: null,
             itemCount,
             total,
@@ -1244,15 +1283,14 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
           lastSubmittedHashRef.current = cartHash;
           clearCartState({ closeDrawer: true });
 
-          if (sbRes?.data?.order) {
+          if (orderSnapshot) {
             setRecentOrders((prev) => {
-              const mapped = mapOrderRow(sbRes.data.order, labName, 0);
-              const rest = prev.filter((o) => o.orderId !== mapped.orderId);
-              return [mapped, ...rest];
+              const rest = prev.filter((o) => o.orderId !== orderSnapshot.orderId);
+              return [orderSnapshot, ...rest];
             });
           }
 
-          await loadRecentOrders();
+          await loadRecentOrders(orderSnapshot ? [orderSnapshot] : []);
           await loadCatalog();
 
           if (orderId) {

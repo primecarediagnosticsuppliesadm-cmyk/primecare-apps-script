@@ -1,5 +1,9 @@
 import { getOrderDetails } from "@/api/primecareApi";
-import { getOrderDetailsRead } from "@/api/primecareSupabaseApi.js";
+import {
+  getLabOrderDetailsRead,
+  getOrderDetailsRead,
+} from "@/api/primecareSupabaseApi.js";
+import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 import { recordPredatorTiming } from "@/predator/predatorTiming.js";
 import { labIdKey } from "@/utils/labId.js";
 import { orderStatusToVariant } from "@/utils/statusTokens.js";
@@ -282,24 +286,116 @@ export function resolveDrawerDetails(orderOrPayload) {
   return mapOrderDetailsPayload(orderOrPayload);
 }
 
+function normalizeFetchScopedOptions(labKeyOrOptions) {
+  if (typeof labKeyOrOptions === "string") {
+    return { labKey: labKeyOrOptions };
+  }
+  return labKeyOrOptions && typeof labKeyOrOptions === "object" ? labKeyOrOptions : {};
+}
+
+function orderIdMatchesCandidate(orderId, candidate) {
+  const oid = str(orderId);
+  if (!oid || !candidate) return false;
+  const keys = [
+    candidate.orderId,
+    candidate.order_id,
+    candidate.id,
+    candidate.orderUUID,
+  ]
+    .map((v) => str(v))
+    .filter(Boolean);
+  return keys.some((key) => key === oid);
+}
+
+/**
+ * Resolve a lab order from in-memory lists (recent orders, checkout handoff).
+ */
+export function findLocalOrderForTracking(orderId, sources = []) {
+  const oid = str(orderId);
+  if (!oid) return null;
+  for (const source of sources) {
+    const list = Array.isArray(source) ? source : source ? [source] : [];
+    for (const row of list) {
+      if (orderIdMatchesCandidate(oid, row)) return row;
+    }
+  }
+  return null;
+}
+
+/**
+ * Build drawer-ready details from a list-row / checkout snapshot (lines optional).
+ */
+export function mapLocalOrderRowToTrackingDetails(orderRow, lines = []) {
+  if (!orderRow) return null;
+  if (orderRow.orderId && Array.isArray(orderRow.lines)) return orderRow;
+  return mapOrderDetailsPayload({
+    order: {
+      orderId: orderRow.orderId ?? orderRow.order_id,
+      order_id: orderRow.orderId ?? orderRow.order_id,
+      id: orderRow.id,
+      orderStatus: orderRow.orderStatus ?? orderRow.status,
+      status: orderRow.orderStatus ?? orderRow.status,
+      orderDate: orderRow.orderDate ?? orderRow.order_date,
+      order_date: orderRow.orderDate ?? orderRow.order_date,
+      createdAt: orderRow.createdAt ?? orderRow.created_at,
+      created_at: orderRow.createdAt ?? orderRow.created_at,
+      updatedAt: orderRow.updatedAt ?? orderRow.updated_at,
+      updated_at: orderRow.updatedAt ?? orderRow.updated_at,
+      labId: orderRow.labId ?? orderRow.lab_id,
+      lab_id: orderRow.labId ?? orderRow.lab_id,
+      labName: orderRow.labName ?? orderRow.lab_name,
+      orderTotal: orderRow.orderTotal ?? orderRow.total_amount ?? orderRow.totalAmount,
+      total_amount: orderRow.orderTotal ?? orderRow.total_amount ?? orderRow.totalAmount,
+      paymentStatus: orderRow.paymentStatus ?? orderRow.payment_status,
+      invoiceStatus: orderRow.invoiceStatus ?? orderRow.invoice_status,
+      invoiceId: orderRow.invoiceId ?? orderRow.invoice_id,
+      notes: orderRow.notes,
+      createdBy: orderRow.createdBy ?? orderRow.created_by,
+    },
+    lines,
+  });
+}
+
 /**
  * Lab-scoped order details for tracking drawer (Supabase first, Apps Script fallback).
  */
-export async function fetchScopedOrderDetails(orderId, labKey) {
-  if (!orderId) throw new Error("Order ID is missing.");
+export async function fetchScopedOrderDetails(orderId, labKeyOrOptions = {}) {
+  const oid = str(orderId);
+  if (!oid) throw new Error("Order ID is missing.");
+
+  const options = normalizeFetchScopedOptions(labKeyOrOptions);
+  const labKey = labIdKey(options.labKey ?? options.labId);
+  const labId = str(options.labId);
+  const tenantId = str(options.tenantId ?? options.tenant_id);
 
   let payload = null;
-  const supRes = await getOrderDetailsRead(orderId);
+
+  const supRes = await getOrderDetailsRead(oid);
   if (supRes?.data?.order) {
     payload = supRes.data;
-  } else {
-    const fallback = await getOrderDetails(orderId);
-    const result = fallback?.data || fallback || null;
-    if (result?.order) payload = result;
+  }
+
+  if (!payload?.order && (labId || labKey)) {
+    const labRes = await getLabOrderDetailsRead({
+      orderId: oid,
+      labId: labId || labKey,
+      tenantId,
+    });
+    if (labRes?.data?.order) payload = labRes.data;
+  }
+
+  if (!payload?.order && ALLOW_LEGACY_APPS_SCRIPT) {
+    try {
+      const fallback = await getOrderDetails(oid);
+      const result = fallback?.data || fallback || null;
+      if (result?.order) payload = result;
+    } catch {
+      // Supabase-only orders are not in Apps Script; ignore legacy lookup errors.
+    }
   }
 
   if (!payload?.order) {
-    throw new Error("Unable to load order details right now.");
+    throw new Error(`Order not found: ${oid}`);
   }
 
   const mapped = mapOrderDetailsPayload(payload);

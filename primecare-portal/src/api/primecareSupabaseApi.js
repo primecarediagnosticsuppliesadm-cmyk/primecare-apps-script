@@ -6679,6 +6679,69 @@ export async function getOrdersRead(params = {}) {
 }
 
 /**
+ * Lab-scoped order + lines read for tracking drawer.
+ * `orderId` may match `orders.order_id` or `orders.id` (uuid).
+ * Never throws.
+ */
+export async function getLabOrderDetailsRead({ orderId, labId, tenantId } = {}) {
+  traceSupabaseRead("LabOrdering.getLabOrderDetailsRead", {
+    tables: ["orders", "order_lines", "order_items"],
+    orderId,
+    labId,
+  });
+  const empty = { success: true, data: { order: null, lines: [] } };
+  if (!supabase) return empty;
+
+  const oid = str(orderId);
+  const lid = str(labId);
+  const tid = str(tenantId);
+  if (!oid) return empty;
+
+  try {
+    async function queryOrderRow(matchKey, matchValue) {
+      let query = supabase.from("orders").select(HQ_ORDER_LIST_COLUMNS).eq(matchKey, matchValue);
+      if (lid) query = query.eq("lab_id", lid);
+      if (tid) query = query.eq("tenant_id", tid);
+      const { data, error } = await query.limit(1);
+      if (error) {
+        hqDebugWarn(`[getLabOrderDetailsRead] orders by ${matchKey}:`, error.message);
+        return null;
+      }
+      return Array.isArray(data) && data[0] ? data[0] : null;
+    }
+
+    let orderRow = await queryOrderRow("order_id", oid);
+    if (!orderRow) {
+      orderRow = await queryOrderRow("id", oid);
+    }
+
+    if (!orderRow) return empty;
+
+    const rowLab = labIdKey(orderRow.lab_id ?? orderRow.labId);
+    if (lid && rowLab && rowLab !== labIdKey(lid)) {
+      return empty;
+    }
+
+    const labMap = await fetchLabsNameMap();
+    const labIdResolved = str(orderRow.lab_id ?? orderRow.labId);
+    const order = mapOrderRow(orderRow, labMap.get(labIdResolved) || "");
+
+    const lineFetch = await fetchOrderDetailLinesForOrder(supabase, orderRow);
+    if (lineFetch.error) {
+      hqDebugWarn("[getLabOrderDetailsRead] order lines:", lineFetch.error.message);
+    }
+    const lines = (lineFetch.lines || [])
+      .map(mapOrderLineRow)
+      .filter((l) => l.productId || l.productName);
+
+    return { success: true, data: { order, lines }, error: null };
+  } catch (err) {
+    hqDebugWarn("[getLabOrderDetailsRead] failed:", err?.message || err);
+    return empty;
+  }
+}
+
+/**
  * Read-only single order + lines from `orders`, `order_lines` or `order_items`, and `labs`.
  * `orderId` may match `orders.order_id` or `orders.id`.
  * Never throws.
