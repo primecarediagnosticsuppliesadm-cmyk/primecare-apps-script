@@ -36,6 +36,13 @@
 - [x] Operations Center — lab_ownership golden sync; no dup ACTIVE HQ-lab rows
 - [x] Operations Center — agent/lab RLS scoped (ownership + own profile)
 - [ ] Create user / reset password / bulk assign — manual UI UAT
+- [ ] **Lab profile — Ordering Mode** dropdown (HQ Managed / Hybrid / Self Service / Suspended) with help text
+- [ ] **Logistics — Delivery policy** policy type + pickup/express/radius fields save (foundation only)
+- [ ] **Logistics — Route Planning** create route, assign shipment, reorder stops, mark complete
+- [ ] **Logistics — Route KPIs** Routes Today / Vehicles Out / Planned Deliveries display
+- [ ] **Logistics — Shipment drawer** shows assigned route, sequence, warehouse, est. window
+- [ ] **Operations Center — Lab profile** preferred delivery day (Mon–Sun) saves
+- [ ] **Finance unchanged** — orders, invoices, payments, collections unaffected by route planning
 - [ ] Create PO — select product from catalog only (invalid SKU blocked)
 - [ ] Edit Draft/Ordered PO before receipt (qty, cost, supplier, status)
 - [ ] Cancel Draft/Ordered PO before receipt
@@ -65,8 +72,13 @@
 - [x] Lab Ordering loads
 - [x] Invoice Center loads
 - [x] Payments & Account loads
+- [ ] **Ordering mode HQ Managed** — catalog/checkout blocked; track orders + invoices + payments still work
+- [ ] **Ordering mode Hybrid** — lab checkout + assisted banner
+- [ ] **Ordering mode Self Service** — normal checkout (no banner)
+- [ ] **Ordering mode Suspended** — checkout blocked; admin can still create
+- [ ] **Admin** — Operations Center / lab drawer: set Ordering Mode + help text
 - [ ] Assigned catalog visible after lab/product setup
-- [ ] Place order
+- [ ] Place order (when mode allows)
 - [ ] View generated invoice
 - [ ] Confirm payment/account update
 

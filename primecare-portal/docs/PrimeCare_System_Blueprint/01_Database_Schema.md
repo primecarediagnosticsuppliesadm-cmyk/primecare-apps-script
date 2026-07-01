@@ -50,7 +50,7 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 | **PK** | `id` (uuid) |
 | **Business key** | `(tenant_id, lab_id)` |
 | **Required** | `tenant_id`, `lab_id`, `lab_name` |
-| **Optional** | `owner_name`, `phone`, `area`, `assigned_agent_id`, `status`, `credit_terms` |
+| **Optional** | `owner_name`, `phone`, `area`, `assigned_agent_id`, `status`, `credit_terms`, `ordering_mode` |
 | **Relationships** | → orders, AR, qualifications, ownership |
 | **RLS** | Yes — lab visibility |
 | **Read** | agent (visible), lab (own), admin, executive |
@@ -296,14 +296,64 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 
 ---
 
+## logistics_warehouses
+
+| Attribute | Value |
+|-----------|-------|
+| **Purpose** | Warehouse registry for route planning |
+| **Module** | Logistics Phase 4 |
+| **PK** | `warehouse_id` (text) |
+| **Unique** | `(tenant_id, warehouse_code)` |
+| **RLS** | Yes — ops CRUD |
+
+---
+
+## delivery_routes
+
+| Attribute | Value |
+|-----------|-------|
+| **Purpose** | Operational delivery route plan |
+| **Module** | Logistics Phase 4 |
+| **PK** | `id` (uuid) |
+| **Business key** | `(tenant_id, route_code)` unique |
+| **Fields** | `route_name`, `warehouse_id`, `delivery_day`, `vehicle_type`, `capacity`, `active`, `route_status`, `courier_id`, `planned_date` |
+| **RLS** | Yes — ops CRUD |
+| **Finance** | **None** |
+
+---
+
+## delivery_route_shipments
+
+| Attribute | Value |
+|-----------|-------|
+| **Purpose** | Shipment stop on a route with sequence |
+| **Module** | Logistics Phase 4 |
+| **PK** | `id` (uuid) |
+| **FK** | `route_id` → `delivery_routes`, `shipment_id` → `order_shipments` |
+| **Unique** | one route per shipment (`shipment_id` unique) |
+| **Fields** | `sequence_number`, `planned_delivery_time` |
+| **RLS** | Yes — ops via route tenant |
+
+---
+
+## labs.preferred_delivery_day (Phase 4)
+
+| Attribute | Value |
+|-----------|-------|
+| **Purpose** | Lab preferred delivery day for route planning groups |
+| **Values** | `mon` … `sun` or NULL |
+| **Module** | Logistics / Operations Center lab profile |
+
+---
+
 ## tenant_delivery_policy
 
 | Attribute | Value |
 |-----------|-------|
-| **Purpose** | Tenant delivery charge defaults (Phase 3A) |
+| **Purpose** | Tenant delivery charge defaults (Phase 3A + policy foundation) |
 | **Module** | Logistics |
 | **PK** | `tenant_id` |
-| **Defaults** | ₹150 standard, ₹5000 free threshold |
+| **Defaults** | policy_type `standard`, ₹150 standard, ₹5000 free threshold |
 | **RLS** | Yes — ops |
 
 ---
@@ -352,5 +402,8 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 | 20260628120000 | Shipments Phase 1A |
 | 20260630120000 | Couriers Phase 2 |
 | 20260701120000 | Delivery charges Phase 3A |
+| 20260703120000 | Lab ordering governance (`ordering_mode`) |
+| 20260703120001 | Delivery policy foundation (`policy_type` + flags) |
+| 20260704120000 | Logistics Phase 4 route planning |
 
 Full manual SQL: `supabase/sql/` (52 files).

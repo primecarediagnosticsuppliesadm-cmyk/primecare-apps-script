@@ -227,6 +227,54 @@ function runStaticChecks() {
   } else {
     fail("static.orders_untouched", "Orders module unexpectedly modified");
   }
+
+  const routeMigration = "supabase/migrations/20260704120000_logistics_phase4_route_planning.sql";
+  if (existsSync(resolve(root, routeMigration))) {
+    const sql = readSrc(routeMigration);
+    if (
+      sql.includes("CREATE TABLE IF NOT EXISTS public.delivery_routes") &&
+      sql.includes("CREATE TABLE IF NOT EXISTS public.delivery_route_shipments") &&
+      sql.includes("preferred_delivery_day")
+    ) {
+      pass("static.phase4_migration", "Phase 4 route planning migration present");
+    } else {
+      fail("static.phase4_migration", "Phase 4 migration incomplete");
+    }
+  } else {
+    fail("static.phase4_migration", "Phase 4 migration file missing");
+  }
+
+  const routeEngine = readSrc("src/logistics/logisticsRouteEngine.js");
+  const routePanel = readSrc("src/components/logistics/RoutePlanningPanel.jsx");
+  if (
+    routeEngine.includes("computeRoutePlanningKpis") &&
+    routePanel.includes("Create Route") &&
+    logisticsApi.includes("createDeliveryRouteWrite") &&
+    logisticsApi.includes("assignShipmentToRouteWrite") &&
+    logisticsApi.includes("reorderRouteStopsWrite") &&
+    logisticsApi.includes("completeDeliveryRouteWrite")
+  ) {
+    pass("static.phase4_routes", "Phase 4 route planning engine + API + UI wired");
+  } else {
+    fail("static.phase4_routes", "Phase 4 route planning module incomplete");
+  }
+
+  const shipmentDrawer = readSrc("src/components/logistics/ShipmentDetailDrawer.jsx");
+  if (
+    shipmentDrawer.includes("Route Planning") &&
+    shipmentDrawer.includes("getShipmentRouteAssignmentRead")
+  ) {
+    pass("static.phase4_drawer", "Shipment drawer shows route assignment fields");
+  } else {
+    fail("static.phase4_drawer", "Shipment drawer missing route planning section");
+  }
+
+  const logisticsPage = readSrc("src/pages/LogisticsDeliveryPage.jsx");
+  if (logisticsPage.includes("Route Planning") && logisticsPage.includes("RoutePlanningPanel")) {
+    pass("static.phase4_dashboard", "Logistics dashboard includes route planning tab");
+  } else {
+    fail("static.phase4_dashboard", "Route planning tab missing from logistics page");
+  }
 }
 
 async function runLiveChecks(sb) {
@@ -359,10 +407,122 @@ async function runLiveChecks(sb) {
   } else {
     pass("live.couriers_table", "logistics_couriers readable");
   }
+
+  await runLiveRoutePlanningChecks(sb, rows);
+}
+
+async function runLiveRoutePlanningChecks(sb, shipments) {
+  console.log("\n--- Live route planning (Phase 4) ---\n");
+
+  const { error: routeTableErr } = await sb.from("delivery_routes").select("id").limit(1);
+  if (routeTableErr && /does not exist|schema cache/i.test(routeTableErr.message)) {
+    warn("live.routes_table", "delivery_routes not deployed — apply Phase 4 migration");
+    return;
+  }
+  if (routeTableErr) {
+    fail("live.routes_table", routeTableErr.message);
+    return;
+  }
+  pass("live.routes_table", "delivery_routes readable");
+
+  const readyShipment = (shipments || []).find(
+    (s) => str(s.dispatch_status).toLowerCase() === "ready_for_dispatch"
+  );
+  const routeCode = `RT-VERIFY-${Date.now()}`;
+  const today = new Date().toISOString().slice(0, 10);
+
+  const { data: createdRoute, error: createErr } = await sb
+    .from("delivery_routes")
+    .insert([
+      {
+        tenant_id: HQ,
+        route_code: routeCode,
+        route_name: "Verify Route",
+        delivery_day: "mon",
+        capacity: 10,
+        active: true,
+        route_status: "planning",
+        planned_date: today,
+      },
+    ])
+    .select()
+    .single();
+
+  if (createErr) {
+    fail("live.create_route", createErr.message);
+    return;
+  }
+  pass("live.create_route", createdRoute.route_code);
+
+  if (readyShipment?.shipment_id) {
+    const { error: assignErr } = await sb.from("delivery_route_shipments").insert([
+      {
+        route_id: createdRoute.id,
+        shipment_id: readyShipment.shipment_id,
+        sequence_number: 1,
+      },
+    ]);
+    if (assignErr) {
+      fail("live.assign_shipment", assignErr.message);
+    } else {
+      pass("live.assign_shipment", readyShipment.shipment_id);
+    }
+
+    const { data: stops } = await sb
+      .from("delivery_route_shipments")
+      .select("shipment_id,sequence_number")
+      .eq("route_id", createdRoute.id)
+      .order("sequence_number", { ascending: true });
+
+    if ((stops || []).length >= 1) {
+      const { error: reorderErr } = await sb
+        .from("delivery_route_shipments")
+        .update({ sequence_number: 1 })
+        .eq("route_id", createdRoute.id)
+        .eq("shipment_id", readyShipment.shipment_id);
+      if (reorderErr) fail("live.reorder_stops", reorderErr.message);
+      else pass("live.reorder_stops", "Sequence update OK");
+    }
+  } else {
+    warn("live.assign_shipment", "No ready_for_dispatch shipment to assign");
+  }
+
+  const { error: completeErr } = await sb
+    .from("delivery_routes")
+    .update({ route_status: "completed", completed_at: new Date().toISOString() })
+    .eq("id", createdRoute.id);
+  if (completeErr) fail("live.mark_complete", completeErr.message);
+  else pass("live.mark_complete", "Route marked completed");
+
+  const { data: routeKpis } = await sb
+    .from("delivery_routes")
+    .select("id,route_status,planned_date")
+    .eq("tenant_id", HQ)
+    .eq("planned_date", today);
+  pass("live.route_kpis", `${(routeKpis || []).length} route(s) planned for today`);
+
+  const orderProbe = await sb.from("orders").select("order_id,total_amount,status").eq("tenant_id", HQ).limit(1);
+  if (orderProbe.error) warn("live.orders_unchanged", orderProbe.error.message);
+  else pass("live.orders_unchanged", "Orders readable after route planning");
+
+  const invProbe = await sb.from("invoices").select("id,total_amount,status").eq("tenant_id", HQ).limit(1);
+  if (invProbe.error) warn("live.invoices_unchanged", invProbe.error.message);
+  else pass("live.invoices_unchanged", `Invoices readable (${invProbe.data?.length || 0} rows)`);
+
+  const payProbe = await sb.from("payments").select("payment_id,amount").eq("tenant_id", HQ).limit(1);
+  if (payProbe.error) warn("live.payments_unchanged", payProbe.error.message);
+  else pass("live.payments_unchanged", `Payments readable (${payProbe.data?.length || 0} rows)`);
+
+  const arProbe = await sb.from("ar_credit_control").select("lab_id,outstanding").eq("tenant_id", HQ).limit(1);
+  if (arProbe.error) warn("live.collections_unchanged", arProbe.error.message);
+  else pass("live.collections_unchanged", "AR/collections readable after route planning");
+
+  await sb.from("delivery_route_shipments").delete().eq("route_id", createdRoute.id);
+  await sb.from("delivery_routes").delete().eq("id", createdRoute.id);
 }
 
 async function main() {
-  console.log("\n=== Logistics Certification (Phase 1A + 2) ===\n");
+  console.log("\n=== Logistics Certification (Phase 1A + 2 + 4) ===\n");
   console.log(`Tenant: ${HQ}\n`);
 
   runStaticChecks();

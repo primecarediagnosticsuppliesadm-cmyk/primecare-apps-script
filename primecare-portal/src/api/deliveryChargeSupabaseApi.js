@@ -32,6 +32,14 @@ function isMissingOrderColumnError(error) {
   return msg.includes("delivery_charge") && (msg.includes("does not exist") || msg.includes("schema cache"));
 }
 
+function isMissingDeliverySnapshotRpcError(error) {
+  const msg = str(error?.message).toLowerCase();
+  return (
+    msg.includes("persist_order_delivery_snapshot") &&
+    (msg.includes("does not exist") || msg.includes("schema cache") || msg.includes("could not find"))
+  );
+}
+
 const L1B_CONTRACT_TYPES = ["L1B Reagent Rental", "Hybrid"];
 
 export async function getTenantDeliveryPolicyRead(tenantId) {
@@ -68,6 +76,12 @@ export async function upsertTenantDeliveryPolicyWrite({
   standardDeliveryCharge,
   freeDeliveryThreshold,
   currency = "INR",
+  policyType = "standard",
+  customerPickupAllowed = false,
+  expressDeliveryAllowed = false,
+  maxDeliveryRadiusKm = null,
+  policyReason = "",
+  isActive = true,
   actorId = "",
 } = {}) {
   if (!supabase) return { success: false, error: "Supabase not configured", data: null };
@@ -76,11 +90,19 @@ export async function upsertTenantDeliveryPolicyWrite({
 
   const row = {
     tenant_id: tid,
+    policy_type: str(policyType) || "standard",
     standard_delivery_charge: roundMoney(standardDeliveryCharge),
     free_delivery_threshold: roundMoney(freeDeliveryThreshold),
     currency: str(currency) || "INR",
+    customer_pickup_allowed: Boolean(customerPickupAllowed),
+    express_delivery_allowed: Boolean(expressDeliveryAllowed),
+    max_delivery_radius_km:
+      maxDeliveryRadiusKm === "" || maxDeliveryRadiusKm == null
+        ? null
+        : roundMoney(maxDeliveryRadiusKm),
+    policy_reason: str(policyReason) || null,
+    is_active: isActive !== false,
     effective_from: new Date().toISOString().slice(0, 10),
-    is_active: true,
     updated_by: str(actorId) || null,
     updated_at: new Date().toISOString(),
   };
@@ -207,22 +229,46 @@ export async function persistOrderDeliverySnapshotWrite({
     deliveryMethodIntent: intent,
   });
 
-  const { data, error } = await supabase
-    .from("orders")
-    .update(patch)
-    .eq("tenant_id", tid)
-    .eq("order_id", oid)
-    .select()
-    .single();
+  logSupabaseFeatureSource("DeliveryCharge.persistOrderDeliverySnapshotWrite", {
+    rpc: "persist_order_delivery_snapshot",
+    orderId: oid,
+  });
+
+  const { data: rpcData, error } = await supabase.rpc("persist_order_delivery_snapshot", {
+    p_tenant_id: tid,
+    p_order_id: oid,
+    p_merchandise_subtotal: patch.merchandise_subtotal,
+    p_delivery_charge_amount: patch.delivery_charge_amount,
+    p_delivery_charge_reason: patch.delivery_charge_reason,
+    p_delivery_method_intent: patch.delivery_method_intent,
+    p_delivery_policy_snapshot: patch.delivery_policy_snapshot,
+    p_delivery_charge_status: patch.delivery_charge_status,
+  });
 
   if (error) {
-    if (isMissingOrderColumnError(error)) {
+    if (isMissingDeliverySnapshotRpcError(error) || isMissingOrderColumnError(error)) {
       return { success: false, skipped: true, error: error.message, data: null };
     }
     return { success: false, error: error.message, data: null };
   }
 
-  return { success: true, data: mapOrderDeliveryFields(data), quote, error: null };
+  const body = rpcData && typeof rpcData === "object" ? rpcData : {};
+  if (body.success === false) {
+    return { success: false, error: str(body.error) || "persist_order_delivery_snapshot failed", data: null };
+  }
+
+  const deliveryRow = body.delivery || body.data?.delivery || null;
+  if (!deliveryRow) {
+    return { success: false, error: "persist_order_delivery_snapshot returned no delivery row", data: null };
+  }
+
+  return {
+    success: true,
+    data: mapOrderDeliveryFields(deliveryRow),
+    quote,
+    idempotent: Boolean(body.idempotent),
+    error: null,
+  };
 }
 
 export async function getOrderDeliverySnapshotRead({ tenantId, orderId } = {}) {

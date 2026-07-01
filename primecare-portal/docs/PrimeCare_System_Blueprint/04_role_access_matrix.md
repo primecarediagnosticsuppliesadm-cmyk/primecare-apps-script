@@ -27,7 +27,7 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 |-----------|--------|
 | **Visible modules** | dashboard, labs, orders, logistics, risk, catalog, inventory, purchase, ops center, access audit, qualification |
 | **Read** | Tenant-scoped all ops tables |
-| **Write** | Fulfill/cancel orders; payments; inventory; catalog; provision users (**not executive role**); logistics; lab ownership |
+| **Write** | Fulfill/cancel orders; **create orders for any lab (override)**; set `labs.ordering_mode`; payments; inventory; catalog; provision users (**not executive role**); logistics; lab ownership |
 | **Blocked** | Founder-only pages; cannot assign executive role |
 | **Freeze** | Order status mutations blocked; record payment allowed |
 
@@ -50,10 +50,21 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 | Dimension | Access |
 |-----------|--------|
 | **Visible modules** | labOrders, labInvoices, labAccount only |
-| **Read** | Own lab orders, invoices, AR, catalog |
-| **Write** | Place orders (if provisioned + credit eligible) |
-| **Blocked** | HQ logistics, ops center, fulfill, other labs' data |
-| **Freeze** | Lab ordering generally allowed unless credit hold |
+| **Read** | Own lab orders, invoices, AR, catalog, own `labs.ordering_mode` |
+| **Write** | Place orders when `ordering_mode` ∈ {`hybrid`, `self_service`} + credit eligible; delivery snapshot via `persist_order_delivery_snapshot` RPC only |
+| **Blocked** | Order initiation when `ordering_mode` ∈ {`hq_managed`, `suspended`}; direct `UPDATE` on `orders`; HQ logistics, ops center, fulfill, other labs' data |
+| **Freeze** | Lab ordering allowed per `ordering_mode` unless credit hold |
+
+### Lab ordering permissions by `ordering_mode`
+
+| Mode | Create order | Track orders | View invoices | View payments | Reorder history |
+|------|--------------|--------------|---------------|---------------|-----------------|
+| HQ Managed | ✖ | ✔ | ✔ | ✔ | ✔ (view only; cannot checkout) |
+| Hybrid | ✔ | ✔ | ✔ | ✔ | ✔ |
+| Self Service | ✔ | ✔ | ✔ | ✔ | ✔ |
+| Suspended | ✖ | ✔ | ✔ | ✔ | ✔ (view only; cannot checkout) |
+
+**Admin override:** `admin` / `executive` may always create orders on behalf of any lab.
 
 ---
 
@@ -115,7 +126,7 @@ Verified: `verify-hq-freeze-policy.mjs`
 
 | Table | lab | agent | admin | executive |
 |-------|-----|-------|-------|-----------|
-| orders | own lab | visible labs | tenant ops | tenant ops |
+| orders | own lab (SELECT, INSERT); delivery snapshot via RPC only — **no direct UPDATE** | visible labs | tenant ops | tenant ops |
 | invoices | own lab | — | tenant | tenant |
 | payments | own lab | agent + lab | tenant | tenant |
 | order_shipments | — | assigned | tenant ops | tenant ops |

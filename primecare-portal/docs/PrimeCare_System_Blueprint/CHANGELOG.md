@@ -20,7 +20,7 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 | GAP-BP-003 | Type drift | `tenant_id` uuid vs text in legacy rows | OPEN |
 | GAP-BP-004 | Migration | Phase 3A delivery columns may be missing on QA while client deployed | OPEN — shipment insert PGRST204 |
 | GAP-BP-005 | RLS | `event_log` enabled without policies | OPEN |
-| GAP-BP-006 | Product | No DB enum for lab ordering mode (HQ Managed / Hybrid / Self-Service) | OPEN — policy doc only |
+| GAP-BP-006 | Product | No DB enum for lab ordering mode (HQ Managed / Hybrid / Self-Service) | MITIGATED — `labs.ordering_mode` Phase 4 |
 | GAP-BP-007 | Audit | No single `audit` table — scattered audit tables | DOCUMENTED |
 | GAP-BP-008 | Legacy | Apps Script fallback can show misleading errors if unguarded | MITIGATED in lab track path |
 | GAP-BP-009 | Architecture | Catalog create seeds inventory (GAP-001 / DA-001) | DEFERRED |
@@ -31,6 +31,15 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 | ID | Resolution |
 |----|------------|
 | GAP-BP-011 | Lab Track Order — `getLabOrderDetailsRead` + cache handoff (code fix 2026-06-30) |
+| GAP-BP-012 | Lab delivery snapshot PATCH 406 — `persist_order_delivery_snapshot` SECURITY DEFINER RPC (2026-07-01) |
+| GAP-BP-013 | Lab ordering governance — `labs.ordering_mode` + initiation gates (2026-07-03) |
+| GAP-BP-014 | Logistics Phase 4 route planning — `delivery_routes` + stop sequencing (2026-07-04) |
+
+### Open (reference)
+
+| ID | Type | Description | Status |
+|----|------|-------------|--------|
+| GAP-BP-012 | conflict | Lab checkout called client PATCH on `orders` for delivery snapshot; `orders_update_by_role` blocks lab UPDATE → PGRST116/406 | MITIGATED — RPC path |
 
 ---
 

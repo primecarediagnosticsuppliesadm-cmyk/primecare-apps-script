@@ -17,7 +17,7 @@ import {
   DELIVERY_CHARGE_STATUS,
   DELIVERY_METHOD_INTENT,
 } from "../src/logistics/deliveryChargeEngine.js";
-import { QA_ADMIN, QA_HQ_TENANT_ID } from "./qaCredentials.mjs";
+import { QA_ADMIN, QA_HQ_TENANT_ID, QA_LAB } from "./qaCredentials.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -95,6 +95,36 @@ function runStaticChecks() {
     pass("DC-03", "deliveryChargeSupabaseApi wired");
   } else {
     fail("DC-03", "deliveryChargeSupabaseApi incomplete");
+  }
+
+  const snapshotRpcMigration =
+    "supabase/migrations/20260702120000_persist_order_delivery_snapshot_rpc.sql";
+  if (!existsSync(resolve(root, snapshotRpcMigration))) {
+    fail("DC-11", "persist_order_delivery_snapshot migration missing");
+  } else {
+    const rpcSql = readSrc(snapshotRpcMigration);
+    if (
+      rpcSql.includes("persist_order_delivery_snapshot") &&
+      rpcSql.includes("SECURITY DEFINER") &&
+      rpcSql.includes("delivery_charge_amount") &&
+      !rpcSql.includes("total_amount")
+    ) {
+      pass("DC-11", "SECURITY DEFINER persist_order_delivery_snapshot migration present");
+    } else {
+      fail("DC-11", "RPC migration missing expected guards");
+    }
+  }
+
+  const persistFnBody = api.match(
+    /export async function persistOrderDeliverySnapshotWrite[\s\S]*?(?=\nexport async function)/
+  )?.[0];
+  if (
+    persistFnBody?.includes('rpc("persist_order_delivery_snapshot"') &&
+    !persistFnBody.includes(".update(")
+  ) {
+    pass("DC-12", "Lab snapshot uses RPC (no client PATCH in persistOrderDeliverySnapshotWrite)");
+  } else {
+    fail("DC-12", "persistOrderDeliverySnapshotWrite still PATCHes orders directly");
   }
 
   const envJs = readSrc("src/config/environment.js");
@@ -326,6 +356,154 @@ async function runLiveChecks(env) {
   }
 }
 
+async function runLiveLabSnapshotChecks(env) {
+  console.log("\n--- Live QA lab delivery snapshot ---\n");
+
+  const sb = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY, {
+    auth: { persistSession: false },
+  });
+  const { error: authErr } = await sb.auth.signInWithPassword({
+    email: QA_LAB.email,
+    password: QA_LAB.password,
+  });
+  if (authErr) {
+    warn("DC-35", `Skip lab snapshot — auth failed: ${authErr.message}`);
+    return;
+  }
+
+  const { data: inv } = await sb
+    .from("inventory")
+    .select("product_id")
+    .eq("tenant_id", HQ)
+    .gt("current_stock", 0)
+    .limit(1);
+  const productId = inv?.[0]?.product_id;
+  if (!productId) {
+    warn("DC-35", "Skip lab snapshot — no inventory");
+    return;
+  }
+
+  const orderId = `ORD-DC-SNAPSHOT-${Date.now()}`;
+  const rpcOrder = await sb.rpc("create_lab_order", {
+    p_tenant_id: HQ,
+    p_lab_id: "QA_LAB_001",
+    p_order_id: orderId,
+    p_items: [{ product_id: productId, product_name: "DC Verify", quantity: 1, unit_price: 15 }],
+    p_client_request_id: `CRQ-dc-snapshot-${Date.now()}`,
+    p_status: "Placed",
+    p_created_by: QA_LAB.email,
+  });
+  if (rpcOrder.error) {
+    fail("DC-35", `create_lab_order failed: ${rpcOrder.error.message}`);
+    return;
+  }
+  pass("DC-35", `Lab checkout smoke order ${orderId}`);
+
+  const snapshotRpc = await sb.rpc("persist_order_delivery_snapshot", {
+    p_tenant_id: HQ,
+    p_order_id: orderId,
+    p_merchandise_subtotal: 15,
+    p_delivery_charge_amount: 150,
+    p_delivery_charge_reason: "standard",
+    p_delivery_method_intent: "delivery",
+    p_delivery_policy_snapshot: {
+      standardDeliveryCharge: 150,
+      freeDeliveryThreshold: 5000,
+      currency: "INR",
+    },
+    p_delivery_charge_status: "quoted",
+  });
+
+  if (snapshotRpc.error) {
+    if (isMissingRpc(snapshotRpc.error)) {
+      warn("DC-36", `RPC not deployed — apply migration: ${snapshotRpc.error.message}`);
+      return;
+    }
+    fail("DC-36", `persist_order_delivery_snapshot failed: ${snapshotRpc.error.message}`);
+    return;
+  }
+
+  const body = snapshotRpc.data || {};
+  if (!body.success) {
+    fail("DC-36", "persist_order_delivery_snapshot returned success=false");
+    return;
+  }
+  pass("DC-36", `RPC persisted delivery snapshot (idempotent=${Boolean(body.idempotent)})`);
+
+  const { data: orderRow, error: readErr } = await sb
+    .from("orders")
+    .select(
+      "order_id,total_amount,merchandise_subtotal,delivery_charge_amount,delivery_charge_reason,delivery_method_intent,delivery_charge_status,status"
+    )
+    .eq("tenant_id", HQ)
+    .eq("order_id", orderId)
+    .maybeSingle();
+
+  if (readErr || !orderRow) {
+    fail("DC-37", readErr?.message || "order row missing after snapshot");
+    return;
+  }
+
+  if (
+    Number(orderRow.merchandise_subtotal) === 15 &&
+    Number(orderRow.delivery_charge_amount) === 150 &&
+    str(orderRow.delivery_charge_reason) === "standard" &&
+    str(orderRow.delivery_charge_status) === "quoted"
+  ) {
+    pass("DC-37", "Order delivery snapshot columns populated on QA row");
+  } else {
+    fail(
+      "DC-37",
+      `Snapshot columns mismatch: sub=${orderRow.merchandise_subtotal} charge=${orderRow.delivery_charge_amount}`
+    );
+  }
+
+  if (Number(orderRow.total_amount) === 15) {
+    pass("DC-38", "orders.total_amount remains merchandise-only (₹15)");
+  } else {
+    fail("DC-38", `total_amount should be 15, got ${orderRow.total_amount}`);
+  }
+
+  const statusPatch = await sb
+    .from("orders")
+    .update({ status: "Processing" })
+    .eq("tenant_id", HQ)
+    .eq("order_id", orderId)
+    .select("order_id")
+    .maybeSingle();
+
+  if (statusPatch.error?.code === "PGRST116" || !statusPatch.data) {
+    pass("DC-39", "Lab cannot directly UPDATE orders.status (RLS blocked)");
+  } else {
+    fail("DC-39", "Lab was able to UPDATE orders.status — RLS hole");
+  }
+
+  const { data: shipments } = await sb
+    .from("order_shipments")
+    .select("delivery_charge_amount")
+    .eq("tenant_id", HQ)
+    .gt("delivery_charge_amount", 0)
+    .limit(5);
+
+  const revenue = computeEstimatedDeliveryRevenue(shipments || []);
+  if ((shipments || []).length > 0 && revenue > 0) {
+    pass("DC-40", `Logistics Est. Delivery Revenue sample includes quoted shipments (₹${revenue})`);
+  } else {
+    warn(
+      "DC-40",
+      "No fulfilled shipments with delivery_charge_amount>0 yet — fulfill UAT confirms mirror"
+    );
+  }
+}
+
+function isMissingRpc(error) {
+  const msg = str(error?.message).toLowerCase();
+  return (
+    msg.includes("persist_order_delivery_snapshot") &&
+    (msg.includes("does not exist") || msg.includes("schema cache") || msg.includes("could not find"))
+  );
+}
+
 async function main() {
   runStaticChecks();
   runEngineChecks();
@@ -333,6 +511,7 @@ async function main() {
   const env = loadEnv();
   if (env?.VITE_SUPABASE_URL && env?.VITE_SUPABASE_ANON_KEY) {
     await runLiveChecks(env);
+    await runLiveLabSnapshotChecks(env);
   } else {
     warn("DC-30", "Skip live — .env.local missing");
   }

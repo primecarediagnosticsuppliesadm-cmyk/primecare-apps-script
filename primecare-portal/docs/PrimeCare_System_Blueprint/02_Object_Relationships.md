@@ -22,6 +22,21 @@ tenants
   ├── inventory ── inventory_ledger
   ├── purchase_orders ── purchase_order_items
   └── tenant_delivery_policy
+  └── logistics_warehouses
+        └── delivery_routes
+              └── delivery_route_shipments → order_shipments
+```
+
+---
+
+## Logistics planning graph (Phase 4)
+
+```
+logistics_warehouses
+  └── delivery_routes (warehouse_id, courier_id → logistics_couriers)
+        └── delivery_route_shipments (sequence_number)
+              └── order_shipments (shipment_id)
+                    └── logistics_couriers (courier_id on shipment assignment)
 ```
 
 ---
@@ -41,6 +56,11 @@ tenants
 | orders | order_shipments | order_id + tenant_id | 1:1 | After fulfill; ops only |
 | order_shipments | shipment_status_events | shipment_id | 1:N | Audit every transition |
 | logistics_couriers | order_shipments | courier_id (text) | 1:N | No formal FK |
+| logistics_warehouses | delivery_routes | warehouse_id | 1:N | Route origin warehouse |
+| delivery_routes | delivery_route_shipments | route_id | 1:N | Stop sequencing |
+| order_shipments | delivery_route_shipments | shipment_id | 1:1 | One route per shipment |
+| delivery_routes | logistics_couriers | courier_id (text) | N:1 | Driver assignment on route |
+| labs | delivery planning | preferred_delivery_day | attr | Groups unassigned shipments |
 | labs | lab_ownership | tenant_id + lab_id | 0..1 ACTIVE | Agent collections filter |
 | inventory | inventory_ledger | tenant_id + product_id | 1:N | Ledger = audit |
 | purchase_orders | purchase_order_items | po_id | 1:N | Receive → stock |

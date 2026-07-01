@@ -10,9 +10,19 @@
 
 | Field | Default |
 |-------|---------|
+| policy_type | `standard` |
 | standard_delivery_charge | ₹150 |
 | free_delivery_threshold | ₹5000 |
+| customer_pickup_allowed | false |
+| express_delivery_allowed | false |
+| max_delivery_radius_km | optional |
+| is_active | true |
+| policy_reason | optional text |
 | currency | INR |
+
+### `policy_type` values (foundation — no distance calc yet)
+
+`standard`, `premium`, `local`, `remote`, `contract`, `manual_override`
 
 ---
 
@@ -30,7 +40,9 @@
 
 `merchandise_subtotal`, `delivery_charge_amount`, `delivery_charge_reason`, `delivery_method_intent`, `delivery_policy_snapshot`, `delivery_charge_status`, override audit fields.
 
-**Written:** `persistOrderDeliverySnapshotWrite` on create; `applyOrderDeliveryOverrideWrite` (HQ).
+**Written:** `persist_order_delivery_snapshot` RPC (lab checkout via `persistOrderDeliverySnapshotWrite`); `applyOrderDeliveryOverrideWrite` (HQ direct UPDATE).
+
+Lab users **must not** PATCH `orders` for delivery snapshot — RLS `orders_update_by_role` is HQ-only. The RPC updates only delivery snapshot columns.
 
 ---
 

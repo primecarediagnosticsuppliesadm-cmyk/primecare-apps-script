@@ -8,6 +8,7 @@ import ShipmentTimeline from "@/components/logistics/ShipmentTimeline.jsx";
 import {
   getLogisticsCouriersRead,
   getShipmentEventsRead,
+  getShipmentRouteAssignmentRead,
   transitionShipmentStatusWrite,
   updateShipmentAssignmentWrite,
 } from "@/api/logisticsSupabaseApi.js";
@@ -37,6 +38,7 @@ import {
   shipmentStatusLabel,
   SHIPMENT_STATUS,
 } from "@/logistics/logisticsShipmentEngine.js";
+import { deliveryDayLabel, formatDeliveryWindow } from "@/logistics/logisticsRouteEngine.js";
 import { Loader2 } from "lucide-react";
 
 function str(v) {
@@ -89,6 +91,7 @@ export default function ShipmentDetailDrawer({
   const [overrideAmount, setOverrideAmount] = useState("");
   const [overrideReason, setOverrideReason] = useState("");
   const [savingOverride, setSavingOverride] = useState(false);
+  const [routeAssignment, setRouteAssignment] = useState(null);
 
   useEffect(() => {
     if (!open || !shipment) return;
@@ -159,6 +162,18 @@ export default function ShipmentDetailDrawer({
       cancelled = true;
     };
   }, [open, tenantId, shipment?.orderId, shipment?.deliveryChargeAmount]);
+
+  useEffect(() => {
+    if (!open || !shipment?.shipmentId) return;
+    let cancelled = false;
+    void getShipmentRouteAssignmentRead({ shipmentId: shipment.shipmentId }).then((res) => {
+      if (cancelled) return;
+      if (res.success) setRouteAssignment(res.assignment);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, shipment?.shipmentId]);
 
   const timeline = useMemo(
     () => buildShipmentTimeline(events, shipment?.dispatchStatus),
@@ -366,6 +381,36 @@ export default function ShipmentDetailDrawer({
                 Delivery override locked — invoice has already been sent.
               </p>
             ) : null}
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Route Planning
+            </h3>
+            <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs text-slate-700">
+              <p>
+                <span className="text-slate-500">Assigned route:</span>{" "}
+                {routeAssignment?.route?.routeName || routeAssignment?.route?.routeCode || "—"}
+              </p>
+              <p>
+                <span className="text-slate-500">Delivery sequence:</span>{" "}
+                {routeAssignment?.sequenceNumber ? `#${routeAssignment.sequenceNumber}` : "—"}
+              </p>
+              <p>
+                <span className="text-slate-500">Warehouse:</span>{" "}
+                {routeAssignment?.warehouse?.warehouseName || "—"}
+              </p>
+              <p>
+                <span className="text-slate-500">Est. delivery window:</span>{" "}
+                {formatDeliveryWindow(routeAssignment)}
+              </p>
+              {routeAssignment?.route?.deliveryDay ? (
+                <p>
+                  <span className="text-slate-500">Route day:</span>{" "}
+                  {deliveryDayLabel(routeAssignment.route.deliveryDay)}
+                </p>
+              ) : null}
+            </div>
           </section>
 
           <section className="space-y-2">

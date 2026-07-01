@@ -7,12 +7,53 @@
 | Rule | Detail |
 |------|--------|
 | **Not Day-1 default** | Lab portal enabled per lab via user provisioning |
-| **Default ordering mode** | **HQ Managed** — HQ places/fulfills until onboarding completes |
-| **Self-Service** | Lab checkout via `LabOrderingPage` when provisioned + credit OK |
-| **Hybrid** | Mix of HQ and lab-initiated orders (operational policy) |
+| **Default ordering mode** | **HQ Managed** (`labs.ordering_mode = hq_managed`) until onboarding enables self-service |
+| **Ordering governance** | `ordering_mode` on `labs` controls **who may initiate** an order — not finance, inventory, or shipment lifecycle |
 | **Menu** | labOrders → labInvoices → labAccount |
 
-*Note: ordering mode is provisioning/onboarding policy today — no single DB enum yet (see CHANGELOG).*
+---
+
+## Lab onboarding lifecycle (commercial)
+
+Ordering capability follows onboarding progress. Stages are operational labels; **`ordering_mode`** is the runtime gate.
+
+```
+Prospect
+   ↓
+Qualified
+   ↓
+Contract Signed
+   ↓
+HQ Managed          ← default Year-1; HQ places orders
+   ↓
+Hybrid              ← lab + HQ may initiate
+   ↓
+Self Service        ← lab self-checkout enabled
+   ↓
+Suspended           ← lab checkout blocked; admin override allowed
+```
+
+| Stage / mode | Lab create order | Admin create order | Track / invoices / payments |
+|--------------|------------------|--------------------|-----------------------------|
+| **HQ Managed** | ✖ | ✔ | ✔ always |
+| **Hybrid** | ✔ | ✔ | ✔ always |
+| **Self Service** | ✔ | ✔ (on behalf) | ✔ always |
+| **Suspended** | ✖ | ✔ | ✔ always |
+
+**Admin override:** HQ (`admin` / `executive`) may always create orders regardless of `ordering_mode`.
+
+---
+
+## `ordering_mode` values
+
+| DB value | UI label |
+|----------|----------|
+| `hq_managed` | HQ Managed |
+| `hybrid` | Hybrid |
+| `self_service` | Self Service |
+| `suspended` | Suspended |
+
+Default for new and existing labs (migration backfill): `hq_managed`.
 
 ---
 
@@ -30,16 +71,29 @@ Lab sees **only own** `lab_id` data — RLS + `scopedRecentOrders` filter.
 |--------|----------|
 | HOLD | Blocked (UI + server) |
 | NEAR_LIMIT | Warning only |
-| OK | Allowed |
+| OK | Allowed when `ordering_mode` permits lab initiation |
+
+Credit hold is independent of ordering mode.
 
 ---
 
 ## Checkout
 
 - `createOrderWrite` / `create_lab_order` RPC
+- Server gate: `lab_ordering_allows_lab_initiate` + `orders_insert_by_role` when caller is `lab`
 - Status default: **Placed**
 - Idempotency: `clientRequestId` + cart hash guard
-- Delivery quote displayed; snapshot on server
+- Delivery quote displayed; snapshot persisted via **`persist_order_delivery_snapshot` RPC** only
+- Lab **cannot** directly `UPDATE` `orders` (status, totals, or delivery fields)
+
+### Lab UX by mode
+
+| Mode | Catalog / cart |
+|------|----------------|
+| HQ Managed | No add-to-cart / checkout; onboarding message; track/invoices/payments/history remain |
+| Hybrid | Normal ordering + assisted-mode banner |
+| Self Service | Normal ordering |
+| Suspended | Checkout hidden; suspension message; read paths unchanged |
 
 ---
 
@@ -53,6 +107,7 @@ Lab sees **only own** `lab_id` data — RLS + `scopedRecentOrders` filter.
 | Local cache: checkout snapshot + recent orders | |
 | Apps Script fallback only if `ALLOW_LEGACY_APPS_SCRIPT` | |
 | Error only after Supabase + cache fail | |
+| **Never blocked by `ordering_mode`** | |
 
 ---
 
@@ -74,5 +129,7 @@ Lab sees **only own** `lab_id` data — RLS + `scopedRecentOrders` filter.
 ## Key files
 
 - `src/pages/LabOrderingPage.jsx`
+- `src/labOrdering/orderingGovernance.js`
 - `src/utils/orderTracking.js`
-- `src/api/primecareSupabaseApi.js` — `getLabOrderDetailsRead`
+- `src/api/primecareSupabaseApi.js` — `getLabOrderDetailsRead`, `updateLabOrderingModeWrite`
+- `src/components/operations/OperationalLabDrawer.jsx` — admin ordering mode editor

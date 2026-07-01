@@ -1,7 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ux";
-import { getLabQualificationRead } from "@/api/primecareSupabaseApi.js";
+import { getLabQualificationRead, updateLabOrderingModeWrite } from "@/api/primecareSupabaseApi.js";
+import { updateLabPreferredDeliveryDayWrite } from "@/api/logisticsSupabaseApi.js";
+import {
+  DELIVERY_DAY_OPTIONS,
+  normalizeDeliveryDay,
+  deliveryDayLabel,
+} from "@/logistics/logisticsRouteEngine.js";
 import { buildOperationalLabSnapshot } from "@/operations/operationsCommandCenterModel.js";
 import { collectionRiskToVariant } from "@/utils/statusTokens.js";
 import { cn } from "@/lib/utils";
@@ -9,6 +15,12 @@ import { X, Loader2, MapPin } from "lucide-react";
 import EvidenceContextActions from "@/components/evidence/EvidenceContextActions.jsx";
 import { formatLabsCurrency, formatLabsDate } from "@/operations/labsHqEngine.js";
 import { canNavigateToCollections } from "@/operations/hqWorkflowNav.js";
+import {
+  ORDERING_MODE_OPTIONS,
+  normalizeOrderingMode,
+  orderingModeLabel,
+} from "@/labOrdering/orderingGovernance.js";
+import { ROLES } from "@/config/rolePermissionMatrix.js";
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -21,6 +33,10 @@ const TABS = [
 
 function formatWhen(iso) {
   return formatLabsDate(iso) || null;
+}
+
+function str(v) {
+  return String(v ?? "").trim();
 }
 
 function Field({ label, value }) {
@@ -56,6 +72,18 @@ export default function OperationalLabDrawer({
   const [qualification, setQualification] = useState(null);
   const [qualLoading, setQualLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
+  const [orderingMode, setOrderingMode] = useState(
+    normalizeOrderingMode(labRecord?.orderingMode ?? labRecord?.ordering_mode)
+  );
+  const [orderingModeSaving, setOrderingModeSaving] = useState(false);
+  const [orderingModeMessage, setOrderingModeMessage] = useState("");
+  const [orderingModeError, setOrderingModeError] = useState("");
+  const [preferredDeliveryDay, setPreferredDeliveryDay] = useState(
+    normalizeDeliveryDay(labRecord?.preferredDeliveryDay ?? labRecord?.preferred_delivery_day)
+  );
+  const [deliveryDaySaving, setDeliveryDaySaving] = useState(false);
+  const [deliveryDayMessage, setDeliveryDayMessage] = useState("");
+  const [deliveryDayError, setDeliveryDayError] = useState("");
 
   const snapshot = useMemo(() => {
     if (!labId || !opsPayload) return null;
@@ -69,6 +97,20 @@ export default function OperationalLabDrawer({
   useEffect(() => {
     if (open) setActiveTab("overview");
   }, [open, labId]);
+
+  useEffect(() => {
+    setOrderingMode(normalizeOrderingMode(labRecord?.orderingMode ?? labRecord?.ordering_mode));
+    setPreferredDeliveryDay(
+      normalizeDeliveryDay(labRecord?.preferredDeliveryDay ?? labRecord?.preferred_delivery_day)
+    );
+  }, [
+    labRecord?.orderingMode,
+    labRecord?.ordering_mode,
+    labRecord?.preferredDeliveryDay,
+    labRecord?.preferred_delivery_day,
+    labId,
+    open,
+  ]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -113,6 +155,59 @@ export default function OperationalLabDrawer({
   const agentId = assignedAgent.agentId || labAssignedAgentId(labRecord) || "";
   const qualStage =
     qualification?.pipeline_stage || qualification?.stage || labRecord?.stage || snapshot?.stage || "";
+  const canEditOrderingMode =
+    currentUser?.role === ROLES.ADMIN || currentUser?.role === ROLES.EXECUTIVE;
+  const labTenantId = str(
+    labRecord?.tenantId ?? labRecord?.tenant_id ?? currentUser?.tenantId ?? currentUser?.tenant_id
+  );
+  const selectedOrderingHelp =
+    ORDERING_MODE_OPTIONS.find((opt) => opt.value === orderingMode)?.help || "";
+
+  async function handleSaveOrderingMode() {
+    if (!canEditOrderingMode || !labTenantId || !labId) return;
+    setOrderingModeSaving(true);
+    setOrderingModeError("");
+    setOrderingModeMessage("");
+    try {
+      const res = await updateLabOrderingModeWrite({
+        tenantId: labTenantId,
+        labId,
+        orderingMode,
+        actorId: currentUser?.email || currentUser?.userId || currentUser?.id || "",
+      });
+      if (!res?.success) throw new Error(res?.error || "Failed to update ordering mode");
+      setOrderingModeMessage(`Ordering mode saved: ${orderingModeLabel(orderingMode)}`);
+    } catch (err) {
+      setOrderingModeError(err?.message || "Failed to update ordering mode");
+    } finally {
+      setOrderingModeSaving(false);
+    }
+  }
+
+  async function handleSavePreferredDeliveryDay() {
+    if (!canEditOrderingMode || !labTenantId || !labId) return;
+    setDeliveryDaySaving(true);
+    setDeliveryDayError("");
+    setDeliveryDayMessage("");
+    try {
+      const res = await updateLabPreferredDeliveryDayWrite({
+        tenantId: labTenantId,
+        labId,
+        preferredDeliveryDay,
+        actorId: currentUser?.email || currentUser?.userId || currentUser?.id || "",
+      });
+      if (!res?.success) throw new Error(res?.error || "Failed to update preferred delivery day");
+      setDeliveryDayMessage(
+        preferredDeliveryDay
+          ? `Preferred delivery day saved: ${deliveryDayLabel(preferredDeliveryDay)}`
+          : "Preferred delivery day cleared"
+      );
+    } catch (err) {
+      setDeliveryDayError(err?.message || "Failed to update preferred delivery day");
+    } finally {
+      setDeliveryDaySaving(false);
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Review lab">
@@ -219,6 +314,114 @@ export default function OperationalLabDrawer({
                 <Field label="Last visit" value={formatWhen(labRecord?.lastVisit)} />
                 <Field label="Next follow-up" value={formatWhen(labRecord?.nextFollowUp)} />
               </dl>
+              <section className="rounded-lg border bg-white p-3">
+                <h3 className="text-xs font-semibold text-slate-900">Ordering Mode</h3>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Controls who may initiate new orders. Does not affect invoices, payments, or track
+                  order.
+                </p>
+                {canEditOrderingMode ? (
+                  <div className="mt-3 space-y-2">
+                    <label className="block text-[11px] text-slate-600">
+                      Mode
+                      <select
+                        className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                        value={orderingMode}
+                        onChange={(e) => setOrderingMode(normalizeOrderingMode(e.target.value))}
+                        disabled={orderingModeSaving}
+                      >
+                        {ORDERING_MODE_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {selectedOrderingHelp ? (
+                      <p className="text-[11px] leading-snug text-slate-600">{selectedOrderingHelp}</p>
+                    ) : null}
+                    {orderingModeError ? (
+                      <p className="text-[11px] text-red-700">{orderingModeError}</p>
+                    ) : null}
+                    {orderingModeMessage ? (
+                      <p className="text-[11px] text-emerald-700">{orderingModeMessage}</p>
+                    ) : null}
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8 text-xs"
+                      disabled={orderingModeSaving}
+                      onClick={() => void handleSaveOrderingMode()}
+                    >
+                      {orderingModeSaving ? (
+                        <>
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          Saving…
+                        </>
+                      ) : (
+                        "Save ordering mode"
+                      )}
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs font-medium text-slate-800">
+                    {orderingModeLabel(orderingMode)}
+                  </p>
+                )}
+              </section>
+              <section className="rounded-lg border bg-white p-3">
+                <h3 className="text-xs font-semibold text-slate-900">Preferred Delivery Day</h3>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Used by logistics route planning to group shipments. Operational only — no finance
+                  impact.
+                </p>
+                {canEditOrderingMode ? (
+                  <div className="mt-3 space-y-2">
+                    <label className="block text-[11px] text-slate-600">
+                      Day
+                      <select
+                        className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                        value={preferredDeliveryDay}
+                        onChange={(e) => setPreferredDeliveryDay(normalizeDeliveryDay(e.target.value))}
+                        disabled={deliveryDaySaving}
+                      >
+                        <option value="">Not set</option>
+                        {DELIVERY_DAY_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {deliveryDayError ? (
+                      <p className="text-[11px] text-red-700">{deliveryDayError}</p>
+                    ) : null}
+                    {deliveryDayMessage ? (
+                      <p className="text-[11px] text-emerald-700">{deliveryDayMessage}</p>
+                    ) : null}
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8 text-xs"
+                      disabled={deliveryDaySaving}
+                      onClick={() => void handleSavePreferredDeliveryDay()}
+                    >
+                      {deliveryDaySaving ? (
+                        <>
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          Saving…
+                        </>
+                      ) : (
+                        "Save delivery day"
+                      )}
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs font-medium text-slate-800">
+                    {preferredDeliveryDay ? deliveryDayLabel(preferredDeliveryDay) : "Not set"}
+                  </p>
+                )}
+              </section>
             </div>
           ) : null}
 

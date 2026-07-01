@@ -32,9 +32,20 @@ import {
   getCollectionHistoryRead,
   getCollectionsRead,
   getLabCatalogRead,
+  getLabOrderingContextRead,
   getLabRecentOrdersRead,
   mapOrderRow,
 } from "@/api/primecareSupabaseApi";
+import {
+  canLabInitiateOrder,
+  isHqManagedOrdering,
+  isSuspendedOrdering,
+  labCatalogOrderingDisabled,
+  labOrderingBannerMessage,
+  labOrderingBlockedMessage,
+  normalizeOrderingMode,
+  orderingModeLabel,
+} from "@/labOrdering/orderingGovernance.js";
 import { supabase } from "@/api/supabaseClient.js";
 import { getInvoicesForLabRead } from "@/api/invoiceSupabaseApi.js";
 import { buildLabAccountLedger } from "@/collections/labAccountLedger.js";
@@ -361,6 +372,8 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState(null);
   const [deliveryQuote, setDeliveryQuote] = useState(null);
+  const [orderingMode, setOrderingMode] = useState(normalizeOrderingMode(null));
+  const [loadingOrderingMode, setLoadingOrderingMode] = useState(true);
   const submitLockRef = useRef(false);
   const hydratedDraftRef = useRef(false);
   const lastSubmittedHashRef = useRef("");
@@ -399,6 +412,10 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
   const creditReason = currentUser?.creditReason || "";
   const isCreditHold = creditStatus === "HOLD";
   const isNearLimit = creditStatus === "NEAR_LIMIT";
+  const labCanInitiateOrder = canLabInitiateOrder(orderingMode);
+  const catalogOrderingDisabled = labCatalogOrderingDisabled(orderingMode);
+  const orderingBanner = labOrderingBannerMessage(orderingMode);
+  const orderingBlockedCopy = labOrderingBlockedMessage(orderingMode);
 
   const profileLabKey = labIdKey(labId);
 
@@ -472,7 +489,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
       trackingDrawerOpen: trackingOpen,
       cartDrawerOpen: isCartOpen,
       submitting,
-      canCheckout: !submitting && cartItems.length > 0 && !isCreditHold,
+      canCheckout: !submitting && cartItems.length > 0 && !isCreditHold && labCanInitiateOrder,
       submitLocked: submitLockRef.current,
       submitSuccess: Boolean(submitResult?.success),
       productQtyInSync: cartItems.every(
@@ -486,8 +503,28 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
     loadCatalog();
     loadRecentOrders();
     loadAccountOutstanding();
+    void loadOrderingMode();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labId]);
+
+  async function loadOrderingMode() {
+    const tenantId = currentUser?.tenantId || currentUser?.tenant_id || null;
+    if (!labId || !tenantId) {
+      setLoadingOrderingMode(false);
+      return;
+    }
+    setLoadingOrderingMode(true);
+    try {
+      const res = await getLabOrderingContextRead({ tenantId, labId });
+      if (res?.success) {
+        setOrderingMode(normalizeOrderingMode(res.orderingMode));
+      }
+    } catch (err) {
+      console.warn("[LabOrderingPage] loadOrderingMode:", err?.message || err);
+    } finally {
+      setLoadingOrderingMode(false);
+    }
+  }
 
   useEffect(() => {
     if (!cartDraftStorageKey || hydratedDraftRef.current) return;
@@ -984,7 +1021,8 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
     return map;
   }, [cartItems]);
 
-  const canCheckout = !submitting && cartItems.length > 0 && !isCreditHold;
+  const canCheckout =
+    !submitting && cartItems.length > 0 && !isCreditHold && labCanInitiateOrder;
 
   const clearCartState = useCallback(
     ({ closeDrawer = true } = {}) => {
@@ -1201,6 +1239,10 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
 
   async function handleSubmitOrder() {
     if (submitLockRef.current || submitting) return;
+    if (!labCanInitiateOrder) {
+      setErrorMessage(orderingBlockedCopy);
+      return;
+    }
     if (!labId) {
       setErrorMessage("Lab identity is missing. Please refresh and try again.");
       return;
@@ -1404,6 +1446,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
           variant="outline"
           className="rounded-full"
           onClick={() => setIsCartOpen(true)}
+          disabled={catalogOrderingDisabled}
         >
           <ShoppingCart className="mr-2 h-4 w-4" />
           Cart ({cartCount})
@@ -1417,6 +1460,63 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
       {isCreditHold ? (
         <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           🚫 Credit Hold: {creditReason || "You cannot place orders until payment is cleared."}
+        </div>
+      ) : null}
+
+      {!loadingOrderingMode && catalogOrderingDisabled ? (
+        <div
+          className={cn(
+            "rounded-xl border p-4 text-sm",
+            isSuspendedOrdering(orderingMode)
+              ? "border-amber-200 bg-amber-50 text-amber-900"
+              : "border-indigo-200 bg-indigo-50 text-indigo-900"
+          )}
+        >
+          <p className="font-semibold">
+            {isHqManagedOrdering(orderingMode) ? "HQ-managed ordering" : "Ordering suspended"}
+          </p>
+          <p className="mt-1">{orderingBlockedCopy}</p>
+          <p className="mt-2 text-xs opacity-90">
+            Please contact PrimeCare to place your next order. You can still track orders, view
+            invoices, and manage payments.
+          </p>
+          {setActivePage ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs"
+                onClick={() => setActiveTab("orders")}
+              >
+                Track Orders
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs"
+                onClick={() => setActivePage("labInvoices")}
+              >
+                Invoices
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs"
+                onClick={() => setActivePage("labAccount")}
+              >
+                Payments
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {!loadingOrderingMode && orderingBanner ? (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+          {orderingBanner}
         </div>
       ) : null}
 
@@ -1493,6 +1593,16 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
 
       {activeTab === "catalog" ? (
         <div className="space-y-3">
+          {catalogOrderingDisabled ? (
+            <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-600">
+              <p className="font-medium text-slate-800">Product catalog ordering is not available</p>
+              <p className="mt-1 text-xs">
+                Mode: {orderingModeLabel(orderingMode)}. Use Previous Orders to track fulfillment or
+                open Invoices / Payments from the menu.
+              </p>
+            </div>
+          ) : (
+          <>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Input
               placeholder="Search products…"
@@ -1595,6 +1705,8 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
                 </div>
               </section>
             </div>
+          )}
+          </>
           )}
         </div>
       ) : null}

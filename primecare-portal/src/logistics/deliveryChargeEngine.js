@@ -16,9 +16,33 @@ function roundMoney(n) {
 }
 
 export const DEFAULT_DELIVERY_POLICY = {
+  policyType: "standard",
   standardDeliveryCharge: 150,
   freeDeliveryThreshold: 5000,
   currency: "INR",
+  customerPickupAllowed: false,
+  expressDeliveryAllowed: false,
+  maxDeliveryRadiusKm: null,
+  policyReason: "",
+  isActive: true,
+};
+
+export const DELIVERY_POLICY_TYPE = {
+  STANDARD: "standard",
+  PREMIUM: "premium",
+  LOCAL: "local",
+  REMOTE: "remote",
+  CONTRACT: "contract",
+  MANUAL_OVERRIDE: "manual_override",
+};
+
+export const DELIVERY_POLICY_TYPE_LABELS = {
+  [DELIVERY_POLICY_TYPE.STANDARD]: "Standard",
+  [DELIVERY_POLICY_TYPE.PREMIUM]: "Premium",
+  [DELIVERY_POLICY_TYPE.LOCAL]: "Local",
+  [DELIVERY_POLICY_TYPE.REMOTE]: "Remote",
+  [DELIVERY_POLICY_TYPE.CONTRACT]: "Contract",
+  [DELIVERY_POLICY_TYPE.MANUAL_OVERRIDE]: "Manual override",
 };
 
 export const DELIVERY_METHOD_INTENT = {
@@ -55,7 +79,10 @@ export function deliveryChargeReasonLabel(reason) {
 }
 
 export function normalizeDeliveryPolicy(row = {}) {
+  const policyType = str(row.policy_type ?? row.policyType) || DELIVERY_POLICY_TYPE.STANDARD;
+  const allowedTypes = Object.values(DELIVERY_POLICY_TYPE);
   return {
+    policyType: allowedTypes.includes(policyType) ? policyType : DELIVERY_POLICY_TYPE.STANDARD,
     standardDeliveryCharge: num(
       row.standard_delivery_charge ?? row.standardDeliveryCharge ?? DEFAULT_DELIVERY_POLICY.standardDeliveryCharge
     ),
@@ -65,6 +92,13 @@ export function normalizeDeliveryPolicy(row = {}) {
     currency: str(row.currency) || DEFAULT_DELIVERY_POLICY.currency,
     effectiveFrom: str(row.effective_from ?? row.effectiveFrom) || null,
     isActive: row.is_active ?? row.isActive ?? true,
+    customerPickupAllowed: row.customer_pickup_allowed ?? row.customerPickupAllowed ?? false,
+    expressDeliveryAllowed: row.express_delivery_allowed ?? row.expressDeliveryAllowed ?? false,
+    maxDeliveryRadiusKm:
+      row.max_delivery_radius_km != null || row.maxDeliveryRadiusKm != null
+        ? num(row.max_delivery_radius_km ?? row.maxDeliveryRadiusKm)
+        : null,
+    policyReason: str(row.policy_reason ?? row.policyReason) || "",
   };
 }
 

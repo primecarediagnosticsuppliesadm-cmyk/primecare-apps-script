@@ -5,6 +5,12 @@ import {
   persistOrderDeliverySnapshotWrite,
 } from "@/api/deliveryChargeSupabaseApi.js";
 import { DELIVERY_METHOD_INTENT } from "@/logistics/deliveryChargeEngine.js";
+import {
+  canLabInitiateOrder,
+  isHqOpsRole,
+  labOrderingBlockedMessage,
+  normalizeOrderingMode,
+} from "@/labOrdering/orderingGovernance.js";
 import { supabase } from "./supabaseClient.js";
 import {
   autoAllocatePaymentToOrderInvoice,
@@ -1163,6 +1169,8 @@ export function mapLabsCreditRow(row) {
     creditWarnings,
     visitCount: num(row.visit_count ?? row.visitCount ?? row.Visit_Count),
     revenue: num(row.revenue ?? row.Revenue),
+    orderingMode: str(row.ordering_mode ?? row.orderingMode) || "hq_managed",
+    ordering_mode: str(row.ordering_mode ?? row.orderingMode) || "hq_managed",
   };
 }
 
@@ -5823,6 +5831,156 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
 }
 
 /**
+ * Read lab ordering mode for portal / admin UI.
+ */
+export async function getLabOrderingContextRead({ tenantId, labId } = {}) {
+  if (!supabase) {
+    return {
+      success: false,
+      error: "Supabase is not configured",
+      orderingMode: normalizeOrderingMode(null),
+    };
+  }
+  const tid = str(tenantId);
+  const lid = labIdKey(labId);
+  if (!tid || !lid) {
+    return {
+      success: false,
+      error: "tenantId and labId required",
+      orderingMode: normalizeOrderingMode(null),
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("labs")
+    .select("ordering_mode, lab_id, lab_name, tenant_id")
+    .eq("tenant_id", tid)
+    .eq("lab_id", lid)
+    .maybeSingle();
+
+  if (error) {
+    const msg = str(error.message).toLowerCase();
+    if (msg.includes("ordering_mode") && msg.includes("does not exist")) {
+      return {
+        success: true,
+        orderingMode: normalizeOrderingMode(null),
+        warning: "ordering_mode not deployed",
+      };
+    }
+    return { success: false, error: error.message, orderingMode: normalizeOrderingMode(null) };
+  }
+
+  return {
+    success: true,
+    orderingMode: normalizeOrderingMode(data?.ordering_mode),
+    labName: str(data?.lab_name) || null,
+    error: null,
+  };
+}
+
+/**
+ * HQ admin: update lab ordering mode (Operations Center / lab profile).
+ */
+export async function updateLabOrderingModeWrite({
+  tenantId,
+  labId,
+  orderingMode,
+  actorId = "",
+} = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+  const tid = str(tenantId);
+  const lid = labIdKey(labId);
+  const mode = normalizeOrderingMode(orderingMode);
+  if (!tid || !lid) return { success: false, error: "tenantId and labId required" };
+
+  const { data, error } = await supabase
+    .from("labs")
+    .update({
+      ordering_mode: mode,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("tenant_id", tid)
+    .eq("lab_id", lid)
+    .select("lab_id, lab_name, ordering_mode, tenant_id")
+    .maybeSingle();
+
+  if (error) {
+    const msg = str(error.message).toLowerCase();
+    if (msg.includes("ordering_mode") && msg.includes("does not exist")) {
+      return { success: false, error: "ordering_mode column not deployed — apply migration" };
+    }
+    return { success: false, error: error.message };
+  }
+  if (!data) return { success: false, error: "Lab not found or not authorized" };
+
+  invalidateLabsCreditReadCache();
+  hqDebugLog("[updateLabOrderingModeWrite]", { labId: lid, orderingMode: mode, actorId: str(actorId) });
+  return {
+    success: true,
+    data: {
+      ...data,
+      orderingMode: normalizeOrderingMode(data.ordering_mode),
+    },
+    error: null,
+  };
+}
+
+async function resolveCurrentActorRole(explicitRole) {
+  const fromPayload = str(explicitRole).toLowerCase();
+  if (fromPayload) return fromPayload;
+  if (!supabase) return "";
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const userId = sessionData?.session?.user?.id;
+    if (!userId) return "";
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("user_id", userId)
+      .maybeSingle();
+    return str(profile?.role).toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Client-side ordering mode gate (mirrors create_lab_order + orders_insert RLS).
+ */
+async function assertLabOrderInitiationAllowed({ tenantId, labId, actorRole = "" } = {}) {
+  if (!supabase) return { ok: true };
+  const role = await resolveCurrentActorRole(actorRole);
+  if (isHqOpsRole(role)) return { ok: true };
+  if (role && role !== "lab") return { ok: true };
+
+  const tid = str(tenantId);
+  const lid = labIdKey(labId);
+  if (!tid || !lid) return { ok: true };
+
+  const { data, error } = await supabase
+    .from("labs")
+    .select("ordering_mode")
+    .eq("tenant_id", tid)
+    .eq("lab_id", lid)
+    .maybeSingle();
+
+  if (error) {
+    const msg = str(error.message).toLowerCase();
+    if (msg.includes("ordering_mode") && msg.includes("does not exist")) {
+      return { ok: true };
+    }
+    hqDebugWarn("[assertLabOrderInitiationAllowed]", error.message);
+    return { ok: true };
+  }
+
+  const mode = normalizeOrderingMode(data?.ordering_mode);
+  if (!canLabInitiateOrder(mode)) {
+    return { ok: false, error: labOrderingBlockedMessage(mode), orderingMode: mode };
+  }
+  return { ok: true, orderingMode: mode };
+}
+
+/**
  * Server-side credit eligibility for lab order placement.
  * @returns {Promise<{ ok: boolean, error?: string }>}
  */
@@ -5897,6 +6055,15 @@ export async function createOrderWrite(payload = {}) {
     }
     if (!items.length) {
       return { success: false, error: "items are required", data: null };
+    }
+
+    const initiationCheck = await assertLabOrderInitiationAllowed({
+      tenantId: tenant_id,
+      labId: lab_id,
+      actorRole: payload.actorRole ?? payload.actor_role ?? null,
+    });
+    if (!initiationCheck.ok) {
+      return { success: false, error: initiationCheck.error, data: null };
     }
 
     const creditCheck = await assertLabOrderCreditEligible(tenant_id, lab_id);

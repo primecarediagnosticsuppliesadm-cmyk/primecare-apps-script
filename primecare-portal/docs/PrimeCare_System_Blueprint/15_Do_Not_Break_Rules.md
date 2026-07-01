@@ -63,9 +63,12 @@ Hard constraints. Violations require explicit approval + blueprint amendment + v
 | ID | Rule |
 |----|------|
 | P1 | Lab portal not default for all labs Day-1 |
-| P2 | Default ordering mode HQ Managed until onboarding |
+| P2 | Default ordering mode HQ Managed until onboarding (`labs.ordering_mode`) |
 | P3 | Admin freeze blocks structural changes, not daily payments |
 | P4 | Permissions from matrix — not hardcoded |
+| P5 | **Ordering Mode controls order initiation only** — never block track order, invoices, payments, collections, finance, inventory, or shipment lifecycle |
+| P6 | HQ admin override always allowed for order creation |
+| P7 | Existing labs default to `hq_managed` on migration (non-breaking) |
 
 ---
 

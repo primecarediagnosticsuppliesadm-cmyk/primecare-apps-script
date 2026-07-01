@@ -21,6 +21,7 @@ import {
 import ShipmentDetailDrawer from "@/components/logistics/ShipmentDetailDrawer.jsx";
 import CourierManagementPanel from "@/components/logistics/CourierManagementPanel.jsx";
 import DeliveryPolicyPanel from "@/components/logistics/DeliveryPolicyPanel.jsx";
+import RoutePlanningPanel from "@/components/logistics/RoutePlanningPanel.jsx";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import { ROLES } from "@/config/roles.js";
 import { cn } from "@/lib/utils";
@@ -205,6 +206,7 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
       <div className="flex gap-2 border-b border-slate-200 pb-1">
         {[
           { id: "dispatch", label: "Dispatch Queue" },
+          { id: "routes", label: "Route Planning" },
           { id: "couriers", label: "Courier Management" },
           { id: "policy", label: "Delivery Policy" },
         ].map((tab) => (
@@ -374,6 +376,13 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
         </div>
       </section>
         </>
+      ) : activeTab === "routes" ? (
+        <RoutePlanningPanel
+          tenantId={tenantId}
+          currentUser={currentUser}
+          readOnly={readOnly}
+          onChanged={() => void load({ force: true })}
+        />
       ) : activeTab === "couriers" ? (
         <CourierManagementPanel
           tenantId={tenantId}

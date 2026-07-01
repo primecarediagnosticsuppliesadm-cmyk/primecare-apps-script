@@ -22,6 +22,23 @@ Placed → Processing → Fulfilled
 
 ---
 
+## Order initiation
+
+**Ordering Mode** (`labs.ordering_mode`) controls **who may initiate** a new order. It does **not** affect fulfillment, invoices, payments, collections, inventory, or shipment lifecycle.
+
+| Mode | Who may initiate |
+|------|------------------|
+| **HQ Managed** | Admin / executive only |
+| **Hybrid** | Admin + lab |
+| **Self Service** | Lab (+ admin on behalf) |
+| **Suspended** | Admin only (lab blocked) |
+
+**Admin override:** HQ ops roles always pass initiation checks.
+
+Enforcement: `lab_ordering_allows_lab_initiate()` in `create_lab_order` RPC + `orders_insert_by_role` RLS for lab callers.
+
+---
+
 ## Creation paths
 
 | Path | API | Default status |
@@ -30,6 +47,7 @@ Placed → Processing → Fulfilled
 | HQ create | `createOrderWrite` | configurable |
 
 ### Preconditions
+- Ordering mode gate (lab callers only)
 - Credit hold check (`assertLabOrderCreditEligible`)
 - Stock validation (no backorder pilot)
 - `client_request_id` idempotency on lab checkout

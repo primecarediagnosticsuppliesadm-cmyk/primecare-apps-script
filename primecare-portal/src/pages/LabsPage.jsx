@@ -338,6 +338,10 @@ function normalizeLab(lab) {
     creditTerms: lab.creditTerms || "",
     visitCount: Number(lab.visitCount || 0),
     revenue: Number(lab.revenue || 0),
+    orderingMode: lab.orderingMode || lab.ordering_mode || "hq_managed",
+    ordering_mode: lab.orderingMode || lab.ordering_mode || "hq_managed",
+    preferredDeliveryDay: lab.preferredDeliveryDay || lab.preferred_delivery_day || "",
+    preferred_delivery_day: lab.preferredDeliveryDay || lab.preferred_delivery_day || "",
   };
 }
 
