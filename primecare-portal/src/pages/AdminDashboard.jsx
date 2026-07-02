@@ -63,6 +63,7 @@ import {
   insightSeverityToVariant,
 } from "@/components/ux";
 import { extractReadHealth } from "@/observability/readHealth.js";
+import { cn } from "@/lib/utils";
 import { typography } from "@/styles/designTokens";
 import {
   TrendingUp,
@@ -1322,7 +1323,9 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
         }
       />
 
-      <ReadHealthBanner health={readHealth} title="Dashboard read status" />
+      {readHealth?.readFailed || readHealth?.degraded ? (
+        <ReadHealthBanner health={readHealth} title="Dashboard read status" />
+      ) : null}
 
       {errorMessage ? (
         <div

@@ -17,7 +17,8 @@ const VARIANT_STYLES = {
  * @param {{ result?: object|null, health?: object|null, className?: string, title?: string }} props
  */
 export default function ReadHealthBanner({ result = null, health = null, className, title }) {
-  const resolved = health || extractReadHealth(result);
+  if (health == null && result == null) return null;
+  const resolved = health ?? extractReadHealth(result);
   const variant = readHealthBannerVariant(resolved);
   const message = readHealthBannerMessage(resolved);
 
