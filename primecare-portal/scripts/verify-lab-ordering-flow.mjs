@@ -164,6 +164,17 @@ if (
 }
 
 if (
+  labPageSrc.includes("buildLabCheckoutClientRequestId") &&
+  !labPageSrc.includes("cartHash.slice(0, 48)") &&
+  apiSrc.includes("LAB_CHECKOUT_IDEMPOTENCY_WINDOW_MS") &&
+  apiSrc.includes("stale_idempotent_replay")
+) {
+  pass("static.checkout_idempotency", "Checkout uses per-attempt client_request_id + rejects stale RPC replays");
+} else {
+  fail("static.checkout_idempotency", "Cart-hash client_request_id or stale idempotent guard missing");
+}
+
+if (
   labPageSrc.includes("trackingRequestSeqRef") &&
   labPageSrc.includes("confirmedDetails") &&
   orderTrackingSrc.includes("buildConfirmedCheckoutTrackingDetails")
@@ -174,6 +185,11 @@ if (
 }
 
 if (
+  apiSrc.includes("collectOrderMetricLookupIds") &&
+  apiSrc.includes("fetchOrderUnitCountsForOrders")
+) {
+  pass("static.hq_item_count", "HQ Orders item count uses canonical line/item quantity rollup");
+} else if (
   apiSrc.includes("fetchOrderUnitCountsForOrders") &&
   orderLineSupportSrc.includes("fetchOrderUnitCountsForOrders")
 ) {

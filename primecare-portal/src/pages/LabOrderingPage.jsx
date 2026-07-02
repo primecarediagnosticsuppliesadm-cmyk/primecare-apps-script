@@ -35,6 +35,7 @@ import {
   getLabOrderingContextRead,
   getLabRecentOrdersRead,
   LAB_CHECKOUT_CONFIRM_ERROR,
+  buildLabCheckoutClientRequestId,
   mapOrderRow,
 } from "@/api/primecareSupabaseApi";
 import {
@@ -854,6 +855,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
   }
 
   function closeOrderTracking() {
+    trackingRequestSeqRef.current += 1;
     setTrackingOpen(false);
     setTrackingOrder(null);
     setTrackingError("");
@@ -1330,7 +1332,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
           labName ||
           labId ||
           null,
-        clientRequestId: `CRQ-${labIdKey(labId)}-${cartHash.slice(0, 48)}`,
+        clientRequestId: buildLabCheckoutClientRequestId(labId),
         items: cartSnapshot.map((item) => ({
           productId: item.productId,
           productName:
@@ -1349,6 +1351,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
           const orderSnapshot = mapOrderRow(sbRes.data.order, labName, 0);
           const confirmedItemCount = Number(sbRes.data.itemCount ?? itemCount);
           const confirmedTotal = Number(sbRes.data.total ?? total);
+          const isIdempotentReplay = Boolean(sbRes.data?.idempotent);
 
           const confirmedDetails = buildConfirmedCheckoutTrackingDetails({
             orderRow: sbRes.data.order,
@@ -1360,6 +1363,8 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
           setSubmitResult({
             success: true,
             confirmed: true,
+            isNewOrder: !isIdempotentReplay,
+            idempotentReplay: isIdempotentReplay,
             orderId,
             orderSnapshot,
             lines: sbRes.data.lines || [],
@@ -1605,11 +1610,35 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
       ) : null}
 
       {submitResult?.success && submitResult?.confirmed ? (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
+        <div
+          className={`rounded-xl border p-3 shadow-sm ${
+            submitResult.idempotentReplay
+              ? "border-amber-200 bg-amber-50"
+              : "border-emerald-200 bg-emerald-50"
+          }`}
+        >
           <div className="flex items-start gap-2.5">
-            <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-700" />
+            <CheckCircle2
+              className={`mt-0.5 h-5 w-5 ${
+                submitResult.idempotentReplay ? "text-amber-700" : "text-emerald-700"
+              }`}
+            />
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-emerald-800">Order placed successfully</div>
+              <div
+                className={`text-sm font-semibold ${
+                  submitResult.idempotentReplay ? "text-amber-900" : "text-emerald-800"
+                }`}
+              >
+                {submitResult.idempotentReplay
+                  ? "Existing order confirmed"
+                  : "Order placed successfully"}
+              </div>
+              {submitResult.idempotentReplay ? (
+                <div className="mt-1 text-xs text-amber-800">
+                  This checkout matched an order already on file from a recent duplicate submit.
+                  No new order was created.
+                </div>
+              ) : null}
               <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-emerald-700">
                 <span>
                   Order ID: <span className="font-semibold">{submitResult.orderId || "—"}</span>

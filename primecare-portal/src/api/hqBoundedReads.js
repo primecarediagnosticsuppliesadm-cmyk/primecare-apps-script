@@ -44,7 +44,7 @@ import {
   ORDER_LINES_METRIC_COLUMNS,
   fetchOrderLineMetricsForOrders,
 } from "@/api/orderLineMetricsSupport.js";
-import { collectOrderRowIds } from "../metrics/computeRevenueMetrics.js";
+import { collectOrderMetricLookupIds } from "../metrics/computeRevenueMetrics.js";
 import { perfLog, perfTime } from "../utils/perfLog.js";
 
 const BOUNDED_SOURCE_CACHE_TTL_MS = 30_000;
@@ -611,7 +611,7 @@ async function loadAdminDashboardBoundedSourceRows(client, empty) {
   if (labsRes.error) errors.labs = labsRes.error.message;
 
   const ordersRaw = ordersRes.error ? [] : ordersRes.data || [];
-  const orderIds = collectOrderRowIds(ordersRaw);
+  const orderIds = collectOrderMetricLookupIds(ordersRaw);
   const arRaw = arRes.error ? [] : arRes.data || [];
   const visitsAllRaw = visitsRes.error ? [] : visitsRes.data || [];
   const invRaw = invRes.error ? [] : invRes.data || [];

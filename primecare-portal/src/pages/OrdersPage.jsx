@@ -360,6 +360,7 @@ export default function OrdersPage({
   const [allOrders, setAllOrders] = useState(() => hydratedOrders?.allOrders ?? []);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [details, setDetails] = useState(null);
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("ALL");
   const [paymentStatus, setPaymentStatus] = useState("ALL");
@@ -405,6 +406,11 @@ export default function OrdersPage({
   }, []);
 
   useEffect(() => {
+    const handle = window.setTimeout(() => setSearch(searchInput), 300);
+    return () => window.clearTimeout(handle);
+  }, [searchInput]);
+
+  useEffect(() => {
     if (distributorScope?.tenantId) {
       setOrders(
         filterRowsByTenant(allOrders, distributorScope.tenantId, { tenantKey: rowTenantId })
@@ -428,7 +434,10 @@ export default function OrdersPage({
 
   async function probeRlsOrderRows() {
     if (!supabase) return [];
-    const { data, error } = await supabase.from("orders").select("*");
+    const { data, error } = await supabase
+      .from("orders")
+      .select("order_id,id,tenant_id,lab_id,status,order_date")
+      .limit(500);
     if (error) {
       console.warn("[OrdersPage] RLS probe failed:", error.message);
       return null;
@@ -922,8 +931,8 @@ export default function OrdersPage({
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               <Input
                 placeholder="Search order ID, lab, status…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 className="h-9 rounded-lg text-sm lg:col-span-2"
               />
               <select

@@ -41,6 +41,7 @@ import {
 import {
   buildOrdersByLabDateIndex,
   collectOrderRowIds,
+  collectOrderMetricLookupIds,
   computeRevenueMetrics,
   normalizedOrderRowStatus,
   orderCountsTowardDashboardRevenue,
@@ -6024,6 +6025,32 @@ export const LAB_CHECKOUT_CONFIRM_ERROR =
 
 const LAB_CHECKOUT_CONFIRM_RETRY_ATTEMPTS = 3;
 const LAB_CHECKOUT_CONFIRM_RETRY_DELAY_MS = 150;
+/** Idempotent RPC replays older than this are rejected (prevents cart-hash CRQ replaying prior-day orders). */
+export const LAB_CHECKOUT_IDEMPOTENCY_WINDOW_MS = 90_000;
+
+export function buildLabCheckoutClientRequestId(labId) {
+  const key = labIdKey(labId);
+  return `CRQ-${key || "lab"}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function evaluateCheckoutIdempotentReplay({ idempotent, savedOrder } = {}) {
+  if (!idempotent || !savedOrder) {
+    return { allowed: true, isReplay: false };
+  }
+  const createdAt = savedOrder.created_at ?? savedOrder.createdAt ?? null;
+  const createdMs = createdAt ? new Date(createdAt).getTime() : Number.NaN;
+  const ageMs = Number.isFinite(createdMs) ? Date.now() - createdMs : Number.POSITIVE_INFINITY;
+  if (ageMs > LAB_CHECKOUT_IDEMPOTENCY_WINDOW_MS) {
+    return {
+      allowed: false,
+      isReplay: true,
+      reason: "stale_idempotent_replay",
+      ageMs,
+      orderId: str(savedOrder.order_id ?? savedOrder.orderId),
+    };
+  }
+  return { allowed: true, isReplay: true, ageMs, orderId: str(savedOrder.order_id ?? savedOrder.orderId) };
+}
 
 function sleepMs(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -6397,6 +6424,41 @@ export async function createOrderWrite(payload = {}) {
         }
 
         hqDebugLog("SUPABASE ORDER SAVED (RPC)", savedOrder);
+
+        const idempotentReplay = evaluateCheckoutIdempotentReplay({
+          idempotent: Boolean(rpcBody.idempotent),
+          savedOrder,
+        });
+        if (!idempotentReplay.allowed) {
+          logLabCheckoutPersistenceDiagnostic({
+            phase: "stale_idempotent_replay",
+            tenantId: tenant_id,
+            labId: lab_id,
+            orderId: returnedOrderId,
+            clientRequestId: client_request_id,
+            userEmail: created_by,
+            cartItemCount: items.length,
+            replayOrderId: idempotentReplay.orderId,
+            replayAgeMs: idempotentReplay.ageMs,
+            replayReason: idempotentReplay.reason,
+          });
+          return {
+            success: false,
+            error:
+              "This checkout matched a previous order from an earlier session. Your cart is saved — adjust quantities or retry checkout.",
+            data: {
+              confirmed: false,
+              idempotentReplayRejected: true,
+              diagnostic: {
+                reason: idempotentReplay.reason,
+                replayOrderId: idempotentReplay.orderId,
+                ageMs: idempotentReplay.ageMs,
+                clientRequestId: client_request_id,
+              },
+            },
+          };
+        }
+
         const finalized = await finalizeConfirmedLabCheckout({
           tenant_id,
           lab_id,
@@ -7096,7 +7158,10 @@ export async function getOrdersRead(params = {}) {
       labMap = new Map();
     }
 
-    const lineCounts = await fetchOrderUnitCountsForOrders(supabase, collectOrderRowIds(rawList));
+    const lineCounts = await fetchOrderUnitCountsForOrders(
+      supabase,
+      collectOrderMetricLookupIds(rawList)
+    );
 
     const orders = rawList.map((r, idx) => {
       const labId = str(r.lab_id ?? r.labId ?? r.lab_uuid ?? r.labUUID ?? "");
