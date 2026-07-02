@@ -139,7 +139,11 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (!id.includes("node_modules")) return;
+          if (!id.includes("node_modules")) {
+            if (id.includes("/src/predator/")) return "predator-tools";
+            if (id.includes("/src/projectionOps/")) return "projection-ops";
+            return;
+          }
           if (id.includes("@supabase")) return "supabase-vendor";
           if (/node_modules[/\\](react-dom|react|scheduler)[/\\]/.test(id)) {
             return "react-vendor";

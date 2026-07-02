@@ -14,7 +14,6 @@ import HqGlobalSearch, {
   useHqGlobalSearchShortcut,
 } from "@/components/hq/HqGlobalSearch.jsx";
 import HqHelpDrawer, { HqHelpButton } from "@/components/hq/HqHelpDrawer.jsx";
-import QaDiagnosticsPanel from "@/components/qa/QaDiagnosticsPanel.jsx";
 import { PERMISSIONS } from "./config/permissions";
 import { getDefaultPageForRole } from "./config/menuConfig";
 import {
@@ -32,6 +31,9 @@ import OperatingZoneSync from "@/components/OperatingZoneSync.jsx";
 import { loadHqNavBadgeCounts } from "@/operations/hqNavBadgeCounts.js";
 import { prefetchLikelyRoutes } from "@/utils/routePrefetch.js";
 import { isNavigationPageCacheWarm } from "@/utils/hqNavigationWarmth.js";
+import { QA_DIAGNOSTICS_ENABLED } from "@/config/environment.js";
+
+const QaDiagnosticsPanel = lazy(() => import("@/components/qa/QaDiagnosticsPanel.jsx"));
 
 function canRoleAccessPage(role, pageKey) {
   if (!role || !pageKey) return false;
@@ -282,16 +284,13 @@ export default function App() {
       intervalId = window.setInterval(refreshBadges, 120000);
     };
 
-    const deferDashboardBadges = activePage === "dashboard";
     let deferHandle;
     let usedIdleCallback = false;
-    if (deferDashboardBadges && typeof window.requestIdleCallback === "function") {
+    if (typeof window.requestIdleCallback === "function") {
       usedIdleCallback = true;
       deferHandle = window.requestIdleCallback(startPolling, { timeout: 3000 });
-    } else if (deferDashboardBadges) {
-      deferHandle = window.setTimeout(startPolling, 1500);
     } else {
-      startPolling();
+      deferHandle = window.setTimeout(startPolling, 1500);
     }
 
     return () => {
@@ -303,7 +302,7 @@ export default function App() {
       }
       if (intervalId != null) window.clearInterval(intervalId);
     };
-  }, [isAuthenticated, role, currentUser?.tenantId, activePage]);
+  }, [isAuthenticated, role, currentUser?.tenantId]);
 
   useEffect(() => {
     if (!role || !activePage) return;
@@ -407,7 +406,11 @@ export default function App() {
               setActivePage={navigateToPage}
               authToken={authToken}
             />
-            <QaDiagnosticsPanel currentUser={currentUser} />
+            {QA_DIAGNOSTICS_ENABLED ? (
+              <Suspense fallback={null}>
+                <QaDiagnosticsPanel currentUser={currentUser} />
+              </Suspense>
+            ) : null}
           </RouteTransitionOverlay>
         </PortalLayout>
         </TenantViewProvider>

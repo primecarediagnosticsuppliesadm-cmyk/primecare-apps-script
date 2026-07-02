@@ -4368,21 +4368,25 @@ export async function getAgentWorkspaceRead(currentUser, options = {}) {
   }
 
   try {
-    const ownershipRes =
+    const [ownershipRes, collectionsRes, labsResult, av] = await Promise.all([
       currentUser?.role === "agent"
-        ? await getAgentActiveLabOwnershipRowsRead()
-        : { data: { rows: [] } };
+        ? getAgentActiveLabOwnershipRowsRead()
+        : Promise.resolve({ data: { rows: [] } }),
+      getCollectionsRead({ force: true }),
+      fetchLabsCreditBoundedRows(supabase),
+      fetchAgentVisitsBoundedRows(supabase),
+    ]);
+
     const ownershipRows = Array.isArray(ownershipRes?.data?.rows)
       ? ownershipRes.data.rows
       : [];
 
-    const collectionsRes = await getCollectionsRead({ force: true });
     const allCollections = Array.isArray(collectionsRes?.data?.collections)
       ? collectionsRes.data.collections
       : [];
     const pendingCollections = filterCollectionsForUser(allCollections, currentUser, ownershipRows);
 
-    const { data: labsRaw, error: labsErr } = await fetchLabsCreditBoundedRows(supabase);
+    const { data: labsRaw, error: labsErr } = labsResult;
     if (labsErr) {
       hqDebugWarn("[getAgentWorkspaceRead] v_labs_credit:", labsErr.message);
     }
@@ -4393,7 +4397,6 @@ export async function getAgentWorkspaceRead(currentUser, options = {}) {
     const assignedLabs = filterLabsForUserWithOwnership(allLabs, currentUser, ownershipRows);
 
     let visitRows = [];
-    const av = await fetchAgentVisitsBoundedRows(supabase);
     if (av.error) {
       hqDebugWarn("[getAgentWorkspaceRead] agent_visits:", av.error.message);
     } else if (Array.isArray(av.data)) {
