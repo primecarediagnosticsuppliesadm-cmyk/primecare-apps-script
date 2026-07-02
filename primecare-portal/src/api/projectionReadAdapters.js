@@ -18,6 +18,7 @@ import {
 } from "@/api/primecareSupabaseApi.js";
 import { PROJECTION_STALENESS_SLA_MS } from "@/config/readProjectionFlags.js";
 import { perfLog } from "@/utils/perfLog.js";
+import { normalizeAdminDashboardPayload } from "@/api/primecareSupabaseApi.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -248,5 +249,132 @@ export async function readLabReceivablesListV1(params = {}) {
     asOf: payload.as_of ?? null,
     stalenessMs,
     degraded: projectionDegraded(stalenessMs, PROJECTION_STALENESS_SLA_MS.receivables),
+  };
+}
+
+function resolveTenantIdParam(params = {}) {
+  return str(params.tenantId ?? params.tenant_id);
+}
+
+/**
+ * @param {object} params — { tenantId?, tenant_id? }
+ */
+export async function readTenantDashboardV1(params = {}) {
+  if (!supabase) {
+    return {
+      success: false,
+      readFailed: true,
+      error: "Supabase is not configured",
+      data: null,
+    };
+  }
+
+  const tenantId = resolveTenantIdParam(params);
+  if (!tenantId) {
+    return { success: false, readFailed: true, error: "tenant_id is required", data: null };
+  }
+
+  perfLog("readTenantDashboardV1.rpc", { tenantId });
+
+  const { data, error } = await supabase.rpc("read_tenant_dashboard_v1", {
+    p_tenant_id: tenantId,
+  });
+
+  if (error) {
+    return {
+      success: false,
+      readFailed: true,
+      error: error.message || String(error),
+      data: null,
+      projection: true,
+    };
+  }
+
+  const payload = data && typeof data === "object" ? data : {};
+  if (payload.success === false || payload.readFailed) {
+    return {
+      success: false,
+      readFailed: true,
+      error: payload.error || "dashboard_projection_read_failed",
+      data: null,
+      projection: true,
+    };
+  }
+
+  const inner = payload.data || payload;
+  const normalized = normalizeAdminDashboardPayload(inner);
+  const stalenessMs = num(payload.staleness_ms);
+
+  return {
+    success: true,
+    readFailed: false,
+    error: null,
+    data: normalized,
+    projection: true,
+    registryId: payload.registry_id || "PRJ-DSH-METRICS-v1",
+    asOf: payload.as_of ?? null,
+    stalenessMs,
+    degraded: projectionDegraded(stalenessMs, PROJECTION_STALENESS_SLA_MS.dashboard),
+  };
+}
+
+/**
+ * @param {object} params — { tenantId?, tenant_id? }
+ */
+export async function readTenantExecutiveV1(params = {}) {
+  if (!supabase) {
+    return {
+      success: false,
+      error: "Supabase is not configured",
+      data: null,
+    };
+  }
+
+  const tenantId = resolveTenantIdParam(params);
+  if (!tenantId) {
+    return { success: false, error: "tenant_id is required", data: null };
+  }
+
+  perfLog("readTenantExecutiveV1.rpc", { tenantId });
+
+  const { data, error } = await supabase.rpc("read_tenant_executive_v1", {
+    p_tenant_id: tenantId,
+  });
+
+  if (error) {
+    return {
+      success: false,
+      error: error.message || String(error),
+      data: null,
+      projection: true,
+    };
+  }
+
+  const payload = data && typeof data === "object" ? data : {};
+  if (payload.success === false || payload.readFailed) {
+    return {
+      success: false,
+      error: payload.error || "executive_projection_read_failed",
+      data: null,
+      projection: true,
+    };
+  }
+
+  const inner = payload.data || payload;
+  const snapshot =
+    inner && typeof inner === "object" && inner.data && typeof inner.data === "object"
+      ? inner.data
+      : inner;
+  const stalenessMs = num(payload.staleness_ms);
+
+  return {
+    success: true,
+    data: snapshot && typeof snapshot === "object" ? snapshot : {},
+    error: null,
+    projection: true,
+    registryId: payload.registry_id || "PRJ-EXE-METRICS-v1",
+    asOf: payload.as_of ?? null,
+    stalenessMs,
+    degraded: projectionDegraded(stalenessMs, PROJECTION_STALENESS_SLA_MS.executive),
   };
 }

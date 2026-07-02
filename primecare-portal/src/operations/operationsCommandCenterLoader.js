@@ -10,6 +10,7 @@ import {
   peekAdminDashboardReadCache,
 } from "@/api/primecareSupabaseApi.js";
 import { coordinatedRead } from "@/api/hqReadCoordinator.js";
+import { mergeReadHealth } from "@/observability/readHealth.js";
 import { getFounderSnapshotRead } from "@/api/founderSnapshotApi.js";
 import { getNotificationEventsRead } from "@/api/notificationApi.js";
 import { listOperationalEvidence } from "@/api/operationalEvidenceApi.js";
@@ -110,6 +111,7 @@ export async function loadOperationsCommandCenterCore(currentUser, options = {})
     ordersReadError,
     notifications,
     visits,
+    _dashReadResult: dashRes,
   };
 }
 
@@ -153,6 +155,7 @@ export async function loadOperationsCommandCenterExtended(currentUser, options =
     ownershipAgents: ownershipBundle?.agents || [],
     ownershipDirectoryUsers: ownershipBundle?.directoryUsers || [],
     founderSnapshot: founderSnapRes?.success ? founderSnapRes.data : null,
+    _founderReadResult: founderSnapRes,
   };
 }
 
@@ -179,13 +182,16 @@ export async function loadOperationsCommandCenterData(currentUser, options = {})
   return coordinatedRead(coordKey, async () => {
     if (progressive && typeof onCoreReady === "function") {
       const core = await loadOperationsCommandCenterCore(currentUser, { force });
-      onCoreReady({ ...core, _extendedPending: true });
+      onCoreReady({ ...core, _extendedPending: true, readHealth: mergeReadHealth(core._dashReadResult) });
       const extended = await loadOperationsCommandCenterExtended(currentUser, { force });
       const data = {
         ...core,
         ...extended,
         _extendedPending: false,
+        readHealth: mergeReadHealth(core._dashReadResult, extended._founderReadResult),
       };
+      delete data._dashReadResult;
+      delete data._founderReadResult;
       if (!force) {
         opsPayloadCache.set(cacheKey, { at: Date.now(), data });
       }
@@ -200,7 +206,10 @@ export async function loadOperationsCommandCenterData(currentUser, options = {})
       ...core,
       ...extended,
       _extendedPending: false,
+      readHealth: mergeReadHealth(core._dashReadResult, extended._founderReadResult),
     };
+    delete data._dashReadResult;
+    delete data._founderReadResult;
 
     if (!force) {
       opsPayloadCache.set(cacheKey, { at: Date.now(), data });

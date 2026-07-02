@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { PageHeader, PageSkeleton, StatusBadge, KpiCard, KpiCardGrid } from "@/components/ux";
+import { PageHeader, PageSkeleton, StatusBadge, KpiCard, KpiCardGrid, ReadHealthBanner } from "@/components/ux";
 import { loadExecutiveFinancialIntelligenceData } from "@/founder/executiveFinancialIntelligenceData.js";
 import { buildExecutiveFinancialIntelligenceModel } from "@/founder/executiveFinancialIntelligenceEngine.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
@@ -215,6 +215,8 @@ export default function ExecutiveFinancialIntelligencePage({
           </Button>
         }
       />
+
+      <ReadHealthBanner health={model.readHealth} title="Executive data status" />
 
       <Section title="Revenue" icon={IndianRupee}>
         <KpiCardGrid columns={4} className="mb-3 sm:grid-cols-2 lg:grid-cols-4">

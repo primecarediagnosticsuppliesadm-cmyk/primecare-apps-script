@@ -26,6 +26,7 @@ import {
   Shield,
   TrendingUp,
   Truck,
+  Database,
 } from "lucide-react";
 
 const ICONS = {
@@ -58,6 +59,8 @@ const ICONS = {
   labOrders: Package,
   predatorDebug: Bug,
   notifications: Bell,
+  projectionOpsCenter: Database,
+  qaCommandCenter: ClipboardCheck,
 };
 
 function titleCase(value) {

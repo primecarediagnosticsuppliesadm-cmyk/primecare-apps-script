@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { StatusBadge, PageSkeleton, KpiCard, KpiCardGrid, usePortalToast, DataFreshnessLabel, PageHeader, DataFetchError } from "@/components/ux";
+import { StatusBadge, PageSkeleton, KpiCard, KpiCardGrid, usePortalToast, DataFreshnessLabel, PageHeader, DataFetchError, ReadHealthBanner } from "@/components/ux";
 import OperationalLabDrawer from "@/components/operations/OperationalLabDrawer.jsx";
 import OwnershipStatusCard from "@/components/operations/OwnershipStatusCard.jsx";
 import LabOwnershipDrawer from "@/components/operations/LabOwnershipDrawer.jsx";
@@ -362,6 +362,11 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
             Refresh
           </Button>
         }
+      />
+
+      <ReadHealthBanner
+        health={ownershipPayload.readHealth}
+        title="Operations data status"
       />
 
       {error ? (

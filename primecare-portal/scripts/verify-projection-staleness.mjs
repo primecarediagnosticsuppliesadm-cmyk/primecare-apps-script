@@ -15,6 +15,10 @@ const root = resolve(__dirname, "..");
 const SLA_MS = {
   "PRJ-ORD-ORDER-v1": 60_000,
   "PRJ-COL-LAB-v1": 60_000,
+  "PRJ-ORD-METRICS-v1": 90_000,
+  "PRJ-COL-METRICS-v1": 90_000,
+  "PRJ-DSH-METRICS-v1": 90_000,
+  "PRJ-EXE-METRICS-v1": 180_000,
 };
 
 function pass(id, detail) {

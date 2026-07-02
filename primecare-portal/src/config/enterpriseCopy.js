@@ -11,6 +11,7 @@ export const ENTERPRISE_PAGE_LABELS = {
   qualificationReview: "Qualification Analytics",
   predatorDebug: "System Diagnostics",
   qaCommandCenter: "Quality Assurance",
+  projectionOpsCenter: "Projection Ops",
   tenantManagement: "Organization Management",
   commissionEngine: "Commission Management",
   labContractEngine: "Contract Management",

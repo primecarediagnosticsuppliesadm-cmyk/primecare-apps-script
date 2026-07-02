@@ -58,10 +58,11 @@ import {
   StatusBadge,
   DataFreshnessLabel,
   PageHeader,
+  ReadHealthBanner,
   visitTypeToVariant,
   insightSeverityToVariant,
 } from "@/components/ux";
-import { cn } from "@/lib/utils";
+import { extractReadHealth } from "@/observability/readHealth.js";
 import { typography } from "@/styles/designTokens";
 import {
   TrendingUp,
@@ -447,7 +448,7 @@ function mergeKpiModels(prev, next) {
  * @param {{ success?: boolean, data?: object }|null|undefined} result
  */
 function normalizeDashboardFromReadResult(result) {
-  if (!result?.success || !result?.data) return null;
+  if (!result?.data) return null;
 
   const raw = unwrapDashboardReadData(result.data);
   if (!raw) return null;
@@ -570,7 +571,7 @@ async function fetchSupabaseAdminSlice({ force = false } = {}) {
 function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) {
   const legacySummary = adminDashboardSkipAppsScriptReads() ? {} : summaryIn;
   const legacyExecutive = adminDashboardSkipAppsScriptReads() ? {} : executiveIn;
-  const dash = supabaseSlice.dashboardRead?.success ? supabaseSlice.dashboardRead.data : null;
+  const dash = supabaseSlice.dashboardRead?.data ?? null;
 
   if (dash?.summary && dash?.executive) {
     const merged = adminDashboardModelFromMerge({
@@ -786,6 +787,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   const [backgroundLoading, setBackgroundLoading] = useState(false);
   const [dataLoadedAt, setDataLoadedAt] = useState(() => (initialBundle ? Date.now() : null));
   const [errorMessage, setErrorMessage] = useState("");
+  const [readHealth, setReadHealth] = useState(null);
   const [domKpiValues, setDomKpiValues] = useState({});
   const loadGenerationRef = useRef(0);
   const loadAllInFlightRef = useRef(null);
@@ -833,14 +835,19 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       if (loadId !== loadGenerationRef.current) return;
 
       lastRawReadRef.current = result;
+      setReadHealth(extractReadHealth(result));
       hqDebugLog("[AdminDashboard] getAdminDashboardRead raw", result);
 
       const hydrated = normalizeDashboardFromReadResult(result);
       if (!hydrated) {
-        console.warn("[AdminDashboard] QA direct read returned no normalizable dashboard model", {
-          success: result?.success,
-          hasData: Boolean(result?.data),
-        });
+        if (result?.readFailed) {
+          setErrorMessage(result.error || "Dashboard read failed — KPIs unavailable");
+        } else {
+          console.warn("[AdminDashboard] QA direct read returned no normalizable dashboard model", {
+            success: result?.success,
+            hasData: Boolean(result?.data),
+          });
+        }
         return;
       }
 
@@ -923,7 +930,10 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     }
 
     const readResult = supabaseSlice.dashboardRead;
-    if (readResult?.success && readResult?.data) {
+    if (readResult) {
+      setReadHealth(extractReadHealth(readResult));
+    }
+    if (readResult?.data) {
       lastRawReadRef.current = readResult;
       hqDebugLog("[AdminDashboard] getAdminDashboardRead raw", readResult);
       const fromRead = normalizeDashboardFromReadResult(readResult);
@@ -1311,6 +1321,8 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
           </button>
         }
       />
+
+      <ReadHealthBanner health={readHealth} title="Dashboard read status" />
 
       {errorMessage ? (
         <div

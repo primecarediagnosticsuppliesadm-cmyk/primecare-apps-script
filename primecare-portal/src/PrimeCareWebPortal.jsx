@@ -42,6 +42,7 @@ const OperationsCenterAdminPage = lazy(() => import("./pages/OperationsCenterAdm
 const LogisticsDeliveryPage = lazy(() => import("./pages/LogisticsDeliveryPage"));
 const AccessAuditPage = lazy(() => import("./pages/AccessAuditPage"));
 const QACommandCenterPage = lazy(() => import("./pages/QACommandCenterPage"));
+const ProjectionOperationsCenterPage = lazy(() => import("./pages/ProjectionOperationsCenterPage"));
 const PilotReadinessPage = lazy(() => import("./pages/PilotReadinessPage"));
 const RevenueFunnelPage = lazy(() => import("./pages/RevenueFunnelPage"));
 
@@ -376,6 +377,10 @@ export default function PrimeCareWebPortal({
       case "qaCommandCenter":
       case "qa-command-center":
         return <QACommandCenterPage currentUser={currentUser} />;
+
+      case "projectionOpsCenter":
+      case "projection-ops-center":
+        return <ProjectionOperationsCenterPage currentUser={currentUser} />;
 
       case "tenantManagement":
         return <TenantManagementPage currentUser={currentUser} />;

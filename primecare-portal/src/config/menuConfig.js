@@ -7,7 +7,7 @@ import {
 } from "./rolePermissionMatrix.js";
 import { ALLOW_EXPERIMENTAL_MODULES, IS_QA, IS_PROD } from "./environment";
 import { isPredatorEnabled } from "@/predator/predatorGuards.js";
-import { isQaCommandCenterEnabled } from "@/config/qaValidation.js";
+import { isQaCommandCenterEnabled, isProjectionOpsCenterEnabled } from "@/config/qaValidation.js";
 import { ENTERPRISE_PAGE_LABELS } from "@/config/enterpriseCopy.js";
 
 /** HQ Admin sidebar sections (order preserved within each group). */
@@ -78,6 +78,7 @@ const EXECUTIVE_HQ_MENU_KEYS = new Set([
   "labContractEngine",
   "predatorDebug",
   "qaCommandCenter",
+  "projectionOpsCenter",
 ]);
 
 const ADMIN_HQ_MENU_KEYS = new Set([
@@ -162,6 +163,7 @@ export const MENU_ITEMS = [
   { key: "purchase", label: "Purchase / Reorder", icon: "PackagePlus" },
   { key: "predatorDebug", label: ENTERPRISE_PAGE_LABELS.predatorDebug, icon: "Brain" },
   { key: "qaCommandCenter", label: ENTERPRISE_PAGE_LABELS.qaCommandCenter, icon: "ClipboardCheck" },
+  { key: "projectionOpsCenter", label: ENTERPRISE_PAGE_LABELS.projectionOpsCenter, icon: "Database" },
 ];
 
 const PILOT_SAFE_PAGE_KEYS = new Set([
@@ -198,6 +200,7 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "reorder",
   "predatorDebug",
   "qaCommandCenter",
+  "projectionOpsCenter",
 ]);
 
 /**
@@ -248,6 +251,12 @@ export function getMenuForRole(role) {
   const items = MENU_ITEMS.filter((item) => {
     if (item.key === "predatorDebug" && !isPredatorEnabled()) return false;
     if (item.key === "qaCommandCenter" && (!isQaCommandCenterEnabled() || normalizedRole !== ROLES.EXECUTIVE)) {
+      return false;
+    }
+    if (
+      item.key === "projectionOpsCenter" &&
+      (!isProjectionOpsCenterEnabled() || normalizedRole !== ROLES.EXECUTIVE)
+    ) {
       return false;
     }
     if (normalizedRole === ROLES.LAB && !LAB_MENU_ORDER.includes(item.key)) {

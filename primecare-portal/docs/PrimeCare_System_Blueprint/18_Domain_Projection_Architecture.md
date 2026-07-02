@@ -305,6 +305,8 @@ Certification: [Projection_Registry.md](../../../docs/Architecture/Projection_Re
 |------|----------|
 | `VITE_READ_ADAPTER_ORDERS_V1` | `read_orders_list_v1` vs `getOrdersRead` |
 | `VITE_READ_ADAPTER_RECEIVABLES_V1` | `read_lab_receivables_list_v1` vs `getCollectionsRead` |
+| `VITE_READ_ADAPTER_DASHBOARD_V1` | `read_tenant_dashboard_v1` vs `getAdminDashboardRead` |
+| `VITE_READ_ADAPTER_EXECUTIVE_V1` | `read_tenant_executive_v1` vs `getFounderSnapshotRead` |
 
 Projection tables may exist while flags OFF (shadow mode).
 
@@ -318,15 +320,23 @@ Projection tables may exist while flags OFF (shadow mode).
 - Event pipeline v0 (client-triggered refresh + scheduled sweep)
 - Parity certification
 
-### Phase 2 — Inventory & Logistics (Year 1 Q4)
+### Phase 2 — Domain metrics + Dashboard & Executive (Year 1 Q4) **← Sprint 2 Phase 2**
+
+- `proj_tenant_order_metrics_v1`, `proj_tenant_receivable_metrics_v1` (rollup from Phase 1 core only)
+- `proj_tenant_dashboard_metrics_v1`, `proj_tenant_executive_metrics_v1` (thin composites — copy only)
+- Adapters: `read_tenant_dashboard_v1`, `read_tenant_executive_v1`
+- **Replaces:** `getAdminDashboardRead` hot path, `get_founder_snapshot` RPC
+- Shadow mode; flags default OFF
+
+### Phase 2b — Inventory & Logistics core (Year 1 Q4–Q1 Y2)
 
 - `proj_sku_stock_v1`, `proj_shipment_v1`
-- `proj_tenant_order_metrics_v1`, `proj_tenant_receivable_metrics_v1`
+- Feed inventory/logistics buckets into dashboard composite refresh (not adapter read time)
 
-### Phase 3 — Dashboard & Executive KPI (Year 2 H1)
+### Phase 3 — Ops & EFI decomposition (Year 2 H1)
 
-- `proj_tenant_dashboard_metrics_v1`, `proj_tenant_executive_metrics_v1`
-- Deprecate dashboard line fan-out and EFI mega-loader
+- `proj_tenant_ops_metrics_v1`; EFI reads executive composite only
+- Deprecate Ops/EFI mega-loaders (TD-006)
 
 ### Phase 4 — Reporting, Forecasting, AI (Year 2–3)
 
@@ -342,16 +352,156 @@ Projection tables may exist while flags OFF (shadow mode).
 
 ---
 
-## Sprint 2 alignment
-
-Sprint 2 implements **Phase 1 core projections only** with domain names:
+## Sprint 2 Phase 1 — complete
 
 1. Schema: `proj_order_v1`, `proj_lab_receivable_v1`, `hq_projection_meta_v1`
 2. Adapters: `read_orders_list_v1`, `read_lab_receivables_list_v1`
-3. Workers: `refresh_proj_order_row_v1`, `refresh_proj_lab_receivable_row_v1`
-4. **Do not** ship dashboard or executive derived projections in Sprint 2
+3. Workers: `refresh_proj_order_row_v1`, `refresh_proj_lab_receivable_row_v1`, `rebuild_projection_v1`
+4. Shadow mode; flags OFF; parity PASS on QA
 
-See [Projection_Registry.md](../../../docs/Architecture/Projection_Registry.md) for full catalog.
+---
+
+## Sprint 2 Phase 2 — Dashboard & Executive (design approved)
+
+**Goal:** Zero transactional scans on Admin Dashboard and Founder/Executive hot paths. Target ≤350 ms dashboard, ≤400 ms executive adapter read.
+
+### Layering (mandatory — no monolithic KPI table)
+
+| Layer | Table | Reads SoT at refresh? | Reads SoT at adapter? | Owns KPIs? |
+|-------|-------|----------------------|----------------------|------------|
+| Core | `proj_order_v1`, `proj_lab_receivable_v1` | Yes (workers) | No | No |
+| Domain metrics | `proj_tenant_order_metrics_v1`, `proj_tenant_receivable_metrics_v1` | **Core only** | No | **Yes** |
+| Composite | `proj_tenant_dashboard_metrics_v1` | Metrics + refresh-worker supplements | No | **No — copy only** |
+| Executive | `proj_tenant_executive_metrics_v1` | Dashboard metrics + ops counts | No | **No — copy only** |
+
+### Incremental refresh cascade
+
+```
+refresh_proj_order_row_v1
+  → refresh_proj_tenant_order_metrics_v1(tenant)     [debounce 5s]
+      → refresh_proj_tenant_dashboard_metrics_v1(tenant)   [debounce 10s]
+          → refresh_proj_tenant_executive_metrics_v1(tenant) [debounce 15s]
+
+refresh_proj_lab_receivable_row_v1
+  → refresh_proj_tenant_receivable_metrics_v1(tenant)
+      → refresh_proj_tenant_dashboard_metrics_v1(tenant)
+          → refresh_proj_tenant_executive_metrics_v1(tenant)
+```
+
+Scheduled sweep (5 min) rebuilds stale metrics/composites when `hq_projection_meta_v1.as_of` exceeds SLA.
+
+### `proj_tenant_order_metrics_v1`
+
+- **Grain:** one row per `tenant_id`
+- **PK:** `(tenant_id)`
+- **Source:** `proj_order_v1` only (never `orders`, `order_items`, `order_lines` at read or rollup time)
+- **Fields:** `todays_revenue`, `week_revenue`, `month_revenue`, `ytd_revenue`, `todays_orders_count`, `open_orders_count`, `fulfilled_orders_count`, `active_orders_count`, `total_sold_value_90d`, `top_labs_by_revenue` (jsonb top 5), `refreshed_at`
+- **Rules:** Revenue = fulfilled orders only (Blueprint `computeRevenueMetrics` parity); amounts from `proj_order_v1.total_amount` + `item_count` embed
+
+### `proj_tenant_receivable_metrics_v1`
+
+- **Grain:** one row per `tenant_id`
+- **PK:** `(tenant_id)`
+- **Source:** `proj_lab_receivable_v1` only
+- **Fields:** `total_outstanding`, `today_collections`, `overdue_amount`, `overdue_count`, `high_risk_count`, `at_risk_labs_count`, `refreshed_at`
+- **Rules:** `total_outstanding` must match AR SoT exactly (financial reconciliation cert)
+
+### `proj_tenant_dashboard_metrics_v1`
+
+- **Grain:** one row per `tenant_id`
+- **PK:** `(tenant_id)`
+- **Source:** COPY from order + receivable metrics rows; inventory/visit supplements from **refresh worker only** (bounded SECURITY DEFINER scan at refresh — not adapter read)
+- **Fields (denormalized):** all scalars needed by `normalizeAdminDashboardPayload` executive + summary blocks; `stock_stats` jsonb; `recent_visits_count`; `labs_at_credit_risk`; `refreshed_at`
+- **Adapter:** `read_tenant_dashboard_v1` — single SELECT + shape to existing UI contract
+- **Non-KPI widgets:** Recent visits list remains bounded secondary fetch (≤10 rows) or Phase 2b defer — **not on KPI hot path**
+
+### `proj_tenant_executive_metrics_v1`
+
+- **Grain:** one row per `tenant_id`
+- **PK:** `(tenant_id)`
+- **Source:** COPY from dashboard metrics + founder headline fields computed at refresh from core projections / bounded ops counts
+- **Fields:** superset of dashboard scalars plus `get_founder_snapshot` contract: `revenue_today`, `cash_collected_today`, `outstanding_ar`, `orders_waiting`, `orders_delayed`, `critical_inventory_skus`, `collections_at_risk`, `inactive_agents_7d`, `labs_needing_attention`, `refreshed_at`
+- **Adapter:** `read_tenant_executive_v1` — **replaces** `get_founder_snapshot` RPC on hot path
+- **Replaces:** `get_founder_snapshot` transactional 6-table scan (QA timeout root cause)
+
+### Read adapters (hot path — zero SoT)
+
+| Adapter | Reads | Target p95 QA |
+|---------|-------|---------------|
+| `read_tenant_dashboard_v1` | `proj_tenant_dashboard_metrics_v1` (+ optional visits widget) | ≤350 ms |
+| `read_tenant_executive_v1` | `proj_tenant_executive_metrics_v1` | ≤400 ms |
+
+### Feature flags (shadow default OFF)
+
+| Flag | Adapter |
+|------|---------|
+| `VITE_READ_ADAPTER_DASHBOARD_V1` | `read_tenant_dashboard_v1` |
+| `VITE_READ_ADAPTER_EXECUTIVE_V1` | `read_tenant_executive_v1` |
+
+### Certification (Phase 2)
+
+| Script | Gate |
+|--------|------|
+| `verify-dashboard-projection-parity.mjs` | Dashboard KPIs vs transactional sample |
+| `verify-executive-projection-parity.mjs` | Executive vs `get_founder_snapshot` + EFI scalars |
+| `verify-projection-staleness.mjs` | Extended for metrics/composite SLAs |
+| `measure-dashboard-projection-reads.mjs` | ≤350 ms / ≤400 ms |
+
+See [Projection_Registry.md](../../../docs/Architecture/Projection_Registry.md) for registry IDs.
+
+---
+
+## Projection Operations Center (Sprint 2 Phase 2b — ops monitoring)
+
+**Goal:** Operational visibility for projection health without modifying projections, adapters, or feature flags.
+
+### Ten operational modules
+
+| # | Module | Source | Output |
+|---|--------|--------|--------|
+| 1 | **Health Registry** | `hq_projection_meta_v1` + `projectionOpsCatalog.json` | Per-projection health record |
+| 2 | **Refresh Timeline** | Meta `as_of` / `updated_at` + rebuild console history | Chronological refresh events |
+| 3 | **Freshness Dashboard** | Meta age vs SLA | PASS/WARN/FAIL tiles |
+| 4 | **Parity Dashboard** | Last cert run + inline deploy probes | Parity status per projection |
+| 5 | **Failure Dashboard** | Meta `last_error` | Active failures + counts |
+| 6 | **Rebuild Console** | `rebuild_projection_v1` RPC | Trigger cascade; record duration |
+| 7 | **Shadow Monitoring** | Registry status + `VITE_READ_ADAPTER_*` | Shadow vs flag state |
+| 8 | **Certification Report** | Aggregated cert script results | GO/WARN/NO-GO summary |
+| 9 | **Drift Alerts** | Freshness + parity + failure composite | Alert list with severity |
+| 10 | **Metrics API** | `projectionMetricsApi.js` | Single read-only aggregate |
+
+### Per-projection health record (contract)
+
+Every deployed projection exposes:
+
+| Field | Source |
+|-------|--------|
+| `registryId` | Registry / catalog |
+| `status` | `Projection_Dependencies.json` node status |
+| `rowCount` | `hq_projection_meta_v1.row_count` |
+| `freshness` | `now - as_of` (ms + human) |
+| `lastRebuild` | `hq_projection_meta_v1.as_of` |
+| `refreshDurationMs` | Rebuild console last run |
+| `parityStatus` | Last cert / deploy probe |
+| `failureCount` | Cumulative from ops storage; 1 if `last_error` set |
+| `shadowStatus` | `shadow` + flags OFF = shadow mode |
+| `featureFlagStatus` | Adapter flag name + ON/OFF |
+
+### UI surface
+
+- Route: `projectionOpsCenter` (Executive-only)
+- Page: `ProjectionOperationsCenterPage.jsx`
+- Read-only — no adapter flip, no SoT writes
+
+### Verification scripts
+
+| Script | Gate |
+|--------|------|
+| `verify-projection-ops-center.mjs` | Catalog completeness + meta readable + health record shape |
+| `generate-projection-ops-report.mjs` | JSON/Markdown ops report for CI |
+| `run-projection-ops-certification.mjs` | Orchestrates staleness + ops verify + report |
+
+Spec: [Projection_Ops_Center.md](../../../docs/Architecture/Projection_Ops_Center.md)
 
 ---
 
@@ -367,6 +517,7 @@ See [Projection_Registry.md](../../../docs/Architecture/Projection_Registry.md) 
 ## Related documents
 
 - [Projection_Registry.md](../../../docs/Architecture/Projection_Registry.md)
+- [Projection_Ops_Center.md](../../../docs/Architecture/Projection_Ops_Center.md)
 - [16_Certification_Framework.md](./16_Certification_Framework.md)
 - [Technical_Debt_Register.md](../../../docs/Architecture/Technical_Debt_Register.md)
 - Sprint 2 plan (conversation / QA docs) — **must rename** before implementation

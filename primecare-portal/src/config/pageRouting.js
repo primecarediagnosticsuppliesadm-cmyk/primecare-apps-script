@@ -78,6 +78,9 @@ export function normalizePageKey(page) {
     case "qa-command-center":
     case "qaCommandCenter":
       return "qaCommandCenter";
+    case "projection-ops-center":
+    case "projectionOpsCenter":
+      return "projectionOpsCenter";
     case "tenant-management":
     case "tenantManagement":
       return "tenantManagement";

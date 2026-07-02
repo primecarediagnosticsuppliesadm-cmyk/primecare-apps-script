@@ -4,6 +4,83 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-02 — Sprint 3A Production Safety Hardening
+
+### Implemented (approved P0 fixes only)
+
+| ID | Fix | Artifact |
+|----|-----|----------|
+| TD-025 / SEC-01 | Tenant auth on all `refresh_proj_*` SECURITY DEFINER RPCs | `20260702170000_sprint3a_production_safety_hardening.sql` |
+| TD-032 | Least-privilege EXECUTE grants on refresh RPCs | Same migration |
+| TD-027 / SEC-03 | Cross-tenant guard on `reset-platform-user-password` | Edge function |
+| TD-026 / SEC-04 | Tenant-scoped `todayCollections` in `read_lab_receivables_list_v1` | Same migration |
+| TD-028 / REL-01 | Dashboard `readFailed` — no silent zero KPIs | `primecareSupabaseApi.js` |
+| TD-031 / REL-03 | `ReadHealthBanner` on Dashboard, Ops, Executive, Projection Ops | UI + `readHealth.js` |
+| WS3 | Migration inventory + manifest + remediation plan | `Sprint3A_Migration_*` |
+| WS4 | Observability abstraction + health endpoint + correlation IDs | `src/observability/` |
+| WS5 | Backup/restore/rollback checklists + production runbook | `docs/operations/Sprint3A_*` |
+
+### Verification scripts added
+
+- `verify-security-hardening.mjs`
+- `verify-migration-integrity.mjs`
+- `verify-production-readiness.mjs`
+- `verify-observability.mjs`
+
+### Out of scope (unchanged)
+
+- No `VITE_READ_ADAPTER_*` flag flips
+- No projection architecture / read adapter logic changes
+- No finance / logistics / inventory business rules
+
+---
+
+## 2026-07-02 — Projection Operations Center (ops monitoring)
+
+### Added (design + implementation)
+- Blueprint 18 Projection Operations Center section (10 modules)
+- [Projection_Ops_Center.md](../../../docs/Architecture/Projection_Ops_Center.md) spec
+- Cert matrix 08 ops gates
+- TD-022, TD-023, TD-024 registered
+- TD-021 mitigated (Phase 2 deployed QA)
+
+### Scope
+- Read-only monitoring via `hq_projection_meta_v1` + catalog
+- No projection/adapter/flag changes
+- Executive UI + CLI verification scripts
+
+### Gaps documented
+
+| ID | Type | Description | Status |
+|----|------|-------------|--------|
+| GAP-BP-024 | ops | Refresh timeline limited to meta + local rebuild history (no append-only event log yet) | OPEN |
+| GAP-BP-025 | ops | Parity dashboard requires cert script run for full field compare | OPEN |
+
+---
+
+## 2026-07-02 — Sprint 2 Phase 2 Dashboard & Executive (design)
+
+### Added (design only — no schema yet)
+- Blueprint 18 Sprint 2 Phase 2 section — domain metrics + thin dashboard/executive composites
+- Registry entries: PRJ-ORD-METRICS-v1, PRJ-COL-METRICS-v1, PRJ-DSH-METRICS-v1, PRJ-EXE-METRICS-v1
+- Cert matrix 08 Phase 2 gates + verification scripts planned
+- TD-019, TD-020, TD-021 registered
+
+### Design decisions
+- Incremental refresh from `proj_order_v1` / `proj_lab_receivable_v1` only — no SoT at adapter read
+- Replaces `getAdminDashboardRead` and `get_founder_snapshot` hot paths
+- Flags `VITE_READ_ADAPTER_DASHBOARD_V1`, `VITE_READ_ADAPTER_EXECUTIVE_V1` default OFF
+- 14-day shadow for composites before flag flip
+
+### Gaps documented
+
+| ID | Type | Description | Status |
+|----|------|-------------|--------|
+| GAP-BP-022 | architecture | Phase 2 migration not deployed | OPEN |
+| GAP-BP-023 | cert | Dashboard/executive parity scripts not yet implemented | OPEN |
+
+---
+
 ## 2026-07-02 — Sprint 2 Phase 1 Domain Projections
 
 ### Added

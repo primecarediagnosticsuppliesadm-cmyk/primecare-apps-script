@@ -116,6 +116,7 @@ export const PERMISSION_BY_KEY = {
   ],
   predatorDebug: [ROLES.ADMIN, ROLES.EXECUTIVE],
   qaCommandCenter: [ROLES.EXECUTIVE],
+  projectionOpsCenter: [ROLES.EXECUTIVE],
 };
 
 /** Sidebar allowlist for distributor-scoped roles (HQ executive/admin use menuConfig HQ sets). */
@@ -155,6 +156,7 @@ export const UNAUTHORIZED_MENU_PAGES_BY_ROLE = {
   [ROLES.READ_ONLY_AUDITOR]: [
     "predatorDebug",
     "qaCommandCenter",
+    "projectionOpsCenter",
     "founderNavigation",
     "founderStrategy",
     "founderFinancialIntelligence",
@@ -178,6 +180,7 @@ export const UNAUTHORIZED_MENU_PAGES_BY_ROLE = {
   [ROLES.DISTRIBUTOR_MANAGER]: [
     "predatorDebug",
     "qaCommandCenter",
+    "projectionOpsCenter",
     "founderNavigation",
     "founderStrategy",
     "founderFinancialIntelligence",
@@ -203,6 +206,7 @@ export const UNAUTHORIZED_MENU_PAGES_BY_ROLE = {
   [ROLES.DISTRIBUTOR_ADMIN]: [
     "predatorDebug",
     "qaCommandCenter",
+    "projectionOpsCenter",
     "founderNavigation",
     "founderStrategy",
     "founderFinancialIntelligence",

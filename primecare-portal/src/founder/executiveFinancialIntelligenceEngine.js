@@ -482,6 +482,7 @@ export function buildExecutiveFinancialIntelligenceModel(data) {
 
   return {
     loadStatus: data.loadStatus,
+    readHealth: opsPayload.readHealth || null,
     revenue,
     collections: collectionsSection,
     orders: ordersSection,

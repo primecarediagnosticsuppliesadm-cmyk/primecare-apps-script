@@ -1,0 +1,103 @@
+{
+  "generated_at": "2026-07-02T22:07:32.054Z",
+  "tenant_id": "f168b98f-47a6-42c3-b788-24c00436fac2",
+  "overall": "GO",
+  "projections": [
+    {
+      "registryId": "PRJ-ORD-ORDER-v1",
+      "status": "shadow",
+      "rowCount": 171,
+      "freshnessMs": 3237,
+      "freshnessStatus": "PASS",
+      "lastRebuild": "2026-07-02T22:07:28.817485+00:00",
+      "refreshDurationMs": null,
+      "parityStatus": "UNKNOWN",
+      "failureCount": 0,
+      "shadowStatus": "shadow-off",
+      "featureFlag": "VITE_READ_ADAPTER_ORDERS_V1",
+      "featureFlagStatus": "OFF",
+      "lastError": null
+    },
+    {
+      "registryId": "PRJ-COL-LAB-v1",
+      "status": "shadow",
+      "rowCount": 30,
+      "freshnessMs": 2981,
+      "freshnessStatus": "PASS",
+      "lastRebuild": "2026-07-02T22:07:29.073614+00:00",
+      "refreshDurationMs": null,
+      "parityStatus": "UNKNOWN",
+      "failureCount": 0,
+      "shadowStatus": "shadow-off",
+      "featureFlag": "VITE_READ_ADAPTER_RECEIVABLES_V1",
+      "featureFlagStatus": "OFF",
+      "lastError": null
+    },
+    {
+      "registryId": "PRJ-ORD-METRICS-v1",
+      "status": "design",
+      "rowCount": 1,
+      "freshnessMs": 3237,
+      "freshnessStatus": "PASS",
+      "lastRebuild": "2026-07-02T22:07:28.817485+00:00",
+      "refreshDurationMs": null,
+      "parityStatus": "UNKNOWN",
+      "failureCount": 0,
+      "shadowStatus": "design-off",
+      "featureFlag": null,
+      "featureFlagStatus": "N/A",
+      "lastError": null
+    },
+    {
+      "registryId": "PRJ-COL-METRICS-v1",
+      "status": "design",
+      "rowCount": 1,
+      "freshnessMs": 2981,
+      "freshnessStatus": "PASS",
+      "lastRebuild": "2026-07-02T22:07:29.073614+00:00",
+      "refreshDurationMs": null,
+      "parityStatus": "UNKNOWN",
+      "failureCount": 0,
+      "shadowStatus": "design-off",
+      "featureFlag": null,
+      "featureFlagStatus": "N/A",
+      "lastError": null
+    },
+    {
+      "registryId": "PRJ-DSH-METRICS-v1",
+      "status": "design",
+      "rowCount": 1,
+      "freshnessMs": 2827,
+      "freshnessStatus": "PASS",
+      "lastRebuild": "2026-07-02T22:07:29.227717+00:00",
+      "refreshDurationMs": null,
+      "parityStatus": "UNKNOWN",
+      "failureCount": 0,
+      "shadowStatus": "design-off",
+      "featureFlag": "VITE_READ_ADAPTER_DASHBOARD_V1",
+      "featureFlagStatus": "OFF",
+      "lastError": null
+    },
+    {
+      "registryId": "PRJ-EXE-METRICS-v1",
+      "status": "design",
+      "rowCount": 1,
+      "freshnessMs": 2708,
+      "freshnessStatus": "PASS",
+      "lastRebuild": "2026-07-02T22:07:29.346324+00:00",
+      "refreshDurationMs": null,
+      "parityStatus": "UNKNOWN",
+      "failureCount": 0,
+      "shadowStatus": "design-off",
+      "featureFlag": "VITE_READ_ADAPTER_EXECUTIVE_V1",
+      "featureFlagStatus": "OFF",
+      "lastError": null
+    }
+  ],
+  "summary": {
+    "total": 6,
+    "freshFail": 0,
+    "activeErrors": 0,
+    "shadowMode": true
+  }
+}

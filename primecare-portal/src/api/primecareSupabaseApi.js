@@ -63,6 +63,7 @@ import { IS_DEV, IS_QA } from "@/config/environment";
 import {
   isReadAdapterOrdersV1Enabled,
   isReadAdapterReceivablesV1Enabled,
+  isReadAdapterDashboardV1Enabled,
 } from "@/config/readProjectionFlags.js";
 import { scheduleProjectionRefreshAfterOrderWrite } from "@/api/projectionRefreshApi.js";
 import { getAppBuildStamp } from "@/utils/buildStamp.js";
@@ -3258,6 +3259,22 @@ async function timedSupabaseQuery(label, queryFnOrPromise) {
  */
 export async function getAdminDashboardRead(options = {}) {
   const force = options.force === true;
+  const tenantId = str(options.tenantId ?? options.tenant_id);
+
+  if (isReadAdapterDashboardV1Enabled() && tenantId) {
+    const { readTenantDashboardV1 } = await import("@/api/projectionReadAdapters.js");
+    const adapterRes = await readTenantDashboardV1({ tenantId, force });
+    if (adapterRes.success && adapterRes.data) {
+      return { success: true, data: adapterRes.data, projection: true };
+    }
+    return {
+      success: false,
+      error: adapterRes.error || "dashboard_projection_read_failed",
+      data: { ...EMPTY_ADMIN_DASHBOARD },
+      projection: true,
+    };
+  }
+
   if (!force && adminDashboardReadInFlight) {
     return adminDashboardReadInFlight;
   }
@@ -3282,7 +3299,13 @@ export async function getAdminDashboardRead(options = {}) {
       durationMs: Math.round(performance.now() - dashboardReadT0),
       detail: { skipped: "no_client" },
     });
-    return { success: true, data: { ...EMPTY_ADMIN_DASHBOARD } };
+    return {
+      success: false,
+      readFailed: true,
+      degraded: true,
+      error: "Supabase client not configured",
+      data: { ...EMPTY_ADMIN_DASHBOARD },
+    };
   }
 
   if (!adminDashboardServerCacheEnabled()) {
@@ -3535,7 +3558,14 @@ export async function getAdminDashboardRead(options = {}) {
       visitsMappedTop10Length: visits.length,
     });
 
-    const result = { success: true, data: payload };
+    const hasQueryErrors = queryErrors.length > 0;
+    const result = {
+      success: !hasQueryErrors,
+      readFailed: hasQueryErrors,
+      degraded: hasQueryErrors,
+      queryErrors,
+      data: payload,
+    };
     const mayCache =
       adminDashboardServerCacheEnabled() &&
       !queryErrors.length &&
@@ -3583,7 +3613,13 @@ export async function getAdminDashboardRead(options = {}) {
       durationMs: Math.round(performance.now() - dashboardReadT0),
       detail: { error: err?.message },
     });
-    return { success: true, data: { ...EMPTY_ADMIN_DASHBOARD } };
+    return {
+      success: false,
+      readFailed: true,
+      degraded: true,
+      error: err?.message || String(err),
+      data: { ...EMPTY_ADMIN_DASHBOARD },
+    };
   }
   });
 
