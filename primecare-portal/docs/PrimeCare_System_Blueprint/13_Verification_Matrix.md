@@ -1,6 +1,8 @@
 # 13 — Verification Matrix
 
-39 scripts in `primecare-portal/scripts/`. **Exit 1 on FAIL** (WARN alone usually passes).
+41 scripts in `primecare-portal/scripts/` (39 verify + 2 cert orchestrators). **Exit 1 on FAIL** (WARN alone usually passes).
+
+**Phase 2 framework:** Object ↔ script mapping in [16_Certification_Framework.md](./16_Certification_Framework.md) and `docs/Certification_Framework/01_Object_Source_of_Truth_Catalog.md`. Browser checklist orchestrator: `scripts/run-browser-certification.mjs`.
 
 ---
 
@@ -84,6 +86,9 @@
 | verify-sprint1-health.mjs | Sprint 1 bundle | Sprint changes |
 | verify-perf-scale-counts.mjs | PERF tenant scale | Perf testing |
 | verify-production-monitoring.mjs | RC-2 orchestrator | Release monitoring |
+| run-hq-performance-certification.mjs | PERF tenant benchmarks | Performance cert |
+| run-browser-certification.mjs | API prereq gate + browser checklist | O2C / release browser cert |
+| measure-hq-navigation-perf.mjs | QA navigation probe | Ad-hoc perf |
 
 ---
 

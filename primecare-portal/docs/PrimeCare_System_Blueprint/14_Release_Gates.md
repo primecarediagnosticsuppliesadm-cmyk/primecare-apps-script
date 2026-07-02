@@ -8,7 +8,8 @@ Criteria before recommending commit, merge, or production promotion.
 
 | Gate | Requirement |
 |------|-------------|
-| **Blueprint** | Relevant 00–15 docs updated; CHANGELOG if gap/conflict |
+| **Blueprint** | Relevant 00–16 docs updated; CHANGELOG if gap/conflict |
+| **Cert framework** | Object + screen catalog entries updated when SoT or UI changes ([16_Certification_Framework.md](./16_Certification_Framework.md)) |
 | **Impact analysis** | `templates/Feature_Impact_Assessment_Template.md` completed |
 | **Build** | `npm run build` passes |
 | **Verify** | Module scripts from [13_Verification_Matrix.md](./13_Verification_Matrix.md) pass |
@@ -50,6 +51,8 @@ Update after each certification run.
 Additional gates:
 - `verify-primecare-production-golden-path.mjs`
 - `verify-production-monitoring.mjs`
+- `scripts/run-browser-certification.mjs` — prereq gate + browser checklist
+- `docs/Certification_Framework/06_Release_Scorecard.md` filled (copy to `docs/QA/`)
 - `docs/QA/Release_Certification.md` sign-off
 - Migrations applied to target Supabase in documented order
 

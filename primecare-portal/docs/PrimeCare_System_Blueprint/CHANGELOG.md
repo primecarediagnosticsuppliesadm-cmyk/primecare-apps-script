@@ -4,6 +4,24 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-02 — Phase 2 Certification Framework
+
+### Added
+- Blueprint `16_Certification_Framework.md` — framework index and workflow
+- `docs/Certification_Framework/` — 7 artifacts (object catalog, screen catalog, dependency graph, browser golden path, browser regression, release scorecard, performance matrix)
+- `docs/Certification_Framework/browser-regression-manifest.json` — suite definitions
+- `scripts/run-browser-certification.mjs` — API prereq orchestrator + manual checklist printer
+
+### Updated
+- `README.md` — doc 16 in index
+- `13_Verification_Matrix.md` — framework cross-reference
+- `14_Release_Gates.md` — cert framework + browser orchestrator gates
+
+### Migration impact
+**None** — documentation and non-mutating orchestration only.
+
+---
+
 ## 2026-06-30 — AI Architect Mode + doc restructure
 
 ### Added
