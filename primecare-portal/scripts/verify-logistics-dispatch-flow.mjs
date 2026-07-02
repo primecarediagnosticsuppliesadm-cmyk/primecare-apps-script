@@ -275,6 +275,15 @@ function runStaticChecks() {
   } else {
     fail("static.phase4_dashboard", "Route planning tab missing from logistics page");
   }
+
+  if (
+    /\bconsumeHqNavContext\s*\(/.test(logisticsPage) &&
+    /import\s*\{[^}]*\bconsumeHqNavContext\b/.test(logisticsPage)
+  ) {
+    pass("static.nav_context_import", "LogisticsDeliveryPage imports consumeHqNavContext");
+  } else if (/\bconsumeHqNavContext\s*\(/.test(logisticsPage)) {
+    fail("static.nav_context_import", "LogisticsDeliveryPage uses consumeHqNavContext without import");
+  }
 }
 
 async function runLiveChecks(sb) {

@@ -92,6 +92,12 @@ async function main() {
     fail("verify-admin-dashboard-no-transactional-lines.mjs");
   }
 
+  if (runNode("verify-runtime-import-safety.mjs")) {
+    pass("verify-runtime-import-safety.mjs");
+  } else {
+    fail("verify-runtime-import-safety.mjs");
+  }
+
   console.log("\n=== Production readiness verification complete ===\n");
   if (process.exitCode) {
     console.log("Overall: NO-GO (P0 gaps remain)\n");

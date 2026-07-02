@@ -26,4 +26,10 @@ export default defineConfig([
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },
+  {
+    files: ['src/pages/**/*.{js,jsx}', 'src/components/**/*.{js,jsx}'],
+    rules: {
+      'no-undef': 'error',
+    },
+  },
 ])

@@ -22,6 +22,7 @@ import ShipmentDetailDrawer from "@/components/logistics/ShipmentDetailDrawer.js
 import CourierManagementPanel from "@/components/logistics/CourierManagementPanel.jsx";
 import DeliveryPolicyPanel from "@/components/logistics/DeliveryPolicyPanel.jsx";
 import RoutePlanningPanel from "@/components/logistics/RoutePlanningPanel.jsx";
+import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import { usePagePerformance } from "@/hooks/usePagePerformance.js";
 import { ROLES } from "@/config/roles.js";
 import { cn } from "@/lib/utils";
