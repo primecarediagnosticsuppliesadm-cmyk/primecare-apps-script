@@ -109,10 +109,31 @@ function staticCheck() {
   } else {
     fail("getAdminDashboardRead missing fetchAdminDashboardBoundedSourceRows");
   }
+
+  console.log("\n--- Static: Sidebar summary (Admin shell badges) ---\n");
+  const sidebarPath = resolve(root, "src/api/sidebarSummaryApi.js");
+  const sidebarSrc = readFileSync(sidebarPath, "utf8");
+  for (const token of [
+    "loadOperationsCommandCenterData",
+    "loadExecutiveActionQueueEnrichment",
+    "get_founder_snapshot",
+    "getFounderSnapshotRead",
+  ]) {
+    if (sidebarSrc.includes(token)) {
+      fail(`sidebarSummaryApi references forbidden token: ${token}`);
+    } else {
+      pass(`sidebarSummaryApi does not reference ${token}`);
+    }
+  }
+  if (sidebarSrc.includes("getOrdersRead({ skipLineCounts: true })")) {
+    pass("sidebarSummaryApi uses skipLineCounts orders read");
+  } else {
+    fail("sidebarSummaryApi missing getOrdersRead({ skipLineCounts: true })");
+  }
 }
 
 async function runtimeCheck() {
-  console.log("\n--- Runtime: getAdminDashboardRead (no transactional line tables) ---\n");
+  console.log("\n--- Runtime: Admin Dashboard critical path ---\n");
 
   const envPath = resolve(root, ".env.local");
   if (!existsSync(envPath)) {
@@ -132,6 +153,7 @@ async function runtimeCheck() {
     const { getAdminDashboardRead } = await server.ssrLoadModule(
       "/src/api/primecareSupabaseApi.js"
     );
+    const { getSidebarSummary } = await server.ssrLoadModule("/src/api/sidebarSummaryApi.js");
 
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email: QA_ADMIN.email,
@@ -143,31 +165,88 @@ async function runtimeCheck() {
     }
 
     const observedTables = [];
+    const observedRpcs = [];
+    const failures = [];
     const originalFrom = supabase.from.bind(supabase);
     supabase.from = (table) => {
       observedTables.push(table);
-      return originalFrom(table);
+      const q = originalFrom(table);
+      const origThen = q.then?.bind(q);
+      if (origThen) {
+        return Object.assign(q, {
+          then(onF, onR) {
+            return origThen(
+              (res) => {
+                if (res?.error) {
+                  failures.push({ kind: "from", table, msg: res.error.message?.slice(0, 120) });
+                }
+                return onF?.(res);
+              },
+              onR
+            );
+          },
+        });
+      }
+      return q;
+    };
+    const originalRpc = supabase.rpc.bind(supabase);
+    supabase.rpc = (fn, args) => {
+      observedRpcs.push(fn);
+      return originalRpc(fn, args).then((res) => {
+        if (res?.error) failures.push({ kind: "rpc", fn, msg: res.error.message?.slice(0, 120) });
+        return res;
+      });
     };
 
+    const dashT0 = performance.now();
     const result = await getAdminDashboardRead({ force: true });
-    const forbiddenHits = observedTables.filter((t) => t === "order_items" || t === "order_lines");
+    const dashMs = Math.round(performance.now() - dashT0);
 
-    if (forbiddenHits.length) {
-      fail(`runtime observed forbidden tables: ${[...new Set(forbiddenHits)].join(", ")}`);
+    const dashForbidden = observedTables.filter((t) => t === "order_items" || t === "order_lines");
+    if (dashForbidden.length) {
+      fail(`dashboard read observed forbidden tables: ${[...new Set(dashForbidden)].join(", ")}`);
     } else {
-      pass(`runtime — no order_items/order_lines reads (${observedTables.length} table calls)`);
+      pass(`dashboard read — no order_items/order_lines (${dashMs} ms)`);
+    }
+
+    if (observedRpcs.includes("get_founder_snapshot")) {
+      fail("dashboard read invoked get_founder_snapshot");
+    } else {
+      pass("dashboard read — no get_founder_snapshot");
     }
 
     if (result?.readFailed) {
-      fail(`runtime — getAdminDashboardRead readFailed: ${result.error || "unknown"}`);
+      fail(`getAdminDashboardRead readFailed: ${result.error || "unknown"}`);
     } else {
-      pass("runtime — getAdminDashboardRead succeeded");
+      pass("getAdminDashboardRead succeeded");
     }
 
-    if (observedTables.includes("proj_order_v1") || result?.itemMetricsDegraded !== true) {
-      pass("runtime — projection path or header totals only (no line-table fan-out required)");
+    if (dashMs <= 3000) {
+      pass(`dashboard read timing — ${dashMs} ms (target ≤3000 ms)`);
     } else {
-      skip("runtime — proj_order_v1 not queried (all orders may have header totals)");
+      fail(`dashboard read timing — ${dashMs} ms exceeds 3000 ms target`);
+    }
+
+    const sidebarT0 = performance.now();
+    await getSidebarSummary({ tenantId: QA_HQ_TENANT_ID, role: "admin", force: true });
+    const sidebarMs = Math.round(performance.now() - sidebarT0);
+    const sidebarForbidden = observedTables.filter((t) => t === "order_items" || t === "order_lines");
+    if (sidebarForbidden.length) {
+      fail(`sidebar summary observed forbidden tables: ${[...new Set(sidebarForbidden)].join(", ")}`);
+    } else {
+      pass(`sidebar summary — no order_items/order_lines (${sidebarMs} ms deferred load)`);
+    }
+    if (observedRpcs.includes("get_founder_snapshot")) {
+      fail("sidebar summary invoked get_founder_snapshot");
+    } else {
+      pass("sidebar summary — no get_founder_snapshot");
+    }
+
+    const founderFailures = failures.filter((f) => f.fn === "get_founder_snapshot");
+    if (founderFailures.length) {
+      fail(`get_founder_snapshot errors: ${founderFailures.map((f) => f.msg).join("; ")}`);
+    } else {
+      pass("no get_founder_snapshot RPC failures on admin route simulation");
     }
 
     if (QA_HQ_TENANT_ID) {

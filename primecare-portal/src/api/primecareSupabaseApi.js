@@ -7153,7 +7153,8 @@ function ordersReadCacheKey(params = {}) {
   const offset = Math.max(0, Number(params.offset) || 0);
   const daysBack =
     Number(params.daysBack) > 0 ? Number(params.daysBack) : HQ_DASHBOARD_RECENT_DAYS;
-  return `${limit}:${offset}:${daysBack}`;
+  const skipLineCounts = params.skipLineCounts === true ? "skipLines" : "withLines";
+  return `${limit}:${offset}:${daysBack}:${skipLineCounts}`;
 }
 
 export function invalidateOrdersReadCache() {
@@ -7240,25 +7241,28 @@ export async function getOrdersRead(params = {}) {
       rawList = Array.isArray(primary.data) ? primary.data : [];
     }
 
-    const [labMapResult, lineCounts] = await Promise.all([
-      fetchLabsNameMap().catch(() => new Map()),
-      fetchOrderUnitCountsForOrders(
+    const skipLineCounts = params.skipLineCounts === true;
+    const labMapResult = await fetchLabsNameMap().catch(() => new Map());
+    const labMap = labMapResult instanceof Map ? labMapResult : new Map();
+    let lineCounts = new Map();
+    if (!skipLineCounts) {
+      lineCounts = await fetchOrderUnitCountsForOrders(
         supabase,
         collectOrderBusinessIds(rawList),
         rawList
-      ),
-    ]);
-    const labMap = labMapResult instanceof Map ? labMapResult : new Map();
+      );
+    }
 
     const orders = rawList.map((r, idx) => {
       const labId = str(r.lab_id ?? r.labId ?? r.lab_uuid ?? r.labUUID ?? "");
       const mapped = mapOrderRow(r, labMap.get(labId) || "", idx);
       const businessId = str(r.order_id ?? r.orderId ?? mapped.orderId);
       const uuidId = r.id != null ? str(r.id) : "";
-      const itemCount =
-        lineCounts.get(businessId) ??
-        (uuidId ? lineCounts.get(uuidId) : 0) ??
-        0;
+      const itemCount = skipLineCounts
+        ? 0
+        : lineCounts.get(businessId) ??
+          (uuidId ? lineCounts.get(uuidId) : 0) ??
+          0;
       return { ...mapped, itemCount };
     });
 

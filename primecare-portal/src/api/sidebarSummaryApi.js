@@ -13,11 +13,12 @@ import { getUserProvisioningEventsRead } from "@/api/userProvisioningApi.js";
 import { computeAccessAuditKpis, enrichAccessAuditEvent } from "@/operations/accessAuditEngine.js";
 import { buildCreditRiskAttentionCards } from "@/operations/creditRiskHqEngine.js";
 import { computeOrdersKpis } from "@/orders/ordersMonitorEngine.js";
-import { loadExecutiveActionQueueEnrichment } from "@/operations/executiveActionQueueData.js";
+import { fetchPendingCommissionEntries } from "@/operations/executiveActionQueueData.js";
 import {
   buildExecutiveActionQueue,
   countOpenExecutiveActionQueueItems,
 } from "@/operations/executiveActionQueueEngine.js";
+import { loadVisibleLabContracts } from "@/labContract/labContractStore.js";
 import { isQualificationPipelinePending } from "@/utils/qualificationPipeline.js";
 import { ROLES } from "@/config/roles.js";
 import { perfLog, perfTime } from "@/utils/perfLog.js";
@@ -129,10 +130,10 @@ export async function getSidebarSummary(options = {}) {
   const endTotal = perfTime("getSidebarSummary.total");
 
   const run = async () => {
-    const [stockRes, ordersRes, collectionsRes, qualRes, notifyRes, auditRes, enrich] =
+    const [stockRes, ordersRes, collectionsRes, qualRes, notifyRes, auditRes, pendingCommissions, contracts] =
       await Promise.all([
         getStockDashboard(),
-        getOrdersRead(),
+        getOrdersRead({ skipLineCounts: true }),
         getCollectionsRead(),
         getQualificationReviewRead(),
         tenantId
@@ -141,10 +142,8 @@ export async function getSidebarSummary(options = {}) {
         tenantId
           ? getUserProvisioningEventsRead({ tenantId, limit: 120 })
           : Promise.resolve({ success: true, data: { events: [] } }),
-        loadExecutiveActionQueueEnrichment(
-          { tenantId, tenant_id: tenantId, role },
-          { commissionLimit: 15, qualificationLimit: 12 }
-        ).catch(() => null),
+        fetchPendingCommissionEntries(15),
+        loadVisibleLabContracts().catch(() => []),
       ]);
 
     const notifyEvents = Array.isArray(notifyRes?.data) ? notifyRes.data : [];
@@ -169,14 +168,17 @@ export async function getSidebarSummary(options = {}) {
     const qualificationCount = countQualificationPending(qualRows);
 
     let actionQueueOpen = 0;
-    if (enrich?.payload) {
+    try {
       const queue = buildExecutiveActionQueue({
-        payload: enrich.payload,
-        contracts: enrich.contracts || [],
-        pendingCommissions: enrich.pendingCommissions || [],
+        payload: { qualifications: qualRows },
+        contracts: Array.isArray(contracts) ? contracts : [],
+        pendingCommissions: Array.isArray(pendingCommissions) ? pendingCommissions : [],
         tenantId,
+        options: { commissionLimit: 15, qualificationLimit: 12 },
       });
       actionQueueOpen = countOpenExecutiveActionQueueItems(queue.items);
+    } catch {
+      actionQueueOpen = 0;
     }
 
     const alerts = activityCount + auditCount + (actionQueueOpen > 0 ? actionQueueOpen : 0);

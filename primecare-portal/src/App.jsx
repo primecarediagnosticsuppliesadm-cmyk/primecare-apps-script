@@ -262,6 +262,8 @@ export default function App() {
     }
 
     let cancelled = false;
+    let intervalId = null;
+
     const refreshBadges = async () => {
       try {
         const badges = await loadHqNavBadgeCounts({
@@ -274,13 +276,34 @@ export default function App() {
       }
     };
 
-    void refreshBadges();
-    const interval = window.setInterval(refreshBadges, 120000);
+    const startPolling = () => {
+      if (cancelled) return;
+      void refreshBadges();
+      intervalId = window.setInterval(refreshBadges, 120000);
+    };
+
+    const deferDashboardBadges = activePage === "dashboard";
+    let deferHandle;
+    let usedIdleCallback = false;
+    if (deferDashboardBadges && typeof window.requestIdleCallback === "function") {
+      usedIdleCallback = true;
+      deferHandle = window.requestIdleCallback(startPolling, { timeout: 3000 });
+    } else if (deferDashboardBadges) {
+      deferHandle = window.setTimeout(startPolling, 1500);
+    } else {
+      startPolling();
+    }
+
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      if (usedIdleCallback && deferHandle != null && typeof window.cancelIdleCallback === "function") {
+        window.cancelIdleCallback(deferHandle);
+      } else if (deferHandle != null) {
+        window.clearTimeout(deferHandle);
+      }
+      if (intervalId != null) window.clearInterval(intervalId);
     };
-  }, [isAuthenticated, role, currentUser?.tenantId]);
+  }, [isAuthenticated, role, currentUser?.tenantId, activePage]);
 
   useEffect(() => {
     if (!role || !activePage) return;
