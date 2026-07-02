@@ -58,6 +58,7 @@ import {
   rollupStockDashboardMappedItems,
 } from "@/metrics/computeInventoryMetrics.js";
 import { IS_DEV, IS_QA } from "@/config/environment";
+import { getAppBuildStamp } from "@/utils/buildStamp.js";
 import { resolveMasterCatalogPricing } from "@/catalog/masterCatalogEngine.js";
 import {
   coalesceOperatingTenantId,
@@ -6017,6 +6018,259 @@ async function assertLabOrderCreditEligible(tenantId, labId) {
   return { ok: true };
 }
 
+/** Shown when create_lab_order response cannot be verified in orders + lines. */
+export const LAB_CHECKOUT_CONFIRM_ERROR =
+  "Order could not be confirmed. Your cart is saved. Please retry or contact PrimeCare support.";
+
+const LAB_CHECKOUT_CONFIRM_RETRY_ATTEMPTS = 3;
+const LAB_CHECKOUT_CONFIRM_RETRY_DELAY_MS = 150;
+
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sanitizeRpcOrderResponseForLog(rpcOrder) {
+  if (!rpcOrder) return null;
+  const body = rpcOrder.data || {};
+  const order = body.order || null;
+  return {
+    rpcSuccess: body.success !== false,
+    idempotent: Boolean(body.idempotent),
+    hasOrderRow: Boolean(order),
+    orderId: str(order?.order_id ?? order?.orderId ?? ""),
+    rpcError: rpcOrder.error?.message ?? null,
+  };
+}
+
+function logLabCheckoutPersistenceDiagnostic(detail = {}) {
+  const payload = {
+    ...detail,
+    at: new Date().toISOString(),
+    buildStamp: getAppBuildStamp(),
+  };
+  hqDebugWarn("[LabCheckout.persistence]", payload);
+  recordPredatorTiming({
+    module: "Lab Ordering",
+    step: "checkout.persistence",
+    durationMs: Number(detail.elapsedMs) || 0,
+    detail: payload,
+  });
+}
+
+/**
+ * Read-back verification: order row + at least one line must exist for lab checkout success.
+ */
+export async function confirmLabOrderPersistedRead({
+  tenantId,
+  labId,
+  orderId,
+  clientRequestId = null,
+} = {}) {
+  const diagnostic = {
+    tenantId: str(tenantId),
+    labId: labIdKey(labId),
+    orderId: str(orderId),
+    clientRequestId: str(clientRequestId) || null,
+    orderFound: false,
+    lineCount: 0,
+    reason: null,
+  };
+
+  if (!supabase) {
+    diagnostic.reason = "no_supabase";
+    return { ok: false, diagnostic };
+  }
+  if (!diagnostic.tenantId || !diagnostic.labId || !diagnostic.orderId) {
+    diagnostic.reason = "missing_scope";
+    return { ok: false, diagnostic };
+  }
+
+  const { data: orderRow, error: orderError } = await supabase
+    .from("orders")
+    .select(HQ_ORDER_LIST_COLUMNS)
+    .eq("tenant_id", diagnostic.tenantId)
+    .eq("lab_id", diagnostic.labId)
+    .eq("order_id", diagnostic.orderId)
+    .maybeSingle();
+
+  if (orderError) {
+    diagnostic.reason = "order_read_error";
+    diagnostic.error = orderError.message;
+    return { ok: false, diagnostic };
+  }
+  if (!orderRow) {
+    diagnostic.reason = "order_not_found";
+    return { ok: false, diagnostic };
+  }
+
+  diagnostic.orderFound = true;
+  const lineFetch = await fetchOrderDetailLinesForOrder(supabase, orderRow);
+  const lines = (lineFetch.lines || [])
+    .map(mapOrderLineRow)
+    .filter((line) => line.productId || line.productName);
+  diagnostic.lineCount = lines.length;
+
+  if (lineFetch.error) {
+    diagnostic.lineReadError = lineFetch.error.message;
+  }
+  if (!lines.length) {
+    diagnostic.reason = "no_lines";
+    return { ok: false, diagnostic };
+  }
+
+  const itemCount = lines.reduce((sum, line) => sum + num(line.quantity), 0);
+  return {
+    ok: true,
+    orderRow,
+    orderId: str(orderRow.order_id ?? diagnostic.orderId),
+    lines,
+    itemCount,
+    total: num(orderRow.total_amount),
+    diagnostic,
+  };
+}
+
+/**
+ * Retry-safe read-back: immediate attempt + brief retries before checkout failure.
+ */
+export async function confirmLabOrderPersistedReadWithRetry({
+  tenantId,
+  labId,
+  orderId,
+  clientRequestId = null,
+} = {}) {
+  const started = Date.now();
+  let lastResult = null;
+
+  for (let attempt = 1; attempt <= LAB_CHECKOUT_CONFIRM_RETRY_ATTEMPTS; attempt += 1) {
+    if (attempt > 1) {
+      await sleepMs(LAB_CHECKOUT_CONFIRM_RETRY_DELAY_MS * (attempt - 1));
+    }
+    lastResult = await confirmLabOrderPersistedRead({
+      tenantId,
+      labId,
+      orderId,
+      clientRequestId,
+    });
+    lastResult.diagnostic = {
+      ...(lastResult.diagnostic || {}),
+      attempt,
+      attempts: LAB_CHECKOUT_CONFIRM_RETRY_ATTEMPTS,
+      elapsedMs: Date.now() - started,
+    };
+    if (lastResult.ok) {
+      return lastResult;
+    }
+  }
+
+  return lastResult;
+}
+
+async function finalizeConfirmedLabCheckout({
+  tenant_id,
+  lab_id,
+  order_id,
+  client_request_id,
+  rpcResponse = null,
+  idempotent = false,
+  userEmail = null,
+  cartItemCount = null,
+  afterConfirmed = null,
+} = {}) {
+  const checkoutStarted = Date.now();
+  const rpcLog = sanitizeRpcOrderResponseForLog(rpcResponse);
+
+  logLabCheckoutPersistenceDiagnostic({
+    phase: "create_lab_order_response",
+    tenantId: tenant_id,
+    labId: lab_id,
+    orderId: order_id,
+    clientRequestId: client_request_id,
+    userEmail: str(userEmail) || null,
+    cartItemCount: cartItemCount != null ? Number(cartItemCount) : null,
+    rpcSuccess: rpcLog?.rpcSuccess ?? null,
+    rpcHasOrderRow: rpcLog?.hasOrderRow ?? null,
+    rpcOrderId: rpcLog?.orderId ?? null,
+    rpcError: rpcLog?.rpcError ?? null,
+    rpcIdempotent: rpcLog?.idempotent ?? null,
+  });
+
+  const confirmed = await confirmLabOrderPersistedReadWithRetry({
+    tenantId: tenant_id,
+    labId: lab_id,
+    orderId: order_id,
+    clientRequestId: client_request_id,
+  });
+
+  logLabCheckoutPersistenceDiagnostic({
+    phase: "persistence_verify",
+    tenantId: tenant_id,
+    labId: lab_id,
+    orderId: order_id,
+    clientRequestId: client_request_id,
+    userEmail: str(userEmail) || null,
+    cartItemCount: cartItemCount != null ? Number(cartItemCount) : null,
+    verified: confirmed.ok,
+    lineCount: confirmed.diagnostic?.lineCount ?? confirmed.lines?.length ?? 0,
+    itemCount: confirmed.itemCount ?? null,
+    confirmationReason: confirmed.diagnostic?.reason ?? null,
+    confirmationAttempts: confirmed.diagnostic?.attempts ?? null,
+    confirmationAttempt: confirmed.diagnostic?.attempt ?? null,
+    elapsedMs: Date.now() - checkoutStarted,
+    ...(confirmed.diagnostic || {}),
+  });
+
+  if (!confirmed.ok) {
+    return {
+      success: false,
+      error: LAB_CHECKOUT_CONFIRM_ERROR,
+      data: { diagnostic: confirmed.diagnostic, confirmed: false },
+    };
+  }
+
+  let deliverySnapshotResult = null;
+  if (typeof afterConfirmed === "function") {
+    deliverySnapshotResult = await afterConfirmed(confirmed);
+  }
+
+  logLabCheckoutPersistenceDiagnostic({
+    phase: "delivery_snapshot",
+    tenantId: tenant_id,
+    labId: lab_id,
+    orderId: confirmed.orderId,
+    clientRequestId: client_request_id,
+    deliverySnapshotSuccess: deliverySnapshotResult?.success ?? null,
+    deliverySnapshotSkipped: deliverySnapshotResult?.skipped ?? null,
+    deliverySnapshotError: deliverySnapshotResult?.error ?? null,
+    elapsedMs: Date.now() - checkoutStarted,
+  });
+
+  return {
+    success: true,
+    data: {
+      confirmed: true,
+      order: confirmed.orderRow,
+      orderId: confirmed.orderId,
+      lines: confirmed.lines,
+      itemCount: confirmed.itemCount,
+      total: confirmed.total,
+      idempotent: Boolean(idempotent),
+      diagnostic: {
+        ...(confirmed.diagnostic || {}),
+        deliverySnapshot: deliverySnapshotResult
+          ? {
+              success: Boolean(deliverySnapshotResult.success),
+              skipped: Boolean(deliverySnapshotResult.skipped),
+              error: deliverySnapshotResult.error || null,
+            }
+          : null,
+        elapsedMs: Date.now() - checkoutStarted,
+      },
+    },
+    error: null,
+  };
+}
+
 /**
  * Inserts a lab order into `orders` and line rows into `order_items`.
  * Payload mirrors LabOrderingPage: { labId, labName?, notes?, items: [{ productId, productName?, quantity, unitSellingPrice }], tenantId?, createdBy?, orderId?, orderDate?, status? }
@@ -6113,78 +6367,108 @@ export async function createOrderWrite(payload = {}) {
       if (!rpcOrder.error && rpcOrder.data?.success !== false) {
         const rpcBody = rpcOrder.data || {};
         const savedOrder = rpcBody.order || null;
-        if (savedOrder) {
-          hqDebugLog("SUPABASE ORDER SAVED (RPC)", savedOrder);
-          await getLabRecentOrdersRead(lab_id);
+        const returnedOrderId = str(savedOrder?.order_id ?? savedOrder?.orderId ?? "");
 
-          await tryPersistOrderDeliverySnapshot({
-            tenant_id,
-            order_id,
-            lab_id,
-            merchandiseSubtotal: total_amount,
-            deliveryMethodIntent:
-              str(payload.deliveryMethodIntent ?? payload.delivery_method_intent) ||
-              DELIVERY_METHOD_INTENT.DELIVERY,
+        if (!savedOrder || !returnedOrderId) {
+          logLabCheckoutPersistenceDiagnostic({
+            phase: "rpc_missing_order_row",
+            tenantId: tenant_id,
+            labId: lab_id,
+            orderId: order_id,
+            clientRequestId: client_request_id,
+            userEmail: created_by,
+            cartItemCount: items.length,
+            rpcSuccess: true,
+            rpcHasOrderRow: false,
+            rpcError: null,
           });
-
-          if (str(status).toLowerCase() === "fulfilled") {
-            const itemsRes = await supabase
-              .from("order_items")
-              .select("*")
-              .eq("order_id", order_id);
-            const itemsData = Array.isArray(itemsRes.data) ? itemsRes.data : [];
-            try {
-              await applyLabOrderInventoryDeduction({
-                savedLineItems: itemsData,
-                order_id,
-                tenant_id,
-                created_by,
-              });
-            } catch (invErr) {
-              hqDebugWarn("[createOrderWrite] RPC fulfill inventory:", invErr?.message || invErr);
-            }
-            const amt = normalizedLines.reduce((s, l) => s + num(l.total_price), 0);
-            const bump = await bumpArOutstandingForFulfillment({
-              lab_id,
-              tenant_id,
-              deltaAmount: amt,
-            });
-            const flagPatch = {
-              fulfilled_at: new Date().toISOString(),
-              inventory_updated: true,
-              ar_posted: Boolean(bump.success && !bump.skipped),
-              updated_at: new Date().toISOString(),
-            };
-            await supabase
-              .from("orders")
-              .update(flagPatch)
-              .eq("order_id", order_id)
-              .select(HQ_ORDER_LIST_COLUMNS);
-            await createInvoiceForFulfilledOrderWrite({
-              tenantId: tenant_id,
-              orderId: order_id,
-              actorId: created_by,
-              createdSource: "createOrderWrite",
-            });
-            await tryCreateShipmentAfterFulfill({
-              orderRow: savedOrder,
-              orderId: order_id,
-              tenantId: tenant_id,
-              actorId: created_by,
-              createdSource: "createOrderWrite.rpc",
-            });
-          }
-
           return {
-            success: true,
+            success: false,
+            error: LAB_CHECKOUT_CONFIRM_ERROR,
             data: {
-              order: savedOrder,
-              orderId: order_id,
-              idempotent: Boolean(rpcBody.idempotent),
+              confirmed: false,
+              diagnostic: {
+                reason: "rpc_success_without_order_row",
+                orderId: order_id,
+                clientRequestId: client_request_id,
+              },
             },
-            error: null,
           };
         }
+
+        hqDebugLog("SUPABASE ORDER SAVED (RPC)", savedOrder);
+        const finalized = await finalizeConfirmedLabCheckout({
+          tenant_id,
+          lab_id,
+          order_id: returnedOrderId,
+          client_request_id,
+          rpcResponse: rpcOrder,
+          idempotent: Boolean(rpcBody.idempotent),
+          userEmail: created_by,
+          cartItemCount: items.length,
+          afterConfirmed: async () => {
+            await getLabRecentOrdersRead(lab_id);
+            const deliverySnapshotResult = await tryPersistOrderDeliverySnapshot({
+              tenant_id,
+              order_id: returnedOrderId,
+              lab_id,
+              merchandiseSubtotal: total_amount,
+              deliveryMethodIntent:
+                str(payload.deliveryMethodIntent ?? payload.delivery_method_intent) ||
+                DELIVERY_METHOD_INTENT.DELIVERY,
+            });
+
+            if (str(status).toLowerCase() === "fulfilled") {
+                const itemsRes = await supabase
+                  .from("order_items")
+                  .select("*")
+                  .eq("order_id", returnedOrderId);
+                const itemsData = Array.isArray(itemsRes.data) ? itemsRes.data : [];
+                try {
+                  await applyLabOrderInventoryDeduction({
+                    savedLineItems: itemsData,
+                    order_id: returnedOrderId,
+                    tenant_id,
+                    created_by,
+                  });
+                } catch (invErr) {
+                  hqDebugWarn("[createOrderWrite] RPC fulfill inventory:", invErr?.message || invErr);
+                }
+                const amt = normalizedLines.reduce((s, l) => s + num(l.total_price), 0);
+                const bump = await bumpArOutstandingForFulfillment({
+                  lab_id,
+                  tenant_id,
+                  deltaAmount: amt,
+                });
+                const flagPatch = {
+                  fulfilled_at: new Date().toISOString(),
+                  inventory_updated: true,
+                  ar_posted: Boolean(bump.success && !bump.skipped),
+                  updated_at: new Date().toISOString(),
+                };
+                await supabase
+                  .from("orders")
+                  .update(flagPatch)
+                  .eq("order_id", returnedOrderId)
+                  .select(HQ_ORDER_LIST_COLUMNS);
+                await createInvoiceForFulfilledOrderWrite({
+                  tenantId: tenant_id,
+                  orderId: returnedOrderId,
+                  actorId: created_by,
+                  createdSource: "createOrderWrite",
+                });
+                await tryCreateShipmentAfterFulfill({
+                  orderRow: savedOrder,
+                  orderId: returnedOrderId,
+                  tenantId: tenant_id,
+                  actorId: created_by,
+                  createdSource: "createOrderWrite.rpc",
+                });
+            }
+            return deliverySnapshotResult;
+          },
+        });
+        return finalized;
       }
 
       if (rpcOrder.error && !isMissingSupabaseRpcError(rpcOrder.error, "create_lab_order")) {
@@ -6258,21 +6542,37 @@ export async function createOrderWrite(payload = {}) {
       return {
         success: false,
         error: itemsError.message || "Order items insert failed",
-        data: { order: savedOrder, items: [] },
+        data: { order: savedOrder, items: [], confirmed: false },
       };
     }
 
     hqDebugLog("SUPABASE ORDER ITEMS SAVED", itemsData);
 
-    await tryPersistOrderDeliverySnapshot({
+    const legacyConfirmed = await finalizeConfirmedLabCheckout({
       tenant_id,
-      order_id,
       lab_id,
-      merchandiseSubtotal: total_amount,
-      deliveryMethodIntent:
-        str(payload.deliveryMethodIntent ?? payload.delivery_method_intent) ||
-        DELIVERY_METHOD_INTENT.DELIVERY,
+      order_id,
+      client_request_id,
+      rpcResponse: null,
+      idempotent: false,
+      userEmail: created_by,
+      cartItemCount: items.length,
+      afterConfirmed: async () => {
+        await getLabRecentOrdersRead(lab_id);
+        return tryPersistOrderDeliverySnapshot({
+          tenant_id,
+          order_id,
+          lab_id,
+          merchandiseSubtotal: total_amount,
+          deliveryMethodIntent:
+            str(payload.deliveryMethodIntent ?? payload.delivery_method_intent) ||
+            DELIVERY_METHOD_INTENT.DELIVERY,
+        });
+      },
     });
+    if (!legacyConfirmed.success) {
+      return legacyConfirmed;
+    }
 
     if (str(status).toLowerCase() === "fulfilled") {
       hqDebugLog("ORDER STATUS BUSINESS RULE", {
@@ -6393,9 +6693,8 @@ export async function createOrderWrite(payload = {}) {
     return {
       success: true,
       data: {
-        order: savedOrder,
+        ...legacyConfirmed.data,
         items: itemsData,
-        orderId: order_id,
       },
       error: null,
     };

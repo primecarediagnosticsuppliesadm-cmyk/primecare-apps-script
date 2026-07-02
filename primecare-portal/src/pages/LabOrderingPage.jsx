@@ -34,6 +34,7 @@ import {
   getLabCatalogRead,
   getLabOrderingContextRead,
   getLabRecentOrdersRead,
+  LAB_CHECKOUT_CONFIRM_ERROR,
   mapOrderRow,
 } from "@/api/primecareSupabaseApi";
 import {
@@ -378,10 +379,12 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
   const hydratedDraftRef = useRef(false);
   const lastSubmittedHashRef = useRef("");
   const lastCheckoutOrderRef = useRef(null);
+  const checkoutInFlightRef = useRef(false);
 
   const [trackingOpen, setTrackingOpen] = useState(false);
   const [trackingOrder, setTrackingOrder] = useState(null);
   const [trackingLoading, setTrackingLoading] = useState(false);
+  const [trackingConfirming, setTrackingConfirming] = useState(false);
   const [trackingError, setTrackingError] = useState("");
   const [repeatLoading, setRepeatLoading] = useState(false);
   const [invoiceDownloadKey, setInvoiceDownloadKey] = useState("");
@@ -777,12 +780,26 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
     const oid = String(orderId || "").trim();
     if (!oid) return null;
 
+    if (checkoutInFlightRef.current) {
+      setTrackingOpen(true);
+      setTrackingLoading(false);
+      setTrackingConfirming(true);
+      setTrackingError("");
+      setTrackingOrder(null);
+      logOrderTrackingEvent("order_tracking.confirming", {
+        orderId: oid,
+        source: "lab_ordering",
+      });
+      return null;
+    }
+
     const localRow = resolveLocalTrackingOrder(oid);
     const localDetails = mapLocalOrderRowToTrackingDetails(localRow);
 
     try {
       setTrackingOpen(true);
       setTrackingLoading(true);
+      setTrackingConfirming(false);
       setTrackingError("");
       setTrackingOrder(localDetails);
       logOrderTrackingEvent("order_tracking.drawer_open", {
@@ -820,6 +837,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
     setTrackingOpen(false);
     setTrackingOrder(null);
     setTrackingError("");
+    setTrackingConfirming(false);
   }
 
   async function handleInvoiceDownload(orderOrDetails) {
@@ -1274,6 +1292,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
 
     try {
       submitLockRef.current = true;
+      checkoutInFlightRef.current = true;
       setSubmitting(true);
       setErrorMessage("");
       setStatusMessage("");
@@ -1304,41 +1323,50 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
       if (supabase) {
         logSupabaseFeatureSource("LabOrdering.submit", { api: "createOrderWrite" });
         const sbRes = await createOrderWrite(requestPayload);
-        if (sbRes?.success) {
-          const orderId =
-            sbRes.data?.orderId ?? sbRes.data?.order?.order_id ?? "";
-          const orderSnapshot = sbRes.data?.order
-            ? mapOrderRow(sbRes.data.order, labName, 0)
-            : null;
-          if (orderSnapshot) {
-            lastCheckoutOrderRef.current = orderSnapshot;
-          }
+        checkoutInFlightRef.current = false;
+        if (sbRes?.success && sbRes.data?.confirmed && sbRes.data?.order) {
+          const orderId = String(sbRes.data.orderId ?? sbRes.data.order?.order_id ?? "").trim();
+          const orderSnapshot = mapOrderRow(sbRes.data.order, labName, 0);
+          const confirmedItemCount = Number(sbRes.data.itemCount ?? itemCount);
+          const confirmedTotal = Number(sbRes.data.total ?? total);
+
+          lastCheckoutOrderRef.current = orderSnapshot;
           setSubmitResult({
             success: true,
+            confirmed: true,
             orderId,
             orderSnapshot,
             invoiceId: null,
-            itemCount,
-            total,
+            itemCount: confirmedItemCount,
+            total: confirmedTotal,
             submittedAt: new Date().toISOString(),
           });
           lastSubmittedHashRef.current = cartHash;
           clearCartState({ closeDrawer: true });
 
-          if (orderSnapshot) {
-            setRecentOrders((prev) => {
-              const rest = prev.filter((o) => o.orderId !== orderSnapshot.orderId);
-              return [orderSnapshot, ...rest];
-            });
-          }
+          setRecentOrders((prev) => {
+            const rest = prev.filter((o) => o.orderId !== orderSnapshot.orderId);
+            return [orderSnapshot, ...rest];
+          });
 
-          await loadRecentOrders(orderSnapshot ? [orderSnapshot] : []);
+          await loadRecentOrders([orderSnapshot]);
           await loadCatalog();
 
           if (orderId) {
             await openOrderTracking(orderId);
           }
           return;
+        }
+        if (sbRes?.data?.diagnostic) {
+          console.error("Lab checkout persistence failed", {
+            orderId: sbRes.data.diagnostic.orderId,
+            clientRequestId: requestPayload.clientRequestId,
+            tenantId: requestPayload.tenantId,
+            labId: requestPayload.labId,
+            userEmail: requestPayload.createdBy,
+            cartItemCount: requestPayload.items?.length ?? 0,
+            diagnostic: sbRes.data.diagnostic,
+          });
         }
         if (!ALLOW_LEGACY_APPS_SCRIPT) {
           throw new Error(sbRes?.error || "Supabase order submission failed.");
@@ -1379,8 +1407,15 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
       }
     } catch (error) {
       console.error("Submit order failed", error);
-      setErrorMessage(error.message || "Unable to submit order right now.");
+      const message =
+        String(error?.message || "")
+          .trim()
+          .includes("could not be confirmed") || error?.message === LAB_CHECKOUT_CONFIRM_ERROR
+          ? LAB_CHECKOUT_CONFIRM_ERROR
+          : error.message || "Unable to submit order right now.";
+      setErrorMessage(message);
     } finally {
+      checkoutInFlightRef.current = false;
       setSubmitting(false);
       submitLockRef.current = false;
     }
@@ -1539,7 +1574,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
         <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{errorMessage}</div>
       ) : null}
 
-      {submitResult?.success ? (
+      {submitResult?.success && submitResult?.confirmed ? (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
           <div className="flex items-start gap-2.5">
             <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-700" />
@@ -1955,6 +1990,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
         onClose={closeOrderTracking}
         order={trackingOrder}
         loading={trackingLoading}
+        confirming={trackingConfirming}
         error={trackingError}
         repeatLoading={repeatLoading}
         invoiceLoading={Boolean(invoiceDownloadKey)}

@@ -34,6 +34,8 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 | GAP-BP-012 | Lab delivery snapshot PATCH 406 — `persist_order_delivery_snapshot` SECURITY DEFINER RPC (2026-07-01) |
 | GAP-BP-013 | Lab ordering governance — `labs.ordering_mode` + initiation gates (2026-07-03) |
 | GAP-BP-014 | Logistics Phase 4 route planning — `delivery_routes` + stop sequencing (2026-07-04) |
+| GAP-BP-015 | Lab checkout false-success — persistence read-back gate before success banner (2026-07-02) |
+| GAP-BP-015b | Lab checkout hardening — RPC order-row required, retry confirmation, structured diagnostics + build stamp, pending-track UX (2026-06-28) |
 
 ### Open (reference)
 

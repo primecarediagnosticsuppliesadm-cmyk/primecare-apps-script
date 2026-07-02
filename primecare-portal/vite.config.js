@@ -6,6 +6,11 @@ import tailwindcss from "@tailwindcss/vite";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const appBuildStamp =
+  process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ||
+  process.env.GITHUB_SHA?.slice(0, 7) ||
+  `local-${new Date().toISOString().slice(0, 19)}`;
+
 /**
  * Vite dev does not run Vercel serverless routes, so /api/primecare would fall
  * through and return non-JSON (e.g. text/javascript). Mirror api/primecare.js
@@ -114,6 +119,9 @@ function primecareLocalApiProxy() {
 
 export default defineConfig({
   plugins: [primecareLocalApiProxy(), react(), tailwindcss()],
+  define: {
+    "import.meta.env.VITE_APP_BUILD_STAMP": JSON.stringify(appBuildStamp),
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

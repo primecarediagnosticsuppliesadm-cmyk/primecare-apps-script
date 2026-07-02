@@ -81,6 +81,12 @@ Credit hold is independent of ordering mode.
 
 - `createOrderWrite` / `create_lab_order` RPC
 - Server gate: `lab_ordering_allows_lab_initiate` + `orders_insert_by_role` when caller is `lab`
+- **Persistence confirmation:** `createOrderWrite` must read back `orders` + lines before success UI (`confirmLabOrderPersistedReadWithRetry` — up to 3 attempts)
+- RPC `create_lab_order` must return an `order` row; success without order data is treated as failure (no false-success banner)
+- Success banner uses **confirmed DB row** (order_id, total_amount, line count) — not cart-only or client-generated values
+- If confirmation fails: cart stays, error *"Order could not be confirmed. Your cart is saved…"*, no success banner
+- Track Order during in-flight checkout shows *"Confirming your order…"* — not "Order not found"
+- Structured checkout diagnostics (order_id, tenant_id, lab_id, client_request_id, RPC result, line count, delivery snapshot, elapsed ms, build stamp) — no auth tokens
 - Status default: **Placed**
 - Idempotency: `clientRequestId` + cart hash guard
 - Delivery quote displayed; snapshot persisted via **`persist_order_delivery_snapshot` RPC** only
@@ -107,6 +113,7 @@ Credit hold is independent of ordering mode.
 | Local cache: checkout snapshot + recent orders | |
 | Apps Script fallback only if `ALLOW_LEGACY_APPS_SCRIPT` | |
 | Error only after Supabase + cache fail | |
+| **During checkout confirmation** | Show *"Confirming your order…"* — never *"Order not found"* until confirmation fails |
 | **Never blocked by `ordering_mode`** | |
 
 ---

@@ -78,7 +78,9 @@
 - [ ] **Ordering mode Suspended** — checkout blocked; admin can still create
 - [ ] **Admin** — Operations Center / lab drawer: set Ordering Mode + help text
 - [ ] Assigned catalog visible after lab/product setup
-- [ ] Place order (when mode allows)
+- [ ] **Lab checkout** — success banner only after DB confirmation; failed confirmation keeps cart + shows cart-saved confirm error
+- [ ] **Lab checkout** — Track Order during confirmation shows "Confirming your order…" (not Not Found)
+- [ ] **Lab checkout** — Track Order works immediately after confirmed checkout
 - [ ] View generated invoice
 - [ ] Confirm payment/account update
 
