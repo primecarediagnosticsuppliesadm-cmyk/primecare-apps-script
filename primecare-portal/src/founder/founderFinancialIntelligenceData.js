@@ -1,5 +1,8 @@
 import { loadDistributorOsPortfolio } from "@/distributor/distributorOsPortfolioData.js";
-import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
+import {
+  loadOperationsCommandCenterData,
+  peekOperationsCommandCenterCache,
+} from "@/operations/operationsCommandCenterLoader.js";
 import { loadVisibleLabContracts } from "@/labContract/labContractStore.js";
 import { loadFounderCommissionMetrics } from "@/commission/commissionData.js";
 import { filterDistributorRegistry } from "@/distributor/distributorOsEngine.js";
@@ -21,10 +24,13 @@ function str(v) {
 export async function loadFounderFinancialIntelligenceData(currentUser, options = {}) {
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
   const loadOpts = { force: options.force };
+  const cachedOps = !options.force ? peekOperationsCommandCenterCache(currentUser) : null;
 
   const [portfolio, opsPayload, contracts] = await Promise.all([
     loadDistributorOsPortfolio(currentUser, loadOpts),
-    loadOperationsCommandCenterData(currentUser, loadOpts),
+    cachedOps
+      ? Promise.resolve(cachedOps)
+      : loadOperationsCommandCenterData(currentUser, loadOpts),
     loadVisibleLabContracts(),
   ]);
 

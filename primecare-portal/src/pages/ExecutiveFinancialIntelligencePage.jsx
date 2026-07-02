@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { PageHeader, PageSkeleton, StatusBadge, KpiCard, KpiCardGrid } from "@/components/ux";
 import { loadExecutiveFinancialIntelligenceData } from "@/founder/executiveFinancialIntelligenceData.js";
@@ -104,6 +104,31 @@ function RevenueTrendChart({ points = [] }) {
   );
 }
 
+import { usePagePerformance } from "@/hooks/usePagePerformance.js";
+
+const EFI_MODEL_CACHE_KEY = "primecare_efi_model_v1";
+const EFI_MODEL_CACHE_TTL_MS = 90_000;
+
+function readEfiModelCache() {
+  try {
+    const raw = sessionStorage.getItem(EFI_MODEL_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.model || Date.now() - (parsed.at || 0) > EFI_MODEL_CACHE_TTL_MS) return null;
+    return parsed.model;
+  } catch {
+    return null;
+  }
+}
+
+function writeEfiModelCache(model) {
+  try {
+    sessionStorage.setItem(EFI_MODEL_CACHE_KEY, JSON.stringify({ at: Date.now(), model }));
+  } catch {
+    /* ignore quota */
+  }
+}
+
 /**
  * Executive Financial Intelligence — read-only HQ analytics dashboard.
  */
@@ -111,21 +136,33 @@ export default function ExecutiveFinancialIntelligencePage({
   setActivePage = null,
   currentUser = null,
 }) {
-  const [model, setModel] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [model, setModel] = useState(() => readEfiModelCache());
+  const [loading, setLoading] = useState(() => !readEfiModelCache());
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const modelRef = useRef(model);
+
+  useEffect(() => {
+    modelRef.current = model;
+  }, [model]);
+
+  usePagePerformance("Executive FI");
 
   const load = useCallback(async () => {
     try {
-      setLoading(true);
+      if (!modelRef.current) setLoading(true);
+      else setRefreshing(true);
       setError("");
       const data = await loadExecutiveFinancialIntelligenceData(currentUser);
-      setModel(buildExecutiveFinancialIntelligenceModel(data));
+      const next = buildExecutiveFinancialIntelligenceModel(data);
+      writeEfiModelCache(next);
+      setModel(next);
     } catch (err) {
       setError(err?.message || "Failed to load executive financial intelligence");
-      setModel(null);
+      if (!modelRef.current) setModel(null);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [currentUser]);
 
@@ -150,7 +187,7 @@ export default function ExecutiveFinancialIntelligencePage({
     Boolean(predatorSnapshot)
   );
 
-  if (loading) return <PageSkeleton rows={12} />;
+  if (loading && !model) return <PageSkeleton rows={12} />;
   if (error) {
     return (
       <div className="p-4 text-sm text-red-700">
@@ -172,8 +209,8 @@ export default function ExecutiveFinancialIntelligencePage({
         subtitle="Read-only HQ analytics — derived from existing operational and financial data."
         icon={BarChart3}
         rightAction={
-          <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
-            <RefreshCw className="mr-2 h-4 w-4" />
+          <Button type="button" variant="outline" size="sm" onClick={() => void load()} disabled={refreshing}>
+            <RefreshCw className={cn("mr-2 h-4 w-4", refreshing && "animate-spin")} />
             Refresh
           </Button>
         }

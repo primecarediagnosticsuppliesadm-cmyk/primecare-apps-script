@@ -42,6 +42,7 @@ import {
   buildOrdersByLabDateIndex,
   collectOrderRowIds,
   collectOrderMetricLookupIds,
+  collectOrderBusinessIds,
   computeRevenueMetrics,
   normalizedOrderRowStatus,
   orderCountsTowardDashboardRevenue,
@@ -59,6 +60,11 @@ import {
   rollupStockDashboardMappedItems,
 } from "@/metrics/computeInventoryMetrics.js";
 import { IS_DEV, IS_QA } from "@/config/environment";
+import {
+  isReadAdapterOrdersV1Enabled,
+  isReadAdapterReceivablesV1Enabled,
+} from "@/config/readProjectionFlags.js";
+import { scheduleProjectionRefreshAfterOrderWrite } from "@/api/projectionRefreshApi.js";
 import { getAppBuildStamp } from "@/utils/buildStamp.js";
 import { resolveMasterCatalogPricing } from "@/catalog/masterCatalogEngine.js";
 import {
@@ -2313,6 +2319,10 @@ export function peekCollectionsReadCache(params = {}) {
 }
 
 export async function getCollectionsRead(params = {}) {
+  if (isReadAdapterReceivablesV1Enabled() && params.force !== true) {
+    const { readLabReceivablesListV1 } = await import("@/api/projectionReadAdapters.js");
+    return readLabReceivablesListV1(params);
+  }
   return predatorTrace("Collections", "api.getCollectionsRead", async () => {
   const force = params.force === true;
   const cacheKey = collectionsReadCacheKey(params);
@@ -2433,12 +2443,14 @@ export async function getCollectionsRead(params = {}) {
     auditCollectionDataInconsistencies(arRaw, payRaw, collections);
 
     const summary = summarizeCollectionsList(collections, todayCollections);
+    const lastPaymentByLabId = buildLastPaymentDateByLabId(payRaw);
 
     return {
       success: true,
       data: {
         summary,
         collections,
+        lastPaymentByLabId,
       },
     };
   } catch (err) {
@@ -3943,6 +3955,25 @@ export function invalidateAllHqReadCaches() {
   invalidateAdminDashboardReadCache();
   invalidateQualificationReviewReadCache();
   invalidateOrdersReadCache();
+  invalidateCollectionsReadCache();
+  invalidateBoundedSourceCache();
+}
+
+/**
+ * Latest payment date per lab from bounded payments already loaded by getCollectionsRead.
+ * @param {object[]} paymentRows
+ * @returns {Record<string, string>}
+ */
+export function buildLastPaymentDateByLabId(paymentRows = []) {
+  /** @type {Record<string, string>} */
+  const out = {};
+  for (const row of paymentRows || []) {
+    const key = normalizeLabIdKey(row.lab_id ?? row.labId);
+    const date = str(row.payment_date ?? row.paymentDate).slice(0, 10);
+    if (!key || !date) continue;
+    if (!out[key] || date > out[key]) out[key] = date;
+  }
+  return out;
 }
 
 export async function getQualificationReviewRead(options = {}) {
@@ -4297,7 +4328,7 @@ export async function getAgentWorkspaceRead(currentUser, options = {}) {
       ? ownershipRes.data.rows
       : [];
 
-    const collectionsRes = await getCollectionsRead();
+    const collectionsRes = await getCollectionsRead({ force: true });
     const allCollections = Array.isArray(collectionsRes?.data?.collections)
       ? collectionsRes.data.collections
       : [];
@@ -6752,6 +6783,12 @@ export async function createOrderWrite(payload = {}) {
       );
     }
 
+    scheduleProjectionRefreshAfterOrderWrite({
+      tenantId: tenant_id,
+      orderId: order_id,
+      labId: lab_id,
+    });
+
     return {
       success: true,
       data: {
@@ -7089,6 +7126,10 @@ export function peekOrdersReadCache(params = {}) {
 }
 
 export async function getOrdersRead(params = {}) {
+  if (isReadAdapterOrdersV1Enabled()) {
+    const { readOrdersListV1 } = await import("@/api/projectionReadAdapters.js");
+    return readOrdersListV1(params);
+  }
   const force = params.force === true;
   const cacheKey = ordersReadCacheKey(params);
 
@@ -7151,17 +7192,15 @@ export async function getOrdersRead(params = {}) {
       rawList = Array.isArray(primary.data) ? primary.data : [];
     }
 
-    let labMap = new Map();
-    try {
-      labMap = await fetchLabsNameMap();
-    } catch {
-      labMap = new Map();
-    }
-
-    const lineCounts = await fetchOrderUnitCountsForOrders(
-      supabase,
-      collectOrderMetricLookupIds(rawList)
-    );
+    const [labMapResult, lineCounts] = await Promise.all([
+      fetchLabsNameMap().catch(() => new Map()),
+      fetchOrderUnitCountsForOrders(
+        supabase,
+        collectOrderBusinessIds(rawList),
+        rawList
+      ),
+    ]);
+    const labMap = labMapResult instanceof Map ? labMapResult : new Map();
 
     const orders = rawList.map((r, idx) => {
       const labId = str(r.lab_id ?? r.labId ?? r.lab_uuid ?? r.labUUID ?? "");
@@ -7877,6 +7916,12 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
         createdSource: "updateOrderStatusWrite",
       });
     }
+
+    scheduleProjectionRefreshAfterOrderWrite({
+      tenantId: str(orderRow?.tenant_id ?? orderRow?.tenantId ?? saved?.tenant_id ?? ""),
+      orderId: businessOrderId,
+      labId: str(orderRow?.lab_id ?? orderRow?.labId ?? ""),
+    });
 
     return {
       success: true,

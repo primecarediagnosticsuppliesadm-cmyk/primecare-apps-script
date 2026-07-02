@@ -43,6 +43,7 @@ Read Blueprint → Inspect code/migrations → Compare doc vs implementation
 | 14 | [14_Release_Gates.md](./14_Release_Gates.md) | Build, cert, commit criteria |
 | 15 | [15_Do_Not_Break_Rules.md](./15_Do_Not_Break_Rules.md) | Hard constraints |
 | 16 | [16_Certification_Framework.md](./16_Certification_Framework.md) | Phase 2 cert framework index |
+| 18 | [18_Domain_Projection_Architecture.md](./18_Domain_Projection_Architecture.md) | Domain projections, event pipeline, read adapters |
 | — | [CHANGELOG.md](./CHANGELOG.md) | Gaps, conflicts, structural changes |
 
 ### Templates
@@ -78,6 +79,7 @@ Earlier blueprint files (`01_schema_catalog.md` … `12_verification_matrix.md`)
 ## Related docs
 
 - `docs/Certification_Framework/` — Phase 2 object/screen catalogs, golden paths, scorecards
+- `docs/Architecture/Projection_Registry.md` — domain projection catalog
 - `docs/QA/` — certification, UAT, gap register
 - `docs/Architecture/` — founder decisions, deferred architecture
 - `supabase/migrations/` — formal migrations

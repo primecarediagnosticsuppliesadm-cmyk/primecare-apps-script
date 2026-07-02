@@ -1,0 +1,53 @@
+{
+  "version": "1.0.0",
+  "updated": "2026-06-28",
+  "description": "Canonical domain ownership for API entry points.",
+  "domains": {
+    "Orders": {
+      "read": ["getOrdersRead", "getOrderDetailsRead", "readOrdersListV1"],
+      "write": ["createOrderWrite", "updateOrderStatusWrite"]
+    },
+    "Collections": {
+      "read": ["getCollectionsRead", "getCollectionDetailRead", "getCollectionHistoryRead", "readLabReceivablesListV1"],
+      "write": ["createPaymentWrite", "updateCollectionNotesWrite", "allocatePaymentToInvoiceWrite"]
+    },
+    "Finance": {
+      "read": ["getInvoicesForLabRead", "getInvoicesByOrderIdsRead", "getInvoiceTenantKpisRead"],
+      "write": ["createInvoiceForFulfilledOrderWrite", "finalizeInvoiceWrite"]
+    },
+    "Logistics": {
+      "read": ["getLogisticsShipmentsRead", "getShipmentByOrderRead", "getDeliveryRoutesRead"],
+      "write": ["createShipmentForFulfilledOrderWrite", "transitionShipmentStatusWrite"]
+    },
+    "Inventory": {
+      "read": ["getStockDashboard", "getPurchaseOrdersRead"],
+      "write": ["createInventoryLedgerWrite", "createPurchaseOrderWrite", "receivePurchaseOrderWrite"]
+    },
+    "Laboratory": {
+      "read": ["getLabCatalogRead", "getLabRecentOrdersRead", "getLabOrderDetailsRead"],
+      "write": ["createLabWrite"]
+    },
+    "Operations": {
+      "read": ["getOperationsUserDirectoryRead"],
+      "write": ["provisionPlatformUserWrite"]
+    },
+    "Executive": {
+      "read": ["getFounderSnapshotRead", "getAdminDashboardRead"],
+      "write": []
+    },
+    "Agent": {
+      "read": ["getAgentCollectionsRead"],
+      "write": ["saveAgentVisitWrite"]
+    },
+    "Platform": {
+      "read": ["coordinatedRead"],
+      "write": ["rebuildProjectionV1"]
+    }
+  },
+  "deprecated": {
+    "primecareApi.js": {
+      "reason": "Legacy Apps Script bridge",
+      "replacement": "primecareSupabaseApi.js module APIs"
+    }
+  }
+}

@@ -10,11 +10,11 @@ import {
   getLabsCredit,
   getReorderForecastRead,
   getAdminDashboardRead,
-  invalidateAdminDashboardReadCache,
   peekAdminDashboardReadCache,
   normalizeAdminDashboardPayload,
   resolveAdminVisitRevenue,
 } from "@/api/primecareSupabaseApi";
+import { invalidateAllHqReads } from "@/api/hqReadCoordinator.js";
 import {
   logHybridSourceWarning,
   logAppsScriptPrimarySource,
@@ -45,6 +45,7 @@ import HqPrioritiesStrip from "@/components/hq/HqPrioritiesStrip.jsx";
 import LogisticsKpiWidget from "@/components/logistics/LogisticsKpiWidget.jsx";
 import { onFinancialSyncCompleted } from "@/operations/financialSyncEvents.js";
 import { useFinancialSyncPulse } from "@/hooks/useFinancialSyncPulse.js";
+import { usePagePerformance } from "@/hooks/usePagePerformance.js";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
 import { hqDebugLog } from "@/utils/hqDebugLog.js";
 import {
@@ -794,6 +795,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   const lastRawReadRef = useRef(null);
   const summaryDataRef = useRef(summaryData);
   const financialSyncPulse = useFinancialSyncPulse();
+  usePagePerformance("Admin Dashboard");
   const executiveDataRef = useRef(executiveData);
 
   useEffect(() => {
@@ -824,7 +826,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     if (shouldUseQaDirectDashboardRead()) {
       if (force) {
         clearAdminDashboardModuleCache();
-        invalidateAdminDashboardReadCache();
+        invalidateAllHqReads(currentUser?.tenantId ?? currentUser?.tenant_id ?? null);
       }
 
       const result = await getAdminDashboardRead({ force });
@@ -1172,6 +1174,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   const displayKpis = kpiModel ?? kpiModelRef.current;
   const dashboardHydrated = hasVisibleKpis(displayKpis);
   const kpisReady = dashboardHydrated && !kpisLoading;
+  const showSecondaryPanels = kpisReady;
   const insights = Array.isArray(insightsData?.insights)
     ? insightsData.insights.map(normalizeInsight)
     : [];
@@ -1322,16 +1325,6 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
         <AdminDashboardQaValidationPanel renderedSnapshot={qaValidationSnapshot} />
       ) : null}
 
-      <HqPrioritiesStrip
-        tenantId={currentUser?.tenantId ?? currentUser?.tenant_id ?? null}
-        setActivePage={setActivePage}
-      />
-
-      <LogisticsKpiWidget
-        tenantId={currentUser?.tenantId ?? currentUser?.tenant_id ?? null}
-        setActivePage={setActivePage}
-      />
-
       {backgroundLoading ? (
         <div className="rounded-2xl border border-[var(--pc-info-border)] bg-[var(--pc-info-bg)] px-4 py-3 text-sm text-[var(--pc-info)]">
           Loading secondary dashboard panels in background...
@@ -1389,6 +1382,19 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
           ))}
         </KpiCardGrid>
       )}
+
+      <HqPrioritiesStrip
+        tenantId={currentUser?.tenantId ?? currentUser?.tenant_id ?? null}
+        setActivePage={setActivePage}
+        enabled={showSecondaryPanels}
+      />
+
+      {showSecondaryPanels ? (
+        <LogisticsKpiWidget
+          tenantId={currentUser?.tenantId ?? currentUser?.tenant_id ?? null}
+          setActivePage={setActivePage}
+        />
+      ) : null}
 
       <div className="grid gap-4 xl:grid-cols-2 xl:gap-6">
         <SectionCard

@@ -19,25 +19,28 @@ function str(v) {
  * @param {{ force?: boolean }} [options]
  */
 export async function loadExecutiveFinancialIntelligenceData(currentUser, options = {}) {
-  const fiData = await loadFounderFinancialIntelligenceData(currentUser, options);
-  const homeTenantId = str(fiData.homeTenantId);
-  const tenantIds = [homeTenantId, ...(fiData.distributorIds || [])].filter(Boolean);
-  const uniqueTenantIds = [...new Set(tenantIds)];
-
-  const [paymentsRes, orderLinesRes, ...shipmentResults] = await Promise.all([
+  const [fiData, paymentsRes, orderLinesRes] = await Promise.all([
+    loadFounderFinancialIntelligenceData(currentUser, options),
     supabase
       ? fetchPaymentsBoundedRows(supabase, { daysBack: 366 })
       : Promise.resolve({ data: [], error: null }),
     supabase
       ? fetchOrderLinesBoundedRows(supabase)
       : Promise.resolve({ data: [], error: null }),
-    ...uniqueTenantIds.map((tenantId) =>
+  ]);
+
+  const homeTenantId = str(fiData.homeTenantId);
+  const tenantIds = [homeTenantId, ...(fiData.distributorIds || [])].filter(Boolean);
+  const uniqueTenantIds = [...new Set(tenantIds)];
+
+  const shipmentResults = await Promise.all(
+    uniqueTenantIds.map((tenantId) =>
       getLogisticsShipmentsRead({ tenantId, limit: 500 }).catch(() => ({
         success: false,
         shipments: [],
       }))
-    ),
-  ]);
+    )
+  );
 
   const shipments = [];
   for (const res of shipmentResults) {

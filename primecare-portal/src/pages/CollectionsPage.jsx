@@ -2046,29 +2046,9 @@ export default function CollectionsPage({
           summary: built.summary,
         });
 
-        const rows = built.collections;
-        if (
-          !isLabAccount &&
-          userRole !== ROLES.AGENT &&
-          supabase &&
-          rows.length
-        ) {
-          const paidLabs = rows.filter((row) => Number(row.totalPaid || 0) > 0);
-          if (paidLabs.length) {
-            void (async () => {
-              const next = {};
-              await Promise.all(
-                paidLabs.map(async (row) => {
-                  const hist = await getCollectionHistoryRead(row.labId);
-                  const date = deriveLastPaymentDateFromHistory(hist?.data?.history);
-                  if (date) next[labIdKey(row.labId)] = date;
-                })
-              );
-              if (Object.keys(next).length) {
-                setLastPaymentByLabId((prev) => ({ ...prev, ...next }));
-              }
-            })();
-          }
+        const lastPaymentFromRead = payload.lastPaymentByLabId;
+        if (lastPaymentFromRead && typeof lastPaymentFromRead === "object") {
+          setLastPaymentByLabId((prev) => ({ ...prev, ...lastPaymentFromRead }));
         }
       } catch (err) {
         console.warn("CollectionsPage loadCollections:", err);

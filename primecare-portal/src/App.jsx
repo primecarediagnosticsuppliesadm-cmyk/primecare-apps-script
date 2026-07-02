@@ -14,6 +14,7 @@ import HqGlobalSearch, {
   useHqGlobalSearchShortcut,
 } from "@/components/hq/HqGlobalSearch.jsx";
 import HqHelpDrawer, { HqHelpButton } from "@/components/hq/HqHelpDrawer.jsx";
+import QaDiagnosticsPanel from "@/components/qa/QaDiagnosticsPanel.jsx";
 import { PERMISSIONS } from "./config/permissions";
 import { getDefaultPageForRole } from "./config/menuConfig";
 import {
@@ -383,6 +384,7 @@ export default function App() {
               setActivePage={navigateToPage}
               authToken={authToken}
             />
+            <QaDiagnosticsPanel currentUser={currentUser} />
           </RouteTransitionOverlay>
         </PortalLayout>
         </TenantViewProvider>

@@ -153,12 +153,23 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
         else setLoading(true);
         setError("");
 
+        let paintedCore = false;
         const model = await traceOperationsCenterLoad(async () => {
-          const payload = await loadOperationsCommandCenterData(currentUser);
+          const payload = await loadOperationsCommandCenterData(currentUser, {
+            force: isRefresh,
+            progressive: !isRefresh,
+            onCoreReady: (corePayload) => {
+              paintedCore = true;
+              setOpsModel(buildOperationsCommandCenterModel(corePayload));
+              setLoading(false);
+              setDataLoadedAt(Date.now());
+            },
+          });
           return buildOperationsCommandCenterModel(payload);
         });
         setOpsModel(model);
         setDataLoadedAt(Date.now());
+        if (!paintedCore) setLoading(false);
       } catch (err) {
         console.error(err);
         setError(err?.message || "Failed to load operations center");

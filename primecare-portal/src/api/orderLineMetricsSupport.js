@@ -100,7 +100,7 @@ export async function fetchOrderLineMetricsForOrders(client, orderIds) {
   if (!client || !orderIds?.length) return rows;
 
   const ids = [...new Set(orderIds.map(str).filter(Boolean))];
-  const chunkSize = 200;
+  const chunkSize = 20;
   let lastError = null;
 
   for (let i = 0; i < ids.length; i += chunkSize) {
@@ -146,7 +146,23 @@ export async function fetchOrderLineMetricsForOrders(client, orderIds) {
  * @param {import('@supabase/supabase-js').SupabaseClient} client
  * @param {string[]} orderIds
  */
-export async function fetchOrderUnitCountsForOrders(client, orderIds) {
+/** Propagate unit counts across business order_id and UUID keys for the same row. */
+export function mergeOrderMetricCountAliases(counts, ordersRaw = []) {
+  if (!counts?.size) return counts;
+  for (const o of ordersRaw || []) {
+    const business = str(o.order_id ?? o.orderId);
+    const uuid = o.id != null ? str(o.id) : "";
+    if (!business || !uuid || business === uuid) continue;
+    const merged = Math.max(counts.get(business) || 0, counts.get(uuid) || 0);
+    if (merged > 0) {
+      counts.set(business, merged);
+      counts.set(uuid, merged);
+    }
+  }
+  return counts;
+}
+
+export async function fetchOrderUnitCountsForOrders(client, orderIds, ordersRaw = []) {
   const counts = new Map();
   const ids = [...new Set(orderIds.map(str).filter(Boolean))];
   if (!client || !ids.length) return counts;
@@ -155,7 +171,8 @@ export async function fetchOrderUnitCountsForOrders(client, orderIds) {
   const itemsQty = new Map();
   const linesPresent = new Set();
   const itemsPresent = new Set();
-  const chunkSize = 200;
+  /** Small chunks — large `.in()` on order_items/order_lines can statement-timeout on QA. */
+  const chunkSize = 20;
 
   const accumulate = (rows, qtyMap, presentSet) => {
     for (const row of rows || []) {
@@ -166,32 +183,34 @@ export async function fetchOrderUnitCountsForOrders(client, orderIds) {
     }
   };
 
+  const chunks = [];
   for (let i = 0; i < ids.length; i += chunkSize) {
-    const chunk = ids.slice(i, i + chunkSize);
-    const linesRes = await queryOrderLinesChunk(
-      client,
-      "order_lines",
-      ORDER_LINE_MINIMAL_COLUMNS,
-      chunk
-    );
-    if (!linesRes.error) accumulate(linesRes.data, linesQty, linesPresent);
-
-    const itemsRes = await queryOrderLinesChunk(
-      client,
-      "order_items",
-      ORDER_LINE_MINIMAL_COLUMNS,
-      chunk
-    );
-    if (!itemsRes.error) accumulate(itemsRes.data, itemsQty, itemsPresent);
+    chunks.push(ids.slice(i, i + chunkSize));
   }
+
+  await Promise.all(
+    chunks.map(async (chunk) => {
+      const [linesRes, itemsRes] = await Promise.all([
+        queryOrderLinesChunk(client, "order_lines", ORDER_LINE_MINIMAL_COLUMNS, chunk),
+        queryOrderLinesChunk(client, "order_items", ORDER_LINE_MINIMAL_COLUMNS, chunk),
+      ]);
+      if (!linesRes.error) accumulate(linesRes.data, linesQty, linesPresent);
+      if (!itemsRes.error) accumulate(itemsRes.data, itemsQty, itemsPresent);
+    })
+  );
 
   for (const oid of ids) {
-    if (linesPresent.has(oid)) counts.set(oid, linesQty.get(oid) || 0);
-    else if (itemsPresent.has(oid)) counts.set(oid, itemsQty.get(oid) || 0);
-    else counts.set(oid, 0);
+    const lineQ = linesPresent.has(oid) ? linesQty.get(oid) || 0 : 0;
+    const itemQ = itemsPresent.has(oid) ? itemsQty.get(oid) || 0 : 0;
+    let count = 0;
+    if (linesPresent.has(oid) && lineQ > 0) count = lineQ;
+    else if (itemsPresent.has(oid) && itemQ > 0) count = itemQ;
+    else if (linesPresent.has(oid)) count = lineQ;
+    else if (itemsPresent.has(oid)) count = itemQ;
+    counts.set(oid, count);
   }
 
-  return counts;
+  return mergeOrderMetricCountAliases(counts, ordersRaw);
 }
 
 export async function fetchOrderDetailLinesForOrder(client, orderRow) {

@@ -22,8 +22,8 @@ FAIL if any bounded surface exceeds 500 ms on PERF tenant or unbounded read dete
 
 | Surface ID | UI screen | API entry | Bounded | Target (cold) | PERF baseline | QA probe |
 |------------|-----------|-----------|---------|---------------|---------------|----------|
-| `orders-list` | OrdersPage | `getOrdersRead` | yes (100) | 350 ms | 282 ms | 239 ms |
-| `collections` | CollectionsPage | `getCollectionsRead` | yes | 200 ms | 154 ms | 138 ms |
+| `orders-list` | OrdersPage | `getOrdersRead` / `read_orders_list_v1` | yes (100) | 350 ms | 282 ms | 239 ms / **615 ms proj** |
+| `collections` | CollectionsPage | `getCollectionsRead` / `read_lab_receivables_list_v1` | yes | 200 ms | 154 ms | 138 ms / **492 ms proj** |
 | `admin-dashboard` | DashboardPage | `getAdminDashboardRead` | yes | 350 ms | 165 ms | 273 ms |
 | `ops-center` | OperationsCenterAdminPage | ops loader bundle | yes | 400 ms | 366 ms | — |
 | `revenue-funnel` | RevenueFunnelPage | orders probe | yes (100) | 300 ms | 266 ms | — |
@@ -48,6 +48,13 @@ Record in each release scorecard when perf-impacting changes land:
 | Orders RLS probe cap | `orders-list` | unbounded | 500 cap | improved | `3de642b` |
 | Item count lookup keys | `orders-list` | ~8s naive | chunked | improved | `3de642b` |
 | Search debounce 300ms | `orders-list` UI | immediate | debounced | UI improved | `3de642b` |
+| Sprint 1 read coordinator | all HQ | fragmented caches | unified invalidate + in-flight join | improved | pending |
+| Collections N+1 history | `collections` | N extra reads/list | `lastPaymentByLabId` embed | improved | pending |
+| Dashboard KPI-first paint | `admin-dashboard` UI | widgets parallel | deferred secondary panels | UI improved | pending |
+| Ops dashboard cache peek | `ops-center` | always cold dashboard | reuse admin cache | improved | pending |
+| EFI parallel payments/lines | `efi` | sequential | parallel with founder | improved | pending |
+| **Sprint 2 projection adapters** | `orders-list` | 2,052 ms transactional | **615 ms** projection RPC | **−70%** | Sprint 2 |
+| **Sprint 2 projection adapters** | `collections` | 1,619 ms transactional | **492 ms** projection RPC | **−70%** | Sprint 2 |
 
 ---
 
@@ -72,6 +79,15 @@ Output: `docs/hq-certification/HQ_PERFORMANCE_CERTIFICATION.md`
 ```bash
 node scripts/measure-hq-navigation-perf.mjs
 ```
+
+### Ad-hoc Sprint 1 HQ read probe
+
+```bash
+node scripts/measure-sprint1-hq-reads.mjs --before   # label in output only
+node scripts/measure-sprint1-hq-reads.mjs --after
+```
+
+Measures cold `force: true` API timings for dashboard, orders, collections, ops loader, EFI loader.
 
 ### Ad-hoc single surface timing
 

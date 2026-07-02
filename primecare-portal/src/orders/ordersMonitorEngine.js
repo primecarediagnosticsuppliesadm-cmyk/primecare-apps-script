@@ -231,6 +231,11 @@ export function formatItemCount(count) {
   return n === 1 ? "1 item" : `${n} items`;
 }
 
+/** Sum line quantities — matches order detail drawer unit count. */
+export function resolveOrderLineUnitCount(lines = []) {
+  return (lines || []).reduce((sum, line) => sum + num(line.quantity), 0);
+}
+
 /** CI / smoke orders created by verify scripts — hidden from HQ list unless validation layer is on. */
 export function isVerificationTestOrderId(orderId) {
   const id = str(orderId).toUpperCase();

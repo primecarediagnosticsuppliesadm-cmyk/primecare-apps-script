@@ -47,6 +47,7 @@ import {
   buildLabFilterOptions,
   formatMissingField,
   formatItemCount,
+  resolveOrderLineUnitCount,
   filterVerificationTestOrders,
   isVerificationTestOrderId,
   normalizeOrderStatusLabel,
@@ -78,6 +79,7 @@ import InvoiceDetailsDrawer from "@/components/invoice/InvoiceDetailsDrawer.jsx"
 import InvoiceStatusBadge from "@/components/invoice/InvoiceStatusBadge.jsx";
 import { getInvoicesByOrderIdsRead } from "@/api/invoiceSupabaseApi.js";
 import { onFinancialSyncCompleted } from "@/operations/financialSyncEvents.js";
+import { usePagePerformance } from "@/hooks/usePagePerformance.js";
 import { useFinancialSyncPulse } from "@/hooks/useFinancialSyncPulse.js";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
 import OrdersLogisticsPanel from "@/components/logistics/OrdersLogisticsPanel.jsx";
@@ -384,6 +386,8 @@ export default function OrdersPage({
 
   const { showToast } = usePortalToast();
 
+  usePagePerformance("Admin Orders");
+
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
   const hqStatusWriteBlocked = isHqOrderStatusWriteBlocked();
 
@@ -537,6 +541,15 @@ export default function OrdersPage({
       }
       setSelectedOrder(orderId);
       setDetails(data);
+      const detailUnits = resolveOrderLineUnitCount(data.lines);
+      if (detailUnits > 0) {
+        const patchRows = (rows) =>
+          rows.map((row) =>
+            str(row.orderId) === str(orderId) ? { ...row, itemCount: detailUnits } : row
+          );
+        setAllOrders((prev) => patchRows(prev));
+        setOrders((prev) => patchRows(prev));
+      }
     } catch (err) {
       console.warn("OrdersPage openOrder:", err);
       setError(err?.message || "Failed to load order details.");

@@ -4,6 +4,55 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-02 — Sprint 2 Phase 1 Domain Projections
+
+### Added
+- Migration `20260705120000_sprint2_domain_projections_phase1.sql` (+ fix migrations 001, 002)
+- Client adapters, feature flags, parity/staleness certification scripts
+- Cert matrix `08_Read_Model_Certification_Matrix.md`
+- ADR-001 committed
+
+### Updated
+- Projection Registry status: `shadow`
+- TD-001 mitigated (Orders + Collections); TD-003 closed
+
+### Gaps documented
+
+| ID | Type | Description | Status |
+|----|------|-------------|--------|
+| GAP-BP-019 | architecture | Screen-oriented names | **CLOSED** — `proj_*` / `read_*` deployed |
+| GAP-BP-020 | architecture | Event queue / worker | OPEN — Phase 1 uses row refresh + rebuild |
+| GAP-BP-021 | cert | Flag flip after 7-day shadow | OPEN |
+
+---
+
+## 2026-07-02 — Domain Projection Architecture v2
+
+### Added
+- Blueprint `18_Domain_Projection_Architecture.md` — domain-driven read layer (replaces screen-oriented read model naming)
+- `docs/Architecture/Projection_Registry.md` — authoritative projection catalog (`PRJ-*` registry IDs)
+
+### Updated
+- `README.md` — doc 18 in index; link to Projection Registry
+- Sprint 2 implementation plan — **must rename** before schema:
+  - `hq_orders_summary_v1` → `proj_order_v1`
+  - `hq_collections_summary_v1` → `proj_lab_receivable_v1`
+  - `get_*_summary_v1` → `read_*_v1` (read adapters, not projections)
+
+### Gaps documented
+
+| ID | Type | Description | Status |
+|----|------|-------------|--------|
+| GAP-BP-017 | gap | ADR-001 not committed; superseded by domain naming in doc 18 | OPEN |
+| GAP-BP-018 | gap | Blueprint 17 (`HQ_Read_Model`) never created — superseded by doc 18 | CLOSED |
+| GAP-BP-019 | architecture | Screen-oriented read model names in Sprint 2 draft | OPEN — rename required |
+| GAP-BP-020 | architecture | No projection event queue / worker yet — Phase 1 uses row refresh + sweep | OPEN |
+
+### Migration impact
+**None** — documentation only until approved schema change.
+
+---
+
 ## 2026-07-02 — Phase 2 Certification Framework
 
 ### Added

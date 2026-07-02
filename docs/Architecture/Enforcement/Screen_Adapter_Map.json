@@ -1,0 +1,39 @@
+{
+  "version": "1.0.0",
+  "updated": "2026-06-28",
+  "description": "Approved read paths per screen when projection adapters exist.",
+  "screens": [
+    {
+      "pageKey": "orders",
+      "component": "OrdersPage.jsx",
+      "approved_reads": ["getOrdersRead", "readOrdersListV1"],
+      "preferred_when_flag_on": "readOrdersListV1",
+      "flag": "VITE_READ_ADAPTER_ORDERS_V1",
+      "projection_registry_id": "PRJ-ORD-ORDER-v1",
+      "forbidden_when_projection_active": [".from(\"orders\")", ".from('orders')"]
+    },
+    {
+      "pageKey": "collections",
+      "component": "CollectionsPage.jsx",
+      "approved_reads": ["getCollectionsRead", "readLabReceivablesListV1"],
+      "preferred_when_flag_on": "readLabReceivablesListV1",
+      "flag": "VITE_READ_ADAPTER_RECEIVABLES_V1",
+      "projection_registry_id": "PRJ-COL-LAB-v1",
+      "forbidden_when_projection_active": [".from(\"ar_credit_control\")", ".from('ar_credit_control')"]
+    },
+    {
+      "pageKey": "dashboard",
+      "component": "AdminDashboardPage.jsx",
+      "approved_reads": ["getAdminDashboardRead", "readTenantDashboardV1"],
+      "preferred_when_flag_on": "readTenantDashboardV1",
+      "flag": "VITE_READ_ADAPTER_DASHBOARD_V1",
+      "projection_registry_id": "PRJ-DSH-METRICS-v1",
+      "forbidden_when_projection_active": ["fetchAdminDashboardBoundedSourceRows"]
+    }
+  ],
+  "exempt_paths": [
+    "src/api/",
+    "src/metrics/",
+    "scripts/"
+  ]
+}

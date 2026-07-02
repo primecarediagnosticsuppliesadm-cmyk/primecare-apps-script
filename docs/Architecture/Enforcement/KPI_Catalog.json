@@ -1,0 +1,105 @@
+{
+  "version": "1.0.0",
+  "updated": "2026-06-28",
+  "description": "Canonical KPI ownership — one owner registry_id per metric. Composites copy only.",
+  "kpis": [
+    {
+      "id": "KPI-ORD-TODAY-COUNT",
+      "name": "todaysOrdersCount",
+      "domain": "Orders",
+      "owner_registry_id": "PRJ-ORD-METRICS-v1",
+      "consumers": ["PRJ-DSH-METRICS-v1", "PRJ-OPS-METRICS-v1"]
+    },
+    {
+      "id": "KPI-ORD-TODAY-REV",
+      "name": "todaysRevenue",
+      "domain": "Orders",
+      "owner_registry_id": "PRJ-ORD-METRICS-v1",
+      "consumers": ["PRJ-DSH-METRICS-v1", "PRJ-EXE-METRICS-v1"]
+    },
+    {
+      "id": "KPI-ORD-WEEK-REV",
+      "name": "weekRevenue",
+      "domain": "Orders",
+      "owner_registry_id": "PRJ-ORD-METRICS-v1",
+      "consumers": ["PRJ-DSH-METRICS-v1", "PRJ-EXE-METRICS-v1"]
+    },
+    {
+      "id": "KPI-ORD-MONTH-REV",
+      "name": "monthRevenue",
+      "domain": "Orders",
+      "owner_registry_id": "PRJ-ORD-METRICS-v1",
+      "consumers": ["PRJ-DSH-METRICS-v1", "PRJ-EXE-METRICS-v1"]
+    },
+    {
+      "id": "KPI-ORD-YTD-REV",
+      "name": "ytdRevenue",
+      "domain": "Orders",
+      "owner_registry_id": "PRJ-ORD-METRICS-v1",
+      "consumers": ["PRJ-DSH-METRICS-v1", "PRJ-EXE-METRICS-v1"]
+    },
+    {
+      "id": "KPI-ORD-OPEN-COUNT",
+      "name": "openOrdersCount",
+      "domain": "Orders",
+      "owner_registry_id": "PRJ-ORD-METRICS-v1",
+      "consumers": ["PRJ-DSH-METRICS-v1", "PRJ-OPS-METRICS-v1"]
+    },
+    {
+      "id": "KPI-COL-OUTSTANDING",
+      "name": "totalOutstanding",
+      "domain": "Collections",
+      "owner_registry_id": "PRJ-COL-METRICS-v1",
+      "consumers": ["PRJ-DSH-METRICS-v1", "PRJ-EXE-METRICS-v1"]
+    },
+    {
+      "id": "KPI-COL-TODAY-COLLECT",
+      "name": "todayCollections",
+      "domain": "Collections",
+      "owner_registry_id": "PRJ-COL-METRICS-v1",
+      "consumers": ["PRJ-DSH-METRICS-v1", "PRJ-EXE-METRICS-v1"]
+    },
+    {
+      "id": "KPI-COL-OVERDUE",
+      "name": "overdueAmount",
+      "domain": "Collections",
+      "owner_registry_id": "PRJ-COL-METRICS-v1",
+      "consumers": ["PRJ-DSH-METRICS-v1", "PRJ-EXE-METRICS-v1"]
+    },
+    {
+      "id": "KPI-COL-AT-RISK",
+      "name": "atRiskLabsCount",
+      "domain": "Collections",
+      "owner_registry_id": "PRJ-COL-METRICS-v1",
+      "consumers": ["PRJ-DSH-METRICS-v1"]
+    },
+    {
+      "id": "KPI-INV-LOW-STOCK",
+      "name": "lowStockSkuCount",
+      "domain": "Inventory",
+      "owner_registry_id": "PRJ-INV-SKU-v1",
+      "consumers": ["PRJ-DSH-METRICS-v1"]
+    },
+    {
+      "id": "KPI-INV-VALUATION",
+      "name": "inventoryValuation",
+      "domain": "Inventory",
+      "owner_registry_id": "PRJ-INV-SKU-v1",
+      "consumers": ["PRJ-DSH-METRICS-v1", "PRJ-EXE-METRICS-v1"]
+    },
+    {
+      "id": "KPI-LOG-PENDING",
+      "name": "pendingShipmentsCount",
+      "domain": "Logistics",
+      "owner_registry_id": "PRJ-LOG-SHIP-v1",
+      "consumers": ["PRJ-DSH-METRICS-v1"]
+    },
+    {
+      "id": "KPI-LOG-DELIVERED-TODAY",
+      "name": "deliveredTodayCount",
+      "domain": "Logistics",
+      "owner_registry_id": "PRJ-LOG-SHIP-v1",
+      "consumers": ["PRJ-DSH-METRICS-v1"]
+    }
+  ]
+}

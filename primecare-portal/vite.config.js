@@ -6,10 +6,16 @@ import tailwindcss from "@tailwindcss/vite";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const gitCommitFull =
+  process.env.VERCEL_GIT_COMMIT_SHA ||
+  process.env.GITHUB_SHA ||
+  "";
 const appBuildStamp =
-  process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ||
-  process.env.GITHUB_SHA?.slice(0, 7) ||
-  `local-${new Date().toISOString().slice(0, 19)}`;
+  gitCommitFull.slice(0, 7) || `local-${new Date().toISOString().slice(0, 19)}`;
+const appGitBranch =
+  process.env.VERCEL_GIT_COMMIT_REF ||
+  process.env.GITHUB_REF_NAME ||
+  "local";
 
 /**
  * Vite dev does not run Vercel serverless routes, so /api/primecare would fall
@@ -121,6 +127,8 @@ export default defineConfig({
   plugins: [primecareLocalApiProxy(), react(), tailwindcss()],
   define: {
     "import.meta.env.VITE_APP_BUILD_STAMP": JSON.stringify(appBuildStamp),
+    "import.meta.env.VITE_APP_COMMIT_HASH": JSON.stringify(gitCommitFull.slice(0, 12) || appBuildStamp),
+    "import.meta.env.VITE_APP_GIT_BRANCH": JSON.stringify(appGitBranch),
   },
   resolve: {
     alias: {

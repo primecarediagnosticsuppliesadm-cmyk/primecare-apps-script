@@ -22,7 +22,7 @@ import ShipmentDetailDrawer from "@/components/logistics/ShipmentDetailDrawer.js
 import CourierManagementPanel from "@/components/logistics/CourierManagementPanel.jsx";
 import DeliveryPolicyPanel from "@/components/logistics/DeliveryPolicyPanel.jsx";
 import RoutePlanningPanel from "@/components/logistics/RoutePlanningPanel.jsx";
-import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
+import { usePagePerformance } from "@/hooks/usePagePerformance.js";
 import { ROLES } from "@/config/roles.js";
 import { cn } from "@/lib/utils";
 import {
@@ -91,6 +91,8 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
   const [selectedShipment, setSelectedShipment] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("dispatch");
+
+  usePagePerformance("Logistics");
 
   const load = useCallback(
     async ({ force = false } = {}) => {
@@ -165,7 +167,16 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
   }
 
   if (loading && !shipments.length) {
-    return <PageSkeleton rows={10} />;
+    return (
+      <div className="mx-auto max-w-7xl space-y-4 p-3 pb-8">
+        <PageHeader
+          title="Logistics & Delivery"
+          subtitle="Operational dispatch queue — shipments are separate from order finance."
+          icon={Truck}
+        />
+        <PageSkeleton rows={8} />
+      </div>
+    );
   }
 
   return (
