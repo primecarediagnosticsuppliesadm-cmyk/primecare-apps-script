@@ -71,6 +71,7 @@ import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
 import OrderProgressMini from "@/components/lab/OrderProgressMini.jsx";
 import { StatusBadge, usePortalToast, PageHeader, DataFetchError } from "@/components/ux";
 import {
+  buildConfirmedCheckoutTrackingDetails,
   fetchScopedOrderDetails,
   findLocalOrderForTracking,
   formatOrderPaymentLabel,
@@ -380,6 +381,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
   const lastSubmittedHashRef = useRef("");
   const lastCheckoutOrderRef = useRef(null);
   const checkoutInFlightRef = useRef(false);
+  const trackingRequestSeqRef = useRef(0);
 
   const [trackingOpen, setTrackingOpen] = useState(false);
   const [trackingOrder, setTrackingOrder] = useState(null);
@@ -776,11 +778,14 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
     ]);
   }
 
-  async function openOrderTracking(orderId) {
+  async function openOrderTracking(orderId, options = {}) {
     const oid = String(orderId || "").trim();
     if (!oid) return null;
 
-    if (checkoutInFlightRef.current) {
+    const requestSeq = ++trackingRequestSeqRef.current;
+    const isActiveRequest = () => requestSeq === trackingRequestSeqRef.current;
+
+    if (checkoutInFlightRef.current && !options.confirmedDetails) {
       setTrackingOpen(true);
       setTrackingLoading(false);
       setTrackingConfirming(true);
@@ -793,19 +798,23 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
       return null;
     }
 
-    const localRow = resolveLocalTrackingOrder(oid);
-    const localDetails = mapLocalOrderRowToTrackingDetails(localRow);
+    const prefilled =
+      options.confirmedDetails ||
+      mapLocalOrderRowToTrackingDetails(resolveLocalTrackingOrder(oid));
 
     try {
       setTrackingOpen(true);
-      setTrackingLoading(true);
       setTrackingConfirming(false);
       setTrackingError("");
-      setTrackingOrder(localDetails);
+      if (isActiveRequest()) {
+        setTrackingOrder(prefilled);
+        setTrackingLoading(true);
+      }
       logOrderTrackingEvent("order_tracking.drawer_open", {
         orderId: oid,
-        source: "lab_ordering",
-        hadLocalSnapshot: Boolean(localDetails),
+        source: options.source || "lab_ordering",
+        hadLocalSnapshot: Boolean(prefilled),
+        checkoutConfirmed: Boolean(options.confirmedDetails),
       });
 
       const details = await fetchScopedOrderDetails(oid, {
@@ -813,6 +822,13 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
         labId,
         tenantId: currentUser?.tenantId || currentUser?.tenant_id || null,
       });
+
+      if (!isActiveRequest()) return null;
+
+      if (String(details?.orderId || "").trim() !== oid) {
+        throw new Error(`Order not found: ${oid}`);
+      }
+
       setTrackingOrder(details);
       logOrderTrackingEvent("order_tracking.status_render", {
         orderId: details.orderId,
@@ -821,15 +837,19 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
       return details;
     } catch (error) {
       console.error("Failed to load order tracking", error);
-      if (localDetails) {
-        setTrackingOrder(localDetails);
+      if (!isActiveRequest()) return null;
+      if (prefilled && String(prefilled.orderId || "").trim() === oid) {
+        setTrackingOrder(prefilled);
         setTrackingError("");
-        return localDetails;
+        return prefilled;
       }
+      setTrackingOrder(null);
       setTrackingError(error.message || `Order not found: ${oid}`);
       return null;
     } finally {
-      setTrackingLoading(false);
+      if (isActiveRequest()) {
+        setTrackingLoading(false);
+      }
     }
   }
 
@@ -1330,12 +1350,19 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
           const confirmedItemCount = Number(sbRes.data.itemCount ?? itemCount);
           const confirmedTotal = Number(sbRes.data.total ?? total);
 
+          const confirmedDetails = buildConfirmedCheckoutTrackingDetails({
+            orderRow: sbRes.data.order,
+            lines: sbRes.data.lines,
+            labName,
+          });
+
           lastCheckoutOrderRef.current = orderSnapshot;
           setSubmitResult({
             success: true,
             confirmed: true,
             orderId,
             orderSnapshot,
+            lines: sbRes.data.lines || [],
             invoiceId: null,
             itemCount: confirmedItemCount,
             total: confirmedTotal,
@@ -1353,7 +1380,10 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
           await loadCatalog();
 
           if (orderId) {
-            await openOrderTracking(orderId);
+            await openOrderTracking(orderId, {
+              confirmedDetails,
+              source: "lab_checkout_confirmed",
+            });
           }
           return;
         }
@@ -1603,7 +1633,16 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
                   onClick={() => {
                     setActiveTab("orders");
                     if (submitResult.orderId) {
-                      void openOrderTracking(submitResult.orderId);
+                      void openOrderTracking(submitResult.orderId, {
+                        confirmedDetails: submitResult.orderSnapshot
+                          ? buildConfirmedCheckoutTrackingDetails({
+                              orderRow: submitResult.orderSnapshot,
+                              lines: submitResult.lines || [],
+                              labName,
+                            })
+                          : null,
+                        source: "lab_success_banner",
+                      });
                     }
                   }}
                 >

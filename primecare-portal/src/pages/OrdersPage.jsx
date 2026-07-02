@@ -47,6 +47,8 @@ import {
   buildLabFilterOptions,
   formatMissingField,
   formatItemCount,
+  filterVerificationTestOrders,
+  isVerificationTestOrderId,
   normalizeOrderStatusLabel,
   normalizePaymentStatusLabel,
   diagnoseOrdersReadDrift,
@@ -86,6 +88,7 @@ import {
   queueKeyToFilterPatch,
 } from "@/orders/ordersOperationsQueueEngine.js";
 import { cn } from "@/lib/utils";
+import { isQaValidationLayerEnabled } from "@/config/qaValidation.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -624,7 +627,10 @@ export default function OrdersPage({
     const queueFiltered = activeQueueKey
       ? filterOrdersByQueue(filtered, activeQueueKey)
       : filtered;
-    return sortOrders(queueFiltered, sortKey);
+    const sorted = sortOrders(queueFiltered, sortKey);
+    return filterVerificationTestOrders(sorted, {
+      showTestOrders: isQaValidationLayerEnabled(),
+    });
   }, [orders, search, status, paymentStatus, labFilter, dateFrom, dateTo, sortKey, activeQueueKey]);
 
   const kpis = useMemo(() => computeOrdersKpis(orders), [orders]);
@@ -1046,6 +1052,12 @@ export default function OrdersPage({
                             >
                               {order.orderId}
                             </HqObjectLink>
+                            {isQaValidationLayerEnabled() &&
+                            isVerificationTestOrderId(order.orderId) ? (
+                              <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-semibold uppercase text-amber-800">
+                                Test
+                              </span>
+                            ) : null}
                           </td>
                           <td className="px-2 py-2 text-slate-700">
                             <div className="max-w-[140px] truncate" title={order.labName}>

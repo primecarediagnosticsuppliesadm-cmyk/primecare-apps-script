@@ -18,7 +18,7 @@ import {
   getInvoiceByOrderRead,
   INVOICE_PAYMENT_FINALIZE_ERROR,
 } from "@/api/invoiceSupabaseApi.js";
-import { fetchOrderDetailLinesForOrder } from "@/api/orderLineMetricsSupport.js";
+import { fetchOrderDetailLinesForOrder, fetchOrderUnitCountsForOrders } from "@/api/orderLineMetricsSupport.js";
 import {
   filterCollectionsForUser,
   filterLabsForUser,
@@ -7096,7 +7096,7 @@ export async function getOrdersRead(params = {}) {
       labMap = new Map();
     }
 
-    const lineCounts = await fetchOrderLineCounts(collectOrderRowIds(rawList));
+    const lineCounts = await fetchOrderUnitCountsForOrders(supabase, collectOrderRowIds(rawList));
 
     const orders = rawList.map((r, idx) => {
       const labId = str(r.lab_id ?? r.labId ?? r.lab_uuid ?? r.labUUID ?? "");

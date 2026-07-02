@@ -231,6 +231,17 @@ export function formatItemCount(count) {
   return n === 1 ? "1 item" : `${n} items`;
 }
 
+/** CI / smoke orders created by verify scripts — hidden from HQ list unless validation layer is on. */
+export function isVerificationTestOrderId(orderId) {
+  const id = str(orderId).toUpperCase();
+  return id.startsWith("ORD-VERIFY") || id.startsWith("ORD-DC-SNAPSHOT");
+}
+
+export function filterVerificationTestOrders(orders = [], { showTestOrders = false } = {}) {
+  if (showTestOrders) return orders;
+  return (orders || []).filter((order) => !isVerificationTestOrderId(order.orderId ?? order.order_id));
+}
+
 /**
  * Compare API-mapped orders vs raw RLS rows for drift diagnostics.
  */

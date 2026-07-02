@@ -114,6 +114,7 @@ Credit hold is independent of ordering mode.
 | Apps Script fallback only if `ALLOW_LEGACY_APPS_SCRIPT` | |
 | Error only after Supabase + cache fail | |
 | **During checkout confirmation** | Show *"Confirming your order…"* — never *"Order not found"* until confirmation fails |
+| **Post-checkout Track** | Must open the **confirmed** `order_id` only — ignore stale in-flight tracking responses |
 | **Never blocked by `ordering_mode`** | |
 
 ---

@@ -59,6 +59,9 @@ const governanceSrc = readSrc("src/labOrdering/orderingGovernance.js");
 const drawerSrc = readSrc("src/components/lab/OrderTrackingDrawer.jsx");
 const operationalLabDrawerSrc = readSrc("src/components/operations/OperationalLabDrawer.jsx");
 const buildStampSrc = readSrc("src/utils/buildStamp.js");
+const orderLineSupportSrc = readSrc("src/api/orderLineMetricsSupport.js");
+const ordersMonitorSrc = readSrc("src/orders/ordersMonitorEngine.js");
+const ordersPageSrc = readSrc("src/pages/OrdersPage.jsx");
 
 if (orderTrackingSrc.includes("getLabOrderDetailsRead")) {
   pass("static.lab_order_details_api", "orderTracking uses getLabOrderDetailsRead");
@@ -158,6 +161,34 @@ if (
   pass("static.success_requires_confirmed", "Success banner + cart clear require confirmed persistence");
 } else {
   fail("static.success_requires_confirmed", "LabOrderingPage may show success without confirmed row");
+}
+
+if (
+  labPageSrc.includes("trackingRequestSeqRef") &&
+  labPageSrc.includes("confirmedDetails") &&
+  orderTrackingSrc.includes("buildConfirmedCheckoutTrackingDetails")
+) {
+  pass("static.track_request_seq", "Track Order ignores stale async responses + uses confirmed checkout details");
+} else {
+  fail("static.track_request_seq", "Track Order race guard or confirmed checkout details missing");
+}
+
+if (
+  apiSrc.includes("fetchOrderUnitCountsForOrders") &&
+  orderLineSupportSrc.includes("fetchOrderUnitCountsForOrders")
+) {
+  pass("static.hq_item_count", "HQ Orders item count uses canonical line/item quantity rollup");
+} else {
+  fail("static.hq_item_count", "fetchOrderUnitCountsForOrders not wired for HQ Orders");
+}
+
+if (
+  ordersMonitorSrc.includes("isVerificationTestOrderId") &&
+  ordersPageSrc.includes("filterVerificationTestOrders")
+) {
+  pass("static.hide_verify_orders", "Verification smoke orders hidden from HQ Orders unless validation layer");
+} else {
+  fail("static.hide_verify_orders", "ORD-VERIFY / ORD-DC-SNAPSHOT filter missing on Orders page");
 }
 
 if (operationalLabDrawerSrc.includes("Ordering Mode") && operationalLabDrawerSrc.includes("updateLabOrderingModeWrite")) {

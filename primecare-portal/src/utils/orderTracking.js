@@ -278,6 +278,59 @@ export function orderStatusChipVariant(rawStatus) {
   return orderStatusToVariant(rawStatus);
 }
 
+/**
+ * Build drawer-ready tracking details from a confirmed checkout DB payload.
+ */
+export function buildConfirmedCheckoutTrackingDetails({ orderRow, lines = [], labName = "" } = {}) {
+  if (!orderRow) return null;
+  const order =
+    orderRow.orderId || orderRow.order_id
+      ? orderRow
+      : {
+          orderId: orderRow.order_id ?? orderRow.orderId,
+          order_id: orderRow.order_id ?? orderRow.orderId,
+          id: orderRow.id,
+          orderStatus: orderRow.status ?? orderRow.orderStatus,
+          status: orderRow.status ?? orderRow.orderStatus,
+          orderDate: orderRow.order_date ?? orderRow.orderDate,
+          order_date: orderRow.order_date ?? orderRow.orderDate,
+          createdAt: orderRow.created_at ?? orderRow.createdAt,
+          created_at: orderRow.created_at ?? orderRow.createdAt,
+          labId: orderRow.lab_id ?? orderRow.labId,
+          lab_id: orderRow.lab_id ?? orderRow.labId,
+          labName,
+          orderTotal: orderRow.total_amount ?? orderRow.totalAmount,
+          total_amount: orderRow.total_amount ?? orderRow.totalAmount,
+          paymentStatus: orderRow.payment_status ?? orderRow.paymentStatus,
+          invoiceStatus: orderRow.invoice_status ?? orderRow.invoiceStatus,
+          invoiceId: orderRow.invoice_id ?? orderRow.invoiceId,
+          notes: orderRow.notes,
+          createdBy: orderRow.created_by ?? orderRow.createdBy,
+        };
+
+  const normalizedLines = (Array.isArray(lines) ? lines : []).map((line) => ({
+    productId: line.productId ?? line.product_id,
+    productName: line.productName ?? line.product_name,
+    quantity: line.quantity,
+    unitSellingPrice: line.unitSellingPrice ?? line.unit_selling_price ?? line.unit_price,
+    unitPrice: line.unitPrice ?? line.unit_price,
+    netLineTotal: line.netLineTotal ?? line.net_line_total ?? line.total_price,
+    total_price: line.total_price ?? line.netLineTotal,
+  }));
+
+  return mapOrderDetailsPayload({ order, lines: normalizedLines });
+}
+
+function trackingOrderIdMatches(requestedId, details) {
+  const oid = str(requestedId);
+  if (!oid || !details) return false;
+  return orderIdMatchesCandidate(oid, {
+    orderId: details.orderId,
+    order_id: details.orderId,
+    id: details.orderUUID ?? details.id,
+  });
+}
+
 export function resolveDrawerDetails(orderOrPayload) {
   if (!orderOrPayload) return null;
   if (orderOrPayload.orderId && Array.isArray(orderOrPayload.lines)) {
@@ -370,18 +423,18 @@ export async function fetchScopedOrderDetails(orderId, labKeyOrOptions = {}) {
 
   let payload = null;
 
-  const supRes = await getOrderDetailsRead(oid);
-  if (supRes?.data?.order) {
-    payload = supRes.data;
-  }
-
-  if (!payload?.order && (labId || labKey)) {
+  if (labId || labKey) {
     const labRes = await getLabOrderDetailsRead({
       orderId: oid,
       labId: labId || labKey,
       tenantId,
     });
     if (labRes?.data?.order) payload = labRes.data;
+  }
+
+  if (!payload?.order) {
+    const supRes = await getOrderDetailsRead(oid);
+    if (supRes?.data?.order) payload = supRes.data;
   }
 
   if (!payload?.order && ALLOW_LEGACY_APPS_SCRIPT) {
@@ -399,6 +452,9 @@ export async function fetchScopedOrderDetails(orderId, labKeyOrOptions = {}) {
   }
 
   const mapped = mapOrderDetailsPayload(payload);
+  if (!trackingOrderIdMatches(oid, mapped)) {
+    throw new Error(`Order not found: ${oid}`);
+  }
   const orderLabKey = labIdKey(mapped.labId);
   if (labKey && orderLabKey && orderLabKey !== labKey) {
     throw new Error("This order is not available for your lab.");

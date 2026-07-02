@@ -140,6 +140,60 @@ export async function fetchOrderLineMetricsForOrders(client, orderIds) {
  * @param {import('@supabase/supabase-js').SupabaseClient} client
  * @param {{ id?: string, order_id?: string, orderId?: string }} orderRow
  */
+/**
+ * Sum unit quantities per order_id — prefers order_lines when present, else order_items.
+ * Matches lab checkout confirmation and order detail reads.
+ * @param {import('@supabase/supabase-js').SupabaseClient} client
+ * @param {string[]} orderIds
+ */
+export async function fetchOrderUnitCountsForOrders(client, orderIds) {
+  const counts = new Map();
+  const ids = [...new Set(orderIds.map(str).filter(Boolean))];
+  if (!client || !ids.length) return counts;
+
+  const linesQty = new Map();
+  const itemsQty = new Map();
+  const linesPresent = new Set();
+  const itemsPresent = new Set();
+  const chunkSize = 200;
+
+  const accumulate = (rows, qtyMap, presentSet) => {
+    for (const row of rows || []) {
+      const oid = str(row.order_id ?? row.orderId);
+      if (!oid) continue;
+      presentSet.add(oid);
+      qtyMap.set(oid, (qtyMap.get(oid) || 0) + num(row.quantity));
+    }
+  };
+
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    const linesRes = await queryOrderLinesChunk(
+      client,
+      "order_lines",
+      ORDER_LINE_MINIMAL_COLUMNS,
+      chunk
+    );
+    if (!linesRes.error) accumulate(linesRes.data, linesQty, linesPresent);
+
+    const itemsRes = await queryOrderLinesChunk(
+      client,
+      "order_items",
+      ORDER_LINE_MINIMAL_COLUMNS,
+      chunk
+    );
+    if (!itemsRes.error) accumulate(itemsRes.data, itemsQty, itemsPresent);
+  }
+
+  for (const oid of ids) {
+    if (linesPresent.has(oid)) counts.set(oid, linesQty.get(oid) || 0);
+    else if (itemsPresent.has(oid)) counts.set(oid, itemsQty.get(oid) || 0);
+    else counts.set(oid, 0);
+  }
+
+  return counts;
+}
+
 export async function fetchOrderDetailLinesForOrder(client, orderRow) {
   if (!client || !orderRow) return { lines: [], error: null };
 
