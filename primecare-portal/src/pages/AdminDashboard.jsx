@@ -1323,7 +1323,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
         }
       />
 
-      {readHealth?.readFailed || readHealth?.degraded ? (
+      {readHealth && (readHealth.readFailed || readHealth.degraded || readHealth.itemMetricsDegraded) ? (
         <ReadHealthBanner health={readHealth} title="Dashboard read status" />
       ) : null}
 

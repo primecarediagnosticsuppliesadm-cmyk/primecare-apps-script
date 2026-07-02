@@ -3288,7 +3288,7 @@ export async function getAdminDashboardRead(options = {}) {
       "agent_visits",
       "inventory",
       "labs",
-      "order_lines",
+      "proj_order_v1",
       "payments",
     ],
   });
@@ -3416,8 +3416,17 @@ export async function getAdminDashboardRead(options = {}) {
     if (boundedSource.errors?.labs) {
       hqDebugWarn("[getAdminDashboardRead] labs:", boundedSource.errors.labs);
     }
-    if (orderIds.length && !orderLinesRaw.length) {
-      queryErrors.push("order_lines");
+    if (boundedSource.lineMetricErrors?.projection) {
+      hqDebugWarn(
+        "[getAdminDashboardRead] projection line metrics degraded:",
+        boundedSource.lineMetricErrors.projection
+      );
+    }
+    if (boundedSource.lineMetricErrors?.read_orders_list_v1) {
+      hqDebugWarn(
+        "[getAdminDashboardRead] read_orders_list_v1 fallback degraded:",
+        boundedSource.lineMetricErrors.read_orders_list_v1
+      );
     }
     if (payRes.error) {
       queryErrors.push("payments");
@@ -3558,11 +3567,14 @@ export async function getAdminDashboardRead(options = {}) {
       visitsMappedTop10Length: visits.length,
     });
 
-    const hasQueryErrors = queryErrors.length > 0;
+    const itemMetricsDegraded = boundedSource.itemMetricsDegraded === true;
+    const hasCoreQueryErrors = queryErrors.length > 0;
     const result = {
-      success: !hasQueryErrors,
-      readFailed: hasQueryErrors,
-      degraded: hasQueryErrors,
+      success: !hasCoreQueryErrors,
+      readFailed: hasCoreQueryErrors,
+      degraded: hasCoreQueryErrors || itemMetricsDegraded,
+      itemMetricsDegraded,
+      partialErrors: boundedSource.lineMetricErrors || {},
       queryErrors,
       data: payload,
     };

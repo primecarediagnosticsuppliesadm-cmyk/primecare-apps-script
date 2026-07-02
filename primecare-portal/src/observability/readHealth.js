@@ -30,21 +30,37 @@ export function extractReadHealth(result) {
     };
   }
 
-  const readFailed = result.readFailed === true || result.success === false;
+  const readFailed =
+    result.readFailed === true ||
+    (result.success === false && result.itemMetricsDegraded !== true);
+  const itemMetricsDegraded = result.itemMetricsDegraded === true;
   const degraded =
     result.degraded === true ||
+    itemMetricsDegraded ||
     readFailed ||
     (Array.isArray(result.queryErrors) && result.queryErrors.length > 0);
   const stalenessMs =
     Number.isFinite(Number(result.stalenessMs)) ? Number(result.stalenessMs) : null;
   const stale = Number.isFinite(stalenessMs) && stalenessMs > 60_000;
 
+  let error = str(result.error) || null;
+  if (!error && itemMetricsDegraded && !readFailed) {
+    const partial = result.partialErrors || {};
+    error =
+      partial.projection ||
+      partial.read_orders_list_v1 ||
+      partial.order_items ||
+      partial.order_lines ||
+      "Order line metrics partially unavailable";
+  }
+
   return {
     readFailed,
     degraded: degraded || stale,
+    itemMetricsDegraded,
     stale,
     stalenessMs,
-    error: str(result.error) || null,
+    error,
     projection: result.projection === true,
   };
 }
@@ -66,6 +82,9 @@ export function readHealthBannerMessage(health) {
     return health.error
       ? `Dashboard data unavailable: ${health.error}`
       : "Dashboard data unavailable. KPIs may be incomplete — refresh or contact support.";
+  }
+  if (health.itemMetricsDegraded) {
+    return "Order line metrics partially unavailable (order_items timeout). Revenue KPIs use order totals; verify item-level details separately.";
   }
   if (health.stale && health.stalenessMs != null) {
     const sec = Math.round(health.stalenessMs / 1000);
@@ -95,9 +114,11 @@ export function mergeReadHealth(...results) {
   );
   const error = parts.find((p) => p.error)?.error || null;
   const projection = parts.some((p) => p.projection);
+  const itemMetricsDegraded = parts.some((p) => p.itemMetricsDegraded);
   return {
     readFailed,
     degraded: degraded || stale,
+    itemMetricsDegraded,
     stale,
     stalenessMs: stalenessMs > 0 ? stalenessMs : null,
     error,

@@ -42,7 +42,7 @@ import {
 } from "@/api/hqReadBounds.js";
 import {
   ORDER_LINES_METRIC_COLUMNS,
-  fetchOrderLineMetricsForOrders,
+  fetchDashboardLineMetricsFromProjection,
 } from "@/api/orderLineMetricsSupport.js";
 import { collectOrderMetricLookupIds } from "../metrics/computeRevenueMetrics.js";
 import { perfLog, perfTime } from "../utils/perfLog.js";
@@ -324,14 +324,6 @@ function str(v) {
 }
 
 /**
- * @param {import('@supabase/supabase-js').SupabaseClient} client
- * @param {string[]} orderIds
- */
-async function fetchOrderLineMetricsForOrdersBounded(client, orderIds) {
-  return fetchOrderLineMetricsForOrders(client, orderIds);
-}
-
-/**
  * Bounded AR read — shared by getCollectionsRead and Collections Predator validation.
  * @param {import('@supabase/supabase-js').SupabaseClient|null|undefined} client
  * @param {{ limit?: number }} [options]
@@ -530,6 +522,8 @@ export async function fetchAdminDashboardBoundedSourceRows(client, options = {})
     invRaw: [],
     labsRaw: [],
     orderLinesRaw: [],
+    lineMetricErrors: {},
+    itemMetricsDegraded: false,
     recentFrom: recentDateYmd(HQ_DASHBOARD_RECENT_DAYS),
     queryMeta: {},
   };
@@ -612,16 +606,28 @@ async function loadAdminDashboardBoundedSourceRows(client, empty) {
 
   const ordersRaw = ordersRes.error ? [] : ordersRes.data || [];
   const orderIds = collectOrderMetricLookupIds(ordersRaw);
+  const tenantId = str(ordersRaw[0]?.tenant_id ?? ordersRaw[0]?.tenantId);
   const arRaw = arRes.error ? [] : arRes.data || [];
   const visitsAllRaw = visitsRes.error ? [] : visitsRes.data || [];
   const invRaw = invRes.error ? [] : invRes.data || [];
   const labsRaw = labsRes.error ? [] : labsRes.data || [];
 
   let orderLinesRaw = [];
-  if (orderIds.length) {
-    const endLines = perfTime("fetchAdminDashboardBoundedSourceRows.orderLines");
-    orderLinesRaw = await fetchOrderLineMetricsForOrdersBounded(client, orderIds);
-    endLines({ orderIds: orderIds.length, lines: orderLinesRaw.length });
+  let lineMetricErrors = {};
+  let itemMetricsDegraded = false;
+  if (ordersRaw.length) {
+    const endLines = perfTime("fetchAdminDashboardBoundedSourceRows.projectionLineMetrics");
+    const lineMetrics = await fetchDashboardLineMetricsFromProjection(client, tenantId, ordersRaw, {
+      daysBack: HQ_DASHBOARD_RECENT_DAYS,
+    });
+    orderLinesRaw = lineMetrics.rows || [];
+    lineMetricErrors = lineMetrics.errors || {};
+    itemMetricsDegraded = lineMetrics.itemMetricsDegraded === true;
+    endLines({
+      orders: ordersRaw.length,
+      needProjectionRows: orderLinesRaw.length,
+      itemMetricsDegraded,
+    });
   }
 
   return {
@@ -633,6 +639,8 @@ async function loadAdminDashboardBoundedSourceRows(client, empty) {
     invRaw,
     labsRaw,
     orderLinesRaw,
+    lineMetricErrors,
+    itemMetricsDegraded,
     recentFrom,
     queryMeta: {
       orders: `orders.select(${HQ_ORDER_LIST_COLUMNS}).gte(order_date,${recentFrom}).limit(${HQ_DASHBOARD_ORDERS_LIMIT})`,
@@ -640,8 +648,8 @@ async function loadAdminDashboardBoundedSourceRows(client, empty) {
       agent_visits: `agent_visits.select(${HQ_AGENT_VISIT_COLUMNS}).limit(${HQ_DASHBOARD_VISITS_LIMIT})`,
       inventory: `inventory.select(${HQ_INVENTORY_HEALTH_COLUMNS}).limit(${HQ_INVENTORY_HEALTH_LIMIT})`,
       labs: `labs.select(${HQ_LABS_NAME_COLUMNS}).limit(${HQ_LABS_CREDIT_LIMIT})`,
-      order_lines: orderIds.length
-        ? `order_lines.in(order_id,${orderIds.length} ids chunked)`
+      proj_order_v1: ordersRaw.length
+        ? `proj_order_v1.in(order_id) for orders missing header total; read_orders_list_v1 RPC fallback only`
         : "skipped (no orders in window)",
     },
   };

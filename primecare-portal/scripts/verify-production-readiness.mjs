@@ -86,6 +86,12 @@ async function main() {
     fail("verify-migration-integrity.mjs");
   }
 
+  if (runNode("verify-admin-dashboard-no-transactional-lines.mjs")) {
+    pass("verify-admin-dashboard-no-transactional-lines.mjs");
+  } else {
+    fail("verify-admin-dashboard-no-transactional-lines.mjs");
+  }
+
   console.log("\n=== Production readiness verification complete ===\n");
   if (process.exitCode) {
     console.log("Overall: NO-GO (P0 gaps remain)\n");
