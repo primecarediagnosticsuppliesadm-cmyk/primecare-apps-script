@@ -50,6 +50,96 @@ function labKey(c) {
   return String(c?.labId ?? c?.lab_id ?? "").trim().toUpperCase();
 }
 
+function recentDateYmd(daysBack = 90) {
+  const d = new Date();
+  d.setDate(d.getDate() - Math.max(1, Number(daysBack) || 90));
+  return d.toISOString().slice(0, 10);
+}
+
+function chunk(array, size) {
+  const out = [];
+  for (let i = 0; i < array.length; i += size) out.push(array.slice(i, i + size));
+  return out;
+}
+
+async function fetchTransactionalOrderUnitCounts(client, orderIds) {
+  const ids = [...new Set(orderIds.map(String).map((v) => v.trim()).filter(Boolean))];
+  const lineQty = new Map();
+  const itemQty = new Map();
+
+  for (const batch of chunk(ids, 20)) {
+    const lines = await client
+      .from("order_lines")
+      .select("order_id,quantity")
+      .in("order_id", batch);
+    if (lines.error) {
+      warn("txn.order_lines", lines.error.message || String(lines.error));
+    } else {
+      for (const row of lines.data || []) {
+        const oid = String(row.order_id || "").trim();
+        if (!oid) continue;
+        lineQty.set(oid, (lineQty.get(oid) || 0) + num(row.quantity));
+      }
+    }
+
+    const items = await client
+      .from("order_items")
+      .select("order_id,quantity")
+      .in("order_id", batch);
+    if (items.error) {
+      warn("txn.order_items", items.error.message || String(items.error));
+    } else {
+      for (const row of items.data || []) {
+        const oid = String(row.order_id || "").trim();
+        if (!oid) continue;
+        itemQty.set(oid, (itemQty.get(oid) || 0) + num(row.quantity));
+      }
+    }
+  }
+
+  const counts = new Map();
+  for (const id of ids) {
+    const lines = lineQty.get(id) || 0;
+    const items = itemQty.get(id) || 0;
+    counts.set(id, lines > 0 ? lines : items);
+  }
+  return counts;
+}
+
+async function readTransactionalOrdersForParity(client) {
+  const recentFrom = recentDateYmd(90);
+  const { data, error } = await client
+    .from("orders")
+    .select("id,order_id,tenant_id,lab_id,status,order_date,created_at,total_amount")
+    .eq("tenant_id", QA_HQ_TENANT_ID)
+    .or(`order_date.is.null,order_date.gte.${recentFrom},created_at.gte.${recentFrom}T00:00:00`)
+    .order("order_date", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false, nullsFirst: false })
+    .limit(100);
+
+  if (error) {
+    return { success: false, error: error.message || String(error), data: { orders: [] } };
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+  const counts = await fetchTransactionalOrderUnitCounts(
+    client,
+    rows.map((row) => row.order_id)
+  );
+  const orders = rows.map((row) => ({
+    id: row.id,
+    orderId: row.order_id,
+    tenantId: row.tenant_id,
+    labId: row.lab_id,
+    orderStatus: row.status,
+    orderDate: row.order_date || row.created_at,
+    orderTotal: num(row.total_amount),
+    itemCount: counts.get(String(row.order_id || "").trim()) || 0,
+  }));
+
+  return { success: true, data: { orders } };
+}
+
 loadEnv();
 
 console.log("\n=== Projection parity (transactional vs adapter) ===\n");
@@ -64,7 +154,9 @@ const { supabase } = await server.ssrLoadModule("/src/api/supabaseClient.js");
 const api = await server.ssrLoadModule("/src/api/primecareSupabaseApi.js");
 const adapters = await server.ssrLoadModule("/src/api/projectionReadAdapters.js");
 const refresh = await server.ssrLoadModule("/src/api/projectionRefreshApi.js");
-await server.close();
+// NOTE: keep the Vite SSR runner alive until all API calls finish. Under Sprint 6A
+// `getOrdersRead` may dynamic-import `projectionReadAdapters.js` when
+// VITE_READ_ADAPTER_ORDERS_V1 is ON; closing the runner too early breaks the import.
 
 const auth = await supabase.auth.signInWithPassword({
   email: QA_ADMIN.email,
@@ -106,7 +198,7 @@ if (!rebuildRecv.success) {
 }
 
 const [txnOrders, projOrders] = await Promise.all([
-  api.getOrdersRead({ force: true }),
+  readTransactionalOrdersForParity(supabase),
   adapters.readOrdersListV1({ force: true }),
 ]);
 
@@ -208,5 +300,7 @@ if (
 if (!collMismatches) {
   pass("parity.collections", `${collSample.length} sampled labs match`);
 }
+
+await server.close();
 
 console.log("\n=== Projection parity complete ===\n");

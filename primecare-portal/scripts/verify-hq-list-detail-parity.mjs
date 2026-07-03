@@ -53,7 +53,9 @@ const server = await createServer({
 });
 const { supabase } = await server.ssrLoadModule("/src/api/supabaseClient.js");
 const api = await server.ssrLoadModule("/src/api/primecareSupabaseApi.js");
-await server.close();
+// Sprint 6A — preload projection adapters so dynamic import inside getOrdersRead
+// resolves through the vite runner while it is still alive.
+await server.ssrLoadModule("/src/api/projectionReadAdapters.js");
 
 const auth = await supabase.auth.signInWithPassword({
   email: QA_ADMIN.email,
@@ -93,3 +95,5 @@ if (!mismatches) {
 } else {
   console.error(`\n${mismatches} mismatch(es) — check order_lines / order_items keys.\n`);
 }
+
+await server.close();

@@ -7233,6 +7233,8 @@ const ORDERS_READ_CACHE_TTL_MS = 45_000;
 let ordersReadCache = { result: null, loadedAt: 0, key: "" };
 /** @type {Promise<object>|null} */
 let ordersReadInFlight = null;
+/** @type {string} */
+let ordersReadInFlightKey = "";
 /** @type {{ map: Map<string, string>|null, loadedAt: number, inFlight: Promise<Map<string, string>>|null }} */
 let labsNameMapCache = { map: null, loadedAt: 0, inFlight: null };
 
@@ -7249,6 +7251,7 @@ function ordersReadCacheKey(params = {}) {
 export function invalidateOrdersReadCache() {
   ordersReadCache = { result: null, loadedAt: 0, key: "" };
   ordersReadInFlight = null;
+  ordersReadInFlightKey = "";
 }
 
 export function peekOrdersReadCache(params = {}) {
@@ -7281,14 +7284,10 @@ export async function enrichOrdersListWithItemCounts(orders) {
 }
 
 export async function getOrdersRead(params = {}) {
-  if (isReadAdapterOrdersV1Enabled()) {
-    const { readOrdersListV1 } = await import("@/api/projectionReadAdapters.js");
-    return readOrdersListV1(params);
-  }
   const force = params.force === true;
   const cacheKey = ordersReadCacheKey(params);
 
-  if (!force && ordersReadInFlight) {
+  if (!force && ordersReadInFlight && ordersReadInFlightKey === cacheKey) {
     perfLog("getOrdersRead.inFlightJoin");
     return ordersReadInFlight;
   }
@@ -7300,6 +7299,32 @@ export async function getOrdersRead(params = {}) {
   ) {
     perfLog("getOrdersRead.cacheHit", { ageMs: Date.now() - ordersReadCache.loadedAt });
     return ordersReadCache.result;
+  }
+
+  // Sprint 6A — projection adapter (flag VITE_READ_ADAPTER_ORDERS_V1) participates
+  // in the same in-flight/cache path as the transactional read so duplicate callers
+  // (sidebar summary, OrdersPage, Operations Center) coalesce to one RPC per TTL.
+  if (isReadAdapterOrdersV1Enabled()) {
+    const runProjection = async () => {
+      const { readOrdersListV1 } = await import("@/api/projectionReadAdapters.js");
+      return readOrdersListV1(params);
+    };
+    if (!force) {
+      ordersReadInFlightKey = cacheKey;
+      ordersReadInFlight = runProjection();
+    }
+    try {
+      const result = await (force ? runProjection() : ordersReadInFlight);
+      if (!force && result?.success !== false) {
+        ordersReadCache = { result, loadedAt: Date.now(), key: cacheKey };
+      }
+      return result;
+    } finally {
+      if (!force && ordersReadInFlightKey === cacheKey) {
+        ordersReadInFlight = null;
+        ordersReadInFlightKey = "";
+      }
+    }
   }
 
   const run = async () => {
@@ -7397,7 +7422,10 @@ export async function getOrdersRead(params = {}) {
   }
   };
 
-  if (!force) ordersReadInFlight = run();
+  if (!force) {
+    ordersReadInFlightKey = cacheKey;
+    ordersReadInFlight = run();
+  }
   try {
     const result = await (force ? run() : ordersReadInFlight);
     if (!force && result?.success !== false) {
@@ -7405,7 +7433,10 @@ export async function getOrdersRead(params = {}) {
     }
     return result;
   } finally {
-    if (!force) ordersReadInFlight = null;
+    if (!force && ordersReadInFlightKey === cacheKey) {
+      ordersReadInFlight = null;
+      ordersReadInFlightKey = "";
+    }
   }
 }
 

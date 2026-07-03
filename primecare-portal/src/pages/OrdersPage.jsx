@@ -516,25 +516,32 @@ export default function OrdersPage({
         ordersReadOk: true,
       });
 
-      const scheduleLineEnrich = () => {
-        void enrichOrdersListWithItemCounts(rows).then((enriched) => {
-          if (!Array.isArray(enriched) || !enriched.length) return;
-          const patchRows = (prev) => {
-            if (!Array.isArray(prev) || !prev.length) return prev;
-            const byId = new Map(enriched.map((o) => [str(o.orderId), o]));
-            return prev.map((row) => {
-              const next = byId.get(str(row.orderId));
-              return next && next.itemCount !== row.itemCount ? { ...row, itemCount: next.itemCount } : row;
-            });
-          };
-          setAllOrders((prev) => patchRows(prev));
-          setOrders((prev) => patchRows(prev));
-        });
-      };
-      if (typeof window.requestIdleCallback === "function") {
-        window.requestIdleCallback(scheduleLineEnrich, { timeout: 2500 });
-      } else {
-        window.setTimeout(scheduleLineEnrich, 0);
+      // Sprint 6A — when list comes from proj_order_v1 (adapter ON), item_count is
+      // already embedded per row; skip the transactional order_lines/order_items
+      // fan-out entirely. Detail drawer still reads SoT on demand.
+      const listFromProjection = res?.projection === true;
+      const rowsMissingCounts = rows.some((r) => !Number(r?.itemCount));
+      if (!listFromProjection && rowsMissingCounts) {
+        const scheduleLineEnrich = () => {
+          void enrichOrdersListWithItemCounts(rows).then((enriched) => {
+            if (!Array.isArray(enriched) || !enriched.length) return;
+            const patchRows = (prev) => {
+              if (!Array.isArray(prev) || !prev.length) return prev;
+              const byId = new Map(enriched.map((o) => [str(o.orderId), o]));
+              return prev.map((row) => {
+                const next = byId.get(str(row.orderId));
+                return next && next.itemCount !== row.itemCount ? { ...row, itemCount: next.itemCount } : row;
+              });
+            };
+            setAllOrders((prev) => patchRows(prev));
+            setOrders((prev) => patchRows(prev));
+          });
+        };
+        if (typeof window.requestIdleCallback === "function") {
+          window.requestIdleCallback(scheduleLineEnrich, { timeout: 2500 });
+        } else {
+          window.setTimeout(scheduleLineEnrich, 0);
+        }
       }
     } catch (err) {
       console.warn("OrdersPage loadOrders:", err);

@@ -41,15 +41,29 @@ function skip(msg) {
 function extractFunctionBody(source, fnName) {
   const start = source.indexOf(`async function ${fnName}`);
   if (start < 0) return "";
-  const braceStart = source.indexOf("{", start);
-  if (braceStart < 0) return "";
+  // Skip the parameter list so default values like `scope = {}` don't get counted
+  // as the function body opener.
+  let parenDepth = 0;
+  let bodyOpen = -1;
+  for (let i = source.indexOf("(", start); i < source.length; i++) {
+    const ch = source[i];
+    if (ch === "(") parenDepth += 1;
+    else if (ch === ")") {
+      parenDepth -= 1;
+      if (parenDepth === 0) {
+        bodyOpen = source.indexOf("{", i);
+        break;
+      }
+    }
+  }
+  if (bodyOpen < 0) return "";
   let depth = 0;
-  for (let i = braceStart; i < source.length; i++) {
+  for (let i = bodyOpen; i < source.length; i++) {
     const ch = source[i];
     if (ch === "{") depth += 1;
     else if (ch === "}") {
       depth -= 1;
-      if (depth === 0) return source.slice(braceStart, i + 1);
+      if (depth === 0) return source.slice(bodyOpen, i + 1);
     }
   }
   return "";
