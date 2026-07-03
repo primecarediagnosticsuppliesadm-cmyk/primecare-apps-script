@@ -48,7 +48,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | Script | Checks | When |
 |--------|--------|------|
 | verify-labs-admin-flow.mjs | Tenant scope, ownership | Labs |
-| verify-labs-projection-parity.mjs | `v_labs_credit` vs `read_labs_list_v1` parity, role scope, freshness | Labs projection |
+| verify-labs-projection-parity.mjs | Read-only `v_labs_credit` vs `read_labs_list_v1` parity, deterministic ordering/limit window, role scope, freshness, SECURITY DEFINER vs table-RLS visibility | Labs projection |
 | verify-credit-risk-admin-flow.mjs | AR KPI, aging | Credit & Risk |
 | verify-agent-collections-ownership-filter.mjs | Ownership scoping | Agent collections |
 | verify-create-lab-ar-rls.mjs | Lab+AR insert RLS | Add lab |
@@ -149,4 +149,5 @@ Use [templates/UAT_Checklist_Template.md](./templates/UAT_Checklist_Template.md)
 - `verify-*`, `check-*`, `measure-*`, and `run-*-certification.mjs` scripts must not mutate QA by default.
 - Mutation-capable probes must be explicitly gated behind `--apply` or `CONFIRM_MUTATION=true`, and repair/backfill entry points must be named `repair-*` or `backfill-*`.
 - `verify-ar-reconcile.mjs` is read-only; AR reconciliation mutations belong only in `repair-ar-reconcile.mjs --apply`.
+- `verify-labs-projection-parity.mjs` is read-only; Labs projection rebuilds belong only in `repair-labs-projection.mjs --apply`.
 - `verify-scripts-readonly.mjs` is a release gate and is wired into `verify-production-readiness.mjs`.

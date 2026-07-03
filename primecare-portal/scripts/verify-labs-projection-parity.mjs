@@ -2,6 +2,7 @@
 /**
  * Labs projection parity — v_labs_credit vs read_labs_list_v1.
  * QA shadow only: the UI flag remains OFF unless architecture review approves it.
+ * Read-only by default: run repair-labs-projection.mjs --apply to rebuild projections.
  */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -96,6 +97,33 @@ function diffRow(expected, actual) {
 function ids(rows = []) {
   return new Set(rows.map(rowIdentity));
 }
+function orderedSignature(rows = []) {
+  return rows.map(rowIdentity).join("|");
+}
+function compareProjectionOrder(label, rows = []) {
+  const actual = orderedSignature(rows);
+  const expected = orderedSignature(
+    [...rows].sort((a, b) => {
+      const name = str(a.lab_name).localeCompare(str(b.lab_name));
+      if (name !== 0) return name;
+      return key(a.lab_id).localeCompare(key(b.lab_id));
+    })
+  );
+  if (actual === expected) {
+    pass(label, "projection order is deterministic by lab_name, lab_id");
+  } else {
+    fail(label, "projection order drifted from read_labs_list_v1 contract");
+  }
+}
+function compareLimitWindow(label, limitedRows = [], fullRows = []) {
+  const expected = orderedSignature(fullRows.slice(0, limitedRows.length));
+  const actual = orderedSignature(limitedRows);
+  if (actual === expected) {
+    pass(label, `limit window stable (${limitedRows.length} rows)`);
+  } else {
+    fail(label, "limited read does not match full-read prefix");
+  }
+}
 function compareSets(label, legacyRows, projectionRows, options = {}) {
   const legacy = ids(legacyRows);
   const projection = ids(projectionRows);
@@ -133,11 +161,51 @@ async function readLegacy(client) {
   if (error) return { error: error.message || String(error), rows: [] };
   return { rows: data || [] };
 }
-async function readProjection(client) {
-  const { data, error } = await client.rpc("read_labs_list_v1", { p_limit: LIMIT });
+async function readProjection(client, limit = LIMIT) {
+  const { data, error } = await client.rpc("read_labs_list_v1", { p_limit: limit });
   if (error) return { error: error.message || String(error), rows: [], payload: null };
   const rows = Array.isArray(data?.data) ? data.data : [];
   return { rows, payload: data };
+}
+async function readProjectionTableRls(client, limit = LIMIT) {
+  const { data, error } = await client
+    .from("proj_lab_profile_v1")
+    .select("tenant_id,lab_id,lab_name")
+    .order("lab_name", { ascending: true })
+    .order("lab_id", { ascending: true })
+    .limit(limit);
+  if (error) return { error: error.message || String(error), rows: [] };
+  return { rows: data || [] };
+}
+async function validatePredicateForRows(client, label, rows = []) {
+  let checked = 0;
+  for (let i = 0; i < rows.length; i += 25) {
+    const batch = rows.slice(i, i + 25);
+    const checks = await Promise.all(
+      batch.map(async (row) => {
+        const { data, error } = await client.rpc("distributor_lab_record_visible", {
+          row_tenant_id: row.tenant_id,
+          row_lab_id: row.lab_id,
+        });
+        return { row, data, error };
+      })
+    );
+    for (const check of checks) {
+      if (check.error) {
+        fail(`${label}.predicate`, check.error.message || String(check.error));
+        return;
+      }
+      if (check.data !== true) {
+        fail(
+          `${label}.predicate`,
+          `row not visible by distributor_lab_record_visible: ${rowIdentity(check.row)}`
+        );
+        return;
+      }
+      checked += 1;
+    }
+  }
+  pass(`${label}.predicate`, `${checked} projection row(s) visible by distributor_lab_record_visible`);
 }
 
 const env = loadEnv();
@@ -146,6 +214,7 @@ const anonKey = env.VITE_SUPABASE_ANON_KEY;
 if (!url || !anonKey) throw new Error("Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY");
 
 console.log("\n=== Labs projection parity ===\n");
+pass("mode.read_only", "verification does not rebuild or mutate projections");
 
 const server = await createServer({
   root,
@@ -171,48 +240,16 @@ try {
     pass("deploy.read_labs_list_v1", "RPC available");
   }
 
-  const execClient = createClient(url, anonKey, { auth: { persistSession: false } });
-  const execSignedIn = await signInRole(execClient, { key: "executive", cred: QA_EXECUTIVE });
-  const execLegacy = execSignedIn ? await readLegacy(execClient) : { rows: [] };
-  const tenantIds = [
-    ...new Set([
-      QA_HQ_TENANT_ID,
-      ...execLegacy.rows.map((row) => str(row.tenant_id)).filter(Boolean),
-    ]),
-  ];
-  await execClient.auth.signOut();
-
-  for (const tenantId of tenantIds) {
-    await signInRole(supabase, { key: "executive", cred: QA_EXECUTIVE });
-    for (const registryId of ["PRJ-COL-LAB-v1", "PRJ-LAB-PROFILE-v1"]) {
-      const { data, error } = await supabase.rpc("rebuild_projection_v1", {
-        p_tenant_id: tenantId,
-        p_registry_id: registryId,
-        p_days_back: 90,
-      });
-      if (error) fail(`rebuild.${registryId}.${tenantId}`, error.message || String(error));
-      else pass(`rebuild.${registryId}.${tenantId}`, `${data?.row_count ?? "?"} rows`);
-    }
-  }
-
-  await signInRole(supabase, { key: "admin", cred: QA_ADMIN });
-
-  for (const registryId of ["PRJ-COL-LAB-v1", "PRJ-LAB-PROFILE-v1"]) {
-    const { data, error } = await supabase.rpc("rebuild_projection_v1", {
-      p_tenant_id: QA_HQ_TENANT_ID,
-      p_registry_id: registryId,
-      p_days_back: 90,
-    });
-    if (error) fail(`rebuild.${registryId}`, error.message || String(error));
-    else pass(`rebuild.${registryId}`, `${data?.row_count ?? "?"} rows`);
-  }
-
   const [legacy, projection] = await Promise.all([readLegacy(supabase), readProjection(supabase)]);
   if (legacy.error) fail("legacy.v_labs_credit", legacy.error);
   if (projection.error) fail("projection.read_labs_list_v1", projection.error);
 
   pass("rows.count", `legacy=${legacy.rows.length} projection=${projection.rows.length}`);
   compareSets("rows.identity", legacy.rows, projection.rows);
+  compareProjectionOrder("rows.ordering", projection.rows);
+  const projectionLimited = await readProjection(supabase, 25);
+  if (projectionLimited.error) fail("rows.limit.projection", projectionLimited.error);
+  else compareLimitWindow("rows.limit", projectionLimited.rows, projection.rows);
 
   const projectionById = new Map(projection.rows.map((r) => [rowIdentity(r), normalize(r)]));
   let drift = 0;
@@ -259,7 +296,7 @@ try {
     const ok = await signInRole(client, roleSpec);
     if (!ok) continue;
 
-    const [{ data: profile }, legacyRole, projectionRole] = await Promise.all([
+    const [{ data: profile }, legacyRole, projectionRole, projectionTableRole] = await Promise.all([
       client
         .from("profiles")
         .select("tenant_id,role,lab_id,agent_id")
@@ -267,12 +304,27 @@ try {
         .maybeSingle(),
       readLegacy(client),
       readProjection(client),
+      readProjectionTableRls(client),
     ]);
     if (legacyRole.error) fail(`visibility.${roleSpec.key}.legacy`, legacyRole.error);
     if (projectionRole.error) fail(`visibility.${roleSpec.key}.projection`, projectionRole.error);
+    if (projectionTableRole.error) {
+      fail(`visibility.${roleSpec.key}.table_rls`, projectionTableRole.error);
+    }
     compareSets(`visibility.${roleSpec.key}`, legacyRole.rows, projectionRole.rows, {
       allowProjectionOverflow: roleSpec.key === "executive",
     });
+    compareSets(
+      `security_definer.${roleSpec.key}`,
+      projectionTableRole.rows,
+      projectionRole.rows,
+      {
+        allowProjectionOverflow:
+          roleSpec.key === "executive" && projectionTableRole.rows.length >= 1000,
+      }
+    );
+    await validatePredicateForRows(client, `security_definer.${roleSpec.key}`, projectionRole.rows);
+    compareProjectionOrder(`ordering.${roleSpec.key}`, projectionRole.rows);
 
     const tenantId = str(profile?.tenant_id);
     if (roleSpec.key !== "executive" && tenantId) {

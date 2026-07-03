@@ -4,6 +4,28 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-03 — Sprint 8A.1 Labs Projection Hardening
+
+### Change
+
+- Harden `readLabsListV1` so stale/unavailable/empty/failed projection reads fall back to the existing `getLabsCredit` / `v_labs_credit` path with `degraded: true` and `source: "fallback"`.
+- Make `verify-labs-projection-parity.mjs` read-only by default; Labs projection rebuilds move to `repair-labs-projection.mjs --apply`.
+- Extend Labs projection certification for deterministic `read_labs_list_v1` ordering/limit windows and SECURITY DEFINER adapter visibility vs projection table RLS.
+
+### Not changed
+
+- No finance, AR, payments, invoices, orders, inventory, logistics, commissions, delivery charge rules, business logic ownership, RLS policy, SQL semantics, or production flag changes.
+- `VITE_READ_ADAPTER_LABS_V1` remains disabled by default.
+
+### Verification gates
+
+- `npm run build`
+- `node scripts/verify-scripts-readonly.mjs`
+- `node scripts/verify-labs-projection-parity.mjs`
+- Full Sprint 8A regression bundle before QA flag review.
+
+---
+
 ## 2026-07-03 — Sprint 8A Labs Projection QA Shadow
 
 ### Change

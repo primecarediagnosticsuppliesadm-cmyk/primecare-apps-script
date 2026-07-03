@@ -15,6 +15,7 @@ Registry: [Projection_Registry.md](../../../docs/Architecture/Projection_Registr
 | Parity — orders | item_count + orderTotal match (15 sample) | `verify-projection-parity.mjs` |
 | Parity — collections | outstanding + totalPaid match (12 sample) | `verify-projection-parity.mjs` |
 | Parity — labs | profile + ownership + ordering + composed receivable fields match `v_labs_credit` | `verify-labs-projection-parity.mjs` |
+| Ordering/paging — labs | deterministic `read_labs_list_v1` ordering by `lab_name`, `lab_id`; limited reads match full-read prefix | `verify-labs-projection-parity.mjs` |
 | Parity — dashboard KPIs | executive + summary scalars vs transactional sample | `verify-dashboard-projection-parity.mjs` |
 | Parity — executive KPIs | `get_founder_snapshot` field match | `verify-executive-projection-parity.mjs` |
 | Staleness — core | ≤ 60 s after rebuild | `verify-projection-staleness.mjs` |
@@ -25,6 +26,7 @@ Registry: [Projection_Registry.md](../../../docs/Architecture/Projection_Registr
 | Performance — dashboard | ≤ 350 ms cold adapter | `measure-dashboard-projection-reads.mjs` |
 | Performance — executive | ≤ 400 ms cold adapter | `measure-dashboard-projection-reads.mjs` |
 | RLS | projection SELECT mirrors SoT | `verify-hq-rls-reads.mjs` (extend) |
+| SECURITY DEFINER visibility — labs | `read_labs_list_v1` output matches `proj_lab_profile_v1` table RLS for admin, executive, agent, lab | `verify-labs-projection-parity.mjs` |
 | Zero SoT on hot path | adapter must not query orders/ar/payments/inventory | `verify-dashboard-projection-parity.mjs` (static + runtime) |
 | Flag default | OFF (shadow) | `.env` — all `VITE_READ_ADAPTER_*` unset |
 
