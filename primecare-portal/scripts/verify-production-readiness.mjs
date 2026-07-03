@@ -68,6 +68,12 @@ async function main() {
     fail("readProjectionFlags.js shadow invariant missing");
   }
 
+  if (runNode("verify-scripts-readonly.mjs")) {
+    pass("verify-scripts-readonly.mjs");
+  } else {
+    fail("verify-scripts-readonly.mjs");
+  }
+
   if (runNode("verify-security-hardening.mjs")) {
     pass("verify-security-hardening.mjs");
   } else {

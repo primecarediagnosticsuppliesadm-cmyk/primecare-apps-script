@@ -4,6 +4,7 @@
  *
  * Usage:
  *   node scripts/verify-logistics-dispatch-flow.mjs
+ *   node scripts/verify-logistics-dispatch-flow.mjs --apply   # live route mutation probes
  */
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync, existsSync } from "node:fs";
@@ -14,6 +15,7 @@ import { QA_ADMIN, QA_HQ_TENANT_ID } from "./qaCredentials.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const HQ = process.env.TENANT_ID || QA_HQ_TENANT_ID;
+const APPLY = process.argv.includes("--apply") || process.env.CONFIRM_MUTATION === "true";
 
 const VALID_STATUSES = new Set([
   "ready_for_dispatch",
@@ -417,7 +419,11 @@ async function runLiveChecks(sb) {
     pass("live.couriers_table", "logistics_couriers readable");
   }
 
-  await runLiveRoutePlanningChecks(sb, rows);
+  if (APPLY) {
+    await runLiveRoutePlanningChecks(sb, rows);
+  } else {
+    warn("live.route_planning_mutation_skipped", "Route create/update/delete checks require --apply");
+  }
 }
 
 async function runLiveRoutePlanningChecks(sb, shipments) {

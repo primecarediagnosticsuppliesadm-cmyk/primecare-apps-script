@@ -4,6 +4,7 @@
  * Validates can_insert_ar_for_lab flips true after lab insert and RPC contract.
  *
  * Usage: node scripts/verify-create-lab-ar-rls.mjs
+ * Live mutation probes require: node scripts/verify-create-lab-ar-rls.mjs --apply
  */
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync, existsSync } from "node:fs";
@@ -14,6 +15,7 @@ import { QA_ADMIN, QA_HQ_TENANT_ID } from "./qaCredentials.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const HQ = process.env.TENANT_ID || QA_HQ_TENANT_ID;
+const APPLY = process.argv.includes("--apply") || process.env.CONFIRM_MUTATION === "true";
 
 const results = [];
 function pass(id, detail) {
@@ -21,6 +23,9 @@ function pass(id, detail) {
 }
 function fail(id, detail) {
   results.push({ id, status: "FAIL", detail });
+}
+function skip(id, detail) {
+  results.push({ id, status: "SKIP", detail });
 }
 
 function loadEnv() {
@@ -58,6 +63,20 @@ async function main() {
     pass("AR-01", "can_insert_ar_for_lab false before lab exists (expected)");
   } else {
     fail("AR-01", `can_insert_ar_for_lab should be false before lab exists; got ${before.data}`);
+  }
+
+  if (!APPLY) {
+    skip("AR-02", "Live lab/AR insert/delete probes skipped — rerun with --apply to mutate QA");
+    skip("AR-04", "Direct AR insert probe skipped — rerun with --apply to mutate QA");
+    skip("AR-05", "create_lab_with_ar_credit RPC mutation skipped — rerun with --apply");
+    const failed = results.filter((r) => r.status === "FAIL");
+    console.log("\n=== Create Lab + AR RLS regression ===");
+    for (const r of results) {
+      console.log(`${r.status} ${r.id}: ${r.detail}`);
+    }
+    console.log(`\n${results.length - failed.length}/${results.length} non-failing`);
+    if (failed.length) process.exit(1);
+    return;
   }
 
   const labRow = {

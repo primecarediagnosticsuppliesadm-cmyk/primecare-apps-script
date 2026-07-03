@@ -4,7 +4,7 @@
  *
  * Usage:
  *   node scripts/verify-invoice-phase5.mjs
- *   node scripts/verify-invoice-phase5.mjs --remote
+ *   node scripts/verify-invoice-phase5.mjs --remote --apply
  */
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync, existsSync } from "fs";
@@ -17,6 +17,7 @@ const SQL_PATH = resolve(root, "supabase/sql/invoice_system_phase5_migration.sql
 const API_PATH = resolve(root, "src/api/invoiceSupabaseApi.js");
 const HQ_TENANT = "f168b98f-47a6-42c3-b788-24c00436fac2";
 const REMOTE = process.argv.includes("--remote");
+const APPLY = process.argv.includes("--apply") || process.env.CONFIRM_MUTATION === "true";
 
 const results = [];
 
@@ -119,6 +120,10 @@ async function verifyRemote(env) {
 
   if (!adminEnv.sb) {
     warn("R-01", `Admin auth failed: ${adminEnv.error || "unknown"}`);
+    return;
+  }
+  if (!APPLY) {
+    skip("R-ALL", "Remote payment/allocation mutation probes skipped — rerun --remote --apply");
     return;
   }
 

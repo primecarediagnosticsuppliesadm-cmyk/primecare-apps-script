@@ -5,6 +5,7 @@
  * Usage:
  *   node scripts/verify-procurement-inventory-flow.mjs           # dry-run (read-only)
  *   node scripts/verify-procurement-inventory-flow.mjs --mutate  # receive on open PO
+ *   node scripts/verify-procurement-inventory-flow.mjs --apply   # same mutation confirmation
  */
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync, existsSync } from "node:fs";
@@ -23,7 +24,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const HQ = process.env.TENANT_ID || "f168b98f-47a6-42c3-b788-24c00436fac2";
 const TEST_SKU = process.env.TEST_SKU || "QA_SKU_003";
-const MUTATE = process.argv.includes("--mutate");
+const APPLY = process.argv.includes("--apply") || process.env.CONFIRM_MUTATION === "true";
+const MUTATE = process.argv.includes("--mutate") || APPLY;
 
 const results = [];
 

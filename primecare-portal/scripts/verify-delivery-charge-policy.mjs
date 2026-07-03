@@ -4,6 +4,7 @@
  *
  * Usage:
  *   node scripts/verify-delivery-charge-policy.mjs
+ *   node scripts/verify-delivery-charge-policy.mjs --apply   # live order/snapshot mutation probe
  */
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync, existsSync } from "node:fs";
@@ -22,6 +23,7 @@ import { QA_ADMIN, QA_HQ_TENANT_ID, QA_LAB } from "./qaCredentials.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const HQ = process.env.TENANT_ID || QA_HQ_TENANT_ID;
+const APPLY = process.argv.includes("--apply") || process.env.CONFIRM_MUTATION === "true";
 
 const results = [];
 
@@ -527,7 +529,11 @@ async function main() {
   const env = loadEnv();
   if (env?.VITE_SUPABASE_URL && env?.VITE_SUPABASE_ANON_KEY) {
     await runLiveChecks(env);
-    await runLiveLabSnapshotChecks(env);
+    if (APPLY) {
+      await runLiveLabSnapshotChecks(env);
+    } else {
+      warn("DC-35", "Live lab order/snapshot mutation probe skipped — rerun with --apply");
+    }
   } else {
     warn("DC-30", "Skip live — .env.local missing");
   }

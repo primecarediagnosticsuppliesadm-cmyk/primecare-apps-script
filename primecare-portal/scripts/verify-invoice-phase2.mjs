@@ -4,7 +4,7 @@
  *
  * Usage:
  *   node scripts/verify-invoice-phase2.mjs
- *   node scripts/verify-invoice-phase2.mjs --remote
+ *   node scripts/verify-invoice-phase2.mjs --remote --apply
  *
  * Remote tests use disposable QA orders prefixed ORD-INV-P2- (HQ tenant only).
  * Does not touch Guntur certified tenant data.
@@ -20,6 +20,7 @@ const SQL_PATH = resolve(root, "supabase/sql/invoice_system_phase2_migration.sql
 const API_PATH = resolve(root, "src/api/primecareSupabaseApi.js");
 const HQ_TENANT = "f168b98f-47a6-42c3-b788-24c00436fac2";
 const REMOTE = process.argv.includes("--remote");
+const APPLY = process.argv.includes("--apply") || process.env.CONFIRM_MUTATION === "true";
 
 const results = [];
 
@@ -111,6 +112,10 @@ async function verifyRemote(env) {
   const { sb: adminSb, error: adminErr } = await login(env, "qa.admin@primecare.test", "1234");
   if (adminErr || !adminSb) {
     warn("R-00", `Admin auth failed: ${adminErr || "unknown"}`);
+    return;
+  }
+  if (!APPLY) {
+    skip("R-ALL", "Remote invoice creation mutation probes skipped — rerun --remote --apply");
     return;
   }
 

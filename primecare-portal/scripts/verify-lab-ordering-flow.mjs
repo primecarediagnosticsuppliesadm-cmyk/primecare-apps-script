@@ -5,6 +5,7 @@
  *
  * Usage:
  *   node scripts/verify-lab-ordering-flow.mjs
+ *   node scripts/verify-lab-ordering-flow.mjs --apply   # live checkout/mode mutation probes
  */
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync, existsSync } from "node:fs";
@@ -14,6 +15,7 @@ import { QA_LAB, QA_ADMIN, QA_HQ_TENANT_ID } from "./qaCredentials.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
+const APPLY = process.argv.includes("--apply") || process.env.CONFIRM_MUTATION === "true";
 
 const RESTORE_MODE = "self_service";
 const LAB_CHECKOUT_CONFIRM_ERROR =
@@ -354,6 +356,16 @@ else {
 }
 
 await signInAdmin();
+if (!APPLY) {
+  warn(
+    "live.mutation_skipped",
+    "Ordering mode changes and live checkout mutation probes skipped — rerun with --apply to mutate QA"
+  );
+  if (!process.exitCode) {
+    console.log("\nRead-only lab ordering checks passed.");
+  }
+  process.exit(process.exitCode || 0);
+}
 const modeColumnReady = await setOrderingMode("self_service");
 if (modeColumnReady) {
   await signInLab();

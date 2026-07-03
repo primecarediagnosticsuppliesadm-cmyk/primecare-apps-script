@@ -5,7 +5,7 @@
  *
  * Usage:
  *   node scripts/verify-invoice-phase1.mjs
- *   node scripts/verify-invoice-phase1.mjs --remote
+ *   node scripts/verify-invoice-phase1.mjs --remote --apply
  */
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync, existsSync } from "fs";
@@ -21,6 +21,7 @@ const MIGRATION_PATH = resolve(
 );
 
 const REMOTE = process.argv.includes("--remote");
+const APPLY = process.argv.includes("--apply") || process.env.CONFIRM_MUTATION === "true";
 
 function loadEnvLocal() {
   const path = resolve(root, ".env.local");
@@ -203,6 +204,11 @@ async function verifyRemote(env) {
   if (ordersErr) fail("R-20", `orders.invoice_id missing or inaccessible: ${ordersErr.message}`);
   else pass("R-20", "orders.invoice_id column accessible");
 
+  if (!APPLY) {
+    skip("R-30", "Lab invoice INSERT denial probe skipped — rerun --remote --apply to attempt mutation");
+    skip("R-31", "Lab line-item INSERT denial probe skipped — rerun --remote --apply to attempt mutation");
+    skip("R-32", "Lab allocation INSERT denial probe skipped — rerun --remote --apply to attempt mutation");
+  } else {
   const { error: invInsErr } = await labSb.from("invoices").insert({
     tenant_id: "00000000-0000-0000-0000-000000000001",
     lab_id: "LAB-PROBE",
@@ -237,6 +243,7 @@ async function verifyRemote(env) {
   });
   if (allocInsErr) pass("R-32", `Lab direct allocation INSERT denied: ${allocInsErr.message}`);
   else fail("R-32", "Lab was able to INSERT into invoice_payment_allocations (RLS hole)");
+  }
 
   const { error: seqErr } = await labSb.from("invoice_number_sequences").select("*").limit(1);
   if (seqErr) pass("R-33", `invoice_number_sequences inaccessible to lab: ${seqErr.message}`);
