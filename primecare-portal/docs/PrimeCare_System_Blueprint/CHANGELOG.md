@@ -4,6 +4,57 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-03 — Sprint 6A.1 Read-Only Verification Safety Gate
+
+### Change
+
+- `verify-ar-reconcile.mjs` is now read-only and runs only the collection inconsistency audit.
+- AR reconciliation mutation moved to `repair-ar-reconcile.mjs`, dry-run by default and requiring `--apply` or `CONFIRM_MUTATION=true` for the `reconcile_ar_from_payments` RPC.
+- `verify-scripts-readonly.mjs` added to audit `verify-*`, `check-*`, `measure-*`, and `run-*-certification.mjs` scripts for obvious mutation patterns.
+- `verify-production-readiness.mjs` now runs the read-only guard before nested readiness checks.
+- Legacy mutation-capable verification probes now require an explicit apply confirmation for default safety.
+
+### Not changed
+
+- No finance, AR, payment, invoice, allocation, Orders adapter, RLS, schema, projection, inventory, or logistics business logic changed.
+- No production deployment.
+
+### Verification gates
+
+- `node scripts/verify-scripts-readonly.mjs`
+- Sprint 6A read-only certification bundle before commit recommendation.
+
+---
+
+## 2026-07-03 — Sprint 6A Orders Projection Adapter (QA enablement)
+
+### Change
+
+- `VITE_READ_ADAPTER_ORDERS_V1=true` enabled on QA (`.env.local`) — HQ Orders list now reads from `proj_order_v1` via `read_orders_list_v1`.
+- Other read adapters remain **OFF** (`VITE_READ_ADAPTER_RECEIVABLES_V1`, `VITE_READ_ADAPTER_DASHBOARD_V1`, `VITE_READ_ADAPTER_EXECUTIVE_V1`).
+- `OrdersPage.jsx`: skips `enrichOrdersListWithItemCounts` (transactional `order_lines`/`order_items` fan-out) when the list is projection-sourced — projection rows already carry `item_count`.
+- `getOrdersRead` (`primecareSupabaseApi.js`): projection path now shares the same in-flight coalesce + 45 s TTL cache as the transactional path, so sidebar summary + Orders page + Operations Center coalesce to one RPC per TTL.
+- Detail drawer path (`getOrderDetailsRead`) unchanged — transactional SoT reads permitted for a single order.
+
+### Not changed
+
+- No SoT writes, no lifecycle changes, no RLS changes, no finance/AR/inventory/logistics logic, no projection schemas.
+- Production deployment untouched. QA-only.
+
+### Verification gates (Sprint 6A)
+
+- `verify-projection-parity.mjs`, `verify-projection-staleness.mjs`
+- `verify-hq-list-detail-parity.mjs` (list `itemCount` vs detail drawer)
+- `verify-admin-dashboard-no-transactional-lines.mjs`, `verify-financial-reconciliation.mjs`, `verify-delivery-charge-policy.mjs`, `verify-production-readiness.mjs`, `verify-runtime-import-safety.mjs`
+- `run-browser-smoke-all-roles.mjs`, `measure-all-role-page-performance.mjs`
+
+### References
+
+- `18_Domain_Projection_Architecture.md` (adapter flags, staleness SLA)
+- `05_Order_Lifecycle.md`, `06_Finance_Rules.md`, `15_Do_Not_Break_Rules.md`
+
+---
+
 ## 2026-07-02 — Sprint 3A Production Safety Hardening
 
 ### Implemented (approved P0 fixes only)

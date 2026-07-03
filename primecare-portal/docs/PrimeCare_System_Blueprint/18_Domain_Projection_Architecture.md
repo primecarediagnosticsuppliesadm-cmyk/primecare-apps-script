@@ -361,6 +361,30 @@ Projection tables may exist while flags OFF (shadow mode).
 
 ---
 
+## Sprint 6A — Orders adapter QA enablement
+
+**Scope:** flip `VITE_READ_ADAPTER_ORDERS_V1=true` on QA only. All other adapters remain OFF.
+
+### Contract preserved
+
+- `getOrdersRead(params)` returns the same result shape whether backed by transactional query or `read_orders_list_v1`. Projection response carries additional `projection: true`, `registryId`, `asOf`, `stalenessMs`, `degraded` fields; consumers may ignore them.
+- Detail drawer (`getOrderDetailsRead(orderId)`) continues to read `orders` + `order_lines`/`order_items` SoT. Projections are for list-load only.
+
+### List path invariants (QA)
+
+- Initial HQ Orders list load performs **zero** `order_items` / `order_lines` reads.
+- `itemCount` on list rows comes from `proj_order_v1.item_count` (event-refreshed).
+- `enrichOrdersListWithItemCounts` idle path is bypassed when `res.projection === true`.
+- `getOrdersRead` in-flight join + 45 s TTL cache is shared across both transactional and projection paths.
+
+### Not enabled (Sprint 6B evaluation)
+
+- `VITE_READ_ADAPTER_RECEIVABLES_V1`
+- `VITE_READ_ADAPTER_DASHBOARD_V1`
+- `VITE_READ_ADAPTER_EXECUTIVE_V1`
+
+---
+
 ## Sprint 2 Phase 2 — Dashboard & Executive (design approved)
 
 **Goal:** Zero transactional scans on Admin Dashboard and Founder/Executive hot paths. Target ≤350 ms dashboard, ≤400 ms executive adapter read.

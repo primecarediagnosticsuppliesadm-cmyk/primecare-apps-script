@@ -1,6 +1,6 @@
 # 13 — Verification Matrix
 
-41 scripts in `primecare-portal/scripts/` (39 verify + 2 cert orchestrators). **Exit 1 on FAIL** (WARN alone usually passes).
+Verification scripts in `primecare-portal/scripts/` are **read-only by default**. **Exit 1 on FAIL** (WARN alone usually passes).
 
 **Phase 2 framework:** Object ↔ script mapping in [16_Certification_Framework.md](./16_Certification_Framework.md) and `docs/Certification_Framework/01_Object_Source_of_Truth_Catalog.md`. Browser checklist orchestrator: `scripts/run-browser-certification.mjs`.
 
@@ -22,8 +22,9 @@
 | verify-invoice-phase3.mjs | PDF immutable lines | PDF |
 | verify-invoice-phase4.mjs | Invoice Center bounded reads | Invoice UI |
 | verify-invoice-phase5.mjs | Allocation RPC, partially_paid | Allocations |
+| verify-invoice-lifecycle.mjs | Read-only bundle for invoice phase/lifecycle checks | Invoice regression |
 | verify-primecare-production-golden-path.mjs | Full E2E golden | Pre-release |
-| verify-ar-reconcile.mjs | AR reconcile + audit | AR drift |
+| verify-ar-reconcile.mjs | Read-only AR inconsistency audit; repair lives in `repair-ar-reconcile.mjs --apply` | AR drift |
 | verify-collection-inconsistencies.mjs | Golden lab cleanliness | Collections hygiene |
 
 ### Orders & lab
@@ -86,6 +87,7 @@
 | verify-sprint1-health.mjs | Sprint 1 bundle | Sprint changes |
 | verify-perf-scale-counts.mjs | PERF tenant scale | Perf testing |
 | verify-production-monitoring.mjs | RC-2 orchestrator | Release monitoring |
+| verify-scripts-readonly.mjs | Guard verify/check/measure/cert scripts against unconfirmed mutations | **Every release / production readiness** |
 | run-hq-performance-certification.mjs | PERF tenant benchmarks | Performance cert |
 | run-browser-certification.mjs | API prereq gate + browser checklist | O2C / release browser cert |
 | measure-hq-navigation-perf.mjs | QA navigation probe | Ad-hoc perf |
@@ -97,6 +99,7 @@
 **HQ Admin cert:**
 ```
 npm run build
+verify-scripts-readonly.mjs
 verify-inventory-dashboard-kpi.mjs
 verify-procurement-inventory-flow.mjs
 verify-orders-admin-flow.mjs
@@ -135,3 +138,12 @@ Use [templates/UAT_Checklist_Template.md](./templates/UAT_Checklist_Template.md)
 | PASS | Continue |
 | WARN | Review; may ship if documented |
 | FAIL | Block merge |
+
+---
+
+## Read-only verification safety
+
+- `verify-*`, `check-*`, `measure-*`, and `run-*-certification.mjs` scripts must not mutate QA by default.
+- Mutation-capable probes must be explicitly gated behind `--apply` or `CONFIRM_MUTATION=true`, and repair/backfill entry points must be named `repair-*` or `backfill-*`.
+- `verify-ar-reconcile.mjs` is read-only; AR reconciliation mutations belong only in `repair-ar-reconcile.mjs --apply`.
+- `verify-scripts-readonly.mjs` is a release gate and is wired into `verify-production-readiness.mjs`.

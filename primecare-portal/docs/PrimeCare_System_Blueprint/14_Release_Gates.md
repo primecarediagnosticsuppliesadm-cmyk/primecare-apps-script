@@ -12,6 +12,7 @@ Criteria before recommending commit, merge, or production promotion.
 | **Cert framework** | Object + screen catalog entries updated when SoT or UI changes ([16_Certification_Framework.md](./16_Certification_Framework.md)) |
 | **Impact analysis** | `templates/Feature_Impact_Assessment_Template.md` completed |
 | **Build** | `npm run build` passes |
+| **Read-only verification guard** | `node scripts/verify-scripts-readonly.mjs` passes before any verify bundle |
 | **Verify** | Module scripts from [13_Verification_Matrix.md](./13_Verification_Matrix.md) pass |
 | **UAT** | Manual checklist written and executed for affected roles |
 | **Regression** | No new FAIL in unrelated verify scripts |
@@ -27,6 +28,7 @@ Do not recommend commit when:
 - Implementation gate = BLOCKED
 - RLS/finance change without approval
 - Verify FAIL unresolved
+- `verify-scripts-readonly.mjs` fails or any verification script mutates without explicit `--apply` / `CONFIRM_MUTATION=true`
 - Blueprint not updated for schema/rule changes
 
 ---
@@ -49,6 +51,7 @@ Update after each certification run.
 ## Production promotion
 
 Additional gates:
+- `verify-scripts-readonly.mjs`
 - `verify-primecare-production-golden-path.mjs`
 - `verify-production-monitoring.mjs`
 - `scripts/run-browser-certification.mjs` — prereq gate + browser checklist
