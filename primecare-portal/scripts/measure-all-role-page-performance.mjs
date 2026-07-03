@@ -27,6 +27,9 @@ const TARGETS = {
   "HQ Admin|collections": 2000,
   "HQ Admin|logistics": 2000,
   "HQ Admin|sidebar": 4000,
+  "HQ Admin|labs": 1000,
+  "HQ Admin|inventory": 1000,
+  "HQ Admin|purchaseOrders": 2000,
   "HQ Executive|dashboard": 3000,
   "HQ Executive|executiveFi": 3000,
   "HQ Executive|sidebar": 4000,
@@ -195,6 +198,18 @@ async function main() {
   rows.push(
     await instrumentedLoad("admin-sidebar", "HQ Admin", "sidebar", () =>
       ctx.sidebar.getSidebarSummary({ tenantId, role: "admin", force: true }), ctx)
+  );
+  rows.push(
+    await instrumentedLoad("admin-labs", "HQ Admin", "labs", () =>
+      ctx.api.getLabsCredit({ force: true }), ctx)
+  );
+  rows.push(
+    await instrumentedLoad("admin-inventory", "HQ Admin", "inventory", () =>
+      ctx.api.getStockDashboard({ force: true, tenantId }), ctx)
+  );
+  rows.push(
+    await instrumentedLoad("admin-purchaseOrders", "HQ Admin", "purchaseOrders", () =>
+      ctx.api.getPurchaseOrdersRead({ force: true }), ctx)
   );
 
   await signIn(QA_EXECUTIVE);

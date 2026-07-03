@@ -93,6 +93,40 @@ export default function ProjectionOperationsCenterPage({ currentUser = null }) {
 
   const catalog = useMemo(() => getCatalogProjections(), []);
 
+  const health = metrics?.healthRegistry || [];
+  const cert = metrics?.certificationReport;
+  const drift = metrics?.driftAlerts;
+  const shadow = metrics?.shadowMonitoring;
+
+  const projectionReadHealth = useMemo(() => {
+    const staleRows = (health || []).filter(
+      (row) => row.freshnessStatus === "FAIL" || row.freshnessStatus === "WARN"
+    );
+    if (!staleRows.length && cert?.overall !== "NO-GO") return null;
+    return mergeReadHealth({
+      success: staleRows.length === 0 && cert?.overall !== "NO-GO",
+      readFailed: cert?.overall === "NO-GO",
+      degraded: staleRows.length > 0 || cert?.overall === "WARN",
+      error:
+        staleRows.length > 0
+          ? `${staleRows.length} projection(s) stale or failing freshness SLA`
+          : cert?.overall === "NO-GO"
+            ? "Projection certification NO-GO"
+            : null,
+      projection: true,
+    });
+  }, [health, cert]);
+
+  const monitoringSnapshot = useMemo(
+    () =>
+      buildHealthSnapshot({
+        overall: cert?.overall || "UNKNOWN",
+        staleProjections: (health || []).filter((r) => r.freshnessStatus !== "PASS").length,
+        driftAlertCount: drift?.alerts?.length ?? 0,
+      }),
+    [cert, health, drift]
+  );
+
   async function handleRebuildCascade() {
     if (!tenantId) return;
     setRebuilding(true);
@@ -139,42 +173,6 @@ export default function ProjectionOperationsCenterPage({ currentUser = null }) {
     return <PageSkeleton rows={8} />;
   }
 
-  const health = metrics?.healthRegistry || [];
-  const cert = metrics?.certificationReport;
-  const drift = metrics?.driftAlerts;
-  const shadow = metrics?.shadowMonitoring;
-
-  const projectionReadHealth = useMemo(() => {
-    const staleRows = (health || []).filter(
-      (row) => row.freshnessStatus === "FAIL" || row.freshnessStatus === "WARN"
-    );
-    if (!staleRows.length && cert?.overall !== "NO-GO") return null;
-    return mergeReadHealth({
-      success: staleRows.length === 0 && cert?.overall !== "NO-GO",
-      readFailed: cert?.overall === "NO-GO",
-      degraded: staleRows.length > 0 || cert?.overall === "WARN",
-      error:
-        staleRows.length > 0
-          ? `${staleRows.length} projection(s) stale or failing freshness SLA`
-          : cert?.overall === "NO-GO"
-            ? "Projection certification NO-GO"
-            : null,
-      projection: true,
-    });
-  }, [health, cert]);
-
-  const monitoringSnapshot = useMemo(
-    () =>
-      buildHealthSnapshot({
-        overall: cert?.overall || "UNKNOWN",
-        staleProjections: (health || []).filter((r) => r.freshnessStatus !== "PASS").length,
-        driftAlertCount: drift?.alerts?.length ?? 0,
-      }),
-    [cert, health, drift]
-  );
-
-  void monitoringSnapshot;
-
   return (
     <div className="mx-auto max-w-6xl space-y-3 p-3 pb-8">
       <header className="flex flex-wrap items-start justify-between gap-2">
@@ -182,6 +180,9 @@ export default function ProjectionOperationsCenterPage({ currentUser = null }) {
           <h1 className="text-lg font-bold text-slate-900">Projection Operations Center</h1>
           <p className="text-xs text-slate-600">
             Read-only monitoring — flags OFF, adapters unchanged. Tenant {tenantId || "—"}
+            {monitoringSnapshot?.projectionOps?.overall
+              ? ` · health ${monitoringSnapshot.projectionOps.overall}`
+              : ""}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

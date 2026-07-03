@@ -8,6 +8,9 @@ import {
   getStockDashboard,
   normalizeAdminDashboardReadResult,
   peekAdminDashboardReadCache,
+  peekCollectionsReadCache,
+  peekOrdersReadCache,
+  peekStockDashboardReadCache,
 } from "@/api/primecareSupabaseApi.js";
 import { coordinatedRead } from "@/api/hqReadCoordinator.js";
 import { mergeReadHealth } from "@/observability/readHealth.js";
@@ -17,6 +20,10 @@ import { listOperationalEvidence } from "@/api/operationalEvidenceApi.js";
 import { loadInventoryEconomicsBundle } from "@/inventory/inventoryEconomicsData.js";
 import { loadLabOwnershipMetricsBundle } from "@/operations/operationsCenterAdminData.js";
 import { HQ_COLLECTIONS_AR_LIMIT, HQ_ORDERS_LIST_DEFAULT_LIMIT } from "@/api/hqReadBounds.js";
+
+function str(v) {
+  return String(v ?? "").trim();
+}
 
 const OPS_CACHE_MS = 45_000;
 /** @type {Map<string, { at: number, data: object }>} */
@@ -63,14 +70,15 @@ const EMPTY_PAYLOAD = {
   founderSnapshot: null,
 };
 
-async function resolveDashboardReadForOps(force = false) {
+async function resolveDashboardReadForOps(force = false, tenantId = "") {
+  const tid = str(tenantId);
   if (!force) {
     const peeked = peekAdminDashboardReadCache();
     if (peeked?.data) {
       return { success: true, data: peeked.data, fromCache: true };
     }
   }
-  return getAdminDashboardRead({ force });
+  return getAdminDashboardRead({ force, ...(tid ? { tenantId: tid } : {}) });
 }
 
 /**
@@ -81,13 +89,18 @@ async function resolveDashboardReadForOps(force = false) {
 export async function loadOperationsCommandCenterCore(currentUser, options = {}) {
   const { force = false } = options;
   const tenantId = currentUser?.tenantId ?? currentUser?.tenant_id ?? null;
-  const readOpts = force ? { force: true } : {};
+  const tid = str(tenantId);
+  const readOpts = force ? { force: true, ...(tid ? { tenantId: tid } : {}) } : tid ? { tenantId: tid } : {};
+
+  const collCached = !force ? peekCollectionsReadCache(readOpts) : null;
+  const stockCached = !force ? peekStockDashboardReadCache() : null;
+  const ordersCached = !force ? peekOrdersReadCache(readOpts) : null;
 
   const [dashRes, collRes, stockRes, ordersRes, notifyRes] = await Promise.all([
-    resolveDashboardReadForOps(force),
-    getCollectionsRead(readOpts),
-    getStockDashboard(readOpts),
-    getOrdersRead({ force }),
+    resolveDashboardReadForOps(force, tid),
+    collCached ? Promise.resolve(collCached) : getCollectionsRead(readOpts),
+    stockCached ? Promise.resolve(stockCached) : getStockDashboard(readOpts),
+    ordersCached ? Promise.resolve(ordersCached) : getOrdersRead({ force, ...readOpts, skipLineCounts: true }),
     getNotificationEventsRead({ tenantId, limit: 60 }),
   ]);
 

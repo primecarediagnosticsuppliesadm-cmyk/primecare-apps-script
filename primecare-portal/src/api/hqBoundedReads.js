@@ -49,11 +49,11 @@ import { perfLog, perfTime } from "../utils/perfLog.js";
 
 const BOUNDED_SOURCE_CACHE_TTL_MS = 30_000;
 
-/** @type {{ loadedAt: number, data: object|null, inFlight: Promise<object>|null }} */
-let boundedSourceCache = { loadedAt: 0, data: null, inFlight: null };
+/** @type {{ tenantId: string, loadedAt: number, data: object|null, inFlight: Promise<object>|null }} */
+let boundedSourceCache = { tenantId: "", loadedAt: 0, data: null, inFlight: null };
 
 export function invalidateBoundedSourceCache() {
-  boundedSourceCache = { loadedAt: 0, data: null, inFlight: null };
+  boundedSourceCache = { tenantId: "", loadedAt: 0, data: null, inFlight: null };
   invalidateStockDashboardReadCache();
   invalidateLabCatalogReadCache();
   invalidateInventoryLedgerReadCache();
@@ -85,42 +85,45 @@ export function invalidateInventoryLedgerReadCache() {
  * Bounded v_stock_dashboard read.
  * @param {import('@supabase/supabase-js').SupabaseClient|null|undefined} client
  */
-export async function fetchStockDashboardBoundedRows(client) {
+export async function fetchStockDashboardBoundedRows(client, options = {}) {
   if (!client) {
     return { data: [], error: { message: "Supabase client not configured" } };
   }
-  return client
-    .from("v_stock_dashboard")
-    .select(HQ_V_STOCK_DASHBOARD_COLUMNS)
-    .limit(HQ_STOCK_DASHBOARD_LIMIT);
+  const tenantId = resolveBoundedTenantId(options);
+  return scopeTenant(
+    client.from("v_stock_dashboard").select(HQ_V_STOCK_DASHBOARD_COLUMNS),
+    tenantId
+  ).limit(HQ_STOCK_DASHBOARD_LIMIT);
 }
 
 /**
  * Bounded v_lab_catalog read.
  * @param {import('@supabase/supabase-js').SupabaseClient|null|undefined} client
  */
-export async function fetchLabCatalogBoundedRows(client) {
+export async function fetchLabCatalogBoundedRows(client, options = {}) {
   if (!client) {
     return { data: [], error: { message: "Supabase client not configured" } };
   }
-  return client
-    .from("v_lab_catalog")
-    .select(HQ_LAB_CATALOG_LIST_COLUMNS)
-    .limit(HQ_LAB_CATALOG_LIMIT);
+  const tenantId = resolveBoundedTenantId(options);
+  return scopeTenant(
+    client.from("v_lab_catalog").select(HQ_LAB_CATALOG_LIST_COLUMNS),
+    tenantId
+  ).limit(HQ_LAB_CATALOG_LIMIT);
 }
 
 /**
  * Bounded v_reorder_candidates read.
  * @param {import('@supabase/supabase-js').SupabaseClient|null|undefined} client
  */
-export async function fetchReorderCandidatesBoundedRows(client) {
+export async function fetchReorderCandidatesBoundedRows(client, options = {}) {
   if (!client) {
     return { data: [], error: { message: "Supabase client not configured" } };
   }
-  return client
-    .from("v_reorder_candidates")
-    .select(HQ_REORDER_CANDIDATE_COLUMNS)
-    .limit(HQ_REORDER_CANDIDATES_LIMIT);
+  const tenantId = resolveBoundedTenantId(options);
+  return scopeTenant(
+    client.from("v_reorder_candidates").select(HQ_REORDER_CANDIDATE_COLUMNS),
+    tenantId
+  ).limit(HQ_REORDER_CANDIDATES_LIMIT);
 }
 
 /**
@@ -276,13 +279,16 @@ export async function fetchPaymentsForLabBoundedRows(client, labId, options = {}
     Number(options.daysBack) > 0 ? Number(options.daysBack) : HQ_PAYMENTS_RECENT_DAYS;
   const limit = clampLimit(options.limit, HQ_PAYMENTS_RECENT_LIMIT, HQ_PAYMENTS_RECENT_LIMIT);
   const recentFrom = recentDateYmd(daysBack);
-  return client
-    .from("payments")
-    .select(HQ_PAYMENT_COLUMNS)
-    .eq("lab_id", str(labId))
-    .gte("payment_date", recentFrom)
-    .order("payment_date", { ascending: false })
-    .limit(limit);
+  const tenantId = resolveBoundedTenantId(options);
+  return scopeTenant(
+    client
+      .from("payments")
+      .select(HQ_PAYMENT_COLUMNS)
+      .eq("lab_id", str(labId))
+      .gte("payment_date", recentFrom)
+      .order("payment_date", { ascending: false }),
+    tenantId
+  ).limit(limit);
 }
 
 /**
@@ -298,11 +304,14 @@ export async function fetchPurchaseOrdersBoundedBundle(client, options = {}) {
     };
   }
   const limit = clampLimit(options.limit, HQ_PURCHASE_ORDER_LIMIT, HQ_PURCHASE_ORDER_LIMIT);
-  const poRes = await client
-    .from("purchase_orders")
-    .select(HQ_PURCHASE_ORDER_LIST_COLUMNS)
-    .order("created_at", { ascending: false })
-    .limit(limit);
+  const tenantId = resolveBoundedTenantId(options);
+  const poRes = await scopeTenant(
+    client
+      .from("purchase_orders")
+      .select(HQ_PURCHASE_ORDER_LIST_COLUMNS)
+      .order("created_at", { ascending: false }),
+    tenantId
+  ).limit(limit);
   if (poRes.error) {
     return { poRes, itemsRes: { data: [], error: poRes.error } };
   }
@@ -323,6 +332,17 @@ function str(v) {
   return String(v ?? "").trim();
 }
 
+/** @param {object} [options] */
+export function resolveBoundedTenantId(options = {}) {
+  return str(options.tenantId ?? options.tenant_id);
+}
+
+/** @param {import('@supabase/postgrest-js').PostgrestFilterBuilder} query */
+function scopeTenant(query, tenantId) {
+  const tid = resolveBoundedTenantId({ tenantId });
+  return tid ? query.eq("tenant_id", tid) : query;
+}
+
 /**
  * Bounded AR read — shared by getCollectionsRead and Collections Predator validation.
  * @param {import('@supabase/supabase-js').SupabaseClient|null|undefined} client
@@ -333,25 +353,29 @@ export async function fetchCollectionsBoundedArRows(client, options = {}) {
     return { data: [], error: { message: "Supabase client not configured" } };
   }
   const limit = clampLimit(options.limit, HQ_COLLECTIONS_AR_LIMIT, HQ_COLLECTIONS_AR_LIMIT);
-  return client
-    .from("ar_credit_control")
-    .select(HQ_AR_COLUMNS)
-    .limit(limit);
+  const tenantId = resolveBoundedTenantId(options);
+  return scopeTenant(
+    client.from("ar_credit_control").select(HQ_AR_COLUMNS),
+    tenantId
+  ).limit(limit);
 }
 
 /**
  * Bounded agent visits read — shared by getAgentWorkspaceRead and Agent Visits validation.
  * @param {import('@supabase/supabase-js').SupabaseClient|null|undefined} client
  */
-export async function fetchAgentVisitsBoundedRows(client) {
+export async function fetchAgentVisitsBoundedRows(client, options = {}) {
   if (!client) {
     return { data: [], error: { message: "Supabase client not configured" } };
   }
-  return client
-    .from("agent_visits")
-    .select(HQ_AGENT_VISIT_COLUMNS)
-    .order("created_at", { ascending: false })
-    .limit(HQ_DASHBOARD_VISITS_LIMIT);
+  const tenantId = resolveBoundedTenantId(options);
+  return scopeTenant(
+    client
+      .from("agent_visits")
+      .select(HQ_AGENT_VISIT_COLUMNS)
+      .order("created_at", { ascending: false }),
+    tenantId
+  ).limit(HQ_DASHBOARD_VISITS_LIMIT);
 }
 
 /**
@@ -365,11 +389,14 @@ export async function fetchQualificationBoundedRows(client, options = {}) {
   }
   const limit = clampLimit(options.limit, HQ_QUALIFICATION_LIMIT, HQ_QUALIFICATION_LIMIT);
   const offset = Math.max(0, Number(options.offset) || 0);
-  return client
-    .from("lab_qualifications")
-    .select(HQ_QUALIFICATION_COLUMNS)
-    .order("updated_at", { ascending: false })
-    .range(offset, offset + limit - 1);
+  const tenantId = resolveBoundedTenantId(options);
+  return scopeTenant(
+    client
+      .from("lab_qualifications")
+      .select(HQ_QUALIFICATION_COLUMNS)
+      .order("updated_at", { ascending: false }),
+    tenantId
+  ).range(offset, offset + limit - 1);
 }
 
 /**
@@ -383,7 +410,8 @@ export async function fetchLabsCreditBoundedRows(client, options = {}) {
   }
   const limit = clampLimit(options.limit, HQ_LABS_CREDIT_LIMIT, HQ_LABS_CREDIT_LIMIT);
   const columns = str(options.columns) || HQ_V_LABS_CREDIT_LIST_COLUMNS;
-  return client.from("v_labs_credit").select(columns).limit(limit);
+  const tenantId = resolveBoundedTenantId(options);
+  return scopeTenant(client.from("v_labs_credit").select(columns), tenantId).limit(limit);
 }
 
 /**
@@ -400,21 +428,23 @@ export async function fetchPaymentsBoundedRows(client, options = {}) {
   const limit = clampLimit(options.limit, HQ_PAYMENTS_RECENT_LIMIT, HQ_PAYMENTS_RECENT_LIMIT);
   const recentFrom = recentDateYmd(daysBack);
   const paymentDateEq = str(options.paymentDateEq);
+  const tenantId = resolveBoundedTenantId(options);
 
   if (paymentDateEq) {
-    return client
-      .from("payments")
-      .select(HQ_PAYMENT_COLUMNS)
-      .eq("payment_date", paymentDateEq)
-      .limit(limit);
+    return scopeTenant(
+      client.from("payments").select(HQ_PAYMENT_COLUMNS).eq("payment_date", paymentDateEq),
+      tenantId
+    ).limit(limit);
   }
 
-  return client
-    .from("payments")
-    .select(HQ_PAYMENT_COLUMNS)
-    .gte("payment_date", recentFrom)
-    .order("payment_date", { ascending: false })
-    .limit(limit);
+  return scopeTenant(
+    client
+      .from("payments")
+      .select(HQ_PAYMENT_COLUMNS)
+      .gte("payment_date", recentFrom)
+      .order("payment_date", { ascending: false }),
+    tenantId
+  ).limit(limit);
 }
 
 /**
@@ -427,11 +457,14 @@ export async function fetchOrderLinesBoundedRows(client, options = {}) {
     return { data: [], error: { message: "Supabase client not configured" } };
   }
   const limit = clampLimit(options.limit, 5000, 5000);
-  return client
-    .from("order_lines")
-    .select(ORDER_LINES_METRIC_COLUMNS)
-    .order("order_id", { ascending: false })
-    .limit(limit);
+  const tenantId = resolveBoundedTenantId(options);
+  return scopeTenant(
+    client
+      .from("order_lines")
+      .select(ORDER_LINES_METRIC_COLUMNS)
+      .order("order_id", { ascending: false }),
+    tenantId
+  ).limit(limit);
 }
 
 /**
@@ -444,7 +477,11 @@ export async function fetchInventoryBoundedRows(client, options = {}) {
     return { data: [], error: { message: "Supabase client not configured" } };
   }
   const limit = clampLimit(options.limit, HQ_INVENTORY_HEALTH_LIMIT, HQ_INVENTORY_HEALTH_LIMIT);
-  return client.from("inventory").select(HQ_INVENTORY_HEALTH_COLUMNS).limit(limit);
+  const tenantId = resolveBoundedTenantId(options);
+  return scopeTenant(
+    client.from("inventory").select(HQ_INVENTORY_HEALTH_COLUMNS),
+    tenantId
+  ).limit(limit);
 }
 
 /**
@@ -460,12 +497,15 @@ export async function fetchInventoryLedgerBoundedRows(client, options = {}) {
     Number(options.daysBack) > 0 ? Number(options.daysBack) : HQ_INVENTORY_LEDGER_RECENT_DAYS;
   const limit = clampLimit(options.limit, HQ_INVENTORY_LEDGER_LIMIT, HQ_INVENTORY_LEDGER_LIMIT);
   const recentFrom = recentDateYmd(daysBack);
-  return client
-    .from("inventory_ledger")
-    .select(HQ_INVENTORY_LEDGER_COLUMNS)
-    .gte("created_at", `${recentFrom}T00:00:00`)
-    .order("created_at", { ascending: false })
-    .limit(limit);
+  const tenantId = resolveBoundedTenantId(options);
+  return scopeTenant(
+    client
+      .from("inventory_ledger")
+      .select(HQ_INVENTORY_LEDGER_COLUMNS)
+      .gte("created_at", `${recentFrom}T00:00:00`)
+      .order("created_at", { ascending: false }),
+    tenantId
+  ).limit(limit);
 }
 
 /**
@@ -513,6 +553,7 @@ export async function fetchSearchRuntimeBoundedSources(client) {
  */
 export async function fetchAdminDashboardBoundedSourceRows(client, options = {}) {
   const force = options.force === true;
+  const tenantId = resolveBoundedTenantId(options);
   const empty = {
     errors: {},
     ordersRaw: [],
@@ -535,6 +576,7 @@ export async function fetchAdminDashboardBoundedSourceRows(client, options = {})
   if (
     !force &&
     boundedSourceCache.data &&
+    boundedSourceCache.tenantId === tenantId &&
     Date.now() - boundedSourceCache.loadedAt < BOUNDED_SOURCE_CACHE_TTL_MS
   ) {
     perfLog("fetchAdminDashboardBoundedSourceRows.cacheHit", {
@@ -549,13 +591,14 @@ export async function fetchAdminDashboardBoundedSourceRows(client, options = {})
   }
 
   const endTotal = perfTime("fetchAdminDashboardBoundedSourceRows.total");
-  const load = loadAdminDashboardBoundedSourceRows(client, empty);
+  const load = loadAdminDashboardBoundedSourceRows(client, empty, { tenantId });
   if (!force) boundedSourceCache.inFlight = load;
 
   try {
     const data = await load;
     if (!force) {
       boundedSourceCache.data = data;
+      boundedSourceCache.tenantId = tenantId;
       boundedSourceCache.loadedAt = Date.now();
     }
     endTotal({
@@ -572,25 +615,32 @@ export async function fetchAdminDashboardBoundedSourceRows(client, options = {})
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} client
  * @param {object} empty
+ * @param {{ tenantId?: string }} [scope]
  */
-async function loadAdminDashboardBoundedSourceRows(client, empty) {
+async function loadAdminDashboardBoundedSourceRows(client, empty, scope = {}) {
   const recentFrom = empty.recentFrom;
   const errors = {};
+  const tenantId = resolveBoundedTenantId(scope);
 
-  const ordersQuery = client
-    .from("orders")
-    .select(HQ_ORDER_LIST_COLUMNS)
-    .gte("order_date", recentFrom)
-    .order("order_date", { ascending: false })
-    .limit(HQ_DASHBOARD_ORDERS_LIMIT);
+  const ordersQuery = scopeTenant(
+    client
+      .from("orders")
+      .select(HQ_ORDER_LIST_COLUMNS)
+      .gte("order_date", recentFrom)
+      .order("order_date", { ascending: false }),
+    tenantId
+  ).limit(HQ_DASHBOARD_ORDERS_LIMIT);
 
   const endParallel = perfTime("fetchAdminDashboardBoundedSourceRows.parallel");
   const [ordersRes, arRes, visitsRes, invRes, labsRes] = await Promise.all([
     ordersQuery,
-    fetchCollectionsBoundedArRows(client),
-    fetchAgentVisitsBoundedRows(client),
-    fetchInventoryBoundedRows(client, { limit: HQ_INVENTORY_HEALTH_LIMIT }),
-    client.from("labs").select(HQ_LABS_NAME_COLUMNS).limit(HQ_LABS_CREDIT_LIMIT),
+    fetchCollectionsBoundedArRows(client, { tenantId }),
+    fetchAgentVisitsBoundedRows(client, { tenantId }),
+    fetchInventoryBoundedRows(client, { limit: HQ_INVENTORY_HEALTH_LIMIT, tenantId }),
+    scopeTenant(
+      client.from("labs").select(HQ_LABS_NAME_COLUMNS),
+      tenantId
+    ).limit(HQ_LABS_CREDIT_LIMIT),
   ]);
   endParallel({
     orders: ordersRes.error ? 0 : ordersRes.data?.length ?? 0,
@@ -606,7 +656,7 @@ async function loadAdminDashboardBoundedSourceRows(client, empty) {
 
   const ordersRaw = ordersRes.error ? [] : ordersRes.data || [];
   const orderIds = collectOrderMetricLookupIds(ordersRaw);
-  const tenantId = str(ordersRaw[0]?.tenant_id ?? ordersRaw[0]?.tenantId);
+  const resolvedTenantId = tenantId || str(ordersRaw[0]?.tenant_id ?? ordersRaw[0]?.tenantId);
   const arRaw = arRes.error ? [] : arRes.data || [];
   const visitsAllRaw = visitsRes.error ? [] : visitsRes.data || [];
   const invRaw = invRes.error ? [] : invRes.data || [];
@@ -617,7 +667,7 @@ async function loadAdminDashboardBoundedSourceRows(client, empty) {
   let itemMetricsDegraded = false;
   if (ordersRaw.length) {
     const endLines = perfTime("fetchAdminDashboardBoundedSourceRows.projectionLineMetrics");
-    const lineMetrics = await fetchDashboardLineMetricsFromProjection(client, tenantId, ordersRaw, {
+    const lineMetrics = await fetchDashboardLineMetricsFromProjection(client, resolvedTenantId, ordersRaw, {
       daysBack: HQ_DASHBOARD_RECENT_DAYS,
     });
     orderLinesRaw = lineMetrics.rows || [];

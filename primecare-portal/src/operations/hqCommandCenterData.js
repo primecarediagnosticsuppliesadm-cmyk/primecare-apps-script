@@ -2,6 +2,7 @@ import {
   getCollectionsRead,
   getOperationsPlatformUsersRead,
   mapOrderRow,
+  peekCollectionsReadCache,
 } from "@/api/primecareSupabaseApi.js";
 import {
   HQ_DASHBOARD_RECENT_DAYS,
@@ -93,8 +94,9 @@ function mapAuditEvents(auditRes, directoryUsers = []) {
 }
 
 /** Inventory-only read — same criticalItems rule as getAdminDashboardRead (rollupInventoryTableRows). */
-async function loadTodaysWorkInventorySlice() {
-  const { data, error } = await fetchInventoryBoundedRows(supabase);
+async function loadTodaysWorkInventorySlice(tenantId) {
+  const boundedScope = str(tenantId) ? { tenantId: str(tenantId) } : {};
+  const { data, error } = await fetchInventoryBoundedRows(supabase, boundedScope);
   const stockStats = rollupInventoryTableRows(data || []);
   return {
     slice: {
@@ -108,32 +110,35 @@ async function loadTodaysWorkInventorySlice() {
 }
 
 /** Orders list for pending count — same bounded query as getOrdersRead without line-count fan-out. */
-async function loadTodaysWorkOrdersSlice() {
+async function loadTodaysWorkOrdersSlice(tenantId) {
   if (!supabase) {
     return { slice: { orders: [] }, error: "Supabase is not configured" };
   }
 
   const limit = HQ_ORDERS_LIST_DEFAULT_LIMIT;
   const recentFrom = recentDateYmd(HQ_DASHBOARD_RECENT_DAYS);
+  const tid = str(tenantId);
   let rawList = [];
   let lastError = null;
 
-  const primary = await supabase
+  let primaryQuery = supabase
     .from("orders")
     .select(HQ_ORDER_LIST_COLUMNS)
     .gte("order_date", recentFrom)
-    .order("order_date", { ascending: false })
-    .limit(limit);
+    .order("order_date", { ascending: false });
+  if (tid) primaryQuery = primaryQuery.eq("tenant_id", tid);
+  const primary = await primaryQuery.limit(limit);
 
   if (!primary.error) {
     rawList = Array.isArray(primary.data) ? primary.data : [];
   } else {
     lastError = primary.error;
-    const fallback = await supabase
+    let fallbackQuery = supabase
       .from("orders")
       .select(HQ_ORDER_LIST_COLUMNS)
-      .order("created_at", { ascending: false })
-      .limit(limit);
+      .order("created_at", { ascending: false });
+    if (tid) fallbackQuery = fallbackQuery.eq("tenant_id", tid);
+    const fallback = await fallbackQuery.limit(limit);
     if (!fallback.error) {
       rawList = Array.isArray(fallback.data) ? fallback.data : [];
       lastError = null;
@@ -225,7 +230,7 @@ export const loadHqPrioritiesBundle = loadHqTodaysWorkBundle;
 export function createTodaysWorkCardLoaders(tenantId, options = {}) {
   const tid = str(tenantId);
   const force = options.force === true;
-  const readOpts = force ? { force: true } : {};
+  const readOpts = force ? { force: true, ...(tid ? { tenantId: tid } : {}) } : tid ? { tenantId: tid } : {};
 
   /** @type {Promise<{ directoryUsers: object[], error?: string }>|null} */
   let usersLoad = null;
@@ -240,9 +245,10 @@ export function createTodaysWorkCardLoaders(tenantId, options = {}) {
   };
 
   return {
-    inventory: () => loadTodaysWorkInventorySlice(),
+    inventory: () => loadTodaysWorkInventorySlice(tid),
     collections: async () => {
-      const collRes = await getCollectionsRead(readOpts);
+      const collCached = !force ? peekCollectionsReadCache(readOpts) : null;
+      const collRes = collCached || (await getCollectionsRead(readOpts));
       return {
         slice: {
           collections: Array.isArray(collRes?.data?.collections) ? collRes.data.collections : [],
@@ -250,7 +256,7 @@ export function createTodaysWorkCardLoaders(tenantId, options = {}) {
         error: collRes?.error || null,
       };
     },
-    orders: () => loadTodaysWorkOrdersSlice(),
+    orders: () => loadTodaysWorkOrdersSlice(tid),
     users: async () => {
       const { directoryUsers, error } = await loadDirectoryUsers();
       return { slice: { directoryUsers }, error };

@@ -47,6 +47,7 @@ import { onFinancialSyncCompleted } from "@/operations/financialSyncEvents.js";
 import { useFinancialSyncPulse } from "@/hooks/useFinancialSyncPulse.js";
 import { usePagePerformance } from "@/hooks/usePagePerformance.js";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
+import { scheduleIdleTask } from "@/utils/scheduleIdleTask.js";
 import { hqDebugLog } from "@/utils/hqDebugLog.js";
 import {
   KpiCard,
@@ -77,6 +78,10 @@ import {
 } from "lucide-react";
 
 const DASHBOARD_CACHE_TTL = 60 * 1000;
+
+function str(v) {
+  return String(v ?? "").trim();
+}
 
 /**
  * When true, AdminDashboard does not call Apps Script reads (getDashboard,
@@ -535,11 +540,13 @@ function commitDashboardHydration(
   return hasVisibleKpis(mergedKpis);
 }
 
-async function fetchSupabaseAdminSlice({ force = false } = {}) {
+async function fetchSupabaseAdminSlice({ force = false, tenantId = "" } = {}) {
+  const tid = str(tenantId);
+  const readOpts = { force, ...(tid ? { tenantId: tid } : {}) };
   const slice = { stock: null, labs: null, forecast: null, dashboardRead: null };
   const endPrimary = perfTime("AdminDashboard.getAdminDashboardRead");
   try {
-    slice.dashboardRead = await getAdminDashboardRead({ force });
+    slice.dashboardRead = await getAdminDashboardRead(readOpts);
     endPrimary({ success: slice.dashboardRead?.success, force });
   } catch (e) {
     console.warn("[AdminDashboard] Supabase dashboard read skipped:", e?.message || e);
@@ -556,7 +563,7 @@ async function fetchSupabaseAdminSlice({ force = false } = {}) {
   const endFallback = perfTime("AdminDashboard.fallbackSliceFetches");
   const [stockSettled, labsSettled, forecastSettled] = await Promise.allSettled([
     getStockDashboard(),
-    getLabsCredit(),
+    getLabsCredit(readOpts),
     getReorderForecastRead(),
   ]);
   if (stockSettled.status === "fulfilled") slice.stock = stockSettled.value;
@@ -832,7 +839,11 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
         invalidateAllHqReads(currentUser?.tenantId ?? currentUser?.tenant_id ?? null);
       }
 
-      const result = await getAdminDashboardRead({ force });
+      const homeTenantId = str(currentUser?.tenantId ?? currentUser?.tenant_id);
+      const result = await getAdminDashboardRead({
+        force,
+        ...(homeTenantId ? { tenantId: homeTenantId } : {}),
+      });
       if (loadId !== loadGenerationRef.current) return;
 
       lastRawReadRef.current = result;
@@ -887,7 +898,11 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       apis: ["getAdminDashboardRead", "getStockDashboard?", "getLabsCredit?", "getReorderForecastRead?"],
     });
     const endLoad = perfTime("AdminDashboard.loadPrimaryData");
-    const supabaseSlice = await fetchSupabaseAdminSlice({ force });
+    const homeTenantId = str(currentUser?.tenantId ?? currentUser?.tenant_id);
+    const supabaseSlice = await fetchSupabaseAdminSlice({
+      force,
+      tenantId: homeTenantId,
+    });
     if (loadId !== loadGenerationRef.current) return;
     endLoad({ force });
 
@@ -1120,8 +1135,10 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       }
 
       if (!shouldUseQaDirectDashboardRead()) {
-        loadSecondaryData({ force }).catch((err) => {
-          console.warn("[AdminDashboard] secondary panels:", err?.message || err);
+        scheduleIdleTask(() => {
+          loadSecondaryData({ force }).catch((err) => {
+            console.warn("[AdminDashboard] secondary panels:", err?.message || err);
+          });
         });
       }
     })();

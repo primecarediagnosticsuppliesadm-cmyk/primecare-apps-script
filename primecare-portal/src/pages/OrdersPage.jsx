@@ -5,6 +5,7 @@ import {
   getOrderDetailsRead,
   updateOrderStatusWrite,
   peekOrdersReadCache,
+  enrichOrdersListWithItemCounts,
   getOperationsLabAssignmentsRead,
 } from "@/api/primecareSupabaseApi";
 import { supabase } from "@/api/supabaseClient.js";
@@ -14,6 +15,7 @@ import {
 } from "@/utils/migrationTrace.js";
 import { invalidateAdminDashboardCaches } from "@/utils/dashboardInvalidate.js";
 import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
+import { scheduleIdleTask } from "@/utils/scheduleIdleTask.js";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 import { isHqOrderStatusWriteBlocked, getHqFreezeBannerMessage } from "@/config/hqReleasePolicy.js";
 import { isPredatorAutoValidationEnabled } from "@/predator/predatorGuards.js";
@@ -464,7 +466,10 @@ export default function OrdersPage({
         setListRefreshing(true);
       }
       setError("");
-      const res = await getOrdersRead();
+      const res = await getOrdersRead({
+        skipLineCounts: true,
+        ...(homeTenantId ? { tenantId: homeTenantId } : {}),
+      });
       if (res?.success === false) {
         throw new Error(res.error || "Failed to load orders from Supabase.");
       }
@@ -510,6 +515,27 @@ export default function OrdersPage({
         orders: scoped,
         ordersReadOk: true,
       });
+
+      const scheduleLineEnrich = () => {
+        void enrichOrdersListWithItemCounts(rows).then((enriched) => {
+          if (!Array.isArray(enriched) || !enriched.length) return;
+          const patchRows = (prev) => {
+            if (!Array.isArray(prev) || !prev.length) return prev;
+            const byId = new Map(enriched.map((o) => [str(o.orderId), o]));
+            return prev.map((row) => {
+              const next = byId.get(str(row.orderId));
+              return next && next.itemCount !== row.itemCount ? { ...row, itemCount: next.itemCount } : row;
+            });
+          };
+          setAllOrders((prev) => patchRows(prev));
+          setOrders((prev) => patchRows(prev));
+        });
+      };
+      if (typeof window.requestIdleCallback === "function") {
+        window.requestIdleCallback(scheduleLineEnrich, { timeout: 2500 });
+      } else {
+        window.setTimeout(scheduleLineEnrich, 0);
+      }
     } catch (err) {
       console.warn("OrdersPage loadOrders:", err);
       const message = err?.message || "Failed to load orders.";
@@ -706,16 +732,16 @@ export default function OrdersPage({
       return undefined;
     }
     let cancelled = false;
-    const timer = window.setTimeout(() => {
+    const cancelIdle = scheduleIdleTask(() => {
       void getInvoicesByOrderIdsRead(invoicePrefetchIds, { tenantId: homeTenantId }).then((res) => {
         if (!cancelled && res.success) {
           setInvoiceByOrderId(res.byOrderId || {});
         }
       });
-    }, 200);
+    }, { timeout: 3000 });
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      cancelIdle();
     };
   }, [invoicePrefetchIds.join("|"), homeTenantId]);
 

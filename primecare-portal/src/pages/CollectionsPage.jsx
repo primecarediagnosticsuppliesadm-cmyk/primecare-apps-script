@@ -2021,7 +2021,8 @@ export default function CollectionsPage({
         logSupabaseFeatureSource("Collections.list", { api: "getCollectionsRead" });
         const [res, ownershipRes] = await Promise.all([
           getCollectionsRead({
-            force: userRole === ROLES.AGENT ? true : silent,
+            force: silent,
+            ...(tenantId ? { tenantId } : {}),
           }),
           userRole === ROLES.AGENT
             ? getAgentActiveLabOwnershipRowsRead()

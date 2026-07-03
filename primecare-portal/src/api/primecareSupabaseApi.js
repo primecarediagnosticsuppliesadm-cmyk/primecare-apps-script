@@ -1057,6 +1057,8 @@ export async function enrichCatalogWithProductMetadata(products, tenantId) {
 const STOCK_DASHBOARD_READ_CACHE_TTL_MS = 45_000;
 /** @type {{ result: object|null, loadedAt: number }} */
 let stockDashboardReadCache = { result: null, loadedAt: 0 };
+/** @type {Promise<object>|null} */
+let stockDashboardReadInFlight = null;
 
 export function peekStockDashboardReadCache() {
   if (
@@ -1070,53 +1072,67 @@ export function peekStockDashboardReadCache() {
 
 export function invalidateStockDashboardReadResultCache() {
   stockDashboardReadCache = { result: null, loadedAt: 0 };
+  stockDashboardReadInFlight = null;
 }
 
 export async function getStockDashboard(options = {}) {
   const force = options.force === true;
   if (!force) {
+    if (stockDashboardReadInFlight) {
+      perfLog("getStockDashboard.inFlightJoin");
+      return stockDashboardReadInFlight;
+    }
     const cached = peekStockDashboardReadCache();
     if (cached) return cached;
   }
 
-  traceSupabaseRead("Inventory.getStockDashboard", { table: "v_stock_dashboard" });
-  if (!supabase) {
-    throw new Error(
-      "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
+  const run = (async () => {
+    traceSupabaseRead("Inventory.getStockDashboard", { table: "v_stock_dashboard" });
+    if (!supabase) {
+      throw new Error(
+        "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
+      );
+    }
+
+    const { data: rawRows, error } = await loadStockDashboardBoundedRows(supabase, {
+      force,
+    });
+
+    if (error) {
+      throw new Error(error.message || "Supabase stock read failed");
+    }
+
+    const inventory = sortInventoryLikeLegacy(
+      (rawRows || [])
+        .map(mapStockDashboardRow)
+        .filter((item) => item.productId)
+        .filter((item) => {
+          const scopedTenantId = str(options.tenantId ?? options.tenant_id);
+          return !scopedTenantId || str(item.tenantId) === scopedTenantId;
+        })
     );
+
+    const stats = rollupStockDashboardMappedItems(inventory);
+
+    const result = {
+      success: true,
+      data: {
+        stats,
+        inventory,
+      },
+    };
+    if (!force) {
+      stockDashboardReadCache = { result, loadedAt: Date.now() };
+    }
+    return result;
+  })();
+
+  if (!force) stockDashboardReadInFlight = run;
+  try {
+    return await run;
+  } finally {
+    if (!force) stockDashboardReadInFlight = null;
   }
-
-  const { data: rawRows, error } = await loadStockDashboardBoundedRows(supabase, {
-    force,
-  });
-
-  if (error) {
-    throw new Error(error.message || "Supabase stock read failed");
-  }
-
-  const inventory = sortInventoryLikeLegacy(
-    (rawRows || [])
-      .map(mapStockDashboardRow)
-      .filter((item) => item.productId)
-      .filter((item) => {
-        const scopedTenantId = str(options.tenantId ?? options.tenant_id);
-        return !scopedTenantId || str(item.tenantId) === scopedTenantId;
-      })
-  );
-
-  const stats = rollupStockDashboardMappedItems(inventory);
-
-  const result = {
-    success: true,
-    data: {
-      stats,
-      inventory,
-    },
-  };
-  if (!force) {
-    stockDashboardReadCache = { result, loadedAt: Date.now() };
-  }
-  return result;
 }
 
 /**
@@ -1190,14 +1206,16 @@ export function mapLabsCreditRow(row) {
  * Read-only labs / credit directory from Supabase view v_labs_credit.
  */
 const LABS_CREDIT_READ_CACHE_TTL_MS = 45_000;
-/** @type {{ result: object|null, loadedAt: number }} */
-let labsCreditReadCache = { result: null, loadedAt: 0 };
+/** @type {{ result: object|null, loadedAt: number, tenantId: string }} */
+let labsCreditReadCache = { result: null, loadedAt: 0, tenantId: "" };
 /** @type {Promise<object>|null} */
 let labsCreditReadInFlight = null;
 
-export function peekLabsCreditReadCache() {
+export function peekLabsCreditReadCache(options = {}) {
+  const tenantId = str(options.tenantId ?? options.tenant_id);
   if (
     labsCreditReadCache.result &&
+    labsCreditReadCache.tenantId === tenantId &&
     Date.now() - labsCreditReadCache.loadedAt < LABS_CREDIT_READ_CACHE_TTL_MS
   ) {
     return labsCreditReadCache.result;
@@ -1206,16 +1224,17 @@ export function peekLabsCreditReadCache() {
 }
 
 export function invalidateLabsCreditReadCache() {
-  labsCreditReadCache = { result: null, loadedAt: 0 };
+  labsCreditReadCache = { result: null, loadedAt: 0, tenantId: "" };
   labsCreditReadInFlight = null;
 }
 
 export async function getLabsCredit(options = {}) {
   const force = options.force === true;
+  const tenantId = str(options.tenantId ?? options.tenant_id);
   if (!force && labsCreditReadInFlight) {
     return labsCreditReadInFlight;
   }
-  const cached = !force ? peekLabsCreditReadCache() : null;
+  const cached = !force ? peekLabsCreditReadCache({ tenantId }) : null;
   if (cached) return cached;
 
   const run = (async () => {
@@ -1226,7 +1245,8 @@ export async function getLabsCredit(options = {}) {
       );
     }
 
-    const { data: rawRows, error } = await fetchLabsCreditBoundedRows(supabase);
+    const boundedScope = tenantId ? { tenantId } : {};
+    const { data: rawRows, error } = await fetchLabsCreditBoundedRows(supabase, boundedScope);
 
     if (error) {
       throw new Error(error.message || "Supabase labs read failed");
@@ -1239,7 +1259,7 @@ export async function getLabsCredit(options = {}) {
       data: labs,
     };
     if (!force) {
-      labsCreditReadCache = { result, loadedAt: Date.now() };
+      labsCreditReadCache = { result, loadedAt: Date.now(), tenantId };
     }
     return result;
   })();
@@ -2297,17 +2317,21 @@ const COLLECTIONS_READ_CACHE_TTL_MS = 45_000;
 let collectionsReadCache = { result: null, loadedAt: 0, key: "" };
 /** @type {Promise<object>|null} */
 let collectionsReadInFlight = null;
+/** @type {Promise<object>|null} */
+let collectionsReadForceInFlight = null;
 
 function collectionsReadCacheKey(params = {}) {
   const limit = clampLimit(params.limit, HQ_COLLECTIONS_AR_LIMIT, HQ_COLLECTIONS_AR_LIMIT);
   const daysBack =
     Number(params.daysBack) > 0 ? Number(params.daysBack) : HQ_PAYMENTS_RECENT_DAYS;
-  return `${limit}:${daysBack}`;
+  const tenantId = str(params.tenantId ?? params.tenant_id);
+  return `${tenantId || "all"}:${limit}:${daysBack}`;
 }
 
 export function invalidateCollectionsReadCache() {
   collectionsReadCache = { result: null, loadedAt: 0, key: "" };
   collectionsReadInFlight = null;
+  collectionsReadForceInFlight = null;
 }
 
 export function peekCollectionsReadCache(params = {}) {
@@ -2331,6 +2355,10 @@ export async function getCollectionsRead(params = {}) {
   const force = params.force === true;
   const cacheKey = collectionsReadCacheKey(params);
 
+  if (force && collectionsReadForceInFlight) {
+    perfLog("getCollectionsRead.forceInFlightJoin");
+    return collectionsReadForceInFlight;
+  }
   if (!force && collectionsReadInFlight) {
     perfLog("getCollectionsRead.inFlightJoin");
     return collectionsReadInFlight;
@@ -2368,12 +2396,14 @@ export async function getCollectionsRead(params = {}) {
     const daysBack =
       Number(params.daysBack) > 0 ? Number(params.daysBack) : HQ_PAYMENTS_RECENT_DAYS;
     const arLimit = clampLimit(params.limit, HQ_COLLECTIONS_AR_LIMIT, HQ_COLLECTIONS_AR_LIMIT);
+    const tenantId = str(params.tenantId ?? params.tenant_id);
+    const boundedScope = tenantId ? { tenantId } : {};
 
     const endParallel = perfTime("getCollectionsRead.parallel");
     const [arRes, payRes, labsRes] = await Promise.all([
-      fetchCollectionsBoundedArRows(supabase, { limit: arLimit }),
-      fetchPaymentsBoundedRows(supabase, { daysBack }),
-      fetchLabsCreditBoundedRows(supabase, { columns: HQ_V_LABS_CREDIT_COLUMNS }),
+      fetchCollectionsBoundedArRows(supabase, { limit: arLimit, ...boundedScope }),
+      fetchPaymentsBoundedRows(supabase, { daysBack, ...boundedScope }),
+      fetchLabsCreditBoundedRows(supabase, { columns: HQ_V_LABS_CREDIT_COLUMNS, ...boundedScope }),
     ]);
     endParallel({
       ar: arRes.error ? 0 : arRes.data?.length ?? 0,
@@ -2472,7 +2502,11 @@ export async function getCollectionsRead(params = {}) {
   };
 
   const promise = run();
-  if (!force) collectionsReadInFlight = promise;
+  if (force) {
+    collectionsReadForceInFlight = promise;
+  } else {
+    collectionsReadInFlight = promise;
+  }
   try {
     const result = await promise;
     if (!force && result?.success) {
@@ -2480,7 +2514,11 @@ export async function getCollectionsRead(params = {}) {
     }
     return result;
   } finally {
-    if (!force) collectionsReadInFlight = null;
+    if (force) {
+      if (collectionsReadForceInFlight === promise) collectionsReadForceInFlight = null;
+    } else if (collectionsReadInFlight === promise) {
+      collectionsReadInFlight = null;
+    }
   }
   });
 }
@@ -3376,9 +3414,12 @@ export async function getAdminDashboardRead(options = {}) {
     const queryErrors = [];
 
     const [boundedSource, payRes] = await Promise.all([
-      fetchAdminDashboardBoundedSourceRows(supabase, { force }),
+      fetchAdminDashboardBoundedSourceRows(supabase, { force, tenantId }),
       timedSupabaseQuery("payments", () =>
-        fetchPaymentsBoundedRows(supabase, { paymentDateEq: today })
+        fetchPaymentsBoundedRows(supabase, {
+          paymentDateEq: today,
+          ...(tenantId ? { tenantId } : {}),
+        })
       ),
     ]);
     for (const table of Object.keys(boundedSource.errors || {})) {
@@ -3717,11 +3758,17 @@ export async function getAgentVisitPageContextRead(currentUser) {
   }
 
   const workspace = workspaceRes.data || EMPTY_AGENT_WORKSPACE;
-  const collectionsRes = await getCollectionsRead();
-  const allCollections = Array.isArray(collectionsRes?.data?.collections)
-    ? collectionsRes.data.collections
+  const scopedFromWorkspace = Array.isArray(workspace.pendingCollections)
+    ? workspace.pendingCollections
     : [];
-  const collections = filterCollectionsForUser(allCollections, currentUser);
+  let collections = scopedFromWorkspace;
+  if (!collections.length) {
+    const collectionsRes = await getCollectionsRead();
+    const allCollections = Array.isArray(collectionsRes?.data?.collections)
+      ? collectionsRes.data.collections
+      : [];
+    collections = filterCollectionsForUser(allCollections, currentUser);
+  }
 
   return {
     success: true,
@@ -4330,6 +4377,8 @@ export async function updateQualificationPipelineWrite(payload = {}) {
 const AGENT_WORKSPACE_READ_CACHE_TTL_MS = 45_000;
 /** @type {{ result: object|null, loadedAt: number, userId: string }} */
 let agentWorkspaceReadCache = { result: null, loadedAt: 0, userId: "" };
+/** @type {Promise<object>|null} */
+let agentWorkspaceReadInFlight = null;
 
 export function peekAgentWorkspaceReadCache(userId = "") {
   const uid = String(userId || "");
@@ -4347,6 +4396,7 @@ export function invalidateAgentWorkspaceReadCache(userId = "") {
   const uid = String(userId || "");
   if (!uid || agentWorkspaceReadCache.userId === uid) {
     agentWorkspaceReadCache = { result: null, loadedAt: 0, userId: "" };
+    agentWorkspaceReadInFlight = null;
   }
 }
 
@@ -4358,11 +4408,21 @@ export function invalidateAgentWorkspaceReadCache(userId = "") {
 export async function getAgentWorkspaceRead(currentUser, options = {}) {
   const force = options.force === true;
   const userId = String(currentUser?.id || "");
+  const tenantId = str(
+    options.tenantId ?? options.tenant_id ?? currentUser?.tenantId ?? currentUser?.tenant_id
+  );
+  const boundedScope = tenantId ? { tenantId } : {};
+  const collectionsOpts = { force, ...boundedScope };
   if (!force) {
+    if (agentWorkspaceReadInFlight) {
+      perfLog("getAgentWorkspaceRead.inFlightJoin");
+      return agentWorkspaceReadInFlight;
+    }
     const cached = peekAgentWorkspaceReadCache(userId);
     if (cached) return cached;
   }
 
+  const run = (async () => {
   traceSupabaseRead("AgentDashboard.getAgentWorkspaceRead", {
     tables: ["v_labs_credit", "agent_visits", "ar_credit_control"],
   });
@@ -4375,9 +4435,9 @@ export async function getAgentWorkspaceRead(currentUser, options = {}) {
       currentUser?.role === "agent"
         ? getAgentActiveLabOwnershipRowsRead()
         : Promise.resolve({ data: { rows: [] } }),
-      getCollectionsRead({ force: true }),
-      fetchLabsCreditBoundedRows(supabase),
-      fetchAgentVisitsBoundedRows(supabase),
+      getCollectionsRead(collectionsOpts),
+      fetchLabsCreditBoundedRows(supabase, boundedScope),
+      fetchAgentVisitsBoundedRows(supabase, boundedScope),
     ]);
 
     const ownershipRows = Array.isArray(ownershipRes?.data?.rows)
@@ -4457,6 +4517,14 @@ export async function getAgentWorkspaceRead(currentUser, options = {}) {
   } catch (err) {
     hqDebugWarn("[getAgentWorkspaceRead] failed:", err?.message || err);
     return { success: false, readFailed: true, error: err?.message || String(err), data: { ...EMPTY_AGENT_WORKSPACE } };
+  }
+  })();
+
+  if (!force) agentWorkspaceReadInFlight = run;
+  try {
+    return await run;
+  } finally {
+    if (!force) agentWorkspaceReadInFlight = null;
   }
 }
 
@@ -7174,7 +7242,8 @@ function ordersReadCacheKey(params = {}) {
   const daysBack =
     Number(params.daysBack) > 0 ? Number(params.daysBack) : HQ_DASHBOARD_RECENT_DAYS;
   const skipLineCounts = params.skipLineCounts === true ? "skipLines" : "withLines";
-  return `${limit}:${offset}:${daysBack}:${skipLineCounts}`;
+  const tenantId = str(params.tenantId ?? params.tenant_id);
+  return `${tenantId || "all"}:${limit}:${offset}:${daysBack}:${skipLineCounts}`;
 }
 
 export function invalidateOrdersReadCache() {
@@ -7192,6 +7261,23 @@ export function peekOrdersReadCache(params = {}) {
     return ordersReadCache.result;
   }
   return null;
+}
+
+/**
+ * Fill itemCount on list rows without re-querying orders (line fan-out only).
+ * @param {object[]} orders
+ */
+export async function enrichOrdersListWithItemCounts(orders) {
+  if (!supabase || !Array.isArray(orders) || !orders.length) return orders;
+  const ids = orders.map((o) => str(o.orderId)).filter(Boolean);
+  if (!ids.length) return orders;
+  const lineCounts = await fetchOrderUnitCountsForOrders(supabase, ids, orders);
+  return orders.map((o) => {
+    const businessId = str(o.orderId);
+    const itemCount =
+      lineCounts.get(businessId) ?? (o.id != null ? lineCounts.get(str(o.id)) : 0) ?? o.itemCount ?? 0;
+    return itemCount === (o.itemCount ?? 0) ? o : { ...o, itemCount };
+  });
 }
 
 export async function getOrdersRead(params = {}) {
@@ -7236,21 +7322,24 @@ export async function getOrdersRead(params = {}) {
     const recentFrom = recentDateYmd(
       Number(params.daysBack) > 0 ? Number(params.daysBack) : HQ_DASHBOARD_RECENT_DAYS
     );
+    const tenantId = str(params.tenantId ?? params.tenant_id);
 
     let rawList = [];
-    const primary = await supabase
+    let primaryQuery = supabase
       .from("orders")
       .select(HQ_ORDER_LIST_COLUMNS)
       .gte("order_date", recentFrom)
-      .order("order_date", { ascending: false })
-      .range(offset, offset + limit - 1);
+      .order("order_date", { ascending: false });
+    if (tenantId) primaryQuery = primaryQuery.eq("tenant_id", tenantId);
+    const primary = await primaryQuery.range(offset, offset + limit - 1);
 
     if (primary.error) {
-      const fallback = await supabase
+      let fallbackQuery = supabase
         .from("orders")
         .select(HQ_ORDER_LIST_COLUMNS)
-        .order("created_at", { ascending: false })
-        .range(offset, offset + limit - 1);
+        .order("created_at", { ascending: false });
+      if (tenantId) fallbackQuery = fallbackQuery.eq("tenant_id", tenantId);
+      const fallback = await fallbackQuery.range(offset, offset + limit - 1);
       if (fallback.error) {
         const message = fallback.error.message || String(fallback.error);
         hqDebugWarn("[getOrdersRead] Supabase error:", message);
@@ -8643,14 +8732,16 @@ export async function updateDistributorAgentAssignmentWrite(payload = {}) {
 
 export async function getOperationsLabAssignmentsRead(options = {}) {
   const opsTenantId = str(options.tenantId ?? options.tenant_id);
-  const res = await getLabsCredit();
+  const [res, tenantsRes] = await Promise.all([
+    getLabsCredit(),
+    getOperationsDistributorsRead(),
+  ]);
   if (!res?.success) {
     return { success: false, error: res?.error || "Failed to load labs", data: { labs: [] } };
   }
 
   let labs = Array.isArray(res.data) ? res.data : [];
 
-  const tenantsRes = await getOperationsDistributorsRead();
   const tenantNameById = new Map();
   if (tenantsRes?.success) {
     for (const t of tenantsRes.data?.distributors || []) {

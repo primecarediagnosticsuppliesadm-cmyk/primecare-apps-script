@@ -130,11 +130,14 @@ export async function getSidebarSummary(options = {}) {
   const endTotal = perfTime("getSidebarSummary.total");
 
   const run = async () => {
+    const readOpts = tenantId ? { tenantId } : {};
     const [stockRes, ordersRes, collectionsRes, qualRes, notifyRes, auditRes, pendingCommissions, contracts] =
       await Promise.all([
         getStockDashboard(),
-        getOrdersRead({ skipLineCounts: true }),
-        getCollectionsRead(),
+        tenantId
+          ? getOrdersRead({ skipLineCounts: true, tenantId })
+          : getOrdersRead({ skipLineCounts: true }),
+        getCollectionsRead(readOpts),
         getQualificationReviewRead(),
         tenantId
           ? getNotificationEventsRead({ tenantId, limit: 80 })

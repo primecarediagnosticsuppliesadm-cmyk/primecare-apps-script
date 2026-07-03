@@ -662,7 +662,9 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
       const forecast = forecastRes.data?.forecast || [];
       const rows = forecast.map(mapForecastToPurchaseReorderCandidate);
-      console.log("SUPABASE PURCHASE REORDER:", rows);
+      if (IS_DEV || IS_QA) {
+        console.info("[PurchaseOrders] SUPABASE PURCHASE REORDER:", rows);
+      }
       setReorderCandidates(rows);
 
       const smartItems = forecast
@@ -685,7 +687,9 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
         healthRes?.data?.rows || [],
         pos
       );
-      console.log("INVENTORY HEALTH AUTO PURCHASE TRIGGERS:", triggerRows);
+      if (IS_DEV || IS_QA) {
+        console.info("[PurchaseOrders] INVENTORY HEALTH AUTO PURCHASE TRIGGERS:", triggerRows);
+      }
       setAutoTriggers(triggerRows);
       setAutoTriggerSummary(summarizePlaceholderTriggers(triggerRows));
 
@@ -916,7 +920,9 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   };
 
   const applyReceivePoSelection = (po, { switchTab = false } = {}) => {
-    console.log("APPLY RECEIVE PO SELECTION", po);
+    if (IS_DEV || IS_QA) {
+      console.info("[PurchaseOrders] APPLY RECEIVE PO SELECTION", po);
+    }
     setStatusMessage("");
     setErrorMessage("");
 

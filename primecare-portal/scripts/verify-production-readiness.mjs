@@ -98,6 +98,12 @@ async function main() {
     fail("verify-runtime-import-safety.mjs");
   }
 
+  if (runNode("audit-react-hook-order.mjs")) {
+    pass("audit-react-hook-order.mjs");
+  } else {
+    fail("audit-react-hook-order.mjs");
+  }
+
   console.log("\n=== Production readiness verification complete ===\n");
   if (process.exitCode) {
     console.log("Overall: NO-GO (P0 gaps remain)\n");

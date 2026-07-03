@@ -108,10 +108,39 @@ function checkShellBlockers() {
   }
 }
 
+function checkHookOrderSafety() {
+  console.log("\n--- React hook order: critical pages ---\n");
+  const targets = [
+    "src/pages/ProjectionOperationsCenterPage.jsx",
+    "src/App.jsx",
+    "src/PrimeCareWebPortal.jsx",
+  ];
+  const hookRe = /\b(useMemo|useEffect|useState|useCallback|useRef|useContext)\s*\(/;
+  const topLevelReturnRe = /^\s{2}if\s*\([^)]*\)\s*\{\s*\n\s{4}return\s/m;
+
+  for (const rel of targets) {
+    const src = readFileSync(resolve(root, rel), "utf8");
+    const fnMatch = src.match(/export default function \w+\([^)]*\)\s*\{([\s\S]*)\n\}/);
+    if (!fnMatch) {
+      fail(`${rel} — could not parse default export`);
+      continue;
+    }
+    const body = fnMatch[1];
+    const earlyReturnIdx = body.search(topLevelReturnRe);
+    const hookIdx = body.search(hookRe);
+    if (earlyReturnIdx >= 0 && hookIdx >= 0 && earlyReturnIdx < hookIdx) {
+      fail(`${rel} — hook called after early return (React #310 risk)`);
+    } else {
+      pass(`${rel} — hooks before conditional return`);
+    }
+  }
+}
+
 function main() {
   console.log("\n=== Runtime import safety (Phase 0) ===\n");
   checkPageImports();
   checkShellBlockers();
+  checkHookOrderSafety();
   console.log("\nOptional: npx eslint -c eslint.runtime-safety.config.js src/pages src/components\n");
   console.log("\n=== Runtime import safety complete ===\n");
   if (process.exitCode) {

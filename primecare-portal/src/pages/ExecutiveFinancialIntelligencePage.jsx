@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { PageHeader, PageSkeleton, StatusBadge, KpiCard, KpiCardGrid, ReadHealthBanner } from "@/components/ux";
+import { PageHeader, PageSkeleton, StatusBadge, KpiCard, KpiCardGrid, ReadHealthBanner, KpiSkeleton, ListSkeleton } from "@/components/ux";
 import { loadExecutiveFinancialIntelligenceData } from "@/founder/executiveFinancialIntelligenceData.js";
 import { buildExecutiveFinancialIntelligenceModel } from "@/founder/executiveFinancialIntelligenceEngine.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
@@ -32,6 +32,10 @@ function MetricTile({ label, value, sub }) {
       {sub ? <p className="mt-0.5 text-[10px] text-slate-500">{sub}</p> : null}
     </div>
   );
+}
+
+function SectionSkeleton({ rows = 3 }) {
+  return <ListSkeleton rows={rows} className="rounded-lg border bg-white p-2" />;
 }
 
 function Section({ title, icon: Icon, children, className }) {
@@ -138,6 +142,7 @@ export default function ExecutiveFinancialIntelligencePage({
 }) {
   const [model, setModel] = useState(() => readEfiModelCache());
   const [loading, setLoading] = useState(() => !readEfiModelCache());
+  const [sectionsLoading, setSectionsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const modelRef = useRef(model);
@@ -153,16 +158,41 @@ export default function ExecutiveFinancialIntelligencePage({
       if (!modelRef.current) setLoading(true);
       else setRefreshing(true);
       setError("");
-      const data = await loadExecutiveFinancialIntelligenceData(currentUser);
-      const next = buildExecutiveFinancialIntelligenceModel(data);
+      setSectionsLoading(true);
+
+      let paintedCore = false;
+      const data = await loadExecutiveFinancialIntelligenceData(currentUser, {
+        progressive: true,
+        onCoreReady: (coreData) => {
+          paintedCore = true;
+          const coreModel = buildExecutiveFinancialIntelligenceModel({
+            ...coreData,
+            opsPayload: {
+              ...coreData.opsPayload,
+              readHealth: coreData.readHealth,
+            },
+          });
+          setModel(coreModel);
+          setLoading(false);
+        },
+      });
+      const next = buildExecutiveFinancialIntelligenceModel({
+        ...data,
+        opsPayload: {
+          ...data.opsPayload,
+          readHealth: data.readHealth,
+        },
+      });
       writeEfiModelCache(next);
       setModel(next);
+      if (!paintedCore) setLoading(false);
     } catch (err) {
       setError(err?.message || "Failed to load executive financial intelligence");
       if (!modelRef.current) setModel(null);
     } finally {
       setLoading(false);
       setRefreshing(false);
+      setSectionsLoading(false);
     }
   }, [currentUser]);
 
@@ -187,8 +217,24 @@ export default function ExecutiveFinancialIntelligencePage({
     Boolean(predatorSnapshot)
   );
 
-  if (loading && !model) return <PageSkeleton rows={12} />;
-  if (error) {
+  if (loading && !model) {
+    return (
+      <div className="mx-auto max-w-6xl space-y-4 p-3 pb-10">
+        <PageHeader
+          title="Executive Financial Intelligence"
+          subtitle="Read-only HQ analytics — derived from existing operational and financial data."
+          icon={BarChart3}
+        />
+        <KpiCardGrid columns={4} className="sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <KpiSkeleton key={i} />
+          ))}
+        </KpiCardGrid>
+        <SectionSkeleton rows={6} />
+      </div>
+    );
+  }
+  if (error && !model) {
     return (
       <div className="p-4 text-sm text-red-700">
         <p>{error}</p>
@@ -201,6 +247,7 @@ export default function ExecutiveFinancialIntelligencePage({
   if (!model) return null;
 
   const { revenue, collections, orders, logistics, inventory, labPerformance, alerts } = model;
+  const deferHeavySections = sectionsLoading;
 
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-3 pb-10">
@@ -226,6 +273,9 @@ export default function ExecutiveFinancialIntelligencePage({
           <KpiCard title="Year To Date" value={revenue.yearToDateLabel} icon={BarChart3} />
         </KpiCardGrid>
         <RevenueTrendChart points={revenue.trend} />
+        {deferHeavySections ? (
+          <p className="mt-2 text-[10px] text-slate-400">Loading payment and line-item detail…</p>
+        ) : null}
         <p className="mt-2 text-[10px] text-slate-500">
           Fulfilled-order revenue only (same rule as Admin dashboard). Total fulfilled:{" "}
           {revenue.totalFulfilledRevenueLabel}
@@ -266,6 +316,10 @@ export default function ExecutiveFinancialIntelligencePage({
       </Section>
 
       <Section title="Logistics" icon={Truck}>
+        {deferHeavySections ? (
+          <SectionSkeleton rows={2} />
+        ) : (
+          <>
         <KpiCardGrid columns={3} className="sm:grid-cols-2 lg:grid-cols-5">
           <KpiCard
             title="Estimated delivery revenue"
@@ -288,9 +342,15 @@ export default function ExecutiveFinancialIntelligencePage({
             Open Logistics &amp; Delivery
           </Button>
         ) : null}
+          </>
+        )}
       </Section>
 
       <Section title="Inventory" icon={Package}>
+        {deferHeavySections ? (
+          <SectionSkeleton rows={2} />
+        ) : (
+        <>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <MetricTile label="Inventory value" value={inventory.inventoryValueLabel} />
           <MetricTile label="Slow moving inventory" value={inventory.slowMovingInventoryLabel} />
@@ -308,9 +368,14 @@ export default function ExecutiveFinancialIntelligencePage({
             Open Inventory
           </Button>
         ) : null}
+        </>
+        )}
       </Section>
 
       <Section title="Lab Performance" icon={Building2}>
+        {deferHeavySections ? (
+          <SectionSkeleton rows={8} />
+        ) : (
         <div className="grid gap-4 lg:grid-cols-2">
           <div>
             <p className="mb-1 text-[10px] font-semibold uppercase text-slate-500">Top revenue labs</p>
@@ -382,10 +447,13 @@ export default function ExecutiveFinancialIntelligencePage({
             />
           </div>
         </div>
+        )}
       </Section>
 
       <Section title="Executive Alerts" icon={AlertTriangle}>
-        {alerts.length === 0 ? (
+        {deferHeavySections ? (
+          <SectionSkeleton rows={3} />
+        ) : alerts.length === 0 ? (
           <p className="text-xs text-slate-500">No executive alerts from current data.</p>
         ) : (
           <ul className="space-y-2">

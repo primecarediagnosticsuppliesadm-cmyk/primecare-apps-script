@@ -90,6 +90,27 @@ for (const p of projections) {
   }
 }
 
+const pocPagePath = resolve(root, "src/pages/ProjectionOperationsCenterPage.jsx");
+const pocSrc = readFileSync(pocPagePath, "utf8");
+const pocBodyMatch = pocSrc.match(/export default function ProjectionOperationsCenterPage[^{]*\{([\s\S]*)\n\}/);
+if (!pocBodyMatch) {
+  fail("ui.page", "ProjectionOperationsCenterPage not found");
+} else {
+  const body = pocBodyMatch[1];
+  const earlyReturnIdx = body.search(/^\s{2}if\s*\([^)]*\)\s*\{\s*\n\s{4}return\s/m);
+  const hookIdx = body.search(/\buseMemo\s*\(/);
+  if (earlyReturnIdx >= 0 && hookIdx >= 0 && earlyReturnIdx < hookIdx) {
+    fail("ui.hooks", "useMemo after early return (React #310 risk)");
+  } else {
+    pass("ui.hooks", "hooks declared before conditional return");
+  }
+  if (pocSrc.includes("loadProjectionMetrics") && pocSrc.includes("Health Registry")) {
+    pass("ui.page", "Projection Operations Center page wired");
+  } else {
+    fail("ui.page", "Projection Operations Center page incomplete");
+  }
+}
+
 const env = loadEnv();
 const sb = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY, {
   auth: { persistSession: false },

@@ -49,6 +49,9 @@ import { cn } from "@/lib/utils";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import HqLabsAdminView from "@/components/hq/HqLabsAdminView.jsx";
 import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
+import { scheduleIdleTask } from "@/utils/scheduleIdleTask.js";
+import ListSkeleton from "@/components/ux/ListSkeleton";
+import KpiSkeleton from "@/components/ux/KpiSkeleton";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -541,14 +544,20 @@ export default function LabsPage({
     Boolean(canAddLab)
   );
 
+  const hasLoadedLabsRef = useRef(hadCacheOnMount.current);
+
   const loadLabs = useCallback(async ({ silent = false } = {}) => {
     try {
       if (silent) setListRefreshing(true);
-      else if (!labs.length) setLoading(true);
+      else if (!hasLoadedLabsRef.current) setLoading(true);
       else setListRefreshing(true);
       setError("");
 
-      const res = await getLabsCredit({ force: silent });
+      const homeTenantId = str(currentUser?.tenantId ?? currentUser?.tenant_id);
+      const res = await getLabsCredit({
+        force: silent,
+        ...(homeTenantId ? { tenantId: homeTenantId } : {}),
+      });
 
       if (!res?.success) {
         throw new Error(res?.error || "Failed to load labs");
@@ -564,6 +573,7 @@ export default function LabsPage({
       const nextSummary = summarizeLabsCreditPortfolio(rows);
       setLabs(rows);
       setSummary(nextSummary);
+      hasLoadedLabsRef.current = true;
       writePageUiCache("labs:credit", { labs: rows, summary: nextSummary });
     } catch (err) {
       console.error("Failed to load labs", err);
@@ -572,7 +582,7 @@ export default function LabsPage({
       setLoading(false);
       setListRefreshing(false);
     }
-  }, [labs.length]);
+  }, []);
 
   useEffect(() => {
     void loadLabs({ silent: hadCacheOnMount.current });
@@ -600,8 +610,10 @@ export default function LabsPage({
 
   useEffect(() => {
     if (!canAddLab || !homeTenantId) return;
-    void loadLabOwnershipMetricsBundle(homeTenantId).then((data) => {
-      setProvisionAgents((data?.agents || []).filter((a) => a.active !== false));
+    return scheduleIdleTask(() => {
+      void loadLabOwnershipMetricsBundle(homeTenantId).then((data) => {
+        setProvisionAgents((data?.agents || []).filter((a) => a.active !== false));
+      });
     });
   }, [canAddLab, homeTenantId]);
 
@@ -618,29 +630,31 @@ export default function LabsPage({
 
   useEffect(() => {
     if (!canAddLab || !isDistributorOs) return;
-    async function loadDistributors() {
-      try {
-        const foundation = await loadTenantFoundationRegistry(currentUser, {
-          skipLiveLoad: true,
-        });
-        const homeId = foundation.homeTenantId;
-        const rows = (foundation.tenants || [])
-          .filter((t) => t.id && t.id !== homeId && !t.isHome)
-          .map((t) => ({ id: t.id, name: t.name || t.config?.companyName || t.id }));
-        if (currentUser?.role === ROLES.ADMIN && currentUser?.tenantId) {
-          const own = rows.find((d) => d.id === currentUser.tenantId);
-          setDistributors(own ? [own] : [{ id: currentUser.tenantId, name: "My distributor" }]);
-        } else {
-          setDistributors(rows);
-        }
-      } catch (err) {
-        console.warn("[LabsPage] distributor list", err);
-        if (currentUser?.tenantId) {
-          setDistributors([{ id: currentUser.tenantId, name: "Current tenant" }]);
+    return scheduleIdleTask(() => {
+      async function loadDistributors() {
+        try {
+          const foundation = await loadTenantFoundationRegistry(currentUser, {
+            skipLiveLoad: true,
+          });
+          const homeId = foundation.homeTenantId;
+          const rows = (foundation.tenants || [])
+            .filter((t) => t.id && t.id !== homeId && !t.isHome)
+            .map((t) => ({ id: t.id, name: t.name || t.config?.companyName || t.id }));
+          if (currentUser?.role === ROLES.ADMIN && currentUser?.tenantId) {
+            const own = rows.find((d) => d.id === currentUser.tenantId);
+            setDistributors(own ? [own] : [{ id: currentUser.tenantId, name: "My distributor" }]);
+          } else {
+            setDistributors(rows);
+          }
+        } catch (err) {
+          console.warn("[LabsPage] distributor list", err);
+          if (currentUser?.tenantId) {
+            setDistributors([{ id: currentUser.tenantId, name: "Current tenant" }]);
+          }
         }
       }
-    }
-    void loadDistributors();
+      void loadDistributors();
+    });
   }, [canAddLab, currentUser, isDistributorOs]);
 
   const visibleLabs = useMemo(() => {
@@ -708,15 +722,26 @@ export default function LabsPage({
 
   if (loading && !labs.length) {
     return (
-      <PageSkeleton
-        kpiCount={4}
-        kpiColumns={4}
-        listRows={8}
+      <div
         className={cn(
-          embedded ? "space-y-4" : "space-y-6 p-4",
+          embedded ? "space-y-4" : "space-y-6",
           isAgentView && !embedded && !isDistributorOs && "mx-auto w-full max-w-[1360px]"
         )}
-      />
+      >
+        {!embedded ? (
+          <PageHeader
+            title={isAgentView ? "My Laboratories" : "Laboratories"}
+            subtitle="Laboratory accounts, credit status, and assignments."
+            icon={Building2}
+          />
+        ) : null}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <KpiSkeleton key={i} />
+          ))}
+        </div>
+        <ListSkeleton rows={8} />
+      </div>
     );
   }
 
