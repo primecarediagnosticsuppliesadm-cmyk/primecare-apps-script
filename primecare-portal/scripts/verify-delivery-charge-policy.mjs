@@ -159,17 +159,33 @@ function runStaticChecks() {
   }
 
   const logisticsPage = readSrc("src/pages/LogisticsDeliveryPage.jsx");
-  if (logisticsPage.includes("Est. Delivery Revenue") && logisticsPage.includes("DeliveryPolicyPanel")) {
+  if (
+    logisticsPage.includes("Estimated delivery revenue") &&
+    logisticsPage.includes("DeliveryPolicyPanel")
+  ) {
     pass("DC-07", "Logistics KPI + policy panel wired");
   } else {
     fail("DC-07", "Logistics delivery UI incomplete");
   }
 
   const drawer = readSrc("src/components/logistics/ShipmentDetailDrawer.jsx");
-  if (drawer.includes("applyOrderDeliveryOverrideWrite") && drawer.includes("canEditDeliveryChargeOverride")) {
+  if (
+    drawer.includes("applyOrderDeliveryOverrideWrite") &&
+    drawer.includes("canEditDeliveryChargeOverride")
+  ) {
     pass("DC-08", "HQ override UI gated before invoice sent");
   } else {
     fail("DC-08", "Shipment override UI missing");
+  }
+
+  const ordersPage = readSrc("src/pages/OrdersPage.jsx");
+  if (
+    ordersPage.includes("OrderAmountDetailBreakdown") &&
+    ordersPage.includes("Delivery est.")
+  ) {
+    pass("DC-07b", "Admin Orders shows merchandise + delivery estimate separately");
+  } else {
+    fail("DC-07b", "Admin Orders delivery breakdown UI missing");
   }
 
   if (/const total_amount = normalizedLines\.reduce/.test(primeApi)) {

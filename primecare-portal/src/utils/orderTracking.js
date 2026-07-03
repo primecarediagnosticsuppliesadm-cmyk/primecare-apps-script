@@ -7,6 +7,7 @@ import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 import { recordPredatorTiming } from "@/predator/predatorTiming.js";
 import { labIdKey } from "@/utils/labId.js";
 import { orderStatusToVariant } from "@/utils/statusTokens.js";
+import { resolveOrderAmountBreakdown } from "@/logistics/deliveryChargeEngine.js";
 
 export const TRACKING_STEPS = [
   { key: "placed", label: "Order Placed" },
@@ -203,6 +204,7 @@ export function mapOrderDetailsPayload(payload) {
   const orderTotal = Number(
     order.orderTotal ?? order.total_amount ?? order.totalAmount ?? order.order_total ?? 0
   );
+  const amountBreakdown = resolveOrderAmountBreakdown(order);
 
   const cancelledAt = str(order.cancelled_at ?? order.cancelledAt);
   const statusNotes = str(order.status_notes ?? order.statusNotes);
@@ -246,6 +248,13 @@ export function mapOrderDetailsPayload(payload) {
     invoiceStatus,
     paymentLabel,
     orderTotal,
+    merchandiseSubtotal: amountBreakdown.merchandiseSubtotal,
+    deliveryChargeAmount: amountBreakdown.deliveryChargeAmount,
+    estimatedOrderTotal: amountBreakdown.estimatedTotal,
+    hasDeliveryEstimate: amountBreakdown.hasDeliveryEstimate,
+    deliveryChargeReason: amountBreakdown.deliveryChargeReason,
+    deliveryMethodIntent: amountBreakdown.deliveryMethodIntent,
+    deliveryChargeStatus: amountBreakdown.deliveryChargeStatus,
     itemCount,
     productCount,
     productUnitLabel: formatProductUnitLabel(productCount, itemCount),
@@ -399,6 +408,16 @@ export function mapLocalOrderRowToTrackingDetails(orderRow, lines = []) {
       labName: orderRow.labName ?? orderRow.lab_name,
       orderTotal: orderRow.orderTotal ?? orderRow.total_amount ?? orderRow.totalAmount,
       total_amount: orderRow.orderTotal ?? orderRow.total_amount ?? orderRow.totalAmount,
+      merchandiseSubtotal: orderRow.merchandiseSubtotal ?? orderRow.merchandise_subtotal,
+      merchandise_subtotal: orderRow.merchandiseSubtotal ?? orderRow.merchandise_subtotal,
+      deliveryChargeAmount: orderRow.deliveryChargeAmount ?? orderRow.delivery_charge_amount,
+      delivery_charge_amount: orderRow.deliveryChargeAmount ?? orderRow.delivery_charge_amount,
+      deliveryChargeReason: orderRow.deliveryChargeReason ?? orderRow.delivery_charge_reason,
+      delivery_charge_reason: orderRow.deliveryChargeReason ?? orderRow.delivery_charge_reason,
+      deliveryMethodIntent: orderRow.deliveryMethodIntent ?? orderRow.delivery_method_intent,
+      delivery_method_intent: orderRow.deliveryMethodIntent ?? orderRow.delivery_method_intent,
+      deliveryChargeStatus: orderRow.deliveryChargeStatus ?? orderRow.delivery_charge_status,
+      delivery_charge_status: orderRow.deliveryChargeStatus ?? orderRow.delivery_charge_status,
       paymentStatus: orderRow.paymentStatus ?? orderRow.payment_status,
       invoiceStatus: orderRow.invoiceStatus ?? orderRow.invoice_status,
       invoiceId: orderRow.invoiceId ?? orderRow.invoice_id,

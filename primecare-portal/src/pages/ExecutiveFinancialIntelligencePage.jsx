@@ -268,9 +268,9 @@ export default function ExecutiveFinancialIntelligencePage({
       <Section title="Logistics" icon={Truck}>
         <KpiCardGrid columns={3} className="sm:grid-cols-2 lg:grid-cols-5">
           <KpiCard
-            title="Est. Delivery Revenue"
+            title="Estimated delivery revenue"
             value={logistics.estimatedDeliveryRevenueLabel}
-            subtitle="Operational quotes only"
+            subtitle="Operational quotes only — not invoiced revenue"
           />
           <KpiCard title="Delivered Today" value={logistics.deliveredToday} />
           <KpiCard title="Pending Dispatch" value={logistics.pendingDispatch} />

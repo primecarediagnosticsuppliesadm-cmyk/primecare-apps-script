@@ -4,7 +4,10 @@ import {
   getOrderDeliverySnapshotRead,
   persistOrderDeliverySnapshotWrite,
 } from "@/api/deliveryChargeSupabaseApi.js";
-import { DELIVERY_METHOD_INTENT } from "@/logistics/deliveryChargeEngine.js";
+import {
+  DELIVERY_METHOD_INTENT,
+  mapOrderDeliveryFields,
+} from "@/logistics/deliveryChargeEngine.js";
 import {
   canLabInitiateOrder,
   isHqOpsRole,
@@ -6875,6 +6878,22 @@ export function mapOrderRow(row, labNameFallback = "", rowIndex = 0) {
   const createdAt = str(row.created_at ?? row.createdAt ?? "");
   const createdBy = str(row.created_by ?? row.createdBy ?? "");
 
+  const orderTotal = num(
+    row.total_amount ??
+      row.totalAmount ??
+      row.order_total ??
+      row.orderTotal ??
+      row.total ??
+      row.amount ??
+      row.grand_total ??
+      0
+  );
+  const delivery = mapOrderDeliveryFields(row) || {};
+  const merchandiseSubtotal =
+    delivery.merchandiseSubtotal > 0 ? delivery.merchandiseSubtotal : orderTotal;
+  const deliveryChargeAmount = num(delivery.deliveryChargeAmount);
+  const estimatedOrderTotal = Math.round((merchandiseSubtotal + deliveryChargeAmount) * 100) / 100;
+
   return {
     orderId,
     orderDate,
@@ -6888,16 +6907,14 @@ export function mapOrderRow(row, labNameFallback = "", rowIndex = 0) {
     orderStatus: str(
       row.status ?? row.order_status ?? row.orderStatus ?? row.state ?? "Placed"
     ),
-    orderTotal: num(
-      row.total_amount ??
-        row.totalAmount ??
-        row.order_total ??
-        row.orderTotal ??
-        row.total ??
-        row.amount ??
-        row.grand_total ??
-        0
-    ),
+    orderTotal,
+    merchandiseSubtotal,
+    deliveryChargeAmount,
+    deliveryChargeReason: delivery.deliveryChargeReason,
+    deliveryMethodIntent: delivery.deliveryMethodIntent,
+    deliveryChargeStatus: delivery.deliveryChargeStatus,
+    estimatedOrderTotal,
+    hasDeliveryEstimate: deliveryChargeAmount > 0,
     createdAt,
     createdBy,
     updatedAt: str(row.updated_at ?? row.updatedAt ?? ""),

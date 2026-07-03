@@ -84,6 +84,11 @@ import { useFinancialSyncPulse } from "@/hooks/useFinancialSyncPulse.js";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
 import OrdersLogisticsPanel from "@/components/logistics/OrdersLogisticsPanel.jsx";
 import {
+  OrderAmountDetailBreakdown,
+  OrderAmountListStack,
+  OrderAmountTableCells,
+} from "@/components/orders/OrderDeliveryAmountDisplay.jsx";
+import {
   ORDER_QUEUE_KEYS,
   buildOrdersOperationsQueue,
   filterOrdersByQueue,
@@ -655,6 +660,14 @@ export default function OrdersPage({
     });
   }, [orders, search, status, paymentStatus, labFilter, dateFrom, dateTo, sortKey, activeQueueKey]);
 
+  const showDeliveryAmountColumns = useMemo(
+    () =>
+      filteredOrders.some(
+        (order) => order.hasDeliveryEstimate || Number(order.deliveryChargeAmount) > 0
+      ),
+    [filteredOrders]
+  );
+
   const kpis = useMemo(() => computeOrdersKpis(orders), [orders]);
   const financialSyncPulse = useFinancialSyncPulse();
   const operationsQueue = useMemo(
@@ -1043,6 +1056,12 @@ export default function OrdersPage({
                       <th className="px-2 py-2 font-medium">Invoice</th>
                       <th className="px-2 py-2 font-medium">Invoice Status</th>
                       <th className="px-2 py-2 font-medium text-right">Amount</th>
+                      {showDeliveryAmountColumns ? (
+                        <>
+                          <th className="px-2 py-2 font-medium text-right">Delivery est.</th>
+                          <th className="px-2 py-2 font-medium text-right">Est. total</th>
+                        </>
+                      ) : null}
                       <th className="px-2 py-2 font-medium">Items</th>
                       <th className="px-2 py-2 font-medium" />
                     </tr>
@@ -1127,9 +1146,11 @@ export default function OrdersPage({
                               <span className="text-slate-400">—</span>
                             )}
                           </td>
-                          <td className="px-2 py-2 text-right font-medium tabular-nums text-slate-900">
-                            {formatCurrency(order.orderTotal)}
-                          </td>
+                          <OrderAmountTableCells
+                            order={order}
+                            formatCurrency={formatCurrency}
+                            showDeliveryColumns={showDeliveryAmountColumns}
+                          />
                           <td className="px-2 py-2 text-slate-600">
                             {formatItemCount(order.itemCount ?? 0)}
                           </td>
@@ -1168,9 +1189,7 @@ export default function OrdersPage({
                           <p className="truncate text-sm text-slate-700">
                             {order.labName || order.labId || "—"}
                           </p>
-                          <p className="mt-1 text-base font-bold tabular-nums">
-                            {formatCurrency(order.orderTotal)}
-                          </p>
+                          <OrderAmountListStack order={order} formatCurrency={formatCurrency} />
                           <p className="text-[10px] text-muted-foreground">
                             {order.orderDate || "—"} · {formatItemCount(order.itemCount ?? 0)}
                           </p>
@@ -1316,11 +1335,13 @@ export default function OrdersPage({
                     >
                       {selectedOrderUx?.paymentLabel}
                     </StatusBadge>
-                    <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-900">
-                      {formatCurrency(selectedOrderSummary.orderTotal)}
-                    </span>
                   </div>
                 </div>
+
+                <OrderAmountDetailBreakdown
+                  order={selectedOrderSummary}
+                  formatCurrency={formatCurrency}
+                />
 
                 {selectedOrderUx?.cancelled ? (
                   <section className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-900">

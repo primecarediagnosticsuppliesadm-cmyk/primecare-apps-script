@@ -70,6 +70,7 @@ import { hqDebugLog } from "@/utils/hqDebugLog.js";
 import OrderTrackingDrawer from "@/components/lab/OrderTrackingDrawer.jsx";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
 import OrderProgressMini from "@/components/lab/OrderProgressMini.jsx";
+import { OrderAmountLabBreakdown } from "@/components/orders/OrderDeliveryAmountDisplay.jsx";
 import { StatusBadge, usePortalToast, PageHeader, DataFetchError } from "@/components/ux";
 import {
   buildConfirmedCheckoutTrackingDetails,
@@ -464,6 +465,14 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
       return !rowLab || rowLab === profileLabKey;
     });
   }, [recentOrders, profileLabKey]);
+
+  const showLabDeliveryAmounts = useMemo(
+    () =>
+      scopedRecentOrders.some(
+        (order) => order.hasDeliveryEstimate || Number(order.deliveryChargeAmount) > 0
+      ),
+    [scopedRecentOrders]
+  );
 
   const crossLabOrderCount = useMemo(() => {
     if (!profileLabKey) return 0;
@@ -1852,7 +1861,9 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
                         <th className="px-2 py-1.5 font-medium">Order</th>
                         <th className="px-2 py-1.5 font-medium">Status</th>
                         <th className="px-2 py-1.5 font-medium">Progress</th>
-                        <th className="px-2 py-1.5 font-medium text-right">Total</th>
+                        <th className="px-2 py-1.5 font-medium text-right">
+                          {showLabDeliveryAmounts ? "Amounts" : "Total"}
+                        </th>
                         <th className="px-2 py-1.5 font-medium text-right">Actions</th>
                       </tr>
                     </thead>
@@ -1900,8 +1911,8 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
                                 <OrderProgressMini status={orderStatus} />
                               )}
                             </td>
-                            <td className="px-2 py-2 text-right tabular-nums font-semibold">
-                              ₹{Number(order.orderTotal ?? order.total ?? 0).toLocaleString("en-IN")}
+                            <td className="px-2 py-2 text-right">
+                              <OrderAmountLabBreakdown order={order} />
                             </td>
                             <td className="px-2 py-2">
                               <div className="flex justify-end gap-1">
@@ -1998,9 +2009,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
                           )}
                         </div>
                         <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px]">
-                          <span className="font-semibold tabular-nums">
-                            ₹{Number(order.orderTotal ?? order.total ?? 0).toLocaleString("en-IN")}
-                          </span>
+                          <OrderAmountLabBreakdown order={order} compact className="text-left" />
                           <StatusBadge variant={paymentStatusToVariant(payment)}>{payment}</StatusBadge>
                         </div>
                         <div className="mt-2 flex flex-wrap gap-1.5">

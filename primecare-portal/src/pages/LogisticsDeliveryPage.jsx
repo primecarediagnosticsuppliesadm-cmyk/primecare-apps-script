@@ -284,9 +284,9 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
           onClick={() => setStatusFilter("customer_pickup")}
         />
         <KpiCard
-          title="Est. Delivery Revenue"
+          title="Estimated delivery revenue"
           value={formatCurrency(kpis.estimatedDeliveryRevenue)}
-          subtitle="Operational quotes only"
+          subtitle="Operational quotes only — not invoiced revenue"
           icon={IndianRupee}
         />
       </KpiCardGrid>

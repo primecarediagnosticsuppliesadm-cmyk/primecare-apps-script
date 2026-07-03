@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ux";
 import { paymentStatusToVariant } from "@/utils/statusTokens";
 import { cn } from "@/lib/utils";
+import { OrderAmountLabBreakdown } from "@/components/orders/OrderDeliveryAmountDisplay.jsx";
 import {
   buildTrackingSteps,
   isCancelledStatus,
@@ -179,10 +180,8 @@ export default function OrderTrackingDrawer({
                     </div>
                   </div>
                   <div className="text-right text-xs text-slate-600">
-                    <p className="font-semibold tabular-nums text-slate-900">
-                      ₹{Number(details.orderTotal || 0).toLocaleString("en-IN")}
-                    </p>
-                    <p>{details.productUnitLabel || `${details.itemCount} items`}</p>
+                    <OrderAmountLabBreakdown order={details} compact />
+                    <p className="mt-1">{details.productUnitLabel || `${details.itemCount} items`}</p>
                   </div>
                 </div>
                 <dl className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-600">

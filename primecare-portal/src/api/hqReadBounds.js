@@ -26,7 +26,7 @@ export const HQ_INVOICE_ORDER_LOOKUP_CHUNK = 100;
 export const HQ_READ_CACHE_TTL_MS = 45_000;
 
 export const HQ_ORDER_LIST_COLUMNS =
-  "id,order_id,lab_id,status,order_date,created_at,total_amount,tenant_id,created_by,notes,agent_id,inventory_updated,fulfilled_at,invoice_id";
+  "id,order_id,lab_id,status,order_date,created_at,total_amount,merchandise_subtotal,delivery_charge_amount,delivery_charge_reason,delivery_method_intent,delivery_charge_status,tenant_id,created_by,notes,agent_id,inventory_updated,fulfilled_at,invoice_id";
 
 export const HQ_ORDER_LINE_COUNT_COLUMNS = "order_id";
 

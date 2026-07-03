@@ -212,3 +212,40 @@ export function computeEstimatedDeliveryRevenue(shipments = []) {
     0
   );
 }
+
+export const DELIVERY_CHARGE_PLANNING_NOTE =
+  "Delivery charge is shown for planning only and is not included in invoice/AR yet.";
+
+export const OPERATIONAL_DELIVERY_QUOTE_LABEL = "Operational delivery quote";
+
+/** Merchandise-only orderTotal plus optional operational delivery estimate (Phase 3A). */
+export function resolveOrderAmountBreakdown(order = {}) {
+  const orderTotal = num(
+    order.orderTotal ??
+      order.total_amount ??
+      order.totalAmount ??
+      order.total ??
+      0
+  );
+  const merchandiseSubtotal = num(
+    order.merchandiseSubtotal ?? order.merchandise_subtotal
+  );
+  const merchandise = merchandiseSubtotal > 0 ? merchandiseSubtotal : orderTotal;
+  const deliveryChargeAmount = num(
+    order.deliveryChargeAmount ?? order.delivery_charge_amount ?? 0
+  );
+  const hasDeliveryEstimate = deliveryChargeAmount > 0;
+  return {
+    merchandiseSubtotal: merchandise,
+    deliveryChargeAmount,
+    estimatedTotal: roundMoney(merchandise + deliveryChargeAmount),
+    hasDeliveryEstimate,
+    deliveryChargeReason: str(order.deliveryChargeReason ?? order.delivery_charge_reason),
+    deliveryMethodIntent: str(order.deliveryMethodIntent ?? order.delivery_method_intent),
+    deliveryChargeStatus: str(order.deliveryChargeStatus ?? order.delivery_charge_status),
+  };
+}
+
+export function formatOrderInr(amount) {
+  return `₹${num(amount).toLocaleString("en-IN")}`;
+}

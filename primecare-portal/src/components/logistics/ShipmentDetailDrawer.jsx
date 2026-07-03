@@ -21,6 +21,7 @@ import {
   canEditDeliveryChargeOverride,
   deliveryChargeReasonLabel,
 } from "@/logistics/deliveryChargeEngine.js";
+import { OperationalDeliveryQuoteLabel } from "@/components/orders/OrderDeliveryAmountDisplay.jsx";
 import {
   ASSIGNMENT_TYPE,
   ASSIGNMENT_TYPE_OPTIONS,
@@ -325,9 +326,12 @@ export default function ShipmentDetailDrawer({
           {error ? <p className="text-xs text-amber-700">{error}</p> : null}
 
           <section className="space-y-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Delivery Charge (operational)
-            </h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Delivery Charge (operational)
+              </h3>
+              <OperationalDeliveryQuoteLabel />
+            </div>
             <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs text-slate-700">
               <p>
                 <span className="text-slate-500">Charge:</span>{" "}
