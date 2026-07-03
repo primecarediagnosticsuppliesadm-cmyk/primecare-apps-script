@@ -392,6 +392,19 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 
 ---
 
+## Domain projections (read-only)
+
+| Projection | Domain | Grain | Source-of-truth inputs | RLS |
+|------------|--------|-------|------------------------|-----|
+| `proj_order_v1` | Orders | `(tenant_id, order_id)` | `orders`, line counts, lab display | Yes — lab visibility |
+| `proj_lab_receivable_v1` | Collections | `(tenant_id, lab_id)` | `ar_credit_control`, `payments` | Yes — lab visibility |
+| `proj_lab_profile_v1` | Laboratory | `(tenant_id, lab_id)` | `labs`, `lab_ownership`, `lab_qualifications`, tenant/profile display fields | Yes — lab visibility |
+| tenant metric projections | Dashboard / Executive | `tenant_id` | Domain projections | Yes — tenant/executive scope |
+
+`proj_lab_profile_v1` is read-only and owns only lab identity/profile/ownership/qualification/ordering display fields. It must not own invoices, payments, receivables, allocations, commissions, order status, or finance calculations. Labs list adapters compose it with `proj_lab_receivable_v1` when credit fields are needed.
+
+---
+
 ## Migration index
 
 | File | Domain |

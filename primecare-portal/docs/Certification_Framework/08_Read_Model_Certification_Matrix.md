@@ -14,12 +14,14 @@ Registry: [Projection_Registry.md](../../../docs/Architecture/Projection_Registr
 | Deploy probe | RPCs + tables exist | `verify-projection-parity.mjs` (preflight) |
 | Parity — orders | item_count + orderTotal match (15 sample) | `verify-projection-parity.mjs` |
 | Parity — collections | outstanding + totalPaid match (12 sample) | `verify-projection-parity.mjs` |
+| Parity — labs | profile + ownership + ordering + composed receivable fields match `v_labs_credit` | `verify-labs-projection-parity.mjs` |
 | Parity — dashboard KPIs | executive + summary scalars vs transactional sample | `verify-dashboard-projection-parity.mjs` |
 | Parity — executive KPIs | `get_founder_snapshot` field match | `verify-executive-projection-parity.mjs` |
 | Staleness — core | ≤ 60 s after rebuild | `verify-projection-staleness.mjs` |
 | Staleness — metrics/composite | ≤ 90 s dashboard / 180 s executive | `verify-projection-staleness.mjs` (extended) |
 | Performance — orders | ≤ 350 ms cold adapter | `measure-projection-reads.mjs` |
 | Performance — collections | ≤ 300 ms cold adapter | `measure-projection-reads.mjs` |
+| Performance — labs | ≤ 300 ms cold adapter | `measure-projection-reads.mjs` |
 | Performance — dashboard | ≤ 350 ms cold adapter | `measure-dashboard-projection-reads.mjs` |
 | Performance — executive | ≤ 400 ms cold adapter | `measure-dashboard-projection-reads.mjs` |
 | RLS | projection SELECT mirrors SoT | `verify-hq-rls-reads.mjs` (extend) |
@@ -38,6 +40,7 @@ Registry: [Projection_Registry.md](../../../docs/Architecture/Projection_Registr
 |-------------|-------|-------------|-----|--------|
 | PRJ-ORD-ORDER-v1 | `proj_order_v1` | `read_orders_list_v1` | 60 s | shadow |
 | PRJ-COL-LAB-v1 | `proj_lab_receivable_v1` | `read_lab_receivables_list_v1` | 60 s | shadow |
+| PRJ-LAB-PROFILE-v1 | `proj_lab_profile_v1` | `read_labs_list_v1` | 60 s | shadow |
 
 ### Phase 2 — design (Sprint 2 Phase 2)
 
@@ -95,6 +98,7 @@ node scripts/run-browser-certification.mjs --prereq-only
 |---------|---------|------------------|----------|
 | Orders list | `read_orders_list_v1` | ≤ 350 ms | `getOrdersRead` fan-out |
 | Collections | `read_lab_receivables_list_v1` | ≤ 300 ms | `getCollectionsRead` |
+| Labs list | `read_labs_list_v1` | ≤ 300 ms | `getLabsCredit` / `v_labs_credit` |
 | Admin Dashboard | `read_tenant_dashboard_v1` | ≤ 350 ms | `getAdminDashboardRead` (~31–40s QA) |
 | Executive snapshot | `read_tenant_executive_v1` | ≤ 400 ms | `get_founder_snapshot` (~8s timeout) |
 

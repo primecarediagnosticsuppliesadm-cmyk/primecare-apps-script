@@ -15,6 +15,7 @@ const root = resolve(__dirname, "..");
 const SLA_MS = {
   "PRJ-ORD-ORDER-v1": 60_000,
   "PRJ-COL-LAB-v1": 60_000,
+  "PRJ-LAB-PROFILE-v1": 60_000,
   "PRJ-ORD-METRICS-v1": 90_000,
   "PRJ-COL-METRICS-v1": 90_000,
   "PRJ-DSH-METRICS-v1": 90_000,
@@ -119,6 +120,19 @@ if (recvErr) {
   pass("proj_lab_receivable_v1.max_refreshed", recvFresh[0].refreshed_at);
 } else {
   warn("proj_lab_receivable_v1.empty", "no projection rows — run rebuild");
+}
+
+const { data: labFresh, error: labErr } = await sb
+  .from("proj_lab_profile_v1")
+  .select("refreshed_at")
+  .order("refreshed_at", { ascending: false })
+  .limit(1);
+if (labErr) {
+  fail("proj_lab_profile_v1.read", labErr.message);
+} else if (labFresh?.[0]?.refreshed_at) {
+  pass("proj_lab_profile_v1.max_refreshed", labFresh[0].refreshed_at);
+} else {
+  warn("proj_lab_profile_v1.empty", "no projection rows — run rebuild");
 }
 
 console.log("\n=== Staleness certification complete ===\n");

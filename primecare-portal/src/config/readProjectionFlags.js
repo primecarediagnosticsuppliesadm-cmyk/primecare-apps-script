@@ -16,6 +16,11 @@ export function isReadAdapterReceivablesV1Enabled() {
   return flagEnabled("VITE_READ_ADAPTER_RECEIVABLES_V1");
 }
 
+/** When true, LabsPage may use read_labs_list_v1 instead of v_labs_credit. Default OFF. */
+export function isReadAdapterLabsV1Enabled() {
+  return flagEnabled("VITE_READ_ADAPTER_LABS_V1");
+}
+
 /** When true, Admin Dashboard uses read_tenant_dashboard_v1. */
 export function isReadAdapterDashboardV1Enabled() {
   return flagEnabled("VITE_READ_ADAPTER_DASHBOARD_V1");
@@ -31,6 +36,7 @@ export function isProjectionShadowMode() {
   return (
     !isReadAdapterOrdersV1Enabled() &&
     !isReadAdapterReceivablesV1Enabled() &&
+    !isReadAdapterLabsV1Enabled() &&
     !isReadAdapterDashboardV1Enabled() &&
     !isReadAdapterExecutiveV1Enabled()
   );
@@ -39,6 +45,7 @@ export function isProjectionShadowMode() {
 export const PROJECTION_STALENESS_SLA_MS = {
   orders: 60_000,
   receivables: 60_000,
+  labs: 60_000,
   dashboard: 90_000,
   executive: 180_000,
   agentReceivables: 0,

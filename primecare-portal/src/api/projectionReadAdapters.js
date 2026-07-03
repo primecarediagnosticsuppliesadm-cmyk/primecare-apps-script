@@ -15,6 +15,7 @@ import {
 import {
   mapOrderRow,
   mapCollectionsRowFromArCredit,
+  mapLabsCreditRow,
 } from "@/api/primecareSupabaseApi.js";
 import { PROJECTION_STALENESS_SLA_MS } from "@/config/readProjectionFlags.js";
 import { perfLog } from "@/utils/perfLog.js";
@@ -249,6 +250,78 @@ export async function readLabReceivablesListV1(params = {}) {
     asOf: payload.as_of ?? null,
     stalenessMs,
     degraded: projectionDegraded(stalenessMs, PROJECTION_STALENESS_SLA_MS.receivables),
+  };
+}
+
+/**
+ * Shadow-only Labs list adapter. UI stays on getLabsCredit until
+ * VITE_READ_ADAPTER_LABS_V1 is explicitly approved for QA.
+ */
+export async function readLabsListV1(params = {}) {
+  if (!supabase) {
+    return {
+      success: false,
+      readFailed: true,
+      error: "Supabase is not configured",
+      data: [],
+    };
+  }
+
+  const limit = clampLimit(params.limit, HQ_COLLECTIONS_AR_LIMIT, HQ_COLLECTIONS_AR_LIMIT);
+
+  perfLog("readLabsListV1.rpc", { limit });
+
+  const { data, error } = await supabase.rpc("read_labs_list_v1", {
+    p_limit: limit,
+  });
+
+  if (error) {
+    return {
+      success: false,
+      readFailed: true,
+      error: error.message || String(error),
+      data: [],
+      projection: true,
+    };
+  }
+
+  const payload = data && typeof data === "object" ? data : {};
+  const rawRows = Array.isArray(payload.data) ? payload.data : [];
+  const labs = rawRows.map((row) => ({
+    ...mapLabsCreditRow(row),
+    orderingMode: str(row.ordering_mode ?? row.orderingMode),
+    assignedAgentName: str(row.assigned_agent_name ?? row.assignedAgentName),
+    primaryAgentId: str(row.primary_agent_id ?? row.primaryAgentId),
+    primaryAgentName: str(row.primary_agent_name ?? row.primaryAgentName),
+    secondaryAgentId: str(row.secondary_agent_id ?? row.secondaryAgentId),
+    secondaryAgentName: str(row.secondary_agent_name ?? row.secondaryAgentName),
+    qualificationStatus: str(row.qualification_status ?? row.qualificationStatus),
+    qualificationStage: str(row.qualification_stage ?? row.qualificationStage),
+    orderingEligible: Boolean(row.ordering_eligible ?? row.orderingEligible),
+    projectionProfileRefreshedAt: row.profile_refreshed_at ?? null,
+    projectionReceivableRefreshedAt: row.receivable_refreshed_at ?? null,
+  }));
+  const stalenessMs = num(payload.staleness_ms);
+
+  return {
+    success: payload.success !== false,
+    readFailed: false,
+    data: labs,
+    meta: payload.meta || {
+      rawRowCount: rawRows.length,
+      mappedRowCount: labs.length,
+      limit,
+      hasMore: rawRows.length >= limit,
+    },
+    projection: true,
+    registryId: payload.registry_id || "PRJ-LAB-PROFILE-v1",
+    composedRegistryIds: payload.composed_registry_ids || [
+      "PRJ-LAB-PROFILE-v1",
+      "PRJ-COL-LAB-v1",
+    ],
+    asOf: payload.as_of ?? null,
+    stalenessMs,
+    degraded: projectionDegraded(stalenessMs, PROJECTION_STALENESS_SLA_MS.labs),
   };
 }
 

@@ -48,6 +48,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | Script | Checks | When |
 |--------|--------|------|
 | verify-labs-admin-flow.mjs | Tenant scope, ownership | Labs |
+| verify-labs-projection-parity.mjs | `v_labs_credit` vs `read_labs_list_v1` parity, role scope, freshness | Labs projection |
 | verify-credit-risk-admin-flow.mjs | AR KPI, aging | Credit & Risk |
 | verify-agent-collections-ownership-filter.mjs | Ownership scoping | Agent collections |
 | verify-create-lab-ar-rls.mjs | Lab+AR insert RLS | Add lab |
@@ -91,6 +92,8 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | run-hq-performance-certification.mjs | PERF tenant benchmarks | Performance cert |
 | run-browser-certification.mjs | API prereq gate + browser checklist | O2C / release browser cert |
 | measure-hq-navigation-perf.mjs | QA navigation probe | Ad-hoc perf |
+| measure-route-prefetch.mjs | Static route prefetch drift check against role routing map | Client-side performance changes |
+| measure-data-broker-duplicates.mjs | Shared broker in-flight/TTL duplicate-read regression probe | Client-side performance changes |
 
 ---
 

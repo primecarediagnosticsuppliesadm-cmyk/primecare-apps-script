@@ -13,6 +13,7 @@ Blueprint refs: [01_Database_Schema.md](../PrimeCare_System_Blueprint/01_Databas
 | [Tenant](#tenant) | Operations | `tenants` |
 | [Profile](#profile) | Operations | `profiles` |
 | [Lab](#lab) | Labs | `labs` |
+| [Lab profile projection](#lab-profile-projection) | Labs | `proj_lab_profile_v1` |
 | [Lab ownership](#lab-ownership) | Operations | `lab_ownership` |
 | [Order](#order) | Orders | `orders` |
 | [Order lines](#order-lines) | Orders | `order_items` / `order_lines` |
@@ -73,6 +74,22 @@ Blueprint refs: [01_Database_Schema.md](../PrimeCare_System_Blueprint/01_Databas
 | **Verify scripts** | `verify-labs-admin-flow.mjs`, `verify-lab-ordering-flow.mjs`, `verify-create-lab-ar-rls.mjs`, `verify-credit-risk-admin-flow.mjs` |
 | **Dependencies** | Tenant, Profile (agent assignment), AR row on create |
 | **Known gaps** | GAP-BP-006 mitigated — `ordering_mode` column; preferred delivery day Phase 4 |
+
+---
+
+## Lab profile projection
+
+| Field | Value |
+|-------|-------|
+| **Source of truth** | Read-only derivative of `labs`, `lab_ownership`, `lab_qualifications`, tenant/profile display fields |
+| **Lifecycle** | Shadow projection → parity/staleness certified → optional QA flag enablement |
+| **APIs** | `refresh_proj_lab_profile_row_v1`, `rebuild_projection_v1`, `read_labs_list_v1` |
+| **Screens** | LabsPage (future flag), Operations lab directory, Agent lab list, search/qualification enrichments |
+| **Verify scripts** | `verify-labs-projection-parity.mjs`, `verify-projection-staleness.mjs`, `verify-hq-rls-reads.mjs` |
+| **Dependencies** | Lab, Lab ownership, Qualification, Receivable projection for composed credit fields |
+| **Known gaps** | Shadow only; `VITE_READ_ADAPTER_LABS_V1` remains OFF until architecture review |
+
+`proj_lab_profile_v1` must not own AR, payments, invoices, allocations, orders, commissions, or finance calculations. Credit/receivable fields remain owned by `proj_lab_receivable_v1`.
 
 ---
 

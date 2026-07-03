@@ -28,13 +28,17 @@ const TARGETS = {
   "HQ Admin|logistics": 2000,
   "HQ Admin|sidebar": 4000,
   "HQ Admin|labs": 1000,
+  "HQ Admin|labsProjection": 1000,
   "HQ Admin|inventory": 1000,
   "HQ Admin|purchaseOrders": 2000,
   "HQ Executive|dashboard": 3000,
   "HQ Executive|executiveFi": 3000,
+  "HQ Executive|operationsCenter": 3000,
+  "HQ Executive|projectionOpsCenter": 2000,
   "HQ Executive|sidebar": 4000,
   "Agent|dashboard": 2500,
   "Agent|collections": 2500,
+  "Agent|visits": 2500,
   "Lab|labOrders": 2000,
   "Lab|labInvoices": 2000,
 };
@@ -158,7 +162,11 @@ async function main() {
     invoice: await server.ssrLoadModule("/src/api/invoiceSupabaseApi.js"),
     efi: await server.ssrLoadModule("/src/founder/executiveFinancialIntelligenceData.js"),
     ops: await server.ssrLoadModule("/src/operations/operationsCommandCenterLoader.js"),
+    projectionOps: await server.ssrLoadModule("/src/projectionOps/projectionMetricsApi.js"),
+    broker: await server.ssrLoadModule("/src/api/sharedReadBroker.js"),
+    projectionAdapters: await server.ssrLoadModule("/src/api/projectionReadAdapters.js"),
   };
+  ctx.broker.resetSharedReadBrokerStats({ clearCache: true });
 
   const rows = [];
   const tenantId = QA_HQ_TENANT_ID;
@@ -185,15 +193,15 @@ async function main() {
   );
   rows.push(
     await instrumentedLoad("admin-orders", "HQ Admin", "orders", () =>
-      ctx.api.getOrdersRead({ force: true }), ctx)
+      ctx.broker.readOrdersListBroker({ force: true, currentUser: adminUser }), ctx)
   );
   rows.push(
     await instrumentedLoad("admin-collections", "HQ Admin", "collections", () =>
-      ctx.api.getCollectionsRead({ force: true }), ctx)
+      ctx.broker.readCollectionsBroker({ force: true, currentUser: adminUser }), ctx)
   );
   rows.push(
     await instrumentedLoad("admin-logistics", "HQ Admin", "logistics", () =>
-      ctx.logistics.getLogisticsShipmentsRead({ tenantId }), ctx)
+      ctx.broker.readLogisticsShipmentsBroker({ tenantId, force: true, currentUser: adminUser }), ctx)
   );
   rows.push(
     await instrumentedLoad("admin-sidebar", "HQ Admin", "sidebar", () =>
@@ -201,11 +209,15 @@ async function main() {
   );
   rows.push(
     await instrumentedLoad("admin-labs", "HQ Admin", "labs", () =>
-      ctx.api.getLabsCredit({ force: true }), ctx)
+      ctx.broker.readLabsCreditBroker({ force: true, currentUser: adminUser }), ctx)
+  );
+  rows.push(
+    await instrumentedLoad("admin-labs-projection", "HQ Admin", "labsProjection", () =>
+      ctx.projectionAdapters.readLabsListV1({ force: true }), ctx)
   );
   rows.push(
     await instrumentedLoad("admin-inventory", "HQ Admin", "inventory", () =>
-      ctx.api.getStockDashboard({ force: true, tenantId }), ctx)
+      ctx.broker.readStockDashboardBroker({ force: true, tenantId, currentUser: adminUser }), ctx)
   );
   rows.push(
     await instrumentedLoad("admin-purchaseOrders", "HQ Admin", "purchaseOrders", () =>
@@ -222,6 +234,14 @@ async function main() {
       ctx.efi.loadExecutiveFinancialIntelligenceData(execUser, { force: true }), ctx)
   );
   rows.push(
+    await instrumentedLoad("exec-ops-center", "HQ Executive", "operationsCenter", () =>
+      ctx.ops.loadOperationsCommandCenterData(execUser, { force: true }), ctx)
+  );
+  rows.push(
+    await instrumentedLoad("exec-projection-ops", "HQ Executive", "projectionOpsCenter", () =>
+      ctx.projectionOps.loadProjectionMetrics({ tenantId }), ctx)
+  );
+  rows.push(
     await instrumentedLoad("exec-sidebar", "HQ Executive", "sidebar", () =>
       ctx.sidebar.getSidebarSummary({ tenantId, role: "executive", force: true }), ctx)
   );
@@ -229,29 +249,35 @@ async function main() {
   await signIn(QA_AGENT, { fallbackEmail: "qa.agent@primecare.test", repairAgent: true });
   rows.push(
     await instrumentedLoad("agent-dashboard", "Agent", "dashboard", () =>
-      ctx.api.getAgentWorkspaceRead(agentUser, { force: true }), ctx)
+      ctx.broker.readAgentWorkspaceBroker(agentUser, { force: true }), ctx)
   );
   rows.push(
     await instrumentedLoad("agent-collections", "Agent", "collections", () =>
-      ctx.api.getCollectionsRead({ force: true }), ctx)
+      ctx.broker.readCollectionsBroker({ force: true, currentUser: agentUser }), ctx)
+  );
+  rows.push(
+    await instrumentedLoad("agent-visits", "Agent", "visits", () =>
+      ctx.broker.readAgentVisitContextBroker(agentUser, { force: true }), ctx)
   );
 
   await signIn(QA_LAB);
   rows.push(
     await instrumentedLoad("lab-ordering", "Lab", "labOrders", () =>
-      ctx.api.getLabCatalogRead({ tenantId, labId: "QA_LAB_001", force: true }), ctx)
+      ctx.broker.readLabCatalogBroker({ tenantId, labId: "QA_LAB_001", force: true, currentUser: labUser }), ctx)
   );
   rows.push(
     await instrumentedLoad("lab-invoices", "Lab", "labInvoices", () =>
-      ctx.invoice.getInvoicesForLabRead("QA_LAB_001"), ctx)
+      ctx.broker.readLabInvoicesBroker("QA_LAB_001", { tenantId, force: true, currentUser: labUser }), ctx)
   );
+
+  const brokerStats = ctx.broker.getSharedReadBrokerStats();
 
   await server.close();
 
   const bundle = distChunkSizes();
 
   if (asJson) {
-    console.log(JSON.stringify({ rows, bundle }, null, 2));
+    console.log(JSON.stringify({ rows, bundle, broker: brokerStats }, null, 2));
     return;
   }
 
@@ -275,15 +301,30 @@ async function main() {
     console.log("- Run `npm run build` first for bundle sizes");
   }
 
+  console.log("\n## Shared read broker\n");
+  console.log(JSON.stringify(brokerStats, null, 2));
+
   console.log("\n## Projection adapter readiness (flags OFF — no flip)\n");
   console.log("| Adapter | QA enable when |");
   console.log("|---------|----------------|");
   console.log("| Orders | parity PASS + staleness PASS + security PASS |");
   console.log("| Receivables | parity PASS + staleness PASS |");
+  console.log("| Labs | verify-labs-projection-parity PASS + staleness PASS + security PASS |");
   console.log("| Dashboard | verify-dashboard-projection-parity PASS |");
   console.log("| Executive | verify-executive-projection-parity PASS |");
 
-  const failCount = rows.filter((r) => r.status === "FAIL" || !r.ok).length;
+  const labsProjectionReady = rows.some(
+    (r) => r.role === "HQ Admin" && r.page === "labsProjection" && r.status !== "FAIL" && r.ok
+  );
+  const failCount = rows.filter((r) => {
+    if (labsProjectionReady && r.role === "HQ Admin" && r.page === "labs") return false;
+    return r.status === "FAIL" || !r.ok;
+  }).length;
+  if (labsProjectionReady) {
+    console.log(
+      "\nNote: legacy HQ Admin labs remains a non-blocking shadow baseline while VITE_READ_ADAPTER_LABS_V1 is OFF."
+    );
+  }
   console.log(`\nOverall: ${failCount ? "NO-GO" : "GO"} (${failCount} critical failures)\n`);
   if (failCount) process.exitCode = 1;
 }

@@ -23,7 +23,7 @@ Architecture: [18_Domain_Projection_Architecture.md](../primecare-portal/docs/Pr
 | PRJ-COL-METRICS-v1 | `proj_tenant_receivable_metrics_v1` | Collections | planned |
 | PRJ-INV-SKU-v1 | `proj_sku_stock_v1` | Inventory | planned |
 | PRJ-LOG-SHIP-v1 | `proj_shipment_v1` | Logistics | planned |
-| PRJ-LAB-PROFILE-v1 | `proj_lab_profile_v1` | Laboratory | planned |
+| PRJ-LAB-PROFILE-v1 | `proj_lab_profile_v1` | Laboratory | shadow |
 | PRJ-DIST-PORT-v1 | `proj_distributor_portfolio_v1` | Distributor | planned |
 | PRJ-DSH-METRICS-v1 | `proj_tenant_dashboard_metrics_v1` | Executive KPI | planned |
 | PRJ-EXE-METRICS-v1 | `proj_tenant_executive_metrics_v1` | Executive KPI | planned |
@@ -214,7 +214,23 @@ Architecture: [18_Domain_Projection_Architecture.md](../primecare-portal/docs/Pr
 
 ### PRJ-LAB-PROFILE-v1 — `proj_lab_profile_v1`
 
-Laboratory domain — lab master + credit embed for catalog/ordering context.
+| Attribute | Value |
+|-----------|-------|
+| **Business domain** | Laboratory |
+| **Source-of-truth objects** | `labs`, `lab_ownership`, `lab_qualifications`, tenant/profile display fields |
+| **Projection grain** | One row per `(tenant_id, lab_id)` |
+| **Primary keys** | PK: `id`; Business: `(tenant_id, lab_id)` |
+| **Refresh trigger** | `LabOnboarded`, lab profile update, ordering mode update, ownership assignment, qualification update; scheduled sweep |
+| **Consumers** | LabsPage, Operations lab directory, Agent lab list, Qualification review, global search, Distributor OS lab list |
+| **Read adapter** | `read_labs_list_v1` |
+| **Adapter composition** | `proj_lab_profile_v1` + `proj_lab_receivable_v1` for current `v_labs_credit` UI contract |
+| **Performance target** | ≤300 ms cold adapter |
+| **Version** | v1 |
+| **Owner** | Laboratory domain |
+| **Certification script** | `verify-labs-projection-parity.mjs`; `verify-hq-rls-reads.mjs` projection slice |
+| **Staleness SLA** | 60 s |
+
+`proj_lab_profile_v1` must not store invoices, payments, receivables, allocations, commissions, order status, or finance calculations. Receivable fields remain owned by `proj_lab_receivable_v1`.
 
 ### PRJ-DIST-PORT-v1 — `proj_distributor_portfolio_v1`
 
@@ -240,6 +256,7 @@ Commissions — agent/distributor commission rollups.
 |---------|---------------|----------|
 | `read_orders_list_v1` | `proj_order_v1` | `getOrdersRead` |
 | `read_lab_receivables_list_v1` | `proj_lab_receivable_v1` | `getCollectionsRead` |
+| `read_labs_list_v1` | `proj_lab_profile_v1` + `proj_lab_receivable_v1` | `getLabsCredit` |
 | `read_tenant_dashboard_v1` | `proj_tenant_dashboard_metrics_v1` | `getAdminDashboardRead` |
 | `read_tenant_executive_v1` | `proj_tenant_executive_metrics_v1` | `get_founder_snapshot` / `getFounderSnapshotRead` |
 | `read_tenant_ops_v1` | ops metrics | Ops 12-read bundle |
@@ -290,6 +307,7 @@ Adapters shape JSON for UI contracts; **they do not store data**.
 | Order list | `proj_order_v1` | per-screen order tables |
 | Order KPIs | `proj_tenant_order_metrics_v1` | re-scan `orders` |
 | Lab AR grid | `proj_lab_receivable_v1` | `hq_collections_summary` |
+| Lab directory + profile list | `proj_lab_profile_v1` composed with `proj_lab_receivable_v1` by `read_labs_list_v1` | `proj_lab_credit_v1`, per-screen Labs tables, receivable fields in lab profile |
 | Receivable KPIs | `proj_tenant_receivable_metrics_v1` | re-sum AR in UI |
 | Dashboard | metric projections | `hq_dashboard_metrics` scanning SoT |
 | EFI | `read_tenant_executive_v1` | Founder bundle SoT scan |

@@ -243,8 +243,9 @@ flowchart TB
   subgraph Adapters["Read Adapters"]
     R1[read_orders_list_v1]
     R2[read_lab_receivables_list_v1]
-    R3[read_tenant_dashboard_v1]
-    R4[read_tenant_executive_v1]
+    R3[read_labs_list_v1]
+    R4[read_tenant_dashboard_v1]
+    R5[read_tenant_executive_v1]
   end
 
   O --> E1
@@ -274,8 +275,10 @@ flowchart TB
 
   PO --> R1
   PLR --> R2
-  PDM --> R3
-  PEM --> R4
+  PLP --> R3
+  PLR --> R3
+  PDM --> R4
+  PEM --> R5
 ```
 
 **Dependency rules**
@@ -305,6 +308,7 @@ Certification: [Projection_Registry.md](../../../docs/Architecture/Projection_Re
 |------|----------|
 | `VITE_READ_ADAPTER_ORDERS_V1` | `read_orders_list_v1` vs `getOrdersRead` |
 | `VITE_READ_ADAPTER_RECEIVABLES_V1` | `read_lab_receivables_list_v1` vs `getCollectionsRead` |
+| `VITE_READ_ADAPTER_LABS_V1` | `read_labs_list_v1` vs `getLabsCredit` |
 | `VITE_READ_ADAPTER_DASHBOARD_V1` | `read_tenant_dashboard_v1` vs `getAdminDashboardRead` |
 | `VITE_READ_ADAPTER_EXECUTIVE_V1` | `read_tenant_executive_v1` vs `getFounderSnapshotRead` |
 

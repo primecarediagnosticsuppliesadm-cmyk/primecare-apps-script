@@ -1,9 +1,10 @@
 {
   "version": "1.0.0",
-  "updated": "2026-07-02",
+  "updated": "2026-07-03",
   "deployed_registry_ids": [
     "PRJ-ORD-ORDER-v1",
     "PRJ-COL-LAB-v1",
+    "PRJ-LAB-PROFILE-v1",
     "PRJ-ORD-METRICS-v1",
     "PRJ-COL-METRICS-v1",
     "PRJ-DSH-METRICS-v1",
@@ -30,6 +31,17 @@
       "featureFlag": "VITE_READ_ADAPTER_RECEIVABLES_V1",
       "stalenessSlaMs": 60000,
       "parityScript": "verify-projection-parity.mjs",
+      "rebuildable": true
+    },
+    {
+      "registryId": "PRJ-LAB-PROFILE-v1",
+      "table": "proj_lab_profile_v1",
+      "class": "core",
+      "status": "shadow",
+      "adapterRpc": "read_labs_list_v1",
+      "featureFlag": "VITE_READ_ADAPTER_LABS_V1",
+      "stalenessSlaMs": 60000,
+      "parityScript": "verify-labs-projection-parity.mjs",
       "rebuildable": true
     },
     {
@@ -80,6 +92,7 @@
   "rebuild_cascade": [
     "PRJ-ORD-ORDER-v1",
     "PRJ-COL-LAB-v1",
+    "PRJ-LAB-PROFILE-v1",
     "PRJ-DSH-METRICS-v1",
     "PRJ-EXE-METRICS-v1"
   ]

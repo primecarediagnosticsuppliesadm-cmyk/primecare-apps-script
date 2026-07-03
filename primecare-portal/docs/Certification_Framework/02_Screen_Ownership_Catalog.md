@@ -115,9 +115,9 @@ Routing: `src/config/pageRouting.js` · Permissions: `src/config/rolePermissionM
 |-------|-------|
 | **Path** | `/labs` |
 | **Users** | `admin` |
-| **Reads** | `getLabsCredit`, lab detail drawers |
+| **Reads** | `getLabsCredit`; shadow adapter `read_labs_list_v1` remains flag OFF until parity/RLS review; lab detail drawers |
 | **Writes** | `createLabWrite`, ordering mode, delivery day |
-| **Verification** | `verify-labs-admin-flow.mjs`, `verify-create-lab-ar-rls.mjs` |
+| **Verification** | `verify-labs-admin-flow.mjs`, `verify-create-lab-ar-rls.mjs`, `verify-labs-projection-parity.mjs` |
 | **Perf target** | **≤ 300 ms** list |
 
 ---

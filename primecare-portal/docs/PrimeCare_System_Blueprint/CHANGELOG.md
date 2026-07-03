@@ -4,6 +4,90 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-03 — Sprint 8A Labs Projection QA Shadow
+
+### Change
+
+- Add the approved Laboratory domain projection `proj_lab_profile_v1` at `(tenant_id, lab_id)` grain for lab identity/profile/ownership/qualification/ordering display fields.
+- Add `read_labs_list_v1` as a read adapter that composes `proj_lab_profile_v1` with the finance-owned `proj_lab_receivable_v1` to preserve the existing `v_labs_credit` UI contract without duplicating receivable ownership.
+- Register `PRJ-LAB-PROFILE-v1` in projection registry, staleness, Projection Ops, and Labs parity certification.
+- Add `VITE_READ_ADAPTER_LABS_V1` as a disabled-by-default shadow flag.
+- Optimize `read_labs_list_v1` with an explicit adapter visibility predicate: admin uses the equivalent own-tenant fast path; all other roles continue through `distributor_lab_record_visible`.
+
+### Not changed
+
+- No finance, AR, payments, allocations, invoices, orders, inventory, logistics, commissions, delivery charge rules, or business logic ownership changes.
+- No production flag enablement.
+- No `proj_lab_credit_v1`; receivable data remains owned by `proj_lab_receivable_v1`.
+
+### Verification gates
+
+- `npm run build`
+- `node scripts/verify-labs-projection-parity.mjs`
+- `node scripts/verify-projection-staleness.mjs`
+- `node scripts/verify-hq-rls-reads.mjs`
+- `node scripts/verify-financial-reconciliation.mjs`
+- `node scripts/verify-ar-reconcile.mjs`
+- `node scripts/verify-delivery-charge-policy.mjs`
+- `node scripts/run-browser-smoke-all-roles.mjs`
+- `node scripts/measure-all-role-page-performance.mjs`
+
+---
+
+## 2026-07-03 — Sprint 7B Data Path Optimization & Progressive Loading
+
+### Change
+
+- Split Executive Financial Intelligence initial load from deep analytics: core summary renders first; portfolio/payments/shipments/catalog/commission analytics load after idle.
+- Removed default EFI order-line fallback from initial analytics; EFI uses `orders.total_amount` as the merchandise SoT and leaves line fallback opt-in for deep diagnostics.
+- Removed founder snapshot RPC from the default Operations Command Center load path; Operations initial and extended panels no longer block on founder analytics.
+- Reused the Sprint 7A shared read broker in the distributor/founder portfolio loader for shared labs, orders, and collections reads.
+
+### Not changed
+
+- No SQL, schema, RLS, projection architecture, projection adapters, projection flags, finance, AR, invoice, payment, inventory, logistics lifecycle, delivery charge, ordering, pricing, or commission business logic changed.
+- Existing verification scripts were not modified for Sprint 7B.
+- No production deployment.
+
+### Verification gates
+
+- `npm run build`
+- `node scripts/verify-runtime-import-safety.mjs`
+- `node scripts/run-browser-smoke-all-roles.mjs`
+- `node scripts/measure-all-role-page-performance.mjs`
+- `node scripts/verify-financial-reconciliation.mjs`
+- `node scripts/verify-delivery-charge-policy.mjs`
+- `node scripts/verify-hq-rls-reads.mjs`
+
+---
+
+## 2026-07-03 — Sprint 7A Client-Side Read Orchestration
+
+### Change
+
+- Add a client-only shared read broker for high-reuse reads with in-flight dedupe, TTL cache reuse, scoped cache keys, and standardized read health envelopes.
+- Add route prefetch measurement for role-route alignment and a duplicate-read broker measurement probe.
+- Keep existing Supabase/RLS/API contracts as the source of truth; broker reads wrap existing read APIs only.
+
+### Not changed
+
+- No SQL, schema, RLS, projection flags, write APIs, finance, AR, invoice, payment, inventory, logistics, ordering, pricing, or commission business logic changed.
+- No production deployment.
+
+### Verification gates
+
+- `npm run build`
+- `node scripts/verify-runtime-import-safety.mjs`
+- `node scripts/run-browser-smoke-all-roles.mjs`
+- `node scripts/measure-all-role-page-performance.mjs`
+- `node scripts/verify-financial-reconciliation.mjs`
+- `node scripts/verify-delivery-charge-policy.mjs`
+- `node scripts/verify-hq-rls-reads.mjs`
+- `node scripts/measure-route-prefetch.mjs`
+- `node scripts/measure-data-broker-duplicates.mjs`
+
+---
+
 ## 2026-07-03 — Sprint 6A.1 Read-Only Verification Safety Gate
 
 ### Change

@@ -84,6 +84,11 @@ async function repairAgentAuthIfNeeded(env, roleSpec) {
 const MODULES = [
   { module: "Orders", table: "orders", select: "order_id, lab_id, status", limit: 100 },
   { module: "Labs", table: "v_labs_credit", select: "lab_id, lab_name, tenant_id" },
+  {
+    module: "Labs projection",
+    table: "proj_lab_profile_v1",
+    select: "lab_id, lab_name, tenant_id, assigned_agent_id",
+  },
   { module: "Collections", table: "ar_credit_control", select: "lab_id, outstanding, total_paid" },
   { module: "Inventory", table: "v_stock_dashboard", select: "product_id, product_name, current_stock" },
   { module: "Users", table: "profiles", select: "user_id, role, display_name, tenant_id" },
