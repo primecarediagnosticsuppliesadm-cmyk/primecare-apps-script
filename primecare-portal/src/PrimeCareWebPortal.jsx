@@ -236,6 +236,15 @@ export default function PrimeCareWebPortal({
 
       case "orders":
         return <OrdersPage currentUser={currentUser} setActivePage={setActivePage} />;
+      case "adminOnBehalfOrder":
+        return (
+          <LabOrderingPage
+            currentUser={currentUser}
+            authToken={authToken}
+            setActivePage={setActivePage}
+            adminOnBehalfRequired
+          />
+        );
       case "distributorOs":
         return (
           <DistributorOsPage
@@ -460,6 +469,15 @@ export default function PrimeCareWebPortal({
 
       case "orders":
         return <OrdersPage currentUser={currentUser} setActivePage={setActivePage} />;
+      case "adminOnBehalfOrder":
+        return (
+          <LabOrderingPage
+            currentUser={currentUser}
+            authToken={authToken}
+            setActivePage={setActivePage}
+            adminOnBehalfRequired
+          />
+        );
       case "distributorOs":
         return (
           <DistributorOsPage

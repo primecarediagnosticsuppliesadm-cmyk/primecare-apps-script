@@ -103,6 +103,9 @@ export function normalizePageKey(page) {
     case "lab-ordering":
     case "ordering":
       return "labOrders";
+    case "admin-on-behalf-order":
+    case "adminOnBehalfOrder":
+      return "adminOnBehalfOrder";
     case "credit-risk":
       return "risk";
     case "payments":

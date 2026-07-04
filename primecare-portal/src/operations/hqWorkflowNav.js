@@ -46,7 +46,7 @@ export function navigateToAdminOnBehalfOrder(
   } = {}
 ) {
   hqNavigate(setActivePage, {
-    page: "labOrders",
+    page: "adminOnBehalfOrder",
     adminOnBehalf: true,
     selectedLabId: str(selectedLabId),
     selectedTenantId: str(selectedTenantId),

@@ -8,9 +8,9 @@ import {
 } from "@/api/primecareSupabaseApi.js";
 import {
   emitSharedReadBrokerInvalidation,
-  readAgentVisitContextBroker,
   readCollectionDetailBroker,
   readLabQualificationBroker,
+  readLabVisitsBroker,
 } from "@/api/sharedReadBroker.js";
 import { updateLabPreferredDeliveryDayWrite } from "@/api/logisticsSupabaseApi.js";
 import {
@@ -220,20 +220,13 @@ export default function OperationalLabDrawer({
     (async () => {
       setVisitsLoading(true);
       try {
-        const res = await readAgentVisitContextBroker(currentUser, {
+        const res = await readLabVisitsBroker(labId, {
           tenantId: labTenantId,
-          labId,
+          currentUser,
+          limit: 100,
         });
-        const labKey = str(labId).toLowerCase();
-        const rows = Array.isArray(res?.data?.recentVisits) ? res.data.recentVisits : [];
-        const scoped = rows
-          .filter((row) => str(row?.labId ?? row?.lab_id).toLowerCase() === labKey)
-          .sort((a, b) =>
-            str(b.visitDate ?? b.visit_date ?? b.date ?? b.created_at).localeCompare(
-              str(a.visitDate ?? a.visit_date ?? a.date ?? a.created_at)
-            )
-          );
-        if (!cancelled) setVisitRows(scoped);
+        const rows = Array.isArray(res?.data?.visits) ? res.data.visits : [];
+        if (!cancelled) setVisitRows(rows);
       } catch {
         if (!cancelled) setVisitRows([]);
       } finally {

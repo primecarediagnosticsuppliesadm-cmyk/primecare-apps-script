@@ -143,6 +143,26 @@ async function main() {
   const api = await server.ssrLoadModule("/src/api/primecareSupabaseApi.js");
   const labsEngine = await server.ssrLoadModule("/src/operations/labsHqEngine.js");
   const orderingGovernance = await server.ssrLoadModule("/src/labOrdering/orderingGovernance.js");
+  const operationalLabDrawerSrc = readFileSync(
+    resolve(root, "src/components/operations/OperationalLabDrawer.jsx"),
+    "utf8"
+  );
+  const apiSrc = readFileSync(resolve(root, "src/api/primecareSupabaseApi.js"), "utf8");
+  const boundedReadsSrc = readFileSync(resolve(root, "src/api/hqBoundedReads.js"), "utf8");
+  const sharedBrokerSrc = readFileSync(resolve(root, "src/api/sharedReadBroker.js"), "utf8");
+
+  if (
+    operationalLabDrawerSrc.includes("readLabVisitsBroker") &&
+    sharedBrokerSrc.includes("readLabVisitsBroker") &&
+    apiSrc.includes("getLabVisitsRead") &&
+    boundedReadsSrc.includes("fetchAgentVisitsForLabBoundedRows") &&
+    boundedReadsSrc.includes(".eq(\"lab_id\", labId)") &&
+    boundedReadsSrc.includes(".order(\"visit_date\", { ascending: false })")
+  ) {
+    pass("static.lab360_visits_lab_scoped", "Lab 360 Visits uses tenant/lab-scoped bounded read");
+  } else {
+    fail("static.lab360_visits_lab_scoped", "Lab 360 Visits may still use workspace recent visits");
+  }
 
   const rawLabs = await queryLabsCredit(sb);
   const scopedLabs = rawLabs.filter((row) => str(row.tenant_id) === HQ);

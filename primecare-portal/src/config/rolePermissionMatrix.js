@@ -102,6 +102,7 @@ export const PERMISSION_BY_KEY = {
   performance: [ROLES.ADMIN, ROLES.EXECUTIVE],
   insights: [ROLES.ADMIN, ROLES.EXECUTIVE],
   labOrders: [ROLES.LAB],
+  adminOnBehalfOrder: [ROLES.ADMIN, ROLES.EXECUTIVE],
   purchase: [ROLES.ADMIN, ROLES.EXECUTIVE],
   reorder: [ROLES.ADMIN, ROLES.EXECUTIVE],
   qualificationReview: [ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.READ_ONLY_AUDITOR],

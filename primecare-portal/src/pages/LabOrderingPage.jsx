@@ -359,9 +359,9 @@ function buildCartHash(items) {
   );
 }
 
-export default function LabOrderingPage({ currentUser, setActivePage }) {
+export default function LabOrderingPage({ currentUser, setActivePage, adminOnBehalfRequired = false }) {
   const [adminOnBehalfContext] = useState(() => {
-    const ctx = consumeHqNavContext("labOrders");
+    const ctx = consumeHqNavContext("adminOnBehalfOrder");
     return ctx?.adminOnBehalf ? ctx : null;
   });
   const [activeTab, setActiveTab] = useState("catalog");
@@ -412,17 +412,24 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
   const currentRole = str(currentUser?.role).toLowerCase();
   const isHqOnBehalfActor = currentRole === "admin" || currentRole === "executive";
   const isAdminOnBehalf = Boolean(adminOnBehalfContext?.adminOnBehalf && isHqOnBehalfActor);
-  const labId = isAdminOnBehalf
+  const adminOnBehalfMissing = Boolean(adminOnBehalfRequired && !isAdminOnBehalf);
+  const labId = adminOnBehalfMissing
+    ? ""
+    : isAdminOnBehalf
     ? str(adminOnBehalfContext?.selectedLabId)
     : currentUser?.labId ||
       currentUser?.labCode ||
       currentUser?.accountId ||
       currentUser?.id ||
       "";
-  const tenantId = isAdminOnBehalf
+  const tenantId = adminOnBehalfMissing
+    ? ""
+    : isAdminOnBehalf
     ? str(adminOnBehalfContext?.selectedTenantId)
     : str(currentUser?.tenantId || currentUser?.tenant_id);
-  const labName = isAdminOnBehalf
+  const labName = adminOnBehalfMissing
+    ? "Selected lab"
+    : isAdminOnBehalf
     ? str(adminOnBehalfContext?.selectedLabName) || labId || "Selected lab"
     : currentUser?.labName || currentUser?.name || "Lab";
   const cartDraftStorageKey = useMemo(() => {
@@ -1515,6 +1522,27 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
 
   function toggleCartSection(key) {
     setCartSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  if (adminOnBehalfMissing) {
+    return (
+      <div className="space-y-4 pb-[max(7rem,env(safe-area-inset-bottom))] lg:pb-6">
+        <PageHeader
+          title="Create HQ Order"
+          subtitle="Select an eligible active lab from Lab 360 before opening admin on-behalf ordering."
+          icon={ShoppingCart}
+        />
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          Admin on-behalf ordering requires selected lab context. Normal lab self-ordering remains
+          available only to lab users.
+        </div>
+        {setActivePage ? (
+          <Button type="button" variant="outline" onClick={() => setActivePage("labs")}>
+            Back to Labs
+          </Button>
+        ) : null}
+      </div>
+    );
   }
 
   return (

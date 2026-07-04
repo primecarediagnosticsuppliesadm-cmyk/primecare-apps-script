@@ -65,6 +65,8 @@ const orderLineSupportSrc = readSrc("src/api/orderLineMetricsSupport.js");
 const ordersMonitorSrc = readSrc("src/orders/ordersMonitorEngine.js");
 const ordersPageSrc = readSrc("src/pages/OrdersPage.jsx");
 const hqWorkflowNavSrc = readSrc("src/operations/hqWorkflowNav.js");
+const rolePermissionSrc = readSrc("src/config/rolePermissionMatrix.js");
+const portalSrc = readSrc("src/PrimeCareWebPortal.jsx");
 
 if (orderTrackingSrc.includes("getLabOrderDetailsRead")) {
   pass("static.lab_order_details_api", "orderTracking uses getLabOrderDetailsRead");
@@ -219,7 +221,8 @@ if (operationalLabDrawerSrc.includes("Ordering Mode") && operationalLabDrawerSrc
 if (
   labPageSrc.includes("adminOnBehalf") &&
   labPageSrc.includes("source: isAdminOnBehalf ? \"admin_on_behalf\"") &&
-  labPageSrc.includes("consumeHqNavContext(\"labOrders\")") &&
+  labPageSrc.includes("consumeHqNavContext(\"adminOnBehalfOrder\")") &&
+  labPageSrc.includes("adminOnBehalfRequired") &&
   labPageSrc.includes("canAdminInitiateOrder(orderingMode, lifecycleStatus)")
 ) {
   pass("static.admin_on_behalf_page", "LabOrderingPage supports admin-on-behalf context and gate");
@@ -236,6 +239,18 @@ if (
   pass("static.admin_on_behalf_api", "createOrderWrite records admin-on-behalf source/audit metadata");
 } else {
   fail("static.admin_on_behalf_api", "createOrderWrite admin-on-behalf audit/gate missing");
+}
+
+if (
+  rolePermissionSrc.includes("labOrders: [ROLES.LAB]") &&
+  rolePermissionSrc.includes("adminOnBehalfOrder: [ROLES.ADMIN, ROLES.EXECUTIVE]") &&
+  portalSrc.includes("case \"adminOnBehalfOrder\"") &&
+  portalSrc.includes("adminOnBehalfRequired") &&
+  hqWorkflowNavSrc.includes("page: \"adminOnBehalfOrder\"")
+) {
+  pass("static.admin_on_behalf_route", "Admin/Executive route is context-only and labOrders remains lab-only");
+} else {
+  fail("static.admin_on_behalf_route", "Admin on-behalf routing gate missing or labOrders widened");
 }
 
 if (

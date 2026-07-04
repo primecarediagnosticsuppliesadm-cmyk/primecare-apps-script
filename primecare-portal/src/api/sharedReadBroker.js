@@ -12,6 +12,7 @@ import {
   getCollectionsRead,
   getLabCatalogRead,
   getLabQualificationRead,
+  getLabVisitsRead,
   getLabsCredit,
   getOrderDetailsRead,
   getOrdersRead,
@@ -547,6 +548,20 @@ export function readCollectionDetailBroker(labId, options = {}) {
     loader: () => getCollectionDetailRead(labId),
     selectData: (raw) => raw?.data ?? { collection: null },
     fallbackData: { collection: null },
+  });
+}
+
+export function readLabVisitsBroker(labId, options = {}) {
+  const scope = scopeFrom({ ...options, labId });
+  return readViaBroker({
+    source: "lab-visits",
+    logicalKey: { tenantId: scope.tenantId, labId: scope.labId, limit: options.limit || 100 },
+    scope,
+    ttlMs: DETAIL_TTL_MS,
+    force: options.force === true,
+    loader: () => getLabVisitsRead({ ...options, labId }),
+    selectData: (raw) => raw?.data ?? { visits: [] },
+    fallbackData: { visits: [] },
   });
 }
 

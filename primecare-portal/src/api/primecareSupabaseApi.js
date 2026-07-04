@@ -105,6 +105,7 @@ import {
 import {
   fetchAdminDashboardBoundedSourceRows,
   fetchCollectionsBoundedArRows,
+  fetchAgentVisitsForLabBoundedRows,
   fetchAgentVisitsBoundedRows,
   fetchLabsCreditBoundedRows,
   fetchQualificationBoundedRows,
@@ -3832,6 +3833,35 @@ function mapVisitRowForAgentDashboard(row) {
     agentName: agent,
     labId: labIdKey(row.lab_id ?? row.Lab_ID ?? row.labId ?? ""),
   };
+}
+
+/**
+ * Read visits for one selected lab for Lab 360. Bounded by tenant + lab_id, latest first.
+ */
+export async function getLabVisitsRead({ tenantId = "", tenant_id = "", labId = "", lab_id = "", limit = 100 } = {}) {
+  const tid = str(tenantId || tenant_id);
+  const lid = labIdKey(labId || lab_id);
+  traceSupabaseRead("Labs.getLabVisitsRead", { table: "agent_visits", labId: lid });
+  if (!supabase || !lid) {
+    return { success: false, error: "lab_id is required", data: { visits: [] } };
+  }
+
+  try {
+    const { data, error } = await fetchAgentVisitsForLabBoundedRows(supabase, {
+      tenantId: tid,
+      labId: lid,
+      limit,
+    });
+    if (error) {
+      return { success: false, error: error.message || "Failed to load lab visits", data: { visits: [] } };
+    }
+    const visits = (data || [])
+      .map(mapVisitRowForAgentDashboard)
+      .filter((row) => labIdKey(row.labId) === lid);
+    return { success: true, data: { visits }, error: null };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err), data: { visits: [] } };
+  }
 }
 
 /**

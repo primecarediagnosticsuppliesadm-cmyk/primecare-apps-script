@@ -379,6 +379,32 @@ export async function fetchAgentVisitsBoundedRows(client, options = {}) {
 }
 
 /**
+ * Bounded visits read for one lab — Lab 360 detail drawer.
+ * @param {import('@supabase/supabase-js').SupabaseClient|null|undefined} client
+ * @param {{ tenantId?: string, tenant_id?: string, labId?: string, lab_id?: string, limit?: number }} [options]
+ */
+export async function fetchAgentVisitsForLabBoundedRows(client, options = {}) {
+  if (!client) {
+    return { data: [], error: { message: "Supabase client not configured" } };
+  }
+  const labId = str(options.labId ?? options.lab_id);
+  if (!labId) {
+    return { data: [], error: { message: "lab_id is required" } };
+  }
+  const limit = clampLimit(options.limit, 100, HQ_DASHBOARD_VISITS_LIMIT);
+  const tenantId = resolveBoundedTenantId(options);
+  return scopeTenant(
+    client
+      .from("agent_visits")
+      .select(HQ_AGENT_VISIT_COLUMNS)
+      .eq("lab_id", labId)
+      .order("visit_date", { ascending: false })
+      .order("created_at", { ascending: false }),
+    tenantId
+  ).limit(limit);
+}
+
+/**
  * Bounded lab qualifications — shared by getQualificationReviewRead and Predator validation.
  * @param {import('@supabase/supabase-js').SupabaseClient|null|undefined} client
  * @param {{ limit?: number, offset?: number }} [options]
