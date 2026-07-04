@@ -120,6 +120,11 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-agent-commission-history.mjs | Agent commission history grid; no O2C writes | Phase 5B commission history |
 | verify-agent-plan-history.mjs | Plan assignment history and change-plan reuse | Phase 5B plan history |
 | verify-agent-compensation-security.mjs | 360 RBAC contract; Lab/Distributor blocked | Phase 5B security |
+| verify-payroll-approval-ui.mjs | Payroll workflow toolbar on periods/preview tabs | Phase 6A approval UI |
+| verify-payroll-workflow-actions.mjs | Status-gated actions wired to domain APIs | Phase 6A workflow actions |
+| verify-payroll-export-ui.mjs | Locked-run export metadata UI; no bank/GL | Phase 6A export UI |
+| verify-payroll-paid-evidence.mjs | Exported-run paid evidence form; no payment row | Phase 6A paid evidence |
+| verify-payroll-no-finance-mutation.mjs | Workflow UI/API do not mutate Finance/O2C | Phase 6A isolation |
 
 ### Infrastructure
 

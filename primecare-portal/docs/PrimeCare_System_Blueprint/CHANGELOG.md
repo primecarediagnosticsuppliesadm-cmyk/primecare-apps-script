@@ -4,6 +4,31 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-04 — Executive Compensation & Payroll Engine Phase 6A Payroll Approval Workflow UI
+
+### Change
+
+- Add **Payroll Workflow** toolbar to Executive Compensation Center Payroll Periods and Payroll Preview tabs.
+- Wire status-gated actions: submit, approve, reject, lock, export metadata, mark paid evidence.
+- Reuse Phase 3C `payrollDomainSupabaseApi` writers; no payroll calculation or finance mutation changes.
+- Add confirmation for irreversible actions; reject and paid evidence forms require reason/reference fields.
+- RBAC: Executive full workflow; HR generate/submit only; Admin view-only.
+
+### Not changed
+
+- No bank payout, GL, accounting, finance, AR, payments, orders, invoice, allocation, inventory, or logistics mutation.
+- No payroll calculation rule or compensation plan rule changes.
+
+### Verification gates
+
+- `node scripts/verify-payroll-approval-ui.mjs`
+- `node scripts/verify-payroll-workflow-actions.mjs`
+- `node scripts/verify-payroll-export-ui.mjs`
+- `node scripts/verify-payroll-paid-evidence.mjs`
+- `node scripts/verify-payroll-no-finance-mutation.mjs`
+
+---
+
 ## 2026-07-04 — Executive Compensation & Payroll Engine Phase 5B Agent Compensation 360
 
 ### Change

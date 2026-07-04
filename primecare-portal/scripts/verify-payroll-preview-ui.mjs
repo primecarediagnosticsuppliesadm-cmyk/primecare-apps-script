@@ -48,8 +48,9 @@ assert(/previewRows/.test(modelSrc), "model.preview_rows", "preview rows built i
 assert(/Search agent, plan, or period/.test(pageSrc), "preview.search", "search control present");
 assert(/All lifecycle statuses/.test(pageSrc), "preview.filter", "lifecycle filter present");
 assert(/toggleSort/.test(pageSrc), "preview.sort", "sortable preview table present");
-assert(!/approvePayrollRunWrite|lockPayrollRunWrite|recordPayrollPaidWrite|generatePayrollExportWrite/.test(pageSrc), "preview.no_workflow_writes", "preview UI has no workflow mutation hooks");
-assert(!/\bonApprove\b|\bonLock\b|\bonExport\b|\bonPay\b|Manual Adjustment|Bonus editing|Salary editing/.test(pageSrc), "preview.no_edit_actions", "preview UI has no edit actions");
+assert(/PayrollWorkflowToolbar/.test(pageSrc), "preview.workflow_toolbar", "payroll preview exposes workflow toolbar");
+assert(/handlePayrollWorkflowAction/.test(pageSrc), "preview.workflow_handler", "workflow handler wired");
+assert(!/\bSalary editing\b|\bBonus editing\b/.test(pageSrc), "preview.no_edit_actions", "preview UI has no salary/bonus edit actions");
 
 if (failures) {
   console.error(`\nOverall: NO-GO (${failures} failure(s))`);

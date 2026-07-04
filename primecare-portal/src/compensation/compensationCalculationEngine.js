@@ -382,6 +382,44 @@ export function calculateCommissionEntries({
     source_hash: sourceHash(entry.source_payment_refs),
   }));
 
+  const coveredAgentIds = new Set(entries.map((entry) => str(entry.agent_id)));
+  for (const rawAssignment of planAssignments) {
+    const assignment = normalizeAssignment(rawAssignment);
+    if (assignment.status !== "active") continue;
+    if (!assignmentForAgent(assignment.agentId, assignments, normalizedPeriod)) continue;
+    if (coveredAgentIds.has(assignment.agentId)) continue;
+    const plan = planForAssignment(assignment, plans);
+    entries.push({
+      tenant_id: normalizedPeriod.tenantId,
+      period_id: normalizedPeriod.id,
+      attribution_snapshot_id: null,
+      agent_id: assignment.agentId,
+      agent_name: assignment.agentName || assignment.agentId,
+      profile_user_id: assignment.profileUserId || null,
+      attribution_method: "plan_assignment_only",
+      attributable_cash_collected: 0,
+      commission_rate_bps: plan.commissionRateBps,
+      commission_amount: 0,
+      eligibility_status: "eligible",
+      blocked_reason: null,
+      source_payment_refs: [],
+      source_hash: "",
+      rule_version: plan.ruleVersion,
+      status: DRAFT_STATUS,
+      metadata: {
+        plan_id: plan.id,
+        plan_code: plan.planCode,
+        plan_version: plan.version,
+        calculated_at: calculatedAt,
+        calculation_phase: "preview_only",
+        payment_count: 0,
+        source_lab_ids: [],
+        fixed_payroll_only: true,
+      },
+    });
+    coveredAgentIds.add(assignment.agentId);
+  }
+
   return { entries, warnings };
 }
 
@@ -534,6 +572,49 @@ export function calculatePayrollPreview({
         calculatedAt,
       })
     );
+  }
+
+  const coveredAgentIds = new Set(lines.map((line) => str(line.agent_id)));
+  for (const rawAssignment of planAssignments) {
+    const assignment = normalizeAssignment(rawAssignment);
+    if (assignment.status !== "active") continue;
+    if (!assignmentForAgent(assignment.agentId, assignments, normalizedPeriod)) continue;
+    if (coveredAgentIds.has(assignment.agentId)) continue;
+
+    const plan = planForAssignment(assignment, plans);
+    const zeroCommissionEntry = {
+      tenant_id: normalizedPeriod.tenantId,
+      period_id: normalizedPeriod.id,
+      agent_id: assignment.agentId,
+      agent_name: assignment.agentName || assignment.agentId,
+      profile_user_id: assignment.profileUserId || null,
+      attributable_cash_collected: 0,
+      commission_rate_bps: plan.commissionRateBps,
+      commission_amount: 0,
+      metadata: {
+        plan_id: plan.id,
+        plan_code: plan.planCode,
+        plan_version: plan.version,
+        payment_count: 0,
+        source_lab_ids: [],
+        fixed_payroll_only: true,
+      },
+    };
+    lines.push(
+      calculateAgentCompensation({
+        period: normalizedPeriod,
+        agentId: assignment.agentId,
+        agentName: assignment.agentName,
+        profileUserId: assignment.profileUserId,
+        plan,
+        planAssignment: assignment,
+        commissionEntry: zeroCommissionEntry,
+        arRows: [],
+        cumulativeCollectedCash: cumulativeCashByAgent.get(assignment.agentId) || 0,
+        calculatedAt,
+      })
+    );
+    coveredAgentIds.add(assignment.agentId);
   }
 
   const totals = lines.reduce(

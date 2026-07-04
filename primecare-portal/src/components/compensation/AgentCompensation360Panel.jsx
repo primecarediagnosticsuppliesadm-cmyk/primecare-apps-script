@@ -52,6 +52,7 @@ export default function AgentCompensation360Panel({
   model,
   permissions,
   loading = false,
+  error = "",
   onBack,
   onChangePlan,
   busy = false,
@@ -72,6 +73,17 @@ export default function AgentCompensation360Panel({
 
   if (loading && !model) {
     return <p className="text-sm text-slate-500">Loading Agent Compensation 360…</p>;
+  }
+  if (error && !model) {
+    return (
+      <div className="space-y-3">
+        <Button type="button" size="sm" variant="outline" onClick={onBack}>
+          <ArrowLeft className="mr-1 h-4 w-4" />
+          Back to Agents
+        </Button>
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+      </div>
+    );
   }
   if (!model) {
     return <p className="text-sm text-slate-500">Select an agent to open Agent Compensation 360.</p>;

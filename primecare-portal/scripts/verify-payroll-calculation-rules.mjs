@@ -49,6 +49,22 @@ const preview = calculateCompensationPreview({
 assert(preview.payrollRunLines[0]?.commission_amount === 30, "rules.cash_commission", "commission = cash collected × rate");
 assert(preview.payrollRunLines[0]?.salary_amount === 20_000, "rules.line_salary", "line salary uses baseline plan");
 
+const assignedNoCash = calculateCompensationPreview({
+  period: { id: "p2", tenant_id: "t1", period_start: "2026-07-01", period_end: "2026-07-31" },
+  payments: [],
+  planAssignments: [
+    { id: "as1", tenant_id: "t1", plan_id: "plan1", agent_id: "A1", agent_name: "Agent One", start_date: "2026-01-01", assignment_status: "active" },
+    { id: "as2", tenant_id: "t1", plan_id: "plan1", agent_id: "A2", agent_name: "Agent Two", start_date: "2026-01-01", assignment_status: "active" },
+  ],
+  compensationPlans: [{ id: "plan1", version: "v1", commission_rate_bps: 300, base_salary: 20000, fuel_allowance: 5000, mobile_allowance: 500 }],
+});
+assert(assignedNoCash.payrollRunLines.length === 2, "rules.assigned_zero_cash_lines", "assigned agents without collections still receive fixed payroll lines");
+assert(
+  assignedNoCash.payrollRunLines.every((line) => line.commission_amount === 0 && line.salary_amount === 20_000),
+  "rules.zero_commission_fixed_salary",
+  "zero-cash assigned agents get salary with zero commission"
+);
+
 const promoted = calculatePromotionEligibility({
   cumulativeCollectedCash: 500_000,
   collectionEfficiencyPct: 85,

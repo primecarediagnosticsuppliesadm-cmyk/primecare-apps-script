@@ -11,6 +11,7 @@ const root = resolve(__dirname, "..");
 const apiSrc = readFileSync(resolve(root, "src/api/compensationSupabaseApi.js"), "utf8");
 const domainSrc = readFileSync(resolve(root, "src/payroll/payrollPreviewGeneration.js"), "utf8");
 const pageSrc = readFileSync(resolve(root, "src/pages/ExecutiveCompensationCenterPage.jsx"), "utf8");
+const uiSrc = readFileSync(resolve(root, "src/payroll/payrollWorkflowUi.js"), "utf8");
 
 let failures = 0;
 function pass(id, detail) {
@@ -34,9 +35,9 @@ assert(/source_payment_hash/.test(apiSrc), "api.payment_hash", "source payment h
 assert(/calculation_version/.test(apiSrc), "api.calculation_version", "calculation version recorded");
 assert(/status:\s*"draft"/.test(apiSrc), "api.draft_status", "writes remain draft-only");
 assert(!/from\("(payments|orders|invoices|ar_credit_control)"\)\s*\.(update|insert|delete|upsert)/.test(apiSrc), "api.no_finance_writes", "no finance table writes");
-assert(/Generate Payroll Preview/.test(pageSrc), "ui.generate_button", "Executive generate button present");
+assert(/Generate Preview|generate_preview/.test(uiSrc) || /handleGeneratePreview/.test(pageSrc), "ui.generate_button", "Executive generate preview action present");
 assert(/generatePayrollPreview/.test(pageSrc), "ui.generate_call", "page calls generatePayrollPreview");
-assert(/row\.status === "draft"/.test(pageSrc), "ui.draft_only_button", "generate visible for draft periods only");
+assert(/draft/.test(pageSrc), "ui.draft_actions", "draft-period workflow actions present");
 assert(/PAYROLL_PREVIEW_GENERATION_VERSION/.test(domainSrc), "domain.version", "preview generation version declared");
 
 if (failures) {

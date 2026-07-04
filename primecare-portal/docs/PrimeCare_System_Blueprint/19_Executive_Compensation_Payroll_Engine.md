@@ -597,6 +597,47 @@ Verification scripts:
 
 ---
 
+## Phase 6A — Payroll Approval Workflow UI
+
+Phase 6A adds Executive Compensation Center workflow actions for payroll runs using the existing Phase 3C domain APIs.
+
+| Status | UI actions |
+|--------|------------|
+| draft | Generate Preview, Submit Preview |
+| previewed | Submit Preview |
+| submitted | Approve, Reject (reason required) |
+| approved | Lock Payroll |
+| locked | Generate Export |
+| exported | Mark Paid Evidence (date, reference, notes) |
+| paid | View only |
+
+RBAC (application layer):
+
+| Action | Executive | HR | Admin |
+|--------|-----------|----|-------|
+| Generate preview | yes | yes | no |
+| Submit preview | yes | yes | no |
+| Approve / reject / lock / export / paid evidence | yes | no | no |
+| View workflow state | yes | yes | yes |
+
+Forbidden in Phase 6A:
+
+- Bank payout, GL posting, accounting entries, finance/O2C mutation
+- Payroll calculation rule changes
+- Compensation plan rule changes
+
+Every workflow action writes `compensation_audit_events` and `compensation_approval_events` via existing domain writers.
+
+Verification scripts:
+
+- `verify-payroll-approval-ui.mjs`
+- `verify-payroll-workflow-actions.mjs`
+- `verify-payroll-export-ui.mjs`
+- `verify-payroll-paid-evidence.mjs`
+- `verify-payroll-no-finance-mutation.mjs`
+
+---
+
 ## Phase plan
 
 | Phase | Scope |

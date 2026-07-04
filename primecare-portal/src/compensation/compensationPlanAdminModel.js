@@ -34,23 +34,29 @@ export function buildCompensationPlanAdminModel({
   assignments = [],
   profiles = [],
   promotionRows = [],
+  compensationPlans,
+  planAssignments,
+  agentProfiles,
   actorRole = "executive",
   actorAgentId = "",
   actorProfileUserId = "",
 } = {}) {
+  const resolvedPlans = plans.length ? plans : compensationPlans || [];
+  const resolvedAssignments = assignments.length ? assignments : planAssignments || [];
+  const resolvedProfiles = profiles.length ? profiles : agentProfiles || [];
   const perms = compensationAdminPermissions(actorRole);
-  const profileByUserId = new Map((profiles || []).map((row) => [str(row.user_id), row]));
+  const profileByUserId = new Map((resolvedProfiles || []).map((row) => [str(row.user_id), row]));
   const profileByAgentId = new Map(
-    (profiles || []).filter((row) => row.agent_id).map((row) => [str(row.agent_id), row])
+    (resolvedProfiles || []).filter((row) => row.agent_id).map((row) => [str(row.agent_id), row])
   );
-  const assignmentCounts = assignmentCountByPlan(assignments);
-  const visibleAssignments = filterAssignmentsForRole(assignments, {
+  const assignmentCounts = assignmentCountByPlan(resolvedAssignments);
+  const visibleAssignments = filterAssignmentsForRole(resolvedAssignments, {
     role: actorRole,
     agentId: actorAgentId,
     profileUserId: actorProfileUserId,
   });
 
-  const planRows = (plans || [])
+  const planRows = (resolvedPlans || [])
     .map((plan) => {
       const rules = normalizePlanRulesJson(plan.rules_json);
       return {
@@ -91,7 +97,7 @@ export function buildCompensationPlanAdminModel({
 
   const assignmentRows = visibleAssignments
     .map((assignment) => {
-      const plan = planById(plans, assignment.plan_id);
+      const plan = planById(resolvedPlans, assignment.plan_id);
       const profile =
         profileByUserId.get(str(assignment.profile_user_id)) ||
         profileByAgentId.get(str(assignment.agent_id));
