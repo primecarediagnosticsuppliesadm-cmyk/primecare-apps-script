@@ -15,8 +15,11 @@ import {
   IndianRupee,
   ArrowRight,
 } from "lucide-react";
-import { createLabWrite, getLabsCredit, peekLabsCreditReadCache } from "@/api/primecareSupabaseApi";
-import { loadLabOwnershipMetricsBundle } from "@/operations/operationsCenterAdminData.js";
+import { createLabWrite, peekLabsCreditReadCache } from "@/api/primecareSupabaseApi";
+import {
+  readLabOwnershipBundleBroker,
+  readLabsCreditBroker,
+} from "@/api/sharedReadBroker.js";
 import AssignLabOwnerPromptModal from "@/components/operations/AssignLabOwnerPromptModal.jsx";
 import { ROLES } from "@/config/roles";
 import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
@@ -556,9 +559,10 @@ export default function LabsPage({
       setError("");
 
       const homeTenantId = str(currentUser?.tenantId ?? currentUser?.tenant_id);
-      const res = await getLabsCredit({
+      const res = await readLabsCreditBroker({
         force: silent,
         ...(homeTenantId ? { tenantId: homeTenantId } : {}),
+        currentUser,
       });
 
       if (!res?.success) {
@@ -613,7 +617,8 @@ export default function LabsPage({
   useEffect(() => {
     if (!canAddLab || !homeTenantId) return;
     return scheduleIdleTask(() => {
-      void loadLabOwnershipMetricsBundle(homeTenantId).then((data) => {
+      void readLabOwnershipBundleBroker(homeTenantId, { currentUser }).then((res) => {
+        const data = res?.data || null;
         setProvisionAgents((data?.agents || []).filter((a) => a.active !== false));
       });
     });
@@ -935,6 +940,7 @@ export default function LabsPage({
           currentUser={currentUser}
           focusLabId={focusLabId}
           initialReviewLabId={initialReviewLabId}
+          onRefresh={() => loadLabs({ silent: true })}
         />
       ) : (
         <>

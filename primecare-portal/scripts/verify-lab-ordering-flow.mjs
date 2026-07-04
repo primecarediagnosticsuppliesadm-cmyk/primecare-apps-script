@@ -64,6 +64,7 @@ const buildStampSrc = readSrc("src/utils/buildStamp.js");
 const orderLineSupportSrc = readSrc("src/api/orderLineMetricsSupport.js");
 const ordersMonitorSrc = readSrc("src/orders/ordersMonitorEngine.js");
 const ordersPageSrc = readSrc("src/pages/OrdersPage.jsx");
+const hqWorkflowNavSrc = readSrc("src/operations/hqWorkflowNav.js");
 
 if (orderTrackingSrc.includes("getLabOrderDetailsRead")) {
   pass("static.lab_order_details_api", "orderTracking uses getLabOrderDetailsRead");
@@ -213,6 +214,38 @@ if (operationalLabDrawerSrc.includes("Ordering Mode") && operationalLabDrawerSrc
   pass("static.admin_ordering_mode", "OperationalLabDrawer ordering mode editor");
 } else {
   fail("static.admin_ordering_mode", "Admin ordering mode UI missing");
+}
+
+if (
+  labPageSrc.includes("adminOnBehalf") &&
+  labPageSrc.includes("source: isAdminOnBehalf ? \"admin_on_behalf\"") &&
+  labPageSrc.includes("consumeHqNavContext(\"labOrders\")") &&
+  labPageSrc.includes("canAdminInitiateOrder(orderingMode, lifecycleStatus)")
+) {
+  pass("static.admin_on_behalf_page", "LabOrderingPage supports admin-on-behalf context and gate");
+} else {
+  fail("static.admin_on_behalf_page", "LabOrderingPage admin-on-behalf mode missing");
+}
+
+if (
+  apiSrc.includes("recordAdminOnBehalfOrderAuditEvent") &&
+  apiSrc.includes("adminOnBehalf") &&
+  apiSrc.includes("adminOrderingBlockedMessage") &&
+  apiSrc.includes("source: \"admin_on_behalf\"")
+) {
+  pass("static.admin_on_behalf_api", "createOrderWrite records admin-on-behalf source/audit metadata");
+} else {
+  fail("static.admin_on_behalf_api", "createOrderWrite admin-on-behalf audit/gate missing");
+}
+
+if (
+  operationalLabDrawerSrc.includes("Create HQ Order") &&
+  operationalLabDrawerSrc.includes("canAdminInitiateOrder(orderingMode, lifecycleStatus)") &&
+  hqWorkflowNavSrc.includes("navigateToAdminOnBehalfOrder")
+) {
+  pass("static.admin_on_behalf_launch", "OperationalLabDrawer launches reused LabOrderingPage mode");
+} else {
+  fail("static.admin_on_behalf_launch", "OperationalLabDrawer admin-on-behalf launch missing");
 }
 
 const env = loadEnv();

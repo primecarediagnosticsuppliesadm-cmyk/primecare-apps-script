@@ -143,6 +143,10 @@ async function readLifecycleAuditEvents(sb, tenantId, labId) {
 }
 
 function assertStaticContract(api) {
+  const drawerSrc = readFileSync(
+    resolve(root, "src/components/operations/OperationalLabDrawer.jsx"),
+    "utf8"
+  );
   const validator = api.validateLabLifecycleTransition;
   if (typeof api.updateLabLifecycleStatusWrite === "function") {
     pass("static.api_export", "updateLabLifecycleStatusWrite exported");
@@ -188,6 +192,17 @@ function assertStaticContract(api) {
     const res = validator(input);
     if (Boolean(res?.ok) === expected) pass(id, expected ? "allowed" : res?.code || "blocked");
     else fail(id, `expected ok=${expected}, got ${JSON.stringify(res)}`);
+  }
+
+  if (
+    drawerSrc.includes("updateLabLifecycleStatusWrite") &&
+    drawerSrc.includes("Mandatory reason") &&
+    drawerSrc.includes("This blocks new order initiation only") &&
+    drawerSrc.includes("Ordering remains suspended")
+  ) {
+    pass("static.lifecycle_ui", "OperationalLabDrawer lifecycle actions use approved warning/reason UI");
+  } else {
+    fail("static.lifecycle_ui", "OperationalLabDrawer lifecycle UI contract missing");
   }
 }
 

@@ -1,7 +1,17 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ux";
-import { getLabQualificationRead, updateLabOrderingModeWrite } from "@/api/primecareSupabaseApi.js";
+import {
+  getCollectionHistoryRead,
+  updateLabLifecycleStatusWrite,
+  updateLabOrderingModeWrite,
+} from "@/api/primecareSupabaseApi.js";
+import {
+  emitSharedReadBrokerInvalidation,
+  readAgentVisitContextBroker,
+  readCollectionDetailBroker,
+  readLabQualificationBroker,
+} from "@/api/sharedReadBroker.js";
 import { updateLabPreferredDeliveryDayWrite } from "@/api/logisticsSupabaseApi.js";
 import {
   DELIVERY_DAY_OPTIONS,
@@ -17,6 +27,8 @@ import { formatLabsCurrency, formatLabsDate } from "@/operations/labsHqEngine.js
 import { canNavigateToCollections } from "@/operations/hqWorkflowNav.js";
 import {
   ORDERING_MODE_OPTIONS,
+  adminOrderingBlockedMessage,
+  canAdminInitiateOrder,
   normalizeOrderingMode,
   orderingModeLabel,
 } from "@/labOrdering/orderingGovernance.js";
@@ -25,11 +37,11 @@ import { ROLES } from "@/config/rolePermissionMatrix.js";
 
 const TABS = [
   { id: "overview", label: "Overview" },
+  { id: "lifecycle", label: "Lifecycle" },
+  { id: "visits", label: "Visits" },
   { id: "collections", label: "Collections" },
   { id: "orders", label: "Orders" },
-  { id: "visits", label: "Visits" },
-  { id: "qualification", label: "Qualification" },
-  { id: "agent", label: "Assigned Agent" },
+  { id: "createHqOrder", label: "Create HQ Order" },
 ];
 
 function formatWhen(iso) {
@@ -48,6 +60,27 @@ function Field({ label, value }) {
       <dd className="font-medium text-slate-800">{value}</dd>
     </div>
   );
+}
+
+function normalizeLifecycleStatus(value) {
+  const status = str(value).toUpperCase();
+  if (status === "PROSPECT" || status === "ACTIVE" || status === "INACTIVE") return status;
+  return "ACTIVE";
+}
+
+function parseVisitOutcome(row) {
+  const explicit = str(row?.outcome ?? row?.labResponse ?? row?.lab_response);
+  if (explicit) return explicit;
+  const notes = str(row?.notes);
+  const match = notes.match(/Response:\s*([^·\n]+)/i);
+  return str(match?.[1]) || str(row?.visitType ?? row?.visit_type) || "Logged";
+}
+
+function visitStatus(row) {
+  if (row?.follow_up_required === true || str(row?.follow_up_required).toLowerCase() === "true") {
+    return "Follow-up required";
+  }
+  return str(row?.status) || "Logged";
 }
 
 /**
@@ -85,6 +118,19 @@ export default function OperationalLabDrawer({
   const [deliveryDaySaving, setDeliveryDaySaving] = useState(false);
   const [deliveryDayMessage, setDeliveryDayMessage] = useState("");
   const [deliveryDayError, setDeliveryDayError] = useState("");
+  const [lifecycleStatus, setLifecycleStatus] = useState(
+    normalizeLifecycleStatus(labRecord?.status)
+  );
+  const [lifecycleReason, setLifecycleReason] = useState("");
+  const [lifecycleNotes, setLifecycleNotes] = useState("");
+  const [lifecycleSaving, setLifecycleSaving] = useState(false);
+  const [lifecycleMessage, setLifecycleMessage] = useState("");
+  const [lifecycleError, setLifecycleError] = useState("");
+  const [collectionDetail, setCollectionDetail] = useState(null);
+  const [collectionHistory, setCollectionHistory] = useState([]);
+  const [collectionsLoading, setCollectionsLoading] = useState(false);
+  const [visitRows, setVisitRows] = useState([]);
+  const [visitsLoading, setVisitsLoading] = useState(false);
 
   const snapshot = useMemo(() => {
     if (!labId || !opsPayload) return null;
@@ -95,18 +141,39 @@ export default function OperationalLabDrawer({
     return base;
   }, [labId, opsPayload]);
 
+  const assignedAgent = resolveLabAgent(labRecord, directoryUsers);
+  const agentName =
+    assignedAgent.agentName ||
+    snapshot?.collection?.assignedAgent ||
+    "";
+  const agentId = assignedAgent.agentId || labAssignedAgentId(labRecord) || "";
+  const qualStage =
+    qualification?.pipeline_stage || qualification?.stage || labRecord?.stage || snapshot?.stage || "";
+  const canEditOrderingMode =
+    currentUser?.role === ROLES.ADMIN || currentUser?.role === ROLES.EXECUTIVE;
+  const labTenantId = str(
+    labRecord?.tenantId ?? labRecord?.tenant_id ?? currentUser?.tenantId ?? currentUser?.tenant_id
+  );
+  const selectedOrderingHelp =
+    ORDERING_MODE_OPTIONS.find((opt) => opt.value === orderingMode)?.help || "";
+  const hqOrderAllowed =
+    canEditOrderingMode && canAdminInitiateOrder(orderingMode, lifecycleStatus);
+  const hqOrderBlockedCopy = adminOrderingBlockedMessage(orderingMode, lifecycleStatus);
+
   useEffect(() => {
     if (open) setActiveTab("overview");
   }, [open, labId]);
 
   useEffect(() => {
     setOrderingMode(normalizeOrderingMode(labRecord?.orderingMode ?? labRecord?.ordering_mode));
+    setLifecycleStatus(normalizeLifecycleStatus(labRecord?.status));
     setPreferredDeliveryDay(
       normalizeDeliveryDay(labRecord?.preferredDeliveryDay ?? labRecord?.preferred_delivery_day)
     );
   }, [
     labRecord?.orderingMode,
     labRecord?.ordering_mode,
+    labRecord?.status,
     labRecord?.preferredDeliveryDay,
     labRecord?.preferred_delivery_day,
     labId,
@@ -131,7 +198,7 @@ export default function OperationalLabDrawer({
     (async () => {
       setQualLoading(true);
       try {
-        const res = await getLabQualificationRead({ labId });
+        const res = await readLabQualificationBroker({ labId });
         if (!cancelled) setQualification(res?.data || null);
       } catch {
         if (!cancelled) setQualification(null);
@@ -144,25 +211,77 @@ export default function OperationalLabDrawer({
     };
   }, [open, labId]);
 
+  useEffect(() => {
+    if (!open || !labId) {
+      setVisitRows([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setVisitsLoading(true);
+      try {
+        const res = await readAgentVisitContextBroker(currentUser, {
+          tenantId: labTenantId,
+          labId,
+        });
+        const labKey = str(labId).toLowerCase();
+        const rows = Array.isArray(res?.data?.recentVisits) ? res.data.recentVisits : [];
+        const scoped = rows
+          .filter((row) => str(row?.labId ?? row?.lab_id).toLowerCase() === labKey)
+          .sort((a, b) =>
+            str(b.visitDate ?? b.visit_date ?? b.date ?? b.created_at).localeCompare(
+              str(a.visitDate ?? a.visit_date ?? a.date ?? a.created_at)
+            )
+          );
+        if (!cancelled) setVisitRows(scoped);
+      } catch {
+        if (!cancelled) setVisitRows([]);
+      } finally {
+        if (!cancelled) setVisitsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, labId, labTenantId, currentUser]);
+
+  useEffect(() => {
+    if (!open || !labId) {
+      setCollectionDetail(null);
+      setCollectionHistory([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setCollectionsLoading(true);
+      try {
+        const [detailRes, historyRes] = await Promise.all([
+          readCollectionDetailBroker(labId, { tenantId: labTenantId, currentUser }),
+          getCollectionHistoryRead(labId),
+        ]);
+        if (cancelled) return;
+        setCollectionDetail(detailRes?.data?.collection || null);
+        setCollectionHistory(
+          Array.isArray(historyRes?.data?.history) ? historyRes.data.history.slice(0, 6) : []
+        );
+      } catch {
+        if (!cancelled) {
+          setCollectionDetail(null);
+          setCollectionHistory([]);
+        }
+      } finally {
+        if (!cancelled) setCollectionsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, labId, labTenantId, currentUser]);
+
   if (!open) return null;
 
   const riskLevel = snapshot?.risk?.level || snapshot?.riskLevel || "Low";
   const drivers = snapshot?.risk?.drivers || [];
-  const assignedAgent = resolveLabAgent(labRecord, directoryUsers);
-  const agentName =
-    assignedAgent.agentName ||
-    snapshot?.collection?.assignedAgent ||
-    "";
-  const agentId = assignedAgent.agentId || labAssignedAgentId(labRecord) || "";
-  const qualStage =
-    qualification?.pipeline_stage || qualification?.stage || labRecord?.stage || snapshot?.stage || "";
-  const canEditOrderingMode =
-    currentUser?.role === ROLES.ADMIN || currentUser?.role === ROLES.EXECUTIVE;
-  const labTenantId = str(
-    labRecord?.tenantId ?? labRecord?.tenant_id ?? currentUser?.tenantId ?? currentUser?.tenant_id
-  );
-  const selectedOrderingHelp =
-    ORDERING_MODE_OPTIONS.find((opt) => opt.value === orderingMode)?.help || "";
 
   async function handleSaveOrderingMode() {
     if (!canEditOrderingMode || !labTenantId || !labId) return;
@@ -207,6 +326,56 @@ export default function OperationalLabDrawer({
       setDeliveryDayError(err?.message || "Failed to update preferred delivery day");
     } finally {
       setDeliveryDaySaving(false);
+    }
+  }
+
+  async function handleLifecycleChange(nextStatus) {
+    if (!canEditOrderingMode || !labTenantId || !labId) return;
+    const normalizedNext = normalizeLifecycleStatus(nextStatus);
+    const reason = str(lifecycleReason);
+    if (!reason) {
+      setLifecycleError("Reason is required before changing lifecycle status.");
+      return;
+    }
+    const warning =
+      normalizedNext === "INACTIVE"
+        ? "This blocks new order initiation only.\nInvoices, payments, collections, shipments, Track Order, and audit history remain available."
+        : "Ordering remains suspended until an administrator explicitly changes Ordering Mode.";
+    const ok = window.confirm(`${warning}\n\nContinue?`);
+    if (!ok) return;
+
+    setLifecycleSaving(true);
+    setLifecycleError("");
+    setLifecycleMessage("");
+    try {
+      const res = await updateLabLifecycleStatusWrite({
+        tenantId: labTenantId,
+        labId,
+        nextStatus: normalizedNext,
+        confirmed: true,
+        reason,
+        notes: lifecycleNotes,
+        originatingScreen: "OperationalLabDrawer",
+      });
+      if (!res?.success) throw new Error(res?.error || "Failed to update lab lifecycle status");
+      setLifecycleStatus(normalizedNext);
+      const nextOrderingMode = normalizeOrderingMode(
+        res?.data?.nextOrderingMode ?? res?.data?.ordering_mode ?? orderingMode
+      );
+      setOrderingMode(nextOrderingMode);
+      setLifecycleReason("");
+      setLifecycleNotes("");
+      setLifecycleMessage(
+        normalizedNext === "INACTIVE"
+          ? "Lab set to INACTIVE. Ordering Mode is now Suspended."
+          : "Lab set to ACTIVE. Ordering remains suspended until changed explicitly."
+      );
+      emitSharedReadBrokerInvalidation({ tenantId: labTenantId, labId, source: "lab-lifecycle" });
+      onAction?.("refreshLabs", { ...(snapshot || {}), labId });
+    } catch (err) {
+      setLifecycleError(err?.message || "Failed to update lab lifecycle status");
+    } finally {
+      setLifecycleSaving(false);
     }
   }
 
@@ -426,15 +595,131 @@ export default function OperationalLabDrawer({
             </div>
           ) : null}
 
+          {activeTab === "lifecycle" ? (
+            <div className="space-y-3">
+              <section className="rounded-lg border bg-white p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusBadge variant={lifecycleStatus === "INACTIVE" ? "warning" : "success"} compact>
+                    {lifecycleStatus}
+                  </StatusBadge>
+                  <StatusBadge variant="neutral" compact>
+                    {orderingModeLabel(orderingMode)}
+                  </StatusBadge>
+                </div>
+                <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                  <Field label="Current lifecycle status" value={lifecycleStatus} />
+                  <Field label="Current ordering mode" value={orderingModeLabel(orderingMode)} />
+                </dl>
+              </section>
+
+              <section className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                <p className="font-semibold">Inactive warning</p>
+                <p className="mt-1">
+                  This blocks new order initiation only. Invoices, payments, collections,
+                  shipments, Track Order, and audit history remain available.
+                </p>
+              </section>
+
+              <section className="space-y-3 rounded-lg border bg-white p-3">
+                <label className="block text-[11px] font-medium text-slate-700">
+                  Mandatory reason
+                  <input
+                    className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs"
+                    value={lifecycleReason}
+                    onChange={(e) => setLifecycleReason(e.target.value)}
+                    placeholder="Why is this lifecycle change needed?"
+                    disabled={lifecycleSaving}
+                  />
+                </label>
+                <label className="block text-[11px] font-medium text-slate-700">
+                  Optional notes
+                  <textarea
+                    className="mt-1 min-h-[72px] w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs"
+                    value={lifecycleNotes}
+                    onChange={(e) => setLifecycleNotes(e.target.value)}
+                    placeholder="Additional context for audit history"
+                    disabled={lifecycleSaving}
+                  />
+                </label>
+                {lifecycleError ? (
+                  <p className="text-[11px] text-red-700">{lifecycleError}</p>
+                ) : null}
+                {lifecycleMessage ? (
+                  <p className="text-[11px] text-emerald-700">{lifecycleMessage}</p>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 text-xs"
+                    disabled={lifecycleSaving || lifecycleStatus === "ACTIVE"}
+                    onClick={() => void handleLifecycleChange("ACTIVE")}
+                  >
+                    {lifecycleSaving ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                    Activate
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 border-amber-300 text-xs text-amber-900 hover:bg-amber-100"
+                    disabled={lifecycleSaving || lifecycleStatus === "INACTIVE"}
+                    onClick={() => void handleLifecycleChange("INACTIVE")}
+                  >
+                    {lifecycleSaving ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                    Inactivate
+                  </Button>
+                </div>
+                {lifecycleStatus === "INACTIVE" ? (
+                  <p className="text-[11px] text-slate-600">
+                    Ordering remains suspended until an administrator explicitly changes Ordering
+                    Mode.
+                  </p>
+                ) : null}
+              </section>
+            </div>
+          ) : null}
+
           {activeTab === "collections" ? (
             <div className="space-y-3">
               <section className="rounded-lg border p-3">
+                {collectionsLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Loading collections…
+                  </div>
+                ) : null}
                 <p className="text-lg font-semibold tabular-nums">
-                  {formatLabsCurrency(snapshot?.outstanding ?? labRecord?.outstandingAmount)}
+                  {formatLabsCurrency(
+                    collectionDetail?.outstandingAmount ??
+                      collectionDetail?.outstanding ??
+                      snapshot?.outstanding ??
+                      labRecord?.outstandingAmount
+                  )}
                 </p>
                 <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                  <Field
+                    label="Overdue"
+                    value={formatLabsCurrency(
+                      collectionDetail?.overdueAmount ?? collectionDetail?.overdue ?? 0
+                    )}
+                  />
+                  <Field
+                    label="Credit limit"
+                    value={formatLabsCurrency(
+                      collectionDetail?.creditLimit ?? labRecord?.creditLimit
+                    )}
+                  />
+                  <Field
+                    label="Credit status"
+                    value={collectionDetail?.creditStatus ?? labRecord?.creditStatus}
+                  />
+                  <Field
+                    label="Last payment"
+                    value={formatWhen(collectionDetail?.lastPaymentDate ?? labRecord?.lastPaymentDate)}
+                  />
                   <Field label="Payment status" value={snapshot?.paymentStatus !== "—" ? snapshot?.paymentStatus : null} />
-                  <Field label="Total paid" value={formatLabsCurrency(snapshot?.collection?.totalPaid)} />
+                  <Field label="Total paid" value={formatLabsCurrency(collectionDetail?.totalPaid ?? snapshot?.collection?.totalPaid)} />
                   <Field
                     label="Last follow-up"
                     value={formatWhen(snapshot?.collection?.lastFollowUp)}
@@ -444,6 +729,32 @@ export default function OperationalLabDrawer({
                 {snapshot?.collection?.collectionsNotes ? (
                   <p className="mt-3 text-xs text-slate-600">{snapshot.collection.collectionsNotes}</p>
                 ) : null}
+              </section>
+              <section className="rounded-lg border p-3">
+                <h3 className="text-xs font-semibold text-slate-900">Recent collections</h3>
+                {collectionHistory.length ? (
+                  <ul className="mt-2 space-y-1.5">
+                    {collectionHistory.map((row) => (
+                      <li
+                        key={row.paymentId || `${row.paymentDate}-${row.amountCollected}`}
+                        className="rounded border border-slate-100 px-2 py-1.5 text-xs"
+                      >
+                        <div className="flex justify-between gap-2">
+                          <span className="font-medium">{formatWhen(row.paymentDate)}</span>
+                          <span className="font-semibold tabular-nums">
+                            {formatLabsCurrency(row.amountCollected)}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-slate-600">
+                          {row.paymentMode || "Payment"}
+                          {row.note ? ` · ${row.note}` : ""}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-xs text-slate-500">No recent collection payments found.</p>
+                )}
               </section>
               {currentUser ? (
                 <EvidenceContextActions
@@ -501,19 +812,88 @@ export default function OperationalLabDrawer({
             </section>
           ) : null}
 
+          {activeTab === "createHqOrder" ? (
+            <section className="space-y-3 rounded-lg border p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusBadge variant={lifecycleStatus === "ACTIVE" ? "success" : "warning"} compact>
+                  {lifecycleStatus}
+                </StatusBadge>
+                <StatusBadge variant="neutral" compact>
+                  {orderingModeLabel(orderingMode)}
+                </StatusBadge>
+              </div>
+              <div className="text-xs text-slate-600">
+                <p>
+                  Launches the existing Lab Ordering page in admin-on-behalf mode. Customer is{" "}
+                  <span className="font-semibold text-slate-800">
+                    {labRecord?.labName || snapshot?.labName || labId}
+                  </span>
+                  ; actor remains your authenticated HQ user.
+                </p>
+              </div>
+              {!hqOrderAllowed ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                  {hqOrderBlockedCopy}
+                </div>
+              ) : null}
+              <Button
+                type="button"
+                className="w-full"
+                disabled={!hqOrderAllowed}
+                onClick={() =>
+                  onAction?.("createHqOrder", {
+                    ...(snapshot || {}),
+                    labId,
+                    status: lifecycleStatus,
+                    orderingMode,
+                  })
+                }
+              >
+                Create HQ Order
+              </Button>
+              <p className="text-[11px] text-slate-500">
+                No impersonation. Pricing, catalog, inventory, finance, AR, shipment, commission,
+                and delivery rules remain on the existing checkout path.
+              </p>
+            </section>
+          ) : null}
+
           {activeTab === "visits" ? (
             <section className="rounded-lg border p-3">
-              {snapshot?.visits?.length ? (
-                <ul className="space-y-1.5">
-                  {snapshot.visits.map((v) => (
-                    <li key={v.visitId || v.id} className="rounded border border-slate-100 px-2 py-1.5 text-xs">
-                      <span className="font-medium">{formatWhen(v.visitDate || v.date)}</span>
-                      <span className="text-slate-600">
-                        {" "}
-                        · {v.visitType} · {v.agent || v.agentName}
-                      </span>
-                    </li>
-                  ))}
+              {visitsLoading ? (
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Loading visits…
+                </div>
+              ) : visitRows.length ? (
+                <ul className="space-y-2">
+                  {visitRows.map((v) => {
+                    const followUp =
+                      str(v.nextFollowUpDate ?? v.next_follow_up_date) ||
+                      (v.follow_up_required ? "Required" : "");
+                    return (
+                      <li
+                        key={v.visitId || v.visit_id || v.id}
+                        className="rounded border border-slate-100 px-2 py-1.5 text-xs"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-medium">
+                            {formatWhen(v.visitDate || v.visit_date || v.date || v.created_at)}
+                          </span>
+                          <StatusBadge variant="neutral" compact>
+                            {visitStatus(v)}
+                          </StatusBadge>
+                        </div>
+                        <dl className="mt-2 grid grid-cols-2 gap-2">
+                          <Field label="Agent" value={v.agent || v.agentName || v.agent_name || v.agent_id} />
+                          <Field label="Outcome" value={parseVisitOutcome(v)} />
+                          <Field label="Follow-up" value={followUp} />
+                          <Field label="Status" value={visitStatus(v)} />
+                        </dl>
+                        {v.notes ? <p className="mt-2 text-slate-600">{v.notes}</p> : null}
+                      </li>
+                    );
+                  })}
                 </ul>
               ) : (
                 <p className="text-xs text-slate-500">No recent visits on record.</p>

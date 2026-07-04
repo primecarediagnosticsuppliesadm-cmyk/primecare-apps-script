@@ -28,7 +28,7 @@ export const ORDERING_MODE_HELP = {
   [ORDERING_MODE.SELF_SERVICE]:
     "Lab self-service checkout enabled. Admin may still place orders on behalf of the lab.",
   [ORDERING_MODE.SUSPENDED]:
-    "Lab checkout suspended. Admin override still allowed. Track and finance paths remain open.",
+    "Lab checkout suspended. New order initiation is blocked. Track and finance paths remain open.",
 };
 
 export const ORDERING_MODE_OPTIONS = Object.values(ORDERING_MODE).map((value) => ({
@@ -38,6 +38,11 @@ export const ORDERING_MODE_OPTIONS = Object.values(ORDERING_MODE).map((value) =>
 }));
 
 const LAB_INITIATE_MODES = new Set([ORDERING_MODE.HYBRID, ORDERING_MODE.SELF_SERVICE]);
+const ADMIN_ON_BEHALF_MODES = new Set([
+  ORDERING_MODE.HQ_MANAGED,
+  ORDERING_MODE.HYBRID,
+  ORDERING_MODE.SELF_SERVICE,
+]);
 
 export function normalizeOrderingMode(value) {
   const key = str(value).toLowerCase();
@@ -53,9 +58,27 @@ export function canLabInitiateOrder(mode) {
   return LAB_INITIATE_MODES.has(normalizeOrderingMode(mode));
 }
 
-/** HQ admin / executive override — always allowed to initiate. */
-export function canAdminInitiateOrder() {
-  return true;
+export function isActiveLifecycleStatus(status) {
+  return str(status || "ACTIVE").toUpperCase() === "ACTIVE";
+}
+
+export function isAdminOnBehalfOrderingModeEligible(mode) {
+  return ADMIN_ON_BEHALF_MODES.has(normalizeOrderingMode(mode));
+}
+
+/** HQ admin / executive on-behalf ordering is limited to ACTIVE, non-suspended labs. */
+export function canAdminInitiateOrder(mode, lifecycleStatus = "ACTIVE") {
+  return isActiveLifecycleStatus(lifecycleStatus) && isAdminOnBehalfOrderingModeEligible(mode);
+}
+
+export function adminOrderingBlockedMessage(mode, lifecycleStatus = "ACTIVE") {
+  if (!isActiveLifecycleStatus(lifecycleStatus)) {
+    return "HQ order creation is blocked because this lab is inactive.";
+  }
+  if (normalizeOrderingMode(mode) === ORDERING_MODE.SUSPENDED) {
+    return "HQ order creation is blocked while Ordering Mode is Suspended.";
+  }
+  return "HQ order creation is not enabled for this lab.";
 }
 
 export function isHqManagedOrdering(mode) {

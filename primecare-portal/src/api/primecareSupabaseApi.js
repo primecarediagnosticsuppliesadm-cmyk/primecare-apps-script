@@ -10,6 +10,8 @@ import {
 } from "@/logistics/deliveryChargeEngine.js";
 import {
   ORDERING_MODE,
+  adminOrderingBlockedMessage,
+  canAdminInitiateOrder,
   canLabInitiateOrder,
   isHqOpsRole,
   labOrderingBlockedMessage,
@@ -6086,6 +6088,7 @@ export async function getLabOrderingContextRead({ tenantId, labId } = {}) {
       success: false,
       error: "Supabase is not configured",
       orderingMode: normalizeOrderingMode(null),
+      lifecycleStatus: LAB_LIFECYCLE_STATUS.ACTIVE,
     };
   }
   const tid = str(tenantId);
@@ -6095,12 +6098,13 @@ export async function getLabOrderingContextRead({ tenantId, labId } = {}) {
       success: false,
       error: "tenantId and labId required",
       orderingMode: normalizeOrderingMode(null),
+      lifecycleStatus: LAB_LIFECYCLE_STATUS.ACTIVE,
     };
   }
 
   const { data, error } = await supabase
     .from("labs")
-    .select("ordering_mode, lab_id, lab_name, tenant_id")
+    .select("ordering_mode, status, lab_id, lab_name, tenant_id")
     .eq("tenant_id", tid)
     .eq("lab_id", lid)
     .maybeSingle();
@@ -6111,15 +6115,22 @@ export async function getLabOrderingContextRead({ tenantId, labId } = {}) {
       return {
         success: true,
         orderingMode: normalizeOrderingMode(null),
+        lifecycleStatus: LAB_LIFECYCLE_STATUS.ACTIVE,
         warning: "ordering_mode not deployed",
       };
     }
-    return { success: false, error: error.message, orderingMode: normalizeOrderingMode(null) };
+    return {
+      success: false,
+      error: error.message,
+      orderingMode: normalizeOrderingMode(null),
+      lifecycleStatus: LAB_LIFECYCLE_STATUS.ACTIVE,
+    };
   }
 
   return {
     success: true,
     orderingMode: normalizeOrderingMode(data?.ordering_mode),
+    lifecycleStatus: normalizeLabLifecycleStatus(data?.status) || LAB_LIFECYCLE_STATUS.ACTIVE,
     labName: str(data?.lab_name) || null,
     error: null,
   };
@@ -6453,14 +6464,57 @@ async function resolveCurrentActorRole(explicitRole) {
 /**
  * Client-side ordering mode gate (mirrors create_lab_order + orders_insert RLS).
  */
-async function assertLabOrderInitiationAllowed({ tenantId, labId, actorRole = "" } = {}) {
+async function assertLabOrderInitiationAllowed({
+  tenantId,
+  labId,
+  actorRole = "",
+  adminOnBehalf = false,
+} = {}) {
   if (!supabase) return { ok: true };
   const role = await resolveCurrentActorRole(actorRole);
-  if (isHqOpsRole(role)) return { ok: true };
-  if (role && role !== "lab") return { ok: true };
-
   const tid = str(tenantId);
   const lid = labIdKey(labId);
+
+  if (isHqOpsRole(role)) {
+    if (!adminOnBehalf) return { ok: true };
+    if (!tid || !lid) {
+      return { ok: false, error: "tenantId and labId required for HQ on-behalf order" };
+    }
+
+    const { data, error } = await supabase
+      .from("labs")
+      .select("ordering_mode, status, lab_id, lab_name, tenant_id")
+      .eq("tenant_id", tid)
+      .eq("lab_id", lid)
+      .maybeSingle();
+
+    if (error) {
+      hqDebugWarn("[assertLabOrderInitiationAllowed.adminOnBehalf]", error.message);
+      return { ok: false, error: error.message || "Failed to verify lab ordering eligibility" };
+    }
+    if (!data) {
+      return { ok: false, error: "Lab not found or not authorized for HQ on-behalf order" };
+    }
+
+    const mode = normalizeOrderingMode(data.ordering_mode);
+    const lifecycleStatus = normalizeLabLifecycleStatus(data.status) || LAB_LIFECYCLE_STATUS.ACTIVE;
+    if (!canAdminInitiateOrder(mode, lifecycleStatus)) {
+      return {
+        ok: false,
+        error: adminOrderingBlockedMessage(mode, lifecycleStatus),
+        orderingMode: mode,
+        lifecycleStatus,
+      };
+    }
+    return {
+      ok: true,
+      orderingMode: mode,
+      lifecycleStatus,
+      labName: str(data.lab_name),
+    };
+  }
+  if (role && role !== "lab") return { ok: true };
+
   if (!tid || !lid) return { ok: true };
 
   const { data, error } = await supabase
@@ -6484,6 +6538,72 @@ async function assertLabOrderInitiationAllowed({ tenantId, labId, actorRole = ""
     return { ok: false, error: labOrderingBlockedMessage(mode), orderingMode: mode };
   }
   return { ok: true, orderingMode: mode };
+}
+
+async function recordAdminOnBehalfOrderAuditEvent({
+  tenantId,
+  labId,
+  labName = "",
+  orderId,
+  actorRole = "",
+  actorUserId = "",
+  actorEmail = "",
+  totalAmount = 0,
+  lineCount = 0,
+} = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+  const actor = await resolveCurrentActorContext();
+  const resolvedActorUserId = str(actorUserId || actor.userId);
+  if (!resolvedActorUserId) {
+    return { success: false, error: "Authenticated actor is required for audit" };
+  }
+
+  const timestamp = new Date().toISOString();
+  const payload = buildProvisioningAuditPayload({
+    action: "admin_on_behalf_order_created",
+    reason: "HQ user created an order for a selected customer lab",
+    related: {
+      source: "admin_on_behalf",
+      tenantId,
+      tenant_id: tenantId,
+      labId,
+      lab_id: labId,
+      labName: labName || undefined,
+      lab_name: labName || undefined,
+      orderId,
+      order_id: orderId,
+      totalAmount: num(totalAmount),
+      total_amount: num(totalAmount),
+      lineCount: Number(lineCount) || 0,
+      line_count: Number(lineCount) || 0,
+      actor: {
+        userId: resolvedActorUserId,
+        user_id: resolvedActorUserId,
+        role: str(actorRole || actor.role),
+        email: str(actorEmail || actor.email),
+        displayName: str(actor.displayName),
+      },
+      actor_user_id: resolvedActorUserId,
+      actor_role: str(actorRole || actor.role),
+      actor_email: str(actorEmail || actor.email),
+      customer_lab_id: labId,
+      customer_lab_name: labName || undefined,
+      timestamp,
+    },
+  });
+
+  const { error } = await supabase.from("user_provisioning_events").insert([
+    {
+      hq_tenant_id: tenantId,
+      subject_user_id: resolvedActorUserId,
+      event_type: "created",
+      actor_user_id: resolvedActorUserId,
+      payload,
+    },
+  ]);
+
+  if (error) return { success: false, error: error.message || "Failed to write audit event" };
+  return { success: true, payload };
 }
 
 /**
@@ -6834,6 +6954,15 @@ export async function createOrderWrite(payload = {}) {
     const status = str(payload.status ?? "Placed");
     const notesRaw = str(payload.notes);
     const items = Array.isArray(payload.items) ? payload.items : [];
+    const orderSource = str(payload.source ?? payload.orderSource ?? payload.order_source).toLowerCase();
+    const adminOnBehalf =
+      payload.adminOnBehalf === true ||
+      payload.admin_on_behalf === true ||
+      orderSource === "admin_on_behalf";
+    const actorRole = str(payload.actorRole ?? payload.actor_role).toLowerCase();
+    const actorUserId = str(payload.actorUserId ?? payload.actor_user_id ?? payload.actorId ?? payload.actor_id);
+    const actorEmail = str(payload.actorEmail ?? payload.actor_email ?? created_by);
+    const customerLabName = str(payload.customerLabName ?? payload.customer_lab_name ?? payload.labName ?? payload.lab_name);
 
     if (!lab_id) {
       return { success: false, error: "lab_id is required", data: null };
@@ -6845,11 +6974,13 @@ export async function createOrderWrite(payload = {}) {
     const initiationCheck = await assertLabOrderInitiationAllowed({
       tenantId: tenant_id,
       labId: lab_id,
-      actorRole: payload.actorRole ?? payload.actor_role ?? null,
+      actorRole,
+      adminOnBehalf,
     });
     if (!initiationCheck.ok) {
       return { success: false, error: initiationCheck.error, data: null };
     }
+    const auditLabName = customerLabName || initiationCheck.labName || "";
 
     const creditCheck = await assertLabOrderCreditEligible(tenant_id, lab_id);
     if (!creditCheck.ok) {
@@ -7034,6 +7165,22 @@ export async function createOrderWrite(payload = {}) {
             return deliverySnapshotResult;
           },
         });
+        if (finalized.success && adminOnBehalf) {
+          const audit = await recordAdminOnBehalfOrderAuditEvent({
+            tenantId: tenant_id,
+            labId: lab_id,
+            labName: auditLabName,
+            orderId: returnedOrderId,
+            actorRole,
+            actorUserId,
+            actorEmail,
+            totalAmount: total_amount,
+            lineCount: normalizedLines.length,
+          });
+          if (!audit.success) {
+            hqDebugWarn("[createOrderWrite] admin on-behalf audit failed:", audit.error);
+          }
+        }
         return finalized;
       }
 
@@ -7231,6 +7378,10 @@ export async function createOrderWrite(payload = {}) {
         payload: {
           orderId: order_id,
           labId: lab_id,
+          source: adminOnBehalf ? "admin_on_behalf" : orderSource || "lab_ordering",
+          actorRole: actorRole || undefined,
+          actorUserId: actorUserId || undefined,
+          customerLabId: adminOnBehalf ? lab_id : undefined,
           totalAmount: total_amount,
           status,
           lineCount: normalizedLines.length,
@@ -7261,6 +7412,23 @@ export async function createOrderWrite(payload = {}) {
       orderId: order_id,
       labId: lab_id,
     });
+
+    if (adminOnBehalf) {
+      const audit = await recordAdminOnBehalfOrderAuditEvent({
+        tenantId: tenant_id,
+        labId: lab_id,
+        labName: auditLabName,
+        orderId: order_id,
+        actorRole,
+        actorUserId,
+        actorEmail,
+        totalAmount: total_amount,
+        lineCount: normalizedLines.length,
+      });
+      if (!audit.success) {
+        hqDebugWarn("[createOrderWrite] admin on-behalf audit failed:", audit.error);
+      }
+    }
 
     return {
       success: true,
