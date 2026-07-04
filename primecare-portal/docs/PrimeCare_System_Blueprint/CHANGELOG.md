@@ -4,6 +4,30 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-04 — Executive Compensation & Payroll Engine Phase 5B Agent Compensation 360
+
+### Change
+
+- Add **Agent Compensation 360** as the single employee compensation profile from Executive Compensation → Agents.
+- Add bounded read loader `loadAgentCompensation360Read` and directory loader `loadAgentCompensationDirectoryRead`.
+- Add seven read-focused sections: Overview, Payroll History, Commission History, Compensation Plan (+ history), Adjustments (read-only), Promotion (review-only), Audit Timeline.
+- Reuse Phase 5A `changeEmployeePlanAssignment` for plan changes from 360; no new payroll or finance mutation paths.
+- Extend RBAC: Executive full view + plan change; HR view + assign plan; Admin view-only; Agent own-profile contract (future); Lab/Distributor blocked.
+
+### Not changed
+
+- No payroll preview calculation, approval workflow, export, mark paid, accounting, finance, AR, payments, orders, or O2C mutation.
+
+### Verification gates
+
+- `node scripts/verify-agent-compensation-profile.mjs`
+- `node scripts/verify-agent-payroll-history.mjs`
+- `node scripts/verify-agent-commission-history.mjs`
+- `node scripts/verify-agent-plan-history.mjs`
+- `node scripts/verify-agent-compensation-security.mjs`
+
+---
+
 ## 2026-07-04 — Executive Compensation & Payroll Engine Phase 5A Compensation Administration
 
 ### Change

@@ -115,6 +115,11 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-compensation-plan-assignment.mjs | Plan Assignments tab, change/end assignment, history preserved, no delete | Phase 5A assignments |
 | verify-compensation-simulator.mjs | Preview-only simulator outputs; no persistence | Phase 5A simulator |
 | verify-compensation-role-security.mjs | Executive/HR/Admin/Agent admin RBAC contract | Phase 5A security |
+| verify-agent-compensation-profile.mjs | Agent Compensation 360 overview sections and loader wiring | Phase 5B profile |
+| verify-agent-payroll-history.mjs | Agent payroll history grid and bounded line reads | Phase 5B payroll history |
+| verify-agent-commission-history.mjs | Agent commission history grid; no O2C writes | Phase 5B commission history |
+| verify-agent-plan-history.mjs | Plan assignment history and change-plan reuse | Phase 5B plan history |
+| verify-agent-compensation-security.mjs | 360 RBAC contract; Lab/Distributor blocked | Phase 5B security |
 
 ### Infrastructure
 

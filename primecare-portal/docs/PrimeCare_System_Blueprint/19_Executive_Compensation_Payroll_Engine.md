@@ -559,6 +559,44 @@ Forbidden in Phase 5A:
 
 ---
 
+## Phase 5B — Agent Compensation 360
+
+Phase 5B delivers the single employee compensation profile surface from **Executive Compensation → Agents → click employee**.
+
+| Section | Scope |
+|---------|-------|
+| Overview | Identity, plan, salary/allowances, commission %, promotion status, collection efficiency, current-month collections/commission |
+| Payroll History | All payroll run lines for the agent (period, salary, commission, allowances, adjustments, net pay, status) |
+| Commission History | Cash-collected commission entries with source payment evidence and calculation version |
+| Compensation Plan | Assigned plan, version, effective dates, history; change plan reuses Phase 5A assignment workflow |
+| Adjustments | Read-only bonuses, penalties, recoveries, manual adjustments with reason and approver |
+| Promotion | Review-only eligibility recommendation; no automatic promotion |
+| Audit Timeline | Unified agent-filtered timeline for plan, payroll, commission, adjustment, and promotion events |
+
+RBAC (application layer; RLS unchanged in Phase 5B):
+
+| Action | Executive | HR | Admin | Agent | Lab | Distributor |
+|--------|-----------|----|-------|-------|-----|-------------|
+| View Agent Compensation 360 | yes | yes | yes | own profile only (future) | no | no |
+| Change plan from 360 | yes | yes | no | no | no | no |
+| Review payroll/commission/adjustment history | yes | yes | yes | own only (future) | no | no |
+
+Forbidden in Phase 5B:
+
+- Payroll approval, export, mark paid, accounting, finance mutation, payroll recalculation
+- Commission rule editing from 360 (HR assigns plans only)
+- Automatic promotion execution
+
+Verification scripts:
+
+- `verify-agent-compensation-profile.mjs`
+- `verify-agent-payroll-history.mjs`
+- `verify-agent-commission-history.mjs`
+- `verify-agent-plan-history.mjs`
+- `verify-agent-compensation-security.mjs`
+
+---
+
 ## Phase plan
 
 | Phase | Scope |

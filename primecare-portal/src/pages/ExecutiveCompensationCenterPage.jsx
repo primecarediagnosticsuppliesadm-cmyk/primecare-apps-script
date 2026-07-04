@@ -23,8 +23,14 @@ import {
 } from "@/api/compensationPlanAdminSupabaseApi.js";
 import CompensationPlanAssignmentsTab from "@/components/compensation/CompensationPlanAssignmentsTab.jsx";
 import CompensationPlansTab from "@/components/compensation/CompensationPlansTab.jsx";
+import AgentCompensation360Panel from "@/components/compensation/AgentCompensation360Panel.jsx";
+import {
+  loadAgentCompensation360Read,
+  loadAgentCompensationDirectoryRead,
+} from "@/api/agentCompensation360SupabaseApi.js";
 import { buildCompensationPlanAdminModel } from "@/compensation/compensationPlanAdminModel.js";
 import { compensationAdminPermissions } from "@/compensation/compensationPlanAdminWorkflow.js";
+import { agentCompensation360Permissions } from "@/compensation/agentCompensation360Workflow.js";
 import { buildExecutiveCompensationModel } from "@/compensation/executiveCompensationModel.js";
 import { YEAR1_BASELINE_PLAN } from "@/compensation/compensationCalculationEngine.js";
 import { usePagePerformance } from "@/hooks/usePagePerformance.js";
@@ -161,9 +167,13 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
   const [adminModel, setAdminModel] = useState(null);
   const [adminBusy, setAdminBusy] = useState(false);
   const [adminNotice, setAdminNotice] = useState("");
+  const [agent360Model, setAgent360Model] = useState(null);
+  const [agent360Loading, setAgent360Loading] = useState(false);
+  const [agentDirectory, setAgentDirectory] = useState([]);
 
   const actorRole = String(currentUser?.role || "executive").toLowerCase();
   const adminPermissions = useMemo(() => compensationAdminPermissions(actorRole), [actorRole]);
+  const agent360Permissions = useMemo(() => agentCompensation360Permissions(actorRole), [actorRole]);
 
   usePagePerformance("Executive Compensation");
 
@@ -203,13 +213,55 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
     }
   }, [actorRole, adminPermissions, currentUser]);
 
+  const loadAgentDirectory = useCallback(async () => {
+    if (!agent360Permissions.canView360) return;
+    try {
+      const result = await loadAgentCompensationDirectoryRead({ currentUser });
+      if (!result.success) throw new Error(result.error || "Could not load agent directory");
+      setAgentDirectory(result.data?.agents || []);
+    } catch (err) {
+      setError(err?.message || "Could not load agent directory");
+    }
+  }, [agent360Permissions, currentUser]);
+
+  const loadAgent360 = useCallback(
+    async (agentId) => {
+      if (!agent360Permissions.canView360 || !agentId) {
+        setAgent360Model(null);
+        return;
+      }
+      try {
+        setAgent360Loading(true);
+        const result = await loadAgentCompensation360Read({ currentUser, agentId });
+        if (!result.success) throw new Error(result.error || "Could not load Agent Compensation 360");
+        setAgent360Model(result.data);
+      } catch (err) {
+        setError(err?.message || "Could not load Agent Compensation 360");
+        setAgent360Model(null);
+      } finally {
+        setAgent360Loading(false);
+      }
+    },
+    [agent360Permissions, currentUser]
+  );
+
   useEffect(() => {
     load();
     loadAdmin();
-  }, [load, loadAdmin]);
+    loadAgentDirectory();
+  }, [load, loadAdmin, loadAgentDirectory]);
+
+  useEffect(() => {
+    if (selectedAgentId && activeTab === "Agents") {
+      loadAgent360(selectedAgentId);
+    } else if (!selectedAgentId) {
+      setAgent360Model(null);
+    }
+  }, [activeTab, loadAgent360, selectedAgentId]);
 
   const refreshAll = async () => {
-    await Promise.all([load(), loadAdmin()]);
+    await Promise.all([load(), loadAdmin(), loadAgentDirectory()]);
+    if (selectedAgentId) await loadAgent360(selectedAgentId);
   };
 
   const handleCreatePlan = async () => {
@@ -307,6 +359,7 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
       if (!result.success) throw new Error(result.error || "Change plan failed");
       setAdminNotice(`Plan changed for ${row.employeeName}; prior assignment preserved.`);
       await loadAdmin();
+      if (selectedAgentId) await loadAgent360(selectedAgentId);
     } catch (err) {
       setError(err?.message || "Could not change employee plan");
     } finally {
@@ -364,6 +417,10 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
   );
 
   const selectedAgent = selectedAgentId ? model?.agentProfiles?.[selectedAgentId] : null;
+  const agentList = useMemo(() => {
+    if (agentDirectory.length) return agentDirectory;
+    return Object.values(model?.agentProfiles || {});
+  }, [agentDirectory, model]);
 
   const openPreview = (periodRow) => {
     setSelectedPeriodId(periodRow.periodId);
@@ -688,52 +745,27 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
       ) : null}
 
       {activeTab === "Agents" && model ? (
-        selectedAgent ? (
-          <div className="grid gap-4 xl:grid-cols-2">
-            <SectionCard title="Profile" icon={Users}>
-              <div className="grid gap-2 text-xs">
-                <p><span className="text-slate-500">Agent:</span> {selectedAgent.agentName}</p>
-                <p><span className="text-slate-500">Plan:</span> {selectedAgent.planCode} · {selectedAgent.planVersion}</p>
-                <p><span className="text-slate-500">Current Salary:</span> ₹{Number(selectedAgent.currentSalary || 0).toLocaleString("en-IN")}</p>
-                <p><span className="text-slate-500">Allowances:</span> Fuel ₹{Number(selectedAgent.fuelAllowance || 0).toLocaleString("en-IN")} · Mobile ₹{Number(selectedAgent.mobileAllowance || 0).toLocaleString("en-IN")}</p>
-                <p><span className="text-slate-500">Commission Rate:</span> {selectedAgent.commissionRateBps} bps</p>
-                <p><span className="text-slate-500">Collection Efficiency:</span> {selectedAgent.collectionEfficiency}%</p>
-                <p><span className="text-slate-500">Promotion Eligibility:</span> {selectedAgent.promotionEligible ? "Eligible" : "Not eligible"}</p>
-              </div>
-            </SectionCard>
-            <SectionCard title="Payroll History" icon={Wallet}>
-              {selectedAgent.payrollHistory.map((row) => (
-                <div key={`${row.periodYm}-${row.runNumber}`} className="mb-2 rounded border bg-white px-3 py-2 text-xs">
-                  <p className="font-semibold">{row.periodYm} · v{row.runNumber}</p>
-                  <p>{row.status} · {row.netPayableLabel}</p>
-                </div>
-              ))}
-            </SectionCard>
-            <SectionCard title="Commission History" icon={TrendingUp}>
-              {selectedAgent.commissionHistory.map((row) => (
-                <div key={`${row.periodId}-${row.ruleVersion}`} className="mb-2 rounded border bg-white px-3 py-2 text-xs">
-                  <p className="font-semibold">{row.commissionLabel}</p>
-                  <p>Cash {row.attributableCashLabel} · {row.status}</p>
-                </div>
-              ))}
-            </SectionCard>
-            <SectionCard title="Attribution Summary" icon={Eye}>
-              {selectedAgent.attributionSummary.map((row, index) => (
-                <div key={index} className="mb-2 rounded border bg-white px-3 py-2 text-xs">
-                  <p className="font-semibold">{row.status}</p>
-                  <p>{row.cashCollectedLabel} · {row.blockedReason}</p>
-                </div>
-              ))}
-            </SectionCard>
-          </div>
+        selectedAgentId ? (
+          <AgentCompensation360Panel
+            model={agent360Model}
+            permissions={agent360Permissions}
+            loading={agent360Loading}
+            busy={adminBusy}
+            selectablePlans={adminModel?.plans || agent360Model?.selectablePlans || []}
+            onBack={() => {
+              setSelectedAgentId("");
+              setAgent360Model(null);
+            }}
+            onChangePlan={handleChangePlan}
+          />
         ) : (
           <EnterpriseDataTable
-            hasRows={Object.keys(model.agentProfiles).length > 0}
-            emptyTitle="Select an agent"
-            emptyDescription="Open Payroll Preview and choose View Agent, or pick an agent below."
+            hasRows={agentList.length > 0}
+            emptyTitle="No agents found"
+            emptyDescription="Active agent profiles with compensation assignments appear here."
             desktop={
               <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                {Object.values(model.agentProfiles).map((agent) => (
+                {agentList.map((agent) => (
                   <button
                     key={agent.agentId}
                     type="button"
@@ -741,8 +773,10 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
                     onClick={() => openAgent(agent.agentId)}
                   >
                     <p className="font-semibold text-slate-900">{agent.agentName}</p>
-                    <p className="text-slate-500">{agent.planCode} · {agent.planVersion}</p>
-                    <p className="mt-1 text-indigo-700">{agent.promotionEligible ? "Promotion eligible" : "Standard track"}</p>
+                    <p className="text-slate-500">
+                      {agent.planCode || agent.assignmentStatus || "—"} · {agent.planVersion || agent.status || "active"}
+                    </p>
+                    <p className="mt-1 text-indigo-700">Open Agent Compensation 360</p>
                   </button>
                 ))}
               </div>
