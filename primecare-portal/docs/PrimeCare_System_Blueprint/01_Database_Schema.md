@@ -371,7 +371,7 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 
 ## compensation / payroll tables (Phase 3A foundation)
 
-Phase 3A creates the schema, lifecycle constraints, RLS helpers/policies, attribution snapshot infrastructure, and audit/event infrastructure only. No commission calculations, payroll calculations, preview generation, approval workflow API, lock/export engine, accounting entry, bank payout, GL posting, disbursement record, dashboard, or payroll UI page exists in this phase.
+Phase 3A creates the schema, lifecycle constraints, RLS helpers/policies, attribution snapshot infrastructure, and audit/event infrastructure. Phase 3B adds the preview-only calculation service and draft preview persistence. No approval workflow API, lock/export engine, accounting entry, bank payout, GL posting, disbursement record, dashboard, or payroll UI page exists in Phase 3B.
 
 | Table | Purpose | RLS expectation |
 |-------|---------|-----------------|
@@ -388,6 +388,8 @@ Phase 3A creates the schema, lifecycle constraints, RLS helpers/policies, attrib
 | compensation_attribution_snapshots | Payment/lab/agent/ownership/rule/source snapshot evidence | Executive/HR/Admin scoped; agent own snapshot visibility only |
 
 Payroll tables are derived from operational SoT and must not mutate `orders`, `invoices`, `payments`, `invoice_payment_allocations`, `ar_credit_control`, inventory, logistics, or accounting records. Commission must be based on `payments` cash actually collected only. See [19_Executive_Compensation_Payroll_Engine.md](./19_Executive_Compensation_Payroll_Engine.md).
+
+Phase 3B preview rows must remain `draft`. `payroll_runs.metadata`, `payroll_run_lines.calculation_snapshot`, and `compensation_commission_entries.metadata` carry `plan_id`, `plan_version`, `rule_version`, and `calculated_at` for versioning. Approval events and export rows are not created by preview calculation.
 
 ---
 

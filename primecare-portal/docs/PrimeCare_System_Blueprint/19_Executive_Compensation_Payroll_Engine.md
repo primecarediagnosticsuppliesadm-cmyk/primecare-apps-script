@@ -230,6 +230,8 @@ Rules:
 
 ## Calculation rules
 
+Phase 3B implements calculation preview only. The engine may calculate draft preview rows and draft audit evidence, but it must not approve, submit, lock, export, pay, create accounting records, create bank files, or expose UI.
+
 ### Cash-only commission
 
 ```
@@ -248,6 +250,12 @@ Forbidden inputs:
 - Projected revenue
 - Outstanding receivables
 - Allocation totals as commission amount
+
+Implementation:
+
+- `calculateCommissionEntries()` reads period `payments.amount_received` only for commissionable cash.
+- Cumulative payment reads may be used for promotion eligibility, but commission amount for the current preview remains period cash × plan rate.
+- Orders, invoices, fulfilled revenue, projected revenue, outstanding receivables, allocation totals, and legacy `commission_entries` are forbidden inputs.
 
 ### Year-1 agent baseline
 
@@ -280,6 +288,34 @@ Priority:
 2. Otherwise use active `lab_ownership` at the payment date.
 
 The calculated entry must persist the attribution method, agent identity snapshot, source payment references or source hash, and rule version. Recomputing current ownership after the fact is not allowed for locked payroll.
+
+Phase 3B preview attribution rule:
+
+1. Use `payments.agent_id` when populated.
+2. Otherwise use existing `compensation_attribution_snapshots`.
+3. Do not read current `lab_ownership` directly during calculation preview. Missing snapshots must produce a warning/manual-review outcome rather than silently using current ownership.
+
+---
+
+## Phase 3B preview calculation engine
+
+Approved pure service functions:
+
+- `calculateCompensationPreview()`
+- `calculateCommissionEntries()`
+- `calculatePayrollPreview()`
+- `calculatePromotionEligibility()`
+- `calculateCollectionEfficiency()`
+- `calculateAgentCompensation()`
+
+Preview persistence rules:
+
+1. Persist only `draft` rows in `payroll_runs`, `payroll_run_lines`, and `compensation_commission_entries`.
+2. Record `calculation_start` and `calculation_finish` in `compensation_audit_events`.
+3. Do not write `compensation_approval_events`.
+4. Do not write `payroll_exports`.
+5. Do not update or delete Finance/O2C records.
+6. Every calculated row must carry `plan_id`, `plan_version`, `rule_version`, and `calculated_at` in metadata or calculation snapshots.
 
 ---
 

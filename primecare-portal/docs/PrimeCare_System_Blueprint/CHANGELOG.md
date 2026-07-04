@@ -4,6 +4,41 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-04 — Executive Compensation & Payroll Engine Phase 3B Preview Calculation
+
+### Change
+
+- Add preview-only compensation calculation engine scope: cash-only commission, Year-1 salary/allowance rules, collection efficiency, promotion eligibility, draft payroll preview totals, attribution snapshot fallback, and versioned calculation snapshots.
+- Define that Phase 3B may write only draft compensation/payroll preview rows and calculation audit start/finish events.
+- Add verification gates for calculation, cash-only commission, promotion eligibility, attribution snapshots, payroll preview, and plan versioning.
+
+### Not changed
+
+- No payroll approval, submission workflow, lock, export, payout, bank integration, accounting entry, GL posting, employee portal, dashboard, UI page, manual adjustment UI, or bonus approval workflow.
+- No Finance, AR, Payments, Orders, Invoices, Collections, Inventory, Logistics, legacy Commission Engine, Projection Engine, projection flag, or O2C business rule behavior changed.
+
+### Verification gates
+
+- `npm run build`
+- `node scripts/verify-runtime-import-safety.mjs`
+- `node scripts/verify-compensation-schema.mjs`
+- `node scripts/verify-compensation-calculation.mjs`
+- `node scripts/verify-cash-only-commission.mjs`
+- `node scripts/verify-promotion-eligibility.mjs`
+- `node scripts/verify-attribution-snapshots.mjs`
+- `node scripts/verify-payroll-preview.mjs`
+- `node scripts/verify-plan-versioning.mjs`
+- `node scripts/verify-financial-reconciliation.mjs`
+- `node scripts/verify-ar-reconcile.mjs`
+- `node scripts/verify-hq-rls-reads.mjs`
+- `node scripts/run-browser-smoke-all-roles.mjs`
+
+### Phase 3C gate
+
+- GO only after Phase 3B verification passes and review confirms draft-only preview behavior with no approval/export/payout or O2C mutation.
+
+---
+
 ## 2026-07-04 — Executive Compensation & Payroll Engine Phase 3A Foundation
 
 ### Change

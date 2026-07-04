@@ -12,6 +12,7 @@ Invoice, payment, allocation, and AR — strict lifecycle for Year-1 pilot.
 | Invoice open balance | `invoice.total - Σ(allocations)` |
 | Invoice paid/partial status | `invoice_payment_allocations` + status enum |
 | Order merchandise value | `orders.total_amount` (excludes delivery Phase 3A) |
+| Payroll commission input | `payments.amount_received` cash actually collected only |
 
 ---
 
@@ -63,8 +64,14 @@ Invoice, payment, allocation, and AR — strict lifecycle for Year-1 pilot.
 
 ## Commission / payroll
 
-- `commission_entries` separate from lab `payments`
-- **Must not** alter payment allocation logic
+- Existing distributor/revenue-based commission analytics are **not** the payroll source of truth.
+- HQ compensation/payroll must derive commission from cash actually collected only: `attributable_cash_collected × applicable_rate`.
+- Forbidden payroll commission inputs: order value, invoice value, fulfilled revenue, projected revenue, outstanding receivables, and allocation totals as commission amount.
+- `payments.agent_id` is the preferred future attribution source when populated and certified; otherwise use an audited active `lab_ownership` snapshot at payment date.
+- Payroll tables are derived ledgers separate from lab `payments`.
+- **Must not** alter payment allocation logic, AR logic, invoices, orders, inventory, logistics, or accounting.
+- No accounting entry, bank payout, GL posting, or disbursement record is created unless explicitly approved in a future finance/payroll phase.
+- Phase 3B preview may write draft rows only to compensation/payroll tables and audit calculation start/finish; it must not write approval/export events or mutate Finance/O2C source records.
 
 ---
 
@@ -75,6 +82,7 @@ Invoice, payment, allocation, and AR — strict lifecycle for Year-1 pilot.
 3. Fulfill does not roll back on invoice failure
 4. Guntur tenant untouched by golden scripts
 5. Bounded payment reads
+6. Compensation/payroll does not mutate finance SoT and does not compute commission from revenue or receivables
 
 ---
 
@@ -85,6 +93,7 @@ Invoice, payment, allocation, and AR — strict lifecycle for Year-1 pilot.
 | Invoice | `createInvoiceForFulfilledOrderWrite`, `getInvoicesForLabRead`, `generateInvoicePdf` |
 | Payment | `createPaymentWrite`, `allocatePaymentToInvoiceWrite` |
 | Status | `invoiceAccountStatus.js`, `buildLabAccountLedger` |
+| Compensation / payroll | Preview-only Phase 3B calculation APIs; see `19_Executive_Compensation_Payroll_Engine.md` |
 
 ---
 
@@ -94,3 +103,5 @@ Invoice, payment, allocation, and AR — strict lifecycle for Year-1 pilot.
 - `verify-partial-payment-sync.mjs`
 - `verify-invoice-phase1.mjs` – `phase5.mjs`
 - `verify-primecare-production-golden-path.mjs`
+- `verify-compensation-calculation.mjs`, `verify-cash-only-commission.mjs`, `verify-promotion-eligibility.mjs`, `verify-attribution-snapshots.mjs`, `verify-payroll-preview.mjs`, `verify-plan-versioning.mjs`
+- Planned later: `verify-compensation-no-finance-mutation.mjs`

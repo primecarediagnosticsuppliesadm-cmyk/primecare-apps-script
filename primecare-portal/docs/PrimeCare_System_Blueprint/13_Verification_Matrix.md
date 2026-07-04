@@ -89,6 +89,12 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-payroll-period-lifecycle.mjs | draft → previewed → submitted → approved → locked → exported lifecycle constraints only; no engine functions | Phase 3A lifecycle foundation |
 | verify-compensation-audit.mjs | Append-only audit/approval event infrastructure and adjustment reason/type constraints | Phase 3A audit foundation |
 | verify-compensation-role-access.mjs | `hr` role metadata, provisioning guard, and placeholder navigation only | Phase 3A role foundation |
+| verify-compensation-calculation.mjs | Pure Phase 3B preview engine functions, draft-only outputs, placeholder components, and no approval/export logic | Phase 3B calculation preview |
+| verify-cash-only-commission.mjs | Commission uses `payments.amount_received` only and rejects order/invoice/revenue/outstanding/allocation inputs | Phase 3B cash-only |
+| verify-promotion-eligibility.mjs | Year-1 promotion threshold, collection efficiency, overdue blocker, and first-3-month baseline rules | Phase 3B promotion |
+| verify-attribution-snapshots.mjs | `payments.agent_id` priority, fallback to `compensation_attribution_snapshots`, no current ownership fallback | Phase 3B attribution |
+| verify-payroll-preview.mjs | Draft-only preview persistence to payroll/commission tables; no approval, lock, export, payout, or UI | Phase 3B preview persistence |
+| verify-plan-versioning.mjs | `plan_id`, `plan_version`, `rule_version`, and `calculated_at` stored on calculated rows | Phase 3B versioning |
 | verify-compensation-cash-only.mjs | Commission uses `payments.amount_received` cash collected only; rejects order/invoice/revenue/receivable inputs | Commission calculation |
 | verify-compensation-attribution.mjs | `payments.agent_id` priority, `lab_ownership` payment-date snapshot fallback, persisted attribution evidence | Attribution |
 | verify-payroll-run-lifecycle.mjs | open → previewed → submitted → approved → locked → exported, immutability after lock | Payroll run lifecycle |
