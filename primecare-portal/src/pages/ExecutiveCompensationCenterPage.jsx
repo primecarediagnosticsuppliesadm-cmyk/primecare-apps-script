@@ -11,6 +11,7 @@ import {
   EnterpriseDataTable,
 } from "@/components/ux";
 import { loadExecutiveCompensationCenterRead } from "@/api/compensationReadSupabaseApi.js";
+import { generatePayrollPreview } from "@/api/compensationSupabaseApi.js";
 import { buildExecutiveCompensationModel } from "@/compensation/executiveCompensationModel.js";
 import { usePagePerformance } from "@/hooks/usePagePerformance.js";
 import { cn } from "@/lib/utils";
@@ -139,6 +140,8 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
   const [selectedPeriodId, setSelectedPeriodId] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState("");
+  const [generatingPeriodId, setGeneratingPeriodId] = useState("");
+  const [generationNotice, setGenerationNotice] = useState("");
 
   usePagePerformance("Executive Compensation");
 
@@ -204,6 +207,37 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
     setActiveTab("Payroll Preview");
   };
 
+  const handleGeneratePreview = async (periodRow) => {
+    try {
+      setGeneratingPeriodId(periodRow.periodId);
+      setError("");
+      setGenerationNotice("");
+      const result = await generatePayrollPreview({
+        currentUser,
+        tenantId: currentUser?.tenantId || currentUser?.tenant_id,
+        periodId: periodRow.periodId,
+        actorRole: "executive",
+        actorUserId: currentUser?.id || currentUser?.userId || null,
+      });
+      if (!result.success) {
+        throw new Error(result.error || "Payroll preview generation failed");
+      }
+      const payload = await loadExecutiveCompensationCenterRead({ currentUser });
+      const nextModel = buildExecutiveCompensationModel(payload);
+      setModel(nextModel);
+      setSelectedPeriodId(periodRow.periodId);
+      setSelectedRunId(result.data?.payrollRunId || "");
+      setGenerationNotice(
+        `Generated draft preview for ${periodRow.periodYm}: ${result.data?.payrollRunLineCount || 0} agent lines, commission ${result.data?.totals?.commission_amount ?? 0}, net ${result.data?.totals?.net_payable ?? 0}.`
+      );
+      setActiveTab("Payroll Preview");
+    } catch (err) {
+      setError(err?.message || "Could not generate payroll preview");
+    } finally {
+      setGeneratingPeriodId("");
+    }
+  };
+
   const openAgent = (agentId) => {
     setSelectedAgentId(agentId);
     setActiveTab("Agents");
@@ -235,6 +269,12 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
       />
 
       <ReadHealthBanner readHealth={model?.readHealth} />
+
+      {generationNotice ? (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          {generationNotice}
+        </div>
+      ) : null}
 
       {error ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
@@ -344,10 +384,24 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
                       <td className="px-2 py-2">{row.employeeCount}</td>
                       <td className="px-2 py-2 tabular-nums">{row.netPayrollLabel}</td>
                       <td className="px-2 py-2">
-                        <Button type="button" size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => openPreview(row)}>
-                          <Eye className="mr-1 h-3 w-3" />
-                          Open Preview
-                        </Button>
+                        <div className="flex flex-wrap gap-1">
+                          {row.status === "draft" ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="default"
+                              className="h-7 text-[10px]"
+                              disabled={generatingPeriodId === row.periodId}
+                              onClick={() => handleGeneratePreview(row)}
+                            >
+                              {generatingPeriodId === row.periodId ? "Generating…" : "Generate Payroll Preview"}
+                            </Button>
+                          ) : null}
+                          <Button type="button" size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => openPreview(row)}>
+                            <Eye className="mr-1 h-3 w-3" />
+                            Open Preview
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}

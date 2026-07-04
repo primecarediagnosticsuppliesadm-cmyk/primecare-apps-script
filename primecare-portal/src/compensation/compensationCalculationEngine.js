@@ -5,7 +5,7 @@
  * lock runs, export payroll, create payouts, or mutate finance/O2C records.
  */
 
-export const COMPENSATION_RULE_VERSION = "PC_COMP_YEAR1_2026_PHASE3B";
+export const COMPENSATION_RULE_VERSION = "PC_COMP_YEAR1_2026_PHASE4B";
 
 export const YEAR1_BASELINE_PLAN = Object.freeze({
   planCode: "AGENT_YEAR1_BASELINE",

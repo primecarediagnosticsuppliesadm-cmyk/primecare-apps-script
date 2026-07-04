@@ -10,6 +10,12 @@ import {
   calculateCompensationPreview,
   COMPENSATION_RULE_VERSION,
 } from "@/compensation/compensationCalculationEngine.js";
+import {
+  assertPayrollPeriodDraftForPreview,
+  buildPreviewGenerationAuditEvidence,
+  buildPreviewSourcePaymentHash,
+  PAYROLL_PREVIEW_GENERATION_VERSION,
+} from "@/payroll/payrollPreviewGeneration.js";
 
 const COMPENSATION_PLAN_COLUMNS =
   "id,tenant_id,plan_code,version,role_scope,effective_from,effective_to,base_salary,fuel_allowance,mobile_allowance,commission_rate_bps,promotion_salary,promotion_commission_rate_bps,promotion_collection_threshold,promotion_min_efficiency_pct,promotion_max_overdue_days,rules_json,status";
@@ -139,28 +145,95 @@ async function nextRunNumber(client, period) {
   return Number(data?.[0]?.run_number || 0) + 1;
 }
 
-async function persistDraftPreview(client, { period, preview, actor = {}, startedAt, durationMs }) {
-  const runNumber = await nextRunNumber(client, period);
+async function findDraftPayrollRun(client, period) {
+  const { data, error } = await client
+    .from("payroll_runs")
+    .select("id, run_number, status")
+    .eq("tenant_id", period.tenant_id)
+    .eq("period_id", period.id)
+    .eq("status", "draft")
+    .order("run_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(`payroll_runs draft lookup failed: ${error.message}`);
+  return data || null;
+}
+
+async function clearDraftPreviewArtifacts(client, period, payrollRunId) {
+  const lineDelete = await client.from("payroll_run_lines").delete().eq("payroll_run_id", payrollRunId);
+  if (lineDelete.error) {
+    throw new Error(`payroll_run_lines delete failed: ${lineDelete.error.message}`);
+  }
+  const commissionDelete = await client
+    .from("compensation_commission_entries")
+    .delete()
+    .eq("tenant_id", period.tenant_id)
+    .eq("period_id", period.id)
+    .eq("status", "draft");
+  if (commissionDelete.error) {
+    throw new Error(`compensation_commission_entries delete failed: ${commissionDelete.error.message}`);
+  }
+}
+
+async function persistDraftPreview(client, { period, preview, actor = {}, startedAt, durationMs, sourcePaymentHash, regenerated = false }) {
+  const existingDraft = await findDraftPayrollRun(client, period);
+  const runNumber = existingDraft?.run_number || (await nextRunNumber(client, period));
+  const auditEvidence = buildPreviewGenerationAuditEvidence({
+    period,
+    preview,
+    actor,
+    startedAt,
+    durationMs,
+    sourcePaymentHash,
+    regenerated: Boolean(existingDraft) || regenerated,
+  });
+
   const runPayload = {
     ...preview.payrollRun,
     run_number: runNumber,
     generated_by: actor.userId || null,
     generated_at: preview.calculatedAt,
     status: "draft",
+    totals_json: {
+      ...preview.totals,
+      calculated_at: preview.calculatedAt,
+      rule_version: preview.ruleVersion,
+      calculation_version: PAYROLL_PREVIEW_GENERATION_VERSION,
+      source_payment_hash: sourcePaymentHash,
+      calculation_phase: "preview_only",
+    },
     metadata: {
       ...preview.payrollRun.metadata,
       rule_version: preview.ruleVersion,
-      plan_versions: [
-        ...new Set(preview.commissionEntries.map((entry) => entry.metadata?.plan_version).filter(Boolean)),
-      ],
+      calculation_version: PAYROLL_PREVIEW_GENERATION_VERSION,
+      source_payment_hash: sourcePaymentHash,
+      plan_versions: auditEvidence.plan_versions,
       execution_duration_ms: durationMs,
       warning_count: preview.warnings.length,
+      preview_only: true,
+      no_approval: true,
+      no_export: true,
+      no_paid: true,
+      regenerated: auditEvidence.regenerated,
     },
   };
 
-  const runInsert = await client.from("payroll_runs").insert([runPayload]).select("id").single();
-  if (runInsert.error) throw new Error(`payroll_runs insert failed: ${runInsert.error.message}`);
-  const payrollRunId = runInsert.data.id;
+  let payrollRunId;
+  if (existingDraft) {
+    await clearDraftPreviewArtifacts(client, period, existingDraft.id);
+    const runUpdate = await client
+      .from("payroll_runs")
+      .update(runPayload)
+      .eq("id", existingDraft.id)
+      .select("id")
+      .single();
+    if (runUpdate.error) throw new Error(`payroll_runs update failed: ${runUpdate.error.message}`);
+    payrollRunId = existingDraft.id;
+  } else {
+    const runInsert = await client.from("payroll_runs").insert([runPayload]).select("id").single();
+    if (runInsert.error) throw new Error(`payroll_runs insert failed: ${runInsert.error.message}`);
+    payrollRunId = runInsert.data.id;
+  }
 
   const commissionRows = preview.commissionEntries.map((entry) => ({
     ...entry,
@@ -197,26 +270,19 @@ async function persistDraftPreview(client, { period, preview, actor = {}, starte
 
   await insertAuditEvent(client, {
     tenant_id: period.tenant_id,
-    event_type: "calculation_finish",
+    event_type: "preview_generated",
     entity_type: "payroll_run",
     entity_id: payrollRunId,
     actor_user_id: actor.userId || null,
     actor_role: actor.role || null,
-    before_json: null,
-    after_json: {
-      run_number: runNumber,
-      rule_version: preview.ruleVersion,
-      calculated_at: preview.calculatedAt,
-      records_calculated: preview.payrollRunLines.length,
-      warnings: preview.warnings,
-      execution_duration_ms: durationMs,
-      started_at: startedAt,
-    },
-    reason: "preview_calculation_finished",
+    before_json: existingDraft ? { payroll_run_id: existingDraft.id, regenerated: true } : null,
+    after_json: auditEvidence,
+    reason: existingDraft ? "payroll_preview_regenerated" : "payroll_preview_generated",
     metadata: {
       preview_only: true,
       no_approval_event: true,
       no_export: true,
+      no_paid: true,
     },
   });
 
@@ -225,41 +291,54 @@ async function persistDraftPreview(client, { period, preview, actor = {}, starte
     runNumber,
     commissionEntryCount: commissionRows.length,
     payrollRunLineCount: lineRows.length,
+    regenerated: Boolean(existingDraft),
+    sourcePaymentHash,
+    auditEvidence,
   };
 }
 
-export async function generateCompensationPreviewDraftWrite(options = {}) {
+export async function generatePayrollPreview(options = {}) {
   const started = performance.now();
   const startedAt = new Date().toISOString();
   try {
     const client = ensureClient(options.client);
-    const tenantId = str(options.tenantId ?? options.tenant_id);
+    const tenantId = str(options.tenantId ?? options.tenant_id ?? options.currentUser?.tenantId ?? options.currentUser?.tenant_id);
     const periodId = str(options.periodId ?? options.period_id);
     const periodYm = str(options.periodYm ?? options.period_ym);
+    const actorUserId = options.actorUserId || options.actor_user_id || options.currentUser?.id || options.currentUser?.userId || null;
+    const actorRole = str(options.actorRole || options.actor_role || options.currentUser?.role || "executive");
+
     if (!tenantId || (!periodId && !periodYm)) {
       return { success: false, error: "tenantId and periodId or periodYm are required", data: null };
     }
 
     const period = await readPayrollPeriod(client, { tenantId, periodId, periodYm });
+    assertPayrollPeriodDraftForPreview(period);
+
+    const existingDraft = await findDraftPayrollRun(client, period);
+    const inputs = await readCompensationInputs(client, period);
+    const sourcePaymentMeta = buildPreviewSourcePaymentHash(inputs.payments);
+
     await insertAuditEvent(client, {
       tenant_id: tenantId,
-      event_type: "calculation_start",
+      event_type: "preview_generation_start",
       entity_type: "payroll_period",
       entity_id: period.id,
-      actor_user_id: options.actorUserId || null,
-      actor_role: options.actorRole || null,
-      before_json: null,
+      actor_user_id: actorUserId,
+      actor_role: actorRole,
+      before_json: existingDraft ? { payroll_run_id: existingDraft.id } : null,
       after_json: {
         period_id: period.id,
         period_ym: period.period_ym,
         rule_version: COMPENSATION_RULE_VERSION,
+        calculation_version: PAYROLL_PREVIEW_GENERATION_VERSION,
+        source_payment_hash: sourcePaymentMeta.sourcePaymentHash,
         started_at: startedAt,
       },
-      reason: "preview_calculation_started",
+      reason: existingDraft ? "payroll_preview_regeneration_started" : "payroll_preview_generation_started",
       metadata: { preview_only: true },
     });
 
-    const inputs = await readCompensationInputs(client, period);
     const calculatedAt = new Date().toISOString();
     const preview = calculateCompensationPreview({
       period,
@@ -270,9 +349,11 @@ export async function generateCompensationPreviewDraftWrite(options = {}) {
     const persisted = await persistDraftPreview(client, {
       period,
       preview,
-      actor: { userId: options.actorUserId || null, role: options.actorRole || null },
+      actor: { userId: actorUserId, role: actorRole },
       startedAt,
       durationMs,
+      sourcePaymentHash: sourcePaymentMeta.sourcePaymentHash,
+      regenerated: Boolean(existingDraft),
     });
 
     return {
@@ -280,17 +361,26 @@ export async function generateCompensationPreviewDraftWrite(options = {}) {
       error: null,
       data: {
         ...persisted,
+        periodId: period.id,
+        periodYm: period.period_ym,
         totals: preview.totals,
         warnings: preview.warnings,
         ruleVersion: preview.ruleVersion,
+        calculationVersion: PAYROLL_PREVIEW_GENERATION_VERSION,
         calculatedAt,
         durationMs,
         status: "draft",
+        sourcePaymentCount: sourcePaymentMeta.paymentCount,
       },
     };
   } catch (error) {
     return failResult(error);
   }
+}
+
+/** @deprecated Use generatePayrollPreview */
+export async function generateCompensationPreviewDraftWrite(options = {}) {
+  return generatePayrollPreview(options);
 }
 
 export {

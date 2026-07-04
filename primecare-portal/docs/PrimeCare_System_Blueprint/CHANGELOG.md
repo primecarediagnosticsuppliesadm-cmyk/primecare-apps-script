@@ -4,6 +4,30 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-04 — Executive Compensation & Payroll Engine Phase 4B Payroll Preview Generation
+
+### Change
+
+- Add `generatePayrollPreview()` with draft-only payroll run, line, and commission entry persistence from cash-collected inputs.
+- Add idempotent regeneration: existing draft preview for a period is cleared and rebuilt without duplicate lines or commission entries.
+- Add preview generation audit evidence: generated_by/at, period, plan versions, rule version, source payment hash, calculation version.
+- Add Executive UI **Generate Payroll Preview** action for draft payroll periods in the Executive Compensation Center.
+- Bump compensation rule version to `PC_COMP_YEAR1_2026_PHASE4B`.
+
+### Not changed
+
+- No approval, lock, export, mark paid, finance/O2C mutation, or period status advancement beyond draft preview artifacts.
+
+### Verification gates
+
+- `node scripts/verify-payroll-preview-generation.mjs`
+- `node scripts/verify-payroll-preview-idempotency.mjs`
+- `node scripts/verify-payroll-calculation-rules.mjs`
+- `node scripts/verify-payroll-plan-resolution.mjs`
+- `node scripts/verify-payroll-period-generation.mjs`
+
+---
+
 ## 2026-07-04 — Executive Compensation & Payroll Engine Phase 4A Executive Compensation Center (Read-Only UI)
 
 ### Change
