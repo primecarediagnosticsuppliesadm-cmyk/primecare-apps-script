@@ -96,7 +96,6 @@ const ADMIN_HQ_MENU_KEYS = new Set([
   "logisticsDelivery",
   "risk",
   "purchase",
-  "compensationPayroll",
   "notifications",
   "predatorDebug",
 ]);

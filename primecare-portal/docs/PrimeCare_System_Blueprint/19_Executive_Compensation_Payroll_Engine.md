@@ -446,6 +446,15 @@ Hard rules:
 
 ## Executive dashboard
 
+Phase 4A delivers the **Executive Compensation Center** (`compensationPayroll` route) as a read-only Executive-only UI.
+
+| Surface | Phase 4A status |
+|---------|-----------------|
+| Executive Compensation Center | Implemented — read-only dashboard, periods, preview, agent detail, history |
+| Approval / lock / export / pay actions | Deferred to Phase 4B |
+| HR / Admin / Agent access | Hidden in Phase 4A |
+| Data source | Bounded reads from payroll/compensation tables only; no finance mutation |
+
 Recommended screens:
 
 - Executive Compensation Dashboard

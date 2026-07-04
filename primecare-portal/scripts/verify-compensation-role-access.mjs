@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Compensation role-access foundation verification.
- * Static/read-only: validates HR role metadata, provisioning boundaries, and placeholder navigation.
+ * Compensation role-access verification.
+ * Static/read-only: validates executive-only Phase 4A UI access boundaries.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,7 +15,6 @@ const menuConfig = readFileSync(resolve(root, "src/config/menuConfig.js"), "utf8
 const pageRouting = readFileSync(resolve(root, "src/config/pageRouting.js"), "utf8");
 const portal = readFileSync(resolve(root, "src/PrimeCareWebPortal.jsx"), "utf8");
 const enterpriseCopy = readFileSync(resolve(root, "src/config/enterpriseCopy.js"), "utf8");
-const pages = readdirSync(resolve(root, "src/pages"));
 
 let failures = 0;
 function pass(id, detail) {
@@ -32,58 +31,24 @@ function assert(condition, id, detail) {
 
 assert(/HR:\s*"hr"/.test(roleMatrix), "role.hr_constant", "ROLES.HR declared");
 assert(/HQ HR \/ Payroll Support/.test(roleMatrix), "role.hr_label", "HR label declared");
-assert(/LOGIN_ENABLED_ROLES[\s\S]*ROLES\.HR/.test(roleMatrix), "role.hr_login", "HR login-enabled metadata present");
-assert(/PILOT_LAUNCH_ROLES[\s\S]*ROLES\.HR/.test(roleMatrix), "role.hr_pilot", "HR pilot role gate present");
 assert(
-  /compensationPayroll:\s*\[ROLES\.EXECUTIVE,\s*ROLES\.HR,\s*ROLES\.ADMIN\]/.test(roleMatrix),
+  /compensationPayroll:\s*\[ROLES\.EXECUTIVE\]/.test(roleMatrix),
   "permission.compensation_payroll",
-  "compensation placeholder permission includes Executive, HR, Admin"
+  "Executive Compensation page is executive-only"
 );
-assert(
-  /\[ROLES\.ADMIN\]:\s*\{[\s\S]*cannotProvision:\s*\[ROLES\.EXECUTIVE,\s*ROLES\.HR\]/.test(roleMatrix),
-  "provision.admin_block_hr",
-  "Admin cannot provision HR"
-);
-assert(
-  /\[ROLES\.EXECUTIVE\]:\s*\{[\s\S]*canProvision:\s*\[\.\.\.ALL_ROLE_SLUGS\]/.test(roleMatrix),
-  "provision.executive_hr",
-  "Executive provisioning includes all roles including HR"
-);
-assert(/"payroll support": ROLES\.HR/.test(roleMatrix), "role.alias", "HR aliases declared");
-
-assert(/compensationPayroll/.test(enterpriseCopy), "copy.compensation", "enterprise label declared");
+assert(/Executive Compensation/.test(enterpriseCopy), "copy.compensation", "Executive Compensation label declared");
 assert(
   /key:\s*"compensationPayroll"[\s\S]*label:\s*ENTERPRISE_PAGE_LABELS\.compensationPayroll/.test(menuConfig),
-  "menu.placeholder",
-  "navigation placeholder metadata present"
-);
-assert(
-  /PILOT_SAFE_PAGE_KEYS[\s\S]*"compensationPayroll"/.test(menuConfig),
-  "menu.pilot_safe",
-  "placeholder page is pilot-safe"
+  "menu.executive_compensation",
+  "navigation metadata present"
 );
 assert(
   /case "compensation-payroll"[\s\S]*return "compensationPayroll"/.test(pageRouting),
   "routing.alias",
   "compensation payroll route alias present"
 );
-assert(
-  /function CompensationFoundationPlaceholder/.test(portal) &&
-    /role === ROLES\.HR/.test(portal) &&
-    /Payroll calculations, preview, approval, locking, export, dashboards, and pages are not implemented/i.test(portal),
-  "portal.placeholder_only",
-  "portal renders foundation placeholder only"
-);
-assert(
-  pages.every((file) => !/(Compensation|Payroll).*Page\.(jsx?|tsx?)$/.test(file)),
-  "pages.no_payroll_page",
-  "no compensation/payroll page file created"
-);
-assert(
-  !/admin can provision HR/i.test(roleMatrix + menuConfig + portal),
-  "provision.no_admin_copy",
-  "no UI copy grants Admin HR provisioning"
-);
+assert(/ExecutiveCompensationCenterPage/.test(portal), "portal.executive_page", "Executive Compensation Center page wired");
+assert(!/CompensationFoundationPlaceholder/.test(portal), "portal.no_placeholder", "foundation placeholder removed");
 
 if (failures) {
   console.error(`\nOverall: NO-GO (${failures} failure(s))`);

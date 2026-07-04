@@ -14,7 +14,7 @@ export const ENTERPRISE_PAGE_LABELS = {
   projectionOpsCenter: "Projection Ops",
   tenantManagement: "Organization Management",
   commissionEngine: "Commission Management",
-  compensationPayroll: "Compensation & Payroll",
+  compensationPayroll: "Executive Compensation",
   labContractEngine: "Contract Management",
   insights: "Business Insights",
   notifications: "Activity Center",

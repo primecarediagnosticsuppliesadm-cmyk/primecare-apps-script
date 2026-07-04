@@ -45,6 +45,7 @@ const QACommandCenterPage = lazy(() => import("./pages/QACommandCenterPage"));
 const ProjectionOperationsCenterPage = lazy(() => import("./pages/ProjectionOperationsCenterPage"));
 const PilotReadinessPage = lazy(() => import("./pages/PilotReadinessPage"));
 const RevenueFunnelPage = lazy(() => import("./pages/RevenueFunnelPage"));
+const ExecutiveCompensationCenterPage = lazy(() => import("./pages/ExecutiveCompensationCenterPage"));
 
 function pageLabel(pageKey) {
   const key = normalizePageKey(pageKey);
@@ -83,21 +84,6 @@ function UnmappedPageCard({ portalName, setActivePage }) {
       variant="notFound"
       title={`${portalName} — section unavailable`}
       description="This link is not available in your workspace. Use the navigation menu to continue."
-      action={
-        setActivePage ? (
-          <PortalAccessAction label="Go to dashboard" onClick={() => setActivePage("dashboard")} />
-        ) : null
-      }
-    />
-  );
-}
-
-function CompensationFoundationPlaceholder({ setActivePage }) {
-  return (
-    <PortalAccessCard
-      variant="notFound"
-      title="Compensation & Payroll foundation"
-      description="The compensation domain foundation is enabled for schema, security, audit, and role access only. Payroll calculations, preview, approval, locking, export, dashboards, and pages are not implemented in this phase."
       action={
         setActivePage ? (
           <PortalAccessAction label="Go to dashboard" onClick={() => setActivePage("dashboard")} />
@@ -161,9 +147,6 @@ export default function PrimeCareWebPortal({
             setActivePage={setActivePage}
           />
         );
-
-      case "compensationPayroll":
-        return <CompensationFoundationPlaceholder setActivePage={setActivePage} />;
 
       case "labs":
         return (
@@ -432,7 +415,12 @@ export default function PrimeCareWebPortal({
         return <CommissionEnginePage currentUser={currentUser} />;
 
       case "compensationPayroll":
-        return <CompensationFoundationPlaceholder setActivePage={setActivePage} />;
+        return (
+          <ExecutiveCompensationCenterPage
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+          />
+        );
 
       case "labContractEngine":
         return (
@@ -598,14 +586,16 @@ export default function PrimeCareWebPortal({
   if (role === ROLES.HR) {
     return (
       <RoutedPage>
-        {(() => {
-          switch (activePage) {
-            case "compensationPayroll":
-              return <CompensationFoundationPlaceholder setActivePage={setActivePage} />;
-            default:
-              return <UnmappedPageCard portalName="HR Payroll Support" setActivePage={setActivePage} />;
+        <PortalAccessCard
+          variant="unauthorized"
+          title="HR workspace not enabled"
+          description="Executive Compensation Center is executive-only in Phase 4A. HR payroll support UI will arrive in a later phase."
+          action={
+            setActivePage ? (
+              <PortalAccessAction label="Go to dashboard" onClick={() => setActivePage("dashboard")} />
+            ) : null
           }
-        })()}
+        />
       </RoutedPage>
     );
   }

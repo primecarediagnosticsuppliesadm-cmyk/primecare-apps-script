@@ -4,6 +4,39 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-04 — Executive Compensation & Payroll Engine Phase 4A Executive Compensation Center (Read-Only UI)
+
+### Change
+
+- Add Executive-only read-only Executive Compensation Center UI with dashboard KPIs, payroll periods table, payroll preview grid, agent compensation detail, compensation history timeline, and trend charts.
+- Restrict `compensationPayroll` navigation and page permission to `executive` only for Phase 4A.
+- Add read-only bounded loader `loadExecutiveCompensationCenterRead` sourcing payroll/compensation tables only.
+- Add Phase 4A verification scripts: `verify-compensation-dashboard.mjs`, `verify-payroll-preview-ui.mjs`, `verify-compensation-history.mjs`, `verify-compensation-role-ui.mjs`.
+
+### Not changed
+
+- No payroll approval, lock, export, mark paid, adjustment editing, plan editing, finance mutation, database schema, or workflow behavior.
+- HR/Admin/Agent/Lab/Distributor have no Executive Compensation Center access in Phase 4A.
+
+### Verification gates
+
+- `npm run build`
+- `node scripts/verify-runtime-import-safety.mjs`
+- `node scripts/verify-compensation-dashboard.mjs`
+- `node scripts/verify-payroll-preview-ui.mjs`
+- `node scripts/verify-compensation-history.mjs`
+- `node scripts/verify-compensation-role-ui.mjs`
+- `node scripts/verify-financial-reconciliation.mjs`
+- `node scripts/verify-compensation-rls.mjs`
+- `node scripts/verify-hq-rls-reads.mjs`
+- `node scripts/run-browser-smoke-all-roles.mjs`
+
+### Phase 4B gate
+
+- GO only after Phase 4A read-only UI gates pass and review confirms no mutation hooks, finance reads beyond compensation tables, or workflow bypass.
+
+---
+
 ## 2026-07-04 — Executive Compensation & Payroll Engine Phase 3C Payroll Domain Completion
 
 ### Change

@@ -84,7 +84,7 @@ export const PERMISSION_BY_KEY = {
   distributorOs: [ROLES.EXECUTIVE, ROLES.ADMIN, ROLES.DISTRIBUTOR_ADMIN, ROLES.DISTRIBUTOR_MANAGER],
   distributorProvisioning: [ROLES.EXECUTIVE],
   commissionEngine: [ROLES.EXECUTIVE],
-  compensationPayroll: [ROLES.EXECUTIVE, ROLES.HR, ROLES.ADMIN],
+  compensationPayroll: [ROLES.EXECUTIVE],
   labContractEngine: [ROLES.ADMIN, ROLES.EXECUTIVE],
   operationsCenter: [
     ROLES.ADMIN,
@@ -249,7 +249,6 @@ export const REQUIRED_MENU_PAGES_BY_ROLE = {
   [ROLES.DISTRIBUTOR_ADMIN]: ["distributorOs", "operationsCenter"],
   [ROLES.LAB]: ["labOrders", "labAccount", "labInvoices"],
   [ROLES.AGENT]: ["dashboard", "collections", "visits"],
-  [ROLES.HR]: ["compensationPayroll"],
 };
 
 /**
