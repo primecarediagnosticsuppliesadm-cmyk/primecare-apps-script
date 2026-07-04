@@ -48,6 +48,12 @@ function num(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function boolFromValue(v) {
+  if (typeof v === "boolean") return v;
+  const s = str(v).toLowerCase();
+  return s === "true" || s === "t" || s === "1" || s === "yes" || s === "y";
+}
+
 function loadEnv() {
   const path = resolve(root, ".env.local");
   if (!existsSync(path)) throw new Error("Missing .env.local");
@@ -136,6 +142,7 @@ async function main() {
   }
   const api = await server.ssrLoadModule("/src/api/primecareSupabaseApi.js");
   const labsEngine = await server.ssrLoadModule("/src/operations/labsHqEngine.js");
+  const orderingGovernance = await server.ssrLoadModule("/src/labOrdering/orderingGovernance.js");
 
   const rawLabs = await queryLabsCredit(sb);
   const scopedLabs = rawLabs.filter((row) => str(row.tenant_id) === HQ);
@@ -278,6 +285,37 @@ async function main() {
     fail(
       "kpi.active_labs",
       `Portfolio active ${portfolioSummary.activeLabs} != counted ${activeLabs.length}`
+    );
+  }
+
+  const expectedOrderEligible = visibleLabs.filter((lab) => {
+    const mode = orderingGovernance.normalizeOrderingMode(lab.orderingMode ?? lab.ordering_mode);
+    const explicitEligible = lab.orderingEligible ?? lab.ordering_eligible;
+    const eligible =
+      explicitEligible == null || explicitEligible === ""
+        ? orderingGovernance.canLabInitiateOrder(mode)
+        : boolFromValue(explicitEligible);
+    return str(lab.status).toLowerCase() === "active" && mode !== "suspended" && eligible;
+  }).length;
+  if (portfolioSummary.orderEligibleLabs === expectedOrderEligible) {
+    pass("kpi.order_eligible_labs", `${expectedOrderEligible} order-eligible lab(s)`);
+  } else {
+    fail(
+      "kpi.order_eligible_labs",
+      `Portfolio order-eligible ${portfolioSummary.orderEligibleLabs} != counted ${expectedOrderEligible}`
+    );
+  }
+
+  const expectedOrderingSuspended = visibleLabs.filter(
+    (lab) =>
+      orderingGovernance.normalizeOrderingMode(lab.orderingMode ?? lab.ordering_mode) === "suspended"
+  ).length;
+  if (portfolioSummary.orderingSuspendedLabs === expectedOrderingSuspended) {
+    pass("kpi.ordering_suspended", `${expectedOrderingSuspended} ordering-suspended lab(s)`);
+  } else {
+    fail(
+      "kpi.ordering_suspended",
+      `Portfolio suspended ${portfolioSummary.orderingSuspendedLabs} != counted ${expectedOrderingSuspended}`
     );
   }
 

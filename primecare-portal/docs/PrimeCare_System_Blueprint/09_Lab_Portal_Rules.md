@@ -57,6 +57,20 @@ Default for new and existing labs (migration backfill): `hq_managed`.
 
 ---
 
+## Labs KPI definitions
+
+Ordering mode and lifecycle status are separate dimensions.
+
+| KPI | Definition | Meaning |
+|-----|------------|---------|
+| **Active Labs** | `labs.status == ACTIVE` | Lifecycle-active laboratories. Unaffected by `ordering_mode`. |
+| **Order-Eligible Labs** | `labs.status == ACTIVE` AND `ordering_mode != suspended` AND `ordering_eligible == true` | Laboratories currently allowed to initiate new orders. |
+| **Ordering Suspended** | `ordering_mode == suspended` | Laboratories whose checkout is intentionally suspended. Invoices, payments, Track Order, finance, logistics, and history remain available. |
+
+`Active Labs` must not be silently redefined to mean order-eligible. UI surfaces that need ordering posture should show a separate `Order-Eligible Labs` or `Ordering Suspended` KPI.
+
+---
+
 ## Data scope
 
 Lab sees **only own** `lab_id` data — RLS + `scopedRecentOrders` filter.

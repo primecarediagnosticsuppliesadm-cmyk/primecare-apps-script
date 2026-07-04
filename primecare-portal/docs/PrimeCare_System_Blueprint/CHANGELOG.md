@@ -4,6 +4,31 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-03 — Sprint 8B Labs KPI Definition
+
+### Change
+
+- Define `Active Labs` as lifecycle-active labs (`labs.status == ACTIVE`) and explicitly state that it is unaffected by `ordering_mode`.
+- Define `Order-Eligible Labs` as lifecycle-active labs with `ordering_mode != suspended` and `ordering_eligible == true`.
+- Define `Ordering Suspended` as labs where `ordering_mode == suspended`; checkout is intentionally blocked while invoices, payments, Track Order, finance, logistics, and history remain available.
+- Update Labs certification references so `verify-labs-admin-flow.mjs` validates the three KPI definitions.
+
+### Not changed
+
+- No SQL, schema, RLS policy, projection table, projection flag, finance, AR, payment, invoice, order lifecycle, inventory, logistics, commission, or ordering behavior changes.
+- `Active Labs` semantics are preserved and not silently redefined.
+
+### Verification gates
+
+- `npm run build`
+- `node scripts/run-browser-smoke-all-roles.mjs`
+- `node scripts/measure-all-role-page-performance.mjs`
+- `node scripts/verify-financial-reconciliation.mjs`
+- `node scripts/verify-hq-rls-reads.mjs`
+- Manual Labs Portfolio Summary UAT: suspend/re-enable ordering and confirm only Order-Eligible / Ordering Suspended counts move.
+
+---
+
 ## 2026-07-03 — Sprint 8A.1 Labs Projection Hardening
 
 ### Change

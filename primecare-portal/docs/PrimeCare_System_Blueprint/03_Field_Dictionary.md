@@ -102,6 +102,29 @@ Critical fields and **id vs business key** rules. Full table columns: `01_Databa
 
 ---
 
+## labs.status
+
+| Attribute | Value |
+|-----------|-------|
+| **Type** | text |
+| **Meaning** | Lab lifecycle/account status |
+| **KPI** | `Active Labs` counts rows where `labs.status == ACTIVE` |
+| **Not affected by** | `labs.ordering_mode`; checkout suspension does not change lifecycle-active status |
+
+---
+
+## labs.ordering_mode
+
+| Attribute | Value |
+|-----------|-------|
+| **Type** | text |
+| **Values** | `hq_managed`, `hybrid`, `self_service`, `suspended` |
+| **Meaning** | Runtime order-initiation governance for lab callers |
+| **KPI** | `Ordering Suspended` counts rows where `ordering_mode == suspended`; `Order-Eligible Labs` also requires `ordering_eligible == true` |
+| **Does not affect** | Invoices, payments, Track Order, finance, logistics, history, or `Active Labs` lifecycle status |
+
+---
+
 ## tenant_id
 
 | Attribute | Value |

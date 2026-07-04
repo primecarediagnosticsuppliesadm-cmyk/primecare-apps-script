@@ -47,7 +47,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 
 | Script | Checks | When |
 |--------|--------|------|
-| verify-labs-admin-flow.mjs | Tenant scope, ownership | Labs |
+| verify-labs-admin-flow.mjs | Tenant scope, ownership, Labs KPI definitions (`Active Labs`, `Order-Eligible Labs`, `Ordering Suspended`) | Labs |
 | verify-labs-projection-parity.mjs | Read-only `v_labs_credit` vs `read_labs_list_v1` parity, deterministic ordering/limit window, role scope, freshness, SECURITY DEFINER vs table-RLS visibility | Labs projection |
 | verify-credit-risk-admin-flow.mjs | AR KPI, aging | Credit & Risk |
 | verify-agent-collections-ownership-filter.mjs | Ownership scoping | Agent collections |

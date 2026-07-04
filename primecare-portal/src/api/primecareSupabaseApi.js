@@ -148,6 +148,12 @@ function str(v) {
   return String(v ?? "").trim();
 }
 
+function boolFromValue(v) {
+  if (typeof v === "boolean") return v;
+  const s = str(v).toLowerCase();
+  return s === "true" || s === "t" || s === "1" || s === "yes" || s === "y";
+}
+
 function cleanCollectionAgentName(agent) {
   const s = str(agent);
   if (!s || s === "-" || s === "—" || s.toLowerCase() === "null") return "";
@@ -1142,6 +1148,15 @@ export async function getStockDashboard(options = {}) {
 export function mapLabsCreditRow(row) {
   const creditWarningsRaw =
     row.credit_warnings ?? row.creditWarnings ?? row.Credit_Warnings;
+  const orderingMode = str(row.ordering_mode ?? row.orderingMode) || "hq_managed";
+  const creditStatus = str(row.credit_status ?? row.creditStatus ?? row.Credit_Status);
+  const creditHoldRaw = row.credit_hold ?? row.creditHold ?? row.Credit_Hold;
+  const creditHold = boolFromValue(creditHoldRaw) || str(creditHoldRaw).toUpperCase() === "HOLD";
+  const explicitOrderingEligible = row.ordering_eligible ?? row.orderingEligible;
+  const orderingEligible =
+    explicitOrderingEligible == null || explicitOrderingEligible === ""
+      ? canLabInitiateOrder(orderingMode) && creditStatus.toUpperCase() !== "HOLD" && !creditHold
+      : boolFromValue(explicitOrderingEligible);
   let creditWarnings = [];
   if (Array.isArray(creditWarningsRaw)) {
     creditWarnings = creditWarningsRaw;
@@ -1192,13 +1207,15 @@ export function mapLabsCreditRow(row) {
     ),
     creditHold: str(row.credit_hold ?? row.creditHold ?? row.Credit_Hold),
     creditReason: str(row.credit_reason ?? row.creditReason ?? row.Credit_Reason),
-    creditStatus: str(row.credit_status ?? row.creditStatus ?? row.Credit_Status),
+    creditStatus,
     creditTerms: str(row.credit_terms ?? row.creditTerms ?? row.Credit_Terms),
     creditWarnings,
     visitCount: num(row.visit_count ?? row.visitCount ?? row.Visit_Count),
     revenue: num(row.revenue ?? row.Revenue),
-    orderingMode: str(row.ordering_mode ?? row.orderingMode) || "hq_managed",
-    ordering_mode: str(row.ordering_mode ?? row.orderingMode) || "hq_managed",
+    orderingMode,
+    ordering_mode: orderingMode,
+    orderingEligible,
+    ordering_eligible: orderingEligible,
   };
 }
 

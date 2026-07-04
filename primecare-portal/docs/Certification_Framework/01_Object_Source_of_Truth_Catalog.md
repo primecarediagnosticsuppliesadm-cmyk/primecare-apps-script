@@ -68,7 +68,7 @@ Blueprint refs: [01_Database_Schema.md](../PrimeCare_System_Blueprint/01_Databas
 | Field | Value |
 |-------|-------|
 | **Source of truth** | `public.labs` — business key `(tenant_id, lab_id)` |
-| **Lifecycle** | `active` / `suspended` / `credit_hold`; **ordering_mode**: `hq_managed`, `hybrid`, `self_service` |
+| **Lifecycle** | `labs.status` owns lifecycle-active state. **Active Labs** = `labs.status == ACTIVE`. **ordering_mode** is separate checkout governance: `hq_managed`, `hybrid`, `self_service`, `suspended`. |
 | **APIs** | `createLabWrite`, `getLabsCredit`, `updateLabOrderingModeWrite`, `getLabOrderingContextRead` |
 | **Screens** | LabsPage, LabOrderingPage, CollectionsPage, OperationalLabDrawer |
 | **Verify scripts** | `verify-labs-admin-flow.mjs`, `verify-lab-ordering-flow.mjs`, `verify-create-lab-ar-rls.mjs`, `verify-credit-risk-admin-flow.mjs` |
@@ -89,7 +89,7 @@ Blueprint refs: [01_Database_Schema.md](../PrimeCare_System_Blueprint/01_Databas
 | **Dependencies** | Lab, Lab ownership, Qualification, Receivable projection for composed credit fields |
 | **Known gaps** | Shadow only; `VITE_READ_ADAPTER_LABS_V1` remains OFF until architecture review |
 
-`proj_lab_profile_v1` must not own AR, payments, invoices, allocations, orders, commissions, or finance calculations. Credit/receivable fields remain owned by `proj_lab_receivable_v1`.
+`proj_lab_profile_v1` must not own AR, payments, invoices, allocations, orders, commissions, or finance calculations. Credit/receivable fields remain owned by `proj_lab_receivable_v1`. Labs list adapters may expose `ordering_mode` and derived `ordering_eligible` for KPI/display contracts only.
 
 ---
 

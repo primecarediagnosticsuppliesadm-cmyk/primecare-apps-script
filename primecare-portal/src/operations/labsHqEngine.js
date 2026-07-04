@@ -9,6 +9,7 @@ import {
   resolveLabAssignedAgentDisplay,
   resolveLabAssignedAgentName,
 } from "@/operations/labAgentResolver.js";
+import { canLabInitiateOrder, normalizeOrderingMode } from "@/labOrdering/orderingGovernance.js";
 
 export {
   buildAgentDisplayNameLookup,
@@ -29,6 +30,31 @@ function str(v) {
 function num(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+function boolFromValue(v) {
+  if (typeof v === "boolean") return v;
+  const s = str(v).toLowerCase();
+  return s === "true" || s === "t" || s === "1" || s === "yes" || s === "y";
+}
+
+function labLifecycleActive(lab = {}) {
+  return str(lab.status).toLowerCase() === "active";
+}
+
+function labOrderingMode(lab = {}) {
+  return normalizeOrderingMode(lab.orderingMode ?? lab.ordering_mode);
+}
+
+function labOrderingSuspended(lab = {}) {
+  return labOrderingMode(lab) === "suspended";
+}
+
+function labOrderingEligible(lab = {}) {
+  const explicit = lab.orderingEligible ?? lab.ordering_eligible;
+  const eligible =
+    explicit == null || explicit === "" ? canLabInitiateOrder(labOrderingMode(lab)) : boolFromValue(explicit);
+  return labLifecycleActive(lab) && !labOrderingSuspended(lab) && eligible;
 }
 
 function parseFollowUpDate(value) {
@@ -131,10 +157,14 @@ export function filterLabsForAttention(labs = [], filter = "ALL", users = []) {
 
 export function buildLabsPortfolioSummary(labs = [], summary = null) {
   const list = Array.isArray(labs) ? labs : [];
-  const active = list.filter((x) => str(x.status).toLowerCase() === "active").length;
+  const active = list.filter(labLifecycleActive).length;
+  const orderEligible = list.filter(labOrderingEligible).length;
+  const orderingSuspended = list.filter(labOrderingSuspended).length;
   return {
     totalLabs: list.length,
     activeLabs: active,
+    orderEligibleLabs: orderEligible,
+    orderingSuspendedLabs: orderingSuspended,
     revenue: num(summary?.totalRevenue),
     outstanding: num(summary?.totalOutstanding),
   };

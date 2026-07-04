@@ -521,8 +521,8 @@ export default function HqLabsAdminView({
           {[
             { label: "Total Labs", value: portfolio.totalLabs },
             { label: "Active Labs", value: portfolio.activeLabs },
-            { label: "Revenue", value: formatLabsCurrency(portfolio.revenue) },
-            { label: "Outstanding", value: formatLabsCurrency(portfolio.outstanding) },
+            { label: "Order-Eligible Labs", value: portfolio.orderEligibleLabs },
+            { label: "Ordering Suspended", value: portfolio.orderingSuspendedLabs },
           ].map((kpi) => (
             <div key={kpi.label} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
               <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{kpi.label}</p>

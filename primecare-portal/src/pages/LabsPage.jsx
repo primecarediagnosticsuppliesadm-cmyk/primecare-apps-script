@@ -343,6 +343,8 @@ function normalizeLab(lab) {
     revenue: Number(lab.revenue || 0),
     orderingMode: lab.orderingMode || lab.ordering_mode || "hq_managed",
     ordering_mode: lab.orderingMode || lab.ordering_mode || "hq_managed",
+    orderingEligible: lab.orderingEligible ?? lab.ordering_eligible,
+    ordering_eligible: lab.orderingEligible ?? lab.ordering_eligible,
     preferredDeliveryDay: lab.preferredDeliveryDay || lab.preferred_delivery_day || "",
     preferred_delivery_day: lab.preferredDeliveryDay || lab.preferred_delivery_day || "",
   };

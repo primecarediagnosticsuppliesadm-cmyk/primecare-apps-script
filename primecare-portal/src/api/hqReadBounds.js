@@ -62,7 +62,7 @@ export const HQ_V_LABS_CREDIT_COLUMNS =
 
 /** Full v_labs_credit projection for LabsPage / Agent workspace mapping (view-safe columns only). */
 export const HQ_V_LABS_CREDIT_LIST_COLUMNS =
-  "lab_id,lab_name,tenant_id,area,owner_name,phone,assigned_agent_id,status,credit_hold,credit_limit,credit_status,days_overdue,outstanding,allowed_overdue_days";
+  "lab_id,lab_name,tenant_id,area,owner_name,phone,assigned_agent_id,status,ordering_mode,credit_hold,credit_limit,credit_status,days_overdue,outstanding,allowed_overdue_days";
 
 export const HQ_INVENTORY_COLUMNS =
   "tenant_id,product_id,current_stock,min_stock,reorder_qty,stock_in,stock_out,last_updated";
