@@ -69,6 +69,7 @@ Hard constraints. Violations require explicit approval + blueprint amendment + v
 | P5 | **Ordering Mode controls order initiation only** — never block track order, invoices, payments, collections, finance, inventory, or shipment lifecycle |
 | P6 | HQ admin override always allowed for order creation |
 | P7 | Existing labs default to `hq_managed` on migration (non-breaking) |
+| P8 | `INACTIVE` lab lifecycle status must never hide or alter AR, invoices, payments, allocations, orders, shipments, Track Order, audit history, reporting, or authorized HQ visibility |
 
 ---
 

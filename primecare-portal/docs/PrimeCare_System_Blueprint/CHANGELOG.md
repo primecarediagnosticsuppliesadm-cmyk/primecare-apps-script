@@ -4,6 +4,86 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-03 — Sprint 9 Phase 2A Lab Lifecycle Backend
+
+### Change
+
+- Implement backend/domain API `updateLabLifecycleStatusWrite` for approved lab lifecycle transitions.
+- Enforce admin/executive-only authorization, confirmation, mandatory reason for inactivation/reactivation, and allowed transition validation.
+- Force `ordering_mode = suspended` only on `ACTIVE -> INACTIVE`; `INACTIVE -> ACTIVE` does not restore Ordering Mode.
+- Record lifecycle audit events using the existing operational audit pattern (`user_provisioning_events` with `event_type = updated` and action `lab_lifecycle_status_changed`).
+- Refresh `proj_lab_profile_v1` after lifecycle and ordering-mode writes so `read_labs_list_v1` reflects lifecycle status and ordering mode.
+- Add `verify-lab-lifecycle-status-flow.mjs` with read-only/static default mode and guarded reversible QA mutation mode via `--apply` or `CONFIRM_MUTATION=true`.
+
+### Not changed
+
+- No UI/browser component, SQL migration, RLS policy, feature flag, finance, AR, invoice, payment, payment allocation, order, shipment, logistics, inventory, commission, delivery rule, or `proj_lab_receivable_v1` behavior changed.
+
+### Verification gates
+
+- `npm run build`
+- `node scripts/verify-runtime-import-safety.mjs`
+- `CONFIRM_MUTATION=true node scripts/verify-lab-lifecycle-status-flow.mjs`
+- `node scripts/verify-labs-projection-parity.mjs`
+- `node scripts/verify-projection-staleness.mjs`
+- `node scripts/verify-hq-rls-reads.mjs`
+- `node scripts/verify-financial-reconciliation.mjs`
+- `node scripts/verify-ar-reconcile.mjs`
+- `node scripts/verify-delivery-charge-policy.mjs`
+- `node scripts/run-browser-smoke-all-roles.mjs`
+
+---
+
+## 2026-07-03 — Phase 1.2 Projection Registry Documentation Cleanup
+
+### Change
+
+- Remove stale references to missing `docs/Architecture/Projection_Registry.md`.
+- Document `src/projectionOps/projectionOpsCatalog.json` as the canonical runtime / ops registry.
+- Document `docs/Certification_Framework/08_Read_Model_Certification_Matrix.md` as the human certification view for registry IDs, SLAs, adapter RPCs, status, and gates.
+- Replace stale references to missing `docs/Architecture/Projection_Ops_Center.md` with the Projection Operations Center section in `18_Domain_Projection_Architecture.md` and generated `docs/QA/Projection_Ops_Report.*` artifacts.
+- Remove stale reference to missing `docs/Architecture/Technical_Debt_Register.md` from projection architecture related-docs.
+
+### Not changed
+
+- No app code, SQL, RLS policy, projection behavior, projection schema, feature flag, finance, AR, invoice, payment, allocation, order, shipment, inventory, commission, or operational write behavior changed.
+- No commit or push performed.
+
+### Phase 2 gate
+
+- Phase 2 Lab Lifecycle implementation may proceed after review of this documentation cleanup, subject to the normal Blueprint-first implementation gate.
+
+---
+
+## 2026-07-03 — Sprint 9 Phase 1 Lab Lifecycle Blueprint
+
+### Change
+
+- Define approved Lab Lifecycle Status states: `PROSPECT`, `ACTIVE`, and `INACTIVE`.
+- Document admin/executive-only lifecycle transitions, confirmation requirements, mandatory reason requirements, and audit expectations.
+- Establish the `INACTIVE` invariant: lifecycle state must never hide or alter AR, invoices, payments, allocations, orders, shipments, Track Order, audit history, reporting, or authorized HQ visibility.
+- Define Ordering Mode interaction: `ACTIVE -> INACTIVE` forces `ordering_mode = suspended`; `INACTIVE -> ACTIVE` does not restore previous ordering mode.
+- Expand Labs KPI definitions to `Total Labs`, `Prospect Labs`, `Active Labs`, `Inactive Labs`, `Order-Eligible Labs`, and `Ordering Suspended`.
+- Document inactive Lab Portal behavior: login allowed when provisioned, checkout/reorder blocked, invoices/payments/Track Order/history available.
+- Record projection expectations: `proj_lab_profile_v1` reflects `status` and `ordering_mode`; `proj_lab_receivable_v1` remains unchanged and finance-owned.
+
+### Not changed
+
+- No app code, SQL, RLS policy, projection schema, feature flag, finance, AR, invoice, payment, allocation, order, shipment, inventory, commission, or operational write behavior changed.
+- No commit or push performed.
+
+### Verification gates
+
+- Planned `verify-lab-lifecycle-status-flow.mjs`
+- `node scripts/verify-labs-admin-flow.mjs`
+- `node scripts/verify-lab-ordering-flow.mjs`
+- `node scripts/verify-labs-projection-parity.mjs`
+- `node scripts/verify-financial-reconciliation.mjs`
+- `node scripts/verify-hq-rls-reads.mjs`
+- Browser smoke covering admin lifecycle controls and inactive Lab Portal read-only history access.
+
+---
+
 ## 2026-07-03 — Sprint 8B Labs KPI Definition
 
 ### Change
@@ -221,7 +301,7 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ### Added (design + implementation)
 - Blueprint 18 Projection Operations Center section (10 modules)
-- [Projection_Ops_Center.md](../../../docs/Architecture/Projection_Ops_Center.md) spec
+- Projection Operations Center spec now lives in `18_Domain_Projection_Architecture.md`; generated ops artifacts live under `docs/QA/Projection_Ops_Report.*`
 - Cert matrix 08 ops gates
 - TD-022, TD-023, TD-024 registered
 - TD-021 mitigated (Phase 2 deployed QA)
@@ -289,7 +369,7 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ### Added
 - Blueprint `18_Domain_Projection_Architecture.md` — domain-driven read layer (replaces screen-oriented read model naming)
-- `docs/Architecture/Projection_Registry.md` — authoritative projection catalog (`PRJ-*` registry IDs)
+- Projection registry contract; current canonical runtime registry is `src/projectionOps/projectionOpsCatalog.json`
 
 ### Updated
 - `README.md` — doc 18 in index; link to Projection Registry

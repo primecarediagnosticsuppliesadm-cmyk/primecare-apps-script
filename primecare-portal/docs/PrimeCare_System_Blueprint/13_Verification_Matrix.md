@@ -47,8 +47,9 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 
 | Script | Checks | When |
 |--------|--------|------|
-| verify-labs-admin-flow.mjs | Tenant scope, ownership, Labs KPI definitions (`Active Labs`, `Order-Eligible Labs`, `Ordering Suspended`) | Labs |
-| verify-labs-projection-parity.mjs | Read-only `v_labs_credit` vs `read_labs_list_v1` parity, deterministic ordering/limit window, role scope, freshness, SECURITY DEFINER vs table-RLS visibility | Labs projection |
+| verify-labs-admin-flow.mjs | Tenant scope, ownership, Labs KPI definitions (`Total Labs`, `Prospect Labs`, `Active Labs`, `Inactive Labs`, `Order-Eligible Labs`, `Ordering Suspended`) | Labs |
+| verify-lab-lifecycle-status-flow.mjs | Lifecycle transition contract: admin/executive-only writes, confirmation/reason requirements, `ACTIVE -> INACTIVE` forces `ordering_mode = suspended`, `INACTIVE -> ACTIVE` does not restore ordering mode, financial/history domains unchanged | Lab lifecycle |
+| verify-labs-projection-parity.mjs | Read-only `v_labs_credit` vs `read_labs_list_v1` parity, lifecycle status + ordering mode parity, deterministic ordering/limit window, role scope, freshness, SECURITY DEFINER vs table-RLS visibility | Labs projection |
 | verify-credit-risk-admin-flow.mjs | AR KPI, aging | Credit & Risk |
 | verify-agent-collections-ownership-filter.mjs | Ownership scoping | Agent collections |
 | verify-create-lab-ar-rls.mjs | Lab+AR insert RLS | Add lab |
@@ -115,6 +116,8 @@ verify-hq-rls-reads.mjs
 
 **Lab portal change:** `verify-lab-ordering-flow.mjs` + `verify-hq-rls-reads.mjs`
 
+**Lab lifecycle change:** `verify-lab-lifecycle-status-flow.mjs` + `verify-labs-admin-flow.mjs` + `verify-lab-ordering-flow.mjs` + `verify-labs-projection-parity.mjs` + `verify-financial-reconciliation.mjs` + `verify-hq-rls-reads.mjs`
+
 **Logistics change:** `verify-logistics-dispatch-flow.mjs` + `verify-delivery-charge-policy.mjs`
 
 ---
@@ -126,6 +129,7 @@ Use [templates/UAT_Checklist_Template.md](./templates/UAT_Checklist_Template.md)
 | Module | Minimum UAT |
 |--------|-------------|
 | Lab | Checkout → Track Order → Previous Orders |
+| Lab lifecycle | `PROSPECT -> ACTIVE`, `ACTIVE -> INACTIVE`, `INACTIVE -> ACTIVE`; confirm reason/audit capture, inactive checkout/reorder blocked, ordering remains suspended after reactivation, and invoices/payments/Track Order/history remain visible |
 | Orders | Fulfill → invoice → shipment |
 | Finance | Pay → allocate → open balance |
 | Logistics | Status transitions → delivered_at |

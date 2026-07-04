@@ -79,7 +79,8 @@ Earlier blueprint files (`01_schema_catalog.md` … `12_verification_matrix.md`)
 ## Related docs
 
 - `docs/Certification_Framework/` — Phase 2 object/screen catalogs, golden paths, scorecards
-- `docs/Architecture/Projection_Registry.md` — domain projection catalog
+- `src/projectionOps/projectionOpsCatalog.json` — canonical runtime / ops projection registry
+- `docs/Certification_Framework/08_Read_Model_Certification_Matrix.md` — human projection certification view
 - `docs/QA/` — certification, UAT, gap register
 - `docs/Architecture/` — founder decisions, deferred architecture
 - `supabase/migrations/` — formal migrations

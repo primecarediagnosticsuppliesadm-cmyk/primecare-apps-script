@@ -4,7 +4,11 @@
 
 Blueprint refs: [00_System_Architecture.md](./00_System_Architecture.md), [06_Finance_Rules.md](./06_Finance_Rules.md), [12_Executive_Analytics_Rules.md](./12_Executive_Analytics_Rules.md), [15_Do_Not_Break_Rules.md](./15_Do_Not_Break_Rules.md)
 
-Registry: [Projection_Registry.md](../../../docs/Architecture/Projection_Registry.md)
+Registry sources:
+
+- Runtime / ops catalog: `src/projectionOps/projectionOpsCatalog.json`
+- Human certification view: [08_Read_Model_Certification_Matrix.md](../Certification_Framework/08_Read_Model_Certification_Matrix.md)
+- Architecture contract: this document
 
 ---
 
@@ -131,6 +135,8 @@ Business Command succeeds (SoT write)
 | `PaymentRecorded` | `proj_lab_receivable_v1`, receivable metrics |
 | `PaymentAllocated` | `proj_lab_receivable_v1`, order invoice embed |
 | `CreditStatusChanged` | `proj_lab_receivable_v1` |
+| `LabLifecycleStatusChanged` | `proj_lab_profile_v1` |
+| `LabOrderingModeChanged` | `proj_lab_profile_v1` |
 
 ### Refresh strategy
 
@@ -200,6 +206,21 @@ Business Command succeeds (SoT write)
 | Admin Dashboard receivables KPI | `read_tenant_receivable_metrics_v1` |
 | Agent collections | scoped adapter (0 staleness SLA) |
 | Reporting | `rpt_collections_aging_v1` |
+
+Lifecycle status changes do not refresh or mutate `proj_lab_receivable_v1`; AR, invoices, payments, allocations, and receivable metrics remain finance-owned.
+
+### Lab profile projection — lifecycle and ordering display
+
+**`proj_lab_profile_v1`** (grain: one row per lab)
+
+| Consumer | Access pattern |
+|----------|----------------|
+| LabsPage | `read_labs_list_v1` |
+| Operations lab directory | Shared lab identity/profile read |
+| Agent lab list | Scoped adapter / visibility predicate |
+| Search and qualification enrichments | Read-only profile enrichment |
+
+`proj_lab_profile_v1` reflects lab lifecycle and operational ordering posture from `labs.status` and `labs.ordering_mode`. It must not own or derive AR, invoices, payments, allocations, orders, shipments, commissions, or finance calculations. `read_labs_list_v1` may compose `proj_lab_profile_v1` with `proj_lab_receivable_v1`, but lifecycle status must not alter receivable rows.
 
 ---
 
@@ -298,7 +319,7 @@ flowchart TB
 | Tenant metrics | 90 s | — |
 | Executive metrics | 180 s | — |
 
-Certification: [Projection_Registry.md](../../../docs/Architecture/Projection_Registry.md), `verify-projection-parity.mjs` (planned), `08_Read_Model_Certification_Matrix.md` (planned).
+Certification: runtime registry in `src/projectionOps/projectionOpsCatalog.json`, human certification view in [08_Read_Model_Certification_Matrix.md](../Certification_Framework/08_Read_Model_Certification_Matrix.md), plus the relevant parity/staleness scripts.
 
 ---
 
@@ -475,7 +496,7 @@ Scheduled sweep (5 min) rebuilds stale metrics/composites when `hq_projection_me
 | `verify-projection-staleness.mjs` | Extended for metrics/composite SLAs |
 | `measure-dashboard-projection-reads.mjs` | ≤350 ms / ≤400 ms |
 
-See [Projection_Registry.md](../../../docs/Architecture/Projection_Registry.md) for registry IDs.
+See `src/projectionOps/projectionOpsCatalog.json` for canonical runtime registry IDs and [08_Read_Model_Certification_Matrix.md](../Certification_Framework/08_Read_Model_Certification_Matrix.md) for the human certification view.
 
 ---
 
@@ -529,7 +550,7 @@ Every deployed projection exposes:
 | `generate-projection-ops-report.mjs` | JSON/Markdown ops report for CI |
 | `run-projection-ops-certification.mjs` | Orchestrates staleness + ops verify + report |
 
-Spec: [Projection_Ops_Center.md](../../../docs/Architecture/Projection_Ops_Center.md)
+Spec: this document's Projection Operations Center section. Ops report artifacts are generated under `docs/QA/Projection_Ops_Report.*`.
 
 ---
 
@@ -544,8 +565,8 @@ Spec: [Projection_Ops_Center.md](../../../docs/Architecture/Projection_Ops_Cente
 
 ## Related documents
 
-- [Projection_Registry.md](../../../docs/Architecture/Projection_Registry.md)
-- [Projection_Ops_Center.md](../../../docs/Architecture/Projection_Ops_Center.md)
+- Runtime / ops registry: `src/projectionOps/projectionOpsCatalog.json`
+- Human certification view: [08_Read_Model_Certification_Matrix.md](../Certification_Framework/08_Read_Model_Certification_Matrix.md)
+- Projection Ops report: [Projection_Ops_Report.md](../QA/Projection_Ops_Report.md)
 - [16_Certification_Framework.md](./16_Certification_Framework.md)
-- [Technical_Debt_Register.md](../../../docs/Architecture/Technical_Debt_Register.md)
 - Sprint 2 plan (conversation / QA docs) — **must rename** before implementation

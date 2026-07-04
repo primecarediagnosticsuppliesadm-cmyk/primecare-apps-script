@@ -68,12 +68,15 @@ Blueprint refs: [01_Database_Schema.md](../PrimeCare_System_Blueprint/01_Databas
 | Field | Value |
 |-------|-------|
 | **Source of truth** | `public.labs` — business key `(tenant_id, lab_id)` |
-| **Lifecycle** | `labs.status` owns lifecycle-active state. **Active Labs** = `labs.status == ACTIVE`. **ordering_mode** is separate checkout governance: `hq_managed`, `hybrid`, `self_service`, `suspended`. |
-| **APIs** | `createLabWrite`, `getLabsCredit`, `updateLabOrderingModeWrite`, `getLabOrderingContextRead` |
+| **Lifecycle** | `labs.status` owns lifecycle state: `PROSPECT`, `ACTIVE`, `INACTIVE`. **Active Labs** = `labs.status == ACTIVE`. **ordering_mode** is separate checkout governance: `hq_managed`, `hybrid`, `self_service`, `suspended`. |
+| **Lifecycle transitions** | `admin` / `executive` only. `ACTIVE -> INACTIVE` requires confirmation + reason and forces `ordering_mode = suspended`. `INACTIVE -> ACTIVE` requires confirmation + reason and does not restore prior ordering mode. |
+| **APIs** | `createLabWrite`, `getLabsCredit`, `updateLabOrderingModeWrite`, `updateLabLifecycleStatusWrite`, `getLabOrderingContextRead` |
 | **Screens** | LabsPage, LabOrderingPage, CollectionsPage, OperationalLabDrawer |
-| **Verify scripts** | `verify-labs-admin-flow.mjs`, `verify-lab-ordering-flow.mjs`, `verify-create-lab-ar-rls.mjs`, `verify-credit-risk-admin-flow.mjs` |
+| **Verify scripts** | `verify-labs-admin-flow.mjs`, planned `verify-lab-lifecycle-status-flow.mjs`, `verify-lab-ordering-flow.mjs`, `verify-create-lab-ar-rls.mjs`, `verify-credit-risk-admin-flow.mjs` |
 | **Dependencies** | Tenant, Profile (agent assignment), AR row on create |
 | **Known gaps** | GAP-BP-006 mitigated — `ordering_mode` column; preferred delivery day Phase 4 |
+
+`INACTIVE` is not a financial state. It must never hide or alter AR, invoices, payments, allocations, orders, shipments, Track Order, audit history, reporting, or authorized HQ visibility.
 
 ---
 
@@ -89,7 +92,7 @@ Blueprint refs: [01_Database_Schema.md](../PrimeCare_System_Blueprint/01_Databas
 | **Dependencies** | Lab, Lab ownership, Qualification, Receivable projection for composed credit fields |
 | **Known gaps** | Shadow only; `VITE_READ_ADAPTER_LABS_V1` remains OFF until architecture review |
 
-`proj_lab_profile_v1` must not own AR, payments, invoices, allocations, orders, commissions, or finance calculations. Credit/receivable fields remain owned by `proj_lab_receivable_v1`. Labs list adapters may expose `ordering_mode` and derived `ordering_eligible` for KPI/display contracts only.
+`proj_lab_profile_v1` must reflect `labs.status` and `labs.ordering_mode` for lifecycle, ordering posture, KPI, and display contracts. It must not own AR, payments, invoices, allocations, orders, commissions, or finance calculations. Credit/receivable fields remain owned by `proj_lab_receivable_v1`, which is unchanged by lifecycle status. Labs list adapters may expose `ordering_mode` and derived `ordering_eligible` for KPI/display contracts only.
 
 ---
 
@@ -355,6 +358,6 @@ Blueprint refs: [01_Database_Schema.md](../PrimeCare_System_Blueprint/01_Databas
 | Payment | `verify-payment-allocation-flow`, `verify-partial-payment-sync` |
 | Shipment | `verify-logistics-dispatch-flow`, `verify-delivery-charge-policy` |
 | Inventory | `verify-inventory-reconciliation`, `verify-procurement-inventory-flow` |
-| Lab | `verify-labs-admin-flow`, `verify-lab-ordering-flow` |
+| Lab | `verify-labs-admin-flow`, planned `verify-lab-lifecycle-status-flow`, `verify-lab-ordering-flow` |
 | AR | `verify-collection-inconsistencies`, `verify-credit-risk-admin-flow` |
 | Full O2C | `verify-primecare-production-golden-path` |

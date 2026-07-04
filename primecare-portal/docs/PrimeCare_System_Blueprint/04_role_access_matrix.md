@@ -15,7 +15,7 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 |-----------|--------|
 | **Visible modules** | Full founder suite, EFI, orders, logistics, risk, inventory, catalog, purchase, ops center, access audit, qualification, commission, contracts, tenant/distributor mgmt (some hidden in pilot sidebar) |
 | **Read** | Cross-tenant profiles; tenant ops data; all pilot tables via RLS |
-| **Write** | All roles provisionable; structural ops; fulfill; payments; logistics; catalog |
+| **Write** | All roles provisionable; structural ops; fulfill; payments; logistics; catalog; lab lifecycle status transitions with confirmation and reason |
 | **Blocked** | — |
 | **Freeze** | Structural writes blocked; payments/collections allowed |
 
@@ -27,7 +27,7 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 |-----------|--------|
 | **Visible modules** | dashboard, labs, orders, logistics, risk, catalog, inventory, purchase, ops center, access audit, qualification |
 | **Read** | Tenant-scoped all ops tables |
-| **Write** | Fulfill/cancel orders; **create orders for any lab (override)**; set `labs.ordering_mode`; payments; inventory; catalog; provision users (**not executive role**); logistics; lab ownership |
+| **Write** | Fulfill/cancel orders; **create orders for any lab (override)**; set `labs.ordering_mode`; lab lifecycle status transitions with confirmation and reason; payments; inventory; catalog; provision users (**not executive role**); logistics; lab ownership |
 | **Blocked** | Founder-only pages; cannot assign executive role |
 | **Freeze** | Order status mutations blocked; record payment allowed |
 
@@ -65,6 +65,18 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 | Suspended | ✖ | ✔ | ✔ | ✔ | ✔ (view only; cannot checkout) |
 
 **Admin override:** `admin` / `executive` may always create orders on behalf of any lab.
+
+### Lab lifecycle permissions
+
+Only `admin` and `executive` may change `labs.status`. Agents and lab users cannot change lab lifecycle status.
+
+| Lifecycle status | Lab login | Create order / checkout | Track orders | View invoices | View payments | View history |
+|------------------|-----------|-------------------------|--------------|---------------|---------------|--------------|
+| `PROSPECT` | If provisioned | Governed by `ordering_mode` and credit eligibility | ✔ | ✔ | ✔ | ✔ |
+| `ACTIVE` | If provisioned | Governed by `ordering_mode` and credit eligibility | ✔ | ✔ | ✔ | ✔ |
+| `INACTIVE` | If provisioned | ✖ (`ordering_mode` must be `suspended`) | ✔ | ✔ | ✔ | ✔ |
+
+`ACTIVE -> INACTIVE` requires confirmation and reason and must force `ordering_mode = suspended`. `INACTIVE -> ACTIVE` requires confirmation and reason but must not restore prior ordering mode. Lifecycle status must never hide AR, invoices, payments, allocations, orders, shipments, Track Order, audit history, reporting, or authorized HQ visibility.
 
 ---
 

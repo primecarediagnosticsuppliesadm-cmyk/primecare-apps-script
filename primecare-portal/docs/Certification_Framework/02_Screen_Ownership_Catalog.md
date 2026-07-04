@@ -19,8 +19,10 @@ Routing: `src/config/pageRouting.js` · Permissions: `src/config/rolePermissionM
 | **Users** | `lab` |
 | **Reads** | `getLabOrderingContextRead`, `getLabCatalogRead`, `getLabRecentOrdersRead`, `getLabOrderDetailsRead` |
 | **Writes** | `createOrderWrite` (checkout), repeat order |
-| **Verification** | `verify-lab-ordering-flow.mjs`; browser steps `BGP-L01`–`BGP-L08` |
+| **Verification** | `verify-lab-ordering-flow.mjs`; browser steps `BGP-L01`–`BGP-L08`; inactive lab portal read-only history UAT |
 | **Perf target** | **≤ 300 ms** catalog + context (warm cache ≤ 50 ms) |
+
+Inactive labs may log in when provisioned, but checkout/reorder must be blocked because lifecycle transition forces `ordering_mode = suspended`. Track Order, invoices, payments, previous orders, and history remain available.
 
 ---
 
@@ -63,6 +65,8 @@ Routing: `src/config/pageRouting.js` · Permissions: `src/config/rolePermissionM
 | **Writes** | `createPaymentWrite`, `updateCollectionNotesWrite`, allocation UI |
 | **Verification** | `verify-financial-reconciliation.mjs`, `verify-credit-risk-admin-flow.mjs`; browser `BGP-A10`–`BGP-A12` |
 | **Perf target** | **≤ 200 ms** bounded collections read |
+
+Inactive lab lifecycle status must not hide receivables, payments, allocations, collection history, or authorized scoped reads.
 
 ---
 
@@ -116,9 +120,11 @@ Routing: `src/config/pageRouting.js` · Permissions: `src/config/rolePermissionM
 | **Path** | `/labs` |
 | **Users** | `admin` |
 | **Reads** | `getLabsCredit`; shadow adapter `read_labs_list_v1` remains flag OFF until parity/RLS review; lab detail drawers |
-| **Writes** | `createLabWrite`, ordering mode, delivery day |
-| **Verification** | `verify-labs-admin-flow.mjs` (Active Labs, Order-Eligible Labs, Ordering Suspended KPIs), `verify-create-lab-ar-rls.mjs`, `verify-labs-projection-parity.mjs` |
+| **Writes** | `createLabWrite`, ordering mode, delivery day, lifecycle status transitions via `updateLabLifecycleStatusWrite` |
+| **Verification** | `verify-labs-admin-flow.mjs` (Total, Prospect, Active, Inactive, Order-Eligible, Ordering Suspended KPIs), `verify-lab-lifecycle-status-flow.mjs`, `verify-create-lab-ar-rls.mjs`, `verify-labs-projection-parity.mjs` |
 | **Perf target** | **≤ 300 ms** list |
+
+Lifecycle controls must require confirmation and reason for inactivation/reactivation. `ACTIVE -> INACTIVE` must force `ordering_mode = suspended`; `INACTIVE -> ACTIVE` must not restore previous Ordering Mode.
 
 ---
 
@@ -198,6 +204,8 @@ Routing: `src/config/pageRouting.js` · Permissions: `src/config/rolePermissionM
 | **Writes** | None (read-only analytics) |
 | **Verification** | `verify-credit-risk-admin-flow.mjs` |
 | **Perf target** | **≤ 250 ms** |
+
+Inactive labs remain visible in Credit & Risk when they have AR/credit history; lifecycle status is display/filter context only, not a receivable state.
 
 ---
 

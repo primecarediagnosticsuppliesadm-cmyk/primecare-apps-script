@@ -9,6 +9,7 @@ import {
   mapOrderDeliveryFields,
 } from "@/logistics/deliveryChargeEngine.js";
 import {
+  ORDERING_MODE,
   canLabInitiateOrder,
   isHqOpsRole,
   labOrderingBlockedMessage,
@@ -132,6 +133,7 @@ import {
 import { isPerfLogEnabled, perfLog, perfTime, shouldRunDashboardKpiAudit } from "@/utils/perfLog.js";
 import { fireNotificationEvent } from "@/notifications/fireNotificationEvent.js";
 import { directoryRoleFromPlatformRole } from "@/operations/operationsCenterAdminEngine.js";
+import { buildProvisioningAuditPayload } from "@/operations/userProvisioningEngine.js";
 
 export { labIdKey, normalizeLabIdKey };
 
@@ -152,6 +154,79 @@ function boolFromValue(v) {
   if (typeof v === "boolean") return v;
   const s = str(v).toLowerCase();
   return s === "true" || s === "t" || s === "1" || s === "yes" || s === "y";
+}
+
+export const LAB_LIFECYCLE_STATUS = {
+  PROSPECT: "PROSPECT",
+  ACTIVE: "ACTIVE",
+  INACTIVE: "INACTIVE",
+};
+
+const LAB_LIFECYCLE_STATUS_VALUES = new Set(Object.values(LAB_LIFECYCLE_STATUS));
+const LAB_LIFECYCLE_ALLOWED_TRANSITIONS = new Set([
+  `${LAB_LIFECYCLE_STATUS.PROSPECT}->${LAB_LIFECYCLE_STATUS.ACTIVE}`,
+  `${LAB_LIFECYCLE_STATUS.ACTIVE}->${LAB_LIFECYCLE_STATUS.INACTIVE}`,
+  `${LAB_LIFECYCLE_STATUS.INACTIVE}->${LAB_LIFECYCLE_STATUS.ACTIVE}`,
+]);
+
+export function normalizeLabLifecycleStatus(value) {
+  const status = str(value).toUpperCase();
+  return LAB_LIFECYCLE_STATUS_VALUES.has(status) ? status : "";
+}
+
+function labLifecycleTransitionKey(previousStatus, nextStatus) {
+  return `${normalizeLabLifecycleStatus(previousStatus)}->${normalizeLabLifecycleStatus(nextStatus)}`;
+}
+
+function labLifecycleTransitionRequiresReason(previousStatus, nextStatus) {
+  const transition = labLifecycleTransitionKey(previousStatus, nextStatus);
+  return (
+    transition === `${LAB_LIFECYCLE_STATUS.ACTIVE}->${LAB_LIFECYCLE_STATUS.INACTIVE}` ||
+    transition === `${LAB_LIFECYCLE_STATUS.INACTIVE}->${LAB_LIFECYCLE_STATUS.ACTIVE}`
+  );
+}
+
+function labLifecycleTransitionRequiresConfirmation(previousStatus, nextStatus) {
+  return LAB_LIFECYCLE_ALLOWED_TRANSITIONS.has(
+    labLifecycleTransitionKey(previousStatus, nextStatus)
+  );
+}
+
+export function validateLabLifecycleTransition({
+  previousStatus,
+  nextStatus,
+  confirmed = false,
+  reason = "",
+} = {}) {
+  const previous = normalizeLabLifecycleStatus(previousStatus);
+  const next = normalizeLabLifecycleStatus(nextStatus);
+  if (!previous) {
+    return { ok: false, code: "invalid_previous_status", error: "Current lab status is invalid" };
+  }
+  if (!next) {
+    return { ok: false, code: "invalid_status", error: "Invalid lab lifecycle status" };
+  }
+  if (previous === next) {
+    return { ok: false, code: "no_status_change", error: "Lab is already in that status" };
+  }
+  const transition = `${previous}->${next}`;
+  if (!LAB_LIFECYCLE_ALLOWED_TRANSITIONS.has(transition)) {
+    return { ok: false, code: "invalid_transition", error: `Transition ${transition} is not allowed` };
+  }
+  if (labLifecycleTransitionRequiresConfirmation(previous, next) && confirmed !== true) {
+    return { ok: false, code: "confirmation_required", error: "Lifecycle status confirmation is required" };
+  }
+  if (labLifecycleTransitionRequiresReason(previous, next) && !str(reason)) {
+    return { ok: false, code: "reason_required", error: "Lifecycle status reason is required" };
+  }
+  return {
+    ok: true,
+    previousStatus: previous,
+    nextStatus: next,
+    transition,
+    forceOrderingSuspended:
+      transition === `${LAB_LIFECYCLE_STATUS.ACTIVE}->${LAB_LIFECYCLE_STATUS.INACTIVE}`,
+  };
 }
 
 function cleanCollectionAgentName(agent) {
@@ -6084,6 +6159,14 @@ export async function updateLabOrderingModeWrite({
   }
   if (!data) return { success: false, error: "Lab not found or not authorized" };
 
+  const projection = await refreshLabProfileProjectionRow({ tenantId: tid, labId: lid });
+  const projectionWarning = projection.success
+    ? ""
+    : projection.error || "Lab profile projection refresh failed";
+  if (projectionWarning) {
+    hqDebugWarn("[updateLabOrderingModeWrite] projection refresh failed:", projectionWarning);
+  }
+
   invalidateLabsCreditReadCache();
   hqDebugLog("[updateLabOrderingModeWrite]", { labId: lid, orderingMode: mode, actorId: str(actorId) });
   return {
@@ -6091,6 +6174,258 @@ export async function updateLabOrderingModeWrite({
     data: {
       ...data,
       orderingMode: normalizeOrderingMode(data.ordering_mode),
+      projectionRefreshed: projection.success,
+      projectionWarning: projectionWarning || null,
+    },
+    error: null,
+  };
+}
+
+async function resolveCurrentActorContext() {
+  if (!supabase) return { userId: "", role: "", email: "", displayName: "" };
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const user = sessionData?.session?.user;
+    const userId = str(user?.id);
+    if (!userId) return { userId: "", role: "", email: "", displayName: "" };
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("user_id, role, email, display_name, username, tenant_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+    return {
+      userId,
+      role: str(profile?.role).toLowerCase(),
+      email: str(profile?.email ?? user?.email),
+      displayName: str(profile?.display_name ?? profile?.username ?? user?.email),
+      tenantId: str(profile?.tenant_id),
+    };
+  } catch {
+    return { userId: "", role: "", email: "", displayName: "" };
+  }
+}
+
+async function recordLabLifecycleAuditEvent({
+  tenantId,
+  labId,
+  labName = "",
+  previousStatus,
+  nextStatus,
+  previousOrderingMode,
+  nextOrderingMode,
+  actor,
+  reason,
+  notes = "",
+  originatingScreen = "",
+} = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+  const actorUserId = str(actor?.userId);
+  if (!actorUserId) return { success: false, error: "Authenticated actor is required for audit" };
+
+  const timestamp = new Date().toISOString();
+  const payload = buildProvisioningAuditPayload({
+    action: "lab_lifecycle_status_changed",
+    reason,
+    previous: {
+      status: previousStatus,
+      orderingMode: previousOrderingMode,
+      previous_status: previousStatus,
+      previous_ordering_mode: previousOrderingMode,
+    },
+    next: {
+      status: nextStatus,
+      orderingMode: nextOrderingMode,
+      new_status: nextStatus,
+      new_ordering_mode: nextOrderingMode,
+    },
+    related: {
+      tenantId,
+      tenant_id: tenantId,
+      labId,
+      lab_id: labId,
+      labName: labName || undefined,
+      lab_name: labName || undefined,
+      previous_status: previousStatus,
+      new_status: nextStatus,
+      previous_ordering_mode: previousOrderingMode,
+      new_ordering_mode: nextOrderingMode,
+      actor: {
+        userId: actorUserId,
+        user_id: actorUserId,
+        role: str(actor?.role),
+        email: str(actor?.email),
+        displayName: str(actor?.displayName),
+      },
+      actor_user_id: actorUserId,
+      timestamp,
+      notes: str(notes) || undefined,
+      originatingScreen: str(originatingScreen) || undefined,
+      originating_screen: str(originatingScreen) || undefined,
+    },
+  });
+
+  const { error } = await supabase.from("user_provisioning_events").insert([
+    {
+      hq_tenant_id: tenantId,
+      subject_user_id: actorUserId,
+      event_type: "updated",
+      actor_user_id: actorUserId,
+      payload,
+    },
+  ]);
+
+  if (error) return { success: false, error: error.message || "Failed to write audit event" };
+  return { success: true, payload };
+}
+
+async function refreshLabProfileProjectionRow({ tenantId, labId } = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+  const { data, error } = await supabase.rpc("refresh_proj_lab_profile_row_v1", {
+    p_tenant_id: tenantId,
+    p_lab_id: labId,
+  });
+  if (error) return { success: false, error: error.message || "Lab profile projection refresh failed" };
+  if (data?.success === false) {
+    return { success: false, error: data?.error || "Lab profile projection refresh failed" };
+  }
+  return { success: true, data };
+}
+
+/**
+ * HQ admin/executive: update lab lifecycle status.
+ * Lifecycle state is not a financial state; this write only touches `labs.status`
+ * and forces `ordering_mode = suspended` for ACTIVE -> INACTIVE.
+ */
+export async function updateLabLifecycleStatusWrite({
+  tenantId,
+  labId,
+  nextStatus,
+  status,
+  confirmed = false,
+  confirmation = false,
+  reason = "",
+  notes = "",
+  originatingScreen = "",
+} = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+  const tid = str(tenantId);
+  const lid = labIdKey(labId);
+  const targetStatus = normalizeLabLifecycleStatus(nextStatus ?? status);
+  const isConfirmed = confirmed === true || confirmation === true;
+  const reasonText = str(reason);
+  if (!tid || !lid) return { success: false, code: "missing_scope", error: "tenantId and labId required" };
+
+  const actor = await resolveCurrentActorContext();
+  if (!isHqOpsRole(actor.role)) {
+    return {
+      success: false,
+      code: "unauthorized",
+      error: "Only admin or executive users may change lab lifecycle status",
+    };
+  }
+
+  const { data: current, error: readError } = await supabase
+    .from("labs")
+    .select("tenant_id, lab_id, lab_name, status, ordering_mode")
+    .eq("tenant_id", tid)
+    .eq("lab_id", lid)
+    .maybeSingle();
+
+  if (readError) return { success: false, code: "read_failed", error: readError.message };
+  if (!current) {
+    return { success: false, code: "lab_not_found", error: "Lab not found or not authorized" };
+  }
+
+  const previousStatus = normalizeLabLifecycleStatus(current.status);
+  const previousOrderingMode = normalizeOrderingMode(current.ordering_mode);
+  const validation = validateLabLifecycleTransition({
+    previousStatus,
+    nextStatus: targetStatus,
+    confirmed: isConfirmed,
+    reason: reasonText,
+  });
+  if (!validation.ok) return { success: false, ...validation };
+
+  const updatePayload = {
+    status: validation.nextStatus,
+  };
+  if (validation.forceOrderingSuspended) {
+    updatePayload.ordering_mode = ORDERING_MODE.SUSPENDED;
+  }
+
+  const { data: updated, error: updateError } = await supabase
+    .from("labs")
+    .update(updatePayload)
+    .eq("tenant_id", tid)
+    .eq("lab_id", lid)
+    .select("tenant_id, lab_id, lab_name, status, ordering_mode")
+    .maybeSingle();
+
+  if (updateError) {
+    return { success: false, code: "update_failed", error: updateError.message };
+  }
+  if (!updated) {
+    return { success: false, code: "update_empty", error: "Lab lifecycle update did not persist" };
+  }
+
+  const nextOrderingMode = normalizeOrderingMode(updated.ordering_mode);
+  const audit = await recordLabLifecycleAuditEvent({
+    tenantId: tid,
+    labId: lid,
+    labName: str(updated.lab_name ?? current.lab_name),
+    previousStatus,
+    nextStatus: validation.nextStatus,
+    previousOrderingMode,
+    nextOrderingMode,
+    actor,
+    reason: reasonText,
+    notes,
+    originatingScreen,
+  });
+  if (!audit.success) {
+    return {
+      success: false,
+      code: "audit_failed",
+      error: audit.error || "Lifecycle audit event failed",
+      data: { lab: updated, auditRecorded: false },
+    };
+  }
+
+  const projection = await refreshLabProfileProjectionRow({ tenantId: tid, labId: lid });
+  if (!projection.success) {
+    return {
+      success: false,
+      code: "projection_refresh_failed",
+      error: projection.error || "Lab profile projection refresh failed",
+      data: { lab: updated, auditRecorded: true, projectionRefreshed: false },
+    };
+  }
+
+  invalidateLabsCreditReadCache();
+  hqDebugLog("[updateLabLifecycleStatusWrite]", {
+    labId: lid,
+    previousStatus,
+    nextStatus: validation.nextStatus,
+    previousOrderingMode,
+    nextOrderingMode,
+    actorId: actor.userId,
+  });
+
+  return {
+    success: true,
+    data: {
+      lab: updated,
+      labId: lid,
+      tenantId: tid,
+      previousStatus,
+      newStatus: validation.nextStatus,
+      previousOrderingMode,
+      newOrderingMode: nextOrderingMode,
+      orderingMode: nextOrderingMode,
+      auditRecorded: true,
+      projectionRefreshed: true,
+      auditPayload: audit.payload,
+      projection: projection.data,
     },
     error: null,
   };

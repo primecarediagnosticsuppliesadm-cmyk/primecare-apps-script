@@ -108,8 +108,14 @@ Critical fields and **id vs business key** rules. Full table columns: `01_Databa
 |-----------|-------|
 | **Type** | text |
 | **Meaning** | Lab lifecycle/account status |
-| **KPI** | `Active Labs` counts rows where `labs.status == ACTIVE` |
+| **Values** | `PROSPECT`, `ACTIVE`, `INACTIVE` |
+| **KPI** | `Total Labs` counts all visible labs; `Prospect Labs`, `Active Labs`, and `Inactive Labs` count `labs.status == PROSPECT`, `ACTIVE`, and `INACTIVE` respectively |
+| **Written by** | `createLabWrite` for new labs; `updateLabLifecycleStatusWrite` for lifecycle transitions |
+| **Transition roles** | `admin`, `executive` only |
+| **Transition controls** | Confirmation required; reason required for `PROSPECT -> INACTIVE`, `ACTIVE -> INACTIVE`, and `INACTIVE -> ACTIVE` |
+| **INACTIVE rule** | `ACTIVE -> INACTIVE` must force `labs.ordering_mode = suspended`; `INACTIVE -> ACTIVE` does not restore prior ordering mode |
 | **Not affected by** | `labs.ordering_mode`; checkout suspension does not change lifecycle-active status |
+| **Must not affect** | AR, invoices, payments, allocations, orders, shipments, Track Order, audit history, reporting history, or authorized HQ visibility |
 
 ---
 
@@ -121,6 +127,7 @@ Critical fields and **id vs business key** rules. Full table columns: `01_Databa
 | **Values** | `hq_managed`, `hybrid`, `self_service`, `suspended` |
 | **Meaning** | Runtime order-initiation governance for lab callers |
 | **KPI** | `Ordering Suspended` counts rows where `ordering_mode == suspended`; `Order-Eligible Labs` also requires `ordering_eligible == true` |
+| **Lifecycle interaction** | `ACTIVE -> INACTIVE` forces `suspended`; `INACTIVE -> ACTIVE` leaves `ordering_mode` unchanged until admin explicitly selects HQ Managed, Hybrid, or Self Service |
 | **Does not affect** | Invoices, payments, Track Order, finance, logistics, history, or `Active Labs` lifecycle status |
 
 ---

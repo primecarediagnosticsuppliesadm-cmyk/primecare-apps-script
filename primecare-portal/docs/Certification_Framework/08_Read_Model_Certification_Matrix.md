@@ -2,8 +2,9 @@
 
 **Sprint 2 — domain projections for Orders, Collections, Dashboard, and Executive.**
 
-Architecture: [18_Domain_Projection_Architecture.md](../PrimeCare_System_Blueprint/18_Domain_Projection_Architecture.md)  
-Registry: [Projection_Registry.md](../../../docs/Architecture/Projection_Registry.md)
+- Architecture: [18_Domain_Projection_Architecture.md](../PrimeCare_System_Blueprint/18_Domain_Projection_Architecture.md)
+- Canonical runtime / ops registry: `src/projectionOps/projectionOpsCatalog.json`
+- Human certification view: this document
 
 ---
 
@@ -14,7 +15,8 @@ Registry: [Projection_Registry.md](../../../docs/Architecture/Projection_Registr
 | Deploy probe | RPCs + tables exist | `verify-projection-parity.mjs` (preflight) |
 | Parity — orders | item_count + orderTotal match (15 sample) | `verify-projection-parity.mjs` |
 | Parity — collections | outstanding + totalPaid match (12 sample) | `verify-projection-parity.mjs` |
-| Parity — labs | profile + ownership + ordering + composed receivable fields match `v_labs_credit` | `verify-labs-projection-parity.mjs` |
+| Parity — labs | profile + ownership + lifecycle status + ordering + composed receivable fields match `v_labs_credit` | `verify-labs-projection-parity.mjs` |
+| Lifecycle — labs | `proj_lab_profile_v1` reflects `labs.status` and `labs.ordering_mode`; `proj_lab_receivable_v1` remains unchanged and finance-owned | `verify-labs-projection-parity.mjs`, `verify-lab-lifecycle-status-flow.mjs` |
 | Ordering/paging — labs | deterministic `read_labs_list_v1` ordering by `lab_name`, `lab_id`; limited reads match full-read prefix | `verify-labs-projection-parity.mjs` |
 | Parity — dashboard KPIs | executive + summary scalars vs transactional sample | `verify-dashboard-projection-parity.mjs` |
 | Parity — executive KPIs | `get_founder_snapshot` field match | `verify-executive-projection-parity.mjs` |
@@ -36,6 +38,8 @@ Registry: [Projection_Registry.md](../../../docs/Architecture/Projection_Registr
 
 ## Projection registry
 
+`src/projectionOps/projectionOpsCatalog.json` is the canonical machine-readable registry consumed by Projection Ops UI and verification scripts. The tables below are the human certification view and must stay aligned with that JSON catalog.
+
 ### Phase 1 — shadow
 
 | Registry ID | Table | Adapter RPC | SLA | Status |
@@ -43,6 +47,8 @@ Registry: [Projection_Registry.md](../../../docs/Architecture/Projection_Registr
 | PRJ-ORD-ORDER-v1 | `proj_order_v1` | `read_orders_list_v1` | 60 s | shadow |
 | PRJ-COL-LAB-v1 | `proj_lab_receivable_v1` | `read_lab_receivables_list_v1` | 60 s | shadow |
 | PRJ-LAB-PROFILE-v1 | `proj_lab_profile_v1` | `read_labs_list_v1` | 60 s | shadow |
+
+`PRJ-LAB-PROFILE-v1` owns read-model exposure of lab lifecycle display fields (`status`) and ordering posture (`ordering_mode`). `PRJ-COL-LAB-v1` remains the receivable projection and must not be modified by lifecycle status changes.
 
 ### Phase 2 — design (Sprint 2 Phase 2)
 
@@ -108,8 +114,7 @@ node scripts/run-browser-certification.mjs --prereq-only
 
 ## KPI ownership (no duplicate owners)
 
-Canonical owners: [KPI_Catalog.json](../../../docs/Architecture/Enforcement/KPI_Catalog.json).  
-Composites **copy only** — never re-aggregate from SoT at read time.
+KPI ownership is governed by the Blueprint domain rules and this certification matrix until a dedicated KPI catalog is introduced. Composites **copy only** — never re-aggregate from SoT at read time.
 
 ---
 
@@ -123,6 +128,6 @@ Composites **copy only** — never re-aggregate from SoT at read time.
 | Ops report generated | JSON + MD artifact | `generate-projection-ops-report.mjs` |
 | Full ops cert | Staleness + ops verify + report | `run-projection-ops-certification.mjs` |
 
-Spec: [Projection_Ops_Center.md](../../../docs/Architecture/Projection_Ops_Center.md)
+Spec: Projection Operations Center section in [18_Domain_Projection_Architecture.md](../PrimeCare_System_Blueprint/18_Domain_Projection_Architecture.md). Ops report artifacts are generated under `docs/QA/Projection_Ops_Report.*`.
 
 **Ops monitoring does not replace parity/staleness cert** — it aggregates and surfaces results for Executive visibility.
