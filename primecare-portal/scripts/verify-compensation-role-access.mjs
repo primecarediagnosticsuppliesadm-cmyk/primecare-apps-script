@@ -32,9 +32,9 @@ function assert(condition, id, detail) {
 assert(/HR:\s*"hr"/.test(roleMatrix), "role.hr_constant", "ROLES.HR declared");
 assert(/HQ HR \/ Payroll Support/.test(roleMatrix), "role.hr_label", "HR label declared");
 assert(
-  /compensationPayroll:\s*\[ROLES\.EXECUTIVE\]/.test(roleMatrix),
+  /compensationPayroll:\s*\[ROLES\.EXECUTIVE,\s*ROLES\.HR,\s*ROLES\.ADMIN\]/.test(roleMatrix),
   "permission.compensation_payroll",
-  "Executive Compensation page is executive-only"
+  "Executive Compensation page allows Executive, HR, and Admin"
 );
 assert(/Executive Compensation/.test(enterpriseCopy), "copy.compensation", "Executive Compensation label declared");
 assert(

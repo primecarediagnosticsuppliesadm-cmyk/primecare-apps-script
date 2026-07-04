@@ -84,7 +84,7 @@ export const PERMISSION_BY_KEY = {
   distributorOs: [ROLES.EXECUTIVE, ROLES.ADMIN, ROLES.DISTRIBUTOR_ADMIN, ROLES.DISTRIBUTOR_MANAGER],
   distributorProvisioning: [ROLES.EXECUTIVE],
   commissionEngine: [ROLES.EXECUTIVE],
-  compensationPayroll: [ROLES.EXECUTIVE],
+  compensationPayroll: [ROLES.EXECUTIVE, ROLES.HR, ROLES.ADMIN],
   labContractEngine: [ROLES.ADMIN, ROLES.EXECUTIVE],
   operationsCenter: [
     ROLES.ADMIN,

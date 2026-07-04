@@ -110,6 +110,11 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-compensation-approval-workflow.mjs | HR preview/submit, Executive approve/lock/export, Admin recommend-only, Agent read-only | Approval |
 | verify-payroll-export.mjs | Export only from locked run, checksum/storage metadata, no accounting entry | Export |
 | verify-compensation-no-finance-mutation.mjs | Orders, invoices, payments, allocations, AR, inventory, logistics unchanged by payroll actions | Regression |
+| verify-compensation-plan-management.mjs | Compensation Plans tab columns, admin APIs, no delete, no finance writes | Phase 5A plan admin |
+| verify-compensation-plan-versioning.mjs | Active plan edit creates new version; draft in-place edit; assignment preservation | Phase 5A versioning |
+| verify-compensation-plan-assignment.mjs | Plan Assignments tab, change/end assignment, history preserved, no delete | Phase 5A assignments |
+| verify-compensation-simulator.mjs | Preview-only simulator outputs; no persistence | Phase 5A simulator |
+| verify-compensation-role-security.mjs | Executive/HR/Admin/Agent admin RBAC contract | Phase 5A security |
 
 ### Infrastructure
 

@@ -4,7 +4,32 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
-## 2026-07-04 — Executive Compensation & Payroll Engine Phase 4B Payroll Preview Generation
+## 2026-07-04 — Executive Compensation & Payroll Engine Phase 5A Compensation Administration
+
+### Change
+
+- Add **Compensation Plans** and **Plan Assignments** permanent tabs to Executive Compensation Center.
+- Add compensation plan administration APIs for create, draft edit, active version create, duplicate, deactivate, assignment change/end.
+- Add plan details panel with fixed/variable/promotion/bonus/incentive/audit sections.
+- Add read-only compensation simulator and promotion eligibility review panel (no automatic promotion).
+- Extend page access to Executive (full CRUD), HR (read + assign), Admin (read-only). Agent remains own-plan read contract only.
+- Enforce active-plan versioning: edits create a new plan version; retired versions preserve assignment history.
+
+### Not changed
+
+- No payroll preview calculation changes, approval workflow, export, paid evidence, finance, AR, payments, orders, or O2C mutation.
+
+### Verification gates
+
+- `node scripts/verify-compensation-plan-management.mjs`
+- `node scripts/verify-compensation-plan-versioning.mjs`
+- `node scripts/verify-compensation-plan-assignment.mjs`
+- `node scripts/verify-compensation-simulator.mjs`
+- `node scripts/verify-compensation-role-security.mjs`
+
+---
+
+## 2026-07-04 — Executive Compensation UI hotfix (export read columns)
 
 ### Change
 

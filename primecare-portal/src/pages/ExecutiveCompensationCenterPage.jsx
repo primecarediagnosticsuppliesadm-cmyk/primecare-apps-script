@@ -12,7 +12,21 @@ import {
 } from "@/components/ux";
 import { loadExecutiveCompensationCenterRead } from "@/api/compensationReadSupabaseApi.js";
 import { generatePayrollPreview } from "@/api/compensationSupabaseApi.js";
+import {
+  changeEmployeePlanAssignment,
+  createCompensationPlan,
+  deactivateCompensationPlan,
+  duplicateCompensationPlan,
+  endEmployeePlanAssignment,
+  loadCompensationPlanAdminRead,
+  saveCompensationPlanAdmin,
+} from "@/api/compensationPlanAdminSupabaseApi.js";
+import CompensationPlanAssignmentsTab from "@/components/compensation/CompensationPlanAssignmentsTab.jsx";
+import CompensationPlansTab from "@/components/compensation/CompensationPlansTab.jsx";
+import { buildCompensationPlanAdminModel } from "@/compensation/compensationPlanAdminModel.js";
+import { compensationAdminPermissions } from "@/compensation/compensationPlanAdminWorkflow.js";
 import { buildExecutiveCompensationModel } from "@/compensation/executiveCompensationModel.js";
+import { YEAR1_BASELINE_PLAN } from "@/compensation/compensationCalculationEngine.js";
 import { usePagePerformance } from "@/hooks/usePagePerformance.js";
 import { cn } from "@/lib/utils";
 import {
@@ -28,6 +42,8 @@ import {
 
 const TABS = [
   "Overview",
+  "Compensation Plans",
+  "Plan Assignments",
   "Payroll Periods",
   "Payroll Preview",
   "Agents",
@@ -142,6 +158,12 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [generatingPeriodId, setGeneratingPeriodId] = useState("");
   const [generationNotice, setGenerationNotice] = useState("");
+  const [adminModel, setAdminModel] = useState(null);
+  const [adminBusy, setAdminBusy] = useState(false);
+  const [adminNotice, setAdminNotice] = useState("");
+
+  const actorRole = String(currentUser?.role || "executive").toLowerCase();
+  const adminPermissions = useMemo(() => compensationAdminPermissions(actorRole), [actorRole]);
 
   usePagePerformance("Executive Compensation");
 
@@ -160,9 +182,151 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
     }
   }, [currentUser, model]);
 
+  const loadAdmin = useCallback(async () => {
+    if (!adminPermissions.canViewPlans && !adminPermissions.agentOwnPlanOnly) return;
+    try {
+      setAdminBusy(true);
+      const result = await loadCompensationPlanAdminRead({ currentUser });
+      if (!result.success) throw new Error(result.error || "Could not load compensation administration");
+      setAdminModel(
+        buildCompensationPlanAdminModel({
+          ...result.data,
+          actorRole,
+          actorAgentId: currentUser?.agentId || currentUser?.agent_id,
+          actorProfileUserId: currentUser?.id || currentUser?.userId,
+        })
+      );
+    } catch (err) {
+      setError(err?.message || "Could not load compensation administration");
+    } finally {
+      setAdminBusy(false);
+    }
+  }, [actorRole, adminPermissions, currentUser]);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadAdmin();
+  }, [load, loadAdmin]);
+
+  const refreshAll = async () => {
+    await Promise.all([load(), loadAdmin()]);
+  };
+
+  const handleCreatePlan = async () => {
+    try {
+      setAdminBusy(true);
+      setAdminNotice("");
+      const result = await createCompensationPlan({
+        currentUser,
+        planInput: {
+          plan_code: "AGENT_YEAR1_BASELINE",
+          displayName: "Year 1 Agent Baseline",
+          role_scope: "agent",
+          base_salary: YEAR1_BASELINE_PLAN.baseSalary,
+          fuel_allowance: YEAR1_BASELINE_PLAN.fuelAllowance,
+          mobile_allowance: YEAR1_BASELINE_PLAN.mobileAllowance,
+          commission_rate_bps: YEAR1_BASELINE_PLAN.commissionRateBps,
+          promotion_salary: YEAR1_BASELINE_PLAN.promotionSalary,
+          promotion_commission_rate_bps: YEAR1_BASELINE_PLAN.promotionCommissionRateBps,
+          promotion_collection_threshold: YEAR1_BASELINE_PLAN.promotionCollectionThreshold,
+          promotion_min_efficiency_pct: YEAR1_BASELINE_PLAN.promotionMinEfficiencyPct,
+          promotion_max_overdue_days: YEAR1_BASELINE_PLAN.promotionMaxOverdueDays,
+          status: "draft",
+        },
+      });
+      if (!result.success) throw new Error(result.error || "Plan create failed");
+      setAdminNotice("Compensation plan draft created.");
+      await loadAdmin();
+    } catch (err) {
+      setError(err?.message || "Could not create compensation plan");
+    } finally {
+      setAdminBusy(false);
+    }
+  };
+
+  const handleSavePlan = async (row, payload) => {
+    try {
+      setAdminBusy(true);
+      setAdminNotice("");
+      const result = await saveCompensationPlanAdmin({
+        currentUser,
+        planId: row.id,
+        planInput: payload,
+      });
+      if (!result.success) throw new Error(result.error || "Plan save failed");
+      setAdminNotice(
+        row.status === "active"
+          ? `Created ${result.data?.newPlan?.version || "new version"}; prior assignments preserved.`
+          : "Compensation plan updated."
+      );
+      await loadAdmin();
+    } catch (err) {
+      setError(err?.message || "Could not save compensation plan");
+    } finally {
+      setAdminBusy(false);
+    }
+  };
+
+  const handleDuplicatePlan = async (row) => {
+    try {
+      setAdminBusy(true);
+      const result = await duplicateCompensationPlan({ currentUser, planId: row.id });
+      if (!result.success) throw new Error(result.error || "Duplicate failed");
+      setAdminNotice("Plan duplicated as draft.");
+      await loadAdmin();
+    } catch (err) {
+      setError(err?.message || "Could not duplicate plan");
+    } finally {
+      setAdminBusy(false);
+    }
+  };
+
+  const handleDeactivatePlan = async (row) => {
+    try {
+      setAdminBusy(true);
+      const result = await deactivateCompensationPlan({ currentUser, planId: row.id });
+      if (!result.success) throw new Error(result.error || "Deactivate failed");
+      setAdminNotice(`Plan ${row.planCode} ${row.version} deactivated.`);
+      await loadAdmin();
+    } catch (err) {
+      setError(err?.message || "Could not deactivate plan");
+    } finally {
+      setAdminBusy(false);
+    }
+  };
+
+  const handleChangePlan = async (row, { newPlanId, effectiveDate }) => {
+    try {
+      setAdminBusy(true);
+      const result = await changeEmployeePlanAssignment({
+        currentUser,
+        assignmentId: row.id,
+        newPlanId,
+        effectiveDate,
+      });
+      if (!result.success) throw new Error(result.error || "Change plan failed");
+      setAdminNotice(`Plan changed for ${row.employeeName}; prior assignment preserved.`);
+      await loadAdmin();
+    } catch (err) {
+      setError(err?.message || "Could not change employee plan");
+    } finally {
+      setAdminBusy(false);
+    }
+  };
+
+  const handleEndAssignment = async (row) => {
+    try {
+      setAdminBusy(true);
+      const result = await endEmployeePlanAssignment({ currentUser, assignmentId: row.id });
+      if (!result.success) throw new Error(result.error || "End assignment failed");
+      setAdminNotice(`Assignment ended for ${row.employeeName}.`);
+      await loadAdmin();
+    } catch (err) {
+      setError(err?.message || "Could not end assignment");
+    } finally {
+      setAdminBusy(false);
+    }
+  };
 
   const previewRows = useMemo(() => {
     const rows = model?.previewRows || [];
@@ -259,9 +423,9 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
     <div className="space-y-4 p-4 md:p-6">
       <PageHeader
         title="Executive Compensation"
-        subtitle="Read-only compensation and payroll intelligence. Preview only — no approvals, locks, exports, or payout actions."
+        subtitle="Compensation administration, payroll preview, and executive intelligence. Configuration changes do not mutate finance, AR, payments, or orders."
         actions={
-          <Button type="button" variant="outline" size="sm" onClick={load} disabled={refreshing}>
+          <Button type="button" variant="outline" size="sm" onClick={refreshAll} disabled={refreshing || adminBusy}>
             <RefreshCw className={cn("mr-1 h-4 w-4", refreshing && "animate-spin")} />
             Refresh
           </Button>
@@ -273,6 +437,12 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
       {generationNotice ? (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
           {generationNotice}
+        </div>
+      ) : null}
+
+      {adminNotice ? (
+        <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-800">
+          {adminNotice}
         </div>
       ) : null}
 
@@ -335,6 +505,29 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
             </SectionCard>
           </div>
         </div>
+      ) : null}
+
+      {activeTab === "Compensation Plans" && adminModel ? (
+        <CompensationPlansTab
+          adminModel={adminModel}
+          permissions={adminPermissions}
+          onRefresh={loadAdmin}
+          onCreatePlan={handleCreatePlan}
+          onSavePlan={handleSavePlan}
+          onDuplicatePlan={handleDuplicatePlan}
+          onDeactivatePlan={handleDeactivatePlan}
+          busy={adminBusy}
+        />
+      ) : null}
+
+      {activeTab === "Plan Assignments" && adminModel ? (
+        <CompensationPlanAssignmentsTab
+          adminModel={adminModel}
+          permissions={adminPermissions}
+          onChangePlan={handleChangePlan}
+          onEndAssignment={handleEndAssignment}
+          busy={adminBusy}
+        />
       ) : null}
 
       {activeTab === "Payroll Periods" && model ? (
@@ -647,7 +840,7 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
 
       {setActivePage ? (
         <p className="text-[10px] text-slate-400">
-          Executive Compensation Center is read-only. Approval, lock, export, and paid evidence workflows remain backend-only until Phase 4B.
+          Compensation administration changes plan and assignment master data only. Payroll preview, approval, lock, export, and paid workflows remain separate phases.
         </p>
       ) : null}
     </div>

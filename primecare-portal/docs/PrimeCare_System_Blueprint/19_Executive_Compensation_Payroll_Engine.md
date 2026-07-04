@@ -527,6 +527,38 @@ Minimum UAT:
 
 ---
 
+---
+
+## Phase 5A — Compensation Administration
+
+Phase 5A delivers the master-data administration layer for compensation plans and employee assignments inside the Executive Compensation Center.
+
+| Surface | Scope |
+|---------|-------|
+| Compensation Plans tab | Plan list, view/edit/duplicate/deactivate (no delete) |
+| Plan Details | General, fixed/variable compensation, promotion rules, bonuses, incentives, audit, version history |
+| Plan Versioning | Active plan edits create a new version; prior version retired; assignments keep old `plan_id` |
+| Plan Assignments tab | Employee assignment list, change plan, end assignment (no delete) |
+| Compensation Simulator | Preview-only expected commission/payroll/net; never writes data |
+| Promotion Eligibility panel | Review-only eligibility recommendations; no automatic promotion |
+
+RBAC (application layer; RLS unchanged in Phase 5A):
+
+| Action | Executive | HR | Admin | Agent |
+|--------|-----------|----|-------|-------|
+| View plans/assignments | yes | yes | yes | own assignment only |
+| Create/edit/version/deactivate plans | yes | no | no | no |
+| Assign / change / end assignments | yes | yes | no | no |
+| Simulator / promotion review | yes | yes | yes | no |
+
+Forbidden in Phase 5A:
+
+- Finance, AR, payments, orders, invoice, allocation mutation
+- Payroll preview calculation changes
+- Approval, lock, export, paid workflow changes
+
+---
+
 ## Phase plan
 
 | Phase | Scope |

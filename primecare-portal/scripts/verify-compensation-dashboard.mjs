@@ -78,6 +78,8 @@ for (const chart of [
 
 assert(/KpiCardGrid/.test(pageSrc), "ui.kpi_grid", "dashboard renders KPI cards");
 assert(/Overview/.test(pageSrc), "ui.overview_tab", "overview tab present");
+assert(/Compensation Plans/.test(pageSrc), "ui.plans_tab", "compensation plans tab present");
+assert(/Plan Assignments/.test(pageSrc), "ui.assignments_tab", "plan assignments tab present");
 assert(/Commission History/.test(pageSrc), "ui.commission_history_tab", "commission history tab present");
 assert(/Audit/.test(pageSrc), "ui.audit_tab", "audit tab present");
 assert(/Exports/.test(pageSrc), "ui.exports_tab", "exports tab present");
