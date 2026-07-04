@@ -6052,7 +6052,6 @@ export async function updateLabOrderingModeWrite({
     .from("labs")
     .update({
       ordering_mode: mode,
-      updated_at: new Date().toISOString(),
     })
     .eq("tenant_id", tid)
     .eq("lab_id", lid)
