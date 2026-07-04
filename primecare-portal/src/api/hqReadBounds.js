@@ -47,7 +47,7 @@ export const HQ_COMPENSATION_COMMISSION_READ_COLUMNS =
 export const HQ_COMPENSATION_AUDIT_READ_COLUMNS =
   "id,tenant_id,event_type,entity_type,entity_id,actor_user_id,actor_role,before_json,after_json,reason,metadata,created_at";
 export const HQ_COMPENSATION_EXPORT_READ_COLUMNS =
-  "id,tenant_id,payroll_run_id,period_id,export_format,storage_path,checksum,metadata,created_at,created_by";
+  "id,tenant_id,payroll_run_id,period_id,export_format,storage_path,checksum,metadata,created_at,generated_by";
 
 export const HQ_ORDER_LIST_COLUMNS =
   "id,order_id,lab_id,status,order_date,created_at,total_amount,merchandise_subtotal,delivery_charge_amount,delivery_charge_reason,delivery_method_intent,delivery_charge_status,tenant_id,created_by,notes,agent_id,inventory_updated,fulfilled_at,invoice_id";
