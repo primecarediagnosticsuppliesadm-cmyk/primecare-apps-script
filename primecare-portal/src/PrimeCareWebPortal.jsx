@@ -92,6 +92,21 @@ function UnmappedPageCard({ portalName, setActivePage }) {
   );
 }
 
+function CompensationFoundationPlaceholder({ setActivePage }) {
+  return (
+    <PortalAccessCard
+      variant="notFound"
+      title="Compensation & Payroll foundation"
+      description="The compensation domain foundation is enabled for schema, security, audit, and role access only. Payroll calculations, preview, approval, locking, export, dashboards, and pages are not implemented in this phase."
+      action={
+        setActivePage ? (
+          <PortalAccessAction label="Go to dashboard" onClick={() => setActivePage("dashboard")} />
+        ) : null
+      }
+    />
+  );
+}
+
 function canAccessPage(role, activePage) {
   const key = resolvePageKeyForRole(role, normalizePageKey(activePage));
   return Boolean(
@@ -146,6 +161,9 @@ export default function PrimeCareWebPortal({
             setActivePage={setActivePage}
           />
         );
+
+      case "compensationPayroll":
+        return <CompensationFoundationPlaceholder setActivePage={setActivePage} />;
 
       case "labs":
         return (
@@ -413,6 +431,9 @@ export default function PrimeCareWebPortal({
       case "commissionEngine":
         return <CommissionEnginePage currentUser={currentUser} />;
 
+      case "compensationPayroll":
+        return <CompensationFoundationPlaceholder setActivePage={setActivePage} />;
+
       case "labContractEngine":
         return (
           <LabContractManagementPage
@@ -568,6 +589,21 @@ export default function PrimeCareWebPortal({
 
       default:
         return <UnmappedPageCard portalName="Lab Portal" setActivePage={setActivePage} />;
+          }
+        })()}
+      </RoutedPage>
+    );
+  }
+
+  if (role === ROLES.HR) {
+    return (
+      <RoutedPage>
+        {(() => {
+          switch (activePage) {
+            case "compensationPayroll":
+              return <CompensationFoundationPlaceholder setActivePage={setActivePage} />;
+            default:
+              return <UnmappedPageCard portalName="HR Payroll Support" setActivePage={setActivePage} />;
           }
         })()}
       </RoutedPage>

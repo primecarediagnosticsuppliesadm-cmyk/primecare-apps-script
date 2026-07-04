@@ -49,7 +49,7 @@ export const HQ_EXECUTIVE_MENU_SECTIONS = [
     label: "INVENTORY",
     keys: ["masterCatalog", "inventory", "purchase"],
   },
-  { id: "people", label: "PEOPLE", keys: ["accessAudit"] },
+  { id: "people", label: "PEOPLE", keys: ["accessAudit", "compensationPayroll"] },
   { id: "growth", label: "GROWTH", keys: ["qualificationReview", "commissionEngine", "labContractEngine"] },
 ];
 
@@ -75,6 +75,7 @@ const EXECUTIVE_HQ_MENU_KEYS = new Set([
   "risk",
   "purchase",
   "commissionEngine",
+  "compensationPayroll",
   "labContractEngine",
   "predatorDebug",
   "qaCommandCenter",
@@ -95,6 +96,7 @@ const ADMIN_HQ_MENU_KEYS = new Set([
   "logisticsDelivery",
   "risk",
   "purchase",
+  "compensationPayroll",
   "notifications",
   "predatorDebug",
 ]);
@@ -133,6 +135,7 @@ export const MENU_ITEMS = [
   { key: "distributorOs", label: "Distributor OS", icon: "Building2" },
   { key: "distributorProvisioning", label: ENTERPRISE_PAGE_LABELS.distributorProvisioning, icon: "ClipboardList" },
   { key: "commissionEngine", label: ENTERPRISE_PAGE_LABELS.commissionEngine, icon: "Coins" },
+  { key: "compensationPayroll", label: ENTERPRISE_PAGE_LABELS.compensationPayroll, icon: "Wallet" },
   { key: "labContractEngine", label: ENTERPRISE_PAGE_LABELS.labContractEngine, icon: "FileText" },
   { key: "operationsCenter", label: ENTERPRISE_PAGE_LABELS.operationsCenter, icon: "Radio" },
   { key: "accessAudit", label: ENTERPRISE_PAGE_LABELS.accessAudit, icon: "Shield" },
@@ -179,6 +182,7 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "distributorOs",
   "distributorProvisioning",
   "commissionEngine",
+  "compensationPayroll",
   "labContractEngine",
   "operationsCenter",
   "logisticsDelivery",

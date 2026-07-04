@@ -31,7 +31,10 @@ Blueprint refs: [01_Database_Schema.md](../PrimeCare_System_Blueprint/01_Databas
 | [Purchase order](#purchase-order) | Procurement | `purchase_orders` |
 | [Qualification](#qualification) | Growth | `lab_qualifications` |
 | [Lab contract](#lab-contract) | Growth | `lab_contracts` |
-| [Commission entry](#commission-entry) | Growth | `commission_entries` |
+| [Commission entry](#commission-entry) | Growth / legacy analytics | `commission_entries` |
+| [Compensation plan](#compensation-plan-phase-3a-foundation) | Compensation / Payroll | `compensation_plans` |
+| [Payroll run](#payroll-run-phase-3a-foundation) | Compensation / Payroll | `payroll_runs` |
+| [Payroll run line](#payroll-run-line-phase-3a-foundation) | Compensation / Payroll | `payroll_run_lines` |
 
 ---
 
@@ -70,13 +73,15 @@ Blueprint refs: [01_Database_Schema.md](../PrimeCare_System_Blueprint/01_Databas
 | **Source of truth** | `public.labs` — business key `(tenant_id, lab_id)` |
 | **Lifecycle** | `labs.status` owns lifecycle state: `PROSPECT`, `ACTIVE`, `INACTIVE`. **Active Labs** = `labs.status == ACTIVE`. **ordering_mode** is separate checkout governance: `hq_managed`, `hybrid`, `self_service`, `suspended`. |
 | **Lifecycle transitions** | `admin` / `executive` only. `ACTIVE -> INACTIVE` requires confirmation + reason and forces `ordering_mode = suspended`. `INACTIVE -> ACTIVE` requires confirmation + reason and does not restore prior ordering mode. |
-| **APIs** | `createLabWrite`, `getLabsCredit`, `updateLabOrderingModeWrite`, `updateLabLifecycleStatusWrite`, `getLabOrderingContextRead` |
+| **APIs** | `createLabWrite`, `getLabsCredit`, `updateLabOrderingModeWrite`, `updateLabLifecycleStatusWrite`, `getLabOrderingContextRead`, `createOrderWrite` for admin-on-behalf ordering |
 | **Screens** | LabsPage, LabOrderingPage, CollectionsPage, OperationalLabDrawer |
-| **Verify scripts** | `verify-labs-admin-flow.mjs`, planned `verify-lab-lifecycle-status-flow.mjs`, `verify-lab-ordering-flow.mjs`, `verify-create-lab-ar-rls.mjs`, `verify-credit-risk-admin-flow.mjs` |
+| **Verify scripts** | `verify-labs-admin-flow.mjs`, `verify-lab-lifecycle-status-flow.mjs`, `verify-lab-ordering-flow.mjs`, `verify-create-lab-ar-rls.mjs`, `verify-credit-risk-admin-flow.mjs` |
 | **Dependencies** | Tenant, Profile (agent assignment), AR row on create |
 | **Known gaps** | GAP-BP-006 mitigated — `ordering_mode` column; preferred delivery day Phase 4 |
 
 `INACTIVE` is not a financial state. It must never hide or alter AR, invoices, payments, allocations, orders, shipments, Track Order, audit history, reporting, or authorized HQ visibility.
+
+Admin-on-behalf ordering may create orders for `ACTIVE` labs when `ordering_mode` is `hq_managed`, `hybrid`, or `self_service`. It is blocked when the customer lab is `INACTIVE` or `ordering_mode = suspended`. The selected lab remains the customer and the authenticated HQ user remains the actor; do not impersonate a lab user.
 
 ---
 
@@ -122,6 +127,8 @@ Blueprint refs: [01_Database_Schema.md](../PrimeCare_System_Blueprint/01_Databas
 | **Known gaps** | GAP-BP-002 dual `order_items`/`order_lines`; GAP-BP-015/016 idempotency client window 90s; server RPC has no TTL; GAP-BP-004 delivery columns env drift |
 
 **Fulfill side effects (idempotent flags):** inventory ORDER_OUT → AR bump → invoice RPC → shipment create.
+
+Admin-on-behalf orders must identify `source = admin_on_behalf` in order/audit metadata, preserve selected lab as customer, preserve authenticated HQ user as actor, and keep pricing, catalog, credit, inventory, finance, delivery, AR, shipment, and commission behavior unchanged.
 
 ---
 
@@ -339,13 +346,55 @@ Blueprint refs: [01_Database_Schema.md](../PrimeCare_System_Blueprint/01_Databas
 
 | Field | Value |
 |-------|-------|
-| **Source of truth** | `public.commission_entries` |
-| **Lifecycle** | pending → approved → paid (payroll separate from lab payments) |
-| **APIs** | Commission engine reads |
+| **Source of truth** | Existing `public.commission_entries` for legacy/distributor commission analytics only |
+| **Lifecycle** | pending → approved → paid (existing Commission Engine workflow) |
+| **APIs** | Existing Commission Engine reads |
 | **Screens** | CommissionEnginePage |
 | **Verify scripts** | `verify-primecare-production-golden-path.mjs` (GP-45) |
 | **Dependencies** | Payment, Agent |
-| **Known gaps** | Must not alter payment allocation logic (Blueprint §06) |
+| **Known gaps** | Not payroll SoT after Blueprint 19. Existing revenue/distributor logic must not be used for payroll payout calculation. Must not alter payment allocation logic (Blueprint §06). |
+
+---
+
+## Compensation plan (Phase 3A foundation)
+
+| Field | Value |
+|-------|-------|
+| **Source of truth** | `public.compensation_plans` |
+| **Lifecycle** | draft → active → retired |
+| **APIs** | None in Phase 3A; foundation schema/RLS only |
+| **Screens** | Placeholder navigation only; no compensation/payroll pages |
+| **Verify scripts** | `verify-compensation-schema.mjs`, `verify-compensation-role-access.mjs`, `verify-compensation-rls.mjs` |
+| **Dependencies** | Profile/Agent, Executive approval |
+| **Known gaps** | Calculation engine, preview workflow, approval/lock/export APIs, and payroll UI deferred to later phases |
+
+---
+
+## Payroll run (Phase 3A foundation)
+
+| Field | Value |
+|-------|-------|
+| **Source of truth** | `public.payroll_runs` + `public.payroll_periods` |
+| **Lifecycle** | draft → previewed → submitted → approved → locked → exported; void exception state |
+| **APIs** | None in Phase 3A; lifecycle constraints only |
+| **Screens** | Placeholder navigation only; Payroll Periods, Run Preview, Approval Queue, and Export History remain future |
+| **Verify scripts** | `verify-payroll-period-lifecycle.mjs`, `verify-compensation-audit.mjs`, future `verify-payroll-run-lifecycle.mjs`, future `verify-compensation-approval-workflow.mjs`, future `verify-payroll-export.mjs` |
+| **Dependencies** | Compensation plan assignment, payment cash collection snapshot, attribution snapshot, adjustments, Executive approval |
+| **Known gaps** | No accounting entry in this phase; export metadata only until future finance approval |
+
+---
+
+## Payroll run line (Phase 3A foundation)
+
+| Field | Value |
+|-------|-------|
+| **Source of truth** | `public.payroll_run_lines` |
+| **Lifecycle** | draft → previewed → submitted → approved → locked → exported; void exception state |
+| **APIs** | None in Phase 3A; no calculation or preview generation |
+| **Screens** | Planned Agent Compensation Detail and Agent Self-View remain future |
+| **Verify scripts** | `verify-compensation-schema.mjs`, `verify-compensation-rls.mjs`, future `verify-compensation-cash-only.mjs`, future `verify-compensation-attribution.mjs` |
+| **Dependencies** | Payment cash collected, `payments.agent_id` or `lab_ownership` payment-date snapshot, plan assignment, approved adjustments |
+| **Known gaps** | Must persist attribution evidence; Agent read must be own locked/exported history only |
 
 ---
 
@@ -360,4 +409,5 @@ Blueprint refs: [01_Database_Schema.md](../PrimeCare_System_Blueprint/01_Databas
 | Inventory | `verify-inventory-reconciliation`, `verify-procurement-inventory-flow` |
 | Lab | `verify-labs-admin-flow`, planned `verify-lab-lifecycle-status-flow`, `verify-lab-ordering-flow` |
 | AR | `verify-collection-inconsistencies`, `verify-credit-risk-admin-flow` |
+| Compensation / payroll | `verify-compensation-schema`, `verify-compensation-rls`, `verify-payroll-period-lifecycle`, `verify-compensation-audit`, `verify-compensation-role-access`; future `verify-compensation-cash-only`, `verify-compensation-attribution`, `verify-payroll-run-lifecycle` |
 | Full O2C | `verify-primecare-production-golden-path` |

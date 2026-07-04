@@ -32,6 +32,9 @@ Hard constraints. Violations require explicit approval + blueprint amendment + v
 | F9 | Delivery charge **not** in invoice/AR in Phase 3A |
 | F10 | Commission must not change payment logic |
 | F11 | PDF reads invoice_line_items only |
+| F12 | Payroll commission must be cash-only: `payments.amount_received` attributable collected cash × approved rate |
+| F13 | Payroll must never use order value, invoice value, fulfilled revenue, projected revenue, outstanding receivables, or allocation totals as commission amount |
+| F14 | Payroll approval/export must not create accounting entries, bank payouts, GL postings, or disbursement records without an approved future finance phase |
 
 ---
 
@@ -67,9 +70,12 @@ Hard constraints. Violations require explicit approval + blueprint amendment + v
 | P3 | Admin freeze blocks structural changes, not daily payments |
 | P4 | Permissions from matrix — not hardcoded |
 | P5 | **Ordering Mode controls order initiation only** — never block track order, invoices, payments, collections, finance, inventory, or shipment lifecycle |
-| P6 | HQ admin override always allowed for order creation |
+| P6 | HQ admin/executive on-behalf order creation is allowed only for `ACTIVE` labs with `ordering_mode` in `hq_managed`, `hybrid`, or `self_service`; it is blocked for `INACTIVE` labs and `suspended` Ordering Mode |
 | P7 | Existing labs default to `hq_managed` on migration (non-breaking) |
 | P8 | `INACTIVE` lab lifecycle status must never hide or alter AR, invoices, payments, allocations, orders, shipments, Track Order, audit history, reporting, or authorized HQ visibility |
+| P9 | Admin on-behalf ordering must reuse `LabOrderingPage`/cart flow, must not impersonate lab users, and must preserve existing pricing, catalog, credit, inventory, finance, delivery, AR, shipment, and commission behavior |
+| P10 | HR is an HQ payroll support role only; HR cannot approve payouts, approve commission changes, lock payroll, export payroll, or mutate finance records |
+| P11 | Distributor OS has no payroll ownership, payout approval, payout authorization, or accounting role |
 
 ---
 
@@ -81,6 +87,8 @@ Hard constraints. Violations require explicit approval + blueprint amendment + v
 | Invoice/payment/AR lifecycle | HQ finance |
 | Phase 3B delivery finance | HQ finance + founder |
 | New core table | HQ + architect |
+| Compensation/payroll approval and export | Executive |
+| HR role/RLS enablement | HQ + security review |
 
 ---
 

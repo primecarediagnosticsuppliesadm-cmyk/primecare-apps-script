@@ -95,6 +95,11 @@ export function normalizePageKey(page) {
     case "commission-management":
     case "commissionEngine":
       return "commissionEngine";
+    case "compensation-payroll":
+    case "executive-compensation":
+    case "payroll":
+    case "compensationPayroll":
+      return "compensationPayroll";
     case "lab-contracts":
     case "contract-management":
     case "labContractEngine":

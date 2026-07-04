@@ -41,6 +41,7 @@ const ICONS = {
   distributorOs: Building2,
   distributorProvisioning: ClipboardList,
   commissionEngine: Coins,
+  compensationPayroll: Wallet,
   labContractEngine: FileText,
   operationsCenter: Radio,
   accessAudit: Shield,

@@ -4,6 +4,86 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-04 — Executive Compensation & Payroll Engine Phase 3A Foundation
+
+### Change
+
+- Add Phase 3A compensation/payroll foundation migration for new domain tables, lifecycle constraints, indexes, RLS helpers, RLS policies, and HR role SQL constraint support.
+- Implement `hr` role metadata, labels, provisioning guardrails, and placeholder navigation only.
+- Add read-only foundation verification scripts: `verify-compensation-schema.mjs`, `verify-compensation-rls.mjs`, `verify-payroll-period-lifecycle.mjs`, `verify-compensation-audit.mjs`, and `verify-compensation-role-access.mjs`.
+- Update Blueprint and Certification docs from planned schema to Phase 3A foundation status.
+
+### Not changed
+
+- No commission calculations, payroll calculations, payroll preview generation, approval workflow API, lock/export engine, payroll dashboard, payroll UI page, accounting entry, bank payout, GL posting, or disbursement record.
+- No Finance, AR, Payments, Invoices, Orders, Inventory, Logistics, Collections, legacy Commission Engine calculation, Projection Engine, projection flag, or O2C business rule behavior changed.
+
+### Verification gates
+
+- `npm run build`
+- `node scripts/verify-runtime-import-safety.mjs`
+- `node scripts/verify-compensation-schema.mjs`
+- `node scripts/verify-compensation-rls.mjs`
+- `node scripts/verify-payroll-period-lifecycle.mjs`
+- `node scripts/verify-compensation-audit.mjs`
+- `node scripts/verify-compensation-role-access.mjs`
+- `node scripts/verify-financial-reconciliation.mjs`
+- `node scripts/verify-ar-reconcile.mjs`
+- `node scripts/verify-hq-rls-reads.mjs`
+- `node scripts/run-browser-smoke-all-roles.mjs`
+
+### Phase 3B gate
+
+- GO only after Phase 3A gates pass and local review confirms no O2C mutation or calculation behavior was introduced.
+
+---
+
+## 2026-07-04 — Executive Compensation & Payroll Engine Blueprint
+
+### Change
+
+- Add Blueprint doc `19_Executive_Compensation_Payroll_Engine.md` defining the HQ-owned compensation/payroll domain.
+- Define planned `hr` role as HQ payroll support: maintain payroll data and generate previews only; no payout approval, commission approval, lock, export, accounting, or finance mutation authority.
+- Resolve existing Commission Engine conflict: distributor/revenue-based commission analytics are not payroll SoT.
+- Establish cash-only commission rule: `attributable_cash_collected × applicable_rate`.
+- Forbid order value, invoice value, fulfilled revenue, projected revenue, outstanding receivables, or allocation totals as commission amount.
+- Define canonical agent attribution: `payments.agent_id` when populated and certified; otherwise active `lab_ownership` snapshot at payment date, persisted with audit evidence.
+- Define Year-1 baseline and promotion rules: first 3 months ₹20,000 salary + ₹5,000 fuel + ₹500 mobile + 3%; promotion after cumulative collections >= ₹5,00,000, collection efficiency >= 80%, and no account overdue > 90 days; promoted salary ₹25,000 + 3.5% commission.
+- Define payroll ownership: Executive approves/locks/authorizes/exports; HR previews/submits; Admin views/recommends; Agent views own locked/exported history; Distributor OS has no payroll ownership.
+
+### Not changed
+
+- Documentation only. No app code, SQL, RLS policy, role provisioning, order lifecycle logic, finance, AR, invoice, payment, allocation, collection source records, inventory, logistics, existing commission source records, accounting, commit, or push changed.
+
+### Implementation gate
+
+- GO for Phase 2 implementation planning.
+- NO-GO for implementation until HR role/RLS, payroll schema migrations, cash-only commission replacement, attribution snapshot design, approval/export workflows, verification scripts, and UAT checklist are reviewed and approved.
+
+---
+
+## 2026-07-03 — Admin On-Behalf Ordering Blueprint Update
+
+### Change
+
+- Clarify that `admin` and `executive` users may create orders on behalf of `ACTIVE` labs when `ordering_mode` is `hq_managed`, `hybrid`, or `self_service`.
+- Block admin-on-behalf order creation when `labs.status = INACTIVE` or `ordering_mode = suspended`.
+- Require reuse of the existing `LabOrderingPage` catalog/cart/checkout flow in explicit `adminOnBehalf` mode.
+- Prohibit lab-user impersonation: the selected lab remains the customer and the authenticated HQ user remains the actor.
+- Require order/audit metadata to identify `source = admin_on_behalf`, originating screen, selected customer lab, authenticated HQ actor, lifecycle status, and ordering mode at submit time.
+- Preserve existing pricing, catalog, credit, inventory, finance, delivery, AR, shipment, and commission behavior.
+
+### Not changed
+
+- Documentation only. No app code, SQL, RLS policy, order lifecycle logic, finance, AR, invoice, payment, inventory, shipment, commission, delivery behavior, commit, or push changed.
+
+### Implementation gate
+
+- GO for implementation planning after review.
+- NO-GO for implementation until the on-behalf UI/API audit path, verification extension, and UAT checklist are reviewed against this Blueprint update.
+
+---
+
 ## 2026-07-03 — Sprint 9 Phase 2A Lab Lifecycle Backend
 
 ### Change

@@ -32,7 +32,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | Script | Checks | When |
 |--------|--------|------|
 | verify-orders-admin-flow.mjs | KPI, fulfill ledger, freeze | Orders page |
-| verify-lab-ordering-flow.mjs | Track order_id; RPC smoke | Lab portal |
+| verify-lab-ordering-flow.mjs | Track order_id; RPC smoke; admin-on-behalf implementation must extend this gate for `adminOnBehalf` source/audit metadata and eligibility blocks | Lab portal / admin on-behalf ordering |
 | verify-transaction-integrity-rpcs.mjs | Sprint 1 RPC symbols | Order/payment RPC |
 | verify-bounded-reads.mjs | No unbounded payment/PO select | Read paths |
 
@@ -80,6 +80,22 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-founder-snapshot.mjs | Founder RPC | Founder |
 | verify-executive-financial-intelligence.mjs | EFI read-only | EFI module |
 
+### Compensation & payroll (Phase 3A foundation + future)
+
+| Script | Checks | When |
+|--------|--------|------|
+| verify-compensation-schema.mjs | Phase 3A tables, constraints, indexes, RLS policy presence, no accidental finance/O2C mutation | Compensation schema |
+| verify-compensation-rls.mjs | Executive/HR/Admin/Agent visibility contract and Distributor exclusion in compensation RLS helpers/policies | Phase 3A RLS/security |
+| verify-payroll-period-lifecycle.mjs | draft → previewed → submitted → approved → locked → exported lifecycle constraints only; no engine functions | Phase 3A lifecycle foundation |
+| verify-compensation-audit.mjs | Append-only audit/approval event infrastructure and adjustment reason/type constraints | Phase 3A audit foundation |
+| verify-compensation-role-access.mjs | `hr` role metadata, provisioning guard, and placeholder navigation only | Phase 3A role foundation |
+| verify-compensation-cash-only.mjs | Commission uses `payments.amount_received` cash collected only; rejects order/invoice/revenue/receivable inputs | Commission calculation |
+| verify-compensation-attribution.mjs | `payments.agent_id` priority, `lab_ownership` payment-date snapshot fallback, persisted attribution evidence | Attribution |
+| verify-payroll-run-lifecycle.mjs | open → previewed → submitted → approved → locked → exported, immutability after lock | Payroll run lifecycle |
+| verify-compensation-approval-workflow.mjs | HR preview/submit, Executive approve/lock/export, Admin recommend-only, Agent read-only | Approval |
+| verify-payroll-export.mjs | Export only from locked run, checksum/storage metadata, no accounting entry | Export |
+| verify-compensation-no-finance-mutation.mjs | Orders, invoices, payments, allocations, AR, inventory, logistics unchanged by payroll actions | Regression |
+
 ### Infrastructure
 
 | Script | Checks | When |
@@ -116,9 +132,13 @@ verify-hq-rls-reads.mjs
 
 **Lab portal change:** `verify-lab-ordering-flow.mjs` + `verify-hq-rls-reads.mjs`
 
+**Admin on-behalf ordering change:** `verify-lab-ordering-flow.mjs` + `verify-orders-admin-flow.mjs` + `verify-labs-admin-flow.mjs` + `verify-lab-lifecycle-status-flow.mjs` + `verify-financial-reconciliation.mjs` + `verify-delivery-charge-policy.mjs` + `verify-hq-rls-reads.mjs` + `run-browser-smoke-all-roles.mjs`
+
 **Lab lifecycle change:** `verify-lab-lifecycle-status-flow.mjs` + `verify-labs-admin-flow.mjs` + `verify-lab-ordering-flow.mjs` + `verify-labs-projection-parity.mjs` + `verify-financial-reconciliation.mjs` + `verify-hq-rls-reads.mjs`
 
 **Logistics change:** `verify-logistics-dispatch-flow.mjs` + `verify-delivery-charge-policy.mjs`
+
+**Compensation / payroll change:** planned compensation verify bundle + `verify-financial-reconciliation.mjs` + `verify-payment-allocation-flow.mjs` + `verify-hq-rls-reads.mjs` + `verify-ar-reconcile.mjs` + `verify-agent-collections-ownership-filter.mjs` + `run-browser-smoke-all-roles.mjs`
 
 ---
 
@@ -129,9 +149,11 @@ Use [templates/UAT_Checklist_Template.md](./templates/UAT_Checklist_Template.md)
 | Module | Minimum UAT |
 |--------|-------------|
 | Lab | Checkout → Track Order → Previous Orders |
+| Admin on-behalf ordering | From `OperationalLabDrawer` / Labs Admin, launch `LabOrderingPage` in `adminOnBehalf` mode; confirm `admin` and `executive` can order for `ACTIVE` labs in `hq_managed`, `hybrid`, and `self_service`; confirm `INACTIVE` and `suspended` are blocked; confirm selected lab is customer, authenticated HQ user is actor, `source = admin_on_behalf` is present in order/audit metadata, and pricing/catalog/credit/inventory/finance/delivery/AR/shipment/commission behavior is unchanged |
 | Lab lifecycle | `PROSPECT -> ACTIVE`, `ACTIVE -> INACTIVE`, `INACTIVE -> ACTIVE`; confirm reason/audit capture, inactive checkout/reorder blocked, ordering remains suspended after reactivation, and invoices/payments/Track Order/history remain visible |
 | Orders | Fulfill → invoice → shipment |
 | Finance | Pay → allocate → open balance |
+| Compensation / payroll | HR generates preview; commission uses collected cash only; Executive approves/locks/exports; Admin can recommend only; Agent sees own locked/exported history only; existing finance/O2C records unchanged |
 | Logistics | Status transitions → delivered_at |
 | Ops | Provision lab user; ownership |
 | Inventory | PO receive → stock increase |

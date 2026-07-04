@@ -369,6 +369,28 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 
 ---
 
+## compensation / payroll tables (Phase 3A foundation)
+
+Phase 3A creates the schema, lifecycle constraints, RLS helpers/policies, attribution snapshot infrastructure, and audit/event infrastructure only. No commission calculations, payroll calculations, preview generation, approval workflow API, lock/export engine, accounting entry, bank payout, GL posting, disbursement record, dashboard, or payroll UI page exists in this phase.
+
+| Table | Purpose | RLS expectation |
+|-------|---------|-----------------|
+| compensation_plans | Versioned salary, allowance, commission, promotion, bonus, and incentive rules | Executive full; HR draft/support; admin read/recommend; no lab/distributor ownership |
+| compensation_plan_assignments | Agent-to-plan effective-dated history | Executive/HR manage; agent own read after lock/export |
+| payroll_periods | Monthly payroll window and lifecycle state | Executive approve/lock/export; HR preview/submit |
+| payroll_runs | Payroll run header, status, totals, approval/lock/export state | Executive full; HR preview/submit; admin read/recommend |
+| payroll_run_lines | Agent-level salary, allowances, cash-only commission, incentives, adjustments, net payable | Executive/HR scoped; agent own locked/exported history only |
+| compensation_commission_entries | Cash-collected commission entries, or successor to existing commission_entries if migrated | Executive approval; HR preview; cash-only source |
+| compensation_adjustments | Manual adjustments, penalties, and recoveries | Executive approval required |
+| compensation_audit_events | Append-only compensation audit | Role-scoped read; no broad cross-agent exposure |
+| compensation_approval_events | Approval/rejection/lock/export evidence | Executive-owned workflow audit |
+| payroll_exports | Export metadata/checksum/storage reference | Executive export; HR no export without approval |
+| compensation_attribution_snapshots | Payment/lab/agent/ownership/rule/source snapshot evidence | Executive/HR/Admin scoped; agent own snapshot visibility only |
+
+Payroll tables are derived from operational SoT and must not mutate `orders`, `invoices`, `payments`, `invoice_payment_allocations`, `ar_credit_control`, inventory, logistics, or accounting records. Commission must be based on `payments` cash actually collected only. See [19_Executive_Compensation_Payroll_Engine.md](./19_Executive_Compensation_Payroll_Engine.md).
+
+---
+
 ## Audit / access (no single `audit` table)
 
 | Table | Purpose | RLS |
@@ -377,7 +399,8 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 | lab_assignment_history | Agent transfer history | Yes |
 | operational_evidence | Evidence metadata | Yes |
 | event_log | Generic events | Yes — **no policies** (gap) |
-| commission_entries | Commission ledger (≠ lab payments) | Yes |
+| commission_entries | Existing commission ledger (not payroll SoT after Phase 1 compensation Blueprint) | Yes |
+| compensation_audit_events | HQ compensation/payroll audit foundation | Yes |
 
 ---
 

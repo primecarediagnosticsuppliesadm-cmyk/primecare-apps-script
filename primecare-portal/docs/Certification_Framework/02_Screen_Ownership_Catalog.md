@@ -16,13 +16,15 @@ Routing: `src/config/pageRouting.js` · Permissions: `src/config/rolePermissionM
 |-------|-------|
 | **Path** | `/lab-orders` |
 | **Component** | `src/pages/LabOrderingPage.jsx` |
-| **Users** | `lab` |
+| **Users** | `lab`; `admin` / `executive` only in explicit `adminOnBehalf` mode |
 | **Reads** | `getLabOrderingContextRead`, `getLabCatalogRead`, `getLabRecentOrdersRead`, `getLabOrderDetailsRead` |
-| **Writes** | `createOrderWrite` (checkout), repeat order |
-| **Verification** | `verify-lab-ordering-flow.mjs`; browser steps `BGP-L01`–`BGP-L08`; inactive lab portal read-only history UAT |
+| **Writes** | `createOrderWrite` (checkout), repeat order; admin-on-behalf order creation for eligible `ACTIVE` labs |
+| **Verification** | `verify-lab-ordering-flow.mjs`; browser steps `BGP-L01`–`BGP-L08`; inactive lab portal read-only history UAT; admin-on-behalf order UAT |
 | **Perf target** | **≤ 300 ms** catalog + context (warm cache ≤ 50 ms) |
 
 Inactive labs may log in when provisioned, but checkout/reorder must be blocked because lifecycle transition forces `ordering_mode = suspended`. Track Order, invoices, payments, previous orders, and history remain available.
+
+Admin-on-behalf mode must reuse this page and cart flow without duplicating the ordering UI or impersonating the lab user. The selected lab remains the customer, the authenticated HQ user remains the actor, and order/audit metadata must include `source = admin_on_behalf`.
 
 ---
 
@@ -120,11 +122,13 @@ Inactive lab lifecycle status must not hide receivables, payments, allocations, 
 | **Path** | `/labs` |
 | **Users** | `admin` |
 | **Reads** | `getLabsCredit`; shadow adapter `read_labs_list_v1` remains flag OFF until parity/RLS review; lab detail drawers |
-| **Writes** | `createLabWrite`, ordering mode, delivery day, lifecycle status transitions via `updateLabLifecycleStatusWrite` |
-| **Verification** | `verify-labs-admin-flow.mjs` (Total, Prospect, Active, Inactive, Order-Eligible, Ordering Suspended KPIs), `verify-lab-lifecycle-status-flow.mjs`, `verify-create-lab-ar-rls.mjs`, `verify-labs-projection-parity.mjs` |
+| **Writes** | `createLabWrite`, ordering mode, delivery day, lifecycle status transitions via `updateLabLifecycleStatusWrite`; admin-on-behalf order launch for eligible labs |
+| **Verification** | `verify-labs-admin-flow.mjs` (Total, Prospect, Active, Inactive, Order-Eligible, Ordering Suspended KPIs), `verify-lab-lifecycle-status-flow.mjs`, `verify-lab-ordering-flow.mjs`, `verify-create-lab-ar-rls.mjs`, `verify-labs-projection-parity.mjs` |
 | **Perf target** | **≤ 300 ms** list |
 
 Lifecycle controls must require confirmation and reason for inactivation/reactivation. `ACTIVE -> INACTIVE` must force `ordering_mode = suspended`; `INACTIVE -> ACTIVE` must not restore previous Ordering Mode.
+
+Admin-on-behalf order actions from Labs Admin / `OperationalLabDrawer` must be enabled only for `ACTIVE` labs with `ordering_mode` in `hq_managed`, `hybrid`, or `self_service`, and blocked for `INACTIVE` or `suspended` labs.
 
 ---
 
@@ -225,9 +229,46 @@ Inactive labs remain visible in Credit & Risk when they have AR/credit history; 
 | Screen | Users | Verification | Perf target |
 |--------|-------|--------------|-------------|
 | RevenueFunnelPage | executive | `verify-founder-snapshot` | ≤ 300 ms |
-| CommissionEnginePage | executive | golden path GP-45 | ≤ 300 ms |
+| CommissionEnginePage | executive | golden path GP-45; legacy analytics only, not payroll SoT | ≤ 300 ms |
 | LabContractManagementPage | executive | golden path GP-11 | ≤ 300 ms |
 | FounderFinancialIntelligencePage | executive | EFI read-only | ≤ 400 ms |
+
+---
+
+## Compensation / payroll screens (planned)
+
+### ExecutiveCompensationDashboard
+
+| Field | Value |
+|-------|-------|
+| **Path** | planned `/executive-compensation` |
+| **Users** | `executive`; `hr` support view after role/RLS implementation |
+| **Reads** | Payroll liability, periods, approval queue, cash-only commission summaries |
+| **Writes** | Executive approval/lock/export only; HR preview/submit only |
+| **Verification** | `verify-compensation-approval-workflow.mjs`, `verify-compensation-rls.mjs`, `verify-compensation-no-finance-mutation.mjs` |
+| **Perf target** | planned ≤ 350 ms bounded dashboard read |
+
+### PayrollRunPreview
+
+| Field | Value |
+|-------|-------|
+| **Path** | planned `/payroll-runs/:period` |
+| **Users** | `executive`, `hr`; `admin` view/recommend only |
+| **Reads** | Payroll period, run lines, compensation plans, attribution snapshots, adjustments |
+| **Writes** | HR generate/submit preview; Executive approve/reject/lock/export |
+| **Verification** | `verify-payroll-run-lifecycle.mjs`, `verify-compensation-cash-only.mjs`, `verify-compensation-attribution.mjs` |
+| **Perf target** | planned ≤ 400 ms bounded run read |
+
+### AgentCompensationHistory
+
+| Field | Value |
+|-------|-------|
+| **Path** | planned `/agent-compensation` |
+| **Users** | `agent` own locked/exported history only; Executive/HR/Admin according to payroll role matrix |
+| **Reads** | Own payroll lines and approved adjustment summaries |
+| **Writes** | None for agent |
+| **Verification** | `verify-compensation-rls.mjs`, browser UAT for own-history isolation |
+| **Perf target** | planned ≤ 250 ms own-history read |
 
 ---
 
@@ -251,6 +292,9 @@ Inactive labs remain visible in Credit & Risk when they have AR/credit history; 
 | CollectionsPage | BGP-A10–A12 |
 | LabInvoiceCenterPage | BGP-L09 |
 | ExecutiveFinancialIntelligencePage | BGP-E03 |
+| ExecutiveCompensationDashboard (planned) | planned BGP-COMP-E01 |
+| PayrollRunPreview (planned) | planned BGP-COMP-HR01 / BGP-COMP-E02 |
+| AgentCompensationHistory (planned) | planned BGP-COMP-A01 |
 | DashboardPage | BGP-A01, BGP-L01, BGP-E01 |
 
 Full step definitions: [04_Browser_Golden_Path.md](./04_Browser_Golden_Path.md)
@@ -267,4 +311,5 @@ Full step definitions: [04_Browser_Golden_Path.md](./04_Browser_Golden_Path.md)
 | CollectionsPage | `verify-financial-reconciliation`, `verify-payment-allocation-flow` |
 | OperationsCenterAdminPage | `verify-operations-center-admin-flow`, `verify-hq-freeze-policy` |
 | MasterCatalog + Inventory | `verify-inventory-dashboard-kpi`, `verify-procurement-inventory-flow` |
+| Compensation / payroll (Phase 3A foundation + future) | `verify-compensation-schema`, `verify-compensation-rls`, `verify-payroll-period-lifecycle`, `verify-compensation-audit`, `verify-compensation-role-access`; future `verify-compensation-cash-only`, `verify-compensation-attribution`, `verify-payroll-run-lifecycle`, `verify-compensation-approval-workflow`, `verify-payroll-export`, `verify-compensation-no-finance-mutation` |
 | Any RLS touch | `verify-hq-rls-reads` |

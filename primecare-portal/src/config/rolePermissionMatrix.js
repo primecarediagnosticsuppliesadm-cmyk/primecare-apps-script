@@ -8,6 +8,7 @@ import { IS_DEV } from "@/config/environment.js";
 export const ROLES = {
   EXECUTIVE: "executive",
   ADMIN: "admin",
+  HR: "hr",
   DISTRIBUTOR_ADMIN: "distributor_admin",
   DISTRIBUTOR_MANAGER: "distributor_manager",
   AGENT: "agent",
@@ -21,6 +22,7 @@ export const ALL_ROLE_SLUGS = Object.values(ROLES);
 export const ROLE_LABELS = {
   [ROLES.EXECUTIVE]: "HQ Executive",
   [ROLES.ADMIN]: "HQ Admin",
+  [ROLES.HR]: "HQ HR / Payroll Support",
   [ROLES.DISTRIBUTOR_ADMIN]: "Distributor Admin",
   [ROLES.DISTRIBUTOR_MANAGER]: "Distributor Manager",
   [ROLES.AGENT]: "Field Agent",
@@ -32,6 +34,7 @@ export const ROLE_LABELS = {
 export const LOGIN_ENABLED_ROLES = new Set([
   ROLES.ADMIN,
   ROLES.EXECUTIVE,
+  ROLES.HR,
   ROLES.AGENT,
   ROLES.LAB,
   ROLES.DISTRIBUTOR_ADMIN,
@@ -43,6 +46,7 @@ export const LOGIN_ENABLED_ROLES = new Set([
 export const PILOT_LAUNCH_ROLES = new Set([
   ROLES.EXECUTIVE,
   ROLES.ADMIN,
+  ROLES.HR,
   ROLES.AGENT,
   ROLES.LAB,
 ]);
@@ -80,6 +84,7 @@ export const PERMISSION_BY_KEY = {
   distributorOs: [ROLES.EXECUTIVE, ROLES.ADMIN, ROLES.DISTRIBUTOR_ADMIN, ROLES.DISTRIBUTOR_MANAGER],
   distributorProvisioning: [ROLES.EXECUTIVE],
   commissionEngine: [ROLES.EXECUTIVE],
+  compensationPayroll: [ROLES.EXECUTIVE, ROLES.HR, ROLES.ADMIN],
   labContractEngine: [ROLES.ADMIN, ROLES.EXECUTIVE],
   operationsCenter: [
     ROLES.ADMIN,
@@ -168,6 +173,7 @@ export const UNAUTHORIZED_MENU_PAGES_BY_ROLE = {
     "distributorManagement",
     "distributorProvisioning",
     "commissionEngine",
+    "compensationPayroll",
     "labContractEngine",
     "visits",
     "purchase",
@@ -192,6 +198,7 @@ export const UNAUTHORIZED_MENU_PAGES_BY_ROLE = {
     "distributorManagement",
     "distributorProvisioning",
     "commissionEngine",
+    "compensationPayroll",
     "labContractEngine",
     "accessAudit",
     "purchase",
@@ -218,6 +225,7 @@ export const UNAUTHORIZED_MENU_PAGES_BY_ROLE = {
     "distributorManagement",
     "distributorProvisioning",
     "commissionEngine",
+    "compensationPayroll",
     "labContractEngine",
     "visits",
     "collections",
@@ -241,6 +249,7 @@ export const REQUIRED_MENU_PAGES_BY_ROLE = {
   [ROLES.DISTRIBUTOR_ADMIN]: ["distributorOs", "operationsCenter"],
   [ROLES.LAB]: ["labOrders", "labAccount", "labInvoices"],
   [ROLES.AGENT]: ["dashboard", "collections", "visits"],
+  [ROLES.HR]: ["compensationPayroll"],
 };
 
 /**
@@ -252,13 +261,14 @@ export const PROVISION_RULES_BY_ACTOR = {
     canProvision: [...ALL_ROLE_SLUGS],
   },
   [ROLES.ADMIN]: {
-    canProvision: ALL_ROLE_SLUGS.filter((r) => r !== ROLES.EXECUTIVE),
-    cannotProvision: [ROLES.EXECUTIVE],
+    canProvision: ALL_ROLE_SLUGS.filter((r) => ![ROLES.EXECUTIVE, ROLES.HR].includes(r)),
+    cannotProvision: [ROLES.EXECUTIVE, ROLES.HR],
   },
   [ROLES.DISTRIBUTOR_ADMIN]: {
     canProvision: [ROLES.AGENT, ROLES.DISTRIBUTOR_MANAGER],
     cannotProvision: [
       ROLES.EXECUTIVE,
+      ROLES.HR,
       ROLES.ADMIN,
       ROLES.LAB,
       ROLES.DISTRIBUTOR_ADMIN,
@@ -273,6 +283,9 @@ export const PROVISIONABLE_ROLES = new Set(ALL_ROLE_SLUGS);
 const KNOWN_ROLE_ALIASES = {
   "hq admin": ROLES.ADMIN,
   "hq executive": ROLES.EXECUTIVE,
+  "hq hr": ROLES.HR,
+  hr: ROLES.HR,
+  "payroll support": ROLES.HR,
   "field agent": ROLES.AGENT,
   "lab user": ROLES.LAB,
   "read only auditor": ROLES.READ_ONLY_AUDITOR,

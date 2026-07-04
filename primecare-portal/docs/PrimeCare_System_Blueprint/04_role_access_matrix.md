@@ -3,7 +3,7 @@
 Runtime: `src/config/rolePermissionMatrix.js`, `menuConfig.js`, `pageRouting.js`.  
 Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patches.
 
-**Pilot QA/PROD login:** `executive`, `admin`, `agent`, `lab` only.
+**Pilot QA/PROD login:** `executive`, `admin`, `hr`, `agent`, `lab` only. `hr` is an HQ payroll support role enabled for Phase 3A foundation metadata, provisioning, placeholder navigation, and compensation RLS only.
 
 **Note on "operations":** There is no `operations` role slug. **HQ operations** = `admin` + `executive` (+ distributor ops roles in dev). Operations Center Admin is permission-gated, not a separate DB role.
 
@@ -15,9 +15,23 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 |-----------|--------|
 | **Visible modules** | Full founder suite, EFI, orders, logistics, risk, inventory, catalog, purchase, ops center, access audit, qualification, commission, contracts, tenant/distributor mgmt (some hidden in pilot sidebar) |
 | **Read** | Cross-tenant profiles; tenant ops data; all pilot tables via RLS |
-| **Write** | All roles provisionable; structural ops; fulfill; payments; logistics; catalog; lab lifecycle status transitions with confirmation and reason |
+| **Write** | All roles provisionable; structural ops; fulfill; create orders on behalf of eligible active labs; payments; logistics; catalog; lab lifecycle status transitions with confirmation and reason; compensation/payroll approval, lock, payout authorization, and export when implemented |
 | **Blocked** | — |
 | **Freeze** | Structural writes blocked; payments/collections allowed |
+
+---
+
+## hr (HQ Payroll Support)
+
+| Dimension | Access |
+|-----------|--------|
+| **Visible modules** | Compensation / Payroll foundation placeholder only until payroll screens are explicitly implemented |
+| **Read** | Payroll periods, plan assignments, payroll previews, own-tenant compensation records needed for payroll support |
+| **Write** | Phase 3A schema/RLS permits support writes to foundation records; app/API preview generation and submission are not implemented until later calculation/workflow phases |
+| **Blocked** | Cannot approve payouts, approve commission changes, lock payroll runs, authorize exports, mutate finance records, or create accounting entries |
+| **Freeze** | Payroll preview support only; no payout authorization |
+
+`hr` must be implemented as an HQ role with explicit RLS. It is not a distributor role and does not grant Distributor OS payroll ownership.
 
 ---
 
@@ -27,8 +41,8 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 |-----------|--------|
 | **Visible modules** | dashboard, labs, orders, logistics, risk, catalog, inventory, purchase, ops center, access audit, qualification |
 | **Read** | Tenant-scoped all ops tables |
-| **Write** | Fulfill/cancel orders; **create orders for any lab (override)**; set `labs.ordering_mode`; lab lifecycle status transitions with confirmation and reason; payments; inventory; catalog; provision users (**not executive role**); logistics; lab ownership |
-| **Blocked** | Founder-only pages; cannot assign executive role |
+| **Write** | Fulfill/cancel orders; **create orders on behalf of eligible active labs**; set `labs.ordering_mode`; lab lifecycle status transitions with confirmation and reason; payments; inventory; catalog; provision users (**not executive role**); logistics; lab ownership |
+| **Blocked** | Founder-only pages; cannot assign executive role; compensation/payroll approval, lock, payout authorization, and export |
 | **Freeze** | Order status mutations blocked; record payment allowed |
 
 ---
@@ -38,9 +52,9 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 | Dimension | Access |
 |-----------|--------|
 | **Visible modules** | dashboard, collections, visits, labs |
-| **Read** | Assigned/visible labs; orders via lab visibility; own visits |
+| **Read** | Assigned/visible labs; orders via lab visibility; own visits; own locked/exported compensation history when payroll self-view is implemented |
 | **Write** | Collections (payments); visits; shipment updates when assigned |
-| **Blocked** | HQ orders fulfill; catalog; logistics board; provisioning |
+| **Blocked** | HQ orders fulfill; catalog; logistics board; provisioning; compensation/payroll edits |
 | **Freeze** | Collections/payments typically allowed (daily ops) |
 
 ---
@@ -64,7 +78,17 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 | Self Service | ✔ | ✔ | ✔ | ✔ | ✔ |
 | Suspended | ✖ | ✔ | ✔ | ✔ | ✔ (view only; cannot checkout) |
 
-**Admin override:** `admin` / `executive` may always create orders on behalf of any lab.
+**Admin on-behalf ordering:** `admin` / `executive` may create orders on behalf of an `ACTIVE` lab when `ordering_mode` is `hq_managed`, `hybrid`, or `self_service`. On-behalf order creation is blocked when `labs.status = INACTIVE` or `ordering_mode = suspended`.
+
+| Customer lab state | Admin / executive on-behalf order | Requirement |
+|--------------------|-----------------------------------|-------------|
+| `ACTIVE` + `hq_managed` | ✔ | Use explicit `adminOnBehalf` flow; selected lab remains customer |
+| `ACTIVE` + `hybrid` | ✔ | Use explicit `adminOnBehalf` flow; selected lab remains customer |
+| `ACTIVE` + `self_service` | ✔ | Use explicit `adminOnBehalf` flow; selected lab remains customer |
+| `ACTIVE` + `suspended` | ✖ | Ordering Mode blocks new order initiation |
+| `INACTIVE` | ✖ | Lifecycle status blocks new order initiation |
+
+The authenticated HQ user remains the actor. The flow must not impersonate a lab user and must identify `source = admin_on_behalf` in order/audit metadata.
 
 ### Lab lifecycle permissions
 
@@ -112,6 +136,7 @@ Only `admin` and `executive` may change `labs.status`. Agents and lab users cann
 | operationsCenter | admin, executive, distributor_*, read_only_auditor |
 | founder*, executiveFinancialIntelligence | executive |
 | masterCatalog, inventory, purchase | admin, executive |
+| executiveCompensation / payroll (planned) | executive; hr preview/support; admin view/recommend; agent own self-view |
 
 Full map: `PERMISSION_BY_KEY` in `rolePermissionMatrix.js`.
 
@@ -136,13 +161,14 @@ Verified: `verify-hq-freeze-policy.mjs`
 
 ## RLS summary by role
 
-| Table | lab | agent | admin | executive |
-|-------|-----|-------|-------|-----------|
-| orders | own lab (SELECT, INSERT); delivery snapshot via RPC only — **no direct UPDATE** | visible labs | tenant ops | tenant ops |
-| invoices | own lab | — | tenant | tenant |
-| payments | own lab | agent + lab | tenant | tenant |
-| order_shipments | — | assigned | tenant ops | tenant ops |
-| profiles | self | self | tenant | cross-tenant read patterns |
+| Table | lab | agent | admin | hr | executive |
+|-------|-----|-------|-------|--------------|-----------|
+| orders | own lab (SELECT, INSERT); delivery snapshot via RPC only — **no direct UPDATE** | visible labs | tenant ops | no payroll dependency | tenant ops |
+| invoices | own lab | — | tenant | no payroll mutation | tenant |
+| payments | own lab | agent + lab | tenant | read only via bounded payroll derivation after approval | tenant |
+| order_shipments | — | assigned | tenant ops | — | tenant ops |
+| compensation/payroll tables | — | own locked/exported lines only | view only | support-scoped foundation access only; no approval/lock/export | full compensation access |
+| profiles | self | self | tenant | payroll-scoped agent profile reads | cross-tenant read patterns |
 
 **Never weaken RLS without approval** — run `verify-hq-rls-reads.mjs`.
 
