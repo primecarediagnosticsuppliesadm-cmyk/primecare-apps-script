@@ -26,9 +26,9 @@ function assert(condition, id, detail) {
 assert(/findDraftPayrollRun/.test(apiSrc), "idempotent.lookup", "draft run lookup before persist");
 assert(/clearDraftPreviewArtifacts/.test(apiSrc), "idempotent.clear", "clears lines and draft commission entries");
 assert(
-  /existingDraft[\s\S]*clearDraftPreviewArtifacts[\s\S]*\.update\(runPayload\)/.test(apiSrc),
+  /existingDraft[\s\S]*clearDraftPreviewArtifacts[\s\S]*payrollRunId = existingDraft\.id/.test(apiSrc),
   "idempotent.reuse_run",
-  "regeneration updates existing draft run instead of duplicating"
+  "regeneration reuses existing draft run and replaces line artifacts only"
 );
 assert(/payroll_run_lines"\)\s*\.delete\(\)/.test(apiSrc), "idempotent.delete_lines", "deletes old lines before reinsert");
 assert(

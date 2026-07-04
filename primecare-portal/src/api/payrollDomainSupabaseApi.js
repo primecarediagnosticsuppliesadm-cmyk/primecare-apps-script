@@ -208,6 +208,23 @@ async function updateDetailStatusesBeforeRunLock(client, { run, nextStatus }) {
   }
 }
 
+function statusKey(value) {
+  return str(value).toLowerCase();
+}
+
+function shouldSyncPeriodStatus(period, nextStatus) {
+  const periodStatus = statusKey(period.status);
+  const next = statusKey(nextStatus);
+  if (periodStatus === next) return false;
+  if (isPayrollImmutableStatus(periodStatus) && !isPayrollImmutableStatus(next)) {
+    return false;
+  }
+  if (isPayrollImmutableStatus(periodStatus) && isPayrollImmutableStatus(next)) {
+    return periodStatus === PAYROLL_STATUSES.EXPORTED && next === PAYROLL_STATUSES.PAID;
+  }
+  return true;
+}
+
 async function updateRunAndPeriodStatus(client, { run, period, action, nextStatus, actor, at, metadata = {} }) {
   const stamp = stampForAction(action, actor, at);
   const runMetadata = {
@@ -227,6 +244,10 @@ async function updateRunAndPeriodStatus(client, { run, period, action, nextStatu
     .eq("tenant_id", run.tenant_id)
     .eq("id", run.id);
   if (runUpdate.error) throw new Error(`payroll_runs status update failed: ${runUpdate.error.message}`);
+
+  if (!shouldSyncPeriodStatus(period, nextStatus)) {
+    return;
+  }
 
   const periodUpdate = await client
     .from("payroll_periods")

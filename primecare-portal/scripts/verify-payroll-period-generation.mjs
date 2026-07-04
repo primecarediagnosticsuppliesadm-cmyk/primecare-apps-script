@@ -33,10 +33,20 @@ function assertThrows(fn, id, detail) {
 }
 
 assert(assertPayrollPeriodDraftForPreview({ status: "draft" }), "period.draft_ok", "draft period allowed");
+assert(
+  assertPayrollPeriodDraftForPreview({ status: "paid" }, { activeDraftRun: { status: "draft" } }),
+  "period.reopen_draft_run_ok",
+  "paid period with active draft run allowed for preview regeneration"
+);
 assertThrows(
   () => assertPayrollPeriodDraftForPreview({ status: "submitted" }),
   "period.submitted_blocked",
-  "non-draft period blocked"
+  "non-draft period without draft run blocked"
+);
+assertThrows(
+  () => assertPayrollPeriodDraftForPreview({ status: "paid" }),
+  "period.paid_without_draft_blocked",
+  "paid period without draft run blocked"
 );
 assert(/readPayrollPeriod/.test(apiSrc), "period.resolve", "payroll period resolved before generation");
 assert(/period_ym/.test(apiSrc) && /period_id/.test(apiSrc), "period.keys", "period id/ym supported");

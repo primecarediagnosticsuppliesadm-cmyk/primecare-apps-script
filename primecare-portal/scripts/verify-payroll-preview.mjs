@@ -3,15 +3,16 @@
  * Phase 3B payroll preview verification.
  * Read-only/unit + static source checks for draft-only persistence.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { calculateCompensationPreview } from "../src/compensation/compensationCalculationEngine.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
-const apiSrc = readFileSync(resolve(root, "src/api/compensationSupabaseApi.js"), "utf8");
-const pages = readdirSync(resolve(root, "src/pages"));
+const previewApiSrc = readFileSync(resolve(root, "src/api/compensationSupabaseApi.js"), "utf8");
+const payrollApiSrc = readFileSync(resolve(root, "src/api/payrollDomainSupabaseApi.js"), "utf8");
+const pageSrc = readFileSync(resolve(root, "src/pages/ExecutiveCompensationCenterPage.jsx"), "utf8");
 
 let failures = 0;
 function pass(id, detail) {
@@ -52,6 +53,14 @@ const preview = calculateCompensationPreview({
       start_date: "2026-06-01",
       assignment_status: "active",
     },
+    {
+      id: "assign-a2",
+      tenant_id: "tenant-1",
+      plan_id: "plan-a",
+      agent_id: "A2",
+      start_date: "2026-06-01",
+      assignment_status: "active",
+    },
   ],
   compensationPlans: [{ id: "plan-a", version: "v1", commission_rate_bps: 300 }],
 });
@@ -63,30 +72,32 @@ assert(
   "preview.commissions_draft",
   "commission entries draft"
 );
-assert(preview.totals.records_calculated === 1, "preview.records", "records calculated");
+assert(preview.totals.records_calculated === 2, "preview.records", "records calculated for assigned agents");
 assert(preview.payrollRun.metadata.no_approval === true, "preview.no_approval", "no approval metadata");
 assert(preview.payrollRun.metadata.no_export === true, "preview.no_export", "no export metadata");
 
-assert(/from\("payroll_runs"\)[\s\S]*insert/.test(apiSrc), "api.insert_run", "draft run insert present");
-assert(/from\("payroll_run_lines"\)[\s\S]*insert/.test(apiSrc), "api.insert_lines", "draft line insert present");
+assert(/from\("payroll_runs"\)[\s\S]*insert/.test(previewApiSrc), "api.insert_run", "draft run insert present");
+assert(/from\("payroll_run_lines"\)[\s\S]*insert/.test(previewApiSrc), "api.insert_lines", "draft line insert present");
 assert(
-  /from\("compensation_commission_entries"\)[\s\S]*insert/.test(apiSrc),
+  /from\("compensation_commission_entries"\)[\s\S]*insert/.test(previewApiSrc),
   "api.insert_commissions",
   "draft commission insert present"
 );
 assert(
-  /event_type: "calculation_start"/.test(apiSrc) && /event_type: "calculation_finish"/.test(apiSrc),
-  "api.audit_events",
-  "calculation start/finish audit events present"
+  /preview_generation_start/.test(previewApiSrc) && /preview_generated/.test(previewApiSrc),
+  "api.preview_audit_events",
+  "preview generation audit events present in compensation preview API"
 );
-assert(!/from\("compensation_approval_events"\)/.test(apiSrc), "api.no_approval_events", "no approval event writes");
-assert(!/from\("payroll_exports"\)/.test(apiSrc), "api.no_exports", "no export writes");
-assert(!/status:\s*"(approved|locked|exported)"/.test(apiSrc), "api.no_terminal_status", "no terminal statuses written");
 assert(
-  pages.every((file) => !/(Compensation|Payroll).*Page\.(jsx?|tsx?)$/.test(file)),
-  "ui.no_pages",
-  "no compensation/payroll UI pages created"
+  /writeWorkflowEvents/.test(payrollApiSrc) && /compensation_audit_events/.test(payrollApiSrc),
+  "api.workflow_audit_events",
+  "payroll workflow audit events present in payroll domain API"
 );
+assert(!/from\("compensation_approval_events"\)/.test(previewApiSrc), "api.no_approval_events", "no approval event writes");
+assert(!/from\("payroll_exports"\)/.test(previewApiSrc), "api.no_exports", "no export writes");
+assert(!/status:\s*"(approved|locked|exported)"/.test(previewApiSrc), "api.no_terminal_status", "no terminal statuses written");
+assert(/ExecutiveCompensationCenterPage/.test(pageSrc), "ui.compensation_page", "Executive Compensation UI page present");
+assert(/loadExecutiveCompensationCenterRead/.test(pageSrc), "ui.read_loader", "Executive Compensation uses read loader");
 
 if (failures) {
   console.error(`\nOverall: NO-GO (${failures} failure(s))`);

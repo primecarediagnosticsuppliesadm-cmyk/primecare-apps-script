@@ -5,12 +5,14 @@
 
 export const PAYROLL_PREVIEW_GENERATION_VERSION = "PC_COMP_PREVIEW_GEN_4B";
 
-export function assertPayrollPeriodDraftForPreview(period = {}) {
+export function assertPayrollPeriodDraftForPreview(period = {}, { activeDraftRun = null } = {}) {
   const status = String(period.status ?? "").toLowerCase();
-  if (status !== "draft") {
-    throw new Error(`payroll_preview_requires_draft_period:${status || "unknown"}`);
+  if (status === "draft") return true;
+  const draftRunStatus = String(activeDraftRun?.status ?? "").toLowerCase();
+  if (activeDraftRun && draftRunStatus === "draft") {
+    return true;
   }
-  return true;
+  throw new Error(`payroll_preview_requires_draft_period:${status || "unknown"}`);
 }
 
 export function buildPreviewSourcePaymentHash(payments = []) {

@@ -4,6 +4,29 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-04 — Executive Compensation Phase 6A.1 Certification Cleanup
+
+### Change
+
+- Refresh stale `verify-payroll-preview.mjs` checks for Executive Compensation UI and split preview vs workflow audit ownership.
+- Allow preview regeneration when a paid period has an active reopened draft run (`assertPayrollPeriodDraftForPreview` + draft-run line artifact replacement).
+- Skip invalid paid-period status churn during reopened run workflow (`shouldSyncPeriodStatus` in payroll domain API).
+- Add QA-only compensation seed script (`seed-qa-compensation-data.mjs --apply`) and Phase 6A.1 certification audit script.
+
+### Not changed
+
+- No finance, AR, payments, orders, invoice, allocation, inventory, logistics, GL, bank, or accounting mutation paths.
+
+### Verification gates
+
+- `node scripts/verify-payroll-preview.mjs`
+- `node scripts/verify-payroll-period-generation.mjs`
+- `node scripts/verify-payroll-preview-idempotency.mjs`
+- `node scripts/seed-qa-compensation-data.mjs --apply` (QA only)
+- `node scripts/audit-phase-6a1-certification.mjs` (QA only)
+
+---
+
 ## 2026-07-04 — Executive Compensation & Payroll Engine Phase 6A Payroll Approval Workflow UI
 
 ### Change

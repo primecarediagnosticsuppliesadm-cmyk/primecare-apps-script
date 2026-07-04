@@ -221,13 +221,6 @@ async function persistDraftPreview(client, { period, preview, actor = {}, starte
   let payrollRunId;
   if (existingDraft) {
     await clearDraftPreviewArtifacts(client, period, existingDraft.id);
-    const runUpdate = await client
-      .from("payroll_runs")
-      .update(runPayload)
-      .eq("id", existingDraft.id)
-      .select("id")
-      .single();
-    if (runUpdate.error) throw new Error(`payroll_runs update failed: ${runUpdate.error.message}`);
     payrollRunId = existingDraft.id;
   } else {
     const runInsert = await client.from("payroll_runs").insert([runPayload]).select("id").single();
@@ -313,9 +306,8 @@ export async function generatePayrollPreview(options = {}) {
     }
 
     const period = await readPayrollPeriod(client, { tenantId, periodId, periodYm });
-    assertPayrollPeriodDraftForPreview(period);
-
     const existingDraft = await findDraftPayrollRun(client, period);
+    assertPayrollPeriodDraftForPreview(period, { activeDraftRun: existingDraft });
     const inputs = await readCompensationInputs(client, period);
     const sourcePaymentMeta = buildPreviewSourcePaymentHash(inputs.payments);
 
