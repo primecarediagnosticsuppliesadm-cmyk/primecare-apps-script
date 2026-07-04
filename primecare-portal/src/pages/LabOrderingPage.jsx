@@ -93,7 +93,7 @@ import {
   onlyAvailableLabel,
 } from "@/utils/labOrderingStock.js";
 import { filterCollectionsForUser } from "@/utils/accessFilters.js";
-import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
+import { clearHqNavContext, readHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -361,7 +361,7 @@ function buildCartHash(items) {
 
 export default function LabOrderingPage({ currentUser, setActivePage, adminOnBehalfRequired = false }) {
   const [adminOnBehalfContext] = useState(() => {
-    const ctx = consumeHqNavContext("adminOnBehalfOrder");
+    const ctx = readHqNavContext("adminOnBehalfOrder");
     return ctx?.adminOnBehalf ? ctx : null;
   });
   const [activeTab, setActiveTab] = useState("catalog");
@@ -408,6 +408,12 @@ export default function LabOrderingPage({ currentUser, setActivePage, adminOnBeh
   const [repeatLoading, setRepeatLoading] = useState(false);
   const [invoiceDownloadKey, setInvoiceDownloadKey] = useState("");
   const { showToast } = usePortalToast();
+
+  useEffect(() => {
+    if (adminOnBehalfContext?.adminOnBehalf) {
+      clearHqNavContext("adminOnBehalfOrder");
+    }
+  }, [adminOnBehalfContext]);
 
   const currentRole = str(currentUser?.role).toLowerCase();
   const isHqOnBehalfActor = currentRole === "admin" || currentRole === "executive";

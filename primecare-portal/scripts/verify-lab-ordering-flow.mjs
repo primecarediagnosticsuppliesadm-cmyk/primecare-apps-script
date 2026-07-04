@@ -67,6 +67,7 @@ const ordersPageSrc = readSrc("src/pages/OrdersPage.jsx");
 const hqWorkflowNavSrc = readSrc("src/operations/hqWorkflowNav.js");
 const rolePermissionSrc = readSrc("src/config/rolePermissionMatrix.js");
 const portalSrc = readSrc("src/PrimeCareWebPortal.jsx");
+const menuConfigSrc = readSrc("src/config/menuConfig.js");
 
 if (orderTrackingSrc.includes("getLabOrderDetailsRead")) {
   pass("static.lab_order_details_api", "orderTracking uses getLabOrderDetailsRead");
@@ -221,7 +222,8 @@ if (operationalLabDrawerSrc.includes("Ordering Mode") && operationalLabDrawerSrc
 if (
   labPageSrc.includes("adminOnBehalf") &&
   labPageSrc.includes("source: isAdminOnBehalf ? \"admin_on_behalf\"") &&
-  labPageSrc.includes("consumeHqNavContext(\"adminOnBehalfOrder\")") &&
+  labPageSrc.includes("readHqNavContext(\"adminOnBehalfOrder\")") &&
+  labPageSrc.includes("clearHqNavContext(\"adminOnBehalfOrder\")") &&
   labPageSrc.includes("adminOnBehalfRequired") &&
   labPageSrc.includes("canAdminInitiateOrder(orderingMode, lifecycleStatus)")
 ) {
@@ -244,6 +246,8 @@ if (
 if (
   rolePermissionSrc.includes("labOrders: [ROLES.LAB]") &&
   rolePermissionSrc.includes("adminOnBehalfOrder: [ROLES.ADMIN, ROLES.EXECUTIVE]") &&
+  menuConfigSrc.includes("\"adminOnBehalfOrder\"") &&
+  portalSrc.includes("isPageVisibleInCurrentEnvironment") &&
   portalSrc.includes("case \"adminOnBehalfOrder\"") &&
   portalSrc.includes("adminOnBehalfRequired") &&
   hqWorkflowNavSrc.includes("page: \"adminOnBehalfOrder\"")

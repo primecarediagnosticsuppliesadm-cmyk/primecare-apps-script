@@ -195,6 +195,7 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "qualificationReview",
   "notifications",
   "labOrders",
+  "adminOnBehalfOrder",
   "labInvoices",
   "purchase",
   "reorder",

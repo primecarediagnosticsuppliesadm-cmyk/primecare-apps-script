@@ -376,3 +376,28 @@ export function consumeHqNavContext(pageKey) {
     return null;
   }
 }
+
+export function readHqNavContext(pageKey) {
+  try {
+    const raw = sessionStorage.getItem("hq_nav_context");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (str(parsed.page) !== str(pageKey)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearHqNavContext(pageKey) {
+  try {
+    const raw = sessionStorage.getItem("hq_nav_context");
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!pageKey || str(parsed.page) === str(pageKey)) {
+      sessionStorage.removeItem("hq_nav_context");
+    }
+  } catch {
+    /* ignore */
+  }
+}
