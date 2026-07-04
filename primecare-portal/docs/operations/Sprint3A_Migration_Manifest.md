@@ -1,11 +1,11 @@
 # Sprint 3A Migration Manifest
 
-Generated: 2026-07-03T03:11:59.002Z
+Generated: 2026-07-03T18:28:56.821Z
 
 | Track | Count | Path |
 |-------|------:|------|
 | A — manual `supabase/sql/` | 53 | Track A per HQ_SQL_MIGRATION_MANIFEST.md |
-| B — CLI `supabase/migrations/` | 23 | `supabase db push` |
+| B — CLI `supabase/migrations/` | 25 | `supabase db push` |
 
 ## Duplicate / overlap candidates
 
@@ -91,6 +91,8 @@ Generated: 2026-07-03T03:11:59.002Z
 - `supabase/migrations/20260705120000_sprint2_domain_projections_phase1.sql`
 - `supabase/migrations/20260705120001_fix_proj_receivable_refresh.sql`
 - `supabase/migrations/20260705120002_fix_read_receivables_timeout.sql`
+- `supabase/migrations/20260705120003_sprint5a_founder_snapshot_projection.sql`
+- `supabase/migrations/20260705120004_sprint5a_receivables_tenant_scope.sql`
 
 ## Machine-readable
 

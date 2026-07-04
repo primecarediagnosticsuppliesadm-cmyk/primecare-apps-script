@@ -30,6 +30,7 @@
 | RLS | projection SELECT mirrors SoT | `verify-hq-rls-reads.mjs` (extend) |
 | SECURITY DEFINER visibility — labs | `read_labs_list_v1` output matches `proj_lab_profile_v1` table RLS for admin, executive, agent, lab | `verify-labs-projection-parity.mjs` |
 | Zero SoT on hot path | adapter must not query orders/ar/payments/inventory | `verify-dashboard-projection-parity.mjs` (static + runtime) |
+| Compensation isolation | Payroll calculation must not read from revenue/order/invoice projections as commission SoT; cash commission must use certified payment cash attribution snapshots | planned `verify-compensation-cash-only.mjs`, `verify-compensation-attribution.mjs` |
 | Flag default | OFF (shadow) | `.env` — all `VITE_READ_ADAPTER_*` unset |
 
 **Flag flip NO-GO** until all parity + staleness + perf checks PASS on QA for **7-day shadow** (14-day for dashboard/executive composites).
@@ -49,6 +50,8 @@
 | PRJ-LAB-PROFILE-v1 | `proj_lab_profile_v1` | `read_labs_list_v1` | 60 s | shadow |
 
 `PRJ-LAB-PROFILE-v1` owns read-model exposure of lab lifecycle display fields (`status`) and ordering posture (`ordering_mode`). `PRJ-COL-LAB-v1` remains the receivable projection and must not be modified by lifecycle status changes.
+
+Compensation/payroll has no approved projection in Phase 1. Future payroll dashboards may introduce `proj_compensation_summary_v1` only after the HQ payroll source tables, RLS, cash-only attribution, and approval workflow are certified. Such projections must be read-only derivatives of payroll domain tables and must not replace payment cash SoT.
 
 ### Phase 2 — design (Sprint 2 Phase 2)
 
@@ -109,12 +112,15 @@ node scripts/run-browser-certification.mjs --prereq-only
 | Labs list | `read_labs_list_v1` | ≤ 300 ms | `getLabsCredit` / `v_labs_credit` |
 | Admin Dashboard | `read_tenant_dashboard_v1` | ≤ 350 ms | `getAdminDashboardRead` (~31–40s QA) |
 | Executive snapshot | `read_tenant_executive_v1` | ≤ 400 ms | `get_founder_snapshot` (~8s timeout) |
+| Compensation dashboard (planned) | future payroll adapter | ≤ 350 ms | payroll domain reads only; not O2C projections as commission SoT |
 
 ---
 
 ## KPI ownership (no duplicate owners)
 
 KPI ownership is governed by the Blueprint domain rules and this certification matrix until a dedicated KPI catalog is introduced. Composites **copy only** — never re-aggregate from SoT at read time.
+
+Payroll KPIs are owned by the compensation/payroll domain. Executive dashboards may display payroll liability, approval status, and export status only from payroll domain tables or certified payroll projections; they must not recompute payable commission from order, invoice, revenue, or receivable projections.
 
 ---
 

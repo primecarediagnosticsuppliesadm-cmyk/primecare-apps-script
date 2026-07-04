@@ -95,6 +95,15 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-attribution-snapshots.mjs | `payments.agent_id` priority, fallback to `compensation_attribution_snapshots`, no current ownership fallback | Phase 3B attribution |
 | verify-payroll-preview.mjs | Draft-only preview persistence to payroll/commission tables; no approval, lock, export, payout, or UI | Phase 3B preview persistence |
 | verify-plan-versioning.mjs | `plan_id`, `plan_version`, `rule_version`, and `calculated_at` stored on calculated rows | Phase 3B versioning |
+| verify-payroll-locking.mjs | Executive-only lock transition, locked status propagation, and no HR/Admin/Agent lock authority | Phase 3C locking |
+| verify-payroll-immutability.mjs | Locked/exported/paid detail rows cannot be updated/deleted; reopen creates new draft version | Phase 3C immutability |
+| verify-payroll-rbac.mjs | Executive/HR/Admin/Agent action matrix for preview, submit, approve, reject, lock, export, pay, reopen, adjustments | Phase 3C RBAC |
+| verify-payroll-audit.mjs | Audit events for preview, submit, approve, reject, lock, export, pay, reopen and no Finance/O2C audit side effects | Phase 3C audit |
+| verify-payroll-export.mjs | CSV, Excel, and accounting-ready export structures from locked payroll only; no bank/GL writes | Phase 3C export model |
+| verify-payroll-lifecycle.mjs | draft → previewed → submitted → approved → locked → exported → paid and reject/reopen paths | Phase 3C lifecycle |
+| verify-payroll-adjustments.mjs | Positive, negative, recovery, advance, correction adjustment validation and approval rules | Phase 3C adjustments |
+| verify-payroll-versioning.mjs | Run versioning and reopen-as-new-draft-version semantics | Phase 3C versioning |
+| verify-compensation-no-finance-mutation.mjs | Compensation/payroll APIs and migrations do not write Finance/O2C/source-domain tables | Phase 3C boundary |
 | verify-compensation-cash-only.mjs | Commission uses `payments.amount_received` cash collected only; rejects order/invoice/revenue/receivable inputs | Commission calculation |
 | verify-compensation-attribution.mjs | `payments.agent_id` priority, `lab_ownership` payment-date snapshot fallback, persisted attribution evidence | Attribution |
 | verify-payroll-run-lifecycle.mjs | open → previewed → submitted → approved → locked → exported, immutability after lock | Payroll run lifecycle |

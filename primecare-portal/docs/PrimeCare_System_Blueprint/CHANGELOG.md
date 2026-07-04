@@ -4,6 +4,48 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-04 — Executive Compensation & Payroll Engine Phase 3C Payroll Domain Completion
+
+### Change
+
+- Add backend/domain payroll workflow states through `paid`: `draft -> previewed -> submitted -> approved -> locked -> exported -> paid`.
+- Define `paid` as payroll-domain evidence only, with no `payments`, AR, allocation, invoice, order, inventory, logistics, accounting, GL, bank, or disbursement mutation.
+- Add immutable-after-lock rules: locked/exported/paid payroll runs and detail rows cannot be edited; reopen creates a new draft run version.
+- Add adjustment domain rules for positive, negative, recovery, advance, and correction adjustments with Executive approval for payable impact.
+- Add audit/workflow event vocabulary for preview, submit, approve, reject, lock, export, pay, reopen, and adjustment request/approval/rejection.
+- Add CSV, Excel-ready, and accounting-ready export model rules with export metadata/checksum only.
+- Add Phase 3C verification bundle for locking, immutability, RBAC, audit, export, lifecycle, adjustments, and versioning.
+
+### Not changed
+
+- No payroll UI, Executive dashboard, or agent self-view UI was built.
+- No Finance, AR, Payments, Orders, Invoices, Collections, Inventory, Logistics, legacy Commission Engine calculation, Projection Engine, projection flag, or O2C business rule behavior changed.
+- No accounting entries, bank payouts, GL postings, payment disbursement records, or bank files are created.
+- Phase 3B calculation engine remains unchanged.
+
+### Verification gates
+
+- `node scripts/verify-payroll-lifecycle.mjs`
+- `node scripts/verify-payroll-locking.mjs`
+- `node scripts/verify-payroll-immutability.mjs`
+- `node scripts/verify-payroll-rbac.mjs`
+- `node scripts/verify-payroll-audit.mjs`
+- `node scripts/verify-payroll-export.mjs`
+- `node scripts/verify-payroll-adjustments.mjs`
+- `node scripts/verify-payroll-versioning.mjs`
+- `npm run build`
+- `node scripts/verify-runtime-import-safety.mjs`
+- `node scripts/verify-financial-reconciliation.mjs`
+- `node scripts/verify-ar-reconcile.mjs`
+- `node scripts/verify-hq-rls-reads.mjs`
+- `node scripts/run-browser-smoke-all-roles.mjs`
+
+### Executive UI gate
+
+- GO only after Phase 3C backend/domain gates pass and review confirms no UI, payout, accounting, bank, or Finance/O2C mutation was introduced.
+
+---
+
 ## 2026-07-04 — Executive Compensation & Payroll Engine Phase 3B Preview Calculation
 
 ### Change

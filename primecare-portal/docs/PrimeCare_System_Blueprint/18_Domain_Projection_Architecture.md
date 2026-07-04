@@ -107,7 +107,8 @@ Sprint 2 draft used names tied to consumers:
 | **Executive KPI** | Derived only — never duplicates order rows | Aggregates over domain projections |
 | **Operations KPI** | Derived only | Aggregates + ops counts |
 | **Contracts** | `proj_lab_contract_v1` | `lab_contracts` |
-| **Commissions** | `proj_commission_summary_v1` | `commission_entries` |
+| **Legacy Commissions** | `proj_commission_summary_v1` | existing `commission_entries` analytics only |
+| **Compensation / Payroll** | future `proj_compensation_summary_v1` only after payroll domain certification | planned payroll domain tables; cash-collected attribution snapshots |
 | **Notifications** | `proj_notification_inbox_v1` | `notification_events` |
 
 ---
@@ -137,6 +138,7 @@ Business Command succeeds (SoT write)
 | `CreditStatusChanged` | `proj_lab_receivable_v1` |
 | `LabLifecycleStatusChanged` | `proj_lab_profile_v1` |
 | `LabOrderingModeChanged` | `proj_lab_profile_v1` |
+| `PayrollRunLocked` (future) | future compensation summary projections only; no finance or O2C projection mutation |
 
 ### Refresh strategy
 

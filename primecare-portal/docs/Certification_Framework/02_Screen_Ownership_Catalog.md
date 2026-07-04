@@ -255,8 +255,8 @@ Inactive labs remain visible in Credit & Risk when they have AR/credit history; 
 | **Path** | planned `/payroll-runs/:period` |
 | **Users** | `executive`, `hr`; `admin` view/recommend only |
 | **Reads** | Payroll period, run lines, compensation plans, attribution snapshots, adjustments |
-| **Writes** | HR generate/submit preview; Executive approve/reject/lock/export |
-| **Verification** | `verify-payroll-run-lifecycle.mjs`, `verify-compensation-cash-only.mjs`, `verify-compensation-attribution.mjs` |
+| **Writes** | Future UI will call Phase 3C backend workflow: HR preview/submit; Executive approve/reject/lock/export/pay/reopen |
+| **Verification** | `verify-payroll-lifecycle.mjs`, `verify-payroll-locking.mjs`, `verify-payroll-rbac.mjs`, `verify-payroll-export.mjs`, `verify-compensation-cash-only.mjs`, `verify-compensation-attribution.mjs` |
 | **Perf target** | planned ≤ 400 ms bounded run read |
 
 ### AgentCompensationHistory
@@ -264,7 +264,7 @@ Inactive labs remain visible in Credit & Risk when they have AR/credit history; 
 | Field | Value |
 |-------|-------|
 | **Path** | planned `/agent-compensation` |
-| **Users** | `agent` own locked/exported history only; Executive/HR/Admin according to payroll role matrix |
+| **Users** | `agent` own locked/exported/paid history only; Executive/HR/Admin according to payroll role matrix |
 | **Reads** | Own payroll lines and approved adjustment summaries |
 | **Writes** | None for agent |
 | **Verification** | `verify-compensation-rls.mjs`, browser UAT for own-history isolation |
@@ -311,5 +311,5 @@ Full step definitions: [04_Browser_Golden_Path.md](./04_Browser_Golden_Path.md)
 | CollectionsPage | `verify-financial-reconciliation`, `verify-payment-allocation-flow` |
 | OperationsCenterAdminPage | `verify-operations-center-admin-flow`, `verify-hq-freeze-policy` |
 | MasterCatalog + Inventory | `verify-inventory-dashboard-kpi`, `verify-procurement-inventory-flow` |
-| Compensation / payroll (Phase 3A foundation + future) | `verify-compensation-schema`, `verify-compensation-rls`, `verify-payroll-period-lifecycle`, `verify-compensation-audit`, `verify-compensation-role-access`; future `verify-compensation-cash-only`, `verify-compensation-attribution`, `verify-payroll-run-lifecycle`, `verify-compensation-approval-workflow`, `verify-payroll-export`, `verify-compensation-no-finance-mutation` |
+| Compensation / payroll (Phase 3A foundation + Phase 3B preview + Phase 3C domain workflow) | `verify-compensation-schema`, `verify-compensation-rls`, `verify-payroll-period-lifecycle`, `verify-compensation-audit`, `verify-compensation-role-access`, `verify-compensation-calculation`, `verify-cash-only-commission`, `verify-attribution-snapshots`, `verify-payroll-preview`, `verify-plan-versioning`, `verify-payroll-lifecycle`, `verify-payroll-locking`, `verify-payroll-immutability`, `verify-payroll-rbac`, `verify-payroll-audit`, `verify-payroll-export`, `verify-payroll-adjustments`, `verify-payroll-versioning`, `verify-compensation-no-finance-mutation` |
 | Any RLS touch | `verify-hq-rls-reads` |

@@ -44,6 +44,19 @@ Critical fields and **id vs business key** rules. Full table columns: `01_Databa
 
 ---
 
+## order/audit source metadata
+
+| Attribute | Value |
+|-----------|-------|
+| **Meaning** | Identifies the initiating workflow for order creation and audit review |
+| **Required value** | Admin on-behalf ordering must record `source = admin_on_behalf` in order/audit metadata |
+| **Customer** | Selected lab remains the order customer (`tenant_id`, `lab_id`) |
+| **Actor** | Authenticated HQ `admin` / `executive` remains the actor; do not impersonate a lab user |
+| **Context captured** | Originating screen, selected customer lab, authenticated HQ actor, lifecycle status, and ordering mode at submit time |
+| **Must not affect** | Pricing, catalog, credit, inventory, finance, delivery, AR, shipment, commission, or order lifecycle behavior |
+
+---
+
 ## invoices.invoice_number
 
 | Attribute | Value |
@@ -128,6 +141,7 @@ Critical fields and **id vs business key** rules. Full table columns: `01_Databa
 | **Meaning** | Runtime order-initiation governance for lab callers |
 | **KPI** | `Ordering Suspended` counts rows where `ordering_mode == suspended`; `Order-Eligible Labs` also requires `ordering_eligible == true` |
 | **Lifecycle interaction** | `ACTIVE -> INACTIVE` forces `suspended`; `INACTIVE -> ACTIVE` leaves `ordering_mode` unchanged until admin explicitly selects HQ Managed, Hybrid, or Self Service |
+| **Admin on-behalf ordering** | `admin` / `executive` may create orders on behalf of `ACTIVE` labs when mode is `hq_managed`, `hybrid`, or `self_service`; blocked when `labs.status = INACTIVE` or mode is `suspended` |
 | **Does not affect** | Invoices, payments, Track Order, finance, logistics, history, or `Active Labs` lifecycle status |
 
 ---
@@ -152,6 +166,74 @@ Critical fields and **id vs business key** rules. Full table columns: `01_Databa
 | **On** | profiles, orders, payments, visits, ownership |
 | **Normalization** | `normalizeAgentIdKey()` |
 | **Meaning** | Field agent code for visits/collections/shipment assignment |
+| **Compensation attribution** | `payments.agent_id` is the preferred future payroll attribution source when populated and certified; otherwise use an audited `lab_ownership` snapshot at payment date |
+
+---
+
+## hr role
+
+| Attribute | Value |
+|-----------|-------|
+| **Type** | role slug (planned) |
+| **Meaning** | HQ payroll support role |
+| **Allowed** | Maintain salary/payroll data, generate payroll previews, submit previews for Executive review |
+| **Blocked** | Approve payouts, approve commission changes, lock payroll runs, authorize exports, create accounting entries |
+| **Implementation gate** | Requires `profiles.role`, provisioning, `rolePermissionMatrix.js`, menus, and RLS review before app/schema implementation |
+
+---
+
+## attributable_cash_collected
+
+| Attribute | Value |
+|-----------|-------|
+| **Type** | numeric |
+| **Meaning** | Cash actually collected and attributable to an agent for payroll commission |
+| **Source** | `payments.amount_received` after successful payment write and AR reduction |
+| **Attribution** | `payments.agent_id` if available; otherwise `lab_ownership` snapshot at payment date |
+| **Must not use** | Order value, invoice value, fulfilled revenue, projected revenue, outstanding receivables, or allocation totals as commission amount |
+
+---
+
+## compensation_commission_rate_bps
+
+| Attribute | Value |
+|-----------|-------|
+| **Type** | integer basis points |
+| **Baseline** | 300 bps (3%) for Year-1 baseline |
+| **Promoted** | 350 bps (3.5%) after promotion eligibility |
+| **Rule** | Applied only to `attributable_cash_collected` |
+
+---
+
+## payroll_period.period_ym
+
+| Attribute | Value |
+|-----------|-------|
+| **Type** | text |
+| **Format** | `YYYY-MM` |
+| **Meaning** | Monthly compensation period |
+| **Lifecycle** | open → previewed → submitted → approved → locked → exported; rejected/void as exception states |
+
+---
+
+## payroll_run.status
+
+| Attribute | Value |
+|-----------|-------|
+| **Type** | text |
+| **Values** | draft, previewed, submitted, approved, locked, exported, rejected, void |
+| **Owner** | Executive owns approve/lock/export; HR can preview/submit |
+| **Immutable point** | Locked runs cannot be edited except Executive void/reversal workflow |
+
+---
+
+## compensation_attribution_snapshot
+
+| Attribute | Value |
+|-----------|-------|
+| **Meaning** | Auditable record of how a payment was attributed to an agent for compensation |
+| **Required fields** | Payment refs/hash, agent ID/name, attribution method, lab ID, ownership source, payment date, rule version |
+| **Rule** | Locked payroll must read the persisted snapshot, not current ownership |
 
 ---
 

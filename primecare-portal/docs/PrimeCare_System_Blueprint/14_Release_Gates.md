@@ -8,7 +8,7 @@ Criteria before recommending commit, merge, or production promotion.
 
 | Gate | Requirement |
 |------|-------------|
-| **Blueprint** | Relevant 00–16 docs updated; CHANGELOG if gap/conflict |
+| **Blueprint** | Relevant 00–19 docs updated; CHANGELOG if gap/conflict |
 | **Cert framework** | Object + screen catalog entries updated when SoT or UI changes ([16_Certification_Framework.md](./16_Certification_Framework.md)) |
 | **Impact analysis** | `templates/Feature_Impact_Assessment_Template.md` completed |
 | **Build** | `npm run build` passes |

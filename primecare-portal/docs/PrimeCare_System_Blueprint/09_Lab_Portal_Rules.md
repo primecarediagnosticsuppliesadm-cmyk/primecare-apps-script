@@ -30,17 +30,21 @@ Hybrid              ← lab + HQ may initiate
    ↓
 Self Service        ← lab self-checkout enabled
    ↓
-Suspended           ← lab checkout blocked; admin override allowed
+Suspended           ← lab checkout blocked; HQ on-behalf ordering blocked
 ```
 
-| Stage / mode | Lab create order | Admin create order | Track / invoices / payments |
-|--------------|------------------|--------------------|-----------------------------|
-| **HQ Managed** | ✖ | ✔ | ✔ always |
-| **Hybrid** | ✔ | ✔ | ✔ always |
-| **Self Service** | ✔ | ✔ (on behalf) | ✔ always |
-| **Suspended** | ✖ | ✔ | ✔ always |
+| Stage / mode | Lab create order | Admin / executive on-behalf order | Track / invoices / payments |
+|--------------|------------------|-----------------------------------|-----------------------------|
+| **HQ Managed** | ✖ | ✔ when `labs.status = ACTIVE` | ✔ always |
+| **Hybrid** | ✔ | ✔ when `labs.status = ACTIVE` | ✔ always |
+| **Self Service** | ✔ | ✔ when `labs.status = ACTIVE` | ✔ always |
+| **Suspended** | ✖ | ✖ | ✔ always |
 
-**Admin override:** HQ (`admin` / `executive`) may always create orders regardless of `ordering_mode`.
+**Admin on-behalf ordering:** HQ (`admin` / `executive`) may create orders on behalf of an `ACTIVE` lab when `ordering_mode` is `hq_managed`, `hybrid`, or `self_service`. On-behalf order creation is blocked when `labs.status = INACTIVE` or `ordering_mode = suspended`.
+
+Admin on-behalf ordering must reuse the existing `LabOrderingPage` catalog/cart/checkout flow in an explicit `adminOnBehalf` mode. It must not duplicate the ordering UI and must not impersonate a lab user. The selected lab remains the order customer, while the authenticated HQ user remains the actor. Order/audit metadata must identify `source = admin_on_behalf`, the originating screen, selected customer lab, authenticated HQ actor, lifecycle status, and ordering mode at submit time.
+
+Existing pricing, catalog, credit, inventory, finance, delivery, AR, shipment, and commission behavior must remain unchanged for admin-on-behalf orders.
 
 ---
 
@@ -129,6 +133,7 @@ Credit hold is independent of ordering mode.
 
 - `createOrderWrite` / `create_lab_order` RPC
 - Server gate: `lab_ordering_allows_lab_initiate` + `orders_insert_by_role` when caller is `lab`
+- Admin-on-behalf checkout must call the same order creation path without impersonation and must persist/audit `source = admin_on_behalf`
 - **Persistence confirmation:** `createOrderWrite` must read back `orders` + lines before success UI (`confirmLabOrderPersistedReadWithRetry` — up to 3 attempts)
 - RPC `create_lab_order` must return an `order` row; success without order data is treated as failure (no false-success banner)
 - Success banner uses **confirmed DB row** (order_id, total_amount, line count) — not cart-only or client-generated values
@@ -187,6 +192,8 @@ Inactive labs may log into the Lab Portal when provisioned, but checkout and reo
 - `verify-labs-projection-parity.mjs`
 - `verify-hq-rls-reads.mjs`
 
+Admin on-behalf ordering UAT must cover: `hq_managed`, `hybrid`, and `self_service` `ACTIVE` labs can be ordered for by `admin` and `executive`; `INACTIVE` labs and `suspended` Ordering Mode are blocked; selected lab remains customer; authenticated HQ user remains actor; order/audit metadata includes `source = admin_on_behalf`; Track Order, invoices, payments, AR, inventory, delivery, shipment, commission, and pricing behavior remain unchanged.
+
 ---
 
 ## Key files
@@ -194,5 +201,5 @@ Inactive labs may log into the Lab Portal when provisioned, but checkout and reo
 - `src/pages/LabOrderingPage.jsx`
 - `src/labOrdering/orderingGovernance.js`
 - `src/utils/orderTracking.js`
-- `src/api/primecareSupabaseApi.js` — `getLabOrderDetailsRead`, `updateLabOrderingModeWrite`, `updateLabLifecycleStatusWrite`
-- `src/components/operations/OperationalLabDrawer.jsx` — admin ordering mode and lifecycle editor
+- `src/api/primecareSupabaseApi.js` — `createOrderWrite`, `getLabOrderDetailsRead`, `updateLabOrderingModeWrite`, `updateLabLifecycleStatusWrite`
+- `src/components/operations/OperationalLabDrawer.jsx` — admin ordering mode, lifecycle editor, and admin-on-behalf order launch point

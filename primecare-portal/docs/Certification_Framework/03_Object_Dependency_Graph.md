@@ -38,7 +38,9 @@ flowchart TD
   AL --> I
   PAY --> AR
   AR --> COL[Collections KPIs]
-  PAY --> COM[Commission Entry]
+  PAY --> COM[Legacy Commission Entry]
+  PAY --> COMP[HQ Payroll Cash Commission]
+  LO --> COMP
   COL --> EFI[Executive Financial Intelligence]
 ```
 
@@ -54,7 +56,8 @@ flowchart TD
 | **L3 Fulfill** | Inventory ledger, Invoice, Shipment | 4 — fulfill chain |
 | **L4 Logistics** | Courier, Route, Delivery charge snapshot | 5 — ops delivery |
 | **L5 Cash** | Payment, Allocation, AR update | 6 — collections |
-| **L6 Intelligence** | EFI, Revenue funnel, Commission | 7 — read-only analytics |
+| **L6 Intelligence** | EFI, Revenue funnel, legacy Commission | 7 — read-only analytics |
+| **L7 Compensation** | Payroll period, payroll run, payroll run line, cash commission, adjustment, export metadata | 8 — Executive approval workflow |
 
 ---
 
@@ -74,7 +77,9 @@ flowchart TD
 | Collections KPI | AR + payments | Grid stale |
 | EFI | AR, payments, orders (read) | KPI gaps only (read-only) |
 | Route assignment | Shipment ready + courier | Dispatch blocked |
-| Commission | Payment + agent | Payroll gap only |
+| Legacy Commission | Payment + agent | Analytics gap only |
+| Payroll cash commission | Payment cash collected + `payments.agent_id` or payment-date lab ownership snapshot | Payroll preview blocked |
+| Payroll run | Compensation plan + cash commission + adjustments + Executive approval | Payroll cannot lock/export |
 
 ---
 
@@ -88,7 +93,8 @@ These dependencies are **intentionally one-way** — cert must confirm no revers
 | Order financial status | Shipment `dispatch_status` |
 | Invoice subtotal | Delivery charge (Phase 3A) |
 | AR outstanding bump | Delivery charge |
-| Commission engine | Payment allocation amounts |
+| Legacy Commission engine | Payment allocation amounts |
+| Compensation/payroll | Orders, invoices, fulfilled revenue, projected revenue, outstanding receivables, finance mutations, accounting entries |
 | Lab portal track | HQ-only ops tables |
 
 Verify: `verify-logistics-dispatch-flow.mjs` → `live.invoices_unchanged`, `live.collections_unchanged`
@@ -140,7 +146,8 @@ Recommended **verify execution order** (matches dependency layers):
 7. verify-financial-reconciliation.mjs
 8. verify-payment-allocation-flow.mjs
 9. verify-executive-financial-intelligence.mjs
-10. verify-primecare-production-golden-path.mjs
+10. planned compensation/payroll verify bundle
+11. verify-primecare-production-golden-path.mjs
 ```
 
 Browser golden path follows the same order: [04_Browser_Golden_Path.md](./04_Browser_Golden_Path.md)

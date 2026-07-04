@@ -18,11 +18,12 @@ Rules for the Lab User role (`lab`) — ordering, tracking, invoices, and accoun
 
 | Mode | Meaning |
 |------|---------|
-| **HQ Managed** | HQ places or fulfills orders on behalf of lab; lab portal may be read-only or limited initially |
-| **Hybrid** | Mix of HQ and lab-initiated orders |
-| **Self-Service** | Lab places own orders via portal (current `LabOrderingPage` checkout flow) |
+| **HQ Managed** | HQ places orders on behalf of an `ACTIVE` lab; lab portal ordering is read-only/limited |
+| **Hybrid** | Mix of HQ on-behalf and lab-initiated orders for an `ACTIVE` lab |
+| **Self-Service** | Lab places own orders via portal; HQ may still order on behalf of an `ACTIVE` lab |
+| **Suspended** | No new order initiation by lab or HQ on behalf |
 
-Mode is an **operational/onboarding policy** — enforced by provisioning (lab user exists + credit eligible) rather than a single DB enum today. Future: explicit lab ordering mode flag in blueprint before implementation.
+Mode is an **operational/onboarding policy** stored in `labs.ordering_mode`. Admin-on-behalf ordering is allowed only for `ACTIVE` labs when mode is `hq_managed`, `hybrid`, or `self_service`; it is blocked for `INACTIVE` labs and `suspended` Ordering Mode.
 
 ---
 
@@ -80,6 +81,8 @@ Source: `currentUser.creditStatus`, `ar_credit_control.credit_hold`
 | 7 | Optional auto-open Track Order drawer |
 
 **No duplicate order creation:** RPC idempotency via `client_request_id`; UI hash lock.
+
+Admin-on-behalf ordering must reuse the existing `LabOrderingPage` catalog/cart/checkout flow in explicit `adminOnBehalf` mode. It must not duplicate ordering UI or impersonate the lab user. The selected lab remains the customer, the authenticated HQ user remains the actor, and order/audit metadata must include `source = admin_on_behalf`.
 
 ---
 
@@ -156,7 +159,7 @@ Source: `currentUser.creditStatus`, `ar_credit_control.credit_hold`
 
 - `verify-lab-ordering-flow.mjs` — track lookup, RPC smoke, legacy guard
 - `verify-hq-rls-reads.mjs` — lab tenant isolation
-- Manual: checkout → Track Order → Previous Orders without refresh
+- Manual: checkout → Track Order → Previous Orders without refresh; admin/executive on-behalf UAT for allowed/blocked lab states and `source = admin_on_behalf`
 
 ---
 

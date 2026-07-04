@@ -43,6 +43,7 @@ Baseline schema dump: `primecare_public_schema.sql` (repo root).
 | Dispatch / delivery ops | `order_shipments` | Order status |
 | Identity | `profiles` + Supabase Auth | Legacy `users` (backfill only) |
 | Page permissions | `rolePermissionMatrix.js` | Hardcoded role checks in pages |
+| Compensation / payroll | HQ payroll domain tables derived from `payments` cash collected | Existing distributor/revenue commission analytics |
 
 ---
 
@@ -60,6 +61,7 @@ Baseline schema dump: `primecare_public_schema.sql` (repo root).
 | **Agent** | collections, visits APIs | AgentDashboard, Visits | agent_visits, ownership |
 | **Executive** | `founderSnapshotApi`, EFI engines | ExecutiveControlTower, EFI pages | read aggregates |
 | **Lab portal** | `getLabCatalogRead`, `getLabOrderDetailsRead` | LabOrderingPage | orders (scoped) |
+| **Compensation / Payroll** | planned compensation APIs | planned Executive Compensation / Payroll screens | planned payroll, run line, adjustment, approval, audit tables |
 
 ---
 
@@ -78,6 +80,7 @@ Lab checkout (Placed)
       → finalize invoice (PDF/sent)
       → allocate to invoice
       → AR reduced
+      → payroll derives cash-only commission snapshot (no finance mutation)
 ```
 
 ### Lab portal (self-service path)

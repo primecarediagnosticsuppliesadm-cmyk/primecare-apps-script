@@ -44,6 +44,7 @@ Read Blueprint → Inspect code/migrations → Compare doc vs implementation
 | 15 | [15_Do_Not_Break_Rules.md](./15_Do_Not_Break_Rules.md) | Hard constraints |
 | 16 | [16_Certification_Framework.md](./16_Certification_Framework.md) | Phase 2 cert framework index |
 | 18 | [18_Domain_Projection_Architecture.md](./18_Domain_Projection_Architecture.md) | Domain projections, event pipeline, read adapters |
+| 19 | [19_Executive_Compensation_Payroll_Engine.md](./19_Executive_Compensation_Payroll_Engine.md) | HQ-owned compensation, payroll, cash-only commission, approval, export |
 | — | [CHANGELOG.md](./CHANGELOG.md) | Gaps, conflicts, structural changes |
 
 ### Templates
@@ -58,7 +59,7 @@ Read Blueprint → Inspect code/migrations → Compare doc vs implementation
 
 ### Legacy docs (superseded numbering)
 
-Earlier blueprint files (`01_schema_catalog.md` … `12_verification_matrix.md`) remain for reference; **prefer 00–15 numbering** above.
+Earlier blueprint files (`01_schema_catalog.md` … `12_verification_matrix.md`) remain for reference; **prefer 00–19 numbering** above.
 
 ---
 
@@ -73,6 +74,7 @@ Earlier blueprint files (`01_schema_catalog.md` … `12_verification_matrix.md`)
 | Inventory | `inventory` + `inventory_ledger` |
 | Permissions | `rolePermissionMatrix.js` |
 | Bounded reads | `hqReadBounds.js` |
+| Compensation / payroll | HQ payroll domain tables; derived from collected cash only |
 
 ---
 

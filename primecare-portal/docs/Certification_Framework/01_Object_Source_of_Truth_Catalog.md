@@ -33,8 +33,8 @@ Blueprint refs: [01_Database_Schema.md](../PrimeCare_System_Blueprint/01_Databas
 | [Lab contract](#lab-contract) | Growth | `lab_contracts` |
 | [Commission entry](#commission-entry) | Growth / legacy analytics | `commission_entries` |
 | [Compensation plan](#compensation-plan-phase-3a-foundation) | Compensation / Payroll | `compensation_plans` |
-| [Payroll run](#payroll-run-phase-3a-foundation) | Compensation / Payroll | `payroll_runs` |
-| [Payroll run line](#payroll-run-line-phase-3a-foundation) | Compensation / Payroll | `payroll_run_lines` |
+| [Payroll run](#payroll-run-phase-3c-domain-workflow) | Compensation / Payroll | `payroll_runs` |
+| [Payroll run line](#payroll-run-line-phase-3c-domain-workflow) | Compensation / Payroll | `payroll_run_lines` |
 
 ---
 
@@ -362,39 +362,39 @@ Admin-on-behalf orders must identify `source = admin_on_behalf` in order/audit m
 |-------|-------|
 | **Source of truth** | `public.compensation_plans` |
 | **Lifecycle** | draft → active → retired |
-| **APIs** | Phase 3B preview-only calculation services; no approval/lock/export APIs |
+| **APIs** | Phase 3B preview calculation services; Phase 3C workflow APIs consume plan/version metadata |
 | **Screens** | Placeholder navigation only; no compensation/payroll pages |
 | **Verify scripts** | `verify-compensation-schema.mjs`, `verify-compensation-role-access.mjs`, `verify-compensation-rls.mjs` |
 | **Dependencies** | Profile/Agent, Executive approval |
-| **Known gaps** | Approval/lock/export APIs and payroll UI deferred to later phases |
+| **Known gaps** | Payroll UI deferred to later phases |
 
 ---
 
-## Payroll run (Phase 3A foundation)
+## Payroll run (Phase 3C domain workflow)
 
 | Field | Value |
 |-------|-------|
 | **Source of truth** | `public.payroll_runs` + `public.payroll_periods` |
-| **Lifecycle** | draft → previewed → submitted → approved → locked → exported; void exception state |
-| **APIs** | Phase 3B preview writer creates draft payroll runs only |
+| **Lifecycle** | draft → previewed → submitted → approved → locked → exported → paid; void exception state |
+| **APIs** | Phase 3B preview writer creates draft runs; Phase 3C workflow APIs preview/submit/approve/reject/lock/export/pay/reopen |
 | **Screens** | Placeholder navigation only; Payroll Periods, Run Preview, Approval Queue, and Export History remain future |
-| **Verify scripts** | `verify-payroll-period-lifecycle.mjs`, `verify-compensation-audit.mjs`, `verify-compensation-calculation.mjs`, `verify-payroll-preview.mjs`, `verify-plan-versioning.mjs`, future `verify-payroll-run-lifecycle.mjs`, future `verify-compensation-approval-workflow.mjs`, future `verify-payroll-export.mjs` |
+| **Verify scripts** | `verify-payroll-period-lifecycle.mjs`, `verify-compensation-audit.mjs`, `verify-compensation-calculation.mjs`, `verify-payroll-preview.mjs`, `verify-plan-versioning.mjs`, `verify-payroll-lifecycle.mjs`, `verify-payroll-locking.mjs`, `verify-payroll-immutability.mjs`, `verify-payroll-rbac.mjs`, `verify-payroll-audit.mjs`, `verify-payroll-export.mjs`, `verify-payroll-versioning.mjs` |
 | **Dependencies** | Compensation plan assignment, payment cash collection snapshot, attribution snapshot, adjustments, Executive approval |
-| **Known gaps** | No accounting entry in this phase; export metadata only until future finance approval |
+| **Known gaps** | No accounting entry, bank payout, GL posting, disbursement record, or payroll UI in this phase; export metadata/model only until future finance approval |
 
 ---
 
-## Payroll run line (Phase 3A foundation)
+## Payroll run line (Phase 3C domain workflow)
 
 | Field | Value |
 |-------|-------|
 | **Source of truth** | `public.payroll_run_lines` |
-| **Lifecycle** | draft → previewed → submitted → approved → locked → exported; void exception state |
-| **APIs** | Phase 3B preview-only calculation; no approval/lock/export |
+| **Lifecycle** | draft → previewed → submitted → approved → locked; parent run progresses exported/paid while locked details remain immutable |
+| **APIs** | Phase 3B preview calculation; Phase 3C workflow status propagation before lock and immutable read/export after lock |
 | **Screens** | Planned Agent Compensation Detail and Agent Self-View remain future |
-| **Verify scripts** | `verify-compensation-schema.mjs`, `verify-compensation-rls.mjs`, `verify-cash-only-commission.mjs`, `verify-attribution-snapshots.mjs`, `verify-promotion-eligibility.mjs` |
+| **Verify scripts** | `verify-compensation-schema.mjs`, `verify-compensation-rls.mjs`, `verify-cash-only-commission.mjs`, `verify-attribution-snapshots.mjs`, `verify-promotion-eligibility.mjs`, `verify-payroll-locking.mjs`, `verify-payroll-immutability.mjs`, `verify-payroll-adjustments.mjs` |
 | **Dependencies** | Payment cash collected, `payments.agent_id` or `lab_ownership` payment-date snapshot, plan assignment, approved adjustments |
-| **Known gaps** | Must persist attribution evidence; Agent read must be own locked/exported history only |
+| **Known gaps** | Agent self-view UI remains future; agent read must be own locked/exported/paid history only |
 
 ---
 
@@ -409,5 +409,5 @@ Admin-on-behalf orders must identify `source = admin_on_behalf` in order/audit m
 | Inventory | `verify-inventory-reconciliation`, `verify-procurement-inventory-flow` |
 | Lab | `verify-labs-admin-flow`, planned `verify-lab-lifecycle-status-flow`, `verify-lab-ordering-flow` |
 | AR | `verify-collection-inconsistencies`, `verify-credit-risk-admin-flow` |
-| Compensation / payroll | `verify-compensation-schema`, `verify-compensation-rls`, `verify-payroll-period-lifecycle`, `verify-compensation-audit`, `verify-compensation-role-access`, `verify-compensation-calculation`, `verify-cash-only-commission`, `verify-promotion-eligibility`, `verify-attribution-snapshots`, `verify-payroll-preview`, `verify-plan-versioning`; future `verify-payroll-run-lifecycle` |
+| Compensation / payroll | `verify-compensation-schema`, `verify-compensation-rls`, `verify-payroll-period-lifecycle`, `verify-compensation-audit`, `verify-compensation-role-access`, `verify-compensation-calculation`, `verify-cash-only-commission`, `verify-promotion-eligibility`, `verify-attribution-snapshots`, `verify-payroll-preview`, `verify-plan-versioning`, `verify-payroll-lifecycle`, `verify-payroll-locking`, `verify-payroll-immutability`, `verify-payroll-rbac`, `verify-payroll-audit`, `verify-payroll-export`, `verify-payroll-adjustments`, `verify-payroll-versioning` |
 | Full O2C | `verify-primecare-production-golden-path` |

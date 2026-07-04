@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-07-03T03:11:59.002Z",
+  "generated_at": "2026-07-03T18:28:56.821Z",
   "track_a_sql_count": 53,
-  "track_b_migrations_count": 23,
+  "track_b_migrations_count": 25,
   "duplicate_pairs": 7,
   "manifest_only_count": 46,
   "files": {
@@ -387,6 +387,16 @@
         "path": "supabase/migrations/20260705120002_fix_read_receivables_timeout.sql",
         "sha256_16": "799d0f0d0bfd4d5b",
         "size_bytes": 2822
+      },
+      {
+        "path": "supabase/migrations/20260705120003_sprint5a_founder_snapshot_projection.sql",
+        "sha256_16": "78b00fe44456dffd",
+        "size_bytes": 1731
+      },
+      {
+        "path": "supabase/migrations/20260705120004_sprint5a_receivables_tenant_scope.sql",
+        "sha256_16": "44f8f47e2b22b205",
+        "size_bytes": 3096
       }
     ]
   },

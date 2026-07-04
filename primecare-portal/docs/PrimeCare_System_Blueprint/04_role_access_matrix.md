@@ -27,7 +27,7 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 |-----------|--------|
 | **Visible modules** | Compensation / Payroll foundation placeholder only until payroll screens are explicitly implemented |
 | **Read** | Payroll periods, plan assignments, payroll previews, own-tenant compensation records needed for payroll support |
-| **Write** | Phase 3A schema/RLS permits support writes to foundation records; app/API preview generation and submission are not implemented until later calculation/workflow phases |
+| **Write** | Generate preview and submit payroll runs; create adjustment requests. Cannot approve, lock, export, mark paid, or reopen locked payroll. |
 | **Blocked** | Cannot approve payouts, approve commission changes, lock payroll runs, authorize exports, mutate finance records, or create accounting entries |
 | **Freeze** | Payroll preview support only; no payout authorization |
 
@@ -136,7 +136,7 @@ Only `admin` and `executive` may change `labs.status`. Agents and lab users cann
 | operationsCenter | admin, executive, distributor_*, read_only_auditor |
 | founder*, executiveFinancialIntelligence | executive |
 | masterCatalog, inventory, purchase | admin, executive |
-| executiveCompensation / payroll (planned) | executive; hr preview/support; admin view/recommend; agent own self-view |
+| executiveCompensation / payroll | executive full workflow; hr preview/submit/support; admin view/recommend only; agent own locked/exported/paid self-view |
 
 Full map: `PERMISSION_BY_KEY` in `rolePermissionMatrix.js`.
 
@@ -167,7 +167,7 @@ Verified: `verify-hq-freeze-policy.mjs`
 | invoices | own lab | — | tenant | no payroll mutation | tenant |
 | payments | own lab | agent + lab | tenant | read only via bounded payroll derivation after approval | tenant |
 | order_shipments | — | assigned | tenant ops | — | tenant ops |
-| compensation/payroll tables | — | own locked/exported lines only | view only | support-scoped foundation access only; no approval/lock/export | full compensation access |
+| compensation/payroll tables | — | own locked/exported/paid lines only | view only | preview/submit/support only; no approval/lock/export/pay/reopen | full compensation workflow |
 | profiles | self | self | tenant | payroll-scoped agent profile reads | cross-tenant read patterns |
 
 **Never weaken RLS without approval** — run `verify-hq-rls-reads.mjs`.

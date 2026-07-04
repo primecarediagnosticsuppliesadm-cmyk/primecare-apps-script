@@ -25,6 +25,11 @@ tenants
   └── logistics_warehouses
         └── delivery_routes
               └── delivery_route_shipments → order_shipments
+  └── payroll_periods
+        └── payroll_runs
+              └── payroll_run_lines
+                    ├── compensation_commission_entries (cash collected)
+                    └── compensation_adjustments
 ```
 
 ---
@@ -62,6 +67,10 @@ logistics_warehouses
 | delivery_routes | logistics_couriers | courier_id (text) | N:1 | Driver assignment on route |
 | labs | delivery planning | preferred_delivery_day | attr | Groups unassigned shipments |
 | labs | lab_ownership | tenant_id + lab_id | 0..1 ACTIVE | Agent collections filter |
+| payments | compensation_commission_entries | payment_id snapshot/ref | derived | Cash-only commission input; no payment mutation |
+| lab_ownership | compensation_commission_entries | tenant_id + lab_id + payment date snapshot | derived | Fallback attribution when payments.agent_id is absent |
+| payroll_periods | payroll_runs | period_id | 1:N | Preview/versioned payroll runs |
+| payroll_runs | payroll_run_lines | payroll_run_id | 1:N | Agent-level payable lines |
 | inventory | inventory_ledger | tenant_id + product_id | 1:N | Ledger = audit |
 | purchase_orders | purchase_order_items | po_id | 1:N | Receive → stock |
 
@@ -112,6 +121,13 @@ profiles.agent_id
 
 Collections agent filter: ownership rows when present.
 
+Compensation attribution:
+
+1. Use `payments.agent_id` when populated and certified.
+2. Otherwise use active `lab_ownership` at the payment date.
+3. Persist attribution snapshot, method, source payment references/hash, and rule version before approval/lock.
+4. Never recompute locked payroll from current ownership.
+
 ---
 
 ## Common query patterns
@@ -124,6 +140,7 @@ Collections agent filter: ownership rows when present.
 | Invoice open balance | `total - sum(allocations)` |
 | Logistics board | `order_shipments` by tenant, order created_at desc |
 | Collections AR | `v_labs_credit` or `ar_credit_control` bounded |
+| Payroll commission | Bounded payments read + attribution snapshot; cash collected only |
 
 ---
 
@@ -132,3 +149,4 @@ Collections agent filter: ownership rows when present.
 - Text joins (`order_id`, `payment_id`) — RPC-enforced; not all DB FKs
 - `tenant_id` may be uuid (canonical) or text in legacy rows — normalize in RPCs
 - Phase 3A columns may be missing if migration not applied — see CHANGELOG
+- Compensation/payroll is derived from payments and ownership snapshots only; it must not mutate O2C source records or create accounting entries in Phase 1/2.

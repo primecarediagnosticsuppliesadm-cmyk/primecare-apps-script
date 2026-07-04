@@ -66,7 +66,7 @@ Every cataloged screen documents:
 ## Certification workflow (Phase 2)
 
 ```
-1. Read Blueprint 00–16 + affected object/screen catalog entries
+1. Read Blueprint 00–19 + affected object/screen catalog entries
 2. Run API regression bundle (13_Verification_Matrix.md)
 3. Run run-browser-certification.mjs (prereq gate + checklist output)
 4. Execute Browser Golden Path (04) manually or via future automation

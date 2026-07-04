@@ -72,6 +72,7 @@ Invoice, payment, allocation, and AR — strict lifecycle for Year-1 pilot.
 - **Must not** alter payment allocation logic, AR logic, invoices, orders, inventory, logistics, or accounting.
 - No accounting entry, bank payout, GL posting, or disbursement record is created unless explicitly approved in a future finance/payroll phase.
 - Phase 3B preview may write draft rows only to compensation/payroll tables and audit calculation start/finish; it must not write approval/export events or mutate Finance/O2C source records.
+- Phase 3C `paid` is payroll-domain evidence only. It must not write `payments`, AR, allocations, invoices, orders, bank files, GL, accounting entries, or disbursement tables.
 
 ---
 
@@ -93,7 +94,7 @@ Invoice, payment, allocation, and AR — strict lifecycle for Year-1 pilot.
 | Invoice | `createInvoiceForFulfilledOrderWrite`, `getInvoicesForLabRead`, `generateInvoicePdf` |
 | Payment | `createPaymentWrite`, `allocatePaymentToInvoiceWrite` |
 | Status | `invoiceAccountStatus.js`, `buildLabAccountLedger` |
-| Compensation / payroll | Preview-only Phase 3B calculation APIs; see `19_Executive_Compensation_Payroll_Engine.md` |
+| Compensation / payroll | Phase 3B preview calculation APIs and Phase 3C payroll-domain workflow APIs; see `19_Executive_Compensation_Payroll_Engine.md` |
 
 ---
 
@@ -104,4 +105,5 @@ Invoice, payment, allocation, and AR — strict lifecycle for Year-1 pilot.
 - `verify-invoice-phase1.mjs` – `phase5.mjs`
 - `verify-primecare-production-golden-path.mjs`
 - `verify-compensation-calculation.mjs`, `verify-cash-only-commission.mjs`, `verify-promotion-eligibility.mjs`, `verify-attribution-snapshots.mjs`, `verify-payroll-preview.mjs`, `verify-plan-versioning.mjs`
+- `verify-payroll-locking.mjs`, `verify-payroll-immutability.mjs`, `verify-payroll-rbac.mjs`, `verify-payroll-audit.mjs`, `verify-payroll-export.mjs`, `verify-payroll-lifecycle.mjs`, `verify-payroll-adjustments.mjs`, `verify-payroll-versioning.mjs`
 - Planned later: `verify-compensation-no-finance-mutation.mjs`

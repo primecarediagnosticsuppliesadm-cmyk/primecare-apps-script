@@ -87,7 +87,7 @@ Month-level payroll window.
 | `id` | UUID primary key |
 | `period_ym` | `YYYY-MM` |
 | `period_start`, `period_end`, `pay_date` | Calendar boundaries |
-| `status` | open / previewed / submitted / approved / locked / exported / void |
+| `status` | draft / previewed / submitted / approved / locked / exported / paid / void |
 | `locked_at`, `locked_by` | Lock audit |
 | `metadata` | Notes and certification state |
 
@@ -109,7 +109,7 @@ Cash-only commission ledger. If the existing `commission_entries` table is reuse
 | `blocked_reason` | Promotion or commission blocker |
 | `source_payment_refs` | Payment IDs or hashed source list |
 | `rule_version` | Compensation rule version |
-| `status` | draft / previewed / approved / locked / exported / void |
+| `status` | draft / previewed / submitted / approved / locked / exported / paid / void |
 
 ### `payroll_runs`
 
@@ -120,7 +120,7 @@ Run header for a period.
 | `id` | UUID primary key |
 | `period_id` | Payroll period |
 | `run_number` | Sequential run version |
-| `status` | draft / previewed / submitted / approved / locked / exported / void |
+| `status` | draft / previewed / submitted / approved / locked / exported / paid / void |
 | `generated_by`, `generated_at` | HR/Executive preview audit |
 | `approved_by`, `approved_at` | Executive approval |
 | `locked_by`, `locked_at` | Executive lock |
@@ -143,7 +143,7 @@ Agent-level payroll result.
 | `quarterly_bonus`, `annual_bonus` | Bonus components |
 | `manual_adjustments_total`, `penalties_total`, `recoveries_total` | Adjustments |
 | `gross_pay`, `deductions_total`, `net_payable` | Payroll totals |
-| `line_status` | draft / approved / locked / exported / void |
+| `line_status` | draft / previewed / submitted / approved / locked / exported / paid / void |
 | `calculation_snapshot` | Full calculation inputs and rule version |
 
 ### `compensation_adjustments`
@@ -154,7 +154,7 @@ Manual additions, penalties, and recoveries.
 |-------|---------|
 | `id` | UUID primary key |
 | `period_id`, `agent_id` | Target |
-| `adjustment_type` | manual_adjustment / penalty / recovery |
+| `adjustment_type` | positive / negative / recovery / advance / correction |
 | `component` | Salary, commission, bonus, attendance, delivery, qualification, collection |
 | `amount` | Positive or negative amount |
 | `reason`, `notes` | Mandatory explanation |
@@ -168,7 +168,7 @@ Append-only audit for every payroll-domain action.
 | Field | Meaning |
 |-------|---------|
 | `id` | UUID primary key |
-| `event_type` | plan_changed / preview_generated / adjustment_requested / approved / locked / exported / voided |
+| `event_type` | preview / submit / approve / reject / lock / export / pay / reopen / adjustment_requested / adjustment_approved / adjustment_rejected |
 | `entity_type`, `entity_id` | Affected domain object |
 | `actor_user_id`, `actor_role` | Authenticated actor |
 | `before_json`, `after_json` | Snapshot diff where applicable |
@@ -182,7 +182,7 @@ Approval workflow evidence.
 |-------|---------|
 | `id` | UUID primary key |
 | `payroll_run_id`, `line_id` | Run or line |
-| `action` | submit / approve / reject / request_changes / lock / export |
+| `action` | submit / approve / reject / request_changes / lock / export / pay / reopen |
 | `actor_user_id`, `actor_role` | Actor |
 | `reason`, `notes` | Approval context |
 | `created_at` | Timestamp |
@@ -195,7 +195,7 @@ Export metadata only.
 |-------|---------|
 | `id` | UUID primary key |
 | `payroll_run_id`, `period_id` | Export target |
-| `export_format` | CSV / bank file / PDF summary |
+| `export_format` | csv / excel / accounting_ready |
 | `storage_path` | File reference |
 | `checksum` | Integrity hash |
 | `generated_by`, `generated_at` | Export audit |
@@ -210,10 +210,10 @@ Payroll periods are monthly. A period must close operationally before final appr
 Allowed period states:
 
 ```
-open -> previewed -> submitted -> approved -> locked -> exported
+draft -> previewed -> submitted -> approved -> locked -> exported -> paid
                          |             |
                          v             v
-                      rejected       void
+                       draft          void
 ```
 
 Rules:
@@ -223,8 +223,9 @@ Rules:
 3. Only Executive may approve.
 4. Only Executive may lock.
 5. Export is allowed only after lock.
-6. Locked runs are immutable except by Executive void/reversal workflow.
-7. No accounting entry is created in this phase.
+6. Paid is a payroll-domain evidence state only; it does not create a `payments` row, bank payout, GL posting, accounting entry, disbursement record, or AR mutation.
+7. Locked runs are immutable. Reopen creates a new draft run version and never edits the locked/exported/paid source run.
+8. No accounting entry is created in this phase.
 
 ---
 
@@ -330,6 +331,50 @@ Preview persistence rules:
 7. Executive approves or rejects.
 8. Executive locks approved run.
 9. Export is generated from locked run only.
+10. Executive may mark exported payroll as paid using payroll-domain evidence only; no Finance/O2C record is mutated.
+
+---
+
+## Phase 3C payroll domain completion
+
+Phase 3C completes backend/domain workflow before UI. It introduces lifecycle services, immutable locking guards, adjustment domain rules, export data shaping, payroll-domain paid evidence, RBAC checks, and verification.
+
+Workflow state diagram:
+
+```
+draft
+  -> previewed       (HR or Executive)
+  -> submitted       (HR or Executive)
+  -> approved        (Executive)
+  -> locked          (Executive; immutable payroll details)
+  -> exported        (Executive; csv/excel/accounting_ready metadata only)
+  -> paid            (Executive; payroll-domain evidence only)
+
+submitted -> draft   (Executive reject)
+locked/exported/paid -> new draft run version (Executive reopen; original remains immutable)
+```
+
+RBAC:
+
+| Action | Executive | HR | Admin | Agent |
+|--------|-----------|----|-------|-------|
+| Preview | yes | yes | view only | no |
+| Submit | yes | yes | view only | no |
+| Approve / reject | yes | no | no | no |
+| Lock | yes | no | no | no |
+| Export | yes | no | no | no |
+| Pay evidence | yes | no | no | no |
+| Reopen as new draft version | yes | no | no | no |
+| Adjustment create | yes | yes | recommend only | no |
+| Adjustment approve/reject | yes | no | no | no |
+| Own locked/exported/paid read | n/a | n/a | n/a | yes |
+
+Immutable after lock:
+
+1. `payroll_run_lines`, `compensation_commission_entries`, and approved adjustments tied to a locked/exported/paid run cannot be updated or deleted.
+2. `payroll_runs` may progress only `locked -> exported -> paid` after lock.
+3. Reopen never mutates the locked/exported/paid run; it creates a new draft run version linked by metadata.
+4. Export/pay evidence must write audit events and workflow evidence only.
 
 ---
 
