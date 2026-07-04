@@ -20,6 +20,7 @@ import {
   normalizeOrderingMode,
   orderingModeLabel,
 } from "@/labOrdering/orderingGovernance.js";
+import { labAssignedAgentId, resolveLabAgent } from "@/operations/labAgentResolver.js";
 import { ROLES } from "@/config/rolePermissionMatrix.js";
 
 const TABS = [
