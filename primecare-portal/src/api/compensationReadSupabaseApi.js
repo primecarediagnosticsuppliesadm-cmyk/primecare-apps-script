@@ -11,9 +11,14 @@ import {
   HQ_COMPENSATION_PERIODS_LIMIT,
   HQ_COMPENSATION_PLAN_READ_COLUMNS,
   HQ_COMPENSATION_RUNS_LIMIT,
+  HQ_AR_COLUMNS,
+  HQ_COLLECTIONS_AR_LIMIT,
+  HQ_PAYMENT_COLUMNS,
+  HQ_PAYMENTS_RECENT_LIMIT,
   HQ_PAYROLL_LINE_READ_COLUMNS,
   HQ_PAYROLL_PERIOD_READ_COLUMNS,
   HQ_PAYROLL_RUN_READ_COLUMNS,
+  HQ_V_LABS_CREDIT_LIST_COLUMNS,
   clampLimit,
 } from "@/api/hqReadBounds.js";
 
@@ -71,6 +76,9 @@ export async function loadExecutiveCompensationCenterRead({
     assignmentsRes,
     auditRes,
     exportsRes,
+    paymentsRes,
+    arRes,
+    labsRes,
   ] = await Promise.all([
     db
       .from("payroll_periods")
@@ -120,6 +128,22 @@ export async function loadExecutiveCompensationCenterRead({
       .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false })
       .limit(boundedExportLimit),
+    db
+      .from("payments")
+      .select(HQ_PAYMENT_COLUMNS)
+      .eq("tenant_id", tenantId)
+      .order("payment_date", { ascending: false })
+      .limit(clampLimit(HQ_PAYMENTS_RECENT_LIMIT, 1, HQ_PAYMENTS_RECENT_LIMIT)),
+    db
+      .from("ar_credit_control")
+      .select(HQ_AR_COLUMNS)
+      .eq("tenant_id", tenantId)
+      .limit(clampLimit(HQ_COLLECTIONS_AR_LIMIT, 1, HQ_COLLECTIONS_AR_LIMIT)),
+    db
+      .from("v_labs_credit")
+      .select(HQ_V_LABS_CREDIT_LIST_COLUMNS)
+      .eq("tenant_id", tenantId)
+      .limit(clampLimit(HQ_COLLECTIONS_AR_LIMIT, 1, HQ_COLLECTIONS_AR_LIMIT)),
   ]);
 
   for (const [label, res] of [
@@ -131,6 +155,9 @@ export async function loadExecutiveCompensationCenterRead({
     ["compensation_plan_assignments", assignmentsRes],
     ["compensation_audit_events", auditRes],
     ["payroll_exports", exportsRes],
+    ["payments", paymentsRes],
+    ["ar_credit_control", arRes],
+    ["v_labs_credit", labsRes],
   ]) {
     if (res.error) readError(label, res.error);
   }
@@ -145,6 +172,9 @@ export async function loadExecutiveCompensationCenterRead({
     planAssignments: assignmentsRes.data || [],
     auditEvents: auditRes.data || [],
     payrollExports: exportsRes.data || [],
+    payments: paymentsRes.data || [],
+    arRows: arRes.data || [],
+    labs: labsRes.data || [],
     readHealth: {
       durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
       bounded: true,
@@ -157,6 +187,9 @@ export async function loadExecutiveCompensationCenterRead({
         "compensation_plan_assignments",
         "compensation_audit_events",
         "payroll_exports",
+        "payments",
+        "ar_credit_control",
+        "v_labs_credit",
       ],
     },
   };

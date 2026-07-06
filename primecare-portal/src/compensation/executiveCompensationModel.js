@@ -1,3 +1,5 @@
+import { buildCompensationIntelligence } from "./compensationIntelligenceEngine.js";
+
 const PENDING_PERIOD_STATUSES = new Set(["draft", "previewed", "submitted"]);
 const LIABILITY_RUN_STATUSES = new Set(["draft", "previewed", "submitted", "approved"]);
 
@@ -434,6 +436,20 @@ export function buildExecutiveCompensationModel(payload = {}) {
     })
     .sort((a, b) => str(b.atLabel).localeCompare(str(a.atLabel)));
 
+  const intelligence = buildCompensationIntelligence({
+    payrollPeriods: periods,
+    payrollRuns: runs,
+    payrollRunLines: lines,
+    commissionEntries,
+    compensationPlans: plans,
+    planAssignments: assignments,
+    payments: payload.payments || [],
+    arRows: payload.arRows || [],
+    labs: payload.labs || [],
+    currentPayrollLiability,
+    commissionPayable,
+  });
+
   return {
     kpis: {
       currentPayrollLiability,
@@ -467,6 +483,8 @@ export function buildExecutiveCompensationModel(payload = {}) {
     commissionHistoryRows,
     auditTimeline,
     exportRows,
+    intelligence,
+    compensationPlans: plans,
     readHealth: payload.readHealth || null,
   };
 }

@@ -34,6 +34,7 @@ import CompensationPlanAssignmentsTab from "@/components/compensation/Compensati
 import CompensationPlansTab from "@/components/compensation/CompensationPlansTab.jsx";
 import AgentCompensation360Panel from "@/components/compensation/AgentCompensation360Panel.jsx";
 import PayrollWorkflowToolbar from "@/components/compensation/PayrollWorkflowToolbar.jsx";
+import ExecutiveCompensationIntelligencePanel from "@/components/compensation/ExecutiveCompensationIntelligencePanel.jsx";
 import {
   loadAgentCompensation360Read,
   loadAgentCompensationDirectoryRead,
@@ -672,9 +673,6 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
             <SectionCard title="Payroll Liability Trend" icon={Wallet}>
               <TrendBars points={model.charts.liabilityTrend} valueKey="liability" />
             </SectionCard>
-            <SectionCard title="Top Performers" icon={Users}>
-              <RankList rows={model.charts.topAgents} />
-            </SectionCard>
             <SectionCard title="Promotion Pipeline" icon={Users}>
               <RankList
                 rows={model.charts.promotionPipeline.map((row) => ({
@@ -686,6 +684,11 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
               />
             </SectionCard>
           </div>
+
+          <ExecutiveCompensationIntelligencePanel
+            intelligence={model.intelligence}
+            compensationPlans={model.compensationPlans}
+          />
         </div>
       ) : null}
 
