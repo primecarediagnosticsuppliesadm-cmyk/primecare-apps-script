@@ -45,6 +45,7 @@ Read Blueprint → Inspect code/migrations → Compare doc vs implementation
 | 16 | [16_Certification_Framework.md](./16_Certification_Framework.md) | Phase 2 cert framework index |
 | 18 | [18_Domain_Projection_Architecture.md](./18_Domain_Projection_Architecture.md) | Domain projections, event pipeline, read adapters |
 | 19 | [19_Executive_Compensation_Payroll_Engine.md](./19_Executive_Compensation_Payroll_Engine.md) | HQ-owned compensation, payroll, cash-only commission, approval, export |
+| 20 | [20_People_Operations.md](./20_People_Operations.md) | People Operations product architecture, navigation, module ownership, vertical slices |
 | — | [CHANGELOG.md](./CHANGELOG.md) | Gaps, conflicts, structural changes |
 
 ### Templates

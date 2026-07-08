@@ -4,6 +4,54 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-08 — People Operations Phase 8.1A UI/UX Unification
+
+### Change
+
+- Introduce shared People Operations UX primitives: `PeopleOpsModuleFrame`, `PeopleOpsSectionCard`, `PeopleOpsFilterBar`, `PeopleOpsDashboard`, `PeopleOpsReportsPanel`, `peopleOpsStatusTokens`.
+- Operational dashboard: payroll status, pending actions, current payroll, employees, notifications, current period — **no trend charts**.
+- Analytical content moved to **Reports** (trends + intelligence panel).
+- Standardize errors (`DataFetchError` + retry), freshness (`DataFreshnessLabel`), success feedback (`usePortalToast`).
+- Fix `ReadHealthBanner` prop (`health` not `readHealth`).
+- Module state preservation: employee search/filters/360 selection retained when switching modules.
+- Meaningful empty states across payroll, exports, directory.
+- Navigation polish: design tokens, ARIA tablist on module nav.
+
+### Not changed
+
+- Payroll/commission calculations, reporting context, APIs, workflow logic, schema, RLS, finance boundaries.
+
+### Verification gates
+
+- `node scripts/verify-people-operations-ux.mjs`
+- `node scripts/audit-phase-8-1a-certification.mjs`
+
+---
+
+## 2026-07-08 — People Operations Phase 8.0 / 8.1 Shell
+
+### Change
+
+- Add canonical product document `20_People_Operations.md` — Executive Compensation evolves into **People Operations** (module hierarchy, reuse matrix, vertical slices 8.1–8.6).
+- Phase **8.1** delivers module navigation shell: Dashboard, Employees, Compensation, Payroll, Reports, Settings.
+- Replace flat nine-tab UI with `PeopleOperationsModuleNav` + `peopleOpsNavigation.js`.
+- Rename page export to `PeopleOperationsPage`; preserve `ExecutiveCompensationCenterPage` alias and `compensationPayroll` route key.
+- Menu label: **People Operations** (`enterpriseCopy.compensationPayroll`).
+- Move `ExecutiveCompensationIntelligencePanel` from Dashboard to **Reports → Analytics**.
+- Settings → Configuration placeholder (no new backend).
+
+### Not changed
+
+- Payroll engine, compensation engine, reporting context, Employee 360, workflow, plan/assignment APIs, analytics helpers, export/audit APIs, schema, RLS, finance boundaries.
+
+### Verification gates
+
+- `node scripts/verify-people-operations-shell.mjs`
+- `node scripts/audit-phase-8-1-certification.mjs`
+- Existing compensation/payroll regression scripts
+
+---
+
 ## 2026-07-08 — Executive Compensation Phase 7.2 Analytics Context
 
 ### Change

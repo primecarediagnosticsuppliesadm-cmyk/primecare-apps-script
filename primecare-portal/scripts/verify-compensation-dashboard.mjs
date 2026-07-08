@@ -10,6 +10,7 @@ import { buildExecutiveCompensationModel } from "../src/compensation/executiveCo
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const pageSrc = readFileSync(resolve(root, "src/pages/ExecutiveCompensationCenterPage.jsx"), "utf8");
+const dashboardSrc = readFileSync(resolve(root, "src/components/peopleOps/PeopleOpsDashboard.jsx"), "utf8");
 const modelSrc = readFileSync(resolve(root, "src/compensation/executiveCompensationModel.js"), "utf8");
 const readApiSrc = readFileSync(resolve(root, "src/api/compensationReadSupabaseApi.js"), "utf8");
 
@@ -76,13 +77,16 @@ for (const chart of [
   assert(Array.isArray(sampleModel.charts[chart]), `chart.${chart}`, `${chart} chart present`);
 }
 
-assert(/KpiCardGrid/.test(pageSrc), "ui.kpi_grid", "dashboard renders KPI cards");
-assert(/Overview/.test(pageSrc), "ui.overview_tab", "overview tab present");
-assert(/Compensation Plans/.test(pageSrc), "ui.plans_tab", "compensation plans tab present");
-assert(/Plan Assignments/.test(pageSrc), "ui.assignments_tab", "plan assignments tab present");
-assert(/Commission History/.test(pageSrc), "ui.commission_history_tab", "commission history tab present");
-assert(/Audit/.test(pageSrc), "ui.audit_tab", "audit tab present");
-assert(/Exports/.test(pageSrc), "ui.exports_tab", "exports tab present");
+assert(/PeopleOpsDashboard/.test(pageSrc), "ui.dashboard", "operational dashboard component present");
+assert(/KpiCardGrid/.test(dashboardSrc), "ui.kpi_grid", "dashboard renders KPI cards");
+assert(/PeopleOperationsModuleNav/.test(pageSrc), "ui.module_nav", "module navigation present");
+assert(/activeModuleId === "dashboard"/.test(pageSrc), "ui.dashboard_module", "dashboard module wired");
+assert(/activeModuleId === "compensation"/.test(pageSrc), "ui.compensation_module", "compensation module wired");
+assert(/activeModuleId === "payroll"/.test(pageSrc), "ui.payroll_module", "payroll module wired");
+assert(/activeModuleId === "employees"/.test(pageSrc), "ui.employees_module", "employees module wired");
+assert(/activeModuleId === "payroll" && activeScreenId === "commission-ledger"/.test(pageSrc), "ui.commission_ledger", "commission ledger screen wired");
+assert(/activeModuleId === "payroll" && activeScreenId === "activity"/.test(pageSrc), "ui.activity", "payroll activity screen wired");
+assert(/activeModuleId === "payroll" && activeScreenId === "exports"/.test(pageSrc), "ui.exports", "payroll exports screen wired");
 assert(/loadExecutiveCompensationCenterRead/.test(pageSrc), "ui.read_loader", "page uses read-only loader");
 assert(/loadExecutiveCompensationCenterRead/.test(readApiSrc), "api.read_only", "read API exported");
 assert(!/\.(insert|update|delete|upsert)\(/.test(readApiSrc), "api.no_writes", "read API has no mutations");

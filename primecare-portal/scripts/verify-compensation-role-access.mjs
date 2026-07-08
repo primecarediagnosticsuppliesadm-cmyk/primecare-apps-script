@@ -34,9 +34,9 @@ assert(/HQ HR \/ Payroll Support/.test(roleMatrix), "role.hr_label", "HR label d
 assert(
   /compensationPayroll:\s*\[ROLES\.EXECUTIVE,\s*ROLES\.HR,\s*ROLES\.ADMIN\]/.test(roleMatrix),
   "permission.compensation_payroll",
-  "Executive Compensation page allows Executive, HR, and Admin"
+  "People Operations page allows Executive, HR, and Admin"
 );
-assert(/Executive Compensation/.test(enterpriseCopy), "copy.compensation", "Executive Compensation label declared");
+assert(/People Operations/.test(enterpriseCopy), "copy.compensation", "People Operations label declared");
 assert(
   /key:\s*"compensationPayroll"[\s\S]*label:\s*ENTERPRISE_PAGE_LABELS\.compensationPayroll/.test(menuConfig),
   "menu.executive_compensation",
@@ -47,7 +47,7 @@ assert(
   "routing.alias",
   "compensation payroll route alias present"
 );
-assert(/ExecutiveCompensationCenterPage/.test(portal), "portal.executive_page", "Executive Compensation Center page wired");
+assert(/ExecutiveCompensationCenterPage/.test(portal), "portal.executive_page", "People Operations page wired (legacy import alias)");
 assert(!/CompensationFoundationPlaceholder/.test(portal), "portal.no_placeholder", "foundation placeholder removed");
 
 if (failures) {

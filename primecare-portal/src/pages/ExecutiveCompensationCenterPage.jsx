@@ -1,14 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   PageHeader,
   PageSkeleton,
   StatusBadge,
-  KpiCard,
-  KpiCardGrid,
   ReadHealthBanner,
   EnterpriseDataTable,
+  DataFetchError,
+  DataFreshnessLabel,
+  ListSkeleton,
+  usePortalToast,
 } from "@/components/ux";
 import { loadExecutiveCompensationCenterRead } from "@/api/compensationReadSupabaseApi.js";
 import { generatePayrollPreview } from "@/api/compensationSupabaseApi.js";
@@ -37,7 +38,14 @@ import CompensationPlansTab from "@/components/compensation/CompensationPlansTab
 import EmployeeCompensation360Panel from "@/components/compensation/EmployeeCompensation360Panel.jsx";
 import EmployeeDirectoryTab from "@/components/compensation/EmployeeDirectoryTab.jsx";
 import PayrollWorkflowToolbar from "@/components/compensation/PayrollWorkflowToolbar.jsx";
-import ExecutiveCompensationIntelligencePanel from "@/components/compensation/ExecutiveCompensationIntelligencePanel.jsx";
+import PeopleOperationsModuleNav from "@/components/peopleOps/PeopleOperationsModuleNav.jsx";
+import PeopleOpsDashboard from "@/components/peopleOps/PeopleOpsDashboard.jsx";
+import PeopleOpsReportsPanel from "@/components/peopleOps/PeopleOpsReportsPanel.jsx";
+import PeopleOpsFilterBar from "@/components/peopleOps/PeopleOpsFilterBar.jsx";
+import PeopleOpsModuleFrame from "@/components/peopleOps/PeopleOpsModuleFrame.jsx";
+import PeopleOpsSectionCard from "@/components/peopleOps/PeopleOpsSectionCard.jsx";
+import { PEOPLE_OPS_PAYROLL_STATUS_VARIANT } from "@/components/peopleOps/peopleOpsStatusTokens.js";
+import { defaultPeopleOpsRoute, resolvePeopleOpsRoute } from "@/peopleOps/peopleOpsNavigation.js";
 import {
   loadEmployeeCompensation360Read,
   loadEmployeeCompensationDirectoryRead,
@@ -50,180 +58,24 @@ import { buildExecutiveCompensationModel } from "@/compensation/executiveCompens
 import { usePagePerformance } from "@/hooks/usePagePerformance.js";
 import { cn } from "@/lib/utils";
 import {
-  BarChart3,
   Eye,
   History,
   RefreshCw,
-  Search,
-  TrendingUp,
-  Users,
-  Wallet,
+  Settings2,
 } from "lucide-react";
 
-const TABS = [
-  "Overview",
-  "Compensation Plans",
-  "Plan Assignments",
-  "Payroll Periods",
-  "Payroll Preview",
-  "Employees",
-  "Commission History",
-  "Audit",
-  "Exports",
-];
+const STATUS_VARIANT = PEOPLE_OPS_PAYROLL_STATUS_VARIANT;
 
-const STATUS_VARIANT = {
-  draft: "neutral",
-  previewed: "info",
-  submitted: "warning",
-  approved: "info",
-  locked: "warning",
-  exported: "success",
-  paid: "success",
-  void: "neutral",
-};
-
-function TrendBars({ points = [], valueKey = "netPayroll", labelKey = "label" }) {
-  const max = Math.max(...points.map((point) => Number(point[valueKey] || 0)), 1);
-  if (!points.length) {
-    return <p className="text-xs text-slate-500">No trend data yet.</p>;
-  }
-  return (
-    <div className="flex h-28 items-end gap-1">
-      {points.map((point) => (
-        <div key={point.periodYm || point.label} className="flex min-w-0 flex-1 flex-col items-center gap-1">
-          <div
-            className="w-full rounded-t bg-indigo-500/80"
-            style={{ height: `${Math.max(4, (Number(point[valueKey] || 0) / max) * 100)}%` }}
-            title={`${point[labelKey]}: ${point.netPayrollLabel || point.commissionLabel || point.efficiencyLabel || point.liabilityLabel || point[valueKey]}`}
-          />
-          <span className="truncate text-[8px] text-slate-400">{point[labelKey]}</span>
-        </div>
-      ))}
-    </div>
+export default function PeopleOperationsPage({ currentUser = null, setActivePage = null }) {
+  const [peopleOpsRoute, setPeopleOpsRoute] = useState(() => defaultPeopleOpsRoute());
+  const { moduleId: activeModuleId, screenId: activeScreenId } = useMemo(
+    () => resolvePeopleOpsRoute(peopleOpsRoute.moduleId, peopleOpsRoute.screenId),
+    [peopleOpsRoute]
   );
-}
-
-function RankList({ rows = [], valueKey = "netPayableLabel" }) {
-  if (!rows.length) return <p className="text-xs text-slate-500">No ranked agents yet.</p>;
-  return (
-    <div className="space-y-2">
-      {rows.map((row, index) => (
-        <div key={row.agentId} className="flex items-center justify-between rounded-lg border bg-white px-3 py-2 text-xs">
-          <div>
-            <p className="font-semibold text-slate-900">
-              #{index + 1} {row.agentName}
-            </p>
-            <p className="text-slate-500">Commission {row.commissionLabel || "—"}</p>
-          </div>
-          <p className="font-bold tabular-nums text-indigo-700">{row[valueKey]}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function SectionCard({ title, icon: Icon, children, className }) {
-  return (
-    <section className={cn("rounded-xl border border-slate-200 bg-slate-50/80 p-4", className)}>
-      <h2 className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-600">
-        {Icon ? <Icon className="h-4 w-4 text-indigo-600" aria-hidden /> : null}
-        {title}
-      </h2>
-      {children}
-    </section>
-  );
-}
-
-function PreviewToolbar({ search, onSearch, statusFilter, onStatusFilter, statuses }) {
-  return (
-    <div className="flex flex-col gap-2 md:flex-row md:items-center">
-      <div className="relative flex-1">
-        <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
-        <Input
-          value={search}
-          onChange={(event) => onSearch(event.target.value)}
-          placeholder="Search agent, plan, or period"
-          className="pl-8"
-        />
-      </div>
-      <select
-        value={statusFilter}
-        onChange={(event) => onStatusFilter(event.target.value)}
-        className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs"
-      >
-        <option value="">All lifecycle statuses</option>
-        {statuses.map((status) => (
-          <option key={status} value={status}>
-            {status}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
-function ReportingContextCard({ context, periodOptions = [], runOptions = [], selectedPeriodId, selectedRunId, onPeriodChange, onRunChange }) {
-  if (!context) return null;
-  return (
-    <SectionCard title="Reporting Context" icon={BarChart3} className="bg-white">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Reporting Period</p>
-          <select
-            className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm"
-            value={selectedPeriodId || context.periodId || ""}
-            onChange={(event) => onPeriodChange(event.target.value)}
-          >
-            {periodOptions.map((row) => (
-              <option key={row.periodId} value={row.periodId}>
-                {row.periodYm}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Payroll Version</p>
-          <select
-            className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm"
-            value={selectedRunId || context.payrollRunId || ""}
-            onChange={(event) => onRunChange(event.target.value)}
-            disabled={!runOptions.length}
-          >
-            {runOptions.map((row) => (
-              <option key={row.runId} value={row.runId}>
-                {row.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Generated</p>
-          <p className="mt-1 text-sm font-medium text-slate-900">{context.generatedAtLabel}</p>
-        </div>
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Generated By</p>
-          <p className="mt-1 text-sm font-medium text-slate-900">{context.generatedBy}</p>
-        </div>
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Status</p>
-          <p className="mt-1 text-sm font-medium text-slate-900">{context.statusLabel}</p>
-        </div>
-      </div>
-      <p className="mt-2 text-xs text-slate-500">
-        All overview KPIs, rankings, territory analytics, and forecast baseline use payroll version{" "}
-        <span className="font-semibold text-slate-700">{context.runVersionLabel}</span> for{" "}
-        <span className="font-semibold text-slate-700">{context.periodLabel}</span>.
-      </p>
-    </SectionCard>
-  );
-}
-
-export default function ExecutiveCompensationCenterPage({ currentUser = null, setActivePage = null }) {
-  const [activeTab, setActiveTab] = useState(TABS[0]);
   const [rawPayload, setRawPayload] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [dataLoadedAt, setDataLoadedAt] = useState(null);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -233,12 +85,9 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
   const [selectedRunId, setSelectedRunId] = useState("");
   const [selectedEmployeeProfileId, setSelectedEmployeeProfileId] = useState("");
   const [generatingPeriodId, setGeneratingPeriodId] = useState("");
-  const [generationNotice, setGenerationNotice] = useState("");
   const [workflowBusy, setWorkflowBusy] = useState(false);
-  const [workflowNotice, setWorkflowNotice] = useState("");
   const [adminModel, setAdminModel] = useState(null);
   const [adminBusy, setAdminBusy] = useState(false);
-  const [adminNotice, setAdminNotice] = useState("");
   const [employee360Model, setEmployee360Model] = useState(null);
   const [employee360Loading, setEmployee360Loading] = useState(false);
   const [employee360Error, setEmployee360Error] = useState("");
@@ -246,13 +95,19 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
   const [employeeRoleFilter, setEmployeeRoleFilter] = useState("all");
   const [employeeSearch, setEmployeeSearch] = useState("");
 
+  const navigatePeopleOps = useCallback((next) => {
+    setPeopleOpsRoute(resolvePeopleOpsRoute(next.moduleId, next.screenId));
+  }, []);
+
   const actorRole = String(currentUser?.role || "executive").toLowerCase();
   const tenantId = currentUser?.tenantId || currentUser?.tenant_id || "";
   const actorUserId = currentUser?.id || currentUser?.userId || "";
   const adminPermissions = useMemo(() => compensationAdminPermissions(actorRole), [actorRole]);
   const employee360Permissions = useMemo(() => employeeCompensation360Permissions(actorRole), [actorRole]);
 
-  usePagePerformance("Executive Compensation");
+  const { showToast } = usePortalToast();
+
+  usePagePerformance("People Operations");
 
   const model = useMemo(() => {
     if (!rawPayload) return null;
@@ -284,6 +139,7 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
       const payload = await loadExecutiveCompensationCenterRead({ currentUser });
       const initialModel = buildExecutiveCompensationModel(payload);
       setRawPayload(payload);
+      setDataLoadedAt(Date.now());
       setSelectedPeriodId((prev) => prev || initialModel.reportingContext?.periodId || "");
       setSelectedRunId((prev) => prev || initialModel.reportingContext?.payrollRunId || "");
     } catch (err) {
@@ -357,14 +213,14 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
   }, [tenantId, actorUserId, actorRole]);
 
   useEffect(() => {
-    if (selectedEmployeeProfileId && activeTab === "Employees") {
+    if (selectedEmployeeProfileId && activeModuleId === "employees") {
       loadEmployee360({ profileUserId: selectedEmployeeProfileId });
     } else if (!selectedEmployeeProfileId) {
       setEmployee360Model(null);
       setEmployee360Error("");
       setEmployee360Loading(false);
     }
-  }, [activeTab, loadEmployee360, selectedEmployeeProfileId]);
+  }, [activeModuleId, loadEmployee360, selectedEmployeeProfileId]);
 
   const refreshAll = async () => {
     await Promise.all([load({ refresh: true }), loadAdmin(), loadEmployeeDirectory()]);
@@ -374,13 +230,12 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
   const handleCreatePlan = async (planInput) => {
     try {
       setAdminBusy(true);
-      setAdminNotice("");
       const result = await createCompensationPlan({
         currentUser,
         planInput,
       });
       if (!result.success) throw new Error(result.error || "Plan create failed");
-      setAdminNotice("Compensation plan draft created.");
+      showToast("success", "Compensation plan draft created.");
       await loadAdmin();
     } catch (err) {
       setError(err?.message || "Could not create compensation plan");
@@ -392,14 +247,14 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
   const handleSavePlan = async (row, payload) => {
     try {
       setAdminBusy(true);
-      setAdminNotice("");
       const result = await saveCompensationPlanAdmin({
         currentUser,
         planId: row.id,
         planInput: payload,
       });
       if (!result.success) throw new Error(result.error || "Plan save failed");
-      setAdminNotice(
+      showToast(
+        "success",
         row.status === "active"
           ? `Created ${result.data?.newPlan?.version || "new version"}; prior assignments preserved.`
           : "Compensation plan updated."
@@ -417,7 +272,7 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
       setAdminBusy(true);
       const result = await duplicateCompensationPlan({ currentUser, planId: row.id });
       if (!result.success) throw new Error(result.error || "Duplicate failed");
-      setAdminNotice("Plan duplicated as draft.");
+      showToast("success", "Plan duplicated as draft.");
       await loadAdmin();
     } catch (err) {
       setError(err?.message || "Could not duplicate plan");
@@ -431,7 +286,7 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
       setAdminBusy(true);
       const result = await deactivateCompensationPlan({ currentUser, planId: row.id });
       if (!result.success) throw new Error(result.error || "Deactivate failed");
-      setAdminNotice(`Plan ${row.planCode} ${row.version} deactivated.`);
+      showToast("success", `Plan ${row.planCode} ${row.version} deactivated.`);
       await loadAdmin();
     } catch (err) {
       setError(err?.message || "Could not deactivate plan");
@@ -445,7 +300,7 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
       setAdminBusy(true);
       const result = await activateCompensationPlan({ currentUser, planId: row.id });
       if (!result.success) throw new Error(result.error || "Activate failed");
-      setAdminNotice(`Plan ${row.planCode} ${row.version} activated.`);
+      showToast("success", `Plan ${row.planCode} ${row.version} activated.`);
       await loadAdmin();
     } catch (err) {
       setError(err?.message || "Could not activate plan");
@@ -464,7 +319,7 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
         effectiveDate,
       });
       if (!result.success) throw new Error(result.error || "Assign failed");
-      setAdminNotice("Employee plan assignment created.");
+      showToast("success", "Employee plan assignment created.");
       await loadAdmin();
       await loadEmployeeDirectory();
       if (selectedEmployeeProfileId === row.profileUserId) {
@@ -487,7 +342,7 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
         effectiveDate,
       });
       if (!result.success) throw new Error(result.error || "Change plan failed");
-      setAdminNotice(`Plan changed for ${row.employeeName}; prior assignment preserved.`);
+      showToast("success", `Plan changed for ${row.employeeName}; prior assignment preserved.`);
       await loadAdmin();
       if (selectedEmployeeProfileId) await loadEmployee360({ profileUserId: selectedEmployeeProfileId });
     } catch (err) {
@@ -502,7 +357,7 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
       setAdminBusy(true);
       const result = await endEmployeePlanAssignment({ currentUser, assignmentId: row.id });
       if (!result.success) throw new Error(result.error || "End assignment failed");
-      setAdminNotice(`Assignment ended for ${row.employeeName}.`);
+      showToast("success", `Assignment ended for ${row.employeeName}.`);
       await loadAdmin();
     } catch (err) {
       setError(err?.message || "Could not end assignment");
@@ -585,7 +440,6 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
     try {
       setWorkflowBusy(true);
       setError("");
-      setWorkflowNotice("");
       const base = {
         ...workflowActorOptions,
         payrollRunId: periodRow.runId,
@@ -640,7 +494,8 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
       await load({ refresh: true });
       setSelectedPeriodId(periodRow.periodId);
       setSelectedRunId(result.data?.payrollRunId || periodRow.runId || "");
-      setWorkflowNotice(
+      showToast(
+        "success",
         `${periodRow.periodYm}: ${result.data?.fromStatus || periodRow.status} → ${result.data?.toStatus || result.data?.status || "updated"}`
       );
     } catch (err) {
@@ -653,14 +508,13 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
   const openPreview = (periodRow) => {
     setSelectedPeriodId(periodRow.periodId);
     setSelectedRunId(periodRow.runId || "");
-    setActiveTab("Payroll Preview");
+    navigatePeopleOps({ moduleId: "payroll", screenId: "run-review" });
   };
 
   const handleGeneratePreview = async (periodRow) => {
     try {
       setGeneratingPeriodId(periodRow.periodId);
       setError("");
-      setGenerationNotice("");
       const result = await generatePayrollPreview({
         currentUser,
         tenantId: currentUser?.tenantId || currentUser?.tenant_id,
@@ -674,10 +528,11 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
       await load({ refresh: true });
       setSelectedPeriodId(periodRow.periodId);
       setSelectedRunId(result.data?.payrollRunId || "");
-      setGenerationNotice(
+      showToast(
+        "success",
         `Generated draft preview for ${periodRow.periodYm}: ${result.data?.payrollRunLineCount || 0} employee lines, commission ${result.data?.totals?.commission_amount ?? 0}, net ${result.data?.totals?.net_payable ?? 0}.`
       );
-      setActiveTab("Payroll Preview");
+      navigatePeopleOps({ moduleId: "payroll", screenId: "run-review" });
     } catch (err) {
       setError(err?.message || "Could not generate payroll preview");
     } finally {
@@ -689,7 +544,7 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
     (employee = {}) => {
       const profileUserId = String(employee.profileUserId || employee.profile_user_id || "").trim();
       const agentId = String(employee.agentId || employee.agent_id || "").trim();
-      setActiveTab("Employees");
+      navigatePeopleOps({ moduleId: "employees", screenId: "directory" });
       if (profileUserId) {
         setSelectedEmployeeProfileId(profileUserId);
         return;
@@ -732,8 +587,15 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
   return (
     <div className="space-y-4 p-4 md:p-6">
       <PageHeader
-        title="Executive Compensation"
-        subtitle="Compensation administration, payroll preview, and executive intelligence. Configuration changes do not mutate finance, AR, payments, or orders."
+        title="People Operations"
+        subtitle="Workforce directory, compensation, payroll, and operational reporting for PrimeCare HQ. Configuration changes do not mutate finance, AR, payments, or orders."
+        freshness={
+          <DataFreshnessLabel
+            loadedAt={dataLoadedAt}
+            refreshing={refreshing || adminBusy || workflowBusy}
+            className="mt-1 block"
+          />
+        }
         actions={
           <Button type="button" variant="outline" size="sm" onClick={refreshAll} disabled={refreshing || adminBusy}>
             <RefreshCw className={cn("mr-1 h-4 w-4", refreshing && "animate-spin")} />
@@ -742,113 +604,69 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
         }
       />
 
-      <ReadHealthBanner readHealth={model?.readHealth} />
-
-      {workflowNotice ? (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-          {workflowNotice}
-        </div>
-      ) : null}
-
-      {generationNotice ? (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-          {generationNotice}
-        </div>
-      ) : null}
-
-      {adminNotice ? (
-        <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-800">
-          {adminNotice}
-        </div>
+      {model?.readHealth ? (
+        <ReadHealthBanner health={model.readHealth} title="People Operations read status" />
       ) : null}
 
       {error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+        <DataFetchError
+          message={error}
+          onRetry={() => void refreshAll()}
+          retrying={refreshing || adminBusy}
+          staleDataNote={model ? "Showing the last People Operations data loaded successfully." : ""}
+        />
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        {TABS.map((tab) => (
-          <Button
-            key={tab}
-            type="button"
-            size="sm"
-            variant={activeTab === tab ? "default" : "outline"}
-            onClick={() => {
-              if (tab === "Employees" && activeTab !== "Employees") {
-                setSelectedEmployeeProfileId("");
-                setEmployee360Model(null);
-                setEmployee360Error("");
-              }
-              setActiveTab(tab);
-            }}
-          >
-            {tab}
-          </Button>
-        ))}
-      </div>
+      <PeopleOperationsModuleNav
+        moduleId={activeModuleId}
+        screenId={activeScreenId}
+        onNavigate={navigatePeopleOps}
+      />
 
-      {activeTab === "Overview" && model ? (
-        <div className="space-y-4">
-          <ReportingContextCard
-            context={model.reportingContext}
-            periodOptions={model.periodRows}
-            runOptions={reportingRunOptions}
-            selectedPeriodId={selectedPeriodId}
-            selectedRunId={selectedRunId}
-            onPeriodChange={(periodId) => {
-              setSelectedPeriodId(periodId);
-              const runs = (rawPayload?.payrollRuns || [])
-                .filter((run) => run.period_id === periodId)
-                .sort((a, b) => Number(b.run_number) - Number(a.run_number));
-              setSelectedRunId(runs[0]?.id || "");
-            }}
-            onRunChange={setSelectedRunId}
-          />
-
-          <KpiCardGrid>
-            <KpiCard title="Current Payroll Liability" value={model.kpis.currentPayrollLiabilityLabel} icon={Wallet} />
-            <KpiCard title="Commission Payable" value={model.kpis.commissionPayableLabel} icon={TrendingUp} />
-            <KpiCard title="Pending Payroll Periods" value={String(model.kpis.pendingPayrollPeriods)} icon={BarChart3} />
-            <KpiCard title="Locked Runs" value={String(model.kpis.lockedPayrollRuns)} icon={BarChart3} />
-            <KpiCard title="Exported Runs" value={String(model.kpis.exportedPayrollRuns)} icon={BarChart3} />
-            <KpiCard title="Paid Evidence Runs" value={String(model.kpis.paidEvidenceRuns)} icon={Wallet} />
-            <KpiCard title="Promotion Eligible Agents" value={String(model.kpis.promotionEligibleAgents)} icon={Users} />
-            <KpiCard title="Collection Efficiency" value={model.kpis.collectionEfficiencyLabel} icon={TrendingUp} />
-          </KpiCardGrid>
-
-          <div className="grid gap-4 xl:grid-cols-2">
-            <SectionCard title="Payroll Trend" icon={BarChart3}>
-              <TrendBars points={model.charts.payrollTrend} valueKey="netPayroll" />
-            </SectionCard>
-            <SectionCard title="Commission Trend" icon={TrendingUp}>
-              <TrendBars points={model.charts.commissionTrend} valueKey="commission" />
-            </SectionCard>
-            <SectionCard title="Collection Trend" icon={TrendingUp}>
-              <TrendBars points={model.charts.collectionTrend} valueKey="efficiency" />
-            </SectionCard>
-            <SectionCard title="Payroll Liability Trend" icon={Wallet}>
-              <TrendBars points={model.charts.liabilityTrend} valueKey="liability" />
-            </SectionCard>
-            <SectionCard title="Promotion Pipeline" icon={Users}>
-              <RankList
-                rows={model.charts.promotionPipeline.map((row) => ({
-                  ...row,
-                  netPayableLabel: row.eligible ? "Eligible" : row.status,
-                  commissionLabel: `${row.efficiencyPct}% efficiency`,
-                }))}
-                valueKey="netPayableLabel"
-              />
-            </SectionCard>
-          </div>
-
-          <ExecutiveCompensationIntelligencePanel
-            intelligence={model.intelligence}
-            compensationPlans={model.compensationPlans}
-          />
-        </div>
+      {activeModuleId === "dashboard" && activeScreenId === "home" && model ? (
+        <PeopleOpsDashboard
+          model={model}
+          employeeCount={employeeList.length}
+          periodOptions={model.periodRows}
+          runOptions={reportingRunOptions}
+          selectedPeriodId={selectedPeriodId}
+          selectedRunId={selectedRunId}
+          onPeriodChange={(periodId) => {
+            setSelectedPeriodId(periodId);
+            const runs = (rawPayload?.payrollRuns || [])
+              .filter((run) => run.period_id === periodId)
+              .sort((a, b) => Number(b.run_number) - Number(a.run_number));
+            setSelectedRunId(runs[0]?.id || "");
+          }}
+          onRunChange={setSelectedRunId}
+          onNavigatePayroll={() => navigatePeopleOps({ moduleId: "payroll", screenId: "periods" })}
+          onNavigateEmployees={() => navigatePeopleOps({ moduleId: "employees", screenId: "directory" })}
+        />
       ) : null}
 
-      {activeTab === "Compensation Plans" ? (
+      {activeModuleId === "reports" && activeScreenId === "analytics" && model ? (
+        <PeopleOpsReportsPanel
+          model={model}
+          intelligence={model.intelligence}
+          compensationPlans={model.compensationPlans}
+        />
+      ) : null}
+
+      {activeModuleId === "settings" && activeScreenId === "configuration" ? (
+        <PeopleOpsModuleFrame
+          title="Settings"
+          description="Payroll configuration, approval policies, and export preferences."
+        >
+          <PeopleOpsSectionCard title="Configuration" subtitle="Phase 8.1 placeholder" icon={Settings2}>
+            <p className="text-sm text-muted-foreground">
+              Payroll configuration, approval policies, and export settings will be configured here in a future release.
+              Existing payroll workflow and export behavior is unchanged.
+            </p>
+          </PeopleOpsSectionCard>
+        </PeopleOpsModuleFrame>
+      ) : null}
+
+      {activeModuleId === "compensation" && activeScreenId === "plans" ? (
         adminModel ? (
         <CompensationPlansTab
           adminModel={adminModel}
@@ -862,13 +680,15 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
           busy={adminBusy}
         />
         ) : (
-          <p className="text-sm text-slate-500">
-            {adminBusy || loading ? "Loading compensation plans…" : "Compensation plans could not be loaded."}
-          </p>
+          <PeopleOpsModuleFrame title="Compensation Plans" description="Create and manage compensation plan versions.">
+            {adminBusy || loading ? <ListSkeleton rows={6} /> : (
+              <DataFetchError message="Compensation plans could not be loaded." onRetry={() => void loadAdmin()} retrying={adminBusy} />
+            )}
+          </PeopleOpsModuleFrame>
         )
       ) : null}
 
-      {activeTab === "Plan Assignments" ? (
+      {activeModuleId === "compensation" && activeScreenId === "assignments" ? (
         adminModel ? (
         <CompensationPlanAssignmentsTab
           adminModel={adminModel}
@@ -880,14 +700,19 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
           busy={adminBusy}
         />
         ) : (
-          <p className="text-sm text-slate-500">
-            {adminBusy || loading ? "Loading plan assignments…" : "Plan assignments could not be loaded."}
-          </p>
+          <PeopleOpsModuleFrame title="Plan Assignments" description="Assign employees to compensation plans and manage assignment history.">
+            {adminBusy || loading ? <ListSkeleton rows={6} /> : (
+              <DataFetchError message="Plan assignments could not be loaded." onRetry={() => void loadAdmin()} retrying={adminBusy} />
+            )}
+          </PeopleOpsModuleFrame>
         )
       ) : null}
 
-      {activeTab === "Payroll Periods" && model ? (
-        <div className="space-y-4">
+      {activeModuleId === "payroll" && activeScreenId === "periods" && model ? (
+        <PeopleOpsModuleFrame
+          title="Payroll Periods"
+          description="Review payroll cycles, generate previews, and run approval workflow."
+        >
           {selectedPeriodRow ? (
             <PayrollWorkflowToolbar
               periodRow={selectedPeriodRow}
@@ -899,8 +724,9 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
           ) : null}
           <EnterpriseDataTable
             hasRows={model.periodRows.length > 0}
-            emptyTitle="No payroll periods"
-            emptyDescription="Payroll periods will appear here after HR or Executive preview generation."
+            loading={refreshing && !model.periodRows.length}
+            emptyTitle="No Payroll Generated Yet"
+            emptyDescription="Generate your first payroll preview from a payroll period to begin the approval cycle."
             desktop={
               <div className="overflow-x-auto rounded-lg border bg-white">
                 <table className="min-w-full text-left text-[11px]">
@@ -972,11 +798,40 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
               </div>
             }
           />
-        </div>
+        </PeopleOpsModuleFrame>
       ) : null}
 
-      {activeTab === "Payroll Preview" && model ? (
-        <div className="space-y-4">
+      {activeModuleId === "payroll" && activeScreenId === "run-review" && model ? (
+        <PeopleOpsModuleFrame
+          title="Run Review"
+          description="Inspect employee-level payroll preview lines for the selected period and run version."
+          filters={
+            <PeopleOpsFilterBar
+              search={search}
+              onSearchChange={setSearch}
+              searchPlaceholder="Search agent, plan, or period"
+              filters={[
+                {
+                  id: "status",
+                  label: "Lifecycle status",
+                  value: statusFilter,
+                  clearValue: "",
+                  onChange: setStatusFilter,
+                  options: [
+                    { value: "", label: "All lifecycle statuses" },
+                    ...lifecycleStatuses.map((status) => ({ value: status, label: status })),
+                  ],
+                },
+              ]}
+              resultCount={previewRows.length}
+              totalCount={(model?.previewRows || []).length}
+              onClear={() => {
+                setSearch("");
+                setStatusFilter("");
+              }}
+            />
+          }
+        >
           {selectedPeriodRow ? (
             <PayrollWorkflowToolbar
               periodRow={selectedPeriodRow}
@@ -988,17 +843,9 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
           ) : null}
           <EnterpriseDataTable
           hasRows={previewRows.length > 0}
-          toolbar={
-            <PreviewToolbar
-              search={search}
-              onSearch={setSearch}
-              statusFilter={statusFilter}
-              onStatusFilter={setStatusFilter}
-              statuses={lifecycleStatuses}
-            />
-          }
-          emptyTitle="No payroll preview lines"
-          emptyDescription="Select a payroll period or generate a preview run to inspect agent-level results."
+          loading={refreshing && !previewRows.length}
+          emptyTitle="No Payroll Preview Lines"
+          emptyDescription="Select a payroll period or generate a preview run to inspect employee-level results."
           desktop={
             <div className="overflow-x-auto rounded-lg border bg-white">
               <table className="min-w-full text-left text-[11px]">
@@ -1065,11 +912,15 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
             </div>
           }
         />
-        </div>
+        </PeopleOpsModuleFrame>
       ) : null}
 
-      {activeTab === "Employees" && model ? (
-        selectedEmployeeProfileId || employee360Model || employee360Loading ? (
+      {activeModuleId === "employees" && model ? (
+        <PeopleOpsModuleFrame
+          title="Employees"
+          description="Enterprise employee directory and Employee Compensation 360."
+        >
+        {selectedEmployeeProfileId || employee360Model || employee360Loading ? (
           <EmployeeCompensation360Panel
             model={employee360Model}
             permissions={employee360Permissions}
@@ -1094,14 +945,16 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
             onSearchChange={setEmployeeSearch}
             onOpenEmployee={openEmployee}
           />
-        )
+        )}
+        </PeopleOpsModuleFrame>
       ) : null}
 
-      {activeTab === "Commission History" && model ? (
+      {activeModuleId === "payroll" && activeScreenId === "commission-ledger" && model ? (
+        <PeopleOpsModuleFrame title="Commission Ledger" description="Cash-only commission entries from payroll preview calculations.">
         <EnterpriseDataTable
           hasRows={model.commissionHistoryRows.length > 0}
-          emptyTitle="No commission history"
-          emptyDescription="Commission entries appear after payroll preview calculation."
+          emptyTitle="No Commission History Yet"
+          emptyDescription="Commission entries appear after payroll preview calculation for a period."
           desktop={
             <div className="overflow-x-auto rounded-lg border bg-white">
               <table className="min-w-full text-left text-[11px]">
@@ -1130,32 +983,38 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
             </div>
           }
         />
+        </PeopleOpsModuleFrame>
       ) : null}
 
-      {activeTab === "Audit" && model ? (
-        <SectionCard title="Audit Events" icon={History}>
+      {activeModuleId === "payroll" && activeScreenId === "activity" && model ? (
+        <PeopleOpsModuleFrame title="Payroll Activity" description="Audit trail for payroll workflow and compensation administration events.">
+        <PeopleOpsSectionCard title="Audit Events" icon={History}>
           <div className="space-y-2">
             {model.auditTimeline.length ? model.auditTimeline.map((event) => (
-              <div key={event.id} className="rounded-lg border bg-white px-3 py-2 text-xs">
+              <div key={event.id} className="rounded-lg border border-border bg-background px-3 py-2.5 text-sm">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <p className="font-semibold text-slate-900">{event.title}</p>
-                    <p className="text-slate-600">{event.subtitle}</p>
+                    <p className="font-semibold text-foreground">{event.title}</p>
+                    <p className="text-muted-foreground">{event.subtitle}</p>
                   </div>
                   <StatusBadge variant={STATUS_VARIANT[event.category] || "neutral"} label={event.category} />
                 </div>
-                <p className="mt-1 text-[10px] text-slate-500">{event.atLabel} · {event.actorRole}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{event.atLabel} · {event.actorRole}</p>
               </div>
-            )) : <p className="text-xs text-slate-500">No audit events recorded yet.</p>}
+            )) : (
+              <p className="text-sm text-muted-foreground">No payroll activity recorded yet. Workflow actions will appear here.</p>
+            )}
           </div>
-        </SectionCard>
+        </PeopleOpsSectionCard>
+        </PeopleOpsModuleFrame>
       ) : null}
 
-      {activeTab === "Exports" && model ? (
+      {activeModuleId === "payroll" && activeScreenId === "exports" && model ? (
+        <PeopleOpsModuleFrame title="Payroll Exports" description="Export metadata generated from locked payroll runs.">
         <EnterpriseDataTable
           hasRows={model.exportRows.length > 0}
-          emptyTitle="No export metadata"
-          emptyDescription="Export metadata appears after Executive generates export from a locked payroll run."
+          emptyTitle="No Exports Yet"
+          emptyDescription="Generate your first payroll export from a locked payroll run."
           desktop={
             <div className="overflow-x-auto rounded-lg border bg-white">
               <table className="min-w-full text-left text-[11px]">
@@ -1182,13 +1041,17 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
             </div>
           }
         />
+        </PeopleOpsModuleFrame>
       ) : null}
 
       {setActivePage ? (
-        <p className="text-[10px] text-slate-400">
+        <p className="text-[10px] text-muted-foreground">
           Compensation administration and payroll workflow actions do not mutate finance, AR, payments, orders, or accounting records.
         </p>
       ) : null}
     </div>
   );
 }
+
+/** @deprecated Phase 8.1 alias — route key `compensationPayroll` unchanged */
+export { PeopleOperationsPage as ExecutiveCompensationCenterPage };

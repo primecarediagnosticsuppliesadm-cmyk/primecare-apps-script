@@ -137,6 +137,10 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-compensation-forecast.mjs | Forecast baseline from persisted run lines; scenarios preview-only | Phase 7.2 analytics |
 | verify-compensation-territories.mjs | Territory rollups from reporting context | Phase 7.2 analytics |
 | audit-phase-7-2-certification.mjs | Phase 7.2 certification bundle (context, ratios, no finance mutation) | Phase 7.2 analytics |
+| verify-people-operations-shell.mjs | People Operations module nav, screen routing, IA (intelligence on Reports) | Phase 8.1 shell |
+| audit-phase-8-1-certification.mjs | Phase 8.1 certification bundle (shell, dashboard, role access, reporting context, no finance mutation, build) | Phase 8.1 shell |
+| verify-people-operations-ux.mjs | UI framework, operational dashboard, reports analytics split, filter bar, errors, state preservation | Phase 8.1A UX |
+| audit-phase-8-1a-certification.mjs | Phase 8.1A UX certification bundle + regression gates | Phase 8.1A UX |
 
 ### Infrastructure
 

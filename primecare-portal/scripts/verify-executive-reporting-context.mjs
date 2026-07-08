@@ -11,6 +11,7 @@ import { resolveReportingContext } from "../src/compensation/reportingContext.js
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const pageSrc = readFileSync(resolve(root, "src/pages/ExecutiveCompensationCenterPage.jsx"), "utf8");
+const dashboardSrc = readFileSync(resolve(root, "src/components/peopleOps/PeopleOpsDashboard.jsx"), "utf8");
 const modelSrc = readFileSync(resolve(root, "src/compensation/executiveCompensationModel.js"), "utf8");
 
 let failures = 0;
@@ -79,7 +80,7 @@ assert(model.kpis.currentPayrollLiability === 25000, "kpi.single_run_liability",
 assert(model.contextPreviewTotal === 25000, "kpi.preview_total_match", "context preview total matches selected run");
 assert(model.intelligence.forecast.baselinePayroll === 25000, "forecast.baseline_persisted", "forecast baseline uses persisted run lines");
 assert(!model.intelligence.rankings.agentRows.some((row) => /probe/i.test(row.agentName)), "exclusion.probe", "probe users excluded from rankings");
-assert(/ReportingContextCard/.test(pageSrc), "ui.reporting_card", "reporting context card present");
+assert(/ReportingContextFields|Current Period/.test(dashboardSrc), "ui.reporting_card", "reporting context on operational dashboard");
 assert(/reportingSelection/.test(pageSrc), "ui.reporting_selection", "page passes reporting selection to model");
 assert(/resolveReportingContext/.test(modelSrc), "model.context_resolution", "façade resolves reporting context");
 assert(/buildRatioMetrics/.test(modelSrc), "model.ratio_helper", "façade orchestrates ratio helper");
