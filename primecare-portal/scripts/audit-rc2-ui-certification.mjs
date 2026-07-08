@@ -18,6 +18,7 @@ const SCRIPTS = [
   "verify-empty-states.mjs",
   "verify-loading-states.mjs",
   "verify-responsive-layouts.mjs",
+  "verify-people-ops-model-render.mjs",
   "verify-runtime-import-safety.mjs",
 ];
 

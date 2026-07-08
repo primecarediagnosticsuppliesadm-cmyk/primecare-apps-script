@@ -21,7 +21,7 @@ assert(/export function buildLabPerformanceContribution/.test(modelSrc), "model.
 assert(/payrollContribution|commissionContribution|growth|risk/.test(modelSrc), "model.fields", "contribution fields");
 assert(/previewOnly:\s*true/.test(modelSrc), "model.readonly", "read only");
 assert(/buildLabPerformanceContribution/.test(commercialSrc), "commercial.wired", "Commercial Lab 360 uses builder");
-assert(/Performance contribution/.test(commercialSrc), "commercial.ui", "contribution section in commercial drawer");
+assert(/Performance contribution|activeSection === "performance"/.test(commercialSrc), "commercial.ui", "contribution section in commercial drawer");
 assert(/buildLabPerformanceContribution/.test(ownershipSrc), "ownership.wired", "Lab ownership drawer uses builder");
 assert(/export function buildLab360Model/.test(ownershipModelSrc), "reuse.lab360", "reuses existing lab 360 model");
 

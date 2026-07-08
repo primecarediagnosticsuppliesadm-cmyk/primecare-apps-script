@@ -18,6 +18,7 @@ const SCRIPTS = [
   "verify-no-payroll-mutation.mjs",
   "verify-no-finance-mutation.mjs",
   "verify-compensation-preview-readonly.mjs",
+  "verify-people-ops-model-render.mjs",
   "verify-runtime-import-safety.mjs",
 ];
 
