@@ -604,6 +604,23 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
     }
   };
 
+  const openEmployee = useCallback(
+    (employee = {}) => {
+      const profileUserId = String(employee.profileUserId || employee.profile_user_id || "").trim();
+      const agentId = String(employee.agentId || employee.agent_id || "").trim();
+      setActiveTab("Employees");
+      if (profileUserId) {
+        setSelectedEmployeeProfileId(profileUserId);
+        return;
+      }
+      if (agentId) {
+        setSelectedEmployeeProfileId("");
+        loadEmployee360({ agentId });
+      }
+    },
+    [loadEmployee360]
+  );
+
   const openEmployeeFromPreview = (row) => {
     if (row.profileUserId) {
       openEmployee({ profileUserId: row.profileUserId });
@@ -615,9 +632,7 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
       return;
     }
     if (row.agentId) {
-      setSelectedEmployeeProfileId("");
-      loadEmployee360({ agentId: row.agentId });
-      setActiveTab("Employees");
+      openEmployee({ agentId: row.agentId });
     }
   };
 
@@ -957,7 +972,7 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
       ) : null}
 
       {activeTab === "Employees" && model ? (
-        selectedEmployeeProfileId ? (
+        selectedEmployeeProfileId || employee360Model || employee360Loading ? (
           <EmployeeCompensation360Panel
             model={employee360Model}
             permissions={employee360Permissions}
