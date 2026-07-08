@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Download, UserPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { EmptyState, EnterpriseDataTable, KpiCard, KpiCardGrid, StatusBadge } from "@/components/ux";
+import { EmptyState, EnterpriseDataTable, KpiCard, KpiCardGrid, StatusBadge, RoleChip } from "@/components/ux";
 import PeopleOpsFilterBar from "@/components/peopleOps/PeopleOpsFilterBar.jsx";
 import PeopleOpsActionMenu from "@/components/peopleOps/PeopleOpsActionMenu.jsx";
 import PeopleOpsTableShell, {
@@ -252,13 +252,18 @@ export default function EmployeeDirectoryTab({
                   <PeopleOpsTableCell className="font-medium">
                     <button
                       type="button"
-                      className="text-left text-[var(--pc-brand-primary)] hover:underline"
+                      className="flex items-center gap-2 text-left hover:text-[var(--pc-brand-primary)]"
                       onClick={() => onOpenEmployee?.(employee)}
                     >
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--pc-neutral-bg)] text-[10px] font-bold uppercase text-[var(--pc-brand-primary)]">
+                        {(employee.employeeName || "?").slice(0, 2)}
+                      </span>
                       {employee.employeeName}
                     </button>
                   </PeopleOpsTableCell>
-                  <PeopleOpsTableCell className="capitalize">{employee.role}</PeopleOpsTableCell>
+                  <PeopleOpsTableCell>
+                    <RoleChip role={employee.role} />
+                  </PeopleOpsTableCell>
                   <PeopleOpsTableCell>{employee.department || "—"}</PeopleOpsTableCell>
                   <PeopleOpsTableCell>{employee.planName || employee.planCode || "No plan assigned"}</PeopleOpsTableCell>
                   <PeopleOpsTableCell>

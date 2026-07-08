@@ -28,6 +28,7 @@ export default function KpiCard({
   dataTestId,
   kpiRawValue,
   highlight = false,
+  dense = false,
 }) {
   if (loading) {
     return <KpiSkeleton className={className} />;
@@ -43,16 +44,17 @@ export default function KpiCard({
   return (
     <div
       className={cn(
-        "rounded-2xl border border-border bg-card p-4 shadow-[var(--pc-shadow-card)] transition-shadow duration-300",
+        "rounded-xl border border-border bg-card shadow-[var(--pc-shadow-card)] transition-shadow duration-200",
+        dense ? "p-2.5" : "p-4",
         highlight && "ring-2 ring-emerald-400/70 shadow-md",
         className
       )}
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className={typography.kpiLabel}>{title}</div>
           <div
-            className={cn(typography.kpiValue, "mt-1 truncate")}
+            className={cn(dense ? typography.kpiValueDense : typography.kpiValue, "mt-0.5 truncate")}
             data-testid={dataTestId}
             data-kpi-value={
               kpiRawValue !== null && kpiRawValue !== undefined
@@ -72,8 +74,8 @@ export default function KpiCard({
           ) : null}
         </div>
         {Icon ? (
-          <div className="shrink-0 rounded-xl bg-[var(--pc-neutral-bg)] p-2">
-            <Icon className="h-5 w-5 text-[var(--pc-brand-primary)]" />
+          <div className={cn("shrink-0 rounded-lg bg-[var(--pc-neutral-bg)]", dense ? "p-1.5" : "p-2")}>
+            <Icon className={cn("text-[var(--pc-brand-primary)]", dense ? "h-4 w-4" : "h-5 w-5")} />
           </div>
         ) : null}
       </div>

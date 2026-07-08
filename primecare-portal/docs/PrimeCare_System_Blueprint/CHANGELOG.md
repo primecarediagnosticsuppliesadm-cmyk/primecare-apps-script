@@ -4,6 +4,52 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-08 — RC2 Enterprise UX Hardening
+
+### Change
+
+- Enterprise design tokens (`enterpriseLayout.js`) and dense typography/spacing.
+- Shared RC2 components: `RoleChip`, `EnterpriseMetricStrip`, `ExecutiveCommandCenterShell`, `Lab360SectionNav`.
+- Compact KPI cards, section cards, module frames, and table density.
+- Executive Command Center (Admin Dashboard) and Founder Command Center layouts.
+- People Ops dashboard metric strip + inline reporting toolbar.
+- Employee directory avatars + role chips; Employee 360 business-first section order.
+- Lab 360 tabbed drawer navigation; professional Settings landing copy.
+
+### Not changed
+
+- Schema, Supabase, APIs, business logic, calculations, payroll engine, finance, collections, workflows, RLS.
+
+### Verification
+
+- `node scripts/audit-rc2-ui-certification.mjs`
+
+---
+
+## 2026-07-08 — Phase 9.3 Collection Compensation & Executive Performance (Year 1–3 final business layer)
+
+### Change
+
+- Read-model compose layer connecting payroll preview, ownership hierarchy, collections, and intelligence.
+- `collectionCompensationModel`, `hierarchicalCompensationModel`, `executivePerformanceModel`, `employee360BusinessProfileModel`, `labPerformanceContributionModel`, `founderPerformanceCardsEngine`.
+- Collection Compensation Dashboard on People Ops payroll run-review.
+- Hierarchical compensation panel on Business Ownership.
+- Executive performance KPIs + rankings on Reports.
+- Employee 360 business profile (read-only).
+- Lab performance contribution in Commercial Lab 360 and Lab Ownership 360.
+- Founder OS performance decision cards (rule-based).
+- Business ownership role rollups (executive / admin / agent / lab).
+
+### Not changed
+
+- Schema, migrations, RLS, payroll engine, commission engine, finance mutation paths, collections workflow, commercial SoT.
+
+### Verification
+
+- `node scripts/audit-phase-9-3-certification.mjs`
+
+---
+
 ## 2026-07-08 — Phase 9.2 Founder Operating System & Decision Engine
 
 ### Change

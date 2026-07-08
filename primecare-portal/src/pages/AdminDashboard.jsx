@@ -177,11 +177,11 @@ function AdminDashboardLoading() {
 
 function SectionCard({ title, subtitle, children, rightAction = null }) {
   return (
-    <section className="rounded-2xl border border-border bg-card p-4 shadow-[var(--pc-shadow-card)] sm:p-5">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+    <section className="rounded-xl border border-border bg-card p-3 shadow-sm">
+      <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <h2 className={typography.sectionTitle}>{title}</h2>
-          {subtitle ? <p className={cn(typography.sectionSubtitle, "mt-1")}>{subtitle}</p> : null}
+          {subtitle ? <p className={cn(typography.sectionSubtitle, "mt-0.5")}>{subtitle}</p> : null}
         </div>
         {rightAction}
       </div>
@@ -1317,11 +1317,12 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   }, [kpisLoading, qaValidationSnapshot, displayKpis]);
 
   return (
-    <div className="space-y-5 p-4 sm:p-6">
+    <div className="space-y-3 p-3 sm:p-4">
       <PageHeader
-        title="Admin Dashboard"
-        subtitle="Operational control across stock, revenue, receivables, risk, and field execution."
+        title="Executive Command Center"
+        subtitle="Today's business pulse — revenue, collections, operations, people, and risk."
         icon={Activity}
+        compact
         freshness={
           <DataFreshnessLabel
             loadedAt={dataLoadedAt}
@@ -1366,14 +1367,16 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       ) : null}
 
       {kpisReady ? (
-        <KpiCardGrid columns={6}>
+        <KpiCardGrid columns={6} dense>
           <KpiCard
+            dense
             title="Today's Revenue"
             value={currency(displayKpis.todaysRevenue)}
             subtitle="Current day visible revenue"
             icon={TrendingUp}
           />
           <KpiCard
+            dense
             title="Receivables"
             value={currency(displayKpis.outstandingReceivables)}
             subtitle="Outstanding collections"
@@ -1382,25 +1385,23 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
             kpiRawValue={displayKpis.outstandingReceivables}
             highlight={financialSyncPulse}
           />
-          <KpiCard
-            title="Credit Risk Labs"
+          <KpiCard dense title="Credit Risk Labs"
             value={displayKpis.labsAtCreditRisk}
             subtitle="Labs needing attention"
             icon={ShieldAlert}
           />
-          <KpiCard
-            title="Near Stockout"
+          <KpiCard dense title="Near Stockout"
             value={displayKpis.productsNearStockout}
             subtitle="Critical + reorder items"
             icon={Package}
           />
-          <KpiCard
-            title="Recent Visits"
+          <KpiCard dense title="Recent Visits"
             value={displayKpis.recentVisits}
             subtitle="Latest field activity"
             icon={Activity}
           />
           <KpiCard
+            dense
             title="Total Sold Value"
             value={currency(displayKpis.totalSoldValue)}
             subtitle="Tracked visit-linked sales"
@@ -1410,7 +1411,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
           />
         </KpiCardGrid>
       ) : (
-        <KpiCardGrid columns={6}>
+        <KpiCardGrid columns={6} dense>
           {Array.from({ length: 6 }).map((_, i) => (
             <KpiSkeleton key={i} />
           ))}

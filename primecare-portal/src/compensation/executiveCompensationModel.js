@@ -1,4 +1,5 @@
-import { filterAnalyticsLines } from "./analytics/analyticsExclusions.js";
+import { buildCollectionCompensationDashboard } from "./collectionCompensationModel.js";
+import { buildExecutivePerformanceModel } from "./executivePerformanceModel.js";
 import { buildEmployeeMetrics } from "./analytics/employeeMetrics.js";
 import { buildForecastMetrics } from "./analytics/forecastMetrics.js";
 import { buildContextPayrollKpis, buildPayrollTrendSeries, buildPromotionPipeline, buildTopPerformers } from "./analytics/payrollMetrics.js";
@@ -387,6 +388,15 @@ export function buildExecutiveCompensationModel(payload = {}) {
     labs: payload.labs || [],
   });
 
+  const partialModel = {
+    reportingContext,
+    previewRows,
+    intelligence,
+    kpis: contextKpis,
+  };
+  const collectionCompensation = buildCollectionCompensationDashboard(partialModel);
+  const executivePerformance = buildExecutivePerformanceModel({ intelligence, model: partialModel });
+
   return {
     reportingContext,
     contextPreviewTotal,
@@ -414,6 +424,8 @@ export function buildExecutiveCompensationModel(payload = {}) {
     auditTimeline,
     exportRows,
     intelligence,
+    executivePerformance,
+    collectionCompensation,
     compensationPlans: plans,
     readHealth: payload.readHealth || null,
   };

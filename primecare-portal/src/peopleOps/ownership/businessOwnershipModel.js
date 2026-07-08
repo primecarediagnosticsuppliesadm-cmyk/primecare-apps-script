@@ -232,18 +232,27 @@ export function resolveOwnerOnPaymentDate(labId, paymentDate, ownershipRows = []
 export function buildCompensationAttributionPreview({
   collectionsAmount = 0,
   agentCommissionAmount = 0,
+  adminOverrideBps = 50,
+  executiveOverrideBps = 25,
 } = {}) {
+  const collections = num(collectionsAmount);
+  const agentCommission = roundMoney(agentCommissionAmount);
+  const adminOverride = roundMoney((collections * num(adminOverrideBps)) / 10000);
+  const executiveOverride = roundMoney((collections * num(executiveOverrideBps)) / 10000);
   return {
     previewOnly: true,
-    title: "Future Hierarchical Compensation",
-    collectionLabel: formatInr(collectionsAmount),
-    agentDirectCommissionLabel: formatInr(agentCommissionAmount),
-    adminOverrideLabel: "Admin Override (Future)",
-    adminOverrideAmountLabel: formatInr(0),
-    executiveOverrideLabel: "Executive Override (Future)",
-    executiveOverrideAmountLabel: formatInr(0),
+    displayOnly: true,
+    title: "Hierarchical Compensation (Display)",
+    collectionLabel: formatInr(collections),
+    agentDirectCommissionAmount: agentCommission,
+    agentDirectCommissionLabel: formatInr(agentCommission),
+    adminOverrideLabel: formatInr(adminOverride),
+    adminOverrideAmount: adminOverride,
+    executiveOverrideLabel: formatInr(executiveOverride),
+    executiveOverrideAmount: executiveOverride,
+    totalTeamPayableLabel: formatInr(roundMoney(agentCommission + adminOverride + executiveOverride)),
     futureOverrideNote:
-      "Future Hierarchical Compensation — explanatory only. Does not change payroll, commission engine, or payouts.",
+      "Display-only hierarchical overrides. Does not change payroll, commission engine, or payouts.",
   };
 }
 
@@ -471,6 +480,7 @@ export function buildRoleScopedOwnershipDashboard({
   collectionsByLabMap = new Map(),
   commissionByAgentMap = new Map(),
   directory,
+  arRows = [],
 } = {}) {
   const role = str(actorRole).toLowerCase();
   let scopedLabs = enrichedLabs;
@@ -500,6 +510,70 @@ export function buildRoleScopedOwnershipDashboard({
   const admins = new Set(scopedLabs.map((lab) => lab.managerId).filter(Boolean));
   const agents = agentIds.size;
 
+  const scopedLabKeys = new Set(scopedLabs.map((lab) => str(lab.labId).toLowerCase()));
+  const revenue = roundMoney(
+    (arRows || [])
+      .filter((row) => scopedLabKeys.has(str(row.lab_id ?? row.labId).toLowerCase()))
+      .reduce((sum, row) => sum + num(row.total_delivered ?? row.totalDelivered), 0)
+  );
+  const outstanding = roundMoney(scopedLabs.reduce((sum, lab) => sum + num(lab.outstanding), 0));
+  const commission = potentialCompensation;
+
+  let growth = "stable";
+  if (collections > 0 && outstanding > collections * 0.5) growth = "at-risk";
+  else if (collections > 0) growth = "positive";
+
+  const roleRollups =
+    role === "executive"
+      ? {
+          collections,
+          collectionsLabel: formatInr(collections),
+          revenue,
+          revenueLabel: formatInr(revenue),
+          commission,
+          commissionLabel: formatInr(commission),
+          payroll: commission,
+          payrollLabel: formatInr(commission),
+          labs: scopedLabs.length,
+          agents,
+          admins: admins.size,
+          executives: orgTree.length,
+          growth,
+        }
+      : role === "admin"
+        ? {
+            collections,
+            collectionsLabel: formatInr(collections),
+            commission,
+            commissionLabel: formatInr(commission),
+            payroll: commission,
+            payrollLabel: formatInr(commission),
+            agents,
+            labs: scopedLabs.length,
+            growth,
+          }
+        : role === "agent"
+          ? {
+              collections,
+              collectionsLabel: formatInr(collections),
+              commission,
+              commissionLabel: formatInr(commission),
+              labs: scopedLabs.length,
+              visitsNote: "See Commercial workspace for visit activity",
+              growth,
+            }
+          : {
+              revenue,
+              revenueLabel: formatInr(revenue),
+              collections,
+              collectionsLabel: formatInr(collections),
+              outstanding,
+              outstandingLabel: formatInr(outstanding),
+              contribution: commission,
+              contributionLabel: formatInr(commission),
+              growth,
+            };
+
   return {
     role,
     kpis: [
@@ -517,7 +591,15 @@ export function buildRoleScopedOwnershipDashboard({
         value: potentialCompensation,
         valueLabel: formatInr(potentialCompensation),
       },
+      revenue > 0
+        ? { id: "revenue", label: "Revenue", value: revenue, valueLabel: formatInr(revenue) }
+        : null,
+      outstanding > 0
+        ? { id: "outstanding", label: "Outstanding", value: outstanding, valueLabel: formatInr(outstanding) }
+        : null,
+      { id: "growth", label: "Growth signal", value: growth, valueLabel: growth },
     ].filter(Boolean),
+    roleRollups,
     scopedLabs,
     scopedTerritories,
     coveragePct: metrics.coveragePct ?? 0,
@@ -733,6 +815,7 @@ export function buildPeopleOpsOwnershipWorkspace({
     collectionsByLabMap,
     commissionByAgentMap,
     directory,
+    arRows: arRowsResolved,
   });
 
   return {

@@ -62,6 +62,9 @@ import PeopleOpsOwnershipModule from "@/components/peopleOps/ownership/PeopleOps
 import LabOwnership360Drawer from "@/components/peopleOps/ownership/LabOwnership360Drawer.jsx";
 import { buildWorkforceBudgetWorkspace } from "@/peopleOps/budgeting/workforceBudgetingModel.js";
 import { buildPeopleOpsOwnershipWorkspace } from "@/peopleOps/ownership/businessOwnershipModel.js";
+import { buildHierarchicalCompensation } from "@/compensation/hierarchicalCompensationModel.js";
+import { buildEmployee360BusinessProfile } from "@/compensation/employee360BusinessProfileModel.js";
+import CollectionCompensationDashboard from "@/components/peopleOps/CollectionCompensationDashboard.jsx";
 import { loadPeopleOpsOwnershipRead } from "@/peopleOps/ownership/peopleOpsOwnershipRead.js";
 import { useWorkforcePlanningState } from "@/peopleOps/budgeting/useWorkforcePlanningState.js";
 import {
@@ -556,6 +559,39 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
     });
   }, [employee360Model, employeeList, ownershipWorkspace, selectedEmployeeProfileId]);
 
+  const hierarchicalCompensation = useMemo(
+    () =>
+      ownershipWorkspace
+        ? buildHierarchicalCompensation({
+            orgTree: ownershipWorkspace.orgTree,
+            reportingContext: model?.reportingContext,
+          })
+        : null,
+    [model?.reportingContext, ownershipWorkspace]
+  );
+
+  const employeeBusinessProfile = useMemo(() => {
+    if (!employee360Model) return null;
+    const metrics =
+      (model?.intelligence?.employeeRows || []).find(
+        (row) =>
+          row.profileUserId === selectedEmployeeProfileId ||
+          (employee360Model?.overview?.agentId && row.agentId === employee360Model.overview.agentId)
+      ) || null;
+    return buildEmployee360BusinessProfile({
+      employee360: employee360Model,
+      ownershipContext: employeeOwnershipContext,
+      employeeMetrics: metrics,
+      reportingContext: model?.reportingContext,
+    });
+  }, [
+    employee360Model,
+    employeeOwnershipContext,
+    model?.intelligence?.employeeRows,
+    model?.reportingContext,
+    selectedEmployeeProfileId,
+  ]);
+
   const selectedEmployeeSummary = useMemo(() => {
     if (!selectedEmployeeProfileId) return null;
     return (
@@ -902,6 +938,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         <PeopleOpsReportsPanel
           model={model}
           intelligence={model.intelligence}
+          executivePerformance={model.executivePerformance}
           compensationPlans={model.compensationPlans}
           breadcrumbs={breadcrumbs}
         />
@@ -931,6 +968,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         <PeopleOpsOwnershipModule
           screenId={activeScreenId}
           workspace={ownershipWorkspace}
+          hierarchicalCompensation={hierarchicalCompensation}
           breadcrumbs={breadcrumbs}
           onOpenLab={(labId) => setSelectedLabId(labId)}
           onOpenEmployee={(profileUserId) => {
@@ -1206,6 +1244,10 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
             </div>
           }
         />
+          <CollectionCompensationDashboard
+            rows={model.collectionCompensation || []}
+            reportingContext={model.reportingContext}
+          />
         </PeopleOpsModuleFrame>
       ) : null}
 
@@ -1245,6 +1287,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         employeeName={selectedEmployeeSummary?.employeeName || employee360Model?.overview?.name}
         model={employee360Model}
         ownershipContext={employeeOwnershipContext}
+        businessProfile={employeeBusinessProfile}
         permissions={employee360Permissions}
         loading={employee360Loading}
         error={employee360Error}

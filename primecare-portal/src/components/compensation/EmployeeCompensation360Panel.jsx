@@ -19,14 +19,24 @@ const STATUS_VARIANT = {
 };
 
 const SECTION_LABELS = {
-  overview: "Overview",
-  payrollHistory: "Payroll History",
-  commissionHistory: "Commission",
-  compensationPlan: "Compensation Plan",
+  overview: "Identity & Business",
+  payrollHistory: "Payroll",
+  commissionHistory: "Collections",
+  compensationPlan: "Compensation",
   adjustments: "Adjustments",
   promotion: "Promotion",
-  auditTimeline: "Audit",
+  auditTimeline: "Audit & Timeline",
 };
+
+const SECTION_ORDER = [
+  "overview",
+  "commissionHistory",
+  "compensationPlan",
+  "payrollHistory",
+  "promotion",
+  "adjustments",
+  "auditTimeline",
+];
 
 function Field({ label, value }) {
   return (
@@ -52,6 +62,7 @@ function SectionShell({ title, icon: Icon, children }) {
 export default function EmployeeCompensation360Panel({
   model,
   ownershipContext = null,
+  businessProfile = null,
   permissions,
   loading = false,
   error = "",
@@ -73,8 +84,10 @@ export default function EmployeeCompensation360Panel({
   const commissionEligible = model?.commissionEligible !== false && overview.role === "agent";
 
   const sections = useMemo(() => {
-    const ids = model?.sections || ["overview", "payrollHistory", "compensationPlan", "adjustments", "auditTimeline"];
-    return ids.map((id) => ({ id, label: SECTION_LABELS[id] || id }));
+    const ids = model?.sections || SECTION_ORDER;
+    const ordered = SECTION_ORDER.filter((id) => ids.includes(id));
+    const rest = ids.filter((id) => !SECTION_ORDER.includes(id));
+    return [...ordered, ...rest].map((id) => ({ id, label: SECTION_LABELS[id] || id }));
   }, [model]);
 
   const planOptions = useMemo(
@@ -119,7 +132,7 @@ export default function EmployeeCompensation360Panel({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
+      <div className="sticky top-0 z-10 -mx-1 flex flex-wrap gap-1 rounded-lg border border-border bg-muted/30 p-1 backdrop-blur">
         {sections.map((section) => (
           <Button
             key={section.id}
@@ -201,6 +214,66 @@ export default function EmployeeCompensation360Panel({
             </p>
             <CompensationAttributionPreview preview={ownershipContext.potentialOverrideCompensation} compact />
           </div>
+        </SectionShell>
+      ) : null}
+
+      {activeSection === "overview" && businessProfile ? (
+        <SectionShell title="Business Profile" icon={TrendingUp}>
+          <p className="mb-3 text-xs text-muted-foreground">Read-only business metrics composed from payroll, ownership, and intelligence reads.</p>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <Field label="Territory" value={businessProfile.identity?.territory} />
+            <Field label="Collections (managed)" value={businessProfile.collections?.managed} />
+            <Field label="Collections (received)" value={businessProfile.collections?.received} />
+            <Field label="Collection efficiency" value={businessProfile.collections?.efficiency} />
+            <Field label="Managed revenue" value={businessProfile.revenue?.managed} />
+            <Field label="Commission (period)" value={businessProfile.performance?.commission} />
+            <Field label="Payroll cost" value={businessProfile.performance?.payrollCost} />
+            <Field label="Labs managed" value={businessProfile.labsManaged?.count} />
+            <Field label="Promotion" value={businessProfile.promotion?.eligible} />
+            <Field label="Ownership chain" value={businessProfile.ownership?.chain} />
+            <Field label="Reporting to" value={businessProfile.ownership?.reportingTo} />
+            <Field label="Period" value={businessProfile.performance?.period} />
+          </div>
+          {businessProfile.labsManaged?.rows?.length ? (
+            <div className="mt-3 overflow-x-auto rounded-lg border">
+              <table className="min-w-full text-left text-[11px]">
+                <thead className="border-b bg-slate-50 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    {["Lab", "Territory"].map((label) => (
+                      <th key={label} className="px-2 py-2">
+                        {label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {businessProfile.labsManaged.rows.map((lab) => (
+                    <tr key={lab.labId} className="border-b border-slate-100 last:border-0">
+                      <td className="px-2 py-2">{lab.labName}</td>
+                      <td className="px-2 py-2">{lab.territory}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+          {businessProfile.ownership?.overridePreview ? (
+            <div className="mt-4">
+              <CompensationAttributionPreview preview={businessProfile.ownership.overridePreview} compact />
+            </div>
+          ) : null}
+          {businessProfile.commissionHistory?.length ? (
+            <div className="mt-4">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Commission history</p>
+              <div className="space-y-1 text-xs text-slate-600">
+                {businessProfile.commissionHistory.slice(0, 5).map((row) => (
+                  <p key={row.id || row.periodYm}>
+                    {row.periodYm}: {row.commissionLabel || row.commission}
+                  </p>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </SectionShell>
       ) : null}
 

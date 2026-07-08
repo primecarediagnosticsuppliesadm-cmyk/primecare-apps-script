@@ -184,6 +184,25 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-founder-approvals.mjs | Approval inbox reuse | Phase 9.2 Founder OS |
 | verify-founder-navigation.mjs | Founder OS menu + routing | Phase 9.2 Founder OS |
 | audit-phase-9-2-certification.mjs | Phase 9.2 Founder OS bundle + boundaries + build | Phase 9.2 Founder OS |
+| verify-collection-compensation.mjs | Collection compensation dashboard from payroll preview reads | Phase 9.3 collection compensation |
+| verify-hierarchical-compensation.mjs | Ownership hierarchy compensation display (no engine rewrite) | Phase 9.3 collection compensation |
+| verify-executive-performance.mjs | Executive KPIs + rankings compose layer | Phase 9.3 collection compensation |
+| verify-founder-performance-cards.mjs | Founder OS rule-based performance decision cards | Phase 9.3 collection compensation |
+| verify-lab-performance-contribution.mjs | Lab 360 performance contribution read compose | Phase 9.3 collection compensation |
+| verify-employee360-business-profile.mjs | Employee 360 business profile sections | Phase 9.3 collection compensation |
+| verify-no-payroll-mutation.mjs | Phase 9.3 models do not mutate payroll | Phase 9.3 collection compensation |
+| verify-no-finance-mutation.mjs | Phase 9.3 models do not mutate finance | Phase 9.3 collection compensation |
+| audit-phase-9-3-certification.mjs | Phase 9.3 bundle + boundaries + build | Phase 9.3 collection compensation |
+| verify-enterprise-ui-consistency.mjs | RC2 design tokens + shared UX components | RC2 enterprise UX |
+| verify-people-ux.mjs | People Ops compact dashboard, directory, Employee 360 | RC2 enterprise UX |
+| verify-founder-ui.mjs | Founder Command Center layout | RC2 enterprise UX |
+| verify-commercial-ui.mjs | Lab 360 section navigation | RC2 enterprise UX |
+| verify-payroll-ui.mjs | Payroll dashboard UX (presentation only) | RC2 enterprise UX |
+| verify-dashboard-layout.mjs | Executive Command Center dashboard | RC2 enterprise UX |
+| verify-empty-states.mjs | Shared empty state components | RC2 enterprise UX |
+| verify-loading-states.mjs | Skeleton loading components | RC2 enterprise UX |
+| verify-responsive-layouts.mjs | Responsive grid tokens | RC2 enterprise UX |
+| audit-rc2-ui-certification.mjs | RC2 UX bundle + no logic mutation + build | RC2 enterprise UX |
 
 ### Infrastructure
 

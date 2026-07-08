@@ -45,6 +45,27 @@ export default function OwnershipRoleDashboard({ workspace, breadcrumbs = [] }) 
           </div>
         </div>
 
+        {dashboard.roleRollups ? (
+          <div className="mt-4 rounded-lg border border-border bg-muted/10 p-3">
+            <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">Role rollups</p>
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              {Object.entries(dashboard.roleRollups)
+                .filter(([key]) => !key.endsWith("Label") && key !== "visitsNote")
+                .map(([key, value]) => (
+                  <div key={key} className="text-sm">
+                    <p className="text-muted-foreground capitalize">{key.replace(/([A-Z])/g, " $1")}</p>
+                    <p className="font-semibold tabular-nums">
+                      {dashboard.roleRollups[`${key}Label`] ?? value}
+                    </p>
+                  </div>
+                ))}
+            </div>
+            {dashboard.roleRollups.visitsNote ? (
+              <p className="mt-2 text-xs text-muted-foreground">{dashboard.roleRollups.visitsNote}</p>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="mt-4">
           <div className="mb-2 flex items-center gap-2">
             <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Ownership gaps</p>

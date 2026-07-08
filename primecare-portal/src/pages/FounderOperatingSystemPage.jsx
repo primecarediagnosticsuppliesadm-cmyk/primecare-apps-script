@@ -12,6 +12,8 @@ import { RefreshCw, Compass, ExternalLink } from "lucide-react";
 import PeopleOpsSectionCard from "@/components/peopleOps/PeopleOpsSectionCard.jsx";
 import PeopleOpsBreadcrumbs from "@/components/peopleOps/PeopleOpsBreadcrumbs.jsx";
 import FounderModuleNav from "@/components/founder/FounderModuleNav.jsx";
+import FounderPerformanceCards from "@/components/founder/FounderPerformanceCards.jsx";
+import { EnterpriseMetricStrip } from "@/components/ux";
 import {
   FOUNDER_OS_MODULES,
   buildFounderOsBreadcrumbs,
@@ -127,11 +129,12 @@ export default function FounderOperatingSystemPage({ currentUser = null, setActi
   const tb = workspace.todaysBusiness;
 
   return (
-    <div className="space-y-4 pb-8">
+    <div className="space-y-3 pb-6">
       <PageHeader
-        title="Founder Operating System"
-        subtitle="What decision do I need to make today? Orchestrates existing modules — no duplicate business logic."
+        title="Founder Command Center"
+        subtitle="What requires your decision today — composed from existing modules, no duplicate logic."
         icon={Compass}
+        compact
         actions={
           <Button type="button" variant="outline" size="sm" onClick={() => load({ refresh: true })} disabled={refreshing}>
             <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
@@ -148,19 +151,25 @@ export default function FounderOperatingSystemPage({ currentUser = null, setActi
       />
 
       {moduleId === "today" ? (
-        <div className="space-y-4">
-          <PeopleOpsSectionCard title="Today's Business" subtitle="Operational pulse — sourced from EFI, Ops, Commercial, People Ops reads">
+        <div className="space-y-3">
+          <EnterpriseMetricStrip
+            items={[
+              { id: "revenue", label: "Today's Revenue", value: tb.todayRevenue },
+              { id: "collections", label: "Collections Today", value: tb.todayCollections },
+              { id: "orders", label: "Orders", value: tb.todayOrders },
+              { id: "labs", label: "New Labs", value: tb.todayNewLabs },
+              { id: "cash", label: "Cash / AR", value: tb.cashPosition },
+              { id: "payroll", label: "Payroll", value: tb.payrollStatus },
+            ]}
+          />
+          <PeopleOpsSectionCard title="Today's Business" subtitle="Operational pulse" dense={false}>
             <MetricGrid
               items={[
-                { label: "Today's Revenue", value: tb.todayRevenue },
-                { label: "Today's Collections", value: tb.todayCollections },
-                { label: "Today's Orders", value: tb.todayOrders },
-                { label: "Today's New Labs", value: tb.todayNewLabs },
-                { label: "Today's Deliveries", value: tb.todayDeliveries },
-                { label: "Cash Position (AR)", value: tb.cashPosition },
-                { label: "Payroll Status", value: tb.payrollStatus },
-                { label: "Outstanding Collections", value: tb.outstandingCollections },
-                { label: "Inventory Health", value: tb.inventoryHealth },
+                { label: "Deliveries", value: tb.todayDeliveries },
+                { label: "Outstanding", value: tb.outstandingCollections },
+                { label: "Inventory", value: tb.inventoryHealth },
+                { label: "Pipeline", value: tb.pipelineValue },
+                { label: "Conversion", value: tb.conversion },
               ]}
             />
           </PeopleOpsSectionCard>
@@ -180,6 +189,10 @@ export default function FounderOperatingSystemPage({ currentUser = null, setActi
               ))}
             </ul>
           </PeopleOpsSectionCard>
+          <FounderPerformanceCards
+            cards={workspace.performanceCards?.cards || []}
+            onNavigate={(page) => setActivePage?.(page)}
+          />
         </div>
       ) : null}
 
@@ -250,6 +263,12 @@ export default function FounderOperatingSystemPage({ currentUser = null, setActi
             ]}
           />
           <DeepLinkButton label="People Operations" page={workspace.people.deepLinkPage} setActivePage={setActivePage} />
+          <div className="mt-4">
+            <FounderPerformanceCards
+              cards={workspace.performanceCards?.cards || []}
+              onNavigate={(page) => setActivePage?.(page)}
+            />
+          </div>
         </PeopleOpsSectionCard>
       ) : null}
 

@@ -5,6 +5,7 @@ import { summarizeCollectionsList } from "@/metrics/computeReceivableMetrics.js"
 import { buildFounderDecisionQueue } from "@/founder/founderDecisionQueueEngine.js";
 import { buildFounderInsights } from "@/founder/founderInsightsEngine.js";
 import { buildFounderPriorities } from "@/founder/founderPrioritiesEngine.js";
+import { buildFounderPerformanceCards } from "@/founder/founderPerformanceCardsEngine.js";
 import { buildApprovalInbox } from "@/peopleOps/productivity/peopleOpsProductivityModel.js";
 import { FOUNDER_DEEP_LINK_PAGES } from "@/founder/founderOperatingNavigation.js";
 
@@ -306,6 +307,7 @@ export function buildFounderWorkspace(readBundle = {}) {
 
   const enriched = { ...readBundle, decisionQueue, insights };
   const priorities = buildFounderPriorities(enriched);
+  const performanceCards = buildFounderPerformanceCards(readBundle);
 
   return {
     previewOnly: true,
@@ -330,6 +332,7 @@ export function buildFounderWorkspace(readBundle = {}) {
     risks: buildFounderRisksSection({ ...readBundle, decisionQueue, insights }),
     approvals: buildFounderApprovalsSection(readBundle),
     forecast: buildFounderForecastSection(readBundle),
+    performanceCards,
     loadedAt: readBundle.loadedAt,
   };
 }

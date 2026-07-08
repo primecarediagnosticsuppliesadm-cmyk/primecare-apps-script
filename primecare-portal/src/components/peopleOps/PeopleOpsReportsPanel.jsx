@@ -4,6 +4,7 @@ import { EmptyState } from "@/components/ux";
 import PeopleOpsModuleFrame from "@/components/peopleOps/PeopleOpsModuleFrame.jsx";
 import PeopleOpsSectionCard from "@/components/peopleOps/PeopleOpsSectionCard.jsx";
 import ExecutiveCompensationIntelligencePanel from "@/components/compensation/ExecutiveCompensationIntelligencePanel.jsx";
+import ExecutivePerformancePanel from "@/components/compensation/ExecutivePerformancePanel.jsx";
 
 function TrendBars({ points = [], valueKey = "netPayroll", labelKey = "label" }) {
   const max = Math.max(...points.map((point) => Number(point[valueKey] || 0)), 1);
@@ -60,7 +61,7 @@ function RankList({ rows = [], valueKey = "netPayableLabel" }) {
 /**
  * Analytical reports surface — ratios, rankings, territory, forecast, and trend charts.
  */
-export default function PeopleOpsReportsPanel({ model, intelligence, compensationPlans = [], breadcrumbs = [] }) {
+export default function PeopleOpsReportsPanel({ model, intelligence, executivePerformance, compensationPlans = [], breadcrumbs = [] }) {
   if (!model || !intelligence) return null;
 
   return (
@@ -99,6 +100,7 @@ export default function PeopleOpsReportsPanel({ model, intelligence, compensatio
         </PeopleOpsSectionCard>
       </div>
 
+      <ExecutivePerformancePanel performance={executivePerformance} />
       <ExecutiveCompensationIntelligencePanel intelligence={intelligence} compensationPlans={compensationPlans} />
     </PeopleOpsModuleFrame>
   );

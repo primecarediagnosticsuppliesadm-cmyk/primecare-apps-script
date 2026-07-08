@@ -40,39 +40,39 @@ const SETTINGS_SECTIONS = [
 export default function PeopleOpsSettingsLanding({ breadcrumbs = [] }) {
   return (
     <PeopleOpsModuleFrame
-      title="Configuration"
-      description="People Operations settings and policies. Editable configuration arrives in Phase 8.6."
+      title="Settings"
+      description="People Operations configuration — policies, approvals, exports, and pay cycles."
       breadcrumbs={breadcrumbs}
     >
       <PeopleOpsSectionCard
-        title="Settings Overview"
-        subtitle="Intentional placeholders — existing payroll workflow behavior is unchanged."
+        title="Configuration Hub"
+        subtitle="Grouped settings for payroll governance and workforce policies."
         icon={Settings2}
       >
         <p className="text-sm text-muted-foreground">
-          Configure payroll policies, approval routing, export templates, and pay cycles from this landing page in a
-          future release. Until then, use Payroll and Compensation modules for day-to-day operations.
+          Manage payroll policies, approval routing, export templates, and pay cycles from this hub. Operational
+          workflows remain in Payroll and Compensation until each settings area is enabled.
         </p>
       </PeopleOpsSectionCard>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {SETTINGS_SECTIONS.map((section) => (
           <PeopleOpsSectionCard
             key={section.id}
             title={section.title}
             subtitle={section.subtitle}
             icon={section.icon}
-            rightAction={<StatusBadge variant="info">Phase 8.6</StatusBadge>}
+            rightAction={<StatusBadge variant="neutral">Future capability</StatusBadge>}
           >
-            <p className="text-sm text-muted-foreground">Available in Phase 8.6</p>
+            <p className="text-sm text-muted-foreground">Planned — use Payroll and Compensation for day-to-day work today.</p>
           </PeopleOpsSectionCard>
         ))}
       </div>
 
-      <PeopleOpsSectionCard title="Future Features" subtitle="Roadmap capabilities not yet in scope.">
+      <PeopleOpsSectionCard title="Roadmap" subtitle="Capabilities on the product roadmap.">
         <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-          <li>Bank file generation handoff (Finance-led)</li>
-          <li>GL posting integration (Finance-led)</li>
+          <li>Bank file generation handoff</li>
+          <li>General ledger posting integration</li>
           <li>Leave and benefits configuration</li>
           <li>Department and manager hierarchy</li>
         </ul>

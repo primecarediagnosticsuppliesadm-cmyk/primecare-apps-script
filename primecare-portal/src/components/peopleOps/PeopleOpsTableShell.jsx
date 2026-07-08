@@ -38,7 +38,7 @@ export function PeopleOpsTableRow({ children, className, onClick }) {
 export function PeopleOpsTableCell({ children, className, header = false }) {
   const Tag = header ? "th" : "td";
   return (
-    <Tag className={cn(header ? "px-3 py-2.5" : "px-3 py-2.5 text-sm text-foreground", className)}>
+    <Tag className={cn(header ? "px-2.5 py-2" : "px-2.5 py-1.5 text-xs text-foreground", className)}>
       {children}
     </Tag>
   );

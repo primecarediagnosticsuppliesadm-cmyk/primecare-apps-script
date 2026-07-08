@@ -45,10 +45,13 @@ export const colors = {
 export const spacing = {
   pageX: "1rem",
   pageXMd: "1.5rem",
-  sectionY: "1.5rem",
-  cardPadding: "1rem",
-  cardPaddingMd: "1.25rem",
+  sectionY: "1rem",
+  cardPadding: "0.75rem",
+  cardPaddingMd: "1rem",
   touchMin: "2.75rem",
+  /** RC2 enterprise density */
+  denseGap: "0.5rem",
+  denseSectionY: "0.75rem",
 };
 
 export const shadows = {
@@ -67,13 +70,14 @@ export const radius = {
 };
 
 export const typography = {
-  pageTitle: "text-xl font-semibold tracking-tight text-foreground",
-  pageSubtitle: "text-sm text-muted-foreground",
-  sectionTitle: "text-lg font-semibold text-foreground",
-  sectionSubtitle: "text-sm text-muted-foreground",
-  kpiLabel: "text-xs font-medium uppercase tracking-wide text-muted-foreground",
-  kpiValue: "text-2xl font-semibold text-foreground",
-  kpiSubtitle: "text-xs text-muted-foreground",
+  pageTitle: "text-lg font-semibold tracking-tight text-foreground",
+  pageSubtitle: "text-xs text-muted-foreground",
+  sectionTitle: "text-sm font-semibold text-foreground",
+  sectionSubtitle: "text-xs text-muted-foreground",
+  kpiLabel: "text-[10px] font-semibold uppercase tracking-wide text-muted-foreground",
+  kpiValue: "text-xl font-semibold tabular-nums text-foreground",
+  kpiValueDense: "text-lg font-semibold tabular-nums text-foreground",
+  kpiSubtitle: "text-[10px] text-muted-foreground",
   body: "text-sm text-foreground",
   caption: "text-xs text-muted-foreground",
 };

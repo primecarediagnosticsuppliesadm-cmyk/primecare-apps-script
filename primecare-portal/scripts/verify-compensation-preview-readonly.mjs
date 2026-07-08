@@ -17,10 +17,10 @@ function fail(id, d) { console.error(`FAIL  ${id}: ${d}`); failures += 1; }
 function assert(c, id, d) { c ? pass(id, d) : fail(id, d); }
 
 assert(/export function buildCompensationAttributionPreview/.test(modelSrc), "model.preview_builder", "attribution preview builder");
-assert(/Future Hierarchical Compensation/.test(modelSrc), "model.future_title", "future hierarchical compensation title");
-assert(/Admin Override \(Future\)/.test(modelSrc), "model.admin_future", "admin override future placeholder");
+assert(/Hierarchical Compensation \(Display\)|displayOnly:\s*true/.test(modelSrc), "model.display_title", "display hierarchical compensation title");
+assert(/adminOverrideAmount|executiveOverrideAmount/.test(modelSrc), "model.override_amounts", "admin and executive override display amounts");
 assert(/commissionByAgent/.test(modelSrc), "reuse.preview_lines", "reuses preview row commission totals");
-assert(/Future Hierarchical Compensation/.test(previewSrc), "ui.future_label", "UI shows future hierarchical label");
+assert(/Future Hierarchical Compensation|Preview only/.test(previewSrc), "ui.preview_label", "UI shows preview hierarchical label");
 assert(!/calculateCommissionEntries|calculatePayrollPreview/.test(modelSrc), "guard.no_engine", "ownership model does not call calculation engine");
 assert(/buildExecutiveCompensationModel/.test(compModelSrc), "guard.comp_model", "executive compensation model intact");
 assert(!/loadPeopleOpsOwnershipRead/.test(compReadSrc), "guard.comp_read_untouched", "compensation read API not extended for ownership");

@@ -12,11 +12,11 @@ const COLUMN_CLASS = {
  * Responsive grid for KpiCard children.
  * @param {{ columns?: 2 | 3 | 4 | 6, className?: string, children: React.ReactNode }} props
  */
-export default function KpiCardGrid({ columns = 4, className, children }) {
+export default function KpiCardGrid({ columns = 4, dense = false, className, children }) {
   return (
     <div
       className={cn(
-        "grid gap-3",
+        dense ? "grid gap-2" : "grid gap-3",
         COLUMN_CLASS[columns] || COLUMN_CLASS[4],
         className
       )}

@@ -5,11 +5,13 @@ import OwnershipExplorerTree from "@/components/peopleOps/ownership/OwnershipExp
 import OwnershipTerritoryDashboard from "@/components/peopleOps/ownership/OwnershipTerritoryDashboard.jsx";
 import OwnershipRoleDashboard from "@/components/peopleOps/ownership/OwnershipRoleDashboard.jsx";
 import OwnershipTimelinePanel from "@/components/peopleOps/ownership/OwnershipTimelinePanel.jsx";
+import HierarchicalCompensationPanel from "@/components/peopleOps/ownership/HierarchicalCompensationPanel.jsx";
 import { GitBranch, MapPin, History } from "lucide-react";
 
 export default function PeopleOpsOwnershipModule({
   screenId,
   workspace,
+  hierarchicalCompensation = null,
   breadcrumbs = [],
   onOpenLab,
   onOpenEmployee,
@@ -81,6 +83,7 @@ export default function PeopleOpsOwnershipModule({
           onOpenEmployee={onOpenEmployee}
         />
       </PeopleOpsSectionCard>
+      {hierarchicalCompensation ? <HierarchicalCompensationPanel model={hierarchicalCompensation} /> : null}
       <div className="grid gap-4 lg:grid-cols-2">
         <PeopleOpsSectionCard title="Territories snapshot" icon={MapPin} subtitle="Top territories by collections">
           <div className="space-y-2">

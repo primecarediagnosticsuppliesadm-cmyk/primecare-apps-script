@@ -1,9 +1,10 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ux";
 import CompensationAttributionPreview from "@/components/peopleOps/ownership/CompensationAttributionPreview.jsx";
 import OwnershipTimelinePanel from "@/components/peopleOps/ownership/OwnershipTimelinePanel.jsx";
+import { buildLabPerformanceContribution } from "@/compensation/labPerformanceContributionModel.js";
 import { cn } from "@/lib/utils";
 
 function Field({ label, value }) {
@@ -16,6 +17,11 @@ function Field({ label, value }) {
 }
 
 export default function LabOwnership360Drawer({ open, onClose, labModel }) {
+  const contribution = useMemo(
+    () => (labModel ? buildLabPerformanceContribution({ ownershipLab360: labModel }) : null),
+    [labModel]
+  );
+
   useEffect(() => {
     if (!open) return undefined;
     const prev = document.body.style.overflow;
@@ -70,6 +76,20 @@ export default function LabOwnership360Drawer({ open, onClose, labModel }) {
             <Field label="Payments (count)" value={labModel.paymentsCountLabel} />
             <Field label="Outstanding" value={labModel.outstandingLabel} />
           </section>
+
+          {contribution ? (
+            <section className="rounded-xl border border-border bg-card p-4">
+              <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                Performance contribution
+              </h3>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Payroll contribution" value={contribution.payrollContribution} />
+                <Field label="Commission contribution" value={contribution.commissionContribution} />
+                <Field label="Growth" value={contribution.growth} />
+                <Field label="Risk" value={contribution.risk} />
+              </div>
+            </section>
+          ) : null}
 
           <section className="rounded-xl border border-border bg-card p-4">
             <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-muted-foreground">

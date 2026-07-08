@@ -14,6 +14,7 @@ export default function EmployeeCompensation360Drawer({
   employeeName = "",
   model,
   ownershipContext = null,
+  businessProfile = null,
   permissions,
   loading = false,
   error = "",
@@ -69,6 +70,7 @@ export default function EmployeeCompensation360Drawer({
             <EmployeeCompensation360Panel
               model={model}
               ownershipContext={ownershipContext}
+              businessProfile={businessProfile}
               permissions={permissions}
               loading={loading}
               error={error}
