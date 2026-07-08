@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ux";
-import { getLabQualificationRead } from "@/api/primecareSupabaseApi.js";
+import { readLabQualificationBroker } from "@/api/sharedReadBroker.js";
 import { buildLabSnapshot } from "@/pages/agentDailyWorkspace.js";
 import { priorityToBadgeVariant, queueTypeLabel } from "@/pages/agentDailyWorkspace.js";
 import { collectionRiskToVariant } from "@/utils/statusTokens.js";
@@ -74,7 +74,7 @@ export default function AgentLabSnapshotDrawer({
     (async () => {
       setQualLoading(true);
       try {
-        const res = await getLabQualificationRead({ labId });
+        const res = await readLabQualificationBroker({ labId });
         if (!cancelled) setQualification(res?.data || null);
       } catch {
         if (!cancelled) setQualification(null);

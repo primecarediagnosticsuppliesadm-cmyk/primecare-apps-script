@@ -1138,9 +1138,9 @@ export default function ExecutiveControlTower({ currentUser, setActivePage }) {
             <User className="mr-1 h-3.5 w-3.5" />
             Field visits
           </Button>
-          <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("qualificationReview")}>
+          <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("commercialCrm")}>
             <FileCheck className="mr-1 h-3.5 w-3.5" />
-            Qualifications
+            Commercial
           </Button>
           <Button
             type="button"

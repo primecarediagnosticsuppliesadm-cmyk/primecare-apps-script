@@ -139,7 +139,10 @@ function staticCheck() {
       pass(`sidebarSummaryApi does not reference ${token}`);
     }
   }
-  if (sidebarSrc.includes("getOrdersRead({ skipLineCounts: true })")) {
+  const hasSkipLineCountsOrdersRead =
+    sidebarSrc.includes("getOrdersRead({ skipLineCounts: true })") ||
+    /readOrdersListBroker\(\{[^}]*skipLineCounts:\s*true/s.test(sidebarSrc);
+  if (hasSkipLineCountsOrdersRead) {
     pass("sidebarSummaryApi uses skipLineCounts orders read");
   } else {
     fail("sidebarSummaryApi missing getOrdersRead({ skipLineCounts: true })");

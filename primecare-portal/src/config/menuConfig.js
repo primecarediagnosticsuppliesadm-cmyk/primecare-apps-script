@@ -9,6 +9,8 @@ import { ALLOW_EXPERIMENTAL_MODULES, IS_QA, IS_PROD } from "./environment";
 import { isPredatorEnabled } from "@/predator/predatorGuards.js";
 import { isQaCommandCenterEnabled, isProjectionOpsCenterEnabled } from "@/config/qaValidation.js";
 import { ENTERPRISE_PAGE_LABELS } from "@/config/enterpriseCopy.js";
+import { isDeepLinkOnlyNavKey } from "@/platform/platformConsolidationModel.js";
+import { isProductionReadinessDashboardEnabled } from "@/config/qaValidation.js";
 
 /** HQ Admin sidebar sections (order preserved within each group). */
 export const HQ_ADMIN_MENU_SECTIONS = [
@@ -28,39 +30,52 @@ export const HQ_ADMIN_MENU_SECTIONS = [
     label: "PEOPLE",
     keys: ["operationsCenter", "accessAudit"],
   },
-  { id: "growth", label: "GROWTH", keys: ["qualificationReview"] },
+  { id: "growth", label: "GROWTH", keys: ["commercialCrm"] },
+  { id: "platform", label: "PLATFORM", keys: ["productionReadiness"] },
 ];
 
-/** HQ Executive sidebar sections. */
+/** HQ Executive sidebar sections (Phase 9.1 — one home per workspace). */
 export const HQ_EXECUTIVE_MENU_SECTIONS = [
   { id: "home", label: "HOME", keys: ["dashboard"] },
   {
     id: "founder",
     label: "FOUNDER",
-    keys: ["executiveFinancialIntelligence", "founderFinancialIntelligence", "revenueFunnel"],
+    keys: ["founderOperatingSystem"],
+  },
+  {
+    id: "executive",
+    label: "EXECUTIVE",
+    keys: ["executiveFinancialIntelligence", "revenueFunnel"],
   },
   {
     id: "operations",
     label: "OPERATIONS",
-    keys: ["orders", "logisticsDelivery", "risk", "operationsCenter"],
+    keys: ["operationsCenter", "orders", "logisticsDelivery", "risk"],
   },
   {
     id: "inventory",
     label: "INVENTORY",
     keys: ["masterCatalog", "inventory", "purchase"],
   },
-  { id: "people", label: "PEOPLE", keys: ["accessAudit", "compensationPayroll"] },
-  { id: "growth", label: "GROWTH", keys: ["qualificationReview", "commissionEngine", "labContractEngine"] },
+  { id: "people", label: "PEOPLE", keys: ["compensationPayroll", "accessAudit"] },
+  { id: "growth", label: "GROWTH", keys: ["commercialCrm"] },
+  {
+    id: "platform",
+    label: "PLATFORM",
+    keys: ["productionReadiness", "qaCommandCenter", "projectionOpsCenter"],
+  },
 ];
 
 /** PrimeCare HQ sidebar — platform modules only (no distributor ops). */
 const EXECUTIVE_HQ_MENU_KEYS = new Set([
   "dashboard",
   "founderNavigation",
+  "founderOperatingSystem",
   "founderStrategy",
   "founderFinancialIntelligence",
   "executiveFinancialIntelligence",
   "revenueFunnel",
+  "commercialCrm",
   "qualificationReview",
   "pilotReadiness",
   "tenantManagement",
@@ -77,6 +92,7 @@ const EXECUTIVE_HQ_MENU_KEYS = new Set([
   "commissionEngine",
   "compensationPayroll",
   "labContractEngine",
+  "productionReadiness",
   "predatorDebug",
   "qaCommandCenter",
   "projectionOpsCenter",
@@ -88,6 +104,7 @@ const ADMIN_HQ_MENU_KEYS = new Set([
   "operationsCenter",
   "logisticsDelivery",
   "accessAudit",
+  "commercialCrm",
   "qualificationReview",
   "masterCatalog",
   "inventory",
@@ -96,6 +113,7 @@ const ADMIN_HQ_MENU_KEYS = new Set([
   "logisticsDelivery",
   "risk",
   "purchase",
+  "productionReadiness",
   "notifications",
   "predatorDebug",
 ]);
@@ -119,10 +137,20 @@ export const MENU_ITEMS = [
   // Core
   { key: "dashboard", label: "Dashboard", icon: "LayoutDashboard" },
   { key: "founderNavigation", label: "Founder Navigation", icon: "Compass" },
+  {
+    key: "founderOperatingSystem",
+    label: ENTERPRISE_PAGE_LABELS.founderOperatingSystem,
+    icon: "Compass",
+  },
   { key: "founderStrategy", label: "Founder Strategy", icon: "Target" },
   { key: "founderFinancialIntelligence", label: "Financial Intelligence", icon: "BarChart3" },
   { key: "executiveFinancialIntelligence", label: "Executive Financial Intelligence", icon: "LineChart" },
   { key: "revenueFunnel", label: "Revenue Funnel", icon: "TrendingUp" },
+  {
+    key: "commercialCrm",
+    label: "Commercial",
+    icon: "Briefcase",
+  },
   {
     key: "qualificationReview",
     label: "Qualification Analytics",
@@ -166,11 +194,17 @@ export const MENU_ITEMS = [
   { key: "predatorDebug", label: ENTERPRISE_PAGE_LABELS.predatorDebug, icon: "Brain" },
   { key: "qaCommandCenter", label: ENTERPRISE_PAGE_LABELS.qaCommandCenter, icon: "ClipboardCheck" },
   { key: "projectionOpsCenter", label: ENTERPRISE_PAGE_LABELS.projectionOpsCenter, icon: "Database" },
+  {
+    key: "productionReadiness",
+    label: ENTERPRISE_PAGE_LABELS.productionReadiness,
+    icon: "ShieldCheck",
+  },
 ];
 
 const PILOT_SAFE_PAGE_KEYS = new Set([
   "dashboard",
   "founderNavigation",
+  "founderOperatingSystem",
   "founderStrategy",
   "founderFinancialIntelligence",
   "executiveFinancialIntelligence",
@@ -201,10 +235,8 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "adminOnBehalfOrder",
   "labInvoices",
   "purchase",
-  "reorder",
-  "predatorDebug",
-  "qaCommandCenter",
   "projectionOpsCenter",
+  "productionReadiness",
 ]);
 
 /**
@@ -261,6 +293,15 @@ export function getMenuForRole(role) {
       item.key === "projectionOpsCenter" &&
       (!isProjectionOpsCenterEnabled() || normalizedRole !== ROLES.EXECUTIVE)
     ) {
+      return false;
+    }
+    if (
+      item.key === "productionReadiness" &&
+      !isProductionReadinessDashboardEnabled(normalizedRole)
+    ) {
+      return false;
+    }
+    if (isDeepLinkOnlyNavKey(item.key)) {
       return false;
     }
     if (normalizedRole === ROLES.LAB && !LAB_MENU_ORDER.includes(item.key)) {

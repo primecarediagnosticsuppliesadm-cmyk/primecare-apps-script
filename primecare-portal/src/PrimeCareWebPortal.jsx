@@ -15,7 +15,7 @@ const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
 const AIInsightsPage = lazy(() => import("./pages/AIInsightsPage"));
 const CollectionsPage = lazy(() => import("./pages/CollectionsPage"));
 const ExecutiveControlTower = lazy(() => import("./pages/ExecutiveControlTower"));
-const FounderNavigationPage = lazy(() => import("./pages/FounderNavigationPage"));
+const FounderOperatingSystemPage = lazy(() => import("./pages/FounderOperatingSystemPage"));
 const FounderStrategyPage = lazy(() => import("./pages/FounderStrategyPage"));
 const FounderFinancialIntelligencePage = lazy(() => import("./pages/FounderFinancialIntelligencePage"));
 const ExecutiveFinancialIntelligencePage = lazy(() => import("./pages/ExecutiveFinancialIntelligencePage"));
@@ -35,6 +35,7 @@ const StockPage = lazy(() => import("./pages/StockPage"));
 const MasterCatalogPage = lazy(() => import("./pages/MasterCatalogPage"));
 const PurchaseOrdersPage = lazy(() => import("./pages/PurchaseOrdersPage"));
 const QualificationReviewPage = lazy(() => import("./pages/QualificationReviewPage"));
+const CommercialCrmPage = lazy(() => import("./pages/CommercialCrmPage"));
 const PredatorDebugConsole = lazy(() => import("./pages/PredatorDebugConsole"));
 const NotificationCenterPage = lazy(() => import("./pages/NotificationCenterPage"));
 const OperationsCommandCenter = lazy(() => import("./pages/OperationsCommandCenter"));
@@ -43,6 +44,7 @@ const LogisticsDeliveryPage = lazy(() => import("./pages/LogisticsDeliveryPage")
 const AccessAuditPage = lazy(() => import("./pages/AccessAuditPage"));
 const QACommandCenterPage = lazy(() => import("./pages/QACommandCenterPage"));
 const ProjectionOperationsCenterPage = lazy(() => import("./pages/ProjectionOperationsCenterPage"));
+const ProductionReadinessDashboardPage = lazy(() => import("./pages/ProductionReadinessDashboardPage"));
 const PilotReadinessPage = lazy(() => import("./pages/PilotReadinessPage"));
 const RevenueFunnelPage = lazy(() => import("./pages/RevenueFunnelPage"));
 const ExecutiveCompensationCenterPage = lazy(() => import("./pages/ExecutiveCompensationCenterPage"));
@@ -273,6 +275,13 @@ export default function PrimeCareWebPortal({
           />
         );
 
+      case "commercialCrm":
+      case "commercial":
+      case "commercial-crm":
+        return (
+          <CommercialCrmPage currentUser={currentUser} setActivePage={setActivePage} />
+        );
+
       case "notifications":
       case "notification-center":
         return <NotificationCenterPage currentUser={currentUser} setActivePage={setActivePage} />;
@@ -302,6 +311,16 @@ export default function PrimeCareWebPortal({
       case "accessAudit":
       case "access-audit":
         return <AccessAuditPage currentUser={currentUser} />;
+
+      case "productionReadiness":
+      case "production-readiness":
+      case "architecture-readiness":
+        return (
+          <ProductionReadinessDashboardPage
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+          />
+        );
 
       case "performance":
         return <PageRedirect setActivePage={setActivePage} target="dashboard" />;
@@ -343,8 +362,19 @@ export default function PrimeCareWebPortal({
         );
 
       case "founderNavigation":
+      case "founder-navigation":
         return (
-          <FounderNavigationPage
+          <FounderOperatingSystemPage
+            setActivePage={setActivePage}
+            currentUser={currentUser}
+          />
+        );
+
+      case "founderOperatingSystem":
+      case "founder-operating-system":
+      case "founder-os":
+        return (
+          <FounderOperatingSystemPage
             setActivePage={setActivePage}
             currentUser={currentUser}
           />
@@ -391,6 +421,16 @@ export default function PrimeCareWebPortal({
       case "projectionOpsCenter":
       case "projection-ops-center":
         return <ProjectionOperationsCenterPage currentUser={currentUser} />;
+
+      case "productionReadiness":
+      case "production-readiness":
+      case "architecture-readiness":
+        return (
+          <ProductionReadinessDashboardPage
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+          />
+        );
 
       case "tenantManagement":
         return <TenantManagementPage currentUser={currentUser} />;
@@ -512,6 +552,13 @@ export default function PrimeCareWebPortal({
             currentUser={currentUser}
             setActivePage={setActivePage}
           />
+        );
+
+      case "commercialCrm":
+      case "commercial":
+      case "commercial-crm":
+        return (
+          <CommercialCrmPage currentUser={currentUser} setActivePage={setActivePage} />
         );
 
       case "notifications":

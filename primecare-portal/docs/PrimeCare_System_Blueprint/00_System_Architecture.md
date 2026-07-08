@@ -62,6 +62,7 @@ Baseline schema dump: `primecare_public_schema.sql` (repo root).
 | **Executive** | `founderSnapshotApi`, EFI engines | ExecutiveControlTower, EFI pages | read aggregates |
 | **Lab portal** | `getLabCatalogRead`, `getLabOrderDetailsRead` | LabOrderingPage | orders (scoped) |
 | **Compensation / Payroll** | planned compensation APIs | planned Executive Compensation / Payroll screens | planned payroll, run line, adjustment, approval, audit tables |
+| **Commercial CRM** | qualification + visits + contracts reads composed | CommercialCrmPage (Phase 9.0) | `lab_qualifications`, `agent_visits`, `lab_contracts`, `labs` (no new CRM tables) |
 
 ---
 

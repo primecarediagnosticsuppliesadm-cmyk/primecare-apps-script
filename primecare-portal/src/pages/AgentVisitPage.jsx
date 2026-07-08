@@ -91,11 +91,13 @@ import { enrichVisitForDisplay, displayResponseLabel } from "@/utils/agentVisitD
 import { saveAgentVisit } from "@/api/primecareApi";
 import {
   createAgentVisitWrite,
-  getAgentVisitPageContextRead,
-  getLabsCredit,
-  getLabQualificationRead,
   upsertLabQualificationWrite,
 } from "@/api/primecareSupabaseApi";
+import {
+  readAgentVisitContextBroker,
+  readLabQualificationBroker,
+  readLabsCreditBroker,
+} from "@/api/sharedReadBroker.js";
 import { supabase } from "@/api/supabaseClient.js";
 import { ROLES } from "@/config/roles";
 import { canAccessAgentVisitFlow, agentVisitBlockedMessage } from "@/config/hqReleasePolicy.js";
@@ -1037,7 +1039,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
           const isAgent = isAgentUser(currentUser);
 
           if (isAgent) {
-            const ctxRes = await getAgentVisitPageContextRead(currentUser);
+            const ctxRes = await readAgentVisitContextBroker(currentUser);
             if (!ctxRes?.success) {
               throw new Error(ctxRes?.error || "Failed to load agent visit context");
             }
@@ -1054,13 +1056,13 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
 
             labList = (ctx.labs || []).map(normalizePortalLab);
             if (labList.length === 0) {
-              const cr = await getLabsCredit();
+              const cr = await readLabsCreditBroker({ currentUser });
               const rawLabs = extractLabsCreditRows(cr);
               labList = rawLabs.map(normalizePortalLab);
             }
           } else {
             try {
-              const cr = await getLabsCredit();
+              const cr = await readLabsCreditBroker({ currentUser });
               if (cr?.success && Array.isArray(cr.data)) {
                 labList = cr.data
                   .map(normalizeLab)
@@ -1525,9 +1527,10 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
 
       try {
         setQualificationLoading(true);
-        const res = await getLabQualificationRead({
+        const res = await readLabQualificationBroker({
           tenantId: currentUser?.tenantId || currentUser?.tenant_id || "",
           labId,
+          currentUser,
         });
 
         if (cancelled) return;

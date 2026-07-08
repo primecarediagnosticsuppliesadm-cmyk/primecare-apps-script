@@ -1,10 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { PageHeader, PageSkeleton, StatusBadge, KpiCard, KpiCardGrid, ReadHealthBanner, KpiSkeleton, ListSkeleton } from "@/components/ux";
-import { loadExecutiveFinancialIntelligenceData } from "@/founder/executiveFinancialIntelligenceData.js";
+import {
+  loadExecutiveFinancialIntelligenceCore,
+  loadExecutiveFinancialIntelligenceExtended,
+} from "@/founder/executiveFinancialIntelligenceData.js";
 import { buildExecutiveFinancialIntelligenceModel } from "@/founder/executiveFinancialIntelligenceEngine.js";
 import { usePredatorModuleValidation } from "@/predator/usePredatorModuleValidation.js";
 import { cn } from "@/lib/utils";
+import { scheduleIdleTask } from "@/utils/scheduleIdleTask.js";
 import {
   BarChart3,
   RefreshCw,
@@ -146,6 +150,7 @@ export default function ExecutiveFinancialIntelligencePage({
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const modelRef = useRef(model);
+  const loadGenerationRef = useRef(0);
 
   useEffect(() => {
     modelRef.current = model;
@@ -154,45 +159,57 @@ export default function ExecutiveFinancialIntelligencePage({
   usePagePerformance("Executive FI");
 
   const load = useCallback(async () => {
+    const loadId = (loadGenerationRef.current += 1);
     try {
       if (!modelRef.current) setLoading(true);
       else setRefreshing(true);
       setError("");
       setSectionsLoading(true);
 
-      let paintedCore = false;
-      const data = await loadExecutiveFinancialIntelligenceData(currentUser, {
-        progressive: true,
-        onCoreReady: (coreData) => {
-          paintedCore = true;
-          const coreModel = buildExecutiveFinancialIntelligenceModel({
-            ...coreData,
+      const coreData = await loadExecutiveFinancialIntelligenceCore(currentUser, {
+        force: Boolean(modelRef.current),
+      });
+      if (loadId !== loadGenerationRef.current) return;
+      const coreModel = buildExecutiveFinancialIntelligenceModel({
+        ...coreData,
+        opsPayload: {
+          ...coreData.opsPayload,
+          readHealth: coreData.readHealth,
+        },
+      });
+      setModel(coreModel);
+      setLoading(false);
+      setRefreshing(false);
+
+      scheduleIdleTask(async () => {
+        try {
+          const data = await loadExecutiveFinancialIntelligenceExtended(currentUser, {
+            force: Boolean(modelRef.current),
+            core: coreData,
+          });
+          if (loadId !== loadGenerationRef.current) return;
+          const next = buildExecutiveFinancialIntelligenceModel({
+            ...data,
             opsPayload: {
-              ...coreData.opsPayload,
-              readHealth: coreData.readHealth,
+              ...data.opsPayload,
+              readHealth: data.readHealth,
             },
           });
-          setModel(coreModel);
-          setLoading(false);
-        },
-      });
-      const next = buildExecutiveFinancialIntelligenceModel({
-        ...data,
-        opsPayload: {
-          ...data.opsPayload,
-          readHealth: data.readHealth,
-        },
-      });
-      writeEfiModelCache(next);
-      setModel(next);
-      if (!paintedCore) setLoading(false);
+          writeEfiModelCache(next);
+          setModel(next);
+        } catch (err) {
+          console.warn("[ExecutiveFinancialIntelligence] extended load failed:", err?.message || err);
+        } finally {
+          if (loadId === loadGenerationRef.current) setSectionsLoading(false);
+        }
+      }, { timeout: 1500 });
     } catch (err) {
       setError(err?.message || "Failed to load executive financial intelligence");
       if (!modelRef.current) setModel(null);
+      setSectionsLoading(false);
     } finally {
       setLoading(false);
       setRefreshing(false);
-      setSectionsLoading(false);
     }
   }, [currentUser]);
 

@@ -317,8 +317,8 @@ export default function App() {
 
   useEffect(() => {
     if (!role || !activePage) return;
-    prefetchLikelyRoutes(role, activePage);
-  }, [role, activePage]);
+    prefetchLikelyRoutes(role, activePage, currentUser);
+  }, [role, activePage, currentUser]);
 
   useEffect(() => {
     if (!role) return;

@@ -1,11 +1,19 @@
 import React, { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { EnterpriseDataTable, StatusBadge } from "@/components/ux";
+import { EnterpriseDataTable, KpiCard, KpiCardGrid, StatusBadge } from "@/components/ux";
 import { buildCompensationPlanDetailModel } from "@/compensation/compensationPlanAdminModel.js";
 import { simulateCompensationPlan } from "@/compensation/compensationPlanSimulator.js";
 import CompensationPlanDetailsPanel from "@/components/compensation/CompensationPlanDetailsPanel.jsx";
 import NewCompensationPlanWizard from "@/components/compensation/NewCompensationPlanWizard.jsx";
+import PeopleOpsActionMenu from "@/components/peopleOps/PeopleOpsActionMenu.jsx";
+import PeopleOpsTableShell, {
+  PeopleOpsTableBody,
+  PeopleOpsTableCell,
+  PeopleOpsTableHead,
+  PeopleOpsTableRow,
+} from "@/components/peopleOps/PeopleOpsTableShell.jsx";
+import { buildCompensationSummaryStats } from "@/peopleOps/peopleOpsEnterpriseModel.js";
+import { ClipboardList, FileStack, Layers, Shield } from "lucide-react";
 
 const STATUS_VARIANT = {
   draft: "neutral",
@@ -22,6 +30,7 @@ export default function CompensationPlansTab({
   onDuplicatePlan,
   onDeactivatePlan,
   onActivatePlan,
+  onViewAssignments,
   busy = false,
 }) {
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -74,8 +83,18 @@ export default function CompensationPlansTab({
     });
   };
 
+  const summary = useMemo(() => buildCompensationSummaryStats(adminModel), [adminModel]);
+
   return (
     <div className="space-y-4">
+      <KpiCardGrid columns={3}>
+        <KpiCard title="Plans" value={String(summary.plans)} subtitle="Total compensation plans" icon={FileStack} />
+        <KpiCard title="Assignments" value={String(summary.assignments)} subtitle="Active and historical assignments" icon={ClipboardList} />
+        <KpiCard title="Active Plans" value={String(summary.activePlans)} subtitle="Currently assignable plans" icon={Shield} />
+        <KpiCard title="Inactive Plans" value={String(summary.inactivePlans)} subtitle="Retired plan versions" icon={Layers} />
+        <KpiCard title="Draft Plans" value={String(summary.draftPlans)} subtitle="Awaiting activation" icon={FileStack} />
+      </KpiCardGrid>
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-slate-600">
           Master compensation plans for the payroll engine. Active edits create a new version; history is preserved.
@@ -102,116 +121,101 @@ export default function CompensationPlansTab({
         emptyTitle="No compensation plans"
         emptyDescription="Create a plan to configure salary, allowances, commission, and promotion rules."
         desktop={
-          <div className="overflow-x-auto rounded-lg border bg-white">
-            <table className="min-w-full text-left text-[11px]">
-              <thead className="border-b bg-slate-50 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                <tr>
-                  {[
-                    "Plan Name",
-                    "Role",
-                    "Version",
-                    "Status",
-                    "Salary",
-                    "Fuel Allowance",
-                    "Mobile Allowance",
-                    "Commission %",
-                    "Promotion Salary",
-                    "Promotion Commission %",
-                    "Effective From",
-                    "Effective To",
-                    "Assigned Employees",
-                    "Created By",
-                    "Created Date",
-                    "Actions",
-                  ].map((label) => (
-                    <th key={label} className="px-2 py-2 whitespace-nowrap">
-                      {label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {(adminModel?.planRows || []).map((row) => (
-                  <tr key={row.id} className="border-b border-slate-100 last:border-0">
-                    <td className="px-2 py-2 font-medium">{row.planName}</td>
-                    <td className="px-2 py-2">{row.roleScope}</td>
-                    <td className="px-2 py-2">{row.version}</td>
-                    <td className="px-2 py-2">
-                      <StatusBadge variant={STATUS_VARIANT[row.status] || "neutral"} label={row.status} />
-                    </td>
-                    <td className="px-2 py-2 tabular-nums">{row.salaryLabel}</td>
-                    <td className="px-2 py-2 tabular-nums">{row.fuelLabel}</td>
-                    <td className="px-2 py-2 tabular-nums">{row.mobileLabel}</td>
-                    <td className="px-2 py-2 tabular-nums">{row.commissionPct}%</td>
-                    <td className="px-2 py-2 tabular-nums">{row.promotionSalaryLabel}</td>
-                    <td className="px-2 py-2 tabular-nums">{row.promotionCommissionPct}%</td>
-                    <td className="px-2 py-2">{row.effectiveFromLabel}</td>
-                    <td className="px-2 py-2">{row.effectiveToLabel}</td>
-                    <td className="px-2 py-2">{row.assignedEmployees}</td>
-                    <td className="px-2 py-2">{row.createdBy}</td>
-                    <td className="px-2 py-2">{row.createdAtLabel}</td>
-                    <td className="px-2 py-2">
-                      <div className="flex flex-wrap gap-1">
-                        <Button type="button" size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => openPlan(row)}>
-                          View
-                        </Button>
-                        {permissions?.canEditDraftPlan || permissions?.canEditActivePlanViaVersion ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-[10px]"
-                            onClick={() => {
-                              openPlan(row);
-                              setEditorOpen(true);
-                            }}
-                          >
-                            Edit
-                          </Button>
-                        ) : null}
-                        {permissions?.canDuplicatePlan ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-[10px]"
-                            disabled={busy}
-                            onClick={() => onDuplicatePlan?.(row)}
-                          >
-                            Duplicate
-                          </Button>
-                        ) : null}
-                        {permissions?.canEditDraftPlan && row.status === "draft" ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-[10px]"
-                            disabled={busy}
-                            onClick={() => onActivatePlan?.(row)}
-                          >
-                            Activate
-                          </Button>
-                        ) : null}
-                        {permissions?.canDeactivatePlan && row.status !== "retired" ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-[10px]"
-                            disabled={busy}
-                            onClick={() => onDeactivatePlan?.(row)}
-                          >
-                            Deactivate
-                          </Button>
-                        ) : null}
-                      </div>
-                    </td>
-                  </tr>
+          <PeopleOpsTableShell>
+            <PeopleOpsTableHead>
+              <tr>
+                {[
+                  "Plan Name",
+                  "Role",
+                  "Version",
+                  "Status",
+                  "Salary",
+                  "Fuel Allowance",
+                  "Mobile Allowance",
+                  "Commission %",
+                  "Promotion Salary",
+                  "Promotion Commission %",
+                  "Effective From",
+                  "Effective To",
+                  "Assigned Employees",
+                  "Created By",
+                  "Created Date",
+                  "Actions",
+                ].map((label) => (
+                  <PeopleOpsTableCell key={label} header>
+                    {label}
+                  </PeopleOpsTableCell>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </tr>
+            </PeopleOpsTableHead>
+            <PeopleOpsTableBody>
+              {(adminModel?.planRows || []).map((row) => (
+                <PeopleOpsTableRow key={row.id}>
+                  <PeopleOpsTableCell className="font-medium">{row.planName}</PeopleOpsTableCell>
+                  <PeopleOpsTableCell>{row.roleScope}</PeopleOpsTableCell>
+                  <PeopleOpsTableCell>
+                    <StatusBadge variant="info">V{row.version}</StatusBadge>
+                  </PeopleOpsTableCell>
+                  <PeopleOpsTableCell>
+                    <StatusBadge variant={STATUS_VARIANT[row.status] || "neutral"} label={row.status} />
+                  </PeopleOpsTableCell>
+                  <PeopleOpsTableCell className="tabular-nums">{row.salaryLabel}</PeopleOpsTableCell>
+                  <PeopleOpsTableCell className="tabular-nums">{row.fuelLabel}</PeopleOpsTableCell>
+                  <PeopleOpsTableCell className="tabular-nums">{row.mobileLabel}</PeopleOpsTableCell>
+                  <PeopleOpsTableCell className="tabular-nums">{row.commissionPct}%</PeopleOpsTableCell>
+                  <PeopleOpsTableCell className="tabular-nums">{row.promotionSalaryLabel}</PeopleOpsTableCell>
+                  <PeopleOpsTableCell className="tabular-nums">{row.promotionCommissionPct}%</PeopleOpsTableCell>
+                  <PeopleOpsTableCell>{row.effectiveFromLabel}</PeopleOpsTableCell>
+                  <PeopleOpsTableCell>{row.effectiveToLabel}</PeopleOpsTableCell>
+                  <PeopleOpsTableCell>
+                    <button
+                      type="button"
+                      className="font-medium text-[var(--pc-brand-primary)] hover:underline"
+                      onClick={() => onViewAssignments?.(row)}
+                    >
+                      {row.assignedEmployees}
+                    </button>
+                  </PeopleOpsTableCell>
+                  <PeopleOpsTableCell>{row.createdBy}</PeopleOpsTableCell>
+                  <PeopleOpsTableCell>{row.createdAtLabel}</PeopleOpsTableCell>
+                  <PeopleOpsTableCell>
+                    <PeopleOpsActionMenu
+                      ariaLabel={`Actions for ${row.planName}`}
+                      items={[
+                        { id: "view", label: "View", onClick: () => openPlan(row) },
+                        permissions?.canEditDraftPlan || permissions?.canEditActivePlanViaVersion
+                          ? {
+                              id: "edit",
+                              label: "Edit",
+                              onClick: () => {
+                                openPlan(row);
+                                setEditorOpen(true);
+                              },
+                            }
+                          : null,
+                        permissions?.canDuplicatePlan
+                          ? { id: "duplicate", label: "Duplicate", disabled: busy, onClick: () => onDuplicatePlan?.(row) }
+                          : null,
+                        permissions?.canEditDraftPlan && row.status === "draft"
+                          ? { id: "activate", label: "Activate", disabled: busy, onClick: () => onActivatePlan?.(row) }
+                          : null,
+                        permissions?.canDeactivatePlan && row.status !== "retired"
+                          ? {
+                              id: "deactivate",
+                              label: "Deactivate",
+                              disabled: busy,
+                              destructive: true,
+                              onClick: () => onDeactivatePlan?.(row),
+                            }
+                          : null,
+                        { id: "history", label: "History", onClick: () => openPlan(row) },
+                      ]}
+                    />
+                  </PeopleOpsTableCell>
+                </PeopleOpsTableRow>
+              ))}
+            </PeopleOpsTableBody>
+          </PeopleOpsTableShell>
         }
       />
 

@@ -46,6 +46,10 @@ export function normalizePageKey(page) {
     case "qualification-analytics":
     case "qualifications":
       return "qualificationReview";
+    case "commercial":
+    case "commercial-crm":
+    case "commercialCrm":
+      return "commercialCrm";
     case "predator-debug":
     case "predatorDebug":
       return "predatorDebug";
@@ -58,7 +62,11 @@ export function normalizePageKey(page) {
     case "founder-navigation":
     case "founderNavigation":
     case "founder-journey":
-      return "founderNavigation";
+      return "founderOperatingSystem";
+    case "founder-operating-system":
+    case "founderOperatingSystem":
+    case "founder-os":
+      return "founderOperatingSystem";
     case "founder-strategy":
     case "founderStrategy":
       return "founderStrategy";
@@ -81,6 +89,10 @@ export function normalizePageKey(page) {
     case "projection-ops-center":
     case "projectionOpsCenter":
       return "projectionOpsCenter";
+    case "production-readiness":
+    case "architecture-readiness":
+    case "productionReadiness":
+      return "productionReadiness";
     case "tenant-management":
     case "tenantManagement":
       return "tenantManagement";

@@ -25,9 +25,10 @@ HQ user provisioning, lab ownership, agent assignment, audit, freeze.
 
 ## Lab ownership
 
-- `lab_ownership` — one ACTIVE row per lab
-- Drives agent collections filter + ops metrics
-- API: `assignPrimaryLabOwnerWrite`
+- **Canonical SoT:** `lab_ownership` — one ACTIVE row per lab
+- Drives agent collections filter + ops metrics + People Ops Business Ownership read façade (Phase 8.4)
+- Write API: `assignPrimaryLabOwnerWrite` / `assignLabOwnership` (Operations Center only)
+- People Ops must **not** invent a second ownership store — see `20_People_Operations.md` Phase 8.4
 
 ---
 

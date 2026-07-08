@@ -74,6 +74,7 @@ export const PERMISSION_BY_KEY = {
     ROLES.READ_ONLY_AUDITOR,
   ],
   founderNavigation: [ROLES.EXECUTIVE],
+  founderOperatingSystem: [ROLES.EXECUTIVE],
   founderStrategy: [ROLES.EXECUTIVE],
   founderFinancialIntelligence: [ROLES.EXECUTIVE],
   executiveFinancialIntelligence: [ROLES.EXECUTIVE],
@@ -110,6 +111,7 @@ export const PERMISSION_BY_KEY = {
   adminOnBehalfOrder: [ROLES.ADMIN, ROLES.EXECUTIVE],
   purchase: [ROLES.ADMIN, ROLES.EXECUTIVE],
   reorder: [ROLES.ADMIN, ROLES.EXECUTIVE],
+  commercialCrm: [ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.READ_ONLY_AUDITOR],
   qualificationReview: [ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.READ_ONLY_AUDITOR],
   notifications: [
     ROLES.AGENT,
@@ -123,6 +125,7 @@ export const PERMISSION_BY_KEY = {
   predatorDebug: [ROLES.ADMIN, ROLES.EXECUTIVE],
   qaCommandCenter: [ROLES.EXECUTIVE],
   projectionOpsCenter: [ROLES.EXECUTIVE],
+  productionReadiness: [ROLES.EXECUTIVE, ROLES.ADMIN],
 };
 
 /** Sidebar allowlist for distributor-scoped roles (HQ executive/admin use menuConfig HQ sets). */
@@ -151,6 +154,7 @@ export const READ_ONLY_AUDITOR_MENU_ORDER = [
   "logisticsDelivery",
   "risk",
   "collections",
+  "commercialCrm",
   "qualificationReview",
   "operationsCenter",
   "accessAudit",
@@ -200,6 +204,7 @@ export const UNAUTHORIZED_MENU_PAGES_BY_ROLE = {
     "commissionEngine",
     "compensationPayroll",
     "labContractEngine",
+    "commercialCrm",
     "accessAudit",
     "purchase",
     "inventory",
@@ -227,6 +232,7 @@ export const UNAUTHORIZED_MENU_PAGES_BY_ROLE = {
     "commissionEngine",
     "compensationPayroll",
     "labContractEngine",
+    "commercialCrm",
     "visits",
     "collections",
     "purchase",

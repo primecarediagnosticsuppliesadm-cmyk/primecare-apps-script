@@ -2,7 +2,10 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ux";
 import ShipmentTimeline from "@/components/logistics/ShipmentTimeline.jsx";
-import { getShipmentByOrderRead, getShipmentEventsRead } from "@/api/logisticsSupabaseApi.js";
+import {
+  readShipmentByOrderBroker,
+  readShipmentEventsBroker,
+} from "@/api/sharedReadBroker.js";
 import { buildShipmentTimeline, shipmentStatusLabel } from "@/logistics/logisticsShipmentEngine.js";
 import { navigateToLogisticsDelivery } from "@/operations/hqWorkflowNav.js";
 import { Loader2, Truck } from "lucide-react";
@@ -25,7 +28,7 @@ export default function OrdersLogisticsPanel({
     }
     let cancelled = false;
     setLoading(true);
-    void getShipmentByOrderRead({ tenantId, orderId }).then(async (res) => {
+    void readShipmentByOrderBroker({ tenantId, orderId }).then(async (res) => {
       if (cancelled) return;
       if (!res.success || !res.shipment) {
         setShipment(null);
@@ -34,7 +37,7 @@ export default function OrdersLogisticsPanel({
         return;
       }
       setShipment(res.shipment);
-      const evRes = await getShipmentEventsRead({
+      const evRes = await readShipmentEventsBroker({
         tenantId,
         shipmentId: res.shipment.shipmentId,
       });

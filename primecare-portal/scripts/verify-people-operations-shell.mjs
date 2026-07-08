@@ -37,7 +37,7 @@ assert(/peopleOpsNavigation/.test(pageSrc), "page.nav_constants", "page uses peo
 assert(!/const TABS\s*=/.test(pageSrc), "page.no_flat_tabs", "flat tab array removed");
 assert(!/activeTab/.test(pageSrc), "page.no_active_tab", "activeTab state removed");
 
-for (const moduleId of ["dashboard", "employees", "compensation", "payroll", "reports", "settings"]) {
+for (const moduleId of ["dashboard", "employees", "compensation", "payroll", "budgeting", "ownership", "reports", "settings"]) {
   assert(new RegExp(`id:\\s*"${moduleId}"`).test(navSrc), `nav.module.${moduleId}`, `${moduleId} module declared`);
 }
 
@@ -69,6 +69,16 @@ assert(
   /activeModuleId === "settings"/.test(pageSrc) && /activeScreenId === "configuration"/.test(pageSrc),
   "screen.settings",
   "settings placeholder screen wired"
+);
+assert(
+  /activeModuleId === "budgeting"/.test(pageSrc) && /PeopleOpsBudgetingModule/.test(pageSrc),
+  "screen.budgeting",
+  "budgeting module wired"
+);
+assert(
+  /activeModuleId === "ownership"/.test(pageSrc) && /PeopleOpsOwnershipModule/.test(pageSrc),
+  "screen.ownership",
+  "ownership module wired"
 );
 
 assert(

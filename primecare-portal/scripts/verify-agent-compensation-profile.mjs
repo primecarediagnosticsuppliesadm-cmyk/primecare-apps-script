@@ -56,7 +56,11 @@ for (const label of [
   assert(panelSrc.includes(label), `overview.${label}`, `${label} overview field present`);
 }
 
-assert(/EmployeeCompensation360Panel/.test(pageSrc), "page.panel", "Executive Compensation uses Employee Compensation 360 panel");
+assert(
+  /EmployeeCompensation360(?:Panel|Drawer)/.test(pageSrc),
+  "page.panel",
+  "Executive Compensation uses Employee Compensation 360 panel or drawer"
+);
 assert(/loadEmployeeCompensation360Read/.test(pageSrc), "page.loader", "360 read loader wired");
 assert(/Employee Compensation 360/.test(panelSrc), "ui.title", "360 panel title present");
 assert(/buildEmployeeCompensation360Model/.test(apiSrc), "api.model", "360 API builds domain model");

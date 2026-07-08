@@ -11,9 +11,9 @@ import { createServer } from "vite";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 import { QA_AGENT } from "./qaCredentials.mjs";
+import { signInWithQaCredentials, loadEnvLocal } from "./qaSignIn.mjs";
 
 const AGENT_EMAIL = QA_AGENT.email;
-const AGENT_PASSWORD = QA_AGENT.password;
 const QA_GAMMA_LAB = "QA_LAB_003";
 
 function loadEnv() {
@@ -40,11 +40,12 @@ async function main() {
     auth: { persistSession: false },
   });
 
-  const auth = await sb.auth.signInWithPassword({
-    email: AGENT_EMAIL,
-    password: AGENT_PASSWORD,
-  });
-  assert(!auth.error, `Agent login failed: ${auth.error?.message}`);
+  const auth = await signInWithQaCredentials(sb, QA_AGENT);
+  assert(auth.ok, `Agent login failed: ${auth.error}`);
+  if (auth.repaired) {
+    console.log("NOTE: Agent password repaired via reset-platform-user-password");
+  }
+  const { data: sessionData } = await sb.auth.getSession();
 
   const server = await createServer({
     configFile: resolve(root, "vite.config.js"),
@@ -52,10 +53,10 @@ async function main() {
   });
 
   const { supabase } = await server.ssrLoadModule("/src/api/supabaseClient.js");
-  if (supabase && auth.data.session) {
+  if (supabase && sessionData?.session) {
     await supabase.auth.setSession({
-      access_token: auth.data.session.access_token,
-      refresh_token: auth.data.session.refresh_token,
+      access_token: sessionData.session.access_token,
+      refresh_token: sessionData.session.refresh_token,
     });
   }
 

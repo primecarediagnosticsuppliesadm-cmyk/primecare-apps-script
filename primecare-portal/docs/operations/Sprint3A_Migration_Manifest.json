@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-07-03T18:28:56.821Z",
+  "generated_at": "2026-07-08T20:19:23.480Z",
   "track_a_sql_count": 53,
-  "track_b_migrations_count": 25,
+  "track_b_migrations_count": 34,
   "duplicate_pairs": 7,
   "manifest_only_count": 46,
   "files": {
@@ -397,6 +397,51 @@
         "path": "supabase/migrations/20260705120004_sprint5a_receivables_tenant_scope.sql",
         "sha256_16": "44f8f47e2b22b205",
         "size_bytes": 3096
+      },
+      {
+        "path": "supabase/migrations/20260705130000_sprint8a_labs_profile_projection.sql",
+        "sha256_16": "f00f9a0bb4011e6c",
+        "size_bytes": 23939
+      },
+      {
+        "path": "supabase/migrations/20260705131000_sprint8a_labs_projection_perf_fix.sql",
+        "sha256_16": "a6f438cd89a46fc2",
+        "size_bytes": 3908
+      },
+      {
+        "path": "supabase/migrations/20260705132000_sprint8a_labs_adapter_rls_perf.sql",
+        "sha256_16": "f4ce2695b17cea07",
+        "size_bytes": 3718
+      },
+      {
+        "path": "supabase/migrations/20260705133000_sprint8a_labs_adapter_admin_perf.sql",
+        "sha256_16": "8b676276de4f5828",
+        "size_bytes": 4332
+      },
+      {
+        "path": "supabase/migrations/20260706120000_compensation_payroll_foundation.sql",
+        "sha256_16": "750d1be0e2c0f4a1",
+        "size_bytes": 33108
+      },
+      {
+        "path": "supabase/migrations/20260706130000_payroll_domain_completion.sql",
+        "sha256_16": "570876c6d151cd27",
+        "size_bytes": 9710
+      },
+      {
+        "path": "supabase/migrations/20260706131000_payroll_domain_rls_hardening.sql",
+        "sha256_16": "d2ec67797081ee98",
+        "size_bytes": 19501
+      },
+      {
+        "path": "supabase/migrations/20260707140000_enterprise_compensation_phase_7_1.sql",
+        "sha256_16": "468ab580edd80e2a",
+        "size_bytes": 4599
+      },
+      {
+        "path": "supabase/migrations/20260707140100_payroll_run_lines_employee_identity.sql",
+        "sha256_16": "c6c777d864aca064",
+        "size_bytes": 771
       }
     ]
   },

@@ -2,6 +2,7 @@ import React from "react";
 import { cn } from "@/lib/utils";
 import { typography } from "@/styles/designTokens";
 import { KpiSkeleton } from "@/components/ux";
+import PeopleOpsBreadcrumbs from "@/components/peopleOps/PeopleOpsBreadcrumbs.jsx";
 
 /**
  * Unified module layout: header → summary → filters → content (+ optional aside).
@@ -9,6 +10,7 @@ import { KpiSkeleton } from "@/components/ux";
 export default function PeopleOpsModuleFrame({
   title,
   description = "",
+  breadcrumbs = null,
   context = null,
   actions = null,
   summary = null,
@@ -22,6 +24,7 @@ export default function PeopleOpsModuleFrame({
     <div className={cn("space-y-4", className)}>
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
         <div className="min-w-0 flex-1 space-y-1">
+          {breadcrumbs ? <PeopleOpsBreadcrumbs items={breadcrumbs} className="mb-1" /> : null}
           <h2 className={typography.sectionTitle}>{title}</h2>
           {description ? <p className={typography.pageSubtitle}>{description}</p> : null}
           {context ? <div className="pt-1">{context}</div> : null}

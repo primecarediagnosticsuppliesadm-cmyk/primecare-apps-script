@@ -7,9 +7,7 @@ import {
 } from "@/api/primecareApi";
 import {
   createPaymentWrite,
-  getCollectionDetailRead,
   getCollectionHistoryRead,
-  getCollectionsRead,
   peekCollectionsReadCache,
   getLabRecentOrdersRead,
   updateCollectionNotesWrite,
@@ -51,7 +49,11 @@ import {
 } from "@/utils/statusTokens";
 import { cn } from "@/lib/utils";
 import { labIdKey } from "@/utils/labId.js";
-import { getInvoicesForLabRead } from "@/api/invoiceSupabaseApi.js";
+import {
+  readCollectionDetailBroker,
+  readCollectionsBroker,
+  readLabInvoicesBroker,
+} from "@/api/sharedReadBroker.js";
 import { HQ_INVOICE_LIST_MAX_LIMIT } from "@/api/hqReadBounds.js";
 import { buildLabAccountLedger } from "@/collections/labAccountLedger.js";
 import {
@@ -646,7 +648,7 @@ function LabAccountTimeline({
   useEffect(() => {
     let cancelled = false;
     if (!labId) return undefined;
-    void getInvoicesForLabRead(labId, { tenantId }).then((res) => {
+    void readLabInvoicesBroker(labId, { tenantId }).then((res) => {
       if (!cancelled && res.success) {
         setServerInvoices(res.rows || []);
       }
@@ -2020,9 +2022,10 @@ export default function CollectionsPage({
 
         logSupabaseFeatureSource("Collections.list", { api: "getCollectionsRead" });
         const [res, ownershipRes] = await Promise.all([
-          getCollectionsRead({
+          readCollectionsBroker({
             force: silent,
             ...(tenantId ? { tenantId } : {}),
+            currentUser,
           }),
           userRole === ROLES.AGENT
             ? getAgentActiveLabOwnershipRowsRead()
@@ -2093,12 +2096,12 @@ export default function CollectionsPage({
 
     try {
       const [invoiceRes, historyRes, detailRes] = await Promise.all([
-        getInvoicesForLabRead(profileLabId, {
+        readLabInvoicesBroker(profileLabId, {
           tenantId,
           pageSize: HQ_INVOICE_LIST_MAX_LIMIT,
         }),
         getCollectionHistoryRead(profileLabId),
-        getCollectionDetailRead(profileLabId),
+        readCollectionDetailBroker(profileLabId, { tenantId, currentUser }),
       ]);
 
       const ledger = buildLabAccountLedger({
@@ -2220,7 +2223,10 @@ export default function CollectionsPage({
 
         try {
           logSupabaseFeatureSource("Collections.details", { api: "getCollectionDetailRead" });
-          const detailRead = await getCollectionDetailRead(canonicalLabId);
+          const detailRead = await readCollectionDetailBroker(canonicalLabId, {
+            tenantId,
+            currentUser,
+          });
           sbDetailOk = Boolean(detailRead?.success);
           sbDetail = detailRead?.data?.collection ?? null;
         } catch (detailErr) {

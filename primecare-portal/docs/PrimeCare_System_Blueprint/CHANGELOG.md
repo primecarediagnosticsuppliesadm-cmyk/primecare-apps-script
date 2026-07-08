@@ -4,6 +4,155 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-08 — Phase 9.2 Founder Operating System & Decision Engine
+
+### Change
+
+- Blueprint `23_Founder_Operating_System.md`.
+- Founder OS page (`founderOperatingSystem`) — compose workspace over ops, commercial, compensation reads.
+- Rule-based insights + top-5 priorities + decision queue + global search index.
+- Executive FOUNDER sidebar section; `founderNavigation` aliases to Founder OS.
+
+### Not changed
+
+- Finance, payroll, compensation engines, commercial compose logic, schema, RLS, workflow engines.
+
+### Verification
+
+- `node scripts/audit-phase-9-2-certification.mjs`
+
+---
+
+## 2026-07-08 — Phase 9.1 Platform Consolidation & Production Readiness Foundation
+
+### Change
+
+- Blueprint `22_Platform_Consolidation.md`.
+- `platformConsolidationModel.js` — workspace homes, deep-link nav keys, KPI/report ownership, financial SoT registry, tech debt registry.
+- `productionReadinessModel.js` + `ProductionReadinessDashboardPage.jsx` — Architecture Readiness (not Founder OS).
+- Executive/Admin sidebar: Commercial only in GROWTH; FOUNDER section removed; deep-link keys hidden globally.
+- Control Tower quick link → Commercial (not Qualification Analytics).
+
+### Not changed
+
+- Finance, payroll, commission engines, Commercial compose logic, schema, RLS, API mutations.
+
+### Verification
+
+- `node scripts/audit-phase-9-1-certification.mjs`
+
+---
+
+## 2026-07-08 — Phase 9.0 Commercial CRM & Lab Growth Platform
+
+### Discovery
+
+- No Salesforce-style CRM exists. Commercial ops already live in Qualification (`lab_qualifications`), Visits (`agent_visits`), Contracts (`lab_contracts`), Labs lifecycle, Ownership (`lab_ownership`), Revenue Funnel, and Dist OS.
+- Phase 9.0 is a **compose workspace** (`commercialCrm`) — read façades only. No new CRM tables.
+
+### Change
+
+- Blueprint `21_Commercial_CRM.md`.
+- Commercial module: Dashboard, Pipeline, Labs, Activities, Contracts, Forecast, Reports.
+- Derivations in `commercialWorkspaceModel.js`; reads via existing qualification / contracts / visits APIs.
+
+### Not changed
+
+- Orders, Collections, Finance, Payroll, Inventory, RLS, People Ops engines, qualification/contract write APIs.
+
+### Verification
+
+- `node scripts/audit-phase-9-certification.mjs`
+
+---
+
+## 2026-07-08 — People Operations Phase 8.4 Business Ownership
+
+### Discovery
+
+- Canonical ownership SoT already exists: `lab_ownership` + `labOwnershipEngine` + Operations Center writes.
+- Phase 8.4 reuses that model as a People Ops **read façade** — does not invent a second ownership system.
+- Legacy `labs.assigned_agent_id` remains sync fallback only.
+
+### Change
+
+- New **Business Ownership** module: Explorer, Territories, Dashboard, Timeline.
+- Derivations in `businessOwnershipModel.js` — reuses `labOwnershipEngine`, `getLabOwnershipRead`, compensation read bundle.
+- Lab Ownership drawer, Employee 360 ownership section, Future Hierarchical Compensation preview (placeholders only).
+- Parallel read `loadPeopleOpsOwnershipRead` — ACTIVE + INACTIVE `lab_ownership` rows; no schema migration.
+
+### Not changed
+
+- Payroll/compensation engines, workflow, reporting context math, finance tables, commission calculations, RLS, exports, budgeting calculations, Operations Center ownership writes.
+
+### Verification gates
+
+- `node scripts/audit-phase-8-4-certification.mjs`
+
+---
+
+## 2026-07-08 — People Operations Phase 8.3 Workforce Planning & Budgeting
+
+### Change
+
+- New **Budgeting** module: Budget Overview, Headcount Planning, Department Budget, Scenario Planning, Budget History.
+- Planning derivations in `workforceBudgetingModel.js` — reuses `executiveCompensationModel`, `reportingContext`, `forecastMetrics`, employee directory.
+- Session-only headcount positions and scenario history (`sessionStorage`) — no persistence, no mutations.
+- Approved budget = derived planning envelope from reporting-context payroll (25% headroom); not Finance P&L.
+
+### Not changed
+
+- Payroll/compensation engines, workflow, APIs, schema, RLS, finance tables, exports.
+
+### Verification gates
+
+- `node scripts/audit-phase-8-3-certification.mjs`
+
+---
+
+## 2026-07-08 — People Operations Phase 8.2 Enterprise UX Hardening
+
+### Change
+
+- Employees: enterprise directory table with KPI strip, filters, bulk actions; Employee 360 in slide-over drawer.
+- Compensation: executive summary cards, overflow action menus, improved status badges.
+- Payroll: summary strip + workflow progress on run review; Open Preview primary CTA.
+- Dashboard: reporting-context KPI cards, actionable pending tasks, no analytical duplication.
+- Settings: intentional configuration landing (Phase 8.6 placeholders).
+- Navigation: breadcrumbs, sticky module nav, standardized table chrome.
+- QA: `seed-qa-people-ops-display-names.mjs` for realistic demo personas.
+
+### Not changed
+
+- Payroll/compensation engines, APIs, schema, RLS, workflow rules, finance boundaries.
+
+### Verification gates
+
+- `node scripts/audit-phase-8-2-certification.mjs`
+
+---
+
+## 2026-07-08 — People Operations Phase 8.1B Executive Productivity
+
+### Change
+
+- Executive workspace: Quick Actions, Approval Inbox, Notifications Center, Recent Activity, Recently Viewed, Favorites.
+- Global search (⌘K / Ctrl+K) across loaded People Operations data — employees, plans, assignments, payroll, exports, reports.
+- Context panel with reporting context, workflow progress visualization, and current selection.
+- Productivity derivations in `peopleOpsProductivityModel.js`; session state via `sessionStorage`.
+- Quick actions reuse `buildPayrollWorkflowActions` — no duplicate workflow logic.
+
+### Not changed
+
+- Payroll/compensation engines, APIs, schema, RLS, reporting context calculations, finance boundaries.
+
+### Verification gates
+
+- `node scripts/verify-people-operations-productivity.mjs`
+- `node scripts/audit-phase-8-1b-certification.mjs`
+
+---
+
 ## 2026-07-08 — People Operations Phase 8.1A UI/UX Unification
 
 ### Change

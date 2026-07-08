@@ -1,11 +1,11 @@
 # Sprint 3A Migration Manifest
 
-Generated: 2026-07-03T18:28:56.821Z
+Generated: 2026-07-08T20:19:23.480Z
 
 | Track | Count | Path |
 |-------|------:|------|
 | A — manual `supabase/sql/` | 53 | Track A per HQ_SQL_MIGRATION_MANIFEST.md |
-| B — CLI `supabase/migrations/` | 25 | `supabase db push` |
+| B — CLI `supabase/migrations/` | 34 | `supabase db push` |
 
 ## Duplicate / overlap candidates
 
@@ -93,6 +93,15 @@ Generated: 2026-07-03T18:28:56.821Z
 - `supabase/migrations/20260705120002_fix_read_receivables_timeout.sql`
 - `supabase/migrations/20260705120003_sprint5a_founder_snapshot_projection.sql`
 - `supabase/migrations/20260705120004_sprint5a_receivables_tenant_scope.sql`
+- `supabase/migrations/20260705130000_sprint8a_labs_profile_projection.sql`
+- `supabase/migrations/20260705131000_sprint8a_labs_projection_perf_fix.sql`
+- `supabase/migrations/20260705132000_sprint8a_labs_adapter_rls_perf.sql`
+- `supabase/migrations/20260705133000_sprint8a_labs_adapter_admin_perf.sql`
+- `supabase/migrations/20260706120000_compensation_payroll_foundation.sql`
+- `supabase/migrations/20260706130000_payroll_domain_completion.sql`
+- `supabase/migrations/20260706131000_payroll_domain_rls_hardening.sql`
+- `supabase/migrations/20260707140000_enterprise_compensation_phase_7_1.sql`
+- `supabase/migrations/20260707140100_payroll_run_lines_employee_identity.sql`
 
 ## Machine-readable
 

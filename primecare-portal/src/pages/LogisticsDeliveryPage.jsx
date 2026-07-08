@@ -9,7 +9,11 @@ import {
 } from "@/components/ux";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { getLogisticsShipmentsRead } from "@/api/logisticsSupabaseApi.js";
+import {
+  prefetchBrokerRead,
+  readLogisticsShipmentsBroker,
+  readShipmentEventsBroker,
+} from "@/api/sharedReadBroker.js";
 import {
   computeLogisticsKpis,
   deliveryMethodLabel,
@@ -106,7 +110,7 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
         if (force) setRefreshing(true);
         else setLoading(true);
         setError("");
-        const res = await getLogisticsShipmentsRead({ tenantId });
+        const res = await readLogisticsShipmentsBroker({ tenantId, force, currentUser });
         if (!res.success) {
           setError(res.error || "Failed to load shipments");
           return;
@@ -157,6 +161,13 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
   function openShipment(row) {
     setSelectedShipment(row);
     setDrawerOpen(true);
+    const idx = filteredRows.findIndex((shipment) => shipment.shipmentId === row?.shipmentId);
+    const nextShipment = idx >= 0 ? filteredRows[idx + 1] : null;
+    if (nextShipment?.shipmentId) {
+      prefetchBrokerRead(readShipmentEventsBroker, [
+        { tenantId, shipmentId: nextShipment.shipmentId, currentUser },
+      ]);
+    }
   }
 
   function handleShipmentUpdated(updated) {

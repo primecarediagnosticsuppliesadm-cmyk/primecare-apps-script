@@ -3,12 +3,14 @@
  * Badge consumers should use this instead of issuing separate module reads.
  */
 import {
-  getCollectionsRead,
-  getOrdersRead,
   getQualificationReviewRead,
-  getStockDashboard,
 } from "@/api/primecareSupabaseApi.js";
-import { getNotificationEventsRead } from "@/api/notificationApi.js";
+import {
+  readCollectionsBroker,
+  readNotificationEventsBroker,
+  readOrdersListBroker,
+  readStockDashboardBroker,
+} from "@/api/sharedReadBroker.js";
 import { getUserProvisioningEventsRead } from "@/api/userProvisioningApi.js";
 import { computeAccessAuditKpis, enrichAccessAuditEvent } from "@/operations/accessAuditEngine.js";
 import { buildCreditRiskAttentionCards } from "@/operations/creditRiskHqEngine.js";
@@ -133,14 +135,14 @@ export async function getSidebarSummary(options = {}) {
     const readOpts = tenantId ? { tenantId } : {};
     const [stockRes, ordersRes, collectionsRes, qualRes, notifyRes, auditRes, pendingCommissions, contracts] =
       await Promise.all([
-        getStockDashboard(),
+        readStockDashboardBroker({ ...readOpts, role }),
         tenantId
-          ? getOrdersRead({ skipLineCounts: true, tenantId })
-          : getOrdersRead({ skipLineCounts: true }),
-        getCollectionsRead(readOpts),
+          ? readOrdersListBroker({ skipLineCounts: true, tenantId, role })
+          : readOrdersListBroker({ skipLineCounts: true, role }),
+        readCollectionsBroker({ ...readOpts, role }),
         getQualificationReviewRead(),
         tenantId
-          ? getNotificationEventsRead({ tenantId, limit: 80 })
+          ? readNotificationEventsBroker({ tenantId, role, limit: 80 })
           : Promise.resolve({ success: true, data: [] }),
         tenantId
           ? getUserProvisioningEventsRead({ tenantId, limit: 120 })

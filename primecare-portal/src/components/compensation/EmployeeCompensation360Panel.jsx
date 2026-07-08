@@ -2,7 +2,8 @@ import React, { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EnterpriseDataTable, StatusBadge } from "@/components/ux";
-import { ArrowLeft, Eye, History, TrendingUp, Wallet } from "lucide-react";
+import { ArrowLeft, Eye, History, TrendingUp, Wallet, GitBranch } from "lucide-react";
+import CompensationAttributionPreview from "@/components/peopleOps/ownership/CompensationAttributionPreview.jsx";
 
 const STATUS_VARIANT = {
   draft: "neutral",
@@ -50,6 +51,7 @@ function SectionShell({ title, icon: Icon, children }) {
 
 export default function EmployeeCompensation360Panel({
   model,
+  ownershipContext = null,
   permissions,
   loading = false,
   error = "",
@@ -58,6 +60,7 @@ export default function EmployeeCompensation360Panel({
   onAssignPlan,
   busy = false,
   selectablePlans = [],
+  embedded = false,
 }) {
   const [activeSection, setActiveSection] = useState("overview");
   const [changePlanOpen, setChangePlanOpen] = useState(false);
@@ -85,10 +88,12 @@ export default function EmployeeCompensation360Panel({
   if (error && !model) {
     return (
       <div className="space-y-3">
-        <Button type="button" size="sm" variant="outline" onClick={onBack}>
-          <ArrowLeft className="mr-1 h-4 w-4" />
-          Back to Employees
-        </Button>
+        {!embedded ? (
+          <Button type="button" size="sm" variant="outline" onClick={onBack}>
+            <ArrowLeft className="mr-1 h-4 w-4" />
+            Back to Employees
+          </Button>
+        ) : null}
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
       </div>
     );
@@ -99,18 +104,20 @@ export default function EmployeeCompensation360Panel({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <Button type="button" size="sm" variant="outline" onClick={onBack}>
-            <ArrowLeft className="mr-1 h-4 w-4" />
-            Back to Employees
-          </Button>
-          <h2 className="mt-2 text-lg font-bold text-slate-900">Employee Compensation 360</h2>
-          <p className="text-xs text-slate-600">
-            {overview.name} · {overview.role} · profile {model.profileUserId || overview.employeeId}
-          </p>
+      {!embedded ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <Button type="button" size="sm" variant="outline" onClick={onBack}>
+              <ArrowLeft className="mr-1 h-4 w-4" />
+              Back to Employees
+            </Button>
+            <h2 className="mt-2 text-lg font-bold text-slate-900">Employee Compensation 360</h2>
+            <p className="text-xs text-slate-600">
+              {overview.name} · {overview.role} · profile {model.profileUserId || overview.employeeId}
+            </p>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         {sections.map((section) => (
@@ -150,6 +157,49 @@ export default function EmployeeCompensation360Panel({
                 <Field label="Current Month Commission" value={overview.currentMonthCommissionLabel} />
               </>
             ) : null}
+          </div>
+        </SectionShell>
+      ) : null}
+
+      {activeSection === "overview" && ownershipContext ? (
+        <SectionShell title="Business Ownership" icon={GitBranch}>
+          <p className="mb-3 text-xs text-muted-foreground">Read-only ownership chain separate from HR and payroll.</p>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <Field label="Territories" value={ownershipContext.territories} />
+            <Field label="Managed Labs" value={ownershipContext.managedLabCount} />
+            <Field label="Reporting Executive" value={ownershipContext.reportingExecutive || ownershipContext.reportingTo} />
+            <Field label="Reporting Admin" value={ownershipContext.reportingAdmin || ownershipContext.managedBy} />
+            <Field label="Ownership Chain" value={ownershipContext.ownershipChain} />
+            <Field label="Collection Attribution" value={ownershipContext.collectionAttributionLabel} />
+          </div>
+          {ownershipContext.managedLabs?.length ? (
+            <div className="mt-3 overflow-x-auto rounded-lg border">
+              <table className="min-w-full text-left text-[11px]">
+                <thead className="border-b bg-slate-50 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    {["Lab", "Territory"].map((label) => (
+                      <th key={label} className="px-2 py-2">
+                        {label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {ownershipContext.managedLabs.map((lab) => (
+                    <tr key={lab.labId} className="border-b border-slate-100 last:border-0">
+                      <td className="px-2 py-2">{lab.labName}</td>
+                      <td className="px-2 py-2">{lab.territory}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+          <div className="mt-4">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              Future Hierarchical Compensation
+            </p>
+            <CompensationAttributionPreview preview={ownershipContext.potentialOverrideCompensation} compact />
           </div>
         </SectionShell>
       ) : null}

@@ -14,7 +14,10 @@ export default function PeopleOperationsModuleNav({
   const showSubNav = activeModule.screens.length > 1;
 
   return (
-    <nav className={cn("space-y-3", className)} aria-label="People Operations modules">
+    <nav
+      className={cn("sticky top-0 z-30 space-y-3 bg-background/95 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80", className)}
+      aria-label="People Operations modules"
+    >
       <div
         className="flex flex-wrap gap-2 rounded-xl border border-border bg-card p-2 shadow-sm"
         role="tablist"

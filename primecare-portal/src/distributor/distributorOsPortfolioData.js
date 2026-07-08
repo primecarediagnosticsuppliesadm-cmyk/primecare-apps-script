@@ -1,8 +1,8 @@
 import {
-  getCollectionsRead,
-  getLabsCredit,
-  getOrdersRead,
-} from "@/api/primecareSupabaseApi.js";
+  readCollectionsBroker,
+  readLabsCreditBroker,
+  readOrdersListBroker,
+} from "@/api/sharedReadBroker.js";
 import { buildDistributorOsPortfolioModel } from "@/distributor/distributorOsPortfolioEngine.js";
 import { filterDistributorRegistry } from "@/distributor/distributorOsEngine.js";
 import { fetchAgentProfilesForTenant, loadDistributorWorkspaceBundle } from "@/distributor/distributorWorkspaceData.js";
@@ -41,9 +41,9 @@ export async function loadDistributorOsPortfolio(currentUser, options = {}) {
 
   const [bundle, labsRes, ordersRes, collRes] = await Promise.all([
     loadDistributorWorkspaceBundle(currentUser, { force: options.force }),
-    getLabsCredit(),
-    getOrdersRead(),
-    getCollectionsRead(),
+    readLabsCreditBroker({ force: options.force, currentUser }),
+    readOrdersListBroker({ force: options.force, skipLineCounts: true, currentUser }),
+    readCollectionsBroker({ force: options.force, currentUser }),
   ]);
 
   const registry = bundle.registry || [];

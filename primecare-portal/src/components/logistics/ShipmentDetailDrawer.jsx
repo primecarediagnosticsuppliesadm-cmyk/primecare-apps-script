@@ -7,11 +7,13 @@ import { StatusBadge } from "@/components/ux";
 import ShipmentTimeline from "@/components/logistics/ShipmentTimeline.jsx";
 import {
   getLogisticsCouriersRead,
-  getShipmentEventsRead,
-  getShipmentRouteAssignmentRead,
   transitionShipmentStatusWrite,
   updateShipmentAssignmentWrite,
 } from "@/api/logisticsSupabaseApi.js";
+import {
+  readShipmentEventsBroker,
+  readShipmentRouteAssignmentBroker,
+} from "@/api/sharedReadBroker.js";
 import {
   applyOrderDeliveryOverrideWrite,
   getOrderDeliverySnapshotRead,
@@ -127,7 +129,7 @@ export default function ShipmentDetailDrawer({
     if (!open || !shipment?.shipmentId) return;
     let cancelled = false;
     setLoadingEvents(true);
-    void getShipmentEventsRead({ tenantId, shipmentId: shipment.shipmentId }).then((res) => {
+    void readShipmentEventsBroker({ tenantId, shipmentId: shipment.shipmentId, currentUser }).then((res) => {
       if (cancelled) return;
       if (res.success) setEvents(res.events || []);
       setLoadingEvents(false);
@@ -167,7 +169,11 @@ export default function ShipmentDetailDrawer({
   useEffect(() => {
     if (!open || !shipment?.shipmentId) return;
     let cancelled = false;
-    void getShipmentRouteAssignmentRead({ shipmentId: shipment.shipmentId }).then((res) => {
+    void readShipmentRouteAssignmentBroker({
+      tenantId,
+      shipmentId: shipment.shipmentId,
+      currentUser,
+    }).then((res) => {
       if (cancelled) return;
       if (res.success) setRouteAssignment(res.assignment);
     });
@@ -299,7 +305,12 @@ export default function ShipmentDetailDrawer({
       setError(res.error || "Status update failed");
       return;
     }
-    const evRes = await getShipmentEventsRead({ tenantId, shipmentId: shipment.shipmentId });
+    const evRes = await readShipmentEventsBroker({
+      tenantId,
+      shipmentId: shipment.shipmentId,
+      currentUser,
+      force: true,
+    });
     if (evRes.success) setEvents(evRes.events || []);
     onUpdated?.(res.data);
   }

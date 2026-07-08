@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { KpiCard, KpiCardGrid } from "@/components/ux";
-import { getLogisticsShipmentsRead } from "@/api/logisticsSupabaseApi.js";
+import { readLogisticsShipmentsBroker } from "@/api/sharedReadBroker.js";
 import { computeLogisticsKpis } from "@/logistics/logisticsShipmentEngine.js";
 import { navigateToLogisticsDelivery } from "@/operations/hqWorkflowNav.js";
 import {
@@ -25,7 +25,7 @@ export default function LogisticsKpiWidget({ tenantId, setActivePage }) {
   useEffect(() => {
     if (!tenantId) return;
     let cancelled = false;
-    void getLogisticsShipmentsRead({ tenantId }).then((res) => {
+    void readLogisticsShipmentsBroker({ tenantId }).then((res) => {
       if (cancelled || !res.success) return;
       setKpis(computeLogisticsKpis(res.shipments || []));
     });

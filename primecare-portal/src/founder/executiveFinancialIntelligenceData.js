@@ -7,7 +7,7 @@ import {
   loadOperationsCommandCenterCore,
   peekOperationsCommandCenterCache,
 } from "@/operations/operationsCommandCenterLoader.js";
-import { getLogisticsShipmentsRead } from "@/api/logisticsSupabaseApi.js";
+import { readLogisticsShipmentsBroker } from "@/api/sharedReadBroker.js";
 import { supabase } from "@/api/supabaseClient.js";
 import {
   fetchOrderLinesBoundedRows,
@@ -78,6 +78,7 @@ export async function loadExecutiveFinancialIntelligenceExtended(currentUser, op
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
   const boundedScope = homeTenantId ? { tenantId: homeTenantId } : {};
   const core = options.core || null;
+  const includeOrderLines = options.includeOrderLines === true;
 
   const [fiData, paymentsRes, orderLinesRes] = await Promise.all([
     loadFounderFinancialIntelligenceData(currentUser, {
@@ -88,7 +89,7 @@ export async function loadExecutiveFinancialIntelligenceExtended(currentUser, op
     supabase
       ? fetchPaymentsBoundedRows(supabase, { daysBack: 366, ...boundedScope })
       : Promise.resolve({ data: [], error: null }),
-    supabase
+    includeOrderLines && supabase
       ? fetchOrderLinesBoundedRows(supabase, boundedScope)
       : Promise.resolve({ data: [], error: null }),
   ]);
@@ -98,7 +99,7 @@ export async function loadExecutiveFinancialIntelligenceExtended(currentUser, op
 
   const shipmentResults = await Promise.all(
     uniqueTenantIds.map((tenantId) =>
-      getLogisticsShipmentsRead({ tenantId, limit: 500 }).catch(() => ({
+      readLogisticsShipmentsBroker({ tenantId, limit: 500, currentUser }).catch(() => ({
         success: false,
         shipments: [],
       }))
@@ -141,7 +142,7 @@ export async function loadExecutiveFinancialIntelligenceExtended(currentUser, op
 
 /**
  * @param {object|null} currentUser
- * @param {{ force?: boolean, progressive?: boolean, onCoreReady?: (data: object) => void }} [options]
+ * @param {{ force?: boolean, progressive?: boolean, includeExtended?: boolean, includeOrderLines?: boolean, onCoreReady?: (data: object) => void }} [options]
  */
 export async function loadExecutiveFinancialIntelligenceData(currentUser, options = {}) {
   const { progressive = false, onCoreReady, force = false } = options;
@@ -152,62 +153,18 @@ export async function loadExecutiveFinancialIntelligenceData(currentUser, option
     const extended = await loadExecutiveFinancialIntelligenceExtended(currentUser, {
       force,
       core,
+      includeOrderLines: options.includeOrderLines === true,
     });
     return extended;
   }
 
-  const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
-  const boundedScope = homeTenantId ? { tenantId: homeTenantId } : {};
-
-  const [fiData, paymentsRes, orderLinesRes] = await Promise.all([
-    loadFounderFinancialIntelligenceData(currentUser, options),
-    supabase
-      ? fetchPaymentsBoundedRows(supabase, { daysBack: 366, ...boundedScope })
-      : Promise.resolve({ data: [], error: null }),
-    supabase
-      ? fetchOrderLinesBoundedRows(supabase, boundedScope)
-      : Promise.resolve({ data: [], error: null }),
-  ]);
-
-  const tenantIds = [homeTenantId, ...(fiData.distributorIds || [])].filter(Boolean);
-  const uniqueTenantIds = [...new Set(tenantIds)];
-
-  const shipmentResults = await Promise.all(
-    uniqueTenantIds.map((tenantId) =>
-      getLogisticsShipmentsRead({ tenantId, limit: 500 }).catch(() => ({
-        success: false,
-        shipments: [],
-      }))
-    )
-  );
-
-  const shipments = [];
-  for (const res of shipmentResults) {
-    if (res?.success && Array.isArray(res.shipments)) {
-      shipments.push(...res.shipments);
-    }
+  const core = await loadExecutiveFinancialIntelligenceCore(currentUser, { force });
+  if (options.includeExtended !== true) {
+    return core;
   }
-
-  return {
-    ...fiData,
-    payments: Array.isArray(paymentsRes?.data) ? paymentsRes.data : [],
-    paymentsLoadError: paymentsRes?.error?.message || null,
-    orderItems: Array.isArray(orderLinesRes?.data) ? orderLinesRes.data : [],
-    orderItemsLoadError: orderLinesRes?.error?.message || null,
-    shipments,
-    loadStatus: {
-      ...fiData.loadStatus,
-      payments: {
-        ok: !paymentsRes?.error,
-        error: paymentsRes?.error?.message || null,
-        count: Array.isArray(paymentsRes?.data) ? paymentsRes.data.length : 0,
-      },
-      shipments: {
-        ok: shipments.length > 0 || shipmentResults.some((r) => r?.success),
-        count: shipments.length,
-      },
-    },
-    readHealth: mergeReadHealth(fiData.opsPayload?._dashReadResult),
-    _coreOnly: false,
-  };
+  return loadExecutiveFinancialIntelligenceExtended(currentUser, {
+    force,
+    core,
+    includeOrderLines: options.includeOrderLines === true,
+  });
 }

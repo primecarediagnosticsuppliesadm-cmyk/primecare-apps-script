@@ -1,0 +1,135 @@
+{
+  "generatedAt": "2026-07-08T20:17:33.249Z",
+  "results": [
+    {
+      "id": "UAT-01",
+      "role": "Executive",
+      "scenario": "Credit & Risk live data",
+      "script": "verify-credit-risk-admin-flow.mjs",
+      "status": "PASS",
+      "evidence": "verify-credit-risk-admin-flow.mjs"
+    },
+    {
+      "id": "UAT-02",
+      "role": "Executive",
+      "scenario": "No Predator in prod nav",
+      "script": "verify-rc1-predator-prod-guard.mjs",
+      "staticOnly": true,
+      "status": "PASS",
+      "evidence": "predatorGuards.js IS_PROD default OFF"
+    },
+    {
+      "id": "UAT-03",
+      "role": "Admin",
+      "scenario": "Create lab HQ mode",
+      "script": "verify-labs-admin-flow.mjs",
+      "match": "create.validation:",
+      "status": "PASS",
+      "evidence": "verify-labs-admin-flow.mjs"
+    },
+    {
+      "id": "UAT-04",
+      "role": "Admin",
+      "scenario": "Reset password Ops Center",
+      "script": "verify-agent-rc1-closure.mjs",
+      "match": "AGT-01",
+      "status": "PASS",
+      "evidence": "verify-agent-rc1-closure.mjs"
+    },
+    {
+      "id": "UAT-05",
+      "role": "Admin",
+      "scenario": "PO cancel/edit lifecycle",
+      "script": "verify-rc1-procurement-lifecycle.mjs",
+      "status": "PASS",
+      "evidence": "verify-rc1-procurement-lifecycle.mjs"
+    },
+    {
+      "id": "UAT-06",
+      "role": "Admin",
+      "scenario": "Record payment UI",
+      "script": "verify-partial-payment-sync.mjs",
+      "match": "PPS-30",
+      "status": "PASS",
+      "evidence": "verify-partial-payment-sync.mjs"
+    },
+    {
+      "id": "UAT-07",
+      "role": "Admin",
+      "scenario": "Partial payment ₹350/₹360",
+      "script": "verify-partial-payment-sync.mjs",
+      "match": "PPS-30",
+      "status": "PASS",
+      "evidence": "verify-partial-payment-sync.mjs"
+    },
+    {
+      "id": "UAT-08",
+      "role": "Admin",
+      "scenario": "Logistics route planning",
+      "waive": "Supervised pilot — HQ manual dispatch (RC1 scope)",
+      "status": "WAIVED",
+      "evidence": "Supervised pilot — HQ manual dispatch (RC1 scope)"
+    },
+    {
+      "id": "UAT-09",
+      "role": "Agent",
+      "scenario": "Login + assigned labs",
+      "script": "verify-agent-rc1-closure.mjs",
+      "match": "AGT-01",
+      "status": "PASS",
+      "evidence": "verify-agent-rc1-closure.mjs"
+    },
+    {
+      "id": "UAT-10",
+      "role": "Agent",
+      "scenario": "Visits create/complete",
+      "script": "verify-agent-rc1-closure.mjs",
+      "match": "AGT-07",
+      "status": "PASS",
+      "evidence": "verify-agent-rc1-closure.mjs"
+    },
+    {
+      "id": "UAT-11",
+      "role": "Agent",
+      "scenario": "Cannot access admin routes",
+      "script": "verify-agent-rc1-closure.mjs",
+      "match": "AGT-04",
+      "status": "PASS",
+      "evidence": "verify-agent-rc1-closure.mjs"
+    },
+    {
+      "id": "UAT-12",
+      "role": "Agent",
+      "scenario": "Mobile workflow shell",
+      "script": "verify-agent-rc1-closure.mjs",
+      "match": "AGT-05",
+      "status": "PASS",
+      "evidence": "verify-agent-rc1-closure.mjs"
+    },
+    {
+      "id": "UAT-13",
+      "role": "Lab",
+      "scenario": "Ordering modes (all)",
+      "script": "verify-lab-ordering-flow.mjs",
+      "status": "PASS",
+      "evidence": "verify-lab-ordering-flow.mjs"
+    },
+    {
+      "id": "UAT-14",
+      "role": "Lab",
+      "scenario": "Checkout confirmation UX",
+      "staticCheckout": true,
+      "status": "PASS",
+      "evidence": "LAB_CHECKOUT_CONFIRM_ERROR cart-saved copy"
+    },
+    {
+      "id": "UAT-15",
+      "role": "E2E",
+      "scenario": "Create lab → pay chain",
+      "script": "verify-labs-admin-flow.mjs",
+      "match": "HQ Admin Labs certification passed",
+      "status": "PASS",
+      "evidence": "verify-labs-admin-flow.mjs"
+    }
+  ]
+}

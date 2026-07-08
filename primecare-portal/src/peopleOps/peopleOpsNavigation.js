@@ -34,6 +34,27 @@ export const PEOPLE_OPS_MODULES = Object.freeze([
     ],
   },
   {
+    id: "budgeting",
+    label: "Budgeting",
+    screens: [
+      { id: "overview", label: "Budget Overview" },
+      { id: "headcount", label: "Headcount Planning" },
+      { id: "department-budget", label: "Department Budget" },
+      { id: "scenarios", label: "Scenario Planning" },
+      { id: "history", label: "Budget History" },
+    ],
+  },
+  {
+    id: "ownership",
+    label: "Business Ownership",
+    screens: [
+      { id: "explorer", label: "Explorer" },
+      { id: "territories", label: "Territories" },
+      { id: "dashboard", label: "Dashboard" },
+      { id: "timeline", label: "Timeline" },
+    ],
+  },
+  {
     id: "reports",
     label: "Reports",
     screens: [{ id: "analytics", label: "Analytics" }],
@@ -71,4 +92,13 @@ export function resolvePeopleOpsRoute(moduleId, screenId) {
 export function moduleForRoute({ moduleId, screenId }) {
   const route = resolvePeopleOpsRoute(moduleId, screenId);
   return PEOPLE_OPS_MODULES.find((row) => row.id === route.moduleId) || PEOPLE_OPS_MODULES[0];
+}
+
+export function buildPeopleOpsBreadcrumbs({ moduleId, screenId } = {}) {
+  const route = resolvePeopleOpsRoute(moduleId, screenId);
+  const module = PEOPLE_OPS_MODULES.find((row) => row.id === route.moduleId) || PEOPLE_OPS_MODULES[0];
+  const screen = module.screens.find((row) => row.id === route.screenId) || module.screens[0];
+  const items = [{ label: "People Operations" }, { label: module.label }];
+  if (module.screens.length > 1) items.push({ label: screen.label });
+  return items;
 }

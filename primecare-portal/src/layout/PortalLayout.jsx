@@ -27,11 +27,13 @@ import {
   TrendingUp,
   Truck,
   Database,
+  ShieldCheck,
 } from "lucide-react";
 
 const ICONS = {
   dashboard: LayoutDashboard,
   founderNavigation: Compass,
+  founderOperatingSystem: Compass,
   founderStrategy: Target,
   founderFinancialIntelligence: BarChart3,
   revenueFunnel: TrendingUp,
@@ -62,6 +64,8 @@ const ICONS = {
   notifications: Bell,
   projectionOpsCenter: Database,
   qaCommandCenter: ClipboardCheck,
+  productionReadiness: ShieldCheck,
+  commercialCrm: Briefcase,
 };
 
 function titleCase(value) {

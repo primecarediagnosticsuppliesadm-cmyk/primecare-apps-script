@@ -1,13 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { updateOrderStatus } from "@/api/primecareApi";
 import {
-  getOrdersRead,
-  getOrderDetailsRead,
   updateOrderStatusWrite,
   peekOrdersReadCache,
   enrichOrdersListWithItemCounts,
   getOperationsLabAssignmentsRead,
 } from "@/api/primecareSupabaseApi";
+import {
+  prefetchBrokerRead,
+  readOrderDetailBroker,
+  readOrdersListBroker,
+} from "@/api/sharedReadBroker.js";
 import { supabase } from "@/api/supabaseClient.js";
 import {
   logAppsScriptFallbackUsed,
@@ -466,9 +469,10 @@ export default function OrdersPage({
         setListRefreshing(true);
       }
       setError("");
-      const res = await getOrdersRead({
+      const res = await readOrdersListBroker({
         skipLineCounts: true,
         ...(homeTenantId ? { tenantId: homeTenantId } : {}),
+        currentUser,
       });
       if (res?.success === false) {
         throw new Error(res.error || "Failed to load orders from Supabase.");
@@ -568,7 +572,10 @@ export default function OrdersPage({
       if (!preserveSuccess) {
         setSuccessMessage("");
       }
-      const res = await getOrderDetailsRead(orderId);
+      const res = await readOrderDetailBroker(orderId, {
+        ...(homeTenantId ? { tenantId: homeTenantId } : {}),
+        currentUser,
+      });
       const result = res?.data || res || {};
       const data = {
         order: result.order || null,
@@ -587,6 +594,14 @@ export default function OrdersPage({
           );
         setAllOrders((prev) => patchRows(prev));
         setOrders((prev) => patchRows(prev));
+      }
+      const currentIdx = orders.findIndex((row) => str(row.orderId) === str(orderId));
+      const nextLikelyOrderId = currentIdx >= 0 ? str(orders[currentIdx + 1]?.orderId) : "";
+      if (nextLikelyOrderId) {
+        prefetchBrokerRead(readOrderDetailBroker, [
+          nextLikelyOrderId,
+          { ...(homeTenantId ? { tenantId: homeTenantId } : {}), currentUser },
+        ]);
       }
     } catch (err) {
       console.warn("OrdersPage openOrder:", err);

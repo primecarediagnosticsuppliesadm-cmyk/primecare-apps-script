@@ -1,7 +1,6 @@
-import React, { useMemo } from "react";
+import React from "react";
 import {
   AlertCircle,
-  BarChart3,
   Bell,
   Calendar,
   CheckCircle2,
@@ -13,7 +12,18 @@ import { Button } from "@/components/ui/button";
 import { KpiCard, KpiCardGrid, StatusBadge } from "@/components/ux";
 import PeopleOpsModuleFrame from "@/components/peopleOps/PeopleOpsModuleFrame.jsx";
 import PeopleOpsSectionCard from "@/components/peopleOps/PeopleOpsSectionCard.jsx";
+import PeopleOpsQuickActions from "@/components/peopleOps/productivity/PeopleOpsQuickActions.jsx";
+import PeopleOpsApprovalInbox from "@/components/peopleOps/productivity/PeopleOpsApprovalInbox.jsx";
+import PeopleOpsNotificationsPanel from "@/components/peopleOps/productivity/PeopleOpsNotificationsPanel.jsx";
+import PeopleOpsRecentActivity from "@/components/peopleOps/productivity/PeopleOpsRecentActivity.jsx";
+import PeopleOpsRecentlyViewed from "@/components/peopleOps/productivity/PeopleOpsRecentlyViewed.jsx";
+import PeopleOpsFavorites from "@/components/peopleOps/productivity/PeopleOpsFavorites.jsx";
+import PeopleOpsWorkflowProgress from "@/components/peopleOps/productivity/PeopleOpsWorkflowProgress.jsx";
 import { PEOPLE_OPS_PAYROLL_STATUS_VARIANT } from "@/components/peopleOps/peopleOpsStatusTokens.js";
+import {
+  buildDashboardPayrollCard,
+  buildDashboardPendingActions,
+} from "@/peopleOps/peopleOpsEnterpriseModel.js";
 
 function ReportingContextFields({
   context,
@@ -23,12 +33,13 @@ function ReportingContextFields({
   selectedRunId,
   onPeriodChange,
   onRunChange,
+  lastRefreshLabel,
 }) {
   if (!context) return null;
   return (
-    <PeopleOpsSectionCard title="Current Period" subtitle="Reporting context for operational views" icon={Calendar}>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <label className="space-y-1">
+    <PeopleOpsSectionCard title="Current Reporting Context" subtitle="Operational views use the selected period and payroll version" icon={Calendar}>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        <label className="space-y-1 xl:col-span-2">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Period</span>
           <select
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm"
@@ -42,8 +53,8 @@ function ReportingContextFields({
             ))}
           </select>
         </label>
-        <label className="space-y-1">
-          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Payroll version</span>
+        <label className="space-y-1 xl:col-span-2">
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Version</span>
           <select
             className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm"
             value={selectedRunId || context.payrollRunId || ""}
@@ -71,6 +82,10 @@ function ReportingContextFields({
             <StatusBadge variant={PEOPLE_OPS_PAYROLL_STATUS_VARIANT[context.status] || "neutral"} label={context.statusLabel} />
           </p>
         </div>
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Last refresh</p>
+          <p className="mt-1 text-sm font-medium">{lastRefreshLabel || "—"}</p>
+        </div>
       </div>
     </PeopleOpsSectionCard>
   );
@@ -78,6 +93,7 @@ function ReportingContextFields({
 
 export default function PeopleOpsDashboard({
   model,
+  breadcrumbs = [],
   employeeCount = 0,
   periodOptions = [],
   runOptions = [],
@@ -87,59 +103,43 @@ export default function PeopleOpsDashboard({
   onRunChange,
   onNavigatePayroll,
   onNavigateEmployees,
+  productivity,
+  onQuickAction,
+  onOpenRoute,
+  recentlyViewed = [],
+  favorites = [],
+  workflowBusy = false,
+  lastRefreshLabel = "",
 }) {
-  const notifications = useMemo(() => {
-    const items = [];
-    if (model.kpis.pendingPayrollPeriods > 0) {
-      items.push({
-        id: "pending-periods",
-        tone: "warning",
-        title: `${model.kpis.pendingPayrollPeriods} payroll period(s) need attention`,
-        detail: "Review draft or submitted periods in Payroll.",
-      });
-    }
-    if (model.kpis.lockedPayrollRuns > 0 && model.kpis.exportedPayrollRuns < model.kpis.lockedPayrollRuns) {
-      items.push({
-        id: "export-ready",
-        tone: "info",
-        title: "Locked runs ready for export",
-        detail: "Generate export metadata from a locked payroll run.",
-      });
-    }
-    if (model.kpis.promotionEligibleAgents > 0) {
-      items.push({
-        id: "promotion",
-        tone: "success",
-        title: `${model.kpis.promotionEligibleAgents} agent(s) promotion eligible`,
-        detail: "Review assignments and compensation plans.",
-      });
-    }
-    return items;
-  }, [model.kpis]);
+  const inboxCount = productivity?.approvalInbox?.length || 0;
+  const notificationCount = (productivity?.notifications || []).filter((row) => !row.disabled).length;
+  const payrollCard = buildDashboardPayrollCard(model.reportingContext, model.kpis);
+  const pending = buildDashboardPendingActions(productivity);
 
   return (
     <PeopleOpsModuleFrame
-      title="Operations Dashboard"
-      description="Current payroll cycle, workforce snapshot, and items requiring action."
+      title="Executive Workspace"
+      description="Operational command center for payroll, compensation, and workforce actions."
+      breadcrumbs={breadcrumbs}
       summary={
         <KpiCardGrid columns={3}>
           <KpiCard
-            title="Payroll Status"
-            value={model.reportingContext?.statusLabel || "—"}
-            subtitle={`${model.reportingContext?.periodLabel || "—"} · ${model.reportingContext?.runVersionLabel || "—"}`}
-            icon={BarChart3}
+            title={payrollCard.title}
+            value={payrollCard.value}
+            subtitle={payrollCard.subtitle}
+            icon={Wallet}
           />
           <KpiCard
             title="Current Payroll"
             value={model.kpis.currentPayrollLiabilityLabel}
-            subtitle={`Commission payable ${model.kpis.commissionPayableLabel}`}
+            subtitle={`${model.kpis.employeeCount} employees · Commission ${model.kpis.commissionPayableLabel}`}
             icon={Wallet}
           />
           <KpiCard
-            title="Pending Actions"
-            value={String(model.kpis.pendingPayrollPeriods)}
-            subtitle={`${model.kpis.lockedPayrollRuns} locked · ${model.kpis.exportedPayrollRuns} exported`}
-            icon={Clock}
+            title="Approval Inbox"
+            value={String(inboxCount)}
+            subtitle={inboxCount ? "Items need action" : "Inbox clear"}
+            icon={AlertCircle}
           />
           <KpiCard
             title="Employees"
@@ -148,20 +148,22 @@ export default function PeopleOpsDashboard({
             icon={Users}
           />
           <KpiCard
-            title="Paid Evidence"
-            value={String(model.kpis.paidEvidenceRuns)}
-            subtitle="Runs with paid evidence recorded"
-            icon={CheckCircle2}
+            title="Pending Actions"
+            value={String(pending.count)}
+            subtitle={pending.summary}
+            icon={Clock}
           />
           <KpiCard
             title="Notifications"
-            value={String(notifications.length)}
-            subtitle={notifications.length ? "Items need review" : "No pending items"}
+            value={String(notificationCount)}
+            subtitle={notificationCount ? "Signals to review" : "No alerts"}
             icon={Bell}
           />
         </KpiCardGrid>
       }
     >
+      <PeopleOpsQuickActions actions={productivity?.quickActions || []} onAction={onQuickAction} busy={workflowBusy} />
+
       <ReportingContextFields
         context={model.reportingContext}
         periodOptions={periodOptions}
@@ -170,41 +172,30 @@ export default function PeopleOpsDashboard({
         selectedRunId={selectedRunId}
         onPeriodChange={onPeriodChange}
         onRunChange={onRunChange}
+        lastRefreshLabel={lastRefreshLabel}
       />
+
+      <PeopleOpsWorkflowProgress stages={productivity?.workflowProgress || []} />
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <PeopleOpsApprovalInbox items={productivity?.approvalInbox || []} onOpenItem={(item) => onOpenRoute?.(item.route, item)} />
+        <PeopleOpsNotificationsPanel
+          notifications={productivity?.notifications || []}
+          onOpenNotification={(item) => onOpenRoute?.(item.route, item)}
+        />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <PeopleOpsFavorites items={favorites} onOpenItem={(item) => onOpenRoute?.(item.route, item)} />
+        <PeopleOpsRecentlyViewed items={recentlyViewed} onOpenItem={(item) => onOpenRoute?.(item.route, item)} />
+      </div>
+
+      <PeopleOpsRecentActivity items={productivity?.recentActivity || []} />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <PeopleOpsSectionCard
-          title="Pending Actions"
-          subtitle="Operational follow-ups for this payroll cycle"
-          icon={AlertCircle}
-          rightAction={
-            <Button type="button" size="sm" variant="outline" onClick={onNavigatePayroll}>
-              Open Payroll
-            </Button>
-          }
-        >
-          {notifications.length ? (
-            <ul className="space-y-2">
-              {notifications.map((item) => (
-                <li key={item.id} className="rounded-lg border border-border bg-background px-3 py-2.5 text-sm">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="font-medium text-foreground">{item.title}</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">{item.detail}</p>
-                    </div>
-                    <StatusBadge variant={item.tone} label={item.tone} />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-muted-foreground">No pending payroll actions for the current period.</p>
-          )}
-        </PeopleOpsSectionCard>
-
-        <PeopleOpsSectionCard
           title="Workforce Snapshot"
-          subtitle="Quick access to employee directory"
+          subtitle="Directory and payroll evidence for the selected run"
           icon={Users}
           rightAction={
             <Button type="button" size="sm" variant="outline" onClick={onNavigateEmployees}>
@@ -218,18 +209,50 @@ export default function PeopleOpsDashboard({
               <dd className="mt-1 text-lg font-semibold tabular-nums">{employeeCount}</dd>
             </div>
             <div className="rounded-lg border border-border bg-background px-3 py-2">
-              <dt className="text-xs text-muted-foreground">Collection efficiency</dt>
-              <dd className="mt-1 text-lg font-semibold">{model.kpis.collectionEfficiencyLabel}</dd>
+              <dt className="text-xs text-muted-foreground">Employees in run</dt>
+              <dd className="mt-1 text-lg font-semibold tabular-nums">{model.kpis.employeeCount}</dd>
             </div>
             <div className="rounded-lg border border-border bg-background px-3 py-2">
-              <dt className="text-xs text-muted-foreground">Promotion eligible</dt>
-              <dd className="mt-1 text-lg font-semibold tabular-nums">{model.kpis.promotionEligibleAgents}</dd>
+              <dt className="text-xs text-muted-foreground">Paid evidence runs</dt>
+              <dd className="mt-1 text-lg font-semibold tabular-nums">{model.kpis.paidEvidenceRuns}</dd>
             </div>
             <div className="rounded-lg border border-border bg-background px-3 py-2">
               <dt className="text-xs text-muted-foreground">Commission payable</dt>
               <dd className="mt-1 text-lg font-semibold">{model.kpis.commissionPayableLabel}</dd>
             </div>
           </dl>
+        </PeopleOpsSectionCard>
+
+        <PeopleOpsSectionCard
+          title="Payroll Operations"
+          subtitle="Jump into the current payroll cycle"
+          icon={CheckCircle2}
+          rightAction={
+            <Button type="button" size="sm" variant="outline" onClick={onNavigatePayroll}>
+              Open Payroll
+            </Button>
+          }
+        >
+          {pending.items.length ? (
+            <ul className="space-y-2 text-sm">
+              {pending.items.map((item) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-left hover:bg-muted/40"
+                    onClick={() => onOpenRoute?.(item.route, item)}
+                  >
+                    <p className="font-medium text-foreground">{item.title}</p>
+                    <p className="text-xs text-muted-foreground">{item.subtitle}</p>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No pending payroll actions for the selected reporting context. Use Quick Actions when a new cycle begins.
+            </p>
+          )}
         </PeopleOpsSectionCard>
       </div>
     </PeopleOpsModuleFrame>

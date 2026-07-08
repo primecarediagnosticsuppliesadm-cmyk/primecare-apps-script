@@ -35,7 +35,6 @@ import {
 } from "@/api/compensationPlanAdminSupabaseApi.js";
 import CompensationPlanAssignmentsTab from "@/components/compensation/CompensationPlanAssignmentsTab.jsx";
 import CompensationPlansTab from "@/components/compensation/CompensationPlansTab.jsx";
-import EmployeeCompensation360Panel from "@/components/compensation/EmployeeCompensation360Panel.jsx";
 import EmployeeDirectoryTab from "@/components/compensation/EmployeeDirectoryTab.jsx";
 import PayrollWorkflowToolbar from "@/components/compensation/PayrollWorkflowToolbar.jsx";
 import PeopleOperationsModuleNav from "@/components/peopleOps/PeopleOperationsModuleNav.jsx";
@@ -45,7 +44,26 @@ import PeopleOpsFilterBar from "@/components/peopleOps/PeopleOpsFilterBar.jsx";
 import PeopleOpsModuleFrame from "@/components/peopleOps/PeopleOpsModuleFrame.jsx";
 import PeopleOpsSectionCard from "@/components/peopleOps/PeopleOpsSectionCard.jsx";
 import { PEOPLE_OPS_PAYROLL_STATUS_VARIANT } from "@/components/peopleOps/peopleOpsStatusTokens.js";
-import { defaultPeopleOpsRoute, resolvePeopleOpsRoute } from "@/peopleOps/peopleOpsNavigation.js";
+import { defaultPeopleOpsRoute, resolvePeopleOpsRoute, buildPeopleOpsBreadcrumbs } from "@/peopleOps/peopleOpsNavigation.js";
+import { buildPeopleOpsProductivityWorkspace } from "@/peopleOps/productivity/peopleOpsProductivityModel.js";
+import { usePeopleOpsSessionState } from "@/peopleOps/productivity/usePeopleOpsSessionState.js";
+import {
+  enrichEmployeeDirectoryRows,
+  buildPayrollRunSummary,
+} from "@/peopleOps/peopleOpsEnterpriseModel.js";
+import PeopleOpsGlobalSearch from "@/components/peopleOps/productivity/PeopleOpsGlobalSearch.jsx";
+import PeopleOpsContextPanel from "@/components/peopleOps/productivity/PeopleOpsContextPanel.jsx";
+import EmployeeCompensation360Drawer from "@/components/peopleOps/EmployeeCompensation360Drawer.jsx";
+import PeopleOpsSettingsLanding from "@/components/peopleOps/PeopleOpsSettingsLanding.jsx";
+import PeopleOpsPayrollSummary from "@/components/peopleOps/PeopleOpsPayrollSummary.jsx";
+import PeopleOpsWorkflowProgress from "@/components/peopleOps/productivity/PeopleOpsWorkflowProgress.jsx";
+import PeopleOpsBudgetingModule from "@/components/peopleOps/budgeting/PeopleOpsBudgetingModule.jsx";
+import PeopleOpsOwnershipModule from "@/components/peopleOps/ownership/PeopleOpsOwnershipModule.jsx";
+import LabOwnership360Drawer from "@/components/peopleOps/ownership/LabOwnership360Drawer.jsx";
+import { buildWorkforceBudgetWorkspace } from "@/peopleOps/budgeting/workforceBudgetingModel.js";
+import { buildPeopleOpsOwnershipWorkspace } from "@/peopleOps/ownership/businessOwnershipModel.js";
+import { loadPeopleOpsOwnershipRead } from "@/peopleOps/ownership/peopleOpsOwnershipRead.js";
+import { useWorkforcePlanningState } from "@/peopleOps/budgeting/useWorkforcePlanningState.js";
 import {
   loadEmployeeCompensation360Read,
   loadEmployeeCompensationDirectoryRead,
@@ -61,7 +79,7 @@ import {
   Eye,
   History,
   RefreshCw,
-  Settings2,
+  Search,
 } from "lucide-react";
 
 const STATUS_VARIANT = PEOPLE_OPS_PAYROLL_STATUS_VARIANT;
@@ -93,7 +111,23 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
   const [employee360Error, setEmployee360Error] = useState("");
   const [employeeDirectory, setEmployeeDirectory] = useState([]);
   const [employeeRoleFilter, setEmployeeRoleFilter] = useState("all");
+  const [employeePlanFilter, setEmployeePlanFilter] = useState("all");
+  const [employeeAssignmentFilter, setEmployeeAssignmentFilter] = useState("all");
   const [employeeSearch, setEmployeeSearch] = useState("");
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState("");
+  const [ownershipPayload, setOwnershipPayload] = useState(null);
+  const [selectedLabId, setSelectedLabId] = useState("");
+
+  const { recentlyViewed, favorites, trackView, toggleFavorite, isFavorite } = usePeopleOpsSessionState();
+  const {
+    planningState,
+    addHeadcountPosition,
+    duplicateHeadcountPosition,
+    archiveHeadcountPosition,
+    addCustomScenario,
+    saveScenarioToHistory,
+  } = useWorkforcePlanningState();
 
   const navigatePeopleOps = useCallback((next) => {
     setPeopleOpsRoute(resolvePeopleOpsRoute(next.moduleId, next.screenId));
@@ -102,6 +136,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
   const actorRole = String(currentUser?.role || "executive").toLowerCase();
   const tenantId = currentUser?.tenantId || currentUser?.tenant_id || "";
   const actorUserId = currentUser?.id || currentUser?.userId || "";
+  const actorAgentId = currentUser?.agentId || currentUser?.agent_id || "";
   const adminPermissions = useMemo(() => compensationAdminPermissions(actorRole), [actorRole]);
   const employee360Permissions = useMemo(() => employeeCompensation360Permissions(actorRole), [actorRole]);
 
@@ -206,24 +241,34 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
     [employee360Permissions.canView360, currentUser]
   );
 
+  const loadOwnership = useCallback(async () => {
+    try {
+      const result = await loadPeopleOpsOwnershipRead({ currentUser });
+      setOwnershipPayload(result);
+    } catch {
+      setOwnershipPayload({ success: false, ownershipRows: [], error: "Could not load ownership reads" });
+    }
+  }, [currentUser]);
+
   useEffect(() => {
     load();
     loadAdmin();
     loadEmployeeDirectory();
+    loadOwnership();
   }, [tenantId, actorUserId, actorRole]);
 
   useEffect(() => {
-    if (selectedEmployeeProfileId && activeModuleId === "employees") {
+    if (selectedEmployeeProfileId) {
       loadEmployee360({ profileUserId: selectedEmployeeProfileId });
     } else if (!selectedEmployeeProfileId) {
       setEmployee360Model(null);
       setEmployee360Error("");
       setEmployee360Loading(false);
     }
-  }, [activeModuleId, loadEmployee360, selectedEmployeeProfileId]);
+  }, [loadEmployee360, selectedEmployeeProfileId]);
 
   const refreshAll = async () => {
-    await Promise.all([load({ refresh: true }), loadAdmin(), loadEmployeeDirectory()]);
+    await Promise.all([load({ refresh: true }), loadAdmin(), loadEmployeeDirectory(), loadOwnership()]);
     if (selectedEmployeeProfileId) await loadEmployee360({ profileUserId: selectedEmployeeProfileId });
   };
 
@@ -402,22 +447,127 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
   );
 
   const employeeList = useMemo(() => {
-    if (employeeDirectory.length) return employeeDirectory;
-    return Object.values(model?.agentProfiles || {}).map((agent) => ({
-      profileUserId: agent.profileUserId,
-      agentId: agent.agentId,
-      employeeName: agent.agentName,
-      role: "agent",
-      planCode: agent.planCode,
-      assignmentStatus: agent.assignmentStatus,
-    }));
-  }, [employeeDirectory, model]);
+    const base = employeeDirectory.length
+      ? employeeDirectory
+      : Object.values(model?.agentProfiles || {}).map((agent) => ({
+          profileUserId: agent.profileUserId,
+          agentId: agent.agentId,
+          employeeName: agent.agentName,
+          role: "agent",
+          planCode: agent.planCode,
+          assignmentStatus: agent.assignmentStatus,
+        }));
+    if (!model) return base;
+    return enrichEmployeeDirectoryRows(base, {
+      previewRows: model.previewRows,
+      assignmentRows: adminModel?.assignmentRows || [],
+    });
+  }, [adminModel, employeeDirectory, model]);
+
+  const breadcrumbs = useMemo(
+    () => buildPeopleOpsBreadcrumbs({ moduleId: activeModuleId, screenId: activeScreenId }),
+    [activeModuleId, activeScreenId]
+  );
+
+  const payrollRunSummary = useMemo(
+    () => (model ? buildPayrollRunSummary(model.previewRows, model.reportingContext) : null),
+    [model]
+  );
+
+  const lastRefreshLabel = useMemo(() => {
+    if (!dataLoadedAt) return "—";
+    return new Date(dataLoadedAt).toLocaleString("en-IN", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }, [dataLoadedAt]);
+
+  const closeEmployeeDrawer = useCallback(() => {
+    setSelectedEmployeeProfileId("");
+    setEmployee360Model(null);
+    setEmployee360Error("");
+  }, []);
 
   const selectedPeriodRow = useMemo(() => {
     const rows = model?.periodRows || [];
     if (!rows.length) return null;
     return rows.find((row) => row.periodId === selectedPeriodId) || rows[0];
   }, [model, selectedPeriodId]);
+
+  const productivity = useMemo(
+    () =>
+      model
+        ? buildPeopleOpsProductivityWorkspace({
+            model,
+            adminModel,
+            employeeList,
+            actorRole,
+            selectedPeriodRow,
+          })
+        : null,
+    [actorRole, adminModel, employeeList, model, selectedPeriodRow]
+  );
+
+  const workforceBudget = useMemo(
+    () =>
+      model
+        ? buildWorkforceBudgetWorkspace({
+            model,
+            employeeList,
+            planningState,
+          })
+        : null,
+    [employeeList, model, planningState]
+  );
+
+  const ownershipWorkspace = useMemo(
+    () =>
+      model
+        ? buildPeopleOpsOwnershipWorkspace({
+            model,
+            employeeList,
+            ownershipRows: ownershipPayload?.ownershipRows || [],
+            actorRole,
+            actorUserId,
+            actorAgentId,
+            profiles: rawPayload?.profiles || [],
+            tenantId,
+            payments: rawPayload?.payments || [],
+            labs: rawPayload?.labs || [],
+            arRows: rawPayload?.arRows || [],
+          })
+        : null,
+    [actorAgentId, actorRole, actorUserId, employeeList, model, ownershipPayload, rawPayload, tenantId]
+  );
+
+  const selectedLabModel = useMemo(() => {
+    if (!selectedLabId || !ownershipWorkspace) return null;
+    return ownershipWorkspace.resolveLab360(selectedLabId);
+  }, [ownershipWorkspace, selectedLabId]);
+
+  const employeeOwnershipContext = useMemo(() => {
+    if (!ownershipWorkspace || !selectedEmployeeProfileId) return null;
+    const employee = employeeList.find((row) => row.profileUserId === selectedEmployeeProfileId);
+    return ownershipWorkspace.buildEmployeeOwnershipContext({
+      profileUserId: selectedEmployeeProfileId,
+      agentId: employee?.agentId || employee360Model?.overview?.agentId,
+    });
+  }, [employee360Model, employeeList, ownershipWorkspace, selectedEmployeeProfileId]);
+
+  const selectedEmployeeSummary = useMemo(() => {
+    if (!selectedEmployeeProfileId) return null;
+    return (
+      employeeList.find((row) => row.profileUserId === selectedEmployeeProfileId) ||
+      (employee360Model
+        ? {
+            employeeName: employee360Model.employeeName,
+            role: employee360Model.role,
+          }
+        : null)
+    );
+  }, [employee360Model, employeeList, selectedEmployeeProfileId]);
 
   const workflowActorOptions = useMemo(
     () => ({
@@ -508,6 +658,13 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
   const openPreview = (periodRow) => {
     setSelectedPeriodId(periodRow.periodId);
     setSelectedRunId(periodRow.runId || "");
+    trackView({
+      id: `period-${periodRow.periodId}`,
+      label: periodRow.periodYm,
+      meta: periodRow.status,
+      route: { moduleId: "payroll", screenId: "run-review", periodId: periodRow.periodId, runId: periodRow.runId },
+      favoriteKey: `period:${periodRow.periodId}`,
+    });
     navigatePeopleOps({ moduleId: "payroll", screenId: "run-review" });
   };
 
@@ -547,6 +704,14 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
       navigatePeopleOps({ moduleId: "employees", screenId: "directory" });
       if (profileUserId) {
         setSelectedEmployeeProfileId(profileUserId);
+        const row = employeeList.find((item) => item.profileUserId === profileUserId) || employee;
+        trackView({
+          id: profileUserId,
+          label: row.employeeName || "Employee",
+          meta: row.role || "employee",
+          route: { moduleId: "employees", screenId: "directory", profileUserId },
+          favoriteKey: `employee:${profileUserId}`,
+        });
         return;
       }
       if (agentId) {
@@ -554,7 +719,63 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         loadEmployee360({ agentId });
       }
     },
-    [loadEmployee360]
+    [employeeList, loadEmployee360, navigatePeopleOps, trackView]
+  );
+
+  const handleOpenProductivityRoute = useCallback(
+    (route, trackItem) => {
+      if (!route) return;
+      if (route.periodId) {
+        setSelectedPeriodId(route.periodId);
+        if (route.runId) setSelectedRunId(route.runId);
+      }
+      if (route.profileUserId) {
+        openEmployee({ profileUserId: route.profileUserId });
+        return;
+      }
+      navigatePeopleOps({ moduleId: route.moduleId, screenId: route.screenId });
+      if (trackItem) {
+        trackView({
+          id: trackItem.id || trackItem.favoriteKey || `${route.moduleId}-${route.screenId}`,
+          label: trackItem.label || trackItem.title,
+          meta: trackItem.meta || trackItem.detail,
+          route,
+          favoriteKey: trackItem.favoriteKey,
+        });
+      }
+    },
+    [navigatePeopleOps, openEmployee, trackView]
+  );
+
+  const handleQuickAction = useCallback(
+    async (action) => {
+      if (!action) return;
+      if (action.kind === "navigate") {
+        handleOpenProductivityRoute(action.route, {
+          id: action.id,
+          label: action.label,
+          favoriteKey: `nav:${action.id}`,
+        });
+        return;
+      }
+      const periodRow =
+        model?.periodRows?.find((row) => row.periodId === action.periodId) || selectedPeriodRow;
+      if (!periodRow) return;
+      setSelectedPeriodId(periodRow.periodId);
+      setSelectedRunId(periodRow.runId || "");
+      navigatePeopleOps(action.route);
+      trackView({
+        id: `period-${periodRow.periodId}`,
+        label: periodRow.periodYm,
+        meta: periodRow.status,
+        route: action.route,
+        favoriteKey: `period:${periodRow.periodId}`,
+      });
+      if (action.id === PAYROLL_UI_ACTION_IDS.GENERATE_PREVIEW) {
+        await handleGeneratePreview(periodRow);
+      }
+    },
+    [handleGeneratePreview, handleOpenProductivityRoute, model, navigatePeopleOps, selectedPeriodRow, trackView]
   );
 
   const openEmployeeFromPreview = (row) => {
@@ -597,11 +818,33 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           />
         }
         actions={
-          <Button type="button" variant="outline" size="sm" onClick={refreshAll} disabled={refreshing || adminBusy}>
-            <RefreshCw className={cn("mr-1 h-4 w-4", refreshing && "animate-spin")} />
-            Refresh
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => setGlobalSearchOpen(true)} aria-label="Search People Operations">
+              <Search className="mr-1 h-4 w-4" />
+              Search
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={refreshAll} disabled={refreshing || adminBusy}>
+              <RefreshCw className={cn("mr-1 h-4 w-4", refreshing && "animate-spin")} />
+              Refresh
+            </Button>
+          </div>
         }
+      />
+
+      <PeopleOpsGlobalSearch
+        open={globalSearchOpen}
+        query={globalSearchQuery}
+        onQueryChange={setGlobalSearchQuery}
+        onClose={() => setGlobalSearchOpen(false)}
+        onToggle={() => setGlobalSearchOpen((open) => !open)}
+        searchIndex={productivity?.searchIndex}
+        onSelectResult={(row) => {
+          setGlobalSearchOpen(false);
+          setGlobalSearchQuery("");
+          handleOpenProductivityRoute(row.route, row);
+        }}
+        onToggleFavorite={toggleFavorite}
+        isFavorite={isFavorite}
       />
 
       {model?.readHealth ? (
@@ -623,14 +866,19 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         onNavigate={navigatePeopleOps}
       />
 
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
+        <div className="min-w-0 space-y-4">
+
       {activeModuleId === "dashboard" && activeScreenId === "home" && model ? (
         <PeopleOpsDashboard
           model={model}
+          breadcrumbs={breadcrumbs}
           employeeCount={employeeList.length}
           periodOptions={model.periodRows}
           runOptions={reportingRunOptions}
           selectedPeriodId={selectedPeriodId}
           selectedRunId={selectedRunId}
+          lastRefreshLabel={lastRefreshLabel}
           onPeriodChange={(periodId) => {
             setSelectedPeriodId(periodId);
             const runs = (rawPayload?.payrollRuns || [])
@@ -641,6 +889,12 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           onRunChange={setSelectedRunId}
           onNavigatePayroll={() => navigatePeopleOps({ moduleId: "payroll", screenId: "periods" })}
           onNavigateEmployees={() => navigatePeopleOps({ moduleId: "employees", screenId: "directory" })}
+          productivity={productivity}
+          onQuickAction={handleQuickAction}
+          onOpenRoute={handleOpenProductivityRoute}
+          recentlyViewed={recentlyViewed}
+          favorites={favorites}
+          workflowBusy={workflowBusy || refreshing}
         />
       ) : null}
 
@@ -649,25 +903,50 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           model={model}
           intelligence={model.intelligence}
           compensationPlans={model.compensationPlans}
+          breadcrumbs={breadcrumbs}
         />
       ) : null}
 
       {activeModuleId === "settings" && activeScreenId === "configuration" ? (
-        <PeopleOpsModuleFrame
-          title="Settings"
-          description="Payroll configuration, approval policies, and export preferences."
-        >
-          <PeopleOpsSectionCard title="Configuration" subtitle="Phase 8.1 placeholder" icon={Settings2}>
-            <p className="text-sm text-muted-foreground">
-              Payroll configuration, approval policies, and export settings will be configured here in a future release.
-              Existing payroll workflow and export behavior is unchanged.
-            </p>
-          </PeopleOpsSectionCard>
-        </PeopleOpsModuleFrame>
+        <PeopleOpsSettingsLanding breadcrumbs={breadcrumbs} />
+      ) : null}
+
+      {activeModuleId === "budgeting" && model && workforceBudget ? (
+        <PeopleOpsBudgetingModule
+          screenId={activeScreenId}
+          workspace={workforceBudget}
+          breadcrumbs={breadcrumbs}
+          actorLabel={actorRole}
+          planningActions={{
+            addHeadcountPosition,
+            duplicateHeadcountPosition,
+            archiveHeadcountPosition,
+            addCustomScenario,
+            saveScenarioToHistory,
+          }}
+        />
+      ) : null}
+
+      {activeModuleId === "ownership" && model && ownershipWorkspace ? (
+        <PeopleOpsOwnershipModule
+          screenId={activeScreenId}
+          workspace={ownershipWorkspace}
+          breadcrumbs={breadcrumbs}
+          onOpenLab={(labId) => setSelectedLabId(labId)}
+          onOpenEmployee={(profileUserId) => {
+            setSelectedEmployeeProfileId(profileUserId);
+            navigatePeopleOps({ moduleId: "employees", screenId: "directory" });
+          }}
+        />
       ) : null}
 
       {activeModuleId === "compensation" && activeScreenId === "plans" ? (
         adminModel ? (
+        <PeopleOpsModuleFrame
+          title="Compensation Plans"
+          description="Create and manage compensation plan versions."
+          breadcrumbs={breadcrumbs}
+        >
         <CompensationPlansTab
           adminModel={adminModel}
           permissions={adminPermissions}
@@ -677,10 +956,15 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           onDuplicatePlan={handleDuplicatePlan}
           onDeactivatePlan={handleDeactivatePlan}
           onActivatePlan={handleActivatePlan}
+          onViewAssignments={(row) => {
+            navigatePeopleOps({ moduleId: "compensation", screenId: "assignments" });
+            setEmployeeSearch(row.planCode || "");
+          }}
           busy={adminBusy}
         />
+        </PeopleOpsModuleFrame>
         ) : (
-          <PeopleOpsModuleFrame title="Compensation Plans" description="Create and manage compensation plan versions.">
+          <PeopleOpsModuleFrame title="Compensation Plans" description="Create and manage compensation plan versions." breadcrumbs={breadcrumbs}>
             {adminBusy || loading ? <ListSkeleton rows={6} /> : (
               <DataFetchError message="Compensation plans could not be loaded." onRetry={() => void loadAdmin()} retrying={adminBusy} />
             )}
@@ -690,6 +974,11 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
 
       {activeModuleId === "compensation" && activeScreenId === "assignments" ? (
         adminModel ? (
+        <PeopleOpsModuleFrame
+          title="Plan Assignments"
+          description="Assign employees to compensation plans and manage assignment history."
+          breadcrumbs={breadcrumbs}
+        >
         <CompensationPlanAssignmentsTab
           adminModel={adminModel}
           permissions={adminPermissions}
@@ -699,8 +988,9 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           onViewAssignment={(row) => openEmployee({ profileUserId: row.profileUserId, agentId: row.agentId })}
           busy={adminBusy}
         />
+        </PeopleOpsModuleFrame>
         ) : (
-          <PeopleOpsModuleFrame title="Plan Assignments" description="Assign employees to compensation plans and manage assignment history.">
+          <PeopleOpsModuleFrame title="Plan Assignments" description="Assign employees to compensation plans and manage assignment history." breadcrumbs={breadcrumbs}>
             {adminBusy || loading ? <ListSkeleton rows={6} /> : (
               <DataFetchError message="Plan assignments could not be loaded." onRetry={() => void loadAdmin()} retrying={adminBusy} />
             )}
@@ -712,6 +1002,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         <PeopleOpsModuleFrame
           title="Payroll Periods"
           description="Review payroll cycles, generate previews, and run approval workflow."
+          breadcrumbs={breadcrumbs}
         >
           {selectedPeriodRow ? (
             <PayrollWorkflowToolbar
@@ -786,7 +1077,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
                         <td className="px-2 py-2">{row.employeeCount}</td>
                         <td className="px-2 py-2 tabular-nums">{row.netPayrollLabel}</td>
                         <td className="px-2 py-2">
-                          <Button type="button" size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => openPreview(row)}>
+                          <Button type="button" size="sm" variant="default" className="h-7 text-[10px]" onClick={() => openPreview(row)}>
                             <Eye className="mr-1 h-3 w-3" />
                             Open Preview
                           </Button>
@@ -805,6 +1096,8 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         <PeopleOpsModuleFrame
           title="Run Review"
           description="Inspect employee-level payroll preview lines for the selected period and run version."
+          breadcrumbs={breadcrumbs}
+          summary={<PeopleOpsPayrollSummary summary={payrollRunSummary} />}
           filters={
             <PeopleOpsFilterBar
               search={search}
@@ -832,6 +1125,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
             />
           }
         >
+          <PeopleOpsWorkflowProgress stages={productivity?.workflowProgress || []} />
           {selectedPeriodRow ? (
             <PayrollWorkflowToolbar
               periodRow={selectedPeriodRow}
@@ -919,38 +1213,55 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         <PeopleOpsModuleFrame
           title="Employees"
           description="Enterprise employee directory and Employee Compensation 360."
+          breadcrumbs={breadcrumbs}
         >
-        {selectedEmployeeProfileId || employee360Model || employee360Loading ? (
-          <EmployeeCompensation360Panel
-            model={employee360Model}
-            permissions={employee360Permissions}
-            loading={employee360Loading}
-            error={employee360Error}
-            busy={adminBusy}
-            selectablePlans={adminModel?.selectablePlans || employee360Model?.selectablePlans || []}
-            onBack={() => {
-              setSelectedEmployeeProfileId("");
-              setEmployee360Model(null);
-              setEmployee360Error("");
-            }}
-            onChangePlan={handleChangePlan}
-            onAssignPlan={handleAssignEmployee}
-          />
-        ) : (
           <EmployeeDirectoryTab
             employees={employeeList}
             roleFilter={employeeRoleFilter}
             onRoleFilterChange={setEmployeeRoleFilter}
+            planFilter={employeePlanFilter}
+            onPlanFilterChange={setEmployeePlanFilter}
+            assignmentFilter={employeeAssignmentFilter}
+            onAssignmentFilterChange={setEmployeeAssignmentFilter}
             search={employeeSearch}
             onSearchChange={setEmployeeSearch}
             onOpenEmployee={openEmployee}
+            permissions={employee360Permissions}
+            onBulkAssignPlan={(rows) => {
+              if (rows?.[0]) openEmployee(rows[0]);
+              navigatePeopleOps({ moduleId: "compensation", screenId: "assignments" });
+            }}
+            onBulkChangePlan={(rows) => {
+              if (rows?.[0]) openEmployee(rows[0]);
+              navigatePeopleOps({ moduleId: "compensation", screenId: "assignments" });
+            }}
           />
-        )}
         </PeopleOpsModuleFrame>
       ) : null}
 
+      <EmployeeCompensation360Drawer
+        open={Boolean(selectedEmployeeProfileId)}
+        onClose={closeEmployeeDrawer}
+        employeeName={selectedEmployeeSummary?.employeeName || employee360Model?.overview?.name}
+        model={employee360Model}
+        ownershipContext={employeeOwnershipContext}
+        permissions={employee360Permissions}
+        loading={employee360Loading}
+        error={employee360Error}
+        busy={adminBusy}
+        selectablePlans={adminModel?.selectablePlans || employee360Model?.selectablePlans || []}
+        onChangePlan={handleChangePlan}
+        onAssignPlan={handleAssignEmployee}
+      />
+
+      <LabOwnership360Drawer
+        open={Boolean(selectedLabId)}
+        onClose={() => setSelectedLabId("")}
+        labModel={selectedLabModel}
+      />
+
       {activeModuleId === "payroll" && activeScreenId === "commission-ledger" && model ? (
-        <PeopleOpsModuleFrame title="Commission Ledger" description="Cash-only commission entries from payroll preview calculations.">
+        <PeopleOpsModuleFrame title="Commission Ledger" description="Cash-only commission entries from payroll preview calculations." breadcrumbs={breadcrumbs}>
         <EnterpriseDataTable
           hasRows={model.commissionHistoryRows.length > 0}
           emptyTitle="No Commission History Yet"
@@ -987,7 +1298,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
       ) : null}
 
       {activeModuleId === "payroll" && activeScreenId === "activity" && model ? (
-        <PeopleOpsModuleFrame title="Payroll Activity" description="Audit trail for payroll workflow and compensation administration events.">
+        <PeopleOpsModuleFrame title="Payroll Activity" description="Audit trail for payroll workflow and compensation administration events." breadcrumbs={breadcrumbs}>
         <PeopleOpsSectionCard title="Audit Events" icon={History}>
           <div className="space-y-2">
             {model.auditTimeline.length ? model.auditTimeline.map((event) => (
@@ -1010,7 +1321,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
       ) : null}
 
       {activeModuleId === "payroll" && activeScreenId === "exports" && model ? (
-        <PeopleOpsModuleFrame title="Payroll Exports" description="Export metadata generated from locked payroll runs.">
+        <PeopleOpsModuleFrame title="Payroll Exports" description="Export metadata generated from locked payroll runs." breadcrumbs={breadcrumbs}>
         <EnterpriseDataTable
           hasRows={model.exportRows.length > 0}
           emptyTitle="No Exports Yet"
@@ -1049,6 +1360,19 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           Compensation administration and payroll workflow actions do not mutate finance, AR, payments, orders, or accounting records.
         </p>
       ) : null}
+
+        </div>
+
+        {model && productivity ? (
+          <aside className="hidden min-w-0 xl:block">
+            <PeopleOpsContextPanel
+              contextSummary={productivity.contextSummary}
+              workflowProgress={productivity.workflowProgress}
+              selectedEmployee={selectedEmployeeSummary}
+            />
+          </aside>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -60,13 +60,14 @@ function RankList({ rows = [], valueKey = "netPayableLabel" }) {
 /**
  * Analytical reports surface — ratios, rankings, territory, forecast, and trend charts.
  */
-export default function PeopleOpsReportsPanel({ model, intelligence, compensationPlans = [] }) {
+export default function PeopleOpsReportsPanel({ model, intelligence, compensationPlans = [], breadcrumbs = [] }) {
   if (!model || !intelligence) return null;
 
   return (
     <PeopleOpsModuleFrame
       title="Analytics & Reports"
       description="Payroll trends, ratios, rankings, territory performance, and forecast scenarios. Read-only — no workflow actions."
+      breadcrumbs={breadcrumbs}
     >
       <div className="grid gap-4 xl:grid-cols-2">
         <PeopleOpsSectionCard title="Payroll Trend" subtitle="Net payroll by period (latest run per period)" icon={BarChart3}>

@@ -1,24 +1,26 @@
 import {
   getAdminDashboardRead,
-  getCollectionsRead,
-  getOrdersRead,
   getPurchaseOrdersRead,
   getQualificationReviewRead,
   getReorderForecastRead,
-  getStockDashboard,
   normalizeAdminDashboardReadResult,
   peekAdminDashboardReadCache,
   peekCollectionsReadCache,
   peekOrdersReadCache,
   peekStockDashboardReadCache,
 } from "@/api/primecareSupabaseApi.js";
+import {
+  readCollectionsBroker,
+  readLabOwnershipBundleBroker,
+  readNotificationEventsBroker,
+  readOrdersListBroker,
+  readStockDashboardBroker,
+} from "@/api/sharedReadBroker.js";
 import { coordinatedRead } from "@/api/hqReadCoordinator.js";
 import { mergeReadHealth } from "@/observability/readHealth.js";
 import { getFounderSnapshotRead } from "@/api/founderSnapshotApi.js";
-import { getNotificationEventsRead } from "@/api/notificationApi.js";
 import { listOperationalEvidence } from "@/api/operationalEvidenceApi.js";
 import { loadInventoryEconomicsBundle } from "@/inventory/inventoryEconomicsData.js";
-import { loadLabOwnershipMetricsBundle } from "@/operations/operationsCenterAdminData.js";
 import { HQ_COLLECTIONS_AR_LIMIT, HQ_ORDERS_LIST_DEFAULT_LIMIT } from "@/api/hqReadBounds.js";
 
 function str(v) {
@@ -98,10 +100,10 @@ export async function loadOperationsCommandCenterCore(currentUser, options = {})
 
   const [dashRes, collRes, stockRes, ordersRes, notifyRes] = await Promise.all([
     resolveDashboardReadForOps(force, tid),
-    collCached ? Promise.resolve(collCached) : getCollectionsRead(readOpts),
-    stockCached ? Promise.resolve(stockCached) : getStockDashboard(readOpts),
-    ordersCached ? Promise.resolve(ordersCached) : getOrdersRead({ force, ...readOpts, skipLineCounts: true }),
-    getNotificationEventsRead({ tenantId, limit: 60 }),
+    collCached ? Promise.resolve(collCached) : readCollectionsBroker({ ...readOpts, currentUser }),
+    stockCached ? Promise.resolve(stockCached) : readStockDashboardBroker({ ...readOpts, currentUser }),
+    ordersCached ? Promise.resolve(ordersCached) : readOrdersListBroker({ force, ...readOpts, skipLineCounts: true, currentUser }),
+    readNotificationEventsBroker({ tenantId, limit: 60, currentUser }),
   ]);
 
   const dashboard = normalizeAdminDashboardReadResult(dashRes);
@@ -135,6 +137,7 @@ export async function loadOperationsCommandCenterCore(currentUser, options = {})
  */
 export async function loadOperationsCommandCenterExtended(currentUser, options = {}) {
   const { force = false } = options;
+  const includeFounderSnapshot = options.includeFounderSnapshot === true;
   const tenantId = currentUser?.tenantId ?? currentUser?.tenant_id ?? null;
   const readOpts = force ? { force: true } : {};
 
@@ -147,8 +150,8 @@ export async function loadOperationsCommandCenterExtended(currentUser, options =
         ? listOperationalEvidence(tenantId, currentUser, { limit: 100 }).catch(() => [])
         : Promise.resolve([]),
       loadInventoryEconomicsBundle(),
-      tenantId ? loadLabOwnershipMetricsBundle(tenantId).catch(() => null) : Promise.resolve(null),
-      tenantId
+      tenantId ? readLabOwnershipBundleBroker(tenantId, { currentUser }).catch(() => null) : Promise.resolve(null),
+      includeFounderSnapshot && tenantId
         ? getFounderSnapshotRead({ tenantId }).catch(() => ({ success: false, data: null }))
         : Promise.resolve({ success: false, data: null }),
     ]);
@@ -164,9 +167,9 @@ export async function loadOperationsCommandCenterExtended(currentUser, options =
     evidence: Array.isArray(evidenceRows) ? evidenceRows : [],
     inventoryEconomics: inventoryEconomicsRes?.model || null,
     inventoryEconomicsLoadOk: inventoryEconomicsRes?.ok === true,
-    ownershipMetrics: ownershipBundle?.ownershipMetrics || null,
-    ownershipAgents: ownershipBundle?.agents || [],
-    ownershipDirectoryUsers: ownershipBundle?.directoryUsers || [],
+    ownershipMetrics: ownershipBundle?.data?.ownershipMetrics || null,
+    ownershipAgents: ownershipBundle?.data?.agents || [],
+    ownershipDirectoryUsers: ownershipBundle?.data?.directoryUsers || [],
     founderSnapshot: founderSnapRes?.success ? founderSnapRes.data : null,
     _founderReadResult: founderSnapRes,
   };

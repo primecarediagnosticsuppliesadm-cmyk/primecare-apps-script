@@ -46,6 +46,9 @@ Read Blueprint → Inspect code/migrations → Compare doc vs implementation
 | 18 | [18_Domain_Projection_Architecture.md](./18_Domain_Projection_Architecture.md) | Domain projections, event pipeline, read adapters |
 | 19 | [19_Executive_Compensation_Payroll_Engine.md](./19_Executive_Compensation_Payroll_Engine.md) | HQ-owned compensation, payroll, cash-only commission, approval, export |
 | 20 | [20_People_Operations.md](./20_People_Operations.md) | People Operations product architecture, navigation, module ownership, vertical slices |
+| 21 | [21_Commercial_CRM.md](./21_Commercial_CRM.md) | Commercial workspace compose layer |
+| 22 | [22_Platform_Consolidation.md](./22_Platform_Consolidation.md) | Navigation consolidation, KPI/report ownership, Architecture Readiness |
+| 23 | [23_Founder_Operating_System.md](./23_Founder_Operating_System.md) | Founder OS decision cockpit (compose-only) |
 | — | [CHANGELOG.md](./CHANGELOG.md) | Gaps, conflicts, structural changes |
 
 ### Templates

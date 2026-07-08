@@ -6,14 +6,16 @@ import {
   getRecentVisits,
 } from "@/api/primecareApi";
 import {
-  getStockDashboard,
-  getLabsCredit,
   getReorderForecastRead,
   getAdminDashboardRead,
   peekAdminDashboardReadCache,
   normalizeAdminDashboardPayload,
   resolveAdminVisitRevenue,
 } from "@/api/primecareSupabaseApi";
+import {
+  readLabsCreditBroker,
+  readStockDashboardBroker,
+} from "@/api/sharedReadBroker.js";
 import { invalidateAllHqReads } from "@/api/hqReadCoordinator.js";
 import {
   logHybridSourceWarning,
@@ -562,8 +564,8 @@ async function fetchSupabaseAdminSlice({ force = false, tenantId = "" } = {}) {
 
   const endFallback = perfTime("AdminDashboard.fallbackSliceFetches");
   const [stockSettled, labsSettled, forecastSettled] = await Promise.allSettled([
-    getStockDashboard(),
-    getLabsCredit(readOpts),
+    readStockDashboardBroker(readOpts),
+    readLabsCreditBroker(readOpts),
     getReorderForecastRead(),
   ]);
   if (stockSettled.status === "fulfilled") slice.stock = stockSettled.value;

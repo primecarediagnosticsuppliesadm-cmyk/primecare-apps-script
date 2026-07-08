@@ -12,6 +12,7 @@ import {
   QA_EXECUTIVE,
   QA_HQ_TENANT_ID,
 } from "./qaCredentials.mjs";
+import { signInWithQaCredentials } from "./qaSignIn.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -98,7 +99,12 @@ async function main() {
 
   let agent = null;
   try {
-    agent = await signIn(env, QA_AGENT.email, QA_AGENT.password);
+    const agentSb = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY, {
+      auth: { persistSession: false },
+    });
+    const agentAuth = await signInWithQaCredentials(agentSb, QA_AGENT);
+    if (agentAuth.ok) agent = agentSb;
+    else warn(`agent auth skipped: ${agentAuth.error}`);
   } catch (err) {
     warn(`agent auth skipped: ${err.message}`);
   }

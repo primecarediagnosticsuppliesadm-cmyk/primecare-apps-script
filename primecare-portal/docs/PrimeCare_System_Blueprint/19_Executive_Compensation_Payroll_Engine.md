@@ -298,6 +298,19 @@ Phase 3B preview attribution rule:
 2. Otherwise use existing `compensation_attribution_snapshots`.
 3. Do not read current `lab_ownership` directly during calculation preview. Missing snapshots must produce a warning/manual-review outcome rather than silently using current ownership.
 
+### Business ownership UI (People Operations Phase 8.4)
+
+People Operations **Business Ownership** is a **read-only operating layer** for founder visibility. It does **not** change attribution rules, commission math, or payroll preview persistence.
+
+| Concern | Phase 8.4 behavior |
+|---------|-------------------|
+| Ownership explorer | Derived from `lab_ownership` + compensation read bundle |
+| Payment-date ownership | `resolveOwnerOnPaymentDate` for timeline display only — not used in `calculateCommissionEntries` |
+| Future hierarchical compensation | Admin/executive override preview labeled **Future Override Compensation** — ₹0 placeholder |
+| Writes | None — assignment remains Operations Center / `labOwnershipApi` write paths |
+
+See `20_People_Operations.md` Phase 8.4 for module screens and verification gates.
+
 ---
 
 ## Phase 3B preview calculation engine

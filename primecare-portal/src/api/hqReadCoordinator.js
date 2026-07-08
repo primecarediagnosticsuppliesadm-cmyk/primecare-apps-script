@@ -10,6 +10,7 @@ import {
   invalidateQualificationReviewReadCache,
   invalidateStockDashboardReadResultCache,
 } from "@/api/primecareSupabaseApi.js";
+import { invalidateSharedReadBroker } from "@/api/sharedReadBroker.js";
 import { perfLog } from "@/utils/perfLog.js";
 
 /** @type {Map<string, Promise<unknown>>} */
@@ -58,6 +59,7 @@ export function invalidateAllHqReads(tenantId = null) {
   invalidateQualificationReviewReadCache();
   invalidateStockDashboardReadResultCache();
   invalidateBoundedSourceCache();
+  invalidateSharedReadBroker(tenantId ? { tenantId } : {});
   void import("@/operations/hqCommandCenterData.js").then((m) => {
     m.invalidateHqTodaysWorkCache();
   });

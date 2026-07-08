@@ -140,7 +140,50 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-people-operations-shell.mjs | People Operations module nav, screen routing, IA (intelligence on Reports) | Phase 8.1 shell |
 | audit-phase-8-1-certification.mjs | Phase 8.1 certification bundle (shell, dashboard, role access, reporting context, no finance mutation, build) | Phase 8.1 shell |
 | verify-people-operations-ux.mjs | UI framework, operational dashboard, reports analytics split, filter bar, errors, state preservation | Phase 8.1A UX |
+| verify-people-operations-productivity.mjs | Quick actions, approval inbox, notifications, search, favorites, workflow progress, session state | Phase 8.1B productivity |
 | audit-phase-8-1a-certification.mjs | Phase 8.1A UX certification bundle + regression gates | Phase 8.1A UX |
+| audit-phase-8-1b-certification.mjs | Phase 8.1B productivity certification bundle + regression + build | Phase 8.1B productivity |
+| verify-people-operations-enterprise-ux.mjs | Enterprise drawer, overflow menus, settings landing, KPI strips | Phase 8.2 enterprise UX |
+| verify-people-operations-navigation.mjs | Breadcrumbs, sticky module navigation | Phase 8.2 enterprise UX |
+| verify-people-operations-dashboard.mjs | Reporting-context KPI derivation, dashboard/report separation | Phase 8.2 enterprise UX |
+| verify-people-operations-payroll-layout.mjs | Payroll summary strip, workflow progress on run review | Phase 8.2 enterprise UX |
+| verify-people-operations-table-standardization.mjs | EnterpriseDataTable + PeopleOpsTableShell adoption | Phase 8.2 enterprise UX |
+| audit-phase-8-2-certification.mjs | Phase 8.2 enterprise UX certification bundle + regression + build | Phase 8.2 enterprise UX |
+| verify-workforce-budgeting.mjs | Budgeting module nav, planning workspace, no mutations | Phase 8.3 workforce planning |
+| verify-headcount-planning.mjs | Headcount table, session positions, projection-only | Phase 8.3 workforce planning |
+| verify-budget-scenarios.mjs | Scenario calculations, forecast reuse, preview-only | Phase 8.3 workforce planning |
+| verify-budget-dashboard.mjs | Budget overview KPIs/charts from reporting context | Phase 8.3 workforce planning |
+| audit-phase-8-3-certification.mjs | Phase 8.3 workforce planning certification bundle + regression + build | Phase 8.3 workforce planning |
+| verify-business-ownership.mjs | Ownership module nav, canonical lab_ownership reuse, no mutations | Phase 8.4 business ownership |
+| verify-ownership-tree.mjs | Sales org tree Executive → Admin → Agent → Lab + KPIs | Phase 8.4 business ownership |
+| verify-ownership-hierarchy.mjs | Alias checks for hierarchy tree builders | Phase 8.4 business ownership |
+| verify-territory-ownership.mjs | Territory dashboard from lab areas | Phase 8.4 business ownership |
+| verify-territory-dashboard.mjs | Territory dashboard UI (legacy name kept) | Phase 8.4 business ownership |
+| verify-lab-ownership.mjs | Lab Ownership drawer, timeline, orders/payments read-only | Phase 8.4 business ownership |
+| verify-employee-ownership.mjs | Employee 360 business ownership section | Phase 8.4 business ownership |
+| verify-compensation-preview-readonly.mjs | Future Hierarchical Compensation preview; no engine writes | Phase 8.4 business ownership |
+| verify-read-model-only.mjs | Single canonical SoT; no parallel ownership table; no writes | Phase 8.4 business ownership |
+| audit-phase-8-4-certification.mjs | Phase 8.4 business ownership certification bundle + regression + build | Phase 8.4 business ownership |
+| verify-commercial-dashboard.mjs | Commercial KPIs compose layer | Phase 9.0 commercial CRM |
+| verify-commercial-pipeline.mjs | Pipeline stages map to lab_qualifications | Phase 9.0 commercial CRM |
+| verify-commercial-lab360.mjs | Commercial Lab 360 drawer + deep-links | Phase 9.0 commercial CRM |
+| verify-commercial-forecast.mjs | Forecast preview-only; payroll labeled read-only | Phase 9.0 commercial CRM |
+| verify-commercial-activities.mjs | Visits + follow-ups unified read | Phase 9.0 commercial CRM |
+| verify-commercial-reuse.mjs | No duplicate CRM schema; reuse existing SoTs | Phase 9.0 commercial CRM |
+| audit-phase-9-certification.mjs | Phase 9.0 commercial CRM certification bundle + regression + build | Phase 9.0 commercial CRM |
+| verify-navigation-consolidation.mjs | One workspace home per domain; deep-link keys hidden from sidebar | Phase 9.1 consolidation |
+| verify-dashboard-ownership.mjs | KPI primary dashboard registry; no duplicate primary surfaces | Phase 9.1 consolidation |
+| verify-report-consolidation.mjs | Report module ownership; no duplicate report nav | Phase 9.1 consolidation |
+| verify-performance-readiness.mjs | Bounded reads, god-page audit, lazy routes | Phase 9.1 consolidation |
+| verify-production-readiness-dashboard.mjs | Architecture Readiness page wired; not Founder OS | Phase 9.1 consolidation |
+| audit-phase-9-1-certification.mjs | Phase 9.1 consolidation bundle + finance/payroll boundary + build | Phase 9.1 consolidation |
+| verify-founder-workspace.mjs | Founder OS read compose + section model | Phase 9.2 Founder OS |
+| verify-founder-decision-queue.mjs | Decision queue from existing engines; deep-links | Phase 9.2 Founder OS |
+| verify-founder-priorities.mjs | Top 5 rule-based priorities | Phase 9.2 Founder OS |
+| verify-founder-insights.mjs | Rule insights; no AI/ML | Phase 9.2 Founder OS |
+| verify-founder-approvals.mjs | Approval inbox reuse | Phase 9.2 Founder OS |
+| verify-founder-navigation.mjs | Founder OS menu + routing | Phase 9.2 Founder OS |
+| audit-phase-9-2-certification.mjs | Phase 9.2 Founder OS bundle + boundaries + build | Phase 9.2 Founder OS |
 
 ### Infrastructure
 
