@@ -126,7 +126,7 @@ export default function ExecutiveCompensationIntelligencePanel({ intelligence, c
             <tbody>
               {rankedRows.length ? (
                 rankedRows.map((row, index) => (
-                  <tr key={row.agentId} className="border-b border-slate-100 last:border-0">
+                  <tr key={row.profileUserId || row.agentId} className="border-b border-slate-100 last:border-0">
                     <td className="px-2 py-2">{index + 1}</td>
                     <td className="px-2 py-2 font-medium text-slate-900">{row.agentName}</td>
                     <td className="px-2 py-2">{row.territory}</td>

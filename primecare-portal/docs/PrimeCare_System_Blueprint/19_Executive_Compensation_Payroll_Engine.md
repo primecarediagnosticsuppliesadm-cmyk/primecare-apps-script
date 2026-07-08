@@ -672,6 +672,74 @@ Verification scripts:
 
 ---
 
+## Phase 7.2 — Executive Analytics Reporting Context
+
+Phase 7.2 corrects executive compensation **read-model analytics** so every KPI, ratio, ranking, territory row, and forecast baseline derives from **one canonical reporting context**: a selected payroll period and a single payroll run version.
+
+### Reporting context
+
+| Field | Meaning |
+|-------|---------|
+| `periodId` | Selected `payroll_periods.id` |
+| `periodYm` | `YYYY-MM` display key |
+| `periodStart`, `periodEnd` | Inclusive payment window for cash-collected ratios |
+| `payrollRunId` | Selected `payroll_runs.id` |
+| `runNumber` | Payroll version (`run_number`) |
+| `status` | Run lifecycle status |
+| `generatedAt` | `payroll_runs.generated_at` |
+| `generatedBy` | `payroll_runs.generated_by` (resolved to profile display name when available) |
+| `source` | `selection` \| `period_default` \| `latest_default` |
+
+**Resolution order:**
+
+1. If `periodId` + `payrollRunId` provided → use exactly those (validate run belongs to period).
+2. If only `periodId` → highest `run_number` for that period.
+3. If neither → latest `period_ym` + highest `run_number` for that period.
+
+### Analytics architecture (read-only)
+
+`executiveCompensationModel.js` remains the **façade**. Focused helpers under `src/compensation/analytics/` compute metrics; the façade orchestrates them. No finance mutation. No payroll workflow changes.
+
+| Helper | Responsibility |
+|--------|----------------|
+| `reportingContext.js` | Context resolution + period/run line filters |
+| `analytics/analyticsExclusions.js` | Exclude Probe/smoke/automation/QA fixture identities |
+| `analytics/payrollMetrics.js` | Overview payroll KPIs + historical trend series |
+| `analytics/employeeMetrics.js` | Profile-primary employee rows for selected run |
+| `analytics/rankingMetrics.js` | Rankings from employee metrics |
+| `analytics/territoryMetrics.js` | Territory rollups |
+| `analytics/ratioMetrics.js` | Payroll % cash collected + payroll % revenue generated |
+| `analytics/forecastMetrics.js` | Baseline from persisted run lines; scenarios via preview engine |
+
+### Invariants
+
+| Rule | Detail |
+|------|--------|
+| **Single run for KPIs** | Payroll liability, commission payable, promotion, efficiency, rankings, territory, and forecast **baseline** use **only** lines where `payroll_run_id = context.payrollRunId` |
+| **Employee identity** | `profile_user_id` primary; never aggregate by `agent_id` alone |
+| **Ratios — both metrics** | **Payroll / Cash Collected %** (operational efficiency) and **Payroll / Revenue Generated %** (commercial productivity) for the **same** `periodYm` window |
+| **Cash collected** | Sum of `payments.amount_received` in `[periodStart, periodEnd]` (finance SoT) |
+| **Revenue generated** | Sum of period-scoped commercial revenue proxy from bounded reads (lab-attributed `ar_credit_control.total_delivered` in period window, or order/invoice read when certified — Phase 7.2 uses period-filtered attribution from existing bounded AR + lab map, not lifetime AR) |
+| **Forecast baseline** | `Σ net_payable` and `Σ commission_amount` from **persisted** context run lines — not recalculated preview |
+| **Forecast scenarios** | `calculateCompensationPreview()` for simulations only (+collections, +salary, etc.) |
+| **Trend charts** | Last 12 periods; each point = **latest run only** for that period (no multi-version sum) |
+| **QA exclusion** | Probe, smoke, automation, and QA fixture profiles excluded from executive analytics; real Admin/Executive/HR remain |
+
+### UI
+
+A **Reporting Context** card displays period, payroll version, generated at/by, and status. No tab redesign.
+
+Verification scripts:
+
+- `verify-executive-reporting-context.mjs`
+- `verify-compensation-ratios.mjs`
+- `verify-compensation-rankings.mjs`
+- `verify-compensation-forecast.mjs`
+- `verify-compensation-territories.mjs`
+- `audit-phase-7-2-certification.mjs`
+
+---
+
 ## Phase plan
 
 | Phase | Scope |

@@ -1,50 +1,26 @@
-import { buildCompensationIntelligence } from "./compensationIntelligenceEngine.js";
+import { filterAnalyticsLines } from "./analytics/analyticsExclusions.js";
+import { buildEmployeeMetrics } from "./analytics/employeeMetrics.js";
+import { buildForecastMetrics } from "./analytics/forecastMetrics.js";
+import { buildContextPayrollKpis, buildPayrollTrendSeries, buildPromotionPipeline, buildTopPerformers } from "./analytics/payrollMetrics.js";
+import { buildRankingMetrics } from "./analytics/rankingMetrics.js";
+import { buildRatioMetrics } from "./analytics/ratioMetrics.js";
+import { buildTerritoryMetrics } from "./analytics/territoryMetrics.js";
+import {
+  formatDate,
+  formatDateTime,
+  formatInr,
+  num,
+  roundMoney,
+  snapshotField,
+  str,
+} from "./analytics/analyticsFormatters.js";
+import {
+  latestRunForPeriod,
+  linesForReportingContext,
+  resolveReportingContext,
+} from "./reportingContext.js";
 
 const PENDING_PERIOD_STATUSES = new Set(["draft", "previewed", "submitted"]);
-const LIABILITY_RUN_STATUSES = new Set(["draft", "previewed", "submitted", "approved"]);
-
-function str(value) {
-  return String(value ?? "").trim();
-}
-
-function num(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function roundMoney(value) {
-  return Math.round(num(value) * 100) / 100;
-}
-
-function formatInr(value) {
-  return `₹${roundMoney(value).toLocaleString("en-IN")}`;
-}
-
-function formatDate(value) {
-  if (!value) return "—";
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? str(value) : d.toLocaleDateString("en-IN");
-}
-
-function formatDateTime(value) {
-  if (!value) return "—";
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? str(value) : d.toLocaleString("en-IN");
-}
-
-function snapshotField(line, key, fallback = 0) {
-  return line?.calculation_snapshot?.[key] ?? fallback;
-}
-
-function latestRunForPeriod(runs, periodId) {
-  return (runs || [])
-    .filter((run) => run.period_id === periodId)
-    .sort((a, b) => num(b.run_number) - num(a.run_number))[0];
-}
-
-function linesForRun(lines, runId) {
-  return (lines || []).filter((line) => line.payroll_run_id === runId);
-}
 
 function planById(plans, planId) {
   return (plans || []).find((plan) => plan.id === planId);
@@ -60,6 +36,57 @@ function paidEvidenceAt(run) {
   return run?.metadata?.paid_evidence?.paid_at || null;
 }
 
+function buildExecutiveIntelligence({
+  context,
+  contextLines,
+  profiles,
+  assignments,
+  plans,
+  payments,
+  arRows,
+  labs,
+}) {
+  const employeeRows = buildEmployeeMetrics({
+    contextLines,
+    profiles,
+    assignments,
+    labs,
+    payments,
+    arRows,
+    period: context.period,
+  });
+  const contextKpis = buildContextPayrollKpis(contextLines);
+  const ratios = buildRatioMetrics({
+    payrollLiability: contextKpis.currentPayrollLiability,
+    employeeRows,
+    payments,
+    arRows,
+    labs,
+    period: context.period,
+  });
+  const rankings = buildRankingMetrics(employeeRows);
+  const territoryRows = buildTerritoryMetrics(employeeRows);
+  const forecast = buildForecastMetrics({
+    contextLines,
+    period: context.period,
+    payments,
+    arRows,
+    compensationPlans: plans,
+    planAssignments: assignments,
+    ratios,
+  });
+
+  return {
+    reportingContext: context,
+    ratios,
+    rankings,
+    territoryRows,
+    forecast,
+    employeeRows,
+    newHireDefaults: forecast.newHireDefaults,
+  };
+}
+
 export function buildExecutiveCompensationModel(payload = {}) {
   const periods = payload.payrollPeriods || [];
   const runs = payload.payrollRuns || [];
@@ -69,22 +96,24 @@ export function buildExecutiveCompensationModel(payload = {}) {
   const assignments = payload.planAssignments || [];
   const auditEvents = payload.auditEvents || [];
   const payrollExports = payload.payrollExports || [];
+  const profiles = payload.profiles || [];
+  const selection = payload.reportingSelection || {};
+
+  const reportingContext = resolveReportingContext({
+    payrollPeriods: periods,
+    payrollRuns: runs,
+    periodId: selection.periodId || null,
+    payrollRunId: selection.payrollRunId || null,
+    profiles,
+  });
+
+  const rawContextLines = linesForReportingContext(lines, reportingContext);
+  const contextLines = filterAnalyticsLines(rawContextLines, { profiles });
 
   const latestRunsByPeriod = new Map(
     periods.map((period) => [period.id, latestRunForPeriod(runs, period.id)])
   );
 
-  const liabilityLines = lines.filter((line) => {
-    const run = runs.find((row) => row.id === line.payroll_run_id);
-    return run && LIABILITY_RUN_STATUSES.has(str(run.status));
-  });
-
-  const currentPayrollLiability = roundMoney(
-    liabilityLines.reduce((sum, line) => sum + num(line.net_payable), 0)
-  );
-  const commissionPayable = roundMoney(
-    liabilityLines.reduce((sum, line) => sum + num(line.commission_amount), 0)
-  );
   const pendingPayrollPeriods = periods.filter((period) =>
     PENDING_PERIOD_STATUSES.has(str(period.status))
   ).length;
@@ -92,96 +121,9 @@ export function buildExecutiveCompensationModel(payload = {}) {
   const exportedPayrollRuns = runs.filter((run) => str(run.status) === "exported").length;
   const paidEvidenceRuns = runs.filter((run) => str(run.status) === "paid").length;
 
-  const efficiencyValues = lines
-    .map((line) => num(snapshotField(line, "collection_efficiency_pct")))
-    .filter((value) => value > 0);
-  const collectionEfficiency =
-    efficiencyValues.length > 0
-      ? roundMoney(
-          efficiencyValues.reduce((sum, value) => sum + value, 0) / efficiencyValues.length
-        )
-      : 0;
-
-  const promotionEligibleAgents = new Set(
-    lines.filter((line) => snapshotField(line, "promotion_eligible", false) === true).map(
-      (line) => str(line.agent_id)
-    )
-  ).size;
-
-  const averageCommission =
-    lines.length > 0
-      ? roundMoney(lines.reduce((sum, line) => sum + num(line.commission_amount), 0) / lines.length)
-      : 0;
-  const averagePayroll =
-    lines.length > 0
-      ? roundMoney(lines.reduce((sum, line) => sum + num(line.net_payable), 0) / lines.length)
-      : 0;
-
-  const payrollTrend = [...periods]
-    .sort((a, b) => str(a.period_ym).localeCompare(str(b.period_ym)))
-    .slice(-12)
-    .map((period) => {
-      const run = latestRunsByPeriod.get(period.id);
-      const runLines = run ? linesForRun(lines, run.id) : [];
-      const netPayroll = roundMoney(runLines.reduce((sum, line) => sum + num(line.net_payable), 0));
-      return {
-        periodYm: period.period_ym,
-        label: period.period_ym,
-        netPayroll,
-        netPayrollLabel: formatInr(netPayroll),
-        status: period.status,
-      };
-    });
-
-  const commissionTrend = payrollTrend.map((point) => {
-    const period = periods.find((row) => row.period_ym === point.periodYm);
-    const run = period ? latestRunsByPeriod.get(period.id) : null;
-    const runLines = run ? linesForRun(lines, run.id) : [];
-    const commission = roundMoney(
-      runLines.reduce((sum, line) => sum + num(line.commission_amount), 0)
-    );
-    return { ...point, commission, commissionLabel: formatInr(commission) };
-  });
-
-  const collectionTrend = payrollTrend.map((point) => {
-    const period = periods.find((row) => row.period_ym === point.periodYm);
-    const run = period ? latestRunsByPeriod.get(period.id) : null;
-    const runLines = run ? linesForRun(lines, run.id) : [];
-    const values = runLines
-      .map((line) => num(snapshotField(line, "collection_efficiency_pct")))
-      .filter((value) => value > 0);
-    const efficiency =
-      values.length > 0
-        ? roundMoney(values.reduce((sum, value) => sum + value, 0) / values.length)
-        : 0;
-    return { ...point, efficiency, efficiencyLabel: `${efficiency}%` };
-  });
-
-  const liabilityTrend = payrollTrend.map((point) => ({
-    ...point,
-    liability: point.netPayroll,
-    liabilityLabel: point.netPayrollLabel,
-  }));
-
-  const topPerformers = [...lines]
-    .reduce((map, line) => {
-      const key = str(line.agent_id);
-      if (!key) return map;
-      const existing = map.get(key) || {
-        agentId: key,
-        agentName: line.agent_name || key,
-        netPayable: 0,
-        commissionAmount: 0,
-      };
-      existing.netPayable = roundMoney(existing.netPayable + num(line.net_payable));
-      existing.commissionAmount = roundMoney(
-        existing.commissionAmount + num(line.commission_amount)
-      );
-      map.set(key, existing);
-      return map;
-    }, new Map())
-    .values();
-
+  const contextKpis = buildContextPayrollKpis(contextLines);
+  const trendSeries = buildPayrollTrendSeries({ periods, runs, lines });
+  const topPerformers = buildTopPerformers(contextLines);
   const topAgents = [...topPerformers]
     .sort((a, b) => b.netPayable - a.netPayable)
     .slice(0, 8)
@@ -191,35 +133,13 @@ export function buildExecutiveCompensationModel(payload = {}) {
       commissionLabel: formatInr(row.commissionAmount),
     }));
 
-  const promotionPipeline = [...lines]
-    .reduce((map, line) => {
-      const key = str(line.agent_id);
-      if (!key) return map;
-      const eligible = snapshotField(line, "promotion_eligible", false) === true;
-      const status = str(snapshotField(line, "promotion_status", "unknown"));
-      const existing = map.get(key) || {
-        agentId: key,
-        agentName: line.agent_name || key,
-        eligible,
-        status,
-        efficiencyPct: num(snapshotField(line, "collection_efficiency_pct")),
-      };
-      existing.eligible = existing.eligible || eligible;
-      existing.status = eligible ? "eligible" : status || existing.status;
-      existing.efficiencyPct = Math.max(existing.efficiencyPct, num(snapshotField(line, "collection_efficiency_pct")));
-      map.set(key, existing);
-      return map;
-    }, new Map())
-    .values();
-
-  const promotionPipelineRows = [...promotionPipeline]
-    .sort((a, b) => Number(b.eligible) - Number(a.eligible))
-    .slice(0, 10);
+  const promotionPipelineRows = buildPromotionPipeline(contextLines);
 
   const periodRows = periods.map((period) => {
     const run = latestRunsByPeriod.get(period.id);
-    const runLines = run ? linesForRun(lines, run.id) : [];
-    const netPayroll = roundMoney(runLines.reduce((sum, line) => sum + num(line.net_payable), 0));
+    const runLines = run ? linesForReportingContext(lines, { payrollRunId: run.id }) : [];
+    const includedLines = filterAnalyticsLines(runLines, { profiles });
+    const netPayroll = roundMoney(includedLines.reduce((sum, line) => sum + num(line.net_payable), 0));
     return {
       periodId: period.id,
       periodYm: period.period_ym,
@@ -232,7 +152,9 @@ export function buildExecutiveCompensationModel(payload = {}) {
       paidAt: paidEvidenceAt(run),
       runVersion: run?.run_number || null,
       runId: run?.id || null,
-      employeeCount: new Set(runLines.map((line) => str(line.agent_id)).filter(Boolean)).size,
+      employeeCount: new Set(
+        includedLines.map((line) => str(line.profile_user_id || line.agent_id)).filter(Boolean)
+      ).size,
       netPayroll,
       netPayrollLabel: formatInr(netPayroll),
     };
@@ -246,8 +168,12 @@ export function buildExecutiveCompensationModel(payload = {}) {
       assignmentForAgent(assignments, line.agent_id);
     const plan = planById(plans, assignment?.plan_id) || planById(plans, snapshotField(line, "plan_id", null));
     const bonuses = roundMoney(
-      num(line.quarterly_bonus) + num(line.annual_bonus) + num(line.collection_incentive) +
-        num(line.delivery_incentive) + num(line.qualification_incentive) + num(line.attendance_incentive)
+      num(line.quarterly_bonus) +
+        num(line.annual_bonus) +
+        num(line.collection_incentive) +
+        num(line.delivery_incentive) +
+        num(line.qualification_incentive) +
+        num(line.attendance_incentive)
     );
     const adjustments = roundMoney(num(line.manual_adjustments_total));
     const recoveries = roundMoney(num(line.recoveries_total) + num(line.penalties_total));
@@ -284,18 +210,28 @@ export function buildExecutiveCompensationModel(payload = {}) {
       recoveriesLabel: formatInr(recoveries),
       netPreviewLabel: formatInr(line.net_payable),
       calculatedAtLabel: formatDateTime(snapshotField(line, "calculated_at", line.updated_at)),
+      inReportingContext: str(line.payroll_run_id) === str(reportingContext.payrollRunId),
     };
   });
 
+  const contextPreviewTotal = roundMoney(
+    contextLines.reduce((sum, line) => sum + num(line.net_payable), 0)
+  );
+
   const agentProfiles = [...previewRows].reduce((map, row) => {
-    const key = str(row.agentId);
+    const key = str(row.profileUserId || row.agentId);
     if (!key || map.has(key)) return map;
-    const assignment = assignmentForAgent(assignments, key);
+    const assignment = assignmentForAgent(assignments, row.agentId);
     const plan = planById(plans, assignment?.plan_id);
-    const agentCommissions = commissionEntries.filter((entry) => str(entry.agent_id) === key);
-    const agentLines = lines.filter((line) => str(line.agent_id) === key);
+    const agentCommissions = commissionEntries.filter((entry) => str(entry.agent_id) === str(row.agentId));
+    const agentLines = lines.filter(
+      (line) =>
+        str(line.profile_user_id) === str(row.profileUserId) ||
+        (row.agentId && str(line.agent_id) === str(row.agentId))
+    );
     map.set(key, {
-      agentId: key,
+      profileUserId: row.profileUserId,
+      agentId: row.agentId,
       agentName: row.agentName,
       planCode: plan?.plan_code || row.planCode,
       planVersion: plan?.version || row.planVersion,
@@ -440,43 +376,33 @@ export function buildExecutiveCompensationModel(payload = {}) {
     })
     .sort((a, b) => str(b.atLabel).localeCompare(str(a.atLabel)));
 
-  const intelligence = buildCompensationIntelligence({
-    payrollPeriods: periods,
-    payrollRuns: runs,
-    payrollRunLines: lines,
-    commissionEntries,
-    compensationPlans: plans,
-    planAssignments: assignments,
+  const intelligence = buildExecutiveIntelligence({
+    context: reportingContext,
+    contextLines,
+    profiles,
+    assignments,
+    plans,
     payments: payload.payments || [],
     arRows: payload.arRows || [],
     labs: payload.labs || [],
-    currentPayrollLiability,
-    commissionPayable,
   });
 
   return {
+    reportingContext,
+    contextPreviewTotal,
+    contextPreviewTotalLabel: formatInr(contextPreviewTotal),
     kpis: {
-      currentPayrollLiability,
-      currentPayrollLiabilityLabel: formatInr(currentPayrollLiability),
-      commissionPayable,
-      commissionPayableLabel: formatInr(commissionPayable),
+      ...contextKpis,
       pendingPayrollPeriods,
       lockedPayrollRuns,
       exportedPayrollRuns,
       paidEvidenceRuns,
-      collectionEfficiency,
-      collectionEfficiencyLabel: `${collectionEfficiency}%`,
-      promotionEligibleAgents,
-      averageCommission,
-      averageCommissionLabel: formatInr(averageCommission),
-      averagePayroll,
-      averagePayrollLabel: formatInr(averagePayroll),
     },
     charts: {
-      payrollTrend,
-      commissionTrend,
-      collectionTrend,
-      liabilityTrend,
+      payrollTrend: trendSeries.payrollTrend,
+      commissionTrend: trendSeries.commissionTrend,
+      collectionTrend: trendSeries.collectionTrend,
+      liabilityTrend: trendSeries.liabilityTrend,
       topAgents,
       promotionPipeline: promotionPipelineRows,
     },

@@ -4,6 +4,34 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-08 — Executive Compensation Phase 7.2 Analytics Context
+
+### Change
+
+- Introduce canonical **Executive Reporting Context** (`periodId` + `payrollRunId`) for all executive compensation analytics.
+- Refactor read-model analytics into focused helpers under `src/compensation/analytics/`; `executiveCompensationModel.js` remains the façade.
+- Overview KPIs, intelligence ratios/rankings/territory/forecast baseline derive from **one selected payroll run** only.
+- Add Payroll % Cash Collected and Payroll % Revenue Generated (same period window).
+- Exclude Probe/smoke/automation/QA fixture identities from executive analytics.
+- Profile-primary employee metrics (`profile_user_id`); trend charts use latest run per historical period only.
+- Reporting Context card in Executive Compensation Center UI.
+
+### Not changed
+
+- Finance, AR, payments, orders, invoices, payroll approval/export/paid workflow, plan administration, assignments, RLS, schema migrations.
+
+### Verification gates
+
+- `node scripts/verify-executive-reporting-context.mjs`
+- `node scripts/verify-compensation-ratios.mjs`
+- `node scripts/verify-compensation-rankings.mjs`
+- `node scripts/verify-compensation-forecast.mjs`
+- `node scripts/verify-compensation-territories.mjs`
+- `node scripts/audit-phase-7-2-certification.mjs`
+- Existing compensation regression scripts
+
+---
+
 ## 2026-07-07 — Enterprise Compensation Phase 7.1
 
 ### Change

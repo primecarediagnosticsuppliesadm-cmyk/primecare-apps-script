@@ -131,6 +131,12 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-agent-commission-isolation.mjs | Commission cash-only; non-agent roles get ₹0 commission | Phase 7.1 enterprise |
 | verify-role-plan-validation.mjs | Plan role_scope must match employee role on assign | Phase 7.1 enterprise |
 | verify-compensation-ui-actions.mjs | New plan wizard, assign, activate, view assignment | Phase 7.1 enterprise |
+| verify-executive-reporting-context.mjs | Canonical reporting context resolution; single-run KPI alignment | Phase 7.2 analytics |
+| verify-compensation-ratios.mjs | Payroll % cash collected + payroll % revenue generated (same period) | Phase 7.2 analytics |
+| verify-compensation-rankings.mjs | Profile-primary rankings; QA/probe exclusion | Phase 7.2 analytics |
+| verify-compensation-forecast.mjs | Forecast baseline from persisted run lines; scenarios preview-only | Phase 7.2 analytics |
+| verify-compensation-territories.mjs | Territory rollups from reporting context | Phase 7.2 analytics |
+| audit-phase-7-2-certification.mjs | Phase 7.2 certification bundle (context, ratios, no finance mutation) | Phase 7.2 analytics |
 
 ### Infrastructure
 

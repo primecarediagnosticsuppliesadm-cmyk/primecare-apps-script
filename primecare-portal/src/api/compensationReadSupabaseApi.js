@@ -22,6 +22,8 @@ import {
   clampLimit,
 } from "@/api/hqReadBounds.js";
 
+const PROFILE_COLUMNS = "user_id,tenant_id,role,agent_id,agent_name,display_name,username,email,active,created_at";
+
 function str(value) {
   return String(value ?? "").trim();
 }
@@ -79,6 +81,7 @@ export async function loadExecutiveCompensationCenterRead({
     paymentsRes,
     arRes,
     labsRes,
+    profilesRes,
   ] = await Promise.all([
     db
       .from("payroll_periods")
@@ -144,6 +147,11 @@ export async function loadExecutiveCompensationCenterRead({
       .select(HQ_V_LABS_CREDIT_LIST_COLUMNS)
       .eq("tenant_id", tenantId)
       .limit(clampLimit(HQ_COLLECTIONS_AR_LIMIT, 1, HQ_COLLECTIONS_AR_LIMIT)),
+    db
+      .from("profiles")
+      .select(PROFILE_COLUMNS)
+      .eq("tenant_id", tenantId)
+      .limit(500),
   ]);
 
   for (const [label, res] of [
@@ -158,6 +166,7 @@ export async function loadExecutiveCompensationCenterRead({
     ["payments", paymentsRes],
     ["ar_credit_control", arRes],
     ["v_labs_credit", labsRes],
+    ["profiles", profilesRes],
   ]) {
     if (res.error) readError(label, res.error);
   }
@@ -175,6 +184,7 @@ export async function loadExecutiveCompensationCenterRead({
     payments: paymentsRes.data || [],
     arRows: arRes.data || [],
     labs: labsRes.data || [],
+    profiles: profilesRes.data || [],
     readHealth: {
       durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
       bounded: true,
@@ -190,6 +200,7 @@ export async function loadExecutiveCompensationCenterRead({
         "payments",
         "ar_credit_control",
         "v_labs_credit",
+        "profiles",
       ],
     },
   };

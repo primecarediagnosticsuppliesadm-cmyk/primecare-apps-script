@@ -106,4 +106,6 @@ Invoice, payment, allocation, and AR — strict lifecycle for Year-1 pilot.
 - `verify-primecare-production-golden-path.mjs`
 - `verify-compensation-calculation.mjs`, `verify-cash-only-commission.mjs`, `verify-promotion-eligibility.mjs`, `verify-attribution-snapshots.mjs`, `verify-payroll-preview.mjs`, `verify-plan-versioning.mjs`
 - `verify-payroll-locking.mjs`, `verify-payroll-immutability.mjs`, `verify-payroll-rbac.mjs`, `verify-payroll-audit.mjs`, `verify-payroll-export.mjs`, `verify-payroll-lifecycle.mjs`, `verify-payroll-adjustments.mjs`, `verify-payroll-versioning.mjs`
-- Planned later: `verify-compensation-no-finance-mutation.mjs`
+- `verify-compensation-no-finance-mutation.mjs`
+- Phase 7.2 executive analytics (read-only): `verify-executive-reporting-context.mjs`, `verify-compensation-ratios.mjs`, `verify-compensation-rankings.mjs`, `verify-compensation-forecast.mjs`, `verify-compensation-territories.mjs`, `audit-phase-7-2-certification.mjs`
+- **Executive ratio denominators (Phase 7.2):** Payroll / Cash Collected % uses `payments.amount_received` in the selected payroll period window (finance SoT). Payroll / Revenue Generated % uses period-scoped commercial revenue attribution from bounded AR + lab map reads — not lifetime AR totals. Both denominators share the same `periodYm` as the selected reporting context.
