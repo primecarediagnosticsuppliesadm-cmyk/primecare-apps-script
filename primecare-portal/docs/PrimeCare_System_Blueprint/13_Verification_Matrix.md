@@ -125,6 +125,12 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-payroll-export-ui.mjs | Locked-run export metadata UI; no bank/GL | Phase 6A export UI |
 | verify-payroll-paid-evidence.mjs | Exported-run paid evidence form; no payment row | Phase 6A paid evidence |
 | verify-payroll-no-finance-mutation.mjs | Workflow UI/API do not mutate Finance/O2C | Phase 6A isolation |
+| verify-enterprise-compensation-roles.mjs | Role scopes, profile-primary assignment schema | Phase 7.1 enterprise |
+| verify-employee-directory.mjs | Employee directory tab + loader | Phase 7.1 enterprise |
+| verify-role-based-payroll-preview.mjs | All assigned employees in preview incl. zero commission | Phase 7.1 enterprise |
+| verify-agent-commission-isolation.mjs | Commission cash-only; non-agent roles get ₹0 commission | Phase 7.1 enterprise |
+| verify-role-plan-validation.mjs | Plan role_scope must match employee role on assign | Phase 7.1 enterprise |
+| verify-compensation-ui-actions.mjs | New plan wizard, assign, activate, view assignment | Phase 7.1 enterprise |
 
 ### Infrastructure
 

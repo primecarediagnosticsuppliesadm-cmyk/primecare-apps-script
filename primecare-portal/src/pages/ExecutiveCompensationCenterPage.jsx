@@ -22,6 +22,8 @@ import {
   submitPayrollRunWrite,
 } from "@/api/payrollDomainSupabaseApi.js";
 import {
+  activateCompensationPlan,
+  assignEmployeeToPlan,
   changeEmployeePlanAssignment,
   createCompensationPlan,
   deactivateCompensationPlan,
@@ -32,19 +34,19 @@ import {
 } from "@/api/compensationPlanAdminSupabaseApi.js";
 import CompensationPlanAssignmentsTab from "@/components/compensation/CompensationPlanAssignmentsTab.jsx";
 import CompensationPlansTab from "@/components/compensation/CompensationPlansTab.jsx";
-import AgentCompensation360Panel from "@/components/compensation/AgentCompensation360Panel.jsx";
+import EmployeeCompensation360Panel from "@/components/compensation/EmployeeCompensation360Panel.jsx";
+import EmployeeDirectoryTab from "@/components/compensation/EmployeeDirectoryTab.jsx";
 import PayrollWorkflowToolbar from "@/components/compensation/PayrollWorkflowToolbar.jsx";
 import ExecutiveCompensationIntelligencePanel from "@/components/compensation/ExecutiveCompensationIntelligencePanel.jsx";
 import {
-  loadAgentCompensation360Read,
-  loadAgentCompensationDirectoryRead,
-} from "@/api/agentCompensation360SupabaseApi.js";
+  loadEmployeeCompensation360Read,
+  loadEmployeeCompensationDirectoryRead,
+} from "@/api/employeeCompensation360SupabaseApi.js";
 import { buildCompensationPlanAdminModel } from "@/compensation/compensationPlanAdminModel.js";
 import { compensationAdminPermissions } from "@/compensation/compensationPlanAdminWorkflow.js";
-import { agentCompensation360Permissions } from "@/compensation/agentCompensation360Workflow.js";
+import { employeeCompensation360Permissions } from "@/compensation/employeeCompensation360Workflow.js";
 import { PAYROLL_UI_ACTION_IDS } from "@/payroll/payrollWorkflowUi.js";
 import { buildExecutiveCompensationModel } from "@/compensation/executiveCompensationModel.js";
-import { YEAR1_BASELINE_PLAN } from "@/compensation/compensationCalculationEngine.js";
 import { usePagePerformance } from "@/hooks/usePagePerformance.js";
 import { cn } from "@/lib/utils";
 import {
@@ -64,7 +66,7 @@ const TABS = [
   "Plan Assignments",
   "Payroll Periods",
   "Payroll Preview",
-  "Agents",
+  "Employees",
   "Commission History",
   "Audit",
   "Exports",
@@ -173,7 +175,7 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
   const [sortDir, setSortDir] = useState("desc");
   const [selectedPeriodId, setSelectedPeriodId] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
-  const [selectedAgentId, setSelectedAgentId] = useState("");
+  const [selectedEmployeeProfileId, setSelectedEmployeeProfileId] = useState("");
   const [generatingPeriodId, setGeneratingPeriodId] = useState("");
   const [generationNotice, setGenerationNotice] = useState("");
   const [workflowBusy, setWorkflowBusy] = useState(false);
@@ -181,16 +183,18 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
   const [adminModel, setAdminModel] = useState(null);
   const [adminBusy, setAdminBusy] = useState(false);
   const [adminNotice, setAdminNotice] = useState("");
-  const [agent360Model, setAgent360Model] = useState(null);
-  const [agent360Loading, setAgent360Loading] = useState(false);
-  const [agent360Error, setAgent360Error] = useState("");
-  const [agentDirectory, setAgentDirectory] = useState([]);
+  const [employee360Model, setEmployee360Model] = useState(null);
+  const [employee360Loading, setEmployee360Loading] = useState(false);
+  const [employee360Error, setEmployee360Error] = useState("");
+  const [employeeDirectory, setEmployeeDirectory] = useState([]);
+  const [employeeRoleFilter, setEmployeeRoleFilter] = useState("all");
+  const [employeeSearch, setEmployeeSearch] = useState("");
 
   const actorRole = String(currentUser?.role || "executive").toLowerCase();
   const tenantId = currentUser?.tenantId || currentUser?.tenant_id || "";
   const actorUserId = currentUser?.id || currentUser?.userId || "";
   const adminPermissions = useMemo(() => compensationAdminPermissions(actorRole), [actorRole]);
-  const agent360Permissions = useMemo(() => agentCompensation360Permissions(actorRole), [actorRole]);
+  const employee360Permissions = useMemo(() => employeeCompensation360Permissions(actorRole), [actorRole]);
 
   usePagePerformance("Executive Compensation");
 
@@ -230,83 +234,69 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
     }
   }, [actorRole, adminPermissions, currentUser]);
 
-  const loadAgentDirectory = useCallback(async () => {
-    if (!agent360Permissions.canView360) return;
+  const loadEmployeeDirectory = useCallback(async () => {
+    if (!employee360Permissions.canView360) return;
     try {
-      const result = await loadAgentCompensationDirectoryRead({ currentUser });
-      if (!result.success) throw new Error(result.error || "Could not load agent directory");
-      setAgentDirectory(result.data?.agents || []);
+      const result = await loadEmployeeCompensationDirectoryRead({ currentUser });
+      if (!result.success) throw new Error(result.error || "Could not load employee directory");
+      setEmployeeDirectory(result.data?.employees || []);
     } catch (err) {
-      setError(err?.message || "Could not load agent directory");
+      setError(err?.message || "Could not load employee directory");
     }
-  }, [agent360Permissions, currentUser]);
+  }, [employee360Permissions, currentUser]);
 
-  const loadAgent360 = useCallback(
-    async (agentId) => {
-      if (!agent360Permissions.canView360 || !agentId) {
-        setAgent360Model(null);
-        setAgent360Error("");
+  const loadEmployee360 = useCallback(
+    async ({ profileUserId, agentId } = {}) => {
+      if (!employee360Permissions.canView360 || (!profileUserId && !agentId)) {
+        setEmployee360Model(null);
+        setEmployee360Error("");
         return;
       }
       try {
-        setAgent360Loading(true);
-        setAgent360Error("");
-        const result = await loadAgentCompensation360Read({ currentUser, agentId });
-        if (!result.success) throw new Error(result.error || "Could not load Agent Compensation 360");
-        setAgent360Model(result.data);
+        setEmployee360Loading(true);
+        setEmployee360Error("");
+        const result = await loadEmployeeCompensation360Read({ currentUser, profileUserId, agentId });
+        if (!result.success) throw new Error(result.error || "Could not load Employee Compensation 360");
+        setEmployee360Model(result.data);
       } catch (err) {
-        const message = err?.message || "Could not load Agent Compensation 360";
-        setAgent360Error(message);
-        setAgent360Model(null);
+        const message = err?.message || "Could not load Employee Compensation 360";
+        setEmployee360Error(message);
+        setEmployee360Model(null);
       } finally {
-        setAgent360Loading(false);
+        setEmployee360Loading(false);
       }
     },
-    [agent360Permissions.canView360, currentUser]
+    [employee360Permissions.canView360, currentUser]
   );
 
   useEffect(() => {
     load();
     loadAdmin();
-    loadAgentDirectory();
+    loadEmployeeDirectory();
   }, [tenantId, actorUserId, actorRole]);
 
   useEffect(() => {
-    if (selectedAgentId && activeTab === "Agents") {
-      loadAgent360(selectedAgentId);
-    } else if (!selectedAgentId) {
-      setAgent360Model(null);
-      setAgent360Error("");
-      setAgent360Loading(false);
+    if (selectedEmployeeProfileId && activeTab === "Employees") {
+      loadEmployee360({ profileUserId: selectedEmployeeProfileId });
+    } else if (!selectedEmployeeProfileId) {
+      setEmployee360Model(null);
+      setEmployee360Error("");
+      setEmployee360Loading(false);
     }
-  }, [activeTab, loadAgent360, selectedAgentId]);
+  }, [activeTab, loadEmployee360, selectedEmployeeProfileId]);
 
   const refreshAll = async () => {
-    await Promise.all([load({ refresh: true }), loadAdmin(), loadAgentDirectory()]);
-    if (selectedAgentId) await loadAgent360(selectedAgentId);
+    await Promise.all([load({ refresh: true }), loadAdmin(), loadEmployeeDirectory()]);
+    if (selectedEmployeeProfileId) await loadEmployee360({ profileUserId: selectedEmployeeProfileId });
   };
 
-  const handleCreatePlan = async () => {
+  const handleCreatePlan = async (planInput) => {
     try {
       setAdminBusy(true);
       setAdminNotice("");
       const result = await createCompensationPlan({
         currentUser,
-        planInput: {
-          plan_code: "AGENT_YEAR1_BASELINE",
-          displayName: "Year 1 Agent Baseline",
-          role_scope: "agent",
-          base_salary: YEAR1_BASELINE_PLAN.baseSalary,
-          fuel_allowance: YEAR1_BASELINE_PLAN.fuelAllowance,
-          mobile_allowance: YEAR1_BASELINE_PLAN.mobileAllowance,
-          commission_rate_bps: YEAR1_BASELINE_PLAN.commissionRateBps,
-          promotion_salary: YEAR1_BASELINE_PLAN.promotionSalary,
-          promotion_commission_rate_bps: YEAR1_BASELINE_PLAN.promotionCommissionRateBps,
-          promotion_collection_threshold: YEAR1_BASELINE_PLAN.promotionCollectionThreshold,
-          promotion_min_efficiency_pct: YEAR1_BASELINE_PLAN.promotionMinEfficiencyPct,
-          promotion_max_overdue_days: YEAR1_BASELINE_PLAN.promotionMaxOverdueDays,
-          status: "draft",
-        },
+        planInput,
       });
       if (!result.success) throw new Error(result.error || "Plan create failed");
       setAdminNotice("Compensation plan draft created.");
@@ -369,6 +359,43 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
     }
   };
 
+  const handleActivatePlan = async (row) => {
+    try {
+      setAdminBusy(true);
+      const result = await activateCompensationPlan({ currentUser, planId: row.id });
+      if (!result.success) throw new Error(result.error || "Activate failed");
+      setAdminNotice(`Plan ${row.planCode} ${row.version} activated.`);
+      await loadAdmin();
+    } catch (err) {
+      setError(err?.message || "Could not activate plan");
+    } finally {
+      setAdminBusy(false);
+    }
+  };
+
+  const handleAssignEmployee = async (row, { planId, effectiveDate }) => {
+    try {
+      setAdminBusy(true);
+      const result = await assignEmployeeToPlan({
+        currentUser,
+        profileUserId: row.profileUserId,
+        planId,
+        effectiveDate,
+      });
+      if (!result.success) throw new Error(result.error || "Assign failed");
+      setAdminNotice("Employee plan assignment created.");
+      await loadAdmin();
+      await loadEmployeeDirectory();
+      if (selectedEmployeeProfileId === row.profileUserId) {
+        await loadEmployee360({ profileUserId: row.profileUserId });
+      }
+    } catch (err) {
+      setError(err?.message || "Could not assign employee plan");
+    } finally {
+      setAdminBusy(false);
+    }
+  };
+
   const handleChangePlan = async (row, { newPlanId, effectiveDate }) => {
     try {
       setAdminBusy(true);
@@ -381,7 +408,7 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
       if (!result.success) throw new Error(result.error || "Change plan failed");
       setAdminNotice(`Plan changed for ${row.employeeName}; prior assignment preserved.`);
       await loadAdmin();
-      if (selectedAgentId) await loadAgent360(selectedAgentId);
+      if (selectedEmployeeProfileId) await loadEmployee360({ profileUserId: selectedEmployeeProfileId });
     } catch (err) {
       setError(err?.message || "Could not change employee plan");
     } finally {
@@ -438,11 +465,17 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
     [model]
   );
 
-  const selectedAgent = selectedAgentId ? model?.agentProfiles?.[selectedAgentId] : null;
-  const agentList = useMemo(() => {
-    if (agentDirectory.length) return agentDirectory;
-    return Object.values(model?.agentProfiles || {});
-  }, [agentDirectory, model]);
+  const employeeList = useMemo(() => {
+    if (employeeDirectory.length) return employeeDirectory;
+    return Object.values(model?.agentProfiles || {}).map((agent) => ({
+      profileUserId: agent.profileUserId,
+      agentId: agent.agentId,
+      employeeName: agent.agentName,
+      role: "agent",
+      planCode: agent.planCode,
+      assignmentStatus: agent.assignmentStatus,
+    }));
+  }, [employeeDirectory, model]);
 
   const selectedPeriodRow = useMemo(() => {
     const rows = model?.periodRows || [];
@@ -561,7 +594,7 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
       setSelectedPeriodId(periodRow.periodId);
       setSelectedRunId(result.data?.payrollRunId || "");
       setGenerationNotice(
-        `Generated draft preview for ${periodRow.periodYm}: ${result.data?.payrollRunLineCount || 0} agent lines, commission ${result.data?.totals?.commission_amount ?? 0}, net ${result.data?.totals?.net_payable ?? 0}.`
+        `Generated draft preview for ${periodRow.periodYm}: ${result.data?.payrollRunLineCount || 0} employee lines, commission ${result.data?.totals?.commission_amount ?? 0}, net ${result.data?.totals?.net_payable ?? 0}.`
       );
       setActiveTab("Payroll Preview");
     } catch (err) {
@@ -571,10 +604,21 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
     }
   };
 
-  const openAgent = (agentId) => {
-    setSelectedAgentId(agentId);
-    setAgent360Error("");
-    setActiveTab("Agents");
+  const openEmployeeFromPreview = (row) => {
+    if (row.profileUserId) {
+      openEmployee({ profileUserId: row.profileUserId });
+      return;
+    }
+    const match = employeeList.find((emp) => emp.agentId && emp.agentId === row.agentId);
+    if (match?.profileUserId) {
+      openEmployee(match);
+      return;
+    }
+    if (row.agentId) {
+      setSelectedEmployeeProfileId("");
+      loadEmployee360({ agentId: row.agentId });
+      setActiveTab("Employees");
+    }
   };
 
   const toggleSort = (key) => {
@@ -634,10 +678,10 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
             size="sm"
             variant={activeTab === tab ? "default" : "outline"}
             onClick={() => {
-              if (tab === "Agents" && activeTab !== "Agents") {
-                setSelectedAgentId("");
-                setAgent360Model(null);
-                setAgent360Error("");
+              if (tab === "Employees" && activeTab !== "Employees") {
+                setSelectedEmployeeProfileId("");
+                setEmployee360Model(null);
+                setEmployee360Error("");
               }
               setActiveTab(tab);
             }}
@@ -702,6 +746,7 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
           onSavePlan={handleSavePlan}
           onDuplicatePlan={handleDuplicatePlan}
           onDeactivatePlan={handleDeactivatePlan}
+          onActivatePlan={handleActivatePlan}
           busy={adminBusy}
         />
         ) : (
@@ -718,6 +763,8 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
           permissions={adminPermissions}
           onChangePlan={handleChangePlan}
           onEndAssignment={handleEndAssignment}
+          onAssignEmployee={handleAssignEmployee}
+          onViewAssignment={(row) => openEmployee({ profileUserId: row.profileUserId, agentId: row.agentId })}
           busy={adminBusy}
         />
         ) : (
@@ -895,8 +942,8 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
                       <td className="px-2 py-2">{row.planVersion}</td>
                       <td className="px-2 py-2">{row.calculatedAtLabel}</td>
                       <td className="px-2 py-2">
-                        <Button type="button" size="sm" variant="ghost" className="h-7 text-[10px]" onClick={() => openAgent(row.agentId)}>
-                          View Agent
+                        <Button type="button" size="sm" variant="ghost" className="h-7 text-[10px]" onClick={() => openEmployeeFromPreview(row)}>
+                          View Employee
                         </Button>
                       </td>
                     </tr>
@@ -909,45 +956,31 @@ export default function ExecutiveCompensationCenterPage({ currentUser = null, se
         </div>
       ) : null}
 
-      {activeTab === "Agents" && model ? (
-        selectedAgentId ? (
-          <AgentCompensation360Panel
-            model={agent360Model}
-            permissions={agent360Permissions}
-            loading={agent360Loading}
-            error={agent360Error}
+      {activeTab === "Employees" && model ? (
+        selectedEmployeeProfileId ? (
+          <EmployeeCompensation360Panel
+            model={employee360Model}
+            permissions={employee360Permissions}
+            loading={employee360Loading}
+            error={employee360Error}
             busy={adminBusy}
-            selectablePlans={adminModel?.plans || agent360Model?.selectablePlans || []}
+            selectablePlans={adminModel?.selectablePlans || employee360Model?.selectablePlans || []}
             onBack={() => {
-              setSelectedAgentId("");
-              setAgent360Model(null);
-              setAgent360Error("");
+              setSelectedEmployeeProfileId("");
+              setEmployee360Model(null);
+              setEmployee360Error("");
             }}
             onChangePlan={handleChangePlan}
+            onAssignPlan={handleAssignEmployee}
           />
         ) : (
-          <EnterpriseDataTable
-            hasRows={agentList.length > 0}
-            emptyTitle="No agents found"
-            emptyDescription="Active agent profiles with compensation assignments appear here."
-            desktop={
-              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                {agentList.map((agent) => (
-                  <button
-                    key={agent.agentId}
-                    type="button"
-                    className="rounded-lg border bg-white p-3 text-left text-xs shadow-sm hover:border-indigo-300"
-                    onClick={() => openAgent(agent.agentId)}
-                  >
-                    <p className="font-semibold text-slate-900">{agent.agentName}</p>
-                    <p className="text-slate-500">
-                      {agent.planCode || agent.assignmentStatus || "—"} · {agent.planVersion || agent.status || "active"}
-                    </p>
-                    <p className="mt-1 text-indigo-700">Open Agent Compensation 360</p>
-                  </button>
-                ))}
-              </div>
-            }
+          <EmployeeDirectoryTab
+            employees={employeeList}
+            roleFilter={employeeRoleFilter}
+            onRoleFilterChange={setEmployeeRoleFilter}
+            search={employeeSearch}
+            onSearchChange={setEmployeeSearch}
+            onOpenEmployee={openEmployee}
           />
         )
       ) : null}

@@ -5,6 +5,8 @@ import {
   filterAssignmentsForRole,
   normalizePlanRulesJson,
 } from "@/compensation/compensationPlanAdminWorkflow.js";
+import { filterPlansForEmployeeRole } from "@/compensation/enterpriseCompensationRoles.js";
+import { employeeDisplayName, profileDisplayName } from "@/compensation/employeeCompensationIdentity.js";
 
 function str(value) {
   return String(value ?? "").trim();
@@ -103,9 +105,11 @@ export function buildCompensationPlanAdminModel({
         profileByAgentId.get(str(assignment.agent_id));
       return {
         id: assignment.id,
-        employeeName: assignment.agent_name || profile?.agent_name || assignment.agent_id,
-        employeeId: assignment.agent_id,
-        role: profile?.role || "agent",
+        profileUserId: assignment.profile_user_id,
+        employeeName: employeeDisplayName(assignment) || profileDisplayName(profile),
+        employeeId: assignment.profile_user_id || assignment.agent_id,
+        agentId: assignment.agent_id || profile?.agent_id || null,
+        role: assignment.employee_role || profile?.role || "agent",
         currentPlan: plan?.plan_code || "—",
         planName: normalizePlanRulesJson(plan?.rules_json).displayName || plan?.plan_code || "—",
         planVersion: plan?.version || "—",
@@ -142,6 +146,17 @@ export function buildCompensationPlanAdminModel({
     assignmentRows,
     promotionEligibilityRows,
     selectablePlans: planRows.filter((row) => ["active", "draft"].includes(str(row.status))),
+    selectableEmployees: (resolvedProfiles || []).map((profile) => ({
+      profileUserId: profile.user_id,
+      employeeName: profileDisplayName(profile),
+      role: str(profile.role).toLowerCase(),
+      agentId: profile.agent_id || null,
+    })),
+    plansByRole: (employeeRole) =>
+      filterPlansForEmployeeRole(
+        planRows.map((row) => ({ ...row.raw, role_scope: row.roleScope, roleScope: row.roleScope })),
+        employeeRole
+      ),
   };
 }
 

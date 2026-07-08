@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { COMPENSATION_ROLE_SCOPES } from "@/compensation/enterpriseCompensationRoles.js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -118,7 +119,7 @@ export default function CompensationPlanDetailsPanel({
           {[
             ["displayName", "Plan Name"],
             ["planCode", "Plan Code"],
-            ["roleScope", "Role"],
+            ["roleScope", "Role", "select"],
             ["effectiveFrom", "Effective From"],
             ["effectiveTo", "Effective To"],
             ["baseSalary", "Salary"],
@@ -135,13 +136,27 @@ export default function CompensationPlanDetailsPanel({
             ["quarterlyBonusMax", "Quarterly Bonus Max"],
             ["annualBonusMin", "Annual Bonus Min"],
             ["annualBonusMax", "Annual Bonus Max"],
-          ].map(([key, label]) => (
+          ].map(([key, label, kind]) => (
             <label key={key} className="space-y-1">
               <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</span>
-              <Input
-                value={form[key] ?? ""}
-                onChange={(event) => setForm((prev) => ({ ...prev, [key]: event.target.value }))}
-              />
+              {kind === "select" ? (
+                <select
+                  className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
+                  value={form[key] ?? ""}
+                  onChange={(event) => setForm((prev) => ({ ...prev, [key]: event.target.value }))}
+                >
+                  {COMPENSATION_ROLE_SCOPES.map((scope) => (
+                    <option key={scope} value={scope}>
+                      {scope}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Input
+                  value={form[key] ?? ""}
+                  onChange={(event) => setForm((prev) => ({ ...prev, [key]: event.target.value }))}
+                />
+              )}
             </label>
           ))}
           <label className="flex items-center gap-2 text-xs">

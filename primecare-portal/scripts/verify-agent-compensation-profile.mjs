@@ -6,16 +6,16 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildAgentCompensation360Model } from "../src/compensation/agentCompensation360Model.js";
-import { AGENT_COMP_360_SECTIONS } from "../src/compensation/agentCompensation360Workflow.js";
+import { EMPLOYEE_COMP_360_SECTIONS } from "../src/compensation/employeeCompensation360Workflow.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const pageSrc = readFileSync(resolve(root, "src/pages/ExecutiveCompensationCenterPage.jsx"), "utf8");
 const panelSrc = readFileSync(
-  resolve(root, "src/components/compensation/AgentCompensation360Panel.jsx"),
+  resolve(root, "src/components/compensation/EmployeeCompensation360Panel.jsx"),
   "utf8"
 );
-const apiSrc = readFileSync(resolve(root, "src/api/agentCompensation360SupabaseApi.js"), "utf8");
+const apiSrc = readFileSync(resolve(root, "src/api/employeeCompensation360SupabaseApi.js"), "utf8");
 
 let failures = 0;
 function pass(id, detail) {
@@ -30,13 +30,13 @@ function assert(condition, id, detail) {
   else fail(id, detail);
 }
 
-for (const section of AGENT_COMP_360_SECTIONS) {
+for (const section of EMPLOYEE_COMP_360_SECTIONS) {
   assert(panelSrc.includes(section) || panelSrc.includes(section.replace(/History$/, " History")), `sections.${section}`, `${section} section wired`);
 }
 
 for (const label of [
   "Name",
-  "Employee ID",
+  "Profile ID",
   "Role",
   "Status",
   "Territory",
@@ -56,11 +56,11 @@ for (const label of [
   assert(panelSrc.includes(label), `overview.${label}`, `${label} overview field present`);
 }
 
-assert(/AgentCompensation360Panel/.test(pageSrc), "page.panel", "Executive Compensation uses Agent Compensation 360 panel");
-assert(/loadAgentCompensation360Read/.test(pageSrc), "page.loader", "360 read loader wired");
-assert(/Agent Compensation 360/.test(panelSrc), "ui.title", "360 panel title present");
-assert(/buildAgentCompensation360Model/.test(apiSrc), "api.model", "360 API builds domain model");
-assert(/assertAgentCompensation360Access/.test(apiSrc), "api.access", "360 API enforces access guard");
+assert(/EmployeeCompensation360Panel/.test(pageSrc), "page.panel", "Executive Compensation uses Employee Compensation 360 panel");
+assert(/loadEmployeeCompensation360Read/.test(pageSrc), "page.loader", "360 read loader wired");
+assert(/Employee Compensation 360/.test(panelSrc), "ui.title", "360 panel title present");
+assert(/buildEmployeeCompensation360Model/.test(apiSrc), "api.model", "360 API builds domain model");
+assert(/assertEmployeeCompensation360Access/.test(apiSrc), "api.access", "360 API enforces access guard");
 
 const model = buildAgentCompensation360Model({
   agentId: "QA_AGENT_001",

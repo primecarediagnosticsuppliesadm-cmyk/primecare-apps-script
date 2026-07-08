@@ -241,7 +241,9 @@ export function buildExecutiveCompensationModel(payload = {}) {
   const previewRows = lines.map((line) => {
     const run = runs.find((row) => row.id === line.payroll_run_id);
     const period = periods.find((row) => row.id === line.period_id);
-    const assignment = assignmentForAgent(assignments, line.agent_id);
+    const assignment =
+      assignments.find((row) => str(row.profile_user_id) === str(line.profile_user_id)) ||
+      assignmentForAgent(assignments, line.agent_id);
     const plan = planById(plans, assignment?.plan_id) || planById(plans, snapshotField(line, "plan_id", null));
     const bonuses = roundMoney(
       num(line.quarterly_bonus) + num(line.annual_bonus) + num(line.collection_incentive) +
@@ -255,7 +257,9 @@ export function buildExecutiveCompensationModel(payload = {}) {
       periodId: line.period_id,
       periodYm: period?.period_ym || "—",
       agentId: line.agent_id,
-      agentName: line.agent_name || line.agent_id,
+      profileUserId: line.profile_user_id,
+      agentName: line.employee_name || line.agent_name || line.profile_user_id || line.agent_id || "—",
+      employeeName: line.employee_name || line.agent_name || line.profile_user_id || "—",
       planCode: plan?.plan_code || snapshotField(line, "plan_code", "—"),
       planVersion: plan?.version || snapshotField(line, "plan_version", "—"),
       salaryAmount: num(line.salary_amount),

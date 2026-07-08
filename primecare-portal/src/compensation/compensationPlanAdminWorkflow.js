@@ -47,7 +47,7 @@ export function compensationAdminPermissions(role) {
     canDuplicatePlan: key === "executive",
     canDeactivatePlan: key === "executive",
     canCreatePlanVersion: key === "executive",
-    canAssignPlan: ["executive", "hr"].includes(key),
+  canAssignPlan: ["executive", "hr"].includes(key),
     canChangePlan: ["executive", "hr"].includes(key),
     canEndAssignment: ["executive", "hr"].includes(key),
     canSimulate: ["executive", "hr", "admin"].includes(key),
@@ -113,6 +113,14 @@ export function normalizePlanRulesJson(rules = {}) {
     ),
     penaltiesAllowed: Boolean(src.penaltiesAllowed ?? src.penalties_allowed ?? false),
     promotionMinimumMonths: Number(src.promotionMinimumMonths ?? src.promotion_minimum_months ?? 3),
+    promotionEnabled:
+      src.promotionEnabled ?? src.promotion_enabled ?? true,
+    deliveryIncentiveEnabled: Boolean(
+      src.deliveryIncentiveEnabled ?? src.delivery_incentive_enabled ?? false
+    ),
+    performanceBonusEnabled: Boolean(
+      src.performanceBonusEnabled ?? src.performance_bonus_enabled ?? false
+    ),
     versionHistory: Array.isArray(src.versionHistory) ? src.versionHistory : [],
   };
 }

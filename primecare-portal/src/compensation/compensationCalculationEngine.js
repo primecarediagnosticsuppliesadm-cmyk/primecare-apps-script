@@ -5,7 +5,13 @@
  * lock runs, export payroll, create payouts, or mutate finance/O2C records.
  */
 
-export const COMPENSATION_RULE_VERSION = "PC_COMP_YEAR1_2026_PHASE4B";
+import {
+  commissionEligibleRoleScope,
+  normalizeCompensationRoleScope,
+} from "./enterpriseCompensationRoles.js";
+import { employeeKey, resolveEmployeeRole } from "./employeeCompensationIdentity.js";
+
+export const COMPENSATION_RULE_VERSION = "PC_COMP_YEAR1_2026_PHASE7_1";
 
 export const YEAR1_BASELINE_PLAN = Object.freeze({
   planCode: "AGENT_YEAR1_BASELINE",
@@ -100,18 +106,27 @@ function normalizePlan(plan = {}) {
       planValue(plan, "promotion_max_overdue_days", "promotionMaxOverdueDays") ??
         YEAR1_BASELINE_PLAN.promotionMaxOverdueDays
     ),
+    roleScope: normalizeCompensationRoleScope(plan.role_scope ?? plan.roleScope ?? "agent"),
     rulesJson: plan.rules_json ?? plan.rulesJson ?? {},
   };
 }
 
 function normalizeAssignment(assignment = {}) {
+  const profileUserId = str(assignment.profile_user_id ?? assignment.profileUserId);
+  const agentId = str(assignment.agent_id ?? assignment.agentId);
+  const employeeRole = resolveEmployeeRole(assignment);
   return {
     id: str(assignment.id ?? assignment.assignment_id),
     tenantId: str(assignment.tenant_id ?? assignment.tenantId),
     planId: str(assignment.plan_id ?? assignment.planId),
-    agentId: str(assignment.agent_id ?? assignment.agentId),
+    agentId,
     agentName: str(assignment.agent_name ?? assignment.agentName),
-    profileUserId: str(assignment.profile_user_id ?? assignment.profileUserId),
+    profileUserId,
+    employeeName: str(
+      assignment.employee_name ?? assignment.employeeName ?? assignment.agent_name ?? assignment.agentName
+    ),
+    employeeRole,
+    employeeKey: employeeKey({ profileUserId, agentId }),
     startDate: ymd(assignment.start_date ?? assignment.startDate),
     endDate: ymd(assignment.end_date ?? assignment.endDate),
     status: str(assignment.assignment_status ?? assignment.assignmentStatus ?? "active").toLowerCase(),
@@ -220,16 +235,33 @@ function attributionForPayment(payment, snapshots = [], warnings = []) {
   return { ok: false, agentId: "", method: "missing_attribution_snapshot" };
 }
 
-function assignmentForAgent(agentId, assignments = [], period = {}) {
+function assignmentMatchesPeriod(assignment, period = {}) {
   const periodStart = ymd(period.periodStart ?? period.period_start);
   const periodEnd = ymd(period.periodEnd ?? period.period_end);
-  return assignments.find((assignment) => {
-    if (assignment.agentId !== agentId) return false;
-    if (assignment.status && assignment.status !== "active") return false;
-    if (assignment.startDate && periodEnd && assignment.startDate > periodEnd) return false;
-    if (assignment.endDate && periodStart && assignment.endDate < periodStart) return false;
-    return true;
-  });
+  if (assignment.status && assignment.status !== "active") return false;
+  if (assignment.startDate && periodEnd && assignment.startDate > periodEnd) return false;
+  if (assignment.endDate && periodStart && assignment.endDate < periodStart) return false;
+  return true;
+}
+
+function assignmentForAgent(agentId, assignments = [], period = {}) {
+  const target = str(agentId);
+  return assignments.find(
+    (assignment) => assignment.agentId === target && assignmentMatchesPeriod(assignment, period)
+  );
+}
+
+function assignmentForEmployeeKey(key, assignments = [], period = {}) {
+  const target = str(key);
+  return assignments.find(
+    (assignment) => assignment.employeeKey === target && assignmentMatchesPeriod(assignment, period)
+  );
+}
+
+function promotionEnabledForPlan(plan = {}, employeeRole = "agent") {
+  const rules = plan.rulesJson && typeof plan.rulesJson === "object" ? plan.rulesJson : {};
+  if (rules.promotionEnabled === false || rules.promotion_enabled === false) return false;
+  return commissionEligibleRoleScope(employeeRole || plan.roleScope);
 }
 
 function planForAssignment(assignment = {}, plans = []) {
@@ -451,13 +483,19 @@ export function calculateAgentCompensation({
   });
   const maxOverdueDays = Math.max(0, ...agentArRows.map((row) => num(row.daysOverdue)));
   const monthsInPlan = monthsBetween(assignment.startDate, normalizedPeriod.periodEnd);
-  const promotion = calculatePromotionEligibility({
-    cumulativeCollectedCash: collectedCash,
-    collectionEfficiencyPct,
-    maxOverdueDays,
-    monthsInPlan,
-    plan: normalizedPlan,
+  const employeeRole = resolveEmployeeRole({
+    employee_role: assignment.employeeRole,
+    role: normalizedPlan.roleScope,
   });
+  const promotion = promotionEnabledForPlan(normalizedPlan, employeeRole)
+    ? calculatePromotionEligibility({
+        cumulativeCollectedCash: collectedCash,
+        collectionEfficiencyPct,
+        maxOverdueDays,
+        monthsInPlan,
+        plan: normalizedPlan,
+      })
+    : { eligible: false, status: "not_applicable", blockedReasons: ["promotion_disabled_for_role"] };
 
   const salaryAmount = promotion.eligible
     ? normalizedPlan.promotionSalary
@@ -465,10 +503,10 @@ export function calculateAgentCompensation({
   const commissionRateBps = promotion.eligible
     ? normalizedPlan.promotionCommissionRateBps
     : normalizedPlan.commissionRateBps;
-  const commissionAmount = bpsAmount(
-    commissionEntry.attributable_cash_collected,
-    commissionRateBps
-  );
+  const commissionEligible = commissionEligibleRoleScope(employeeRole || normalizedPlan.roleScope);
+  const commissionAmount = commissionEligible
+    ? bpsAmount(commissionEntry.attributable_cash_collected, commissionRateBps)
+    : 0;
   const grossPay = roundMoney(
     salaryAmount +
       normalizedPlan.fuelAllowance +
@@ -481,9 +519,11 @@ export function calculateAgentCompensation({
     period_id: normalizedPeriod.id,
     plan_assignment_id: assignment.id || null,
     commission_entry_id: commissionEntry.id || null,
-    agent_id: str(agentId ?? commissionEntry.agent_id),
-    agent_name: str(agentName ?? commissionEntry.agent_name ?? agentId),
-    profile_user_id: str(profileUserId ?? commissionEntry.profile_user_id) || null,
+    agent_id: commissionEligible ? str(agentId ?? commissionEntry.agent_id) || null : null,
+    agent_name: str(agentName ?? commissionEntry.agent_name ?? agentId) || null,
+    profile_user_id: str(profileUserId ?? commissionEntry.profile_user_id ?? assignment.profileUserId) || null,
+    employee_name: str(assignment.employeeName ?? agentName ?? commissionEntry.agent_name) || null,
+    employee_role: employeeRole,
     salary_amount: roundMoney(salaryAmount),
     fuel_allowance: roundMoney(normalizedPlan.fuelAllowance),
     mobile_allowance: roundMoney(normalizedPlan.mobileAllowance),
@@ -574,22 +614,24 @@ export function calculatePayrollPreview({
     );
   }
 
-  const coveredAgentIds = new Set(lines.map((line) => str(line.agent_id)));
+  const coveredEmployeeKeys = new Set(lines.map((line) => employeeKey(line)));
   for (const rawAssignment of planAssignments) {
     const assignment = normalizeAssignment(rawAssignment);
     if (assignment.status !== "active") continue;
-    if (!assignmentForAgent(assignment.agentId, assignments, normalizedPeriod)) continue;
-    if (coveredAgentIds.has(assignment.agentId)) continue;
+    if (!assignmentMatchesPeriod(assignment, normalizedPeriod)) continue;
+    if (coveredEmployeeKeys.has(assignment.employeeKey)) continue;
 
     const plan = planForAssignment(assignment, plans);
     const zeroCommissionEntry = {
       tenant_id: normalizedPeriod.tenantId,
       period_id: normalizedPeriod.id,
-      agent_id: assignment.agentId,
-      agent_name: assignment.agentName || assignment.agentId,
+      agent_id: assignment.agentId || null,
+      agent_name: assignment.agentName || assignment.employeeName || null,
       profile_user_id: assignment.profileUserId || null,
       attributable_cash_collected: 0,
-      commission_rate_bps: plan.commissionRateBps,
+      commission_rate_bps: commissionEligibleRoleScope(assignment.employeeRole || plan.roleScope)
+        ? plan.commissionRateBps
+        : 0,
       commission_amount: 0,
       metadata: {
         plan_id: plan.id,
@@ -598,13 +640,14 @@ export function calculatePayrollPreview({
         payment_count: 0,
         source_lab_ids: [],
         fixed_payroll_only: true,
+        employee_role: assignment.employeeRole,
       },
     };
     lines.push(
       calculateAgentCompensation({
         period: normalizedPeriod,
         agentId: assignment.agentId,
-        agentName: assignment.agentName,
+        agentName: assignment.employeeName || assignment.agentName,
         profileUserId: assignment.profileUserId,
         plan,
         planAssignment: assignment,
@@ -614,7 +657,7 @@ export function calculatePayrollPreview({
         calculatedAt,
       })
     );
-    coveredAgentIds.add(assignment.agentId);
+    coveredEmployeeKeys.add(assignment.employeeKey);
   }
 
   const totals = lines.reduce(
@@ -716,3 +759,4 @@ export function calculateCompensationPreview({
   };
 }
 
+export { calculateAgentCompensation as calculateEmployeeCompensation };

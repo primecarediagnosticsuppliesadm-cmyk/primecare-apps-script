@@ -4,6 +4,33 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-07 — Enterprise Compensation Phase 7.1
+
+### Change
+
+- Refactor compensation domain from agent-centric to **profile-primary enterprise employee compensation**.
+- Migration `20260707140000_enterprise_compensation_phase_7_1.sql`: `profile_user_id` required on assignments; `agent_id` optional except agent role; role-aware `compensation_plans.role_scope` check; HQ employee profile roles extended.
+- Add role scopes: agent, admin, executive, hr, warehouse, delivery, operations, support, future.
+- New Plan wizard with role defaults; Activate Plan; Assign Employee APIs and UI.
+- Employee Directory + Employee Compensation 360 replace Agent-only directory (Agent 360 preserved via compatibility aliases).
+- Payroll preview includes all active assigned employees; commission remains cash-only and agent-role only.
+
+### Not changed
+
+- Finance, AR, payments, orders, invoices, payroll approval workflow, export, GL, bank, accounting.
+
+### Verification gates
+
+- `node scripts/verify-enterprise-compensation-roles.mjs`
+- `node scripts/verify-employee-directory.mjs`
+- `node scripts/verify-role-based-payroll-preview.mjs`
+- `node scripts/verify-agent-commission-isolation.mjs`
+- `node scripts/verify-role-plan-validation.mjs`
+- `node scripts/verify-compensation-ui-actions.mjs`
+- All existing compensation verify scripts
+
+---
+
 ## 2026-07-04 — Executive Compensation Phase 6A.1 Certification Cleanup
 
 ### Change

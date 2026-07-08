@@ -5,6 +5,7 @@ import { EnterpriseDataTable, StatusBadge } from "@/components/ux";
 import { buildCompensationPlanDetailModel } from "@/compensation/compensationPlanAdminModel.js";
 import { simulateCompensationPlan } from "@/compensation/compensationPlanSimulator.js";
 import CompensationPlanDetailsPanel from "@/components/compensation/CompensationPlanDetailsPanel.jsx";
+import NewCompensationPlanWizard from "@/components/compensation/NewCompensationPlanWizard.jsx";
 
 const STATUS_VARIANT = {
   draft: "neutral",
@@ -20,8 +21,10 @@ export default function CompensationPlansTab({
   onSavePlan,
   onDuplicatePlan,
   onDeactivatePlan,
+  onActivatePlan,
   busy = false,
 }) {
+  const [wizardOpen, setWizardOpen] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
   const [simInputs, setSimInputs] = useState({
@@ -78,11 +81,21 @@ export default function CompensationPlansTab({
           Master compensation plans for the payroll engine. Active edits create a new version; history is preserved.
         </p>
         {permissions?.canCreatePlan ? (
-          <Button type="button" size="sm" disabled={busy} onClick={() => onCreatePlan?.()}>
+          <Button type="button" size="sm" disabled={busy} onClick={() => setWizardOpen(true)}>
             New Plan
           </Button>
         ) : null}
       </div>
+
+      <NewCompensationPlanWizard
+        open={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        busy={busy}
+        onCreate={async (payload) => {
+          await onCreatePlan?.(payload);
+          setWizardOpen(false);
+        }}
+      />
 
       <EnterpriseDataTable
         hasRows={(adminModel?.planRows || []).length > 0}
@@ -166,6 +179,18 @@ export default function CompensationPlansTab({
                             onClick={() => onDuplicatePlan?.(row)}
                           >
                             Duplicate
+                          </Button>
+                        ) : null}
+                        {permissions?.canEditDraftPlan && row.status === "draft" ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-[10px]"
+                            disabled={busy}
+                            onClick={() => onActivatePlan?.(row)}
+                          >
+                            Activate
                           </Button>
                         ) : null}
                         {permissions?.canDeactivatePlan && row.status !== "retired" ? (

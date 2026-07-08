@@ -7,7 +7,7 @@ import {
   HQ_COLLECTIONS_AR_LIMIT,
   clampLimit,
 } from "@/api/hqReadBounds.js";
-import { COMPENSATION_RULE_VERSION } from "@/compensation/compensationCalculationEngine.js";
+import { COMPENSATION_RULE_VERSION, calculateCollectionEfficiency, calculatePromotionEligibility } from "@/compensation/compensationCalculationEngine.js";
 import {
   assertCompensationAdminAction,
   buildRetiredPlanPatch,
@@ -20,11 +20,21 @@ import {
   normalizePlanRulesJson,
   shouldVersionOnEdit,
 } from "@/compensation/compensationPlanAdminWorkflow.js";
-import { calculateCollectionEfficiency, calculatePromotionEligibility } from "@/compensation/compensationCalculationEngine.js";
+import {
+  assertPlanScopeMatchesEmployee,
+  buildNewPlanInputFromRoleScope,
+  COMPENSATION_EMPLOYEE_PROFILE_ROLES,
+  normalizeCompensationRoleScope,
+} from "@/compensation/enterpriseCompensationRoles.js";
+import {
+  assignmentIdentityPayload,
+  employeeDisplayName,
+  profileDisplayName,
+} from "@/compensation/employeeCompensationIdentity.js";
 
 const PLAN_ADMIN_COLUMNS = `${HQ_COMPENSATION_PLAN_READ_COLUMNS},rules_json,created_by,updated_by,created_at,updated_at`;
 const ASSIGNMENT_ADMIN_COLUMNS = `${HQ_COMPENSATION_ASSIGNMENT_READ_COLUMNS},assigned_by,assigned_at,metadata,created_at,updated_at`;
-const PROFILE_AGENT_COLUMNS = "user_id,tenant_id,role,agent_id,agent_name,active";
+const PROFILE_EMPLOYEE_COLUMNS = "user_id,tenant_id,role,agent_id,agent_name,display_name,username,email,active,created_at";
 
 function str(value) {
   return String(value ?? "").trim();
@@ -67,13 +77,16 @@ function planPayloadFromInput(input = {}, { tenantId, actorUserId, version, stat
     manualAdjustmentAllowed: input.manualAdjustmentAllowed,
     penaltiesAllowed: input.penaltiesAllowed,
     promotionMinimumMonths: input.promotionMinimumMonths,
+    promotionEnabled: input.promotionEnabled ?? input.promotion_enabled,
+    deliveryIncentiveEnabled: input.deliveryIncentiveEnabled ?? input.delivery_incentive_enabled,
+    performanceBonusEnabled: input.performanceBonusEnabled ?? input.performance_bonus_enabled,
   });
 
   return {
     tenant_id: tenantId,
     plan_code: str(input.plan_code || input.planCode || "AGENT_CUSTOM"),
     version: str(version || input.version || "v1"),
-    role_scope: str(input.role_scope || input.roleScope || "agent"),
+    role_scope: normalizeCompensationRoleScope(input.role_scope || input.roleScope || "agent"),
     effective_from: str(input.effective_from || input.effectiveFrom || new Date().toISOString().slice(0, 10)),
     effective_to: input.effective_to || input.effectiveTo || null,
     base_salary: Number(input.base_salary ?? input.baseSalary ?? 0),
@@ -120,9 +133,9 @@ export async function loadCompensationPlanAdminRead({ currentUser, client = supa
         .order("start_date", { ascending: false }),
       db
         .from("profiles")
-        .select(PROFILE_AGENT_COLUMNS)
+        .select(PROFILE_EMPLOYEE_COLUMNS)
         .eq("tenant_id", tenantId)
-        .in("role", ["agent", "hr", "admin"])
+        .in("role", COMPENSATION_EMPLOYEE_PROFILE_ROLES)
         .eq("active", true),
       loadPromotionEligibilityAdminRead({ currentUser, client: db }),
     ]);
@@ -140,6 +153,7 @@ export async function loadCompensationPlanAdminRead({ currentUser, client = supa
         compensationPlans: plansRes.data || [],
         planAssignments: assignmentsRes.data || [],
         agentProfiles: profilesRes.data || [],
+        employeeProfiles: profilesRes.data || [],
         promotionRows: promotionRes.data?.rows || [],
       },
     };
@@ -568,6 +582,8 @@ export async function changeEmployeePlanAssignment({
           profile_user_id: existing.data.profile_user_id,
           agent_id: existing.data.agent_id,
           agent_name: existing.data.agent_name,
+          employee_name: existing.data.employee_name || existing.data.agent_name,
+          employee_role: existing.data.employee_role,
           assignment_status: COMPENSATION_ASSIGNMENT_STATUSES.ACTIVE,
           start_date: startDate,
           assigned_by: actorUserId,
@@ -642,6 +658,217 @@ export async function endEmployeePlanAssignment({
   } catch (error) {
     return failResult(error);
   }
+}
+
+export async function activateCompensationPlan({ currentUser, planId, client = supabase } = {}) {
+  try {
+    const db = ensureClient(client);
+    const role = roleFromUser(currentUser);
+    assertCompensationAdminAction(role, COMPENSATION_ADMIN_ACTIONS.EDIT);
+    const tenantId = tenantIdFromUser(currentUser);
+    const actorUserId = actorIdFromUser(currentUser);
+
+    const existing = await db
+      .from("compensation_plans")
+      .select(PLAN_ADMIN_COLUMNS)
+      .eq("tenant_id", tenantId)
+      .eq("id", planId)
+      .maybeSingle();
+    if (existing.error) throw new Error(`compensation_plans read failed: ${existing.error.message}`);
+    if (!existing.data) throw new Error("compensation_plan_not_found");
+    if (str(existing.data.status) !== COMPENSATION_PLAN_STATUSES.DRAFT) {
+      throw new Error("only_draft_plans_can_be_activated");
+    }
+
+    const update = await db
+      .from("compensation_plans")
+      .update({ status: COMPENSATION_PLAN_STATUSES.ACTIVE, updated_by: actorUserId })
+      .eq("id", planId)
+      .select(PLAN_ADMIN_COLUMNS)
+      .single();
+    if (update.error) throw new Error(`compensation_plans activate failed: ${update.error.message}`);
+
+    await insertAuditEvent(db, {
+      tenant_id: tenantId,
+      event_type: "plan_activated",
+      entity_type: "compensation_plan",
+      entity_id: planId,
+      actor_user_id: actorUserId,
+      actor_role: role,
+      before_json: existing.data,
+      after_json: update.data,
+      reason: "compensation_plan_activated",
+    });
+
+    return { success: true, error: null, data: update.data };
+  } catch (error) {
+    return failResult(error);
+  }
+}
+
+export async function assignEmployeeToPlan({
+  currentUser,
+  profileUserId,
+  planId,
+  effectiveDate,
+  client = supabase,
+} = {}) {
+  try {
+    const db = ensureClient(client);
+    const role = roleFromUser(currentUser);
+    assertCompensationAdminAction(role, COMPENSATION_ADMIN_ACTIONS.ASSIGN);
+    const tenantId = tenantIdFromUser(currentUser);
+    const actorUserId = actorIdFromUser(currentUser);
+    const startDate = str(effectiveDate || new Date().toISOString().slice(0, 10));
+    const targetProfileUserId = str(profileUserId);
+    if (!targetProfileUserId || !planId) throw new Error("profile_user_id_and_plan_id_required");
+
+    const [profileRes, planRes, activeRes] = await Promise.all([
+      db
+        .from("profiles")
+        .select(PROFILE_EMPLOYEE_COLUMNS)
+        .eq("tenant_id", tenantId)
+        .eq("user_id", targetProfileUserId)
+        .maybeSingle(),
+      db
+        .from("compensation_plans")
+        .select(PLAN_ADMIN_COLUMNS)
+        .eq("tenant_id", tenantId)
+        .eq("id", planId)
+        .maybeSingle(),
+      db
+        .from("compensation_plan_assignments")
+        .select(ASSIGNMENT_ADMIN_COLUMNS)
+        .eq("tenant_id", tenantId)
+        .eq("profile_user_id", targetProfileUserId)
+        .eq("assignment_status", COMPENSATION_ASSIGNMENT_STATUSES.ACTIVE),
+    ]);
+
+    if (profileRes.error) throw new Error(`profiles read failed: ${profileRes.error.message}`);
+    if (planRes.error) throw new Error(`compensation_plans read failed: ${planRes.error.message}`);
+    if (activeRes.error) {
+      throw new Error(`compensation_plan_assignments read failed: ${activeRes.error.message}`);
+    }
+    if (!profileRes.data) throw new Error("employee_profile_not_found");
+    if (!planRes.data) throw new Error("compensation_plan_not_found");
+    if ((activeRes.data || []).length) throw new Error("employee_already_has_active_assignment");
+
+    assertPlanScopeMatchesEmployee(planRes.data.role_scope, profileRes.data.role);
+
+    const identity = assignmentIdentityPayload(profileRes.data);
+    const created = await db
+      .from("compensation_plan_assignments")
+      .insert([
+        {
+          tenant_id: tenantId,
+          plan_id: planId,
+          profile_user_id: identity.profile_user_id,
+          agent_id: identity.agent_id,
+          agent_name: identity.agent_name,
+          employee_name: identity.employee_name,
+          employee_role: identity.employee_role,
+          assignment_status: COMPENSATION_ASSIGNMENT_STATUSES.ACTIVE,
+          start_date: startDate,
+          assigned_by: actorUserId,
+          metadata: { assigned_via: "assign_employee_to_plan" },
+        },
+      ])
+      .select(ASSIGNMENT_ADMIN_COLUMNS)
+      .single();
+    if (created.error) {
+      throw new Error(`compensation_plan_assignments insert failed: ${created.error.message}`);
+    }
+
+    await insertAuditEvent(db, {
+      tenant_id: tenantId,
+      event_type: "plan_assigned",
+      entity_type: "compensation_plan_assignment",
+      entity_id: created.data.id,
+      actor_user_id: actorUserId,
+      actor_role: role,
+      after_json: created.data,
+      reason: "employee_plan_assigned",
+      metadata: {
+        profile_user_id: identity.profile_user_id,
+        employee_role: identity.employee_role,
+        plan_id: planId,
+      },
+    });
+
+    return { success: true, error: null, data: created.data };
+  } catch (error) {
+    return failResult(error);
+  }
+}
+
+export async function loadCompensationEmployeeDirectoryRead({ currentUser, client = supabase } = {}) {
+  try {
+    const db = ensureClient(client);
+    const tenantId = tenantIdFromUser(currentUser);
+    if (!tenantId) throw new Error("tenant_id_required");
+
+    const [profilesRes, assignmentsRes, plansRes] = await Promise.all([
+      db
+        .from("profiles")
+        .select(PROFILE_EMPLOYEE_COLUMNS)
+        .eq("tenant_id", tenantId)
+        .in("role", COMPENSATION_EMPLOYEE_PROFILE_ROLES)
+        .eq("active", true),
+      db
+        .from("compensation_plan_assignments")
+        .select(ASSIGNMENT_ADMIN_COLUMNS)
+        .eq("tenant_id", tenantId)
+        .eq("assignment_status", COMPENSATION_ASSIGNMENT_STATUSES.ACTIVE),
+      db.from("compensation_plans").select(PLAN_ADMIN_COLUMNS).eq("tenant_id", tenantId),
+    ]);
+
+    if (profilesRes.error) throw new Error(`profiles read failed: ${profilesRes.error.message}`);
+    if (assignmentsRes.error) {
+      throw new Error(`compensation_plan_assignments read failed: ${assignmentsRes.error.message}`);
+    }
+    if (plansRes.error) throw new Error(`compensation_plans read failed: ${plansRes.error.message}`);
+
+    const assignmentByProfile = new Map(
+      (assignmentsRes.data || []).map((row) => [str(row.profile_user_id), row])
+    );
+    const planById = new Map((plansRes.data || []).map((row) => [row.id, row]));
+
+    const employees = (profilesRes.data || [])
+      .map((profile) => {
+        const assignment = assignmentByProfile.get(str(profile.user_id));
+        const plan = assignment ? planById.get(assignment.plan_id) : null;
+        return {
+          profileUserId: profile.user_id,
+          agentId: profile.agent_id || null,
+          employeeName: profileDisplayName(profile),
+          role: str(profile.role).toLowerCase(),
+          status: profile.active === false ? "inactive" : "active",
+          assignmentStatus: assignment?.assignment_status || "unassigned",
+          planId: assignment?.plan_id || null,
+          planCode: plan?.plan_code || null,
+          planVersion: plan?.version || null,
+          planName: plan?.rules_json?.displayName || plan?.plan_code || null,
+        };
+      })
+      .sort((a, b) => str(a.employeeName).localeCompare(str(b.employeeName)));
+
+    return { success: true, error: null, data: { employees } };
+  } catch (error) {
+    return failResult(error);
+  }
+}
+
+export async function createCompensationPlanFromRoleScope({
+  currentUser,
+  roleScope,
+  overrides = {},
+  client = supabase,
+} = {}) {
+  return createCompensationPlan({
+    currentUser,
+    planInput: { ...buildNewPlanInputFromRoleScope(roleScope), ...overrides },
+    client,
+  });
 }
 
 export async function saveCompensationPlanAdmin({

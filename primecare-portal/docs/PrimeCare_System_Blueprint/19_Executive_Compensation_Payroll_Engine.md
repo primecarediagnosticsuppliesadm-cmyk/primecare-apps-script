@@ -53,7 +53,7 @@ Plan version and rule definition.
 | `plan_code` | Stable code, e.g. `AGENT_YEAR1_BASELINE` |
 | `version` | Rule version |
 | `effective_from`, `effective_to` | Date validity |
-| `role_scope` | Agent / future role family |
+| `role_scope` | Employee role family: `agent`, `admin`, `executive`, `hr`, `warehouse`, `delivery`, `operations`, `support`, `future` |
 | `base_salary`, `fuel_allowance`, `mobile_allowance` | Fixed monthly components |
 | `commission_rate_bps` | Commission rate in basis points |
 | `promotion_salary`, `promotion_commission_rate_bps` | Promoted terms |
@@ -66,13 +66,15 @@ Plan version and rule definition.
 
 ### `compensation_plan_assignments`
 
-Agent-to-plan history.
+Profile-primary employee-to-plan history.
 
 | Field | Meaning |
 |-------|---------|
 | `id` | UUID primary key |
-| `tenant_id` | HQ/distributor scope for the assigned agent |
-| `agent_id`, `profile_user_id` | Agent identity |
+| `tenant_id` | HQ tenant scope |
+| `profile_user_id` | **Primary employee identity** (required) |
+| `agent_id` | Required only when `employee_role = agent`; null for HQ salary roles |
+| `employee_name`, `employee_role` | Denormalized display snapshot at assignment time |
 | `plan_id` | Compensation plan |
 | `assignment_status` | active / ended / suspended |
 | `start_date`, `end_date` | Effective date window |
@@ -635,6 +637,38 @@ Verification scripts:
 - `verify-payroll-export-ui.mjs`
 - `verify-payroll-paid-evidence.mjs`
 - `verify-payroll-no-finance-mutation.mjs`
+
+---
+
+## Phase 7.1 — Enterprise Employee Compensation
+
+Phase 7.1 evolves the compensation engine from agent-only to **enterprise employee compensation** with profile as primary identity.
+
+| Surface | Scope |
+|---------|-------|
+| Employee Directory | All HQ compensation-eligible roles: agent, admin, executive, hr, warehouse, delivery, operations, support |
+| Employee Compensation 360 | Profile-primary single employee view; commission/promotion sections agent-only |
+| New Plan Wizard | Role selector + role defaults (0% commission for non-agent by default) |
+| Assign Employee | Initial assignment API + UI (profile_user_id primary) |
+| Activate Plan | Draft → active transition |
+| Payroll preview | All active assigned employees receive lines; zero-commission salary-only employees included |
+
+Architecture:
+
+```
+Employee → Profile (primary) → Role → Compensation Plan → Assignment → Payroll Preview → Workflow
+```
+
+Commission remains **cash-only** and **agent-role only**. No finance mutation.
+
+Verification scripts:
+
+- `verify-enterprise-compensation-roles.mjs`
+- `verify-employee-directory.mjs`
+- `verify-role-based-payroll-preview.mjs`
+- `verify-agent-commission-isolation.mjs`
+- `verify-role-plan-validation.mjs`
+- `verify-compensation-ui-actions.mjs`
 
 ---
 

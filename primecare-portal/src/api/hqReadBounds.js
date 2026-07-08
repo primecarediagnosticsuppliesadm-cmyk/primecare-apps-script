@@ -37,11 +37,11 @@ export const HQ_PAYROLL_PERIOD_READ_COLUMNS =
 export const HQ_PAYROLL_RUN_READ_COLUMNS =
   "id,tenant_id,period_id,run_number,status,generated_at,submitted_at,approved_at,locked_at,exported_at,totals_json,metadata,created_at,updated_at";
 export const HQ_PAYROLL_LINE_READ_COLUMNS =
-  "id,tenant_id,payroll_run_id,period_id,plan_assignment_id,commission_entry_id,agent_id,agent_name,profile_user_id,salary_amount,fuel_allowance,mobile_allowance,commission_amount,collection_incentive,delivery_incentive,qualification_incentive,attendance_incentive,quarterly_bonus,annual_bonus,manual_adjustments_total,penalties_total,recoveries_total,gross_pay,deductions_total,net_payable,line_status,calculation_snapshot,metadata,created_at,updated_at";
+  "id,tenant_id,payroll_run_id,period_id,plan_assignment_id,commission_entry_id,agent_id,agent_name,profile_user_id,employee_name,employee_role,salary_amount,fuel_allowance,mobile_allowance,commission_amount,collection_incentive,delivery_incentive,qualification_incentive,attendance_incentive,quarterly_bonus,annual_bonus,manual_adjustments_total,penalties_total,recoveries_total,gross_pay,deductions_total,net_payable,line_status,calculation_snapshot,metadata,created_at,updated_at";
 export const HQ_COMPENSATION_PLAN_READ_COLUMNS =
   "id,tenant_id,plan_code,version,role_scope,effective_from,effective_to,base_salary,fuel_allowance,mobile_allowance,commission_rate_bps,promotion_salary,promotion_commission_rate_bps,promotion_collection_threshold,promotion_min_efficiency_pct,promotion_max_overdue_days,status";
 export const HQ_COMPENSATION_ASSIGNMENT_READ_COLUMNS =
-  "id,tenant_id,plan_id,profile_user_id,agent_id,agent_name,assignment_status,start_date,end_date";
+  "id,tenant_id,plan_id,profile_user_id,agent_id,agent_name,employee_name,employee_role,assignment_status,start_date,end_date";
 export const HQ_COMPENSATION_COMMISSION_READ_COLUMNS =
   "id,tenant_id,period_id,agent_id,agent_name,profile_user_id,attributable_cash_collected,commission_rate_bps,commission_amount,eligibility_status,blocked_reason,rule_version,status,metadata,created_at,updated_at";
 export const HQ_COMPENSATION_AUDIT_READ_COLUMNS =
