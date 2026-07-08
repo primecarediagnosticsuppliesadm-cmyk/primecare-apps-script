@@ -17,6 +17,7 @@ function fail(id, detail) { console.error(`FAIL  ${id}: ${detail}`); failures +=
 function assert(c, id, d) { c ? pass(id, d) : fail(id, d); }
 
 assert(/PeopleOpsPayrollSummary/.test(pageSrc), "payroll.summary_wired", "payroll summary on run review");
+assert(/PeopleOpsPayrollStickyTotals/.test(pageSrc), "payroll.sticky_totals", "sticky payroll totals on run review");
 assert(/PeopleOpsWorkflowProgress/.test(pageSrc), "payroll.workflow_wired", "workflow progress on run review");
 assert(/variant="default"[\s\S]{0,220}Open Preview/.test(pageSrc), "payroll.primary_cta", "Open Preview is primary CTA");
 assert(/Gross Payroll/.test(summarySrc), "payroll.summary_gross", "gross payroll KPI");

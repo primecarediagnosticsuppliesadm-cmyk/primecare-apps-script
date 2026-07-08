@@ -19,13 +19,13 @@ function fail(id, d) { console.error(`FAIL  ${id}: ${d}`); failures += 1; }
 function assert(c, id, d) { c ? pass(id, d) : fail(id, d); }
 
 assert(/EnterpriseMetricStrip/.test(dash), "dash.metric_strip", "compact KPI strip");
-assert(/ReportingContextToolbar/.test(dash), "dash.context_toolbar", "inline reporting toolbar");
+assert(/PeopleOpsReportingContextBar|PeopleOpsContextWidget/.test(readFileSync(resolve(root, "src/pages/ExecutiveCompensationCenterPage.jsx"), "utf8")), "dash.context_toolbar", "reporting context via universal widget");
 assert(/RoleChip/.test(emp), "emp.role_chip", "role chips in directory");
 assert(/PeopleOpsFilterBar/.test(emp), "emp.filter_bar", "sticky filter bar");
 assert(/Identity & Business/.test(panel), "360.business_first", "business-first section label");
 assert(/SECTION_ORDER/.test(panel), "360.section_order", "RC2 section ordering");
-assert(/space-y-3/.test(frame), "frame.compact", "compact module frame spacing");
-assert(/Future capability/.test(settings), "settings.professional", "professional settings copy");
+assert(/space-y-2|dense/.test(frame), "frame.compact", "compact module frame spacing");
+assert(/Future Capabilities|Future capability|Roadmap/.test(settings), "settings.professional", "professional settings copy");
 assert(!/Phase 8\.6/.test(settings), "settings.no_dev_labels", "no developer phase labels");
 
 if (failures) { console.error(`\nOverall: NO-GO (${failures})`); process.exit(1); }

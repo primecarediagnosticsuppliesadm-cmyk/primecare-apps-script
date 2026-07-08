@@ -19,7 +19,7 @@ export default function PeopleOpsSectionCard({
     <section
       className={cn(
         dense
-          ? "rounded-xl border border-border bg-card p-3 shadow-sm"
+          ? "rounded-lg border border-border bg-card p-2 shadow-sm"
           : "rounded-2xl border border-border bg-card p-4 shadow-[var(--pc-shadow-card)] md:p-5",
         className
       )}

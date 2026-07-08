@@ -203,6 +203,10 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-loading-states.mjs | Skeleton loading components | RC2 enterprise UX |
 | verify-responsive-layouts.mjs | Responsive grid tokens | RC2 enterprise UX |
 | audit-rc2-ui-certification.mjs | RC2 UX bundle + no logic mutation + build | RC2 enterprise UX |
+| verify-rc3-people-ops-ui.mjs | RC3 work inbox, context widget, data quality, dense KPIs, keyboard nav | RC3 enterprise UX |
+| audit-rc3-ui-certification.mjs | RC3 UX bundle + RC2/Phase 9.3 regression + build | RC3 enterprise UX |
+| verify-rc4-enterprise-polish.mjs | RC4 density, universal context, reports summary-first, table UX | RC4 enterprise polish |
+| audit-rc4-ui-certification.mjs | RC4 bundle + RC3 regression + build | RC4 enterprise polish |
 
 ### Infrastructure
 

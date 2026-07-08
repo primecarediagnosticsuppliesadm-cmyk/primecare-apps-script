@@ -1,18 +1,19 @@
 import React from "react";
 import { KpiCard, KpiCardGrid } from "@/components/ux";
 import { DollarSign, Minus, Plus, Users, Wallet } from "lucide-react";
+import { formatPeopleOpsMetricValue } from "@/peopleOps/peopleOpsDataQualityModel.js";
 
 export default function PeopleOpsPayrollSummary({ summary }) {
   if (!summary) return null;
 
   return (
-    <KpiCardGrid columns={3}>
-      <KpiCard title="Employees" value={String(summary.employees)} subtitle="In selected payroll run" icon={Users} />
-      <KpiCard title="Gross Payroll" value={summary.grossPayrollLabel} subtitle="Salary + allowances + commission + bonuses" icon={Wallet} />
-      <KpiCard title="Commission" value={summary.commissionLabel} subtitle="Cash-only commission total" icon={DollarSign} />
-      <KpiCard title="Adjustments" value={summary.adjustmentsLabel} subtitle="Manual adjustments" icon={Plus} />
-      <KpiCard title="Recoveries" value={summary.recoveriesLabel} subtitle="Recoveries and penalties" icon={Minus} />
-      <KpiCard title="Net Payroll" value={summary.netPayrollLabel} subtitle="Net payable for selected run" icon={Wallet} />
+    <KpiCardGrid columns={3} dense>
+      <KpiCard dense title="Employees" value={summary.employeesLabel || String(summary.employees)} subtitle="In selected payroll run" icon={Users} />
+      <KpiCard dense title="Gross Payroll" value={formatPeopleOpsMetricValue(summary.grossPayrollLabel, { emptyLabel: "No preview lines" })} subtitle="Salary + allowances + commission + bonuses" icon={Wallet} />
+      <KpiCard dense title="Commission" value={formatPeopleOpsMetricValue(summary.commissionLabel, { emptyLabel: "No commission" })} subtitle="Cash-only commission total" icon={DollarSign} />
+      <KpiCard dense title="Adjustments" value={formatPeopleOpsMetricValue(summary.adjustmentsLabel, { emptyLabel: "None" })} subtitle="Manual adjustments" icon={Plus} />
+      <KpiCard dense title="Recoveries" value={formatPeopleOpsMetricValue(summary.recoveriesLabel, { emptyLabel: "None" })} subtitle="Recoveries and penalties" icon={Minus} />
+      <KpiCard dense title="Net Payroll" value={formatPeopleOpsMetricValue(summary.netPayrollLabel, { emptyLabel: "Not calculated" })} subtitle="Net payable for selected run" icon={Wallet} highlight />
     </KpiCardGrid>
   );
 }

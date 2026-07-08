@@ -4,18 +4,33 @@ import { StatusBadge } from "@/components/ux";
 import PeopleOpsModuleFrame from "@/components/peopleOps/PeopleOpsModuleFrame.jsx";
 import PeopleOpsSectionCard from "@/components/peopleOps/PeopleOpsSectionCard.jsx";
 
-const SETTINGS_SECTIONS = [
+const ACTIVE_SETTINGS = [
+  {
+    id: "pay-cycles",
+    title: "Pay Cycles",
+    subtitle: "Monthly cadence, period boundaries, and run versioning — active via Payroll Periods.",
+    icon: Clock,
+    status: "Active",
+    statusVariant: "success",
+    detail: "Use Payroll → Periods to generate previews and manage run versions for the current reporting context.",
+  },
+  {
+    id: "approval-matrix",
+    title: "Approval Matrix",
+    subtitle: "Role-based submit, approve, lock, and export permissions — enforced in payroll workflow.",
+    icon: Lock,
+    status: "Active",
+    statusVariant: "success",
+    detail: "Executive and admin roles drive submit/approve/lock actions on the Run Review toolbar.",
+  },
+];
+
+const ROADMAP_SETTINGS = [
   {
     id: "payroll-policies",
     title: "Payroll Policies",
     subtitle: "Approval thresholds, preview rules, and paid-evidence requirements.",
     icon: Shield,
-  },
-  {
-    id: "approval-matrix",
-    title: "Approval Matrix",
-    subtitle: "Role-based submit, approve, lock, and export permissions.",
-    icon: Lock,
   },
   {
     id: "export-templates",
@@ -29,47 +44,49 @@ const SETTINGS_SECTIONS = [
     subtitle: "Business days, holidays, and payroll blackout windows.",
     icon: Calendar,
   },
-  {
-    id: "pay-cycles",
-    title: "Pay Cycles",
-    subtitle: "Monthly cadence, period boundaries, and run versioning.",
-    icon: Clock,
-  },
 ];
 
 export default function PeopleOpsSettingsLanding({ breadcrumbs = [] }) {
   return (
     <PeopleOpsModuleFrame
       title="Settings"
-      description="People Operations configuration — policies, approvals, exports, and pay cycles."
+      description="People Operations configuration — active governance vs roadmap capabilities."
       breadcrumbs={breadcrumbs}
     >
       <PeopleOpsSectionCard
-        title="Configuration Hub"
-        subtitle="Grouped settings for payroll governance and workforce policies."
+        title="Active Configuration"
+        subtitle="Settings that are operational today through Payroll and Compensation workflows."
         icon={Settings2}
       >
-        <p className="text-sm text-muted-foreground">
-          Manage payroll policies, approval routing, export templates, and pay cycles from this hub. Operational
-          workflows remain in Payroll and Compensation until each settings area is enabled.
-        </p>
+        <div className="grid gap-2 md:grid-cols-2">
+          {ACTIVE_SETTINGS.map((section) => (
+            <div key={section.id} className="rounded-lg border border-[var(--pc-brand-primary)]/20 bg-[var(--pc-brand-primary)]/5 px-3 py-2.5">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-foreground">{section.title}</p>
+                <StatusBadge variant={section.statusVariant} label={section.status} />
+              </div>
+              <p className="text-xs text-muted-foreground">{section.subtitle}</p>
+              <p className="mt-1.5 text-xs text-foreground">{section.detail}</p>
+            </div>
+          ))}
+        </div>
       </PeopleOpsSectionCard>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {SETTINGS_SECTIONS.map((section) => (
-          <PeopleOpsSectionCard
-            key={section.id}
-            title={section.title}
-            subtitle={section.subtitle}
-            icon={section.icon}
-            rightAction={<StatusBadge variant="neutral">Future capability</StatusBadge>}
-          >
-            <p className="text-sm text-muted-foreground">Planned — use Payroll and Compensation for day-to-day work today.</p>
-          </PeopleOpsSectionCard>
-        ))}
-      </div>
+      <PeopleOpsSectionCard title="Future Capabilities" subtitle="Roadmap items — not yet configurable in this module.">
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {ROADMAP_SETTINGS.map((section) => (
+            <div key={section.id} className="rounded-lg border border-dashed border-border bg-muted/10 px-3 py-2.5">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-foreground">{section.title}</p>
+                <StatusBadge variant="neutral">Roadmap</StatusBadge>
+              </div>
+              <p className="text-xs text-muted-foreground">{section.subtitle}</p>
+            </div>
+          ))}
+        </div>
+      </PeopleOpsSectionCard>
 
-      <PeopleOpsSectionCard title="Roadmap" subtitle="Capabilities on the product roadmap.">
+      <PeopleOpsSectionCard title="Product Roadmap" subtitle="Capabilities planned beyond current People Operations scope.">
         <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
           <li>Bank file generation handoff</li>
           <li>General ledger posting integration</li>

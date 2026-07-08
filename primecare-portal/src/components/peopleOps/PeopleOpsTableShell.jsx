@@ -20,8 +20,12 @@ export function PeopleOpsTableHead({ children }) {
   );
 }
 
-export function PeopleOpsTableBody({ children }) {
-  return <tbody className="divide-y divide-border">{children}</tbody>;
+export function PeopleOpsTableBody({ children, className, ...props }) {
+  return (
+    <tbody className={cn("divide-y divide-border", className)} {...props}>
+      {children}
+    </tbody>
+  );
 }
 
 export function PeopleOpsTableRow({ children, className, onClick }) {
@@ -35,10 +39,10 @@ export function PeopleOpsTableRow({ children, className, onClick }) {
   );
 }
 
-export function PeopleOpsTableCell({ children, className, header = false }) {
+export function PeopleOpsTableCell({ children, className, header = false, ...props }) {
   const Tag = header ? "th" : "td";
   return (
-    <Tag className={cn(header ? "px-2.5 py-2" : "px-2.5 py-1.5 text-xs text-foreground", className)}>
+    <Tag className={cn(header ? "px-2.5 py-2" : "px-2.5 py-1.5 text-xs text-foreground", className)} {...props}>
       {children}
     </Tag>
   );

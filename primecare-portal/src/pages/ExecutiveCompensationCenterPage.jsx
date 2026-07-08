@@ -52,7 +52,11 @@ import {
   buildPayrollRunSummary,
 } from "@/peopleOps/peopleOpsEnterpriseModel.js";
 import PeopleOpsGlobalSearch from "@/components/peopleOps/productivity/PeopleOpsGlobalSearch.jsx";
-import PeopleOpsContextPanel from "@/components/peopleOps/productivity/PeopleOpsContextPanel.jsx";
+import PeopleOpsContextWidget from "@/components/peopleOps/productivity/PeopleOpsContextWidget.jsx";
+import PeopleOpsDataQualityBanner from "@/components/peopleOps/PeopleOpsDataQualityBanner.jsx";
+import CompensationExecutiveSummary from "@/components/peopleOps/CompensationExecutiveSummary.jsx";
+import PeopleOpsPayrollStickyTotals from "@/components/peopleOps/PeopleOpsPayrollStickyTotals.jsx";
+import { buildPeopleOpsDataQualityWarnings } from "@/peopleOps/peopleOpsDataQualityModel.js";
 import EmployeeCompensation360Drawer from "@/components/peopleOps/EmployeeCompensation360Drawer.jsx";
 import PeopleOpsSettingsLanding from "@/components/peopleOps/PeopleOpsSettingsLanding.jsx";
 import PeopleOpsPayrollSummary from "@/components/peopleOps/PeopleOpsPayrollSummary.jsx";
@@ -513,6 +517,11 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
     [actorRole, adminModel, employeeList, model, selectedPeriodRow]
   );
 
+  const showWorkflowProgress =
+    activeModuleId === "dashboard" ||
+    activeModuleId === "payroll" ||
+    activeModuleId === "compensation";
+
   const workforceBudget = useMemo(
     () =>
       model
@@ -543,6 +552,18 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           })
         : null,
     [actorAgentId, actorRole, actorUserId, employeeList, model, ownershipPayload, rawPayload, tenantId]
+  );
+
+  const dataQualityWarnings = useMemo(
+    () =>
+      buildPeopleOpsDataQualityWarnings({
+        model,
+        employeeList,
+        adminModel,
+        ownershipWorkspace,
+        workforceBudget,
+      }),
+    [adminModel, employeeList, model, ownershipWorkspace, workforceBudget]
   );
 
   const selectedLabModel = useMemo(() => {
@@ -842,7 +863,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
   }
 
   return (
-    <div className="space-y-4 p-4 md:p-6">
+    <div className="space-y-3 p-3 md:p-4">
       <PageHeader
         title="People Operations"
         subtitle="Workforce directory, compensation, payroll, and operational reporting for PrimeCare HQ. Configuration changes do not mutate finance, AR, payments, or orders."
@@ -902,35 +923,26 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         onNavigate={navigatePeopleOps}
       />
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
-        <div className="min-w-0 space-y-4">
+      {activeModuleId !== "dashboard" ? (
+        <PeopleOpsDataQualityBanner warnings={dataQualityWarnings} onNavigate={handleOpenProductivityRoute} />
+      ) : null}
+
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_16rem]">
+        <div className="min-w-0 space-y-3">
 
       {activeModuleId === "dashboard" && activeScreenId === "home" && model ? (
         <PeopleOpsDashboard
           model={model}
           breadcrumbs={breadcrumbs}
           employeeCount={employeeList.length}
-          periodOptions={model.periodRows}
-          runOptions={reportingRunOptions}
-          selectedPeriodId={selectedPeriodId}
-          selectedRunId={selectedRunId}
-          lastRefreshLabel={lastRefreshLabel}
-          onPeriodChange={(periodId) => {
-            setSelectedPeriodId(periodId);
-            const runs = (rawPayload?.payrollRuns || [])
-              .filter((run) => run.period_id === periodId)
-              .sort((a, b) => Number(b.run_number) - Number(a.run_number));
-            setSelectedRunId(runs[0]?.id || "");
-          }}
-          onRunChange={setSelectedRunId}
           onNavigatePayroll={() => navigatePeopleOps({ moduleId: "payroll", screenId: "periods" })}
           onNavigateEmployees={() => navigatePeopleOps({ moduleId: "employees", screenId: "directory" })}
           productivity={productivity}
           onQuickAction={handleQuickAction}
           onOpenRoute={handleOpenProductivityRoute}
-          recentlyViewed={recentlyViewed}
-          favorites={favorites}
+          dataQualityWarnings={dataQualityWarnings}
           workflowBusy={workflowBusy || refreshing}
+          refreshing={refreshing}
         />
       ) : null}
 
@@ -941,6 +953,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           executivePerformance={model.executivePerformance}
           compensationPlans={model.compensationPlans}
           breadcrumbs={breadcrumbs}
+          onNavigatePayroll={() => navigatePeopleOps({ moduleId: "payroll", screenId: "periods" })}
         />
       ) : null}
 
@@ -985,6 +998,8 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           description="Create and manage compensation plan versions."
           breadcrumbs={breadcrumbs}
         >
+        {showWorkflowProgress ? <PeopleOpsWorkflowProgress stages={productivity?.workflowProgress || []} compact /> : null}
+        <CompensationExecutiveSummary adminModel={adminModel} model={model} />
         <CompensationPlansTab
           adminModel={adminModel}
           permissions={adminPermissions}
@@ -1017,6 +1032,8 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           description="Assign employees to compensation plans and manage assignment history."
           breadcrumbs={breadcrumbs}
         >
+        {showWorkflowProgress ? <PeopleOpsWorkflowProgress stages={productivity?.workflowProgress || []} compact /> : null}
+        <CompensationExecutiveSummary adminModel={adminModel} model={model} />
         <CompensationPlanAssignmentsTab
           adminModel={adminModel}
           permissions={adminPermissions}
@@ -1041,6 +1058,19 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           title="Payroll Periods"
           description="Review payroll cycles, generate previews, and run approval workflow."
           breadcrumbs={breadcrumbs}
+          dense
+          summary={
+            <PeopleOpsPayrollSummary
+              summary={{
+                employeesLabel: String(model.periodRows.length ? model.kpis.employeeCount : "No periods"),
+                grossPayrollLabel: model.kpis.currentPayrollLiabilityLabel,
+                commissionLabel: model.kpis.commissionPayableLabel,
+                adjustmentsLabel: "—",
+                recoveriesLabel: "—",
+                netPayrollLabel: model.kpis.currentPayrollLiabilityLabel,
+              }}
+            />
+          }
         >
           {selectedPeriodRow ? (
             <PayrollWorkflowToolbar
@@ -1135,7 +1165,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           title="Run Review"
           description="Inspect employee-level payroll preview lines for the selected period and run version."
           breadcrumbs={breadcrumbs}
-          summary={<PeopleOpsPayrollSummary summary={payrollRunSummary} />}
+          dense
           filters={
             <PeopleOpsFilterBar
               search={search}
@@ -1163,7 +1193,9 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
             />
           }
         >
-          <PeopleOpsWorkflowProgress stages={productivity?.workflowProgress || []} />
+          <PeopleOpsWorkflowProgress stages={productivity?.workflowProgress || []} compact />
+          <PeopleOpsPayrollStickyTotals summary={payrollRunSummary} />
+          <PeopleOpsPayrollSummary summary={payrollRunSummary} />
           {selectedPeriodRow ? (
             <PayrollWorkflowToolbar
               periodRow={selectedPeriodRow}
@@ -1256,6 +1288,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           title="Employees"
           description="Enterprise employee directory and Employee Compensation 360."
           breadcrumbs={breadcrumbs}
+          dense
         >
           <EmployeeDirectoryTab
             employees={employeeList}
@@ -1408,10 +1441,22 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
 
         {model && productivity ? (
           <aside className="hidden min-w-0 xl:block">
-            <PeopleOpsContextPanel
+            <PeopleOpsContextWidget
               contextSummary={productivity.contextSummary}
-              workflowProgress={productivity.workflowProgress}
               selectedEmployee={selectedEmployeeSummary}
+              periodOptions={model.periodRows}
+              runOptions={reportingRunOptions}
+              selectedPeriodId={selectedPeriodId}
+              selectedRunId={selectedRunId}
+              onPeriodChange={(periodId) => {
+                setSelectedPeriodId(periodId);
+                const runs = (rawPayload?.payrollRuns || [])
+                  .filter((run) => run.period_id === periodId)
+                  .sort((a, b) => Number(b.run_number) - Number(a.run_number));
+                setSelectedRunId(runs[0]?.id || "");
+              }}
+              onRunChange={setSelectedRunId}
+              lastRefreshLabel={lastRefreshLabel}
             />
           </aside>
         ) : null}

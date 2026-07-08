@@ -41,14 +41,13 @@ assert(/sessionStorage/.test(sessionSrc), "session.storage", "browser session pe
 assert(/usePeopleOpsSessionState/.test(pageSrc), "ui.session_hook", "page uses session state hook");
 
 assert(/PeopleOpsQuickActions/.test(dashboardSrc), "ui.quick_actions", "dashboard renders quick actions");
-assert(/PeopleOpsApprovalInbox/.test(dashboardSrc), "ui.approval_inbox", "dashboard renders approval inbox");
-assert(/PeopleOpsNotificationsPanel/.test(dashboardSrc), "ui.notifications", "dashboard renders notifications center");
+assert(/PeopleOpsWorkInbox/.test(dashboardSrc), "ui.work_inbox", "dashboard renders unified work inbox");
 assert(/PeopleOpsRecentActivity/.test(dashboardSrc), "ui.recent_activity", "dashboard renders activity feed");
-assert(/PeopleOpsRecentlyViewed/.test(dashboardSrc), "ui.recently_viewed", "dashboard renders recently viewed");
-assert(/PeopleOpsFavorites/.test(dashboardSrc), "ui.favorites", "dashboard renders favorites");
+assert(/Operational Timeline|Workforce Snapshot/.test(dashboardSrc), "ui.operational_timeline", "dashboard renders operational timeline zone");
+assert(!/PeopleOpsFavorites/.test(dashboardSrc), "ui.no_favorites", "favorites replaced by recent activity focus");
 
 assert(/PeopleOpsGlobalSearch/.test(pageSrc), "ui.global_search", "global search wired on page");
-assert(/PeopleOpsContextPanel/.test(pageSrc), "ui.context_panel", "context panel wired on page");
+assert(/PeopleOpsContextWidget/.test(pageSrc), "ui.context_widget", "context widget wired on page");
 assert(/buildPayrollWorkflowActions/.test(modelSrc), "reuse.workflow_actions", "quick actions reuse payroll workflow UI");
 
 assert(!/supabase\/migrations/.test(pageSrc + modelSrc + sessionSrc), "guard.no_schema", "no schema changes in productivity layer");

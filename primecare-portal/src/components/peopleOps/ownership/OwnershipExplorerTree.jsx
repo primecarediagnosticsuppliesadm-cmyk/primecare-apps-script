@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ux";
-import { ChevronDown, ChevronRight, Building2, User, Users, Crown } from "lucide-react";
+import { ChevronDown, ChevronRight, Building2, User, Users, Crown, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import CompensationAttributionPreview from "@/components/peopleOps/ownership/CompensationAttributionPreview.jsx";
 
@@ -11,6 +11,24 @@ const TYPE_ICON = {
   agent: User,
   lab: Building2,
 };
+
+function nodeMatches(node, query, typeFilter) {
+  if (typeFilter !== "all" && node.type !== typeFilter) return false;
+  if (!query) return true;
+  const haystack = [node.label, node.subtitle, node.type].join(" ").toLowerCase();
+  return haystack.includes(query);
+}
+
+function filterTree(nodes, query, typeFilter) {
+  const result = [];
+  for (const node of nodes || []) {
+    const children = filterTree(node.children, query, typeFilter);
+    if (nodeMatches(node, query, typeFilter) || children.length) {
+      result.push({ ...node, children });
+    }
+  }
+  return result;
+}
 
 function TreeNode({ node, depth = 0, expanded, onToggle, onOpenLab, onOpenEmployee }) {
   const Icon = TYPE_ICON[node.type] || User;
@@ -28,7 +46,7 @@ function TreeNode({ node, depth = 0, expanded, onToggle, onOpenLab, onOpenEmploy
       <div
         className={cn(
           "flex items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 hover:border-border hover:bg-muted/40",
-          node.type === "lab" && "cursor-pointer"
+          (node.type === "lab" || node.profileUserId) && "cursor-pointer"
         )}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
       >
@@ -88,6 +106,13 @@ function TreeNode({ node, depth = 0, expanded, onToggle, onOpenLab, onOpenEmploy
 
 export default function OwnershipExplorerTree({ orgTree = [], onOpenLab, onOpenEmployee }) {
   const [expanded, setExpanded] = useState(() => new Set(orgTree.map((node) => node.id)));
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
+
+  const filteredTree = useMemo(
+    () => filterTree(orgTree, search.trim().toLowerCase(), typeFilter),
+    [orgTree, search, typeFilter]
+  );
 
   const allNodeIds = useMemo(() => {
     const ids = [];
@@ -97,9 +122,9 @@ export default function OwnershipExplorerTree({ orgTree = [], onOpenLab, onOpenE
         walk(node.children);
       }
     };
-    walk(orgTree);
+    walk(filteredTree);
     return ids;
-  }, [orgTree]);
+  }, [filteredTree]);
 
   const toggle = (id) => {
     setExpanded((prev) => {
@@ -111,18 +136,44 @@ export default function OwnershipExplorerTree({ orgTree = [], onOpenLab, onOpenE
   };
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" size="sm" variant="outline" onClick={() => setExpanded(new Set(allNodeIds))}>
+    <div className="space-y-2">
+      <div className="sticky top-0 z-10 flex flex-wrap items-end gap-2 rounded-lg border border-border bg-card/95 px-2.5 py-2 backdrop-blur">
+        <label className="min-w-[10rem] flex-1 space-y-0.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Search</span>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              className="h-8 w-full rounded-md border border-border bg-background pl-7 pr-2 text-xs"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Name, role, or lab"
+            />
+          </div>
+        </label>
+        <label className="min-w-[7rem] space-y-0.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Type</span>
+          <select
+            className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+            value={typeFilter}
+            onChange={(event) => setTypeFilter(event.target.value)}
+          >
+            <option value="all">All types</option>
+            <option value="executive">Executive</option>
+            <option value="admin">Admin</option>
+            <option value="agent">Agent</option>
+            <option value="lab">Lab</option>
+          </select>
+        </label>
+        <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => setExpanded(new Set(allNodeIds))}>
           Expand all
         </Button>
-        <Button type="button" size="sm" variant="outline" onClick={() => setExpanded(new Set())}>
+        <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => setExpanded(new Set())}>
           Collapse all
         </Button>
       </div>
       <div className="rounded-xl border border-border bg-card p-2">
-        {orgTree.length ? (
-          orgTree.map((node) => (
+        {filteredTree.length ? (
+          filteredTree.map((node) => (
             <TreeNode
               key={node.id}
               node={node}
@@ -133,7 +184,9 @@ export default function OwnershipExplorerTree({ orgTree = [], onOpenLab, onOpenE
             />
           ))
         ) : (
-          <p className="px-3 py-6 text-sm text-muted-foreground">No ownership hierarchy available yet.</p>
+          <p className="px-3 py-6 text-sm text-muted-foreground">
+            {orgTree.length ? "No nodes match your search or filter." : "No ownership hierarchy available yet."}
+          </p>
         )}
       </div>
     </div>

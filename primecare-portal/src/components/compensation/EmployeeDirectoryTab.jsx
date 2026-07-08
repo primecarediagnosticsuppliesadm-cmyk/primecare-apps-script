@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useCallback, useEffect } from "react";
 import { Download, UserPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState, EnterpriseDataTable, KpiCard, KpiCardGrid, StatusBadge, RoleChip } from "@/components/ux";
 import PeopleOpsFilterBar from "@/components/peopleOps/PeopleOpsFilterBar.jsx";
 import PeopleOpsActionMenu from "@/components/peopleOps/PeopleOpsActionMenu.jsx";
+import PeopleOpsTableToolbar, { usePeopleOpsTableDensity } from "@/components/peopleOps/PeopleOpsTableToolbar.jsx";
 import PeopleOpsTableShell, {
   PeopleOpsTableBody,
   PeopleOpsTableCell,
@@ -13,12 +14,35 @@ import PeopleOpsTableShell, {
 import { PEOPLE_OPS_PAYROLL_STATUS_VARIANT } from "@/components/peopleOps/peopleOpsStatusTokens.js";
 import { buildEmployeeDirectoryStats } from "@/peopleOps/peopleOpsEnterpriseModel.js";
 import { COMPENSATION_EMPLOYEE_PROFILE_ROLES } from "@/compensation/enterpriseCompensationRoles.js";
+import { cn } from "@/lib/utils";
 
 const ASSIGNMENT_VARIANT = {
   active: "success",
   ended: "neutral",
   unassigned: "warning",
 };
+
+const AVATAR_STYLES = {
+  executive: "bg-violet-100 text-violet-800 ring-violet-200",
+  admin: "bg-blue-100 text-blue-800 ring-blue-200",
+  agent: "bg-emerald-100 text-emerald-800 ring-emerald-200",
+  hr: "bg-slate-100 text-slate-700 ring-slate-200",
+  default: "bg-[var(--pc-neutral-bg)] text-[var(--pc-brand-primary)] ring-border",
+};
+
+const DIRECTORY_COLUMNS = [
+  { id: "employee", label: "Employee" },
+  { id: "role", label: "Role" },
+  { id: "department", label: "Department" },
+  { id: "plan", label: "Compensation Plan" },
+  { id: "assignment", label: "Assignment Status" },
+  { id: "payroll", label: "Payroll Status" },
+  { id: "updated", label: "Updated" },
+];
+
+function employeeAvatarClass(role) {
+  return AVATAR_STYLES[String(role || "").toLowerCase()] || AVATAR_STYLES.default;
+}
 
 function exportEmployeesCsv(rows = []) {
   const header = ["Employee", "Role", "Department", "Plan", "Assignment Status", "Payroll Status", "Updated"];
@@ -61,6 +85,10 @@ export default function EmployeeDirectoryTab({
   permissions,
 }) {
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [focusedIndex, setFocusedIndex] = useState(-1);
+  const [density, setDensity] = usePeopleOpsTableDensity("compact");
+  const [visibleColumns, setVisibleColumns] = useState(() => DIRECTORY_COLUMNS.map((col) => col.id));
+  const [savedFilters, setSavedFilters] = useState([]);
 
   const planOptions = useMemo(() => {
     const codes = [...new Set(employees.map((row) => row.planCode).filter(Boolean))].sort();
@@ -82,6 +110,27 @@ export default function EmployeeDirectoryTab({
       );
     });
   }, [employees, roleFilter, planFilter, assignmentFilter, search]);
+
+  useEffect(() => {
+    setFocusedIndex(-1);
+  }, [filtered]);
+
+  const handleTableKeyDown = useCallback(
+    (event) => {
+      if (!filtered.length) return;
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setFocusedIndex((index) => Math.min(index + 1, filtered.length - 1));
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setFocusedIndex((index) => Math.max(index - 1, 0));
+      } else if (event.key === "Enter" && focusedIndex >= 0) {
+        event.preventDefault();
+        onOpenEmployee?.(filtered[focusedIndex]);
+      }
+    },
+    [filtered, focusedIndex, onOpenEmployee]
+  );
 
   const stats = useMemo(() => buildEmployeeDirectoryStats(employees), [employees]);
   const selectedRows = useMemo(
@@ -108,15 +157,15 @@ export default function EmployeeDirectoryTab({
   };
 
   return (
-    <div className="space-y-4">
-      <KpiCardGrid columns={3}>
-        <KpiCard title="Employees" value={String(stats.total)} subtitle={`${stats.assigned} assigned · ${stats.unassigned} unassigned`} icon={Users} />
-        <KpiCard title="Assigned Plans" value={String(stats.assigned)} subtitle="Active compensation assignments" icon={UserPlus} />
-        <KpiCard title="Unassigned" value={String(stats.unassigned)} subtitle="Employees without active plan" icon={Users} />
-        <KpiCard title="Executives" value={String(stats.executives)} subtitle="Executive profiles" icon={Users} />
-        <KpiCard title="HR" value={String(stats.hr)} subtitle="HR profiles" icon={Users} />
-        <KpiCard title="Agents" value={String(stats.agents)} subtitle="Field agent profiles" icon={Users} />
-        <KpiCard title="Admins" value={String(stats.admins)} subtitle="Admin profiles" icon={Users} />
+    <div className="space-y-2">
+      <KpiCardGrid columns={3} dense>
+        <KpiCard dense title="Employees" value={String(stats.total)} subtitle={`${stats.assigned} assigned · ${stats.unassigned} unassigned`} icon={Users} />
+        <KpiCard dense title="Assigned Plans" value={String(stats.assigned)} subtitle="Active compensation assignments" icon={UserPlus} />
+        <KpiCard dense title="Unassigned" value={String(stats.unassigned)} subtitle="Employees without active plan" icon={Users} />
+        <KpiCard dense title="Executives" value={String(stats.executives)} subtitle="Executive profiles" icon={Users} />
+        <KpiCard dense title="HR" value={String(stats.hr)} subtitle="HR profiles" icon={Users} />
+        <KpiCard dense title="Agents" value={String(stats.agents)} subtitle="Field agent profiles" icon={Users} />
+        <KpiCard dense title="Admins" value={String(stats.admins)} subtitle="Admin profiles" icon={Users} />
       </KpiCardGrid>
 
       <PeopleOpsFilterBar
@@ -170,6 +219,34 @@ export default function EmployeeDirectoryTab({
         }
       />
 
+      <PeopleOpsTableToolbar
+        density={density}
+        onDensityChange={setDensity}
+        columns={DIRECTORY_COLUMNS}
+        visibleColumnIds={visibleColumns}
+        onToggleColumn={(id) =>
+          setVisibleColumns((prev) => (prev.includes(id) ? prev.filter((col) => col !== id) : [...prev, id]))
+        }
+        savedFilters={savedFilters}
+        onApplyFilter={(preset) => {
+          onRoleFilterChange?.(preset.roleFilter || "all");
+          onPlanFilterChange?.(preset.planFilter || "all");
+          onAssignmentFilterChange?.(preset.assignmentFilter || "all");
+          onSearchChange?.(preset.search || "");
+        }}
+        onSaveFilter={() => {
+          const preset = {
+            id: `filter-${Date.now()}`,
+            label: roleFilter !== "all" ? `${roleFilter} filter` : "Current filter",
+            roleFilter,
+            planFilter,
+            assignmentFilter,
+            search,
+          };
+          setSavedFilters((prev) => [...prev.slice(-4), preset]);
+        }}
+      />
+
       {selectedRows.length ? (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
           <span className="text-sm font-medium text-foreground">{selectedRows.length} selected</span>
@@ -216,6 +293,7 @@ export default function EmployeeDirectoryTab({
           ) : null
         }
         desktop={
+          <div tabIndex={0} onKeyDown={handleTableKeyDown} aria-label="Employee directory table" className="outline-none focus-visible:ring-2 focus-visible:ring-[var(--pc-brand-primary)] rounded-xl">
           <PeopleOpsTableShell>
             <PeopleOpsTableHead>
               <tr>
@@ -238,9 +316,13 @@ export default function EmployeeDirectoryTab({
               </tr>
             </PeopleOpsTableHead>
             <PeopleOpsTableBody>
-              {filtered.map((employee) => (
-                <PeopleOpsTableRow key={employee.profileUserId}>
-                  <PeopleOpsTableCell>
+              {filtered.map((employee, index) => (
+                <PeopleOpsTableRow
+                  key={employee.profileUserId}
+                  className={cn(focusedIndex === index && "bg-muted/60 ring-1 ring-inset ring-[var(--pc-brand-primary)]/30")}
+                  onClick={() => onOpenEmployee?.(employee)}
+                >
+                  <PeopleOpsTableCell onClick={(event) => event.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={selectedIds.has(employee.profileUserId)}
@@ -250,16 +332,18 @@ export default function EmployeeDirectoryTab({
                     />
                   </PeopleOpsTableCell>
                   <PeopleOpsTableCell className="font-medium">
-                    <button
-                      type="button"
-                      className="flex items-center gap-2 text-left hover:text-[var(--pc-brand-primary)]"
-                      onClick={() => onOpenEmployee?.(employee)}
-                    >
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--pc-neutral-bg)] text-[10px] font-bold uppercase text-[var(--pc-brand-primary)]">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold uppercase ring-1",
+                          employeeAvatarClass(employee.role)
+                        )}
+                        aria-hidden
+                      >
                         {(employee.employeeName || "?").slice(0, 2)}
                       </span>
-                      {employee.employeeName}
-                    </button>
+                      <span>{employee.employeeName}</span>
+                    </div>
                   </PeopleOpsTableCell>
                   <PeopleOpsTableCell>
                     <RoleChip role={employee.role} />
@@ -276,7 +360,7 @@ export default function EmployeeDirectoryTab({
                     />
                   </PeopleOpsTableCell>
                   <PeopleOpsTableCell>{employee.updatedAtLabel || "—"}</PeopleOpsTableCell>
-                  <PeopleOpsTableCell>
+                  <PeopleOpsTableCell onClick={(event) => event.stopPropagation()}>
                     <PeopleOpsActionMenu
                       ariaLabel={`Actions for ${employee.employeeName}`}
                       items={[
@@ -294,6 +378,7 @@ export default function EmployeeDirectoryTab({
               ))}
             </PeopleOpsTableBody>
           </PeopleOpsTableShell>
+          </div>
         }
         mobile={
           <div className="space-y-2">

@@ -87,6 +87,7 @@ export function buildPayrollRunSummary(previewRows = [], reportingContext = null
 
   return {
     employees,
+    employeesLabel: employees === 0 ? "No employees included in this payroll version." : String(employees),
     grossPayroll,
     grossPayrollLabel: formatInr(grossPayroll),
     commission,

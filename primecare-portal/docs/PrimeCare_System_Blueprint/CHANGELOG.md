@@ -4,6 +4,54 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-08 — RC4 Enterprise Finish Pass (People Operations)
+
+### Change
+
+- Further dashboard compression (~15–20%); compact quick-action toolbar; operational timeline zone.
+- Universal **PeopleOpsReportingContextBar** in Context widget — removed duplicate period/version/status from dashboard.
+- Standardized KPI card height, typography, icon sizing, and refresh animation.
+- **ReportsExecutiveSummary** before charts; charts suppressed when no meaningful data.
+- **OwnershipCoveragePanel** with progress bar, completeness, and orphan indicators.
+- Compensation widgets: most used plan, highest commission, pending changes, inactive plans (read-only compose).
+- Payroll run review order: timeline → sticky totals → summary → tables.
+- **PeopleOpsTableToolbar**: density toggle, column chooser, saved filter presets.
+- Expanded UI validation warnings (inactive plans, missing budget, stale period, orphan ownership).
+
+### Not changed
+
+- Schema, Supabase, APIs, read models, business logic, payroll/finance/collections calculations, workflows, RLS.
+
+### Verification
+
+- `node scripts/audit-rc4-ui-certification.mjs`
+
+---
+
+## 2026-07-08 — RC3 Enterprise UX Finalization (People Operations)
+
+### Change
+
+- Compressed dashboard vertical spacing; executive work zones (action, activity, operations snapshot).
+- Unified **Work Inbox** (approvals + notifications); **Recent Activity** replaces Favorites on dashboard.
+- Compact sticky **Context Widget**; workflow progress only on Dashboard, Payroll, and Compensation.
+- Dense KPI cards globally; sticky payroll totals on Run Review; compensation executive summary widgets.
+- Employee directory: sticky headers, row hover, clickable rows, role-colored avatars/chips, keyboard navigation.
+- Budget KPI-first layout; configured vs unconfigured envelope labels; hide empty charts.
+- Business Ownership: summary KPIs before hierarchy; tree search/filter/expand controls.
+- Reports meaningful empty states with primary actions; Settings active vs roadmap separation.
+- UI data quality banners (`peopleOpsDataQualityModel`) and misleading-zero formatting (`formatPeopleOpsMetricValue`).
+
+### Not changed
+
+- Schema, Supabase, APIs, business logic, payroll/finance/collections calculations, workflows, RLS.
+
+### Verification
+
+- `node scripts/audit-rc3-ui-certification.mjs`
+
+---
+
 ## 2026-07-08 — RC2 Enterprise UX Hardening
 
 ### Change

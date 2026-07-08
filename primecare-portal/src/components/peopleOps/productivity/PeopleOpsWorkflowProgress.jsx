@@ -3,8 +3,33 @@ import { cn } from "@/lib/utils";
 import PeopleOpsSectionCard from "@/components/peopleOps/PeopleOpsSectionCard.jsx";
 import { GitBranch } from "lucide-react";
 
-export default function PeopleOpsWorkflowProgress({ stages = [] }) {
+export default function PeopleOpsWorkflowProgress({ stages = [], compact = false }) {
   if (!stages.length) return null;
+
+  if (compact) {
+    return (
+      <div className="rounded-lg border border-border bg-muted/20 px-2.5 py-2" aria-label="Payroll workflow progress">
+        <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Workflow</p>
+        <ol className="flex flex-wrap gap-2">
+          {stages.map((stage, index) => (
+            <li
+              key={stage.id}
+              className={cn(
+                "rounded-md border px-2 py-1 text-[10px] font-medium",
+                stage.state === "complete" && "border-[var(--pc-brand-primary)] bg-[var(--pc-brand-primary)]/10 text-[var(--pc-brand-primary)]",
+                stage.state === "current" && "border-[var(--pc-brand-primary)] bg-[var(--pc-brand-primary)] text-white",
+                stage.state === "upcoming" && "border-border text-muted-foreground"
+              )}
+              aria-current={stage.state === "current" ? "step" : undefined}
+            >
+              {index + 1}. {stage.label}
+            </li>
+          ))}
+        </ol>
+      </div>
+    );
+  }
+
   return (
     <PeopleOpsSectionCard title="Workflow Progress" subtitle="Payroll lifecycle for selected period" icon={GitBranch}>
       <ol className="space-y-2" aria-label="Payroll workflow progress">

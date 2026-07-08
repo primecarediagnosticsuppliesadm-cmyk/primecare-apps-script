@@ -26,7 +26,7 @@ assert(/PeopleOpsTableShell/.test(directorySrc), "ui.directory_shell", "director
 assert(/onBulkAssignPlan/.test(directorySrc), "ui.bulk_assign", "bulk assign action present");
 assert(/PeopleOpsActionMenu/.test(plansSrc), "ui.overflow_menu", "compensation plans use overflow menu");
 assert(/buildCompensationSummaryStats/.test(plansSrc), "ui.comp_summary", "compensation summary cards");
-assert(/Phase 8\.6/.test(settingsSrc), "ui.settings_landing", "settings landing is intentional");
+assert(/Active Configuration/.test(settingsSrc), "ui.settings_landing", "settings landing distinguishes active vs roadmap");
 assert(/buildPayrollRunSummary/.test(enterpriseSrc), "ui.payroll_summary_model", "payroll summary derivation");
 assert(!/supabase\/migrations/.test(pageSrc + enterpriseSrc), "guard.no_schema", "no schema changes");
 assert(modelSrc === readFileSync(resolve(root, "src/compensation/executiveCompensationModel.js"), "utf8"), "guard.model", "compensation model unchanged");

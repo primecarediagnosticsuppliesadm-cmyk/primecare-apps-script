@@ -18,8 +18,8 @@ function assert(c, id, d) { c ? pass(id, d) : fail(id, d); }
 
 assert(/buildDashboardPayrollCard/.test(dashboardSrc), "dash.context_card", "payroll status card uses reporting context");
 assert(/buildDashboardPendingActions/.test(dashboardSrc), "dash.pending_actions", "pending actions are actionable");
-assert(/Current Reporting Context/.test(dashboardSrc), "dash.reporting_context", "reporting context card present");
-assert(/Last refresh/.test(dashboardSrc), "dash.last_refresh", "last refresh shown");
+assert(/PeopleOpsReportingContextBar|PeopleOpsContextWidget/.test(readFileSync(resolve(root, "src/pages/ExecutiveCompensationCenterPage.jsx"), "utf8")), "dash.reporting_context", "reporting context in universal context widget");
+assert(/PeopleOpsDataQualityBanner/.test(dashboardSrc), "dash.data_quality", "data quality banner on dashboard");
 assert(!/TrendBars/.test(dashboardSrc), "dash.no_trends", "dashboard excludes trend charts");
 assert(!/collectionEfficiencyLabel/.test(dashboardSrc), "dash.no_analytics_dup", "collection efficiency removed from dashboard");
 assert(/model\.kpis\.employeeCount/.test(dashboardSrc), "dash.run_employee_count", "employee count from reporting context KPIs");
