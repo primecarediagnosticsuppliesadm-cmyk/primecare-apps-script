@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity, CheckCircle2, Users } from "lucide-react";
+import { Activity, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EnterpriseMetricStrip } from "@/components/ux";
 import PeopleOpsModuleFrame from "@/components/peopleOps/PeopleOpsModuleFrame.jsx";
@@ -9,6 +9,7 @@ import PeopleOpsWorkInbox from "@/components/peopleOps/productivity/PeopleOpsWor
 import PeopleOpsRecentActivity from "@/components/peopleOps/productivity/PeopleOpsRecentActivity.jsx";
 import PeopleOpsWorkflowProgress from "@/components/peopleOps/productivity/PeopleOpsWorkflowProgress.jsx";
 import PeopleOpsDataQualityBanner from "@/components/peopleOps/PeopleOpsDataQualityBanner.jsx";
+import PeopleOpsGuidedOnboarding from "@/components/peopleOps/PeopleOpsGuidedOnboarding.jsx";
 import { formatPeopleOpsMetricValue } from "@/peopleOps/peopleOpsDataQualityModel.js";
 import {
   buildDashboardPayrollCard,
@@ -39,8 +40,9 @@ export default function PeopleOpsDashboard({
   return (
     <PeopleOpsModuleFrame
       title="People Operations"
-      description="Executive workspace — action, activity, and payroll operations."
+      description="See payroll blockers, work that needs attention, and where this pay cycle stands."
       breadcrumbs={breadcrumbs}
+      helpModuleId="dashboard"
       dense
       summary={
         <EnterpriseMetricStrip
@@ -51,11 +53,12 @@ export default function PeopleOpsDashboard({
             { id: "inbox", label: "Work inbox", value: String(inboxCount + notificationCount), hint: inboxCount ? "Needs action" : "Clear" },
             { id: "employees", label: "Employees", value: String(employeeCount) },
             { id: "pending", label: "Pending", value: String(pending.count) },
-            { id: "run", label: "In run", value: formatPeopleOpsMetricValue(model.kpis.employeeCount, { emptyLabel: "None" }) },
+            { id: "run", label: "In payroll run", value: formatPeopleOpsMetricValue(model.kpis.employeeCount, { emptyLabel: "None" }) },
           ]}
         />
       }
     >
+      <PeopleOpsGuidedOnboarding onNavigate={(route) => onOpenRoute?.(route)} />
       <PeopleOpsDataQualityBanner warnings={dataQualityWarnings} onNavigate={(route) => onOpenRoute?.(route)} />
       <PeopleOpsQuickActions actions={productivity?.quickActions || []} onAction={onQuickAction} busy={workflowBusy} />
 
@@ -74,7 +77,7 @@ export default function PeopleOpsDashboard({
           <dl className="grid grid-cols-2 gap-1 text-xs">
             {[
               ["Directory", employeeCount],
-              ["In run", formatPeopleOpsMetricValue(model.kpis.employeeCount, { emptyLabel: "None in version" })],
+              ["In payroll run", formatPeopleOpsMetricValue(model.kpis.employeeCount, { emptyLabel: "None yet" })],
               ["Paid evidence", model.kpis.paidEvidenceRuns || "None"],
               ["Commission", model.kpis.commissionPayableLabel || "Not configured"],
             ].map(([label, value]) => (
@@ -101,7 +104,7 @@ export default function PeopleOpsDashboard({
                 ))}
               </ul>
             ) : (
-              <p className="text-xs text-muted-foreground">No pending payroll actions for the selected context.</p>
+              <p className="text-xs text-muted-foreground">No pending payroll actions for the selected period.</p>
             )}
             <div className="mt-1.5 flex flex-wrap gap-1">
               <Button type="button" size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={onNavigatePayroll}>

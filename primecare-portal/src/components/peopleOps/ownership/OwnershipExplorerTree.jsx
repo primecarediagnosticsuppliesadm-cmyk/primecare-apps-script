@@ -185,7 +185,9 @@ export default function OwnershipExplorerTree({ orgTree = [], onOpenLab, onOpenE
           ))
         ) : (
           <p className="px-3 py-6 text-sm text-muted-foreground">
-            {orgTree.length ? "No nodes match your search or filter." : "No ownership hierarchy available yet."}
+            {orgTree.length
+              ? "No people or laboratories match your search."
+              : "No Business Ownership assigned yet. Assign owners in Operations Center."}
           </p>
         )}
       </div>

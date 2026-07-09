@@ -1,11 +1,14 @@
 /**
- * RC3/RC4 — UI-only data quality warnings derived from existing read models.
- * Does not mutate data or change business rules.
+ * RC3–RC5 — UI-only data quality / business validation warnings.
+ * Derived from existing read models. Does not mutate data or change business rules.
  */
 function str(value) {
   return String(value ?? "").trim();
 }
 
+/**
+ * Build founder-facing blockers: Problem → Why → Action.
+ */
 export function buildPeopleOpsDataQualityWarnings({
   model = null,
   employeeList = [],
@@ -21,9 +24,11 @@ export function buildPeopleOpsDataQualityWarnings({
     warnings.push({
       id: "missing-assignments",
       severity: "warning",
-      title: `${withoutPlan.length} employee(s) without active plan assignment`,
-      detail: "Assign compensation plans before payroll preview for complete run coverage.",
-      actionLabel: "Open Employees",
+      blockerLabel: "Payroll Blocker",
+      title: `${withoutPlan.length} employee${withoutPlan.length === 1 ? "" : "s"} cannot be included in payroll.`,
+      detail: "No compensation plan assigned.",
+      why: "Payroll needs an active Compensation Plan for every employee in the run.",
+      actionLabel: "Assign Compensation Plans →",
       actionRoute: { moduleId: "employees", screenId: "directory" },
     });
   }
@@ -39,9 +44,11 @@ export function buildPeopleOpsDataQualityWarnings({
     warnings.push({
       id: "duplicate-names",
       severity: "attention",
-      title: "Possible duplicate employee display names",
-      detail: `${duplicates.length} name(s) appear more than once in the directory.`,
-      actionLabel: "Open Employees",
+      blockerLabel: "Directory Attention",
+      title: "Possible duplicate employee names",
+      detail: `${duplicates.length} name${duplicates.length === 1 ? "" : "s"} appear more than once.`,
+      why: "Duplicate names can confuse payroll review and reporting.",
+      actionLabel: "Review Employees →",
       actionRoute: { moduleId: "employees", screenId: "directory" },
     });
   }
@@ -51,21 +58,25 @@ export function buildPeopleOpsDataQualityWarnings({
     warnings.push({
       id: "ownership-gaps",
       severity: "warning",
-      title: `${gaps.length} lab ownership gap(s)`,
-      detail: "Some labs lack primary agent or reporting admin in lab_ownership.",
-      actionLabel: "Business Ownership",
+      blockerLabel: "Commission Blocker",
+      title: `${gaps.length} laborator${gaps.length === 1 ? "y is" : "ies are"} not assigned to an Agent or Reporting Admin.`,
+      detail: "Commission cannot be calculated for unassigned laboratories.",
+      why: "Business Ownership links each laboratory to the person who earns commission on collections.",
+      actionLabel: "Open Business Ownership →",
       actionRoute: { moduleId: "ownership", screenId: "dashboard" },
     });
   }
 
   const orphanLabs = ownershipWorkspace?.dashboard?.unassignedLabs ?? 0;
-  if (orphanLabs > 0) {
+  if (orphanLabs > 0 && !gaps.length) {
     warnings.push({
       id: "orphan-ownership",
       severity: "attention",
-      title: `${orphanLabs} lab(s) with orphan ownership`,
-      detail: "Labs without complete ownership assignment in the current scope.",
-      actionLabel: "Business Ownership",
+      blockerLabel: "Commission Attention",
+      title: `${orphanLabs} laborator${orphanLabs === 1 ? "y has" : "ies have"} incomplete Business Ownership.`,
+      detail: "Assign a Primary Agent and Reporting Admin so commission can flow correctly.",
+      why: "Incomplete ownership leaves collections without a clear commission path.",
+      actionLabel: "Open Business Ownership →",
       actionRoute: { moduleId: "ownership", screenId: "explorer" },
     });
   }
@@ -75,10 +86,12 @@ export function buildPeopleOpsDataQualityWarnings({
     warnings.push({
       id: "no-run-version",
       severity: "info",
-      title: "No payroll run version selected",
-      detail: "Generate or select a payroll preview run for employee-level lines.",
-      actionLabel: "Open Payroll",
-      actionRoute: { moduleId: "payroll", screenId: "run-review" },
+      blockerLabel: "Payroll Ready",
+      title: "Payroll has not been generated for this reporting period.",
+      detail: "Generate a Payroll Preview to calculate salary and commission lines.",
+      why: "A payroll run is required before you can review or approve pay.",
+      actionLabel: "Generate Payroll Preview →",
+      actionRoute: { moduleId: "payroll", screenId: "periods" },
     });
   }
 
@@ -87,10 +100,12 @@ export function buildPeopleOpsDataQualityWarnings({
     warnings.push({
       id: "empty-run",
       severity: "attention",
-      title: "No employees included in this payroll version",
-      detail: "Preview lines are empty for the selected period and version.",
-      actionLabel: "Open Payroll",
-      actionRoute: { moduleId: "payroll", screenId: "run-review" },
+      blockerLabel: "Payroll Blocker",
+      title: "Payroll cannot be generated with employee lines yet.",
+      detail: "This payroll run has zero employees.",
+      why: "Possible reasons: no employees assigned, compensation plans missing, or preview generated before assignments were complete.",
+      actionLabel: "Fix Employees & Plans →",
+      actionRoute: { moduleId: "employees", screenId: "directory" },
     });
   }
 
@@ -99,9 +114,11 @@ export function buildPeopleOpsDataQualityWarnings({
     warnings.push({
       id: "draft-plans",
       severity: "info",
-      title: `${draftPlans.length} compensation plan(s) in draft`,
-      detail: "Activate plans before assigning to employees.",
-      actionLabel: "Compensation Plans",
+      blockerLabel: "Compensation Attention",
+      title: `${draftPlans.length} Compensation Plan${draftPlans.length === 1 ? "" : "s"} still in draft.`,
+      detail: "Activate plans before assigning them to employees.",
+      why: "Draft plans are templates only until activated.",
+      actionLabel: "Open Compensation Plans →",
       actionRoute: { moduleId: "compensation", screenId: "plans" },
     });
   }
@@ -111,10 +128,35 @@ export function buildPeopleOpsDataQualityWarnings({
     warnings.push({
       id: "inactive-plans",
       severity: "info",
-      title: `${inactivePlans.length} inactive plan version(s)`,
-      detail: "Retired plans remain for history; verify active assignments use current versions.",
-      actionLabel: "Compensation Plans",
+      blockerLabel: "Compensation Note",
+      title: `${inactivePlans.length} inactive Compensation Plan${inactivePlans.length === 1 ? "" : "s"}.`,
+      detail: "Inactive plans stay for history. Confirm active employees use current plans.",
+      why: "Employees on inactive plans may be excluded from new payroll runs.",
+      actionLabel: "Review Compensation Plans →",
       actionRoute: { moduleId: "compensation", screenId: "plans" },
+    });
+  }
+
+  const plansWithoutEmployees = (adminModel?.planRows || []).filter((plan) => {
+    if (plan.status !== "active") return false;
+    const code = str(plan.planCode || plan.plan_code);
+    const assigned = (adminModel?.assignmentRows || []).some(
+      (row) =>
+        (row.status === "active" || row.assignmentStatus === "active") &&
+        str(row.planCode || row.plan_code) === code
+    );
+    return !assigned;
+  });
+  if (plansWithoutEmployees.length) {
+    warnings.push({
+      id: "plans-without-employees",
+      severity: "info",
+      blockerLabel: "Next Step",
+      title: `${plansWithoutEmployees.length} Compensation Plan${plansWithoutEmployees.length === 1 ? "" : "s"} have no employees assigned.`,
+      detail: "Assign employees so payroll can use these pay templates.",
+      why: "A plan with zero employees does not affect payroll until someone is assigned.",
+      actionLabel: "Assign Employees →",
+      actionRoute: { moduleId: "compensation", screenId: "assignments" },
     });
   }
 
@@ -123,9 +165,11 @@ export function buildPeopleOpsDataQualityWarnings({
     warnings.push({
       id: "missing-budget",
       severity: "info",
-      title: "Budget not configured",
-      detail: "Workforce planning envelope derives from payroll preview — generate a preview first.",
-      actionLabel: "Open Budget",
+      blockerLabel: "Budget Note",
+      title: "Workforce budget is not configured yet.",
+      detail: "Generate a Payroll Preview first — budgeting uses payroll as its planning baseline.",
+      why: "Without a payroll preview, the workforce cost envelope has nothing to plan against.",
+      actionLabel: "Open Budgeting →",
       actionRoute: { moduleId: "budgeting", screenId: "overview" },
     });
   }
@@ -137,9 +181,11 @@ export function buildPeopleOpsDataQualityWarnings({
       warnings.push({
         id: "stale-period",
         severity: "attention",
-        title: "Reporting period may be stale",
-        detail: "Selected period is not the most recent payroll period in the read model.",
-        actionLabel: "Dashboard",
+        blockerLabel: "Reporting Attention",
+        title: "Reporting period may be out of date.",
+        detail: "You are viewing an older payroll period, not the most recent one.",
+        why: "Approvals and reports should usually use the current reporting period.",
+        actionLabel: "Open Dashboard →",
         actionRoute: { moduleId: "dashboard", screenId: "home" },
       });
     }

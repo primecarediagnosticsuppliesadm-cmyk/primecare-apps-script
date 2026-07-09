@@ -89,8 +89,9 @@ export default function PeopleOpsReportsPanel({
   return (
     <PeopleOpsModuleFrame
       title="Analytics & Reports"
-      description="Executive summary, trends, rankings, and forecast scenarios. Read-only."
+      description="Business summary first — then trends and rankings. Read-only."
       breadcrumbs={breadcrumbs}
+      helpModuleId="reports"
       dense
       summary={<ReportsExecutiveSummary model={model} executivePerformance={executivePerformance} />}
     >
@@ -128,8 +129,8 @@ export default function PeopleOpsReportsPanel({
       ) : (
         <EmptyState
           compact
-          title="No payroll trends yet"
-          description="Generate payroll previews across periods to unlock trend charts and rankings."
+          title="No payroll generated yet."
+          description="Generate a Payroll Preview across periods to unlock trend charts and rankings."
           action={payrollAction}
         />
       )}

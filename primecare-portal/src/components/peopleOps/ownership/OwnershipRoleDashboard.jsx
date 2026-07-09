@@ -59,7 +59,7 @@ export default function OwnershipRoleDashboard({ workspace, breadcrumbs = [] }) 
           </div>
           <EnterpriseDataTable
             hasRows={gaps.length > 0}
-            emptyTitle="No ownership gaps"
+            emptyTitle="All laboratories have Business Ownership assigned"
             emptyDescription="Every scoped lab has a primary agent and reporting admin."
             desktop={
               <div className="overflow-x-auto rounded-lg border">

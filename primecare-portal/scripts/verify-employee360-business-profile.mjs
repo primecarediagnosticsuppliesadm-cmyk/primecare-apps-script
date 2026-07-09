@@ -21,7 +21,8 @@ assert(/export function buildEmployee360BusinessProfile/.test(modelSrc), "model.
 assert(/identity|compensation|labsManaged|collections|ownership|payroll|performance/.test(modelSrc), "model.sections", "profile sections");
 assert(/previewOnly:\s*true/.test(modelSrc), "model.readonly", "read only");
 assert(/businessProfile/.test(panelSrc), "panel.prop", "panel accepts businessProfile");
-assert(/Business Profile/.test(panelSrc), "panel.ui", "business profile section rendered");
+assert(/Performance|Business Ownership|Current Pay Structure|Payroll History/.test(panelSrc), "panel.ui", "business-facing 360 sections rendered");
+assert(/EmployeeBusinessSummaryCard/.test(panelSrc), "panel.summary", "employee business summary card");
 assert(/businessProfile/.test(drawerSrc), "drawer.prop", "drawer passes businessProfile");
 assert(/buildEmployee360BusinessProfile/.test(pageSrc), "page.builder", "page builds business profile");
 assert(/businessProfile=\{employeeBusinessProfile\}/.test(pageSrc), "page.wired", "drawer receives profile");

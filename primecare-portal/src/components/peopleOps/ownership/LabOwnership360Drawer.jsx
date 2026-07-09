@@ -49,11 +49,9 @@ export default function LabOwnership360Drawer({ open, onClose, labModel }) {
       >
         <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
           <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Lab Ownership</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Business Ownership</p>
             <h2 className="truncate text-lg font-semibold text-foreground">{labModel.labName}</h2>
-            <p className="truncate text-xs text-muted-foreground">
-              {labModel.labId} · SoT {labModel.canonicalSource || "lab_ownership"}
-            </p>
+            <p className="truncate text-xs text-muted-foreground">{labModel.territory || "Territory not set"}</p>
           </div>
           <Button type="button" variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={onClose} aria-label="Close">
             <X className="h-4 w-4" />
@@ -62,18 +60,32 @@ export default function LabOwnership360Drawer({ open, onClose, labModel }) {
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
           <div className="flex flex-wrap gap-2">
-            <StatusBadge variant="info" label="Read only" />
+            <StatusBadge variant="info" label="Review only" />
             <StatusBadge variant={labModel.ownershipStatus === "ACTIVE" ? "success" : "warning"} label={labModel.ownershipStatus} />
           </div>
 
+          {!labModel.agentName || !labModel.adminName ? (
+            <div className="rounded-lg border border-[var(--pc-warning-border)] bg-[var(--pc-warning-bg)] px-3 py-2 text-xs text-[var(--pc-warning)]">
+              <p className="font-semibold">This laboratory cannot generate commission until ownership is assigned.</p>
+              <p className="mt-1 opacity-90">Assign a Primary Agent and Reporting Admin in Operations Center.</p>
+            </div>
+          ) : null}
+
           <section className="grid gap-3 rounded-xl border border-border bg-card p-4 md:grid-cols-2">
+            <Field label="Primary Agent" value={labModel.agentName || "Not assigned"} />
+            <Field label="Reporting Admin" value={labModel.adminName || "Not assigned"} />
+            <Field label="Executive" value={labModel.executiveName || "Not assigned"} />
+            <Field
+              label="Commission Path"
+              value={
+                [labModel.executiveName, labModel.adminName, labModel.agentName, labModel.labName]
+                  .filter(Boolean)
+                  .join(" → ") || "Incomplete"
+              }
+            />
             <Field label="Territory" value={labModel.territory} />
-            <Field label="Executive" value={labModel.executiveName} />
-            <Field label="Admin" value={labModel.adminName} />
-            <Field label="Primary Agent" value={labModel.agentName} />
             <Field label="Collections (period)" value={labModel.collectionsLabel} />
             <Field label="Orders (delivered)" value={labModel.ordersVolumeLabel} />
-            <Field label="Payments (count)" value={labModel.paymentsCountLabel} />
             <Field label="Outstanding" value={labModel.outstandingLabel} />
           </section>
 

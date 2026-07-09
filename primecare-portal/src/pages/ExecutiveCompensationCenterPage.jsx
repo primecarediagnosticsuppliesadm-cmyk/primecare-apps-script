@@ -60,6 +60,8 @@ import { buildPeopleOpsDataQualityWarnings } from "@/peopleOps/peopleOpsDataQual
 import EmployeeCompensation360Drawer from "@/components/peopleOps/EmployeeCompensation360Drawer.jsx";
 import PeopleOpsSettingsLanding from "@/components/peopleOps/PeopleOpsSettingsLanding.jsx";
 import PeopleOpsPayrollSummary from "@/components/peopleOps/PeopleOpsPayrollSummary.jsx";
+import PeopleOpsPayrollLineBreakdown from "@/components/peopleOps/PeopleOpsPayrollLineBreakdown.jsx";
+import PeopleOpsPayrollEmptyState from "@/components/peopleOps/PeopleOpsPayrollEmptyState.jsx";
 import PeopleOpsWorkflowProgress from "@/components/peopleOps/productivity/PeopleOpsWorkflowProgress.jsx";
 import PeopleOpsBudgetingModule from "@/components/peopleOps/budgeting/PeopleOpsBudgetingModule.jsx";
 import PeopleOpsOwnershipModule from "@/components/peopleOps/ownership/PeopleOpsOwnershipModule.jsx";
@@ -287,7 +289,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         planInput,
       });
       if (!result.success) throw new Error(result.error || "Plan create failed");
-      showToast("success", "Compensation plan draft created.");
+      showToast("success", "Compensation Plan created successfully. Next: Assign Employees →");
       await loadAdmin();
     } catch (err) {
       setError(err?.message || "Could not create compensation plan");
@@ -995,11 +997,16 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         adminModel ? (
         <PeopleOpsModuleFrame
           title="Compensation Plans"
-          description="Create and manage compensation plan versions."
+          description="Pay templates for salary, allowances, and commission. Assign employees after creating a plan."
           breadcrumbs={breadcrumbs}
+          helpModuleId="compensation"
         >
         {showWorkflowProgress ? <PeopleOpsWorkflowProgress stages={productivity?.workflowProgress || []} compact /> : null}
-        <CompensationExecutiveSummary adminModel={adminModel} model={model} />
+        <CompensationExecutiveSummary
+          adminModel={adminModel}
+          model={model}
+          onAssignEmployees={() => navigatePeopleOps({ moduleId: "compensation", screenId: "assignments" })}
+        />
         <CompensationPlansTab
           adminModel={adminModel}
           permissions={adminPermissions}
@@ -1009,6 +1016,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           onDuplicatePlan={handleDuplicatePlan}
           onDeactivatePlan={handleDeactivatePlan}
           onActivatePlan={handleActivatePlan}
+          onAssignEmployees={() => navigatePeopleOps({ moduleId: "compensation", screenId: "assignments" })}
           onViewAssignments={(row) => {
             navigatePeopleOps({ moduleId: "compensation", screenId: "assignments" });
             setEmployeeSearch(row.planCode || "");
@@ -1017,7 +1025,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         />
         </PeopleOpsModuleFrame>
         ) : (
-          <PeopleOpsModuleFrame title="Compensation Plans" description="Create and manage compensation plan versions." breadcrumbs={breadcrumbs}>
+          <PeopleOpsModuleFrame title="Compensation Plans" description="Pay templates for salary, allowances, and commission." breadcrumbs={breadcrumbs} helpModuleId="compensation">
             {adminBusy || loading ? <ListSkeleton rows={6} /> : (
               <DataFetchError message="Compensation plans could not be loaded." onRetry={() => void loadAdmin()} retrying={adminBusy} />
             )}
@@ -1028,12 +1036,17 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
       {activeModuleId === "compensation" && activeScreenId === "assignments" ? (
         adminModel ? (
         <PeopleOpsModuleFrame
-          title="Plan Assignments"
-          description="Assign employees to compensation plans and manage assignment history."
+          title="Compensation Assignments"
+          description="Link each employee to a Compensation Plan so they can be included in payroll."
           breadcrumbs={breadcrumbs}
+          helpModuleId="compensation"
         >
         {showWorkflowProgress ? <PeopleOpsWorkflowProgress stages={productivity?.workflowProgress || []} compact /> : null}
-        <CompensationExecutiveSummary adminModel={adminModel} model={model} />
+        <CompensationExecutiveSummary
+          adminModel={adminModel}
+          model={model}
+          onAssignEmployees={() => navigatePeopleOps({ moduleId: "compensation", screenId: "assignments" })}
+        />
         <CompensationPlanAssignmentsTab
           adminModel={adminModel}
           permissions={adminPermissions}
@@ -1045,7 +1058,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         />
         </PeopleOpsModuleFrame>
         ) : (
-          <PeopleOpsModuleFrame title="Plan Assignments" description="Assign employees to compensation plans and manage assignment history." breadcrumbs={breadcrumbs}>
+          <PeopleOpsModuleFrame title="Compensation Assignments" description="Link each employee to a Compensation Plan so they can be included in payroll." breadcrumbs={breadcrumbs} helpModuleId="compensation">
             {adminBusy || loading ? <ListSkeleton rows={6} /> : (
               <DataFetchError message="Plan assignments could not be loaded." onRetry={() => void loadAdmin()} retrying={adminBusy} />
             )}
@@ -1055,9 +1068,10 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
 
       {activeModuleId === "payroll" && activeScreenId === "periods" && model ? (
         <PeopleOpsModuleFrame
-          title="Payroll Periods"
-          description="Review payroll cycles, generate previews, and run approval workflow."
+          title="Pay Periods"
+          description="Review pay cycles, generate a Payroll Preview, and run the approval workflow."
           breadcrumbs={breadcrumbs}
+          helpModuleId="payroll"
           dense
           summary={
             <PeopleOpsPayrollSummary
@@ -1084,8 +1098,8 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           <EnterpriseDataTable
             hasRows={model.periodRows.length > 0}
             loading={refreshing && !model.periodRows.length}
-            emptyTitle="No Payroll Generated Yet"
-            emptyDescription="Generate your first payroll preview from a payroll period to begin the approval cycle."
+            emptyTitle="No payroll generated yet."
+            emptyDescription="Generate a Payroll Preview for a pay period to begin the approval cycle."
             desktop={
               <div className="overflow-x-auto rounded-lg border bg-white">
                 <table className="min-w-full text-left text-[11px]">
@@ -1162,24 +1176,25 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
 
       {activeModuleId === "payroll" && activeScreenId === "run-review" && model ? (
         <PeopleOpsModuleFrame
-          title="Run Review"
-          description="Inspect employee-level payroll preview lines for the selected period and run version."
+          title="Payroll Preview"
+          description="Review each employee’s salary, allowances, and commission before approval."
           breadcrumbs={breadcrumbs}
+          helpModuleId="payroll"
           dense
           filters={
             <PeopleOpsFilterBar
               search={search}
               onSearchChange={setSearch}
-              searchPlaceholder="Search agent, plan, or period"
+              searchPlaceholder="Search employee, plan, or period"
               filters={[
                 {
                   id: "status",
-                  label: "Lifecycle status",
+                  label: "Payroll status",
                   value: statusFilter,
                   clearValue: "",
                   onChange: setStatusFilter,
                   options: [
-                    { value: "", label: "All lifecycle statuses" },
+                    { value: "", label: "All statuses" },
                     ...lifecycleStatuses.map((status) => ({ value: status, label: status })),
                   ],
                 },
@@ -1205,77 +1220,30 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
               onAction={handlePayrollWorkflowAction}
             />
           ) : null}
-          <EnterpriseDataTable
-          hasRows={previewRows.length > 0}
-          loading={refreshing && !previewRows.length}
-          emptyTitle="No Payroll Preview Lines"
-          emptyDescription="Select a payroll period or generate a preview run to inspect employee-level results."
-          desktop={
-            <div className="overflow-x-auto rounded-lg border bg-white">
-              <table className="min-w-full text-left text-[11px]">
-                <thead className="border-b bg-slate-50 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                  <tr>
-                    {[
-                      ["agentName", "Agent"],
-                      ["planCode", "Compensation Plan"],
-                      ["salaryLabel", "Salary"],
-                      ["fuelLabel", "Fuel"],
-                      ["mobileLabel", "Mobile"],
-                      ["collectedCashLabel", "Collected Cash"],
-                      ["commissionLabel", "Commission"],
-                      ["bonusesLabel", "Bonuses"],
-                      ["adjustmentsLabel", "Adjustments"],
-                      ["recoveriesLabel", "Recoveries"],
-                      ["netPreviewLabel", "Net Preview"],
-                      ["lifecycleStatus", "Lifecycle Status"],
-                      ["ruleVersion", "Rule Version"],
-                      ["planVersion", "Plan Version"],
-                      ["calculatedAtLabel", "Calculated At"],
-                      ["", ""],
-                    ].map(([key, label]) => (
-                      <th
-                        key={label || key}
-                        className="cursor-pointer px-2 py-2"
-                        onClick={() => key && toggleSort(key)}
-                      >
-                        {label}
-                        {sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : null}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {previewRows.map((row) => (
-                    <tr key={row.lineId} className="border-b border-slate-100 last:border-0">
-                      <td className="px-2 py-2 font-medium">{row.agentName}</td>
-                      <td className="px-2 py-2">{row.planCode}</td>
-                      <td className="px-2 py-2 tabular-nums">{row.salaryLabel}</td>
-                      <td className="px-2 py-2 tabular-nums">{row.fuelLabel}</td>
-                      <td className="px-2 py-2 tabular-nums">{row.mobileLabel}</td>
-                      <td className="px-2 py-2 tabular-nums">{row.collectedCashLabel}</td>
-                      <td className="px-2 py-2 tabular-nums">{row.commissionLabel}</td>
-                      <td className="px-2 py-2 tabular-nums">{row.bonusesLabel}</td>
-                      <td className="px-2 py-2 tabular-nums">{row.adjustmentsLabel}</td>
-                      <td className="px-2 py-2 tabular-nums">{row.recoveriesLabel}</td>
-                      <td className="px-2 py-2 tabular-nums font-semibold text-indigo-700">{row.netPreviewLabel}</td>
-                      <td className="px-2 py-2">
-                        <StatusBadge variant={STATUS_VARIANT[row.lifecycleStatus] || "neutral"} label={row.lifecycleStatus} />
-                      </td>
-                      <td className="px-2 py-2">{row.ruleVersion}</td>
-                      <td className="px-2 py-2">{row.planVersion}</td>
-                      <td className="px-2 py-2">{row.calculatedAtLabel}</td>
-                      <td className="px-2 py-2">
-                        <Button type="button" size="sm" variant="ghost" className="h-7 text-[10px]" onClick={() => openEmployeeFromPreview(row)}>
-                          View Employee
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {previewRows.length > 0 ? (
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                Employee payroll breakdown — expand a row for Salary, Fuel, Mobile, Commission, Adjustments, Recoveries, Bonuses, and Net Payroll
+              </p>
+              {previewRows.map((row) => (
+                <PeopleOpsPayrollLineBreakdown
+                  key={row.lineId}
+                  row={row}
+                  onViewEmployee={openEmployeeFromPreview}
+                />
+              ))}
             </div>
-          }
-        />
+          ) : (
+            <PeopleOpsPayrollEmptyState
+              hasEmployees={employeeList.length > 0}
+              hasAssignments={employeeList.some((row) => row.assignmentStatus === "active")}
+              hasRun={Boolean(model?.reportingContext?.payrollRunId)}
+              onGeneratePreview={() => navigatePeopleOps({ moduleId: "payroll", screenId: "periods" })}
+              onOpenEmployees={() => navigatePeopleOps({ moduleId: "employees", screenId: "directory" })}
+              onOpenCompensation={() => navigatePeopleOps({ moduleId: "compensation", screenId: "plans" })}
+              onOpenOwnership={() => navigatePeopleOps({ moduleId: "ownership", screenId: "explorer" })}
+            />
+          )}
           <CollectionCompensationDashboard
             rows={model.collectionCompensation || []}
             reportingContext={model.reportingContext}
@@ -1286,8 +1254,9 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
       {activeModuleId === "employees" && model ? (
         <PeopleOpsModuleFrame
           title="Employees"
-          description="Enterprise employee directory and Employee Compensation 360."
+          description="Who is on the HQ team — open anyone to see identity, ownership, pay, and performance."
           breadcrumbs={breadcrumbs}
+          helpModuleId="employees"
           dense
         >
           <EmployeeDirectoryTab

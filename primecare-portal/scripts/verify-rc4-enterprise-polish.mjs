@@ -40,9 +40,9 @@ assert(/hasChartData|hasAnyTrend/.test(src.reports), "rc4.reports_no_empty_shell
 assert(/min-h-\[4\.25rem\]/.test(src.kpi), "rc4.kpi_height", "standardized KPI card height");
 assert(/PeopleOpsTableToolbar/.test(src.directory), "rc4.table_toolbar", "directory table experience toolbar");
 assert(/OwnershipCoveragePanel|coveragePct/.test(src.ownership + src.page), "rc4.ownership_coverage", "ownership coverage visualization");
-assert(/Most Used Plan|Highest Commission|Pending Plan Changes/.test(src.compensation), "rc4.compensation_widgets", "compensation executive widgets");
+assert(/Most Used Plan|Highest Commission|Promotion Eligible|Inactive Plans/.test(src.compensation), "rc4.compensation_widgets", "compensation executive widgets");
 assert(/PeopleOpsPayrollStickyTotals/.test(src.page), "rc4.payroll_sticky_order", "payroll sticky totals in run review flow");
-assert(/payroll version/.test(src.enterprise), "rc4.payroll_empty_message", "payroll empty employee messaging");
+assert(/Payroll cannot be generated|payroll version|No employees/.test(src.enterprise), "rc4.payroll_empty_message", "payroll empty employee messaging");
 assert(/missing-budget|inactive-plans|orphan-ownership|stale-period/.test(src.dataQuality), "rc4.validation_ux", "expanded validation warnings");
 assert(/Budget not configured/.test(readFileSync(resolve(root, "src/components/peopleOps/budgeting/WorkforceBudgetOverview.jsx"), "utf8")), "rc4.budget_not_configured", "budget missing config label");
 assert(!/supabase\/migrations/.test(src.page + src.dashboard), "guard.no_schema", "no schema changes");

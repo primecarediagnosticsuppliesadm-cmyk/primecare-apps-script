@@ -35,7 +35,7 @@ const DIRECTORY_COLUMNS = [
   { id: "role", label: "Role" },
   { id: "department", label: "Department" },
   { id: "plan", label: "Compensation Plan" },
-  { id: "assignment", label: "Assignment Status" },
+  { id: "assignment", label: "Compensation Assignment" },
   { id: "payroll", label: "Payroll Status" },
   { id: "updated", label: "Updated" },
 ];
@@ -160,8 +160,8 @@ export default function EmployeeDirectoryTab({
     <div className="space-y-2">
       <KpiCardGrid columns={3} dense>
         <KpiCard dense title="Employees" value={String(stats.total)} subtitle={`${stats.assigned} assigned · ${stats.unassigned} unassigned`} icon={Users} />
-        <KpiCard dense title="Assigned Plans" value={String(stats.assigned)} subtitle="Active compensation assignments" icon={UserPlus} />
-        <KpiCard dense title="Unassigned" value={String(stats.unassigned)} subtitle="Employees without active plan" icon={Users} />
+        <KpiCard dense title="Assigned Plans" value={String(stats.assigned)} subtitle="Active Compensation Assignments" icon={UserPlus} />
+        <KpiCard dense title="Unassigned" value={String(stats.unassigned)} subtitle="Cannot be included in payroll yet" icon={Users} />
         <KpiCard dense title="Executives" value={String(stats.executives)} subtitle="Executive profiles" icon={Users} />
         <KpiCard dense title="HR" value={String(stats.hr)} subtitle="HR profiles" icon={Users} />
         <KpiCard dense title="Agents" value={String(stats.agents)} subtitle="Field agent profiles" icon={Users} />
@@ -194,7 +194,7 @@ export default function EmployeeDirectoryTab({
           },
           {
             id: "assignment",
-            label: "Assignment Status",
+            label: "Compensation Assignment",
             value: assignmentFilter,
             clearValue: "all",
             onChange: onAssignmentFilterChange,
@@ -202,7 +202,7 @@ export default function EmployeeDirectoryTab({
               { value: "all", label: "All statuses" },
               { value: "active", label: "Active" },
               { value: "ended", label: "Ended" },
-              { value: "unassigned", label: "Unassigned" },
+              { value: "unassigned", label: "No plan assigned" },
             ],
           },
         ]}
@@ -269,11 +269,11 @@ export default function EmployeeDirectoryTab({
 
       <EnterpriseDataTable
         hasRows={filtered.length > 0}
-        emptyTitle={employees.length ? "No employees match your filters" : "No employees yet"}
+        emptyTitle={employees.length ? "No employees match your filters" : "No employees assigned yet."}
         emptyDescription={
           employees.length
             ? "Try clearing filters or broadening your search."
-            : "Employees appear here after profiles are provisioned in Operations Center and assigned compensation plans."
+            : "Employees appear after they are provisioned in Operations Center. Then Assign Compensation Plans →"
         }
         emptyAction={
           employees.length ? (

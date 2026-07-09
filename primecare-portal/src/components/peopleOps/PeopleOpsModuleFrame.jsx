@@ -3,9 +3,10 @@ import { cn } from "@/lib/utils";
 import { typography } from "@/styles/designTokens";
 import { KpiSkeleton } from "@/components/ux";
 import PeopleOpsBreadcrumbs from "@/components/peopleOps/PeopleOpsBreadcrumbs.jsx";
+import PeopleOpsPageHelp from "@/components/peopleOps/PeopleOpsPageHelp.jsx";
 
 /**
- * RC4 — Unified module layout: header → KPIs → filters → primary work → supporting insights.
+ * RC4/RC5 — Unified module layout: header → KPIs → filters → primary work → supporting insights.
  */
 export default function PeopleOpsModuleFrame({
   title,
@@ -20,6 +21,7 @@ export default function PeopleOpsModuleFrame({
   aside = null,
   className,
   dense = false,
+  helpModuleId = null,
 }) {
   return (
     <div className={cn(dense ? "space-y-1.5" : "space-y-2", className)}>
@@ -30,7 +32,10 @@ export default function PeopleOpsModuleFrame({
           {description ? <p className={typography.pageSubtitle}>{description}</p> : null}
           {context ? <div className="pt-0.5">{context}</div> : null}
         </div>
-        {actions ? <div className="flex shrink-0 flex-wrap items-center gap-1">{actions}</div> : null}
+        <div className="flex shrink-0 flex-wrap items-center gap-1">
+          {helpModuleId ? <PeopleOpsPageHelp moduleId={helpModuleId} /> : null}
+          {actions}
+        </div>
       </header>
 
       {summaryLoading ? (

@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { EnterpriseDataTable, StatusBadge } from "@/components/ux";
 import { ArrowLeft, Eye, History, TrendingUp, Wallet, GitBranch } from "lucide-react";
 import CompensationAttributionPreview from "@/components/peopleOps/ownership/CompensationAttributionPreview.jsx";
+import EmployeeBusinessSummaryCard from "@/components/peopleOps/EmployeeBusinessSummaryCard.jsx";
 
 const STATUS_VARIANT = {
   draft: "neutral",
@@ -20,9 +21,9 @@ const STATUS_VARIANT = {
 
 const SECTION_LABELS = {
   overview: "Identity & Business",
-  payrollHistory: "Payroll",
+  payrollHistory: "Payroll History",
   commissionHistory: "Collections",
-  compensationPlan: "Compensation",
+  compensationPlan: "Current Pay Structure",
   adjustments: "Adjustments",
   promotion: "Promotion",
   auditTimeline: "Audit & Timeline",
@@ -147,43 +148,52 @@ export default function EmployeeCompensation360Panel({
       </div>
 
       {activeSection === "overview" ? (
-        <SectionShell title="Overview" icon={Eye}>
-          <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-4">
-            <Field label="Name" value={overview.name} />
-            <Field label="Profile ID" value={model.profileUserId || overview.employeeId} />
-            <Field label="Role" value={overview.role} />
-            <Field label="Status" value={overview.status} />
-            {commissionEligible ? <Field label="Territory" value={overview.territory} /> : null}
-            <Field label="Manager" value={overview.manager} />
-            <Field label="Join Date" value={overview.joinDateLabel} />
-            <Field label="Compensation Plan" value={overview.compensationPlan} />
-            <Field label="Current Version" value={overview.planVersion} />
-            <Field label="Salary" value={overview.salaryLabel} />
-            <Field label="Fuel" value={overview.fuelLabel} />
-            <Field label="Mobile" value={overview.mobileLabel} />
-            {commissionEligible ? (
-              <>
-                <Field label="Commission %" value={`${overview.commissionPct}%`} />
-                <Field label="Promotion Status" value={overview.promotionStatus} />
-                <Field label="Collection Efficiency" value={overview.collectionEfficiencyLabel} />
-                <Field label="Current Month Collections" value={overview.currentMonthCollectionsLabel} />
-                <Field label="Current Month Commission" value={overview.currentMonthCommissionLabel} />
-              </>
-            ) : null}
-          </div>
-        </SectionShell>
+        <>
+          <EmployeeBusinessSummaryCard
+            overview={overview}
+            model={model}
+            ownershipContext={ownershipContext}
+            businessProfile={businessProfile}
+          />
+          <SectionShell title="Overview" icon={Eye}>
+            <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-4">
+              <Field label="Name" value={overview.name} />
+              <Field label="Role" value={overview.role} />
+              <Field label="Status" value={overview.status} />
+              {commissionEligible ? <Field label="Territory" value={overview.territory} /> : null}
+              <Field label="Manager" value={overview.manager} />
+              <Field label="Joined Date" value={overview.joinDateLabel} />
+              <Field label="Compensation Plan" value={overview.compensationPlan} />
+              <Field label="Plan Version" value={overview.planVersion} />
+              <Field label="Salary" value={overview.salaryLabel} />
+              <Field label="Fuel" value={overview.fuelLabel} />
+              <Field label="Mobile" value={overview.mobileLabel} />
+              {commissionEligible ? (
+                <>
+                  <Field label="Commission %" value={`${overview.commissionPct}%`} />
+                  <Field label="Promotion Status" value={overview.promotionStatus} />
+                  <Field label="Collection Efficiency" value={overview.collectionEfficiencyLabel} />
+                  <Field label="Current Month Collections" value={overview.currentMonthCollectionsLabel} />
+                  <Field label="Current Month Commission" value={overview.currentMonthCommissionLabel} />
+                </>
+              ) : null}
+            </div>
+          </SectionShell>
+        </>
       ) : null}
 
       {activeSection === "overview" && ownershipContext ? (
         <SectionShell title="Business Ownership" icon={GitBranch}>
-          <p className="mb-3 text-xs text-muted-foreground">Read-only ownership chain separate from HR and payroll.</p>
+          <p className="mb-3 text-xs text-muted-foreground">
+            These laboratories generate this employee&apos;s commission.
+          </p>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             <Field label="Territories" value={ownershipContext.territories} />
-            <Field label="Managed Labs" value={ownershipContext.managedLabCount} />
-            <Field label="Reporting Executive" value={ownershipContext.reportingExecutive || ownershipContext.reportingTo} />
+            <Field label="Managed Laboratories" value={ownershipContext.managedLabCount} />
+            <Field label="Executive" value={ownershipContext.reportingExecutive || ownershipContext.reportingTo} />
             <Field label="Reporting Admin" value={ownershipContext.reportingAdmin || ownershipContext.managedBy} />
-            <Field label="Ownership Chain" value={ownershipContext.ownershipChain} />
-            <Field label="Collection Attribution" value={ownershipContext.collectionAttributionLabel} />
+            <Field label="Reporting Structure" value={ownershipContext.ownershipChain} />
+            <Field label="Commission Path" value={ownershipContext.collectionAttributionLabel} />
           </div>
           {ownershipContext.managedLabs?.length ? (
             <div className="mt-3 overflow-x-auto rounded-lg border">
@@ -218,8 +228,10 @@ export default function EmployeeCompensation360Panel({
       ) : null}
 
       {activeSection === "overview" && businessProfile ? (
-        <SectionShell title="Business Profile" icon={TrendingUp}>
-          <p className="mb-3 text-xs text-muted-foreground">Read-only business metrics composed from payroll, ownership, and intelligence reads.</p>
+        <SectionShell title="Performance" icon={TrendingUp}>
+          <p className="mb-3 text-xs text-muted-foreground">
+            How this employee is performing on collections, revenue, and pay for the selected period.
+          </p>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             <Field label="Territory" value={businessProfile.identity?.territory} />
             <Field label="Collections (managed)" value={businessProfile.collections?.managed} />
@@ -228,10 +240,10 @@ export default function EmployeeCompensation360Panel({
             <Field label="Managed revenue" value={businessProfile.revenue?.managed} />
             <Field label="Commission (period)" value={businessProfile.performance?.commission} />
             <Field label="Payroll cost" value={businessProfile.performance?.payrollCost} />
-            <Field label="Labs managed" value={businessProfile.labsManaged?.count} />
+            <Field label="Laboratories managed" value={businessProfile.labsManaged?.count} />
             <Field label="Promotion" value={businessProfile.promotion?.eligible} />
-            <Field label="Ownership chain" value={businessProfile.ownership?.chain} />
-            <Field label="Reporting to" value={businessProfile.ownership?.reportingTo} />
+            <Field label="Reporting Structure" value={businessProfile.ownership?.chain} />
+            <Field label="Reports to" value={businessProfile.ownership?.reportingTo} />
             <Field label="Period" value={businessProfile.performance?.period} />
           </div>
           {businessProfile.labsManaged?.rows?.length ? (
@@ -280,8 +292,8 @@ export default function EmployeeCompensation360Panel({
       {activeSection === "payrollHistory" ? (
         <EnterpriseDataTable
           hasRows={(model.payrollHistory || []).length > 0}
-          emptyTitle="No payroll history"
-          emptyDescription="Payroll run lines appear after payroll preview generation."
+          emptyTitle="No payroll history yet"
+          emptyDescription="Generate a Payroll Preview to see salary and commission history for this employee."
           desktop={
             <div className="overflow-x-auto rounded-lg border bg-white">
               <table className="min-w-full text-left text-[11px]">
@@ -320,8 +332,8 @@ export default function EmployeeCompensation360Panel({
       {activeSection === "commissionHistory" && commissionEligible ? (
         <EnterpriseDataTable
           hasRows={(model.commissionHistory || []).length > 0}
-          emptyTitle="No commission history"
-          emptyDescription="Cash-collected commission entries appear after payroll preview generation."
+          emptyTitle="No commission history yet"
+          emptyDescription="Commission appears after collections are recorded and a Payroll Preview is generated."
           desktop={
             <div className="overflow-x-auto rounded-lg border bg-white">
               <table className="min-w-full text-left text-[11px]">
@@ -361,10 +373,13 @@ export default function EmployeeCompensation360Panel({
 
       {activeSection === "compensationPlan" ? (
         <div className="space-y-4">
-          <SectionShell title="Assigned Plan" icon={Wallet}>
+          <SectionShell title="Current Pay Structure" icon={Wallet}>
+            <p className="mb-3 text-xs text-muted-foreground">
+              This Compensation Plan is the template used for salary, allowances, and commission.
+            </p>
             <div className="grid gap-3 md:grid-cols-3">
-              <Field label="Assigned Plan" value={overview.compensationPlan} />
-              <Field label="Version" value={overview.planVersion} />
+              <Field label="Compensation Plan" value={overview.compensationPlan} />
+              <Field label="Plan Version" value={overview.planVersion} />
               <Field label="Effective From" value={model.planHistory?.[0]?.effectiveFromLabel} />
               <Field label="Effective To" value={model.planHistory?.[0]?.effectiveToLabel} />
             </div>

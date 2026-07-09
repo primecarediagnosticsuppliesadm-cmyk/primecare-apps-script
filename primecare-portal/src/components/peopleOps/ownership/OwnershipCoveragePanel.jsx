@@ -1,13 +1,14 @@
 import React from "react";
 import { AlertTriangle } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ux";
 import { cn } from "@/lib/utils";
 import { typography } from "@/styles/designTokens";
 
 /**
- * RC4 — Ownership coverage visualization (read-only).
+ * RC5 — Business Ownership coverage (read-only, business language).
  */
-export default function OwnershipCoveragePanel({ dashboard, workspace }) {
+export default function OwnershipCoveragePanel({ dashboard, workspace, onOpenOwnership }) {
   if (!dashboard) return null;
 
   const coveragePct = Number(dashboard.coveragePct) || 0;
@@ -19,10 +20,13 @@ export default function OwnershipCoveragePanel({ dashboard, workspace }) {
     <div className="space-y-2 rounded-lg border border-border bg-muted/10 px-2.5 py-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className={typography.kpiLabel}>Ownership coverage</p>
+          <p className={typography.kpiLabel}>Business Ownership coverage</p>
           <p className={cn(typography.kpiValueDense, "text-base")}>{coveragePct}% complete</p>
         </div>
-        <StatusBadge variant={complete ? "success" : orphanCount ? "warning" : "info"} label={complete ? "Complete" : `${orphanCount} orphan(s)`} />
+        <StatusBadge
+          variant={complete ? "success" : orphanCount ? "warning" : "info"}
+          label={complete ? "Complete" : `${orphanCount} need owner(s)`}
+        />
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={coveragePct} aria-valuemin={0} aria-valuemax={100}>
         <div
@@ -30,14 +34,19 @@ export default function OwnershipCoveragePanel({ dashboard, workspace }) {
           style={{ width: `${Math.min(100, Math.max(0, coveragePct))}%` }}
         />
       </div>
-      <div className="flex flex-wrap gap-3 text-[10px] text-muted-foreground">
-        <span>Unassigned labs: {dashboard.unassignedLabs ?? 0}</span>
+      <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
+        <span>Laboratories without owner: {dashboard.unassignedLabs ?? 0}</span>
         <span>Period: {workspace?.reportingContext?.periodYm || "Current"}</span>
         {gaps.length ? (
           <span className="inline-flex items-center gap-1 text-[var(--pc-warning)]">
             <AlertTriangle className="h-3 w-3" aria-hidden />
-            {gaps.length} ownership gap(s)
+            {gaps.length} laborator{gaps.length === 1 ? "y" : "ies"} cannot generate commission until ownership is assigned
           </span>
+        ) : null}
+        {gaps.length && onOpenOwnership ? (
+          <Button type="button" size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={onOpenOwnership}>
+            Assign Owner →
+          </Button>
         ) : null}
       </div>
     </div>

@@ -18,16 +18,16 @@ export const PEOPLE_OPS_MODULES = Object.freeze([
     id: "compensation",
     label: "Compensation",
     screens: [
-      { id: "plans", label: "Plans" },
-      { id: "assignments", label: "Assignments" },
+      { id: "plans", label: "Compensation Plans" },
+      { id: "assignments", label: "Compensation Assignments" },
     ],
   },
   {
     id: "payroll",
     label: "Payroll",
     screens: [
-      { id: "periods", label: "Periods" },
-      { id: "run-review", label: "Run Review" },
+      { id: "periods", label: "Pay Periods" },
+      { id: "run-review", label: "Payroll Preview" },
       { id: "commission-ledger", label: "Commission Ledger" },
       { id: "activity", label: "Activity" },
       { id: "exports", label: "Exports" },

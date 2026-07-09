@@ -429,6 +429,24 @@ Inherits `19_Executive_Compensation_Payroll_Engine.md` and `15_Do_Not_Break_Rule
 
 ---
 
+## RC5 — Founder UX & business language (UI only)
+
+People Operations surfaces use **business language** for founders, HR, and finance managers:
+
+| Pattern | Rule |
+|---------|------|
+| Warnings | Problem → Reason → Primary CTA (never silent technical jargon) |
+| Empty states | Explain what is missing and the next action |
+| Terminology | Compensation Plan, Compensation Assignment, Business Ownership, Reporting Structure, Payroll Preview, Payroll Run |
+| Help | Every major module has “What does this page do?” |
+| Onboarding | Dismissible five-step path: Employees → Compensation → Business Ownership → Payroll → Reports |
+
+**Not changed in RC5:** schema, APIs, calculations, write paths, finance/collections/ownership engines.
+
+Verification: `verify-rc5-business-language.mjs`, `audit-rc5-founder-certification.mjs`.
+
+---
+
 ## Future roadmap
 
 | Horizon | Capabilities |

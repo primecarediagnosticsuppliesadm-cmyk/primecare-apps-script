@@ -72,10 +72,22 @@ export default function PeopleOpsOwnershipModule({
   return (
     <div className="space-y-3">
       <PeopleOpsBreadcrumbs items={breadcrumbs} />
+      <div className="rounded-lg border border-border bg-muted/10 px-3 py-2.5 text-xs">
+        <p className="font-semibold text-foreground">Organisation Ownership</p>
+        <p className="mt-1 text-muted-foreground">
+          Business Ownership determines commission, reporting, and payroll attribution for each laboratory.
+        </p>
+        <p className="mt-2 font-medium text-foreground">
+          Executive → Reporting Admin → Agent → Laboratory
+        </p>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Assign or change owners in Operations Center. This page is for review and coverage.
+        </p>
+      </div>
       <OwnershipRoleDashboard workspace={workspace} breadcrumbs={[]} />
       <PeopleOpsSectionCard
         title="Business Ownership Explorer"
-        subtitle="Canonical sales chain from lab_ownership: Executive → Admin → Agent → Labs. Writes stay in Operations Center."
+        subtitle="Reporting structure: Executive → Reporting Admin → Agent → Laboratory"
         icon={GitBranch}
       >
         <OwnershipExplorerTree

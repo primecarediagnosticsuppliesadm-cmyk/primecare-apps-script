@@ -207,6 +207,8 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | audit-rc3-ui-certification.mjs | RC3 UX bundle + RC2/Phase 9.3 regression + build | RC3 enterprise UX |
 | verify-rc4-enterprise-polish.mjs | RC4 density, universal context, reports summary-first, table UX | RC4 enterprise polish |
 | audit-rc4-ui-certification.mjs | RC4 bundle + RC3 regression + build | RC4 enterprise polish |
+| verify-rc5-business-language.mjs | RC5 founder business language, blockers, help, onboarding, empty states | RC5 founder UX |
+| audit-rc5-founder-certification.mjs | RC5 verify + RC4 regression + finance mutation guards + build | RC5 founder UX |
 
 ### Infrastructure
 

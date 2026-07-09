@@ -31,11 +31,13 @@ export default function CompensationPlansTab({
   onDeactivatePlan,
   onActivatePlan,
   onViewAssignments,
+  onAssignEmployees,
   busy = false,
 }) {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
+  const [justCreated, setJustCreated] = useState(false);
   const [simInputs, setSimInputs] = useState({
     commissionRatePct: 3,
     salary: 20000,
@@ -88,23 +90,43 @@ export default function CompensationPlansTab({
   return (
     <div className="space-y-4">
       <KpiCardGrid columns={3}>
-        <KpiCard title="Plans" value={String(summary.plans)} subtitle="Total compensation plans" icon={FileStack} />
-        <KpiCard title="Assignments" value={String(summary.assignments)} subtitle="Active and historical assignments" icon={ClipboardList} />
-        <KpiCard title="Active Plans" value={String(summary.activePlans)} subtitle="Currently assignable plans" icon={Shield} />
-        <KpiCard title="Inactive Plans" value={String(summary.inactivePlans)} subtitle="Retired plan versions" icon={Layers} />
+        <KpiCard title="Compensation Plans" value={String(summary.plans)} subtitle="Pay templates" icon={FileStack} />
+        <KpiCard title="Compensation Assignments" value={String(summary.assignments)} subtitle="Employees linked to plans" icon={ClipboardList} />
+        <KpiCard title="Active Plans" value={String(summary.activePlans)} subtitle="Ready to assign" icon={Shield} />
+        <KpiCard title="Inactive Plans" value={String(summary.inactivePlans)} subtitle="Kept for history" icon={Layers} />
         <KpiCard title="Draft Plans" value={String(summary.draftPlans)} subtitle="Awaiting activation" icon={FileStack} />
       </KpiCardGrid>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-slate-600">
-          Master compensation plans for the payroll engine. Active edits create a new version; history is preserved.
+          Compensation Plans are pay templates (salary, allowances, commission). Assign each employee to a plan before payroll.
         </p>
         {permissions?.canCreatePlan ? (
           <Button type="button" size="sm" disabled={busy} onClick={() => setWizardOpen(true)}>
-            New Plan
+            New Compensation Plan
           </Button>
         ) : null}
       </div>
+
+      {justCreated ? (
+        <div className="rounded-lg border border-[var(--pc-success)]/30 bg-[var(--pc-success)]/5 px-3 py-2 text-xs">
+          <p className="font-semibold text-foreground">Compensation Plan created successfully.</p>
+          <p className="mt-1 text-muted-foreground">Employees assigned: 0</p>
+          <p className="mt-1 font-medium text-foreground">Next Step</p>
+          <Button
+            type="button"
+            size="sm"
+            className="mt-1.5 h-7 text-[10px]"
+            onClick={() => {
+              setJustCreated(false);
+              onAssignEmployees?.();
+              onViewAssignments?.({});
+            }}
+          >
+            Assign Employees →
+          </Button>
+        </div>
+      ) : null}
 
       <NewCompensationPlanWizard
         open={wizardOpen}
@@ -113,13 +135,14 @@ export default function CompensationPlansTab({
         onCreate={async (payload) => {
           await onCreatePlan?.(payload);
           setWizardOpen(false);
+          setJustCreated(true);
         }}
       />
 
       <EnterpriseDataTable
         hasRows={(adminModel?.planRows || []).length > 0}
-        emptyTitle="No compensation plans"
-        emptyDescription="Create a plan to configure salary, allowances, commission, and promotion rules."
+        emptyTitle="No Compensation Plans yet."
+        emptyDescription="Create a Compensation Plan to define salary, allowances, and commission — then Assign Employees →"
         desktop={
           <PeopleOpsTableShell>
             <PeopleOpsTableHead>

@@ -4,6 +4,29 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-09 — RC5 Founder UX & Business Language Transformation (People Operations)
+
+### Change
+
+- Replaced technical data-quality warnings with **Problem → Reason → Action** business blockers (Payroll Blocker, Commission Blocker, Generate Payroll Preview).
+- Employee 360: identity/business summary card; renamed sections to Business Ownership, Current Pay Structure, Payroll History, Performance; helper copy for commission labs.
+- Compensation: post-create “Assign Employees →” next step; executive widgets (Most Used Plan, Highest Commission %, Promotion Eligible, Inactive Plans, Plans without Employees).
+- Business Ownership: organisation explainer, commission path labels on lab drawer, coverage CTAs.
+- Payroll Preview: expandable pay breakdown + “How was this calculated?”; business empty state with reasons and CTAs.
+- Reports: Business Summary KPIs first (best agent, needs attention, territories, payroll, collections, promotion candidates).
+- Page help popovers (“What does this page do?”), dismissible guided onboarding, business empty states and terminology.
+
+### Not changed
+
+- Schema, Supabase, APIs, read models, business logic, payroll/finance/collections calculations, workflows, RLS, write paths.
+
+### Verification
+
+- `node scripts/verify-rc5-business-language.mjs`
+- `node scripts/audit-rc5-founder-certification.mjs`
+
+---
+
 ## 2026-07-08 — RC4 Enterprise Finish Pass (People Operations)
 
 ### Change
