@@ -40,7 +40,7 @@ export default function CollectionCompensationDashboard({ rows = [], reportingCo
       </KpiCardGrid>
       <PeopleOpsSectionCard
         title="Collection Compensation"
-        subtitle="Derived from payroll preview lines and collection metrics — no write logic"
+        subtitle="How collections feed agent commission for the selected period"
       >
         <EnterpriseDataTable columns={columns} rows={rows} rowKey="lineId" emptyMessage="No payroll lines in reporting context." />
       </PeopleOpsSectionCard>

@@ -26,8 +26,8 @@ export default function PeopleOpsWorkInbox({ approvalItems = [], notifications =
 
   return (
     <PeopleOpsSectionCard
-      title="Work Inbox"
-      subtitle="Approvals and operational signals requiring attention"
+      title="Requires Your Attention"
+      subtitle="Approvals and decisions waiting for you"
       icon={Inbox}
       rightAction={
         items.length ? <StatusBadge variant="warning" label={String(items.length)} /> : <StatusBadge variant="success" label="Clear" />
@@ -46,15 +46,18 @@ export default function PeopleOpsWorkInbox({ approvalItems = [], notifications =
               >
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-foreground">{item.title}</p>
-                  <p className="text-[11px] text-muted-foreground">{item.subtitle || item.reason}</p>
+                  <p className="text-[11px] text-muted-foreground">{item.detail || item.subtitle || item.reason}</p>
                 </div>
-                <StatusBadge variant={item.kind === "approval" ? "warning" : "info"} label={item.kind === "approval" ? "Approval" : "Alert"} />
+                <StatusBadge variant={item.kind === "approval" ? "warning" : "info"} label={item.kind === "approval" ? "Decision" : "Alert"} />
               </button>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="text-sm text-muted-foreground">Inbox clear — no approvals or alerts for the current context.</p>
+        <div className="rounded-md border border-dashed border-border bg-muted/10 px-3 py-3 text-sm">
+          <p className="font-medium text-foreground">Nothing needs your attention right now.</p>
+          <p className="mt-1 text-xs text-muted-foreground">Approvals and alerts will appear here when payroll or plans need a decision.</p>
+        </div>
       )}
     </PeopleOpsSectionCard>
   );

@@ -45,8 +45,8 @@ function RankList({ rows = [], valueKey = "netPayableLabel", emptyAction = null 
     return (
       <EmptyState
         compact
-        title="No promotion pipeline data"
-        description="Agent promotion eligibility appears after payroll preview calculations."
+        title="No promotion candidates yet"
+        description="Promotion eligibility appears after a Payroll Preview is generated."
         action={emptyAction}
       />
     );

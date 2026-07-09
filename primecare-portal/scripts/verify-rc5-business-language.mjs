@@ -46,9 +46,9 @@ function assert(condition, id, detail) {
 
 assert(/Payroll Blocker/.test(src.dataQuality), "rc5.payroll_blocker", "payroll blocker business language");
 assert(/Commission Blocker/.test(src.dataQuality), "rc5.commission_blocker", "commission blocker business language");
-assert(/Assign Compensation Plans/.test(src.dataQuality), "rc5.cta_assign_plans", "assign plans CTA");
-assert(/Open Business Ownership/.test(src.dataQuality), "rc5.cta_ownership", "ownership CTA");
-assert(/Generate Payroll Preview/.test(src.dataQuality), "rc5.cta_preview", "generate preview CTA");
+assert(/Assign Plans|Assign Compensation Plans/.test(src.dataQuality), "rc5.cta_assign_plans", "assign plans CTA");
+assert(/Open Ownership|Open Business Ownership/.test(src.dataQuality), "rc5.cta_ownership", "ownership CTA");
+assert(/Generate Preview|Generate Payroll Preview/.test(src.dataQuality), "rc5.cta_preview", "generate preview CTA");
 assert(/blockerLabel|Reason:/.test(src.banner), "rc5.banner_structure", "problem → reason → action banner");
 assert(/What does this page do\?/.test(src.help), "rc5.page_help", "page help popover");
 assert(/PEOPLE_OPS_PAGE_HELP/.test(src.copy), "rc5.help_copy", "help copy catalog");

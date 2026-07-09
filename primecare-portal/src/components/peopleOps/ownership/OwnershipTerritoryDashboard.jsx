@@ -54,7 +54,7 @@ export default function OwnershipTerritoryDashboard({ workspace, breadcrumbs = [
         <EnterpriseDataTable
           hasRows={rows.length > 0}
           emptyTitle="No territories"
-          emptyDescription="Territories are derived from lab area labels in the compensation read bundle."
+          emptyDescription="Territories appear when laboratories have area labels and collections in the selected period."
           desktop={
             <div className="overflow-x-auto rounded-lg border">
               <table className="min-w-full text-left text-[11px]">

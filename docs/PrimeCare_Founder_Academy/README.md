@@ -14,6 +14,7 @@ These documents are for founders, executives, and business stakeholders who need
 | [02_People_Operations_Business_Walkthrough.md](./02_People_Operations_Business_Walkthrough.md) | Founder, HR, finance partners | The full People Operations story: employees → pay → approval, with a realistic field example |
 | [03_People_Operations_UAT_Guide.md](./03_People_Operations_UAT_Guide.md) | Founder, QA, pilot leads | Step-by-step UAT checklist for every People Operations tab |
 | [04_RC5_Founder_UX_UAT_Checklist.md](./04_RC5_Founder_UX_UAT_Checklist.md) | Founder, HR, Finance | RC5 business-language UX sign-off (warnings, help, empty states) |
+| [05_RC6_Founder_Dashboard_UAT.md](./05_RC6_Founder_Dashboard_UAT.md) | Founder / CEO | RC6 dashboard: payroll cycle, day board, activity language |
 
 ---
 
@@ -23,6 +24,7 @@ These documents are for founders, executives, and business stakeholders who need
 2. Read **02 — Business Walkthrough** before your first live demo of People Operations.
 3. Use **03 — UAT Guide** when you are ready to sign off on People Operations v1.0.
 4. Use **04 — RC5 UAT** after the Founder UX language pass to confirm every page is understandable in ~5 minutes.
+5. Use **05 — RC6 UAT** to confirm the dashboard answers “what needs my attention today?” in under 15 seconds.
 
 ---
 

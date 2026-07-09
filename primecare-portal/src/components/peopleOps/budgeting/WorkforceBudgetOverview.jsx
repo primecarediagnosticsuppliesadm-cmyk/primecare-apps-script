@@ -22,18 +22,18 @@ export default function WorkforceBudgetOverview({ workspace, breadcrumbs = [] })
       summary={
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge variant={isConfigured ? "success" : "warning"} label={isConfigured ? "Configured (derived envelope)" : "Not configured"} />
+            <StatusBadge variant={isConfigured ? "success" : "warning"} label={isConfigured ? "Configured" : "Not configured"} />
             <span className="text-xs text-muted-foreground">
               {isConfigured
-                ? `Derived from current payroll with ${envelope.headroomPct}% headroom`
-                : "Generate a payroll preview to derive the planning envelope"}
+                ? `Based on current payroll with ${envelope.headroomPct}% planning headroom`
+                : "Generate a Payroll Preview to set the workforce budget baseline"}
             </span>
           </div>
           <KpiCardGrid columns={3} dense>
-            <KpiCard dense title="Approved Budget" value={isConfigured ? overview.approvedBudgetLabel : "Budget not configured"} subtitle="Derived planning envelope (+25% headroom)" icon={Wallet} />
-            <KpiCard dense title="Current Payroll" value={formatPeopleOpsMetricValue(overview.currentPayrollLabel, { emptyLabel: "Budget not configured" })} subtitle="Selected reporting run" icon={TrendingUp} />
+            <KpiCard dense title="Approved Budget" value={isConfigured ? overview.approvedBudgetLabel : "Budget not configured"} subtitle="Planning envelope (+25% headroom)" icon={Wallet} />
+            <KpiCard dense title="Current Payroll" value={formatPeopleOpsMetricValue(overview.currentPayrollLabel, { emptyLabel: "Budget not configured" })} subtitle="Selected reporting period" icon={TrendingUp} />
             <KpiCard dense title="Projected Payroll" value={formatPeopleOpsMetricValue(overview.projectedPayrollLabel, { emptyLabel: "No forecast" })} subtitle="Forecast scenario peak" icon={BarChart3} />
-            <KpiCard dense title="Remaining Budget" value={formatPeopleOpsMetricValue(overview.remainingBudgetLabel, { emptyLabel: "Not available" })} subtitle="Envelope minus projection" icon={Target} />
+            <KpiCard dense title="Remaining Budget" value={formatPeopleOpsMetricValue(overview.remainingBudgetLabel, { emptyLabel: "Not available" })} subtitle="Budget minus expected payroll" icon={Target} />
             <KpiCard dense title="Payroll %" value={isConfigured ? overview.payrollPctLabel : "Not configured"} subtitle={`Revenue ratio ${overview.payrollPctRevenueLabel || "—"}`} icon={Briefcase} />
             <KpiCard dense title="Headcount" value={overview.headcount ? String(overview.headcount) : "None in run"} subtitle={`${overview.openPositions} open positions`} icon={Users} />
             <KpiCard dense title="Variance" value={formatPeopleOpsMetricValue(overview.varianceLabel, { emptyLabel: "Not available" })} subtitle="Envelope minus current payroll" icon={Wallet} />

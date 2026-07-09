@@ -26,7 +26,7 @@ export default function WorkforceHeadcountPlanning({
   return (
     <PeopleOpsModuleFrame
       title="Headcount Planning"
-      description="Plan future positions and hiring cost. Session-only — projections do not change payroll."
+      description="Plan future positions and hiring cost. Planning only — does not change payroll."
       breadcrumbs={breadcrumbs}
       actions={
         <Button type="button" size="sm" onClick={() => onAddPosition?.(draft)}>

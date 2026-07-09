@@ -25,10 +25,10 @@ export function buildPeopleOpsDataQualityWarnings({
       id: "missing-assignments",
       severity: "warning",
       blockerLabel: "Payroll Blocker",
-      title: `${withoutPlan.length} employee${withoutPlan.length === 1 ? "" : "s"} cannot be included in payroll.`,
-      detail: "No compensation plan assigned.",
-      why: "Payroll needs an active Compensation Plan for every employee in the run.",
-      actionLabel: "Assign Compensation Plans →",
+      title: `${withoutPlan.length} employee${withoutPlan.length === 1 ? "" : "s"} are not assigned to any compensation plan.`,
+      detail: "They will not be included in payroll.",
+      why: "Every employee needs an active Compensation Plan before they can appear in a payroll run.",
+      actionLabel: "Assign Plans →",
       actionRoute: { moduleId: "employees", screenId: "directory" },
     });
   }
@@ -59,24 +59,24 @@ export function buildPeopleOpsDataQualityWarnings({
       id: "ownership-gaps",
       severity: "warning",
       blockerLabel: "Commission Blocker",
-      title: `${gaps.length} laborator${gaps.length === 1 ? "y is" : "ies are"} not assigned to an Agent or Reporting Admin.`,
-      detail: "Commission cannot be calculated for unassigned laboratories.",
+      title: `${gaps.length} laborator${gaps.length === 1 ? "y is" : "ies are"} missing a primary owner.`,
+      detail: "These labs cannot generate commissions correctly.",
       why: "Business Ownership links each laboratory to the person who earns commission on collections.",
-      actionLabel: "Open Business Ownership →",
+      actionLabel: "Open Ownership →",
       actionRoute: { moduleId: "ownership", screenId: "dashboard" },
     });
   }
 
-  const orphanLabs = ownershipWorkspace?.dashboard?.unassignedLabs ?? 0;
-  if (orphanLabs > 0 && !gaps.length) {
+  const labsWithoutOwner = ownershipWorkspace?.dashboard?.unassignedLabs ?? 0;
+  if (labsWithoutOwner > 0 && !gaps.length) {
     warnings.push({
       id: "orphan-ownership",
       severity: "attention",
       blockerLabel: "Commission Attention",
-      title: `${orphanLabs} laborator${orphanLabs === 1 ? "y has" : "ies have"} incomplete Business Ownership.`,
+      title: `${labsWithoutOwner} laborator${labsWithoutOwner === 1 ? "y has" : "ies have"} incomplete Business Ownership.`,
       detail: "Assign a Primary Agent and Reporting Admin so commission can flow correctly.",
       why: "Incomplete ownership leaves collections without a clear commission path.",
-      actionLabel: "Open Business Ownership →",
+      actionLabel: "Open Ownership →",
       actionRoute: { moduleId: "ownership", screenId: "explorer" },
     });
   }
@@ -101,11 +101,11 @@ export function buildPeopleOpsDataQualityWarnings({
       id: "empty-run",
       severity: "attention",
       blockerLabel: "Payroll Blocker",
-      title: "Payroll cannot be generated with employee lines yet.",
-      detail: "This payroll run has zero employees.",
-      why: "Possible reasons: no employees assigned, compensation plans missing, or preview generated before assignments were complete.",
-      actionLabel: "Fix Employees & Plans →",
-      actionRoute: { moduleId: "employees", screenId: "directory" },
+      title: "No employees are assigned to this payroll run.",
+      detail: "Possible reasons: employees have no compensation plan, payroll preview has not been generated, or the wrong reporting period is selected.",
+      why: "A payroll run needs employees with active Compensation Plans for the selected period.",
+      actionLabel: "Generate Preview →",
+      actionRoute: { moduleId: "payroll", screenId: "periods" },
     });
   }
 

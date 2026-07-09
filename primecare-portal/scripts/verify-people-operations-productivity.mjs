@@ -43,7 +43,7 @@ assert(/usePeopleOpsSessionState/.test(pageSrc), "ui.session_hook", "page uses s
 assert(/PeopleOpsQuickActions/.test(dashboardSrc), "ui.quick_actions", "dashboard renders quick actions");
 assert(/PeopleOpsWorkInbox/.test(dashboardSrc), "ui.work_inbox", "dashboard renders unified work inbox");
 assert(/PeopleOpsRecentActivity/.test(dashboardSrc), "ui.recent_activity", "dashboard renders activity feed");
-assert(/Operational Timeline|Workforce Snapshot/.test(dashboardSrc), "ui.operational_timeline", "dashboard renders operational timeline zone");
+assert(/PeopleOpsFounderDayBoard|What needs my attention today/.test(dashboardSrc), "ui.founder_day_board", "dashboard renders founder day board");
 assert(!/PeopleOpsFavorites/.test(dashboardSrc), "ui.no_favorites", "favorites replaced by recent activity focus");
 
 assert(/PeopleOpsGlobalSearch/.test(pageSrc), "ui.global_search", "global search wired on page");

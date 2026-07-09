@@ -4,6 +4,28 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-09 — RC6 Founder Dashboard Business Language & Actionability
+
+### Change
+
+- **Current Payroll Cycle** replaces Workflow: status + business explanation + primary CTA for Draft → Paid.
+- **Business Activity Today** maps internal events to founder titles (no snake_case event names).
+- **What needs my attention today?** day board: Needs Attention / In Progress / Completed.
+- Data-quality warnings tightened (missing plans, missing lab owners, empty payroll run) with CTAs.
+- Section help (`?`) on payroll cycle, day board, and activity; Context → Current Reporting Period; Work Inbox → Requires Your Attention.
+- Language audit on People Ops UI surfaces (orphan/preview lines/derive/projection/snapshot avoided in user copy).
+
+### Not changed
+
+- Schema, Supabase, APIs, read models, payroll/compensation/collections calculations, write paths, RLS.
+
+### Verification
+
+- `node scripts/verify-rc6-founder-language.mjs`
+- `node scripts/audit-rc6-founder-certification.mjs`
+
+---
+
 ## 2026-07-09 — RC5 Founder UX & Business Language Transformation (People Operations)
 
 ### Change

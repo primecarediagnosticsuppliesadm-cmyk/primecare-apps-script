@@ -1,5 +1,5 @@
 /**
- * Phase 8.1B — People Operations productivity derivations (UI only, no API/calculation changes).
+ * Phase 8.1B / RC6 — People Operations productivity (UI only, no API/calculation changes).
  */
 import { compensationAdminPermissions } from "@/compensation/compensationPlanAdminWorkflow.js";
 import {
@@ -7,6 +7,7 @@ import {
   PAYROLL_UI_ACTION_IDS,
   payrollWorkflowPermissions,
 } from "@/payroll/payrollWorkflowUi.js";
+import { mapActivityToBusinessLanguage } from "@/peopleOps/peopleOpsBusinessCopy.js";
 
 const PAYROLL_WORKFLOW_STAGES = Object.freeze([
   { id: "draft", label: "Draft" },
@@ -48,39 +49,16 @@ function daysUntil(dateValue) {
 }
 
 export function translateActivityEvent(event) {
-  const category = statusKey(event.category);
-  const title = str(event.title).toLowerCase();
-  const kind = str(event.kind);
-
-  if (kind === "export_event") {
-    return { label: "Export Generated", detail: event.subtitle || event.title };
-  }
-  if (kind === "plan_change") {
-    return { label: "Plan Assigned", detail: event.title };
-  }
-  if (kind === "payroll_run") {
-    if (category === "submitted") return { label: "Payroll Submitted", detail: event.title };
-    if (category === "approved") return { label: "Payroll Approved", detail: event.title };
-    if (category === "locked") return { label: "Payroll Locked", detail: event.title };
-    if (category === "exported") return { label: "Payroll Exported", detail: event.title };
-    if (category === "paid") return { label: "Paid Evidence Recorded", detail: event.title };
-    if (category === "previewed" || category === "draft") return { label: "Payroll Generated", detail: event.title };
-    return { label: "Payroll Run Updated", detail: event.subtitle || event.title };
-  }
-  if (kind === "audit") {
-    if (title.includes("submit")) return { label: "Payroll Submitted", detail: event.subtitle || event.title };
-    if (title.includes("approve")) return { label: "Payroll Approved", detail: event.subtitle || event.title };
-    if (title.includes("lock")) return { label: "Payroll Locked", detail: event.subtitle || event.title };
-    if (title.includes("export")) return { label: "Export Generated", detail: event.subtitle || event.title };
-    if (title.includes("paid")) return { label: "Paid Evidence Recorded", detail: event.subtitle || event.title };
-    if (title.includes("plan") && title.includes("create")) return { label: "Plan Created", detail: event.subtitle || event.title };
-    if (title.includes("assign")) return { label: "Plan Assigned", detail: event.subtitle || event.title };
-    return { label: "Compensation Activity", detail: event.subtitle || event.title };
-  }
-  if (kind === "commission_entry") {
-    return { label: "Commission Calculated", detail: event.subtitle || event.title };
-  }
-  return { label: "Workforce Activity", detail: event.subtitle || event.title };
+  const mapped = mapActivityToBusinessLanguage(event);
+  return {
+    label: mapped.title,
+    title: mapped.title,
+    detail: mapped.detail,
+    viewLabel: mapped.viewLabel,
+    route: mapped.route,
+    atLabel: mapped.atLabel,
+    actorRole: mapped.actorRole,
+  };
 }
 
 export function buildWorkflowProgress(periodRow) {
@@ -204,24 +182,24 @@ export function buildApprovalInbox({ model, adminModel } = {}) {
     } else if (status === "approved") {
       items.push({
         id: `lock-${row.periodId}`,
-        title: `Payroll awaiting lock · ${row.periodYm}`,
-        detail: "Approved run ready to lock.",
+        title: `Ready to lock payroll · ${row.periodYm}`,
+        detail: "Approved payroll can now be locked.",
         tone: "info",
         route: payrollRouteForPeriod(row, "run-review"),
       });
     } else if (status === "locked") {
       items.push({
         id: `export-${row.periodId}`,
-        title: `Pending export · ${row.periodYm}`,
-        detail: "Generate export metadata from locked run.",
+        title: `Ready to export · ${row.periodYm}`,
+        detail: "Payroll is locked. Create the export next.",
         tone: "info",
         route: payrollRouteForPeriod(row, "run-review"),
       });
     } else if (status === "exported") {
       items.push({
         id: `paid-${row.periodId}`,
-        title: `Pending paid evidence · ${row.periodYm}`,
-        detail: "Record paid evidence after disbursement confirmation.",
+        title: `Waiting for salary confirmation · ${row.periodYm}`,
+        detail: "Mark payroll as paid after salaries are confirmed.",
         tone: "warning",
         route: payrollRouteForPeriod(row, "run-review"),
       });
@@ -229,7 +207,7 @@ export function buildApprovalInbox({ model, adminModel } = {}) {
       items.push({
         id: `review-${row.periodId}`,
         title: `Payroll preview ready · ${row.periodYm}`,
-        detail: "Review lines and submit when ready.",
+        detail: "Review employee pay and submit when ready.",
         tone: "neutral",
         route: payrollRouteForPeriod(row, "run-review"),
       });
@@ -240,8 +218,8 @@ export function buildApprovalInbox({ model, adminModel } = {}) {
     if (statusKey(plan.status) === "draft") {
       items.push({
         id: `plan-draft-${plan.id}`,
-        title: `Plan awaiting activation · ${plan.planCode}`,
-        detail: `Version ${plan.version} · ${plan.assignedEmployees} assignments`,
+        title: `Compensation plan awaiting activation · ${plan.planCode}`,
+        detail: `Version ${plan.version} · ${plan.assignedEmployees} employees linked`,
         tone: "info",
         route: { moduleId: "compensation", screenId: "plans", planId: plan.id },
       });
@@ -252,8 +230,8 @@ export function buildApprovalInbox({ model, adminModel } = {}) {
   if (unassignedCount > 0) {
     items.push({
       id: "assignments-review",
-      title: "Assignments requiring review",
-      detail: `${unassignedCount} non-active assignment record(s)`,
+      title: "Compensation assignments need review",
+      detail: `${unassignedCount} employee link(s) are not active`,
       tone: "warning",
       route: { moduleId: "compensation", screenId: "assignments" },
     });
@@ -271,8 +249,8 @@ export function buildNotifications({ model, adminModel, employeeList = [] } = {}
     items.push({
       id: "employees-unassigned",
       category: "warning",
-      title: `${unassignedEmployees.length} employee(s) without compensation plans`,
-      detail: "Assign plans to keep payroll preview complete.",
+      title: `${unassignedEmployees.length} employees are not assigned to any compensation plan`,
+      detail: "They will not be included in payroll.",
       route: { moduleId: "employees", screenId: "directory" },
     });
   }
@@ -283,8 +261,8 @@ export function buildNotifications({ model, adminModel, employeeList = [] } = {}
       items.push({
         id: `generated-${row.periodId}`,
         category: "info",
-        title: `Payroll generated · ${row.periodYm}`,
-        detail: "Preview run available for review.",
+        title: `Payroll preview ready · ${row.periodYm}`,
+        detail: "Review employee pay when you are ready.",
         route: payrollRouteForPeriod(row, "run-review"),
       });
     }
@@ -292,8 +270,8 @@ export function buildNotifications({ model, adminModel, employeeList = [] } = {}
       items.push({
         id: `exported-${row.periodId}`,
         category: "info",
-        title: `Payroll exported · ${row.periodYm}`,
-        detail: "Export metadata recorded.",
+        title: `Payroll export ready · ${row.periodYm}`,
+        detail: "Confirm salaries, then mark payroll as paid.",
         route: { moduleId: "payroll", screenId: "exports", periodId: row.periodId },
       });
     }
@@ -302,7 +280,7 @@ export function buildNotifications({ model, adminModel, employeeList = [] } = {}
         id: `overdue-${row.periodId}`,
         category: "critical",
         title: `Payroll cycle in progress · ${row.periodYm}`,
-        detail: `Status: ${row.status}. Complete workflow to close the period.`,
+        detail: `Currently ${row.status}. Finish the remaining steps to close this month.`,
         route: payrollRouteForPeriod(row, "run-review"),
       });
     }
@@ -314,7 +292,7 @@ export function buildNotifications({ model, adminModel, employeeList = [] } = {}
       items.push({
         id: `plan-expire-${plan.id}`,
         category: "warning",
-        title: `Plan expires soon · ${plan.planCode}`,
+        title: `Compensation plan ends soon · ${plan.planCode}`,
         detail: `Effective through ${plan.effectiveToLabel}`,
         route: { moduleId: "compensation", screenId: "plans", planId: plan.id },
       });
@@ -327,21 +305,12 @@ export function buildNotifications({ model, adminModel, employeeList = [] } = {}
       items.push({
         id: `assignment-end-${row.id}`,
         category: "warning",
-        title: `Assignment ends soon · ${row.employeeName}`,
+        title: `Pay plan ending soon · ${row.employeeName}`,
         detail: `Ends ${row.effectiveToLabel}`,
         route: { moduleId: "compensation", screenId: "assignments" },
       });
     }
   }
-
-  items.push({
-    id: "salary-revision-placeholder",
-    category: "info",
-    title: "Salary revision workflow",
-    detail: "Future placeholder — revision requests will appear here.",
-    route: null,
-    disabled: true,
-  });
 
   return items.slice(0, 14);
 }
@@ -351,10 +320,13 @@ export function buildRecentActivity(historyEvents = [], limit = 12) {
     const translated = translateActivityEvent(event);
     return {
       id: event.id,
-      label: translated.label,
+      label: translated.title || translated.label,
+      title: translated.title || translated.label,
       detail: translated.detail,
-      atLabel: event.atLabel,
-      actorRole: event.actorRole,
+      atLabel: translated.atLabel || event.atLabel,
+      actorRole: translated.actorRole || event.actorRole,
+      viewLabel: translated.viewLabel || "View →",
+      route: translated.route || null,
     };
   });
 }

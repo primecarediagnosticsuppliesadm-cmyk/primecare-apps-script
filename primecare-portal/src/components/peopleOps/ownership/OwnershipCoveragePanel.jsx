@@ -13,7 +13,7 @@ export default function OwnershipCoveragePanel({ dashboard, workspace, onOpenOwn
 
   const coveragePct = Number(dashboard.coveragePct) || 0;
   const gaps = dashboard.ownershipGaps || [];
-  const orphanCount = dashboard.unassignedLabs ?? gaps.length;
+  const labsNeedingOwner = dashboard.unassignedLabs ?? gaps.length;
   const complete = coveragePct >= 100 && !gaps.length;
 
   return (
@@ -24,8 +24,8 @@ export default function OwnershipCoveragePanel({ dashboard, workspace, onOpenOwn
           <p className={cn(typography.kpiValueDense, "text-base")}>{coveragePct}% complete</p>
         </div>
         <StatusBadge
-          variant={complete ? "success" : orphanCount ? "warning" : "info"}
-          label={complete ? "Complete" : `${orphanCount} need owner(s)`}
+          variant={complete ? "success" : labsNeedingOwner ? "warning" : "info"}
+          label={complete ? "Complete" : `${labsNeedingOwner} need owner(s)`}
         />
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={coveragePct} aria-valuemin={0} aria-valuemax={100}>

@@ -937,6 +937,9 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           model={model}
           breadcrumbs={breadcrumbs}
           employeeCount={employeeList.length}
+          employeeList={employeeList}
+          ownershipWorkspace={ownershipWorkspace}
+          selectedPeriodRow={selectedPeriodRow}
           onNavigatePayroll={() => navigatePeopleOps({ moduleId: "payroll", screenId: "periods" })}
           onNavigateEmployees={() => navigatePeopleOps({ moduleId: "employees", screenId: "directory" })}
           productivity={productivity}

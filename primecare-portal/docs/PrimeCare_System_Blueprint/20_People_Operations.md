@@ -447,6 +447,24 @@ Verification: `verify-rc5-business-language.mjs`, `audit-rc5-founder-certificati
 
 ---
 
+## RC6 — Founder dashboard actionability (UI only)
+
+Dashboard answers three questions in under 15 seconds:
+
+| Widget | Business question |
+|--------|-------------------|
+| **What needs my attention today?** | What requires my decision? |
+| **Current Payroll Cycle** | Where are we in payroll? |
+| **Business Activity Today** | What changed today? |
+
+Every payroll status shows **Status → Explanation → Primary CTA**. Activity never shows internal event names. Section `?` help explains why the card matters.
+
+**Not changed in RC6:** schema, APIs, calculations, write paths.
+
+Verification: `verify-rc6-founder-language.mjs`, `audit-rc6-founder-certification.mjs`.
+
+---
+
 ## Future roadmap
 
 | Horizon | Capabilities |

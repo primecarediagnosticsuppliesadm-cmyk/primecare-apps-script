@@ -98,7 +98,7 @@ export default function PeopleOpsOwnershipModule({
       </PeopleOpsSectionCard>
       {hierarchicalCompensation ? <HierarchicalCompensationPanel model={hierarchicalCompensation} /> : null}
       <div className="grid gap-2 lg:grid-cols-2">
-        <PeopleOpsSectionCard title="Territories snapshot" icon={MapPin} subtitle="Top territories by collections">
+        <PeopleOpsSectionCard title="Top Territories" icon={MapPin} subtitle="Highest collections by territory">
           <div className="space-y-1.5">
             {(workspace.territories || []).slice(0, 6).map((row) => (
               <div key={row.territoryId} className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-xs">
