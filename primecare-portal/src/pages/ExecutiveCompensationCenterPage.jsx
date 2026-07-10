@@ -34,6 +34,7 @@ import {
   saveCompensationPlanAdmin,
 } from "@/api/compensationPlanAdminSupabaseApi.js";
 import CompensationPlanAssignmentsTab from "@/components/compensation/CompensationPlanAssignmentsTab.jsx";
+import CompensationActionDrawer from "@/components/compensation/CompensationActionDrawer.jsx";
 import CompensationPlansTab from "@/components/compensation/CompensationPlansTab.jsx";
 import EmployeeDirectoryTab from "@/components/compensation/EmployeeDirectoryTab.jsx";
 import PayrollWorkflowToolbar from "@/components/compensation/PayrollWorkflowToolbar.jsx";
@@ -78,6 +79,11 @@ import {
   loadEmployeeCompensationDirectoryRead,
 } from "@/api/employeeCompensation360SupabaseApi.js";
 import { buildCompensationPlanAdminModel } from "@/compensation/compensationPlanAdminModel.js";
+import {
+  listUnassignedEmployees,
+  resolveActiveAssignmentRow,
+  resolveCompensationActionEmployee,
+} from "@/compensation/compensationActionDrawerModel.js";
 import { compensationAdminPermissions } from "@/compensation/compensationPlanAdminWorkflow.js";
 import { employeeCompensation360Permissions } from "@/compensation/employeeCompensation360Workflow.js";
 import { PAYROLL_UI_ACTION_IDS } from "@/payroll/payrollWorkflowUi.js";
@@ -127,8 +133,9 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
   const [globalSearchQuery, setGlobalSearchQuery] = useState("");
   const [ownershipPayload, setOwnershipPayload] = useState(null);
   const [selectedLabId, setSelectedLabId] = useState("");
-  /** Directory-driven assign/change workflow — consumed by CompensationPlanAssignmentsTab. */
+  /** Directory-driven assign/change workflow — opens CompensationActionDrawer. */
   const [assignmentIntent, setAssignmentIntent] = useState(null);
+  const [compensationAction, setCompensationAction] = useState(null);
 
   const { recentlyViewed, favorites, trackView, toggleFavorite, isFavorite } = usePeopleOpsSessionState();
   const {
@@ -161,9 +168,14 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
     setAssignmentIntent(null);
   }, []);
 
+  const closeCompensationAction = useCallback(() => {
+    setCompensationAction(null);
+  }, []);
+
   useEffect(() => {
     if (activeModuleId !== "compensation" || activeScreenId !== "assignments") {
       setAssignmentIntent(null);
+      setCompensationAction(null);
     }
   }, [activeModuleId, activeScreenId]);
 
@@ -398,14 +410,16 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         effectiveDate,
       });
       if (!result.success) throw new Error(result.error || "Assign failed");
-      showToast("success", "Employee plan assignment created.");
+      showToast("success", "Compensation plan assigned successfully.");
       await loadAdmin();
       await loadEmployeeDirectory();
       if (selectedEmployeeProfileId === row.profileUserId) {
         await loadEmployee360({ profileUserId: row.profileUserId });
       }
+      return true;
     } catch (err) {
       setError(err?.message || "Could not assign employee plan");
+      return false;
     } finally {
       setAdminBusy(false);
     }
@@ -423,9 +437,12 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
       if (!result.success) throw new Error(result.error || "Change plan failed");
       showToast("success", `Plan changed for ${row.employeeName}; prior assignment preserved.`);
       await loadAdmin();
+      await loadEmployeeDirectory();
       if (selectedEmployeeProfileId) await loadEmployee360({ profileUserId: selectedEmployeeProfileId });
+      return true;
     } catch (err) {
       setError(err?.message || "Could not change employee plan");
+      return false;
     } finally {
       setAdminBusy(false);
     }
@@ -563,11 +580,96 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
     [adminModel, closeEmployeeDrawer, navigatePeopleOps, showToast]
   );
 
+  const openCompensationAssign = useCallback(
+    ({ lockEmployee = false, profileUserId = "" } = {}) => {
+      const resolvedId = String(profileUserId || "").trim();
+      const employee = resolvedId
+        ? resolveCompensationActionEmployee(resolvedId, { employeeList, adminModel })
+        : null;
+      setCompensationAction({
+        mode: "assign",
+        lockEmployee: Boolean(lockEmployee && resolvedId),
+        employee,
+        currentAssignment: resolvedId ? resolveActiveAssignmentRow(resolvedId, adminModel) : null,
+      });
+    },
+    [adminModel, employeeList]
+  );
+
+  const openCompensationChange = useCallback(
+    (assignmentRow) => {
+      if (!assignmentRow?.profileUserId) return;
+      setCompensationAction({
+        mode: "change",
+        lockEmployee: true,
+        employee: resolveCompensationActionEmployee(assignmentRow.profileUserId, {
+          employeeList,
+          adminModel,
+        }),
+        currentAssignment: assignmentRow,
+      });
+    },
+    [adminModel, employeeList]
+  );
+
+  useEffect(() => {
+    if (!assignmentIntent?.profileUserId) return;
+    if (activeModuleId !== "compensation" || activeScreenId !== "assignments") return;
+
+    const { profileUserId, mode, assignmentId } = assignmentIntent;
+
+    if (mode === "change") {
+      const row = resolveActiveAssignmentRow(profileUserId, adminModel, assignmentId);
+      if (!row) return;
+      openCompensationChange(row);
+      clearAssignmentIntent();
+      return;
+    }
+
+    openCompensationAssign({ lockEmployee: true, profileUserId });
+    clearAssignmentIntent();
+  }, [
+    activeModuleId,
+    activeScreenId,
+    adminModel,
+    assignmentIntent,
+    clearAssignmentIntent,
+    openCompensationAssign,
+    openCompensationChange,
+  ]);
+
+  const handleCompensationActionSubmit = useCallback(
+    async ({ mode, profileUserId, planId, effectiveDate, assignmentRow }) => {
+      if (mode === "change") {
+        const ok = await handleChangePlan(assignmentRow, { newPlanId: planId, effectiveDate });
+        if (ok) closeCompensationAction();
+        return;
+      }
+      const ok = await handleAssignEmployee({ profileUserId }, { planId, effectiveDate });
+      if (ok) closeCompensationAction();
+    },
+    [closeCompensationAction, handleAssignEmployee, handleChangePlan]
+  );
+
   const selectedPeriodRow = useMemo(() => {
     const rows = model?.periodRows || [];
     if (!rows.length) return null;
     return rows.find((row) => row.periodId === selectedPeriodId) || rows[0];
   }, [model, selectedPeriodId]);
+
+  const compensationPayrollCycleLabel = useMemo(() => {
+    return (
+      selectedPeriodRow?.periodYm ||
+      model?.reportingContext?.periodLabel ||
+      model?.reportingContext?.periodYm ||
+      "Current reporting period"
+    );
+  }, [model, selectedPeriodRow]);
+
+  const compensationSelectableEmployees = useMemo(
+    () => listUnassignedEmployees(adminModel),
+    [adminModel]
+  );
 
   const productivity = useMemo(
     () =>
@@ -1112,17 +1214,15 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         <CompensationExecutiveSummary
           adminModel={adminModel}
           model={model}
-          onAssignEmployees={() => navigatePeopleOps({ moduleId: "compensation", screenId: "assignments" })}
+          onAssignEmployees={() => openCompensationAssign()}
         />
         <CompensationPlanAssignmentsTab
           adminModel={adminModel}
           permissions={adminPermissions}
-          onChangePlan={handleChangePlan}
           onEndAssignment={handleEndAssignment}
-          onAssignEmployee={handleAssignEmployee}
           onViewAssignment={(row) => openEmployee({ profileUserId: row.profileUserId, agentId: row.agentId })}
-          assignmentIntent={assignmentIntent}
-          onAssignmentIntentConsumed={clearAssignmentIntent}
+          onOpenAssign={() => openCompensationAssign()}
+          onOpenChangePlan={openCompensationChange}
           busy={adminBusy}
         />
         </PeopleOpsModuleFrame>
@@ -1345,6 +1445,21 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           />
         </PeopleOpsModuleFrame>
       ) : null}
+
+      <CompensationActionDrawer
+        open={Boolean(compensationAction)}
+        mode={compensationAction?.mode || "assign"}
+        busy={adminBusy}
+        lockEmployee={compensationAction?.lockEmployee === true}
+        employee={compensationAction?.employee || null}
+        currentAssignment={compensationAction?.currentAssignment || null}
+        availablePlans={adminModel?.selectablePlans || []}
+        selectableEmployees={compensationSelectableEmployees}
+        promotionEligibilityRows={adminModel?.promotionEligibilityRows || []}
+        payrollCycleLabel={compensationPayrollCycleLabel}
+        onSubmit={handleCompensationActionSubmit}
+        onCancel={closeCompensationAction}
+      />
 
       <EmployeeCompensation360Drawer
         open={Boolean(selectedEmployeeProfileId)}

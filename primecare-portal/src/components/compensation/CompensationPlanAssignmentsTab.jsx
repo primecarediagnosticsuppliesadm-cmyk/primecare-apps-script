@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EnterpriseDataTable, StatusBadge } from "@/components/ux";
@@ -10,87 +10,18 @@ const STATUS_VARIANT = {
   suspended: "warning",
 };
 
-function resolveChangeAssignmentRow(assignmentIntent, adminModel) {
-  if (!assignmentIntent?.profileUserId) return null;
-  const rows = adminModel?.assignmentRows || [];
-  if (assignmentIntent.assignmentId) {
-    const byId = rows.find((row) => row.id === assignmentIntent.assignmentId);
-    if (byId) return byId;
-  }
-  return (
-    rows.find(
-      (row) => row.profileUserId === assignmentIntent.profileUserId && row.status === "active"
-    ) || null
-  );
-}
-
 export default function CompensationPlanAssignmentsTab({
   adminModel,
   permissions,
-  onChangePlan,
   onEndAssignment,
-  onAssignEmployee,
   onViewAssignment,
-  assignmentIntent = null,
-  onAssignmentIntentConsumed,
+  onOpenAssign,
+  onOpenChangePlan,
   busy = false,
 }) {
-  const [changeTarget, setChangeTarget] = useState(null);
-  const [assignOpen, setAssignOpen] = useState(false);
-  const [newPlanId, setNewPlanId] = useState("");
-  const [assignProfileUserId, setAssignProfileUserId] = useState("");
-  const [effectiveDate, setEffectiveDate] = useState(new Date().toISOString().slice(0, 10));
   const [roleFilter, setRoleFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("active");
   const [search, setSearch] = useState("");
-  const appliedIntentKeyRef = useRef("");
-
-  const closeAssignForm = () => {
-    setAssignOpen(false);
-    setAssignProfileUserId("");
-    setNewPlanId("");
-    onAssignmentIntentConsumed?.();
-  };
-
-  const closeChangeForm = () => {
-    setChangeTarget(null);
-    onAssignmentIntentConsumed?.();
-  };
-
-  useEffect(() => {
-    if (!assignmentIntent?.profileUserId) {
-      appliedIntentKeyRef.current = "";
-      return;
-    }
-
-    const intentKey = `${assignmentIntent.mode}:${assignmentIntent.profileUserId}:${assignmentIntent.assignmentId || ""}`;
-    if (appliedIntentKeyRef.current === intentKey) return;
-
-    const today = new Date().toISOString().slice(0, 10);
-
-    if (assignmentIntent.mode === "assign") {
-      setChangeTarget(null);
-      setAssignOpen(true);
-      setAssignProfileUserId(assignmentIntent.profileUserId);
-      setNewPlanId("");
-      setEffectiveDate(today);
-      appliedIntentKeyRef.current = intentKey;
-      onAssignmentIntentConsumed?.();
-      return;
-    }
-
-    if (assignmentIntent.mode === "change") {
-      const row = resolveChangeAssignmentRow(assignmentIntent, adminModel);
-      if (!row) return;
-
-      setAssignOpen(false);
-      setChangeTarget(row);
-      setNewPlanId(row.planId || "");
-      setEffectiveDate(today);
-      appliedIntentKeyRef.current = intentKey;
-      onAssignmentIntentConsumed?.();
-    }
-  }, [adminModel, assignmentIntent, onAssignmentIntentConsumed]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -105,11 +36,6 @@ export default function CompensationPlanAssignmentsTab({
     });
   }, [adminModel, roleFilter, statusFilter, search]);
 
-  const unassignedEmployees = useMemo(() => {
-    const assigned = new Set((adminModel?.assignmentRows || []).filter((r) => r.status === "active").map((r) => r.profileUserId));
-    return (adminModel?.selectableEmployees || []).filter((emp) => !assigned.has(emp.profileUserId));
-  }, [adminModel]);
-
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -117,7 +43,7 @@ export default function CompensationPlanAssignmentsTab({
           Employee plan assignments preserve history. Assign, change plan, or end assignment — no delete.
         </p>
         {permissions?.canAssignPlan ? (
-          <Button type="button" size="sm" disabled={busy} onClick={() => setAssignOpen(true)}>
+          <Button type="button" size="sm" disabled={busy} onClick={() => onOpenAssign?.()}>
             Assign Employee
           </Button>
         ) : null}
@@ -210,10 +136,7 @@ export default function CompensationPlanAssignmentsTab({
                             size="sm"
                             variant="outline"
                             className="h-7 text-[10px]"
-                            onClick={() => {
-                              setChangeTarget(row);
-                              setNewPlanId(row.planId);
-                            }}
+                            onClick={() => onOpenChangePlan?.(row)}
                           >
                             Change Plan
                           </Button>
@@ -239,106 +162,6 @@ export default function CompensationPlanAssignmentsTab({
           </div>
         }
       />
-
-      {assignOpen && permissions?.canAssignPlan ? (
-        <section className="rounded-lg border bg-white p-4">
-          <h3 className="text-sm font-bold text-slate-900">Assign Employee to Plan</h3>
-          <div className="mt-3 grid gap-3 md:grid-cols-3">
-            <label className="space-y-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Employee</span>
-              <select
-                className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
-                value={assignProfileUserId}
-                onChange={(event) => setAssignProfileUserId(event.target.value)}
-              >
-                <option value="">Select employee</option>
-                {unassignedEmployees.map((emp) => (
-                  <option key={emp.profileUserId} value={emp.profileUserId}>
-                    {emp.employeeName} · {emp.role}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="space-y-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Plan</span>
-              <select
-                className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
-                value={newPlanId}
-                onChange={(event) => setNewPlanId(event.target.value)}
-              >
-                <option value="">Select plan</option>
-                {(adminModel?.selectablePlans || []).map((plan) => (
-                  <option key={plan.id} value={plan.id}>
-                    {plan.planName} · {plan.roleScope} · {plan.version}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="space-y-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Effective Date</span>
-              <Input type="date" value={effectiveDate} onChange={(event) => setEffectiveDate(event.target.value)} />
-            </label>
-            <div className="flex items-end gap-2 md:col-span-3">
-              <Button type="button" size="sm" variant="outline" onClick={closeAssignForm}>
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                disabled={busy || !assignProfileUserId || !newPlanId}
-                onClick={() => {
-                  onAssignEmployee?.({ profileUserId: assignProfileUserId }, { planId: newPlanId, effectiveDate });
-                  closeAssignForm();
-                }}
-              >
-                Save Assignment
-              </Button>
-            </div>
-          </div>
-        </section>
-      ) : null}
-
-      {changeTarget && permissions?.canChangePlan ? (
-        <section className="rounded-lg border bg-white p-4">
-          <h3 className="text-sm font-bold text-slate-900">Change Plan · {changeTarget.employeeName}</h3>
-          <div className="mt-3 grid gap-3 md:grid-cols-3">
-            <label className="space-y-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">New Plan</span>
-              <select
-                className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
-                value={newPlanId}
-                onChange={(event) => setNewPlanId(event.target.value)}
-              >
-                {(adminModel?.selectablePlans || []).map((plan) => (
-                  <option key={plan.id} value={plan.id}>
-                    {plan.planName} · {plan.version}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="space-y-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Effective Date</span>
-              <Input type="date" value={effectiveDate} onChange={(event) => setEffectiveDate(event.target.value)} />
-            </label>
-            <div className="flex items-end gap-2">
-              <Button type="button" size="sm" variant="outline" onClick={closeChangeForm}>
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                disabled={busy || !newPlanId}
-                onClick={() => {
-                  onChangePlan?.(changeTarget, { newPlanId, effectiveDate });
-                  closeChangeForm();
-                }}
-              >
-                Save Change
-              </Button>
-            </div>
-          </div>
-        </section>
-      ) : null}
     </div>
   );
 }
