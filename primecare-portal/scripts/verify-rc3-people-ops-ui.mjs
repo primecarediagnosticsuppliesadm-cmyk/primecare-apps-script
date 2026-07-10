@@ -38,6 +38,8 @@ assert(/Future Capabilities/.test(settingsSrc), "rc3.settings_roadmap", "setting
 assert(/Not configured|Configured \(derived envelope\)/.test(budgetSrc), "rc3.budget_status", "budget configured vs unconfigured");
 assert(/filterTree/.test(ownershipSrc), "rc3.ownership_search", "ownership tree search/filter");
 assert(/formatPeopleOpsMetricValue/.test(dataQualitySrc), "rc3.metric_formatting", "misleading zero formatting helper");
+assert(/filterPeopleOpsDataQualityWarningsForModule/.test(dataQualitySrc), "rc3.module_blocker_filter", "module-scoped blocker filter");
+assert(/moduleDataQualityWarnings/.test(pageSrc), "rc3.module_blockers_wired", "page filters blockers per module");
 assert(!/supabase\/migrations/.test(pageSrc + dashboardSrc), "guard.no_schema", "no schema changes");
 
 if (failures) { console.error(`\nOverall: NO-GO (${failures} failure(s))`); process.exit(1); }

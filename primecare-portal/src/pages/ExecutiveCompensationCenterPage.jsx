@@ -55,9 +55,14 @@ import {
 import PeopleOpsGlobalSearch from "@/components/peopleOps/productivity/PeopleOpsGlobalSearch.jsx";
 import PeopleOpsContextWidget from "@/components/peopleOps/productivity/PeopleOpsContextWidget.jsx";
 import PeopleOpsDataQualityBanner from "@/components/peopleOps/PeopleOpsDataQualityBanner.jsx";
+import PeopleOpsModuleDependencyNotice from "@/components/peopleOps/PeopleOpsModuleDependencyNotice.jsx";
 import CompensationExecutiveSummary from "@/components/peopleOps/CompensationExecutiveSummary.jsx";
 import PeopleOpsPayrollStickyTotals from "@/components/peopleOps/PeopleOpsPayrollStickyTotals.jsx";
-import { buildPeopleOpsDataQualityWarnings } from "@/peopleOps/peopleOpsDataQualityModel.js";
+import {
+  buildPeopleOpsDataQualityWarnings,
+  buildPeopleOpsModuleDependencyNotices,
+  filterPeopleOpsDataQualityWarningsForModule,
+} from "@/peopleOps/peopleOpsDataQualityModel.js";
 import EmployeeCompensation360Drawer from "@/components/peopleOps/EmployeeCompensation360Drawer.jsx";
 import PeopleOpsSettingsLanding from "@/components/peopleOps/PeopleOpsSettingsLanding.jsx";
 import PeopleOpsPayrollSummary from "@/components/peopleOps/PeopleOpsPayrollSummary.jsx";
@@ -734,6 +739,16 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
     [adminModel, employeeList, model, ownershipWorkspace, workforceBudget]
   );
 
+  const moduleDataQualityWarnings = useMemo(
+    () => filterPeopleOpsDataQualityWarningsForModule(dataQualityWarnings, activeModuleId),
+    [activeModuleId, dataQualityWarnings]
+  );
+
+  const moduleDependencyNotices = useMemo(
+    () => buildPeopleOpsModuleDependencyNotices({ moduleId: activeModuleId, employeeList }),
+    [activeModuleId, employeeList]
+  );
+
   const selectedLabModel = useMemo(() => {
     if (!selectedLabId || !ownershipWorkspace) return null;
     return ownershipWorkspace.resolveLab360(selectedLabId);
@@ -1092,7 +1107,10 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
       />
 
       {activeModuleId !== "dashboard" ? (
-        <PeopleOpsDataQualityBanner warnings={dataQualityWarnings} onNavigate={handleOpenProductivityRoute} />
+        <>
+          <PeopleOpsModuleDependencyNotice notices={moduleDependencyNotices} onNavigate={handleOpenProductivityRoute} />
+          <PeopleOpsDataQualityBanner warnings={moduleDataQualityWarnings} onNavigate={handleOpenProductivityRoute} />
+        </>
       ) : null}
 
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_16rem]">

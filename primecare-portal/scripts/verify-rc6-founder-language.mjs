@@ -69,6 +69,10 @@ assert(/are not assigned to any compensation plan/.test(src.dataQuality), "rc6.d
 assert(/missing a primary owner/.test(src.dataQuality), "rc6.dq_ownership", "ownership warning business language");
 assert(/No employees are assigned to this payroll run/.test(src.dataQuality), "rc6.dq_empty_run", "empty payroll run business language");
 assert(/Assign Plans →|Open Ownership →|Generate Preview →/.test(src.dataQuality), "rc6.dq_ctas", "warnings have CTAs");
+assert(/filterPeopleOpsDataQualityWarningsForModule/.test(src.dataQuality), "rc6.dq_module_filter", "module-scoped blocker filter");
+assert(/buildPeopleOpsModuleDependencyNotices/.test(src.dataQuality), "rc6.dq_dependency_notices", "cross-module dependency notices");
+assert(/PeopleOpsModuleDependencyNotice/.test(src.page), "rc6.page_dependency_notice", "page renders dependency notices on modules");
+assert(/moduleDataQualityWarnings/.test(src.page), "rc6.page_module_warnings", "page filters blockers by active module");
 
 assert(/Requires Your Attention/.test(src.inbox), "rc6.inbox_title", "inbox renamed");
 assert(/Current Reporting Period/.test(src.context), "rc6.context_title", "context renamed");
