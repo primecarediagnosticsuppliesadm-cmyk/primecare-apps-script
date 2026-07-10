@@ -26,6 +26,7 @@ assert(/PeopleOpsTableShell/.test(directorySrc), "ui.directory_shell", "director
 assert(/onBulkAssignPlan/.test(directorySrc), "ui.bulk_assign", "bulk assign action present");
 assert(/openDirectoryAssignmentWorkflow/.test(pageSrc), "ui.directory_assign_route", "directory assign opens assignments workflow");
 assert(!/onBulkAssignPlan=\{\(rows\) => \{[\s\S]*openEmployee\(rows\[0\]\)/.test(pageSrc), "ui.no_assign_via_360", "assign plan does not open employee 360");
+assert(/resolved\.moduleId === "compensation"[\s\S]*closeEmployeeDrawer/.test(pageSrc), "ui.comp_nav_closes_drawer", "compensation navigation closes employee 360 drawer");
 assert(/PeopleOpsActionMenu/.test(plansSrc), "ui.overflow_menu", "compensation plans use overflow menu");
 assert(/buildCompensationSummaryStats/.test(plansSrc), "ui.comp_summary", "compensation summary cards");
 assert(/Active Configuration/.test(settingsSrc), "ui.settings_landing", "settings landing distinguishes active vs roadmap");

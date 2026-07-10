@@ -140,9 +140,22 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
     saveScenarioToHistory,
   } = useWorkforcePlanningState();
 
-  const navigatePeopleOps = useCallback((next) => {
-    setPeopleOpsRoute(resolvePeopleOpsRoute(next.moduleId, next.screenId));
+  const closeEmployeeDrawer = useCallback(() => {
+    setSelectedEmployeeProfileId("");
+    setEmployee360Model(null);
+    setEmployee360Error("");
   }, []);
+
+  const navigatePeopleOps = useCallback(
+    (next) => {
+      const resolved = resolvePeopleOpsRoute(next.moduleId, next.screenId);
+      if (resolved.moduleId === "compensation") {
+        closeEmployeeDrawer();
+      }
+      setPeopleOpsRoute(resolved);
+    },
+    [closeEmployeeDrawer]
+  );
 
   const clearAssignmentIntent = useCallback(() => {
     setAssignmentIntent(null);
@@ -504,12 +517,6 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
       minute: "2-digit",
     });
   }, [dataLoadedAt]);
-
-  const closeEmployeeDrawer = useCallback(() => {
-    setSelectedEmployeeProfileId("");
-    setEmployee360Model(null);
-    setEmployee360Error("");
-  }, []);
 
   const openDirectoryAssignmentWorkflow = useCallback(
     (rows, mode) => {
