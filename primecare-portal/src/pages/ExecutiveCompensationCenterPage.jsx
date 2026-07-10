@@ -127,6 +127,8 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
   const [globalSearchQuery, setGlobalSearchQuery] = useState("");
   const [ownershipPayload, setOwnershipPayload] = useState(null);
   const [selectedLabId, setSelectedLabId] = useState("");
+  /** Directory-driven assign/change workflow — consumed by CompensationPlanAssignmentsTab. */
+  const [assignmentIntent, setAssignmentIntent] = useState(null);
 
   const { recentlyViewed, favorites, trackView, toggleFavorite, isFavorite } = usePeopleOpsSessionState();
   const {
@@ -141,6 +143,16 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
   const navigatePeopleOps = useCallback((next) => {
     setPeopleOpsRoute(resolvePeopleOpsRoute(next.moduleId, next.screenId));
   }, []);
+
+  const clearAssignmentIntent = useCallback(() => {
+    setAssignmentIntent(null);
+  }, []);
+
+  useEffect(() => {
+    if (activeModuleId !== "compensation" || activeScreenId !== "assignments") {
+      setAssignmentIntent(null);
+    }
+  }, [activeModuleId, activeScreenId]);
 
   const actorRole = String(currentUser?.role || "executive").toLowerCase();
   const tenantId = currentUser?.tenantId || currentUser?.tenant_id || "";
@@ -498,6 +510,51 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
     setEmployee360Model(null);
     setEmployee360Error("");
   }, []);
+
+  const openDirectoryAssignmentWorkflow = useCallback(
+    (rows, mode) => {
+      if (!rows?.length) return;
+      if (rows.length > 1) {
+        showToast(
+          "info",
+          mode === "change"
+            ? "Select one employee at a time to change a compensation plan."
+            : "Select one employee at a time to assign a compensation plan."
+        );
+        return;
+      }
+
+      const employee = rows[0];
+      const profileUserId = String(employee.profileUserId || employee.profile_user_id || "").trim();
+      if (!profileUserId) {
+        showToast("warning", "This employee cannot be assigned a plan yet.");
+        return;
+      }
+
+      closeEmployeeDrawer();
+
+      if (mode === "change") {
+        const activeAssignment = (adminModel?.assignmentRows || []).find(
+          (row) => row.profileUserId === profileUserId && row.status === "active"
+        );
+        setAssignmentIntent({
+          mode: "change",
+          profileUserId,
+          employeeName: employee.employeeName,
+          assignmentId: activeAssignment?.id || "",
+        });
+      } else {
+        setAssignmentIntent({
+          mode: "assign",
+          profileUserId,
+          employeeName: employee.employeeName,
+        });
+      }
+
+      navigatePeopleOps({ moduleId: "compensation", screenId: "assignments" });
+    },
+    [adminModel, closeEmployeeDrawer, navigatePeopleOps, showToast]
+  );
 
   const selectedPeriodRow = useMemo(() => {
     const rows = model?.periodRows || [];
@@ -1057,6 +1114,8 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           onEndAssignment={handleEndAssignment}
           onAssignEmployee={handleAssignEmployee}
           onViewAssignment={(row) => openEmployee({ profileUserId: row.profileUserId, agentId: row.agentId })}
+          assignmentIntent={assignmentIntent}
+          onAssignmentIntentConsumed={clearAssignmentIntent}
           busy={adminBusy}
         />
         </PeopleOpsModuleFrame>
@@ -1274,14 +1333,8 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
             onSearchChange={setEmployeeSearch}
             onOpenEmployee={openEmployee}
             permissions={employee360Permissions}
-            onBulkAssignPlan={(rows) => {
-              if (rows?.[0]) openEmployee(rows[0]);
-              navigatePeopleOps({ moduleId: "compensation", screenId: "assignments" });
-            }}
-            onBulkChangePlan={(rows) => {
-              if (rows?.[0]) openEmployee(rows[0]);
-              navigatePeopleOps({ moduleId: "compensation", screenId: "assignments" });
-            }}
+            onBulkAssignPlan={(rows) => openDirectoryAssignmentWorkflow(rows, "assign")}
+            onBulkChangePlan={(rows) => openDirectoryAssignmentWorkflow(rows, "change")}
           />
         </PeopleOpsModuleFrame>
       ) : null}

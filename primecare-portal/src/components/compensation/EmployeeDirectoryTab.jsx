@@ -251,12 +251,26 @@ export default function EmployeeDirectoryTab({
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
           <span className="text-sm font-medium text-foreground">{selectedRows.length} selected</span>
           {permissions?.canAssignPlan ? (
-            <Button type="button" size="sm" variant="outline" onClick={() => onBulkAssignPlan?.(selectedRows)}>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={selectedRows.length > 1}
+              title={selectedRows.length > 1 ? "Assign one employee at a time" : undefined}
+              onClick={() => onBulkAssignPlan?.(selectedRows)}
+            >
               Assign Plan
             </Button>
           ) : null}
           {permissions?.canChangePlan ? (
-            <Button type="button" size="sm" variant="outline" onClick={() => onBulkChangePlan?.(selectedRows)}>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={selectedRows.length > 1}
+              title={selectedRows.length > 1 ? "Change one employee at a time" : undefined}
+              onClick={() => onBulkChangePlan?.(selectedRows)}
+            >
               Change Plan
             </Button>
           ) : null}

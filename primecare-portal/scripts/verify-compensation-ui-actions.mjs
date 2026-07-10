@@ -21,6 +21,9 @@ assert(/onViewAssignment/.test(assignSrc), "ui.view_assignment", "view assignmen
 assert(/assignEmployeeToPlan/.test(apiSrc), "api.assign", "assign API");
 assert(/activateCompensationPlan/.test(apiSrc), "api.activate", "activate API");
 assert(/handleAssignEmployee/.test(pageSrc), "page.assign_handler", "assign handler on page");
+assert(/assignmentIntent/.test(pageSrc), "page.assignment_intent", "directory assignment intent state");
+assert(/openDirectoryAssignmentWorkflow/.test(pageSrc), "page.directory_assignment", "directory routes to assignments workflow");
+assert(/assignmentIntent/.test(assignSrc), "ui.assignment_intent", "assignments tab consumes directory intent");
 
 if (failures) { console.error(`\nOverall: NO-GO (${failures})`); process.exit(1); }
 console.log("\nOverall: GO\n");

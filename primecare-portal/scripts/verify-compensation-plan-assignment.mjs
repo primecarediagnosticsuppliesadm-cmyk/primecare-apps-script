@@ -42,11 +42,13 @@ for (const column of [
   assert(assignmentsTabSrc.includes(column), `assignments.column.${column}`, `${column} column present`);
 }
 
-assert(/Plan Assignments/.test(pageSrc), "page.assignments_tab", "Plan Assignments tab wired");
+assert(/Compensation Assignments/.test(pageSrc), "page.assignments_tab", "Compensation Assignments tab wired");
 assert(/changeEmployeePlanAssignment/.test(apiSrc), "api.change_plan", "change plan API exported");
 assert(/endEmployeePlanAssignment/.test(apiSrc), "api.end_assignment", "end assignment API exported");
 assert(/history_preserved/.test(apiSrc), "api.history_preserved", "assignment history preserved on change");
 assert(/Change Plan/.test(assignmentsTabSrc), "ui.change_plan", "change plan action present");
+assert(/assignmentIntent/.test(assignmentsTabSrc), "ui.assignment_intent", "assignments tab accepts directory intent");
+assert(/openDirectoryAssignmentWorkflow/.test(pageSrc), "page.directory_workflow", "page routes directory assign/change to assignments");
 assert(/End Assignment/.test(assignmentsTabSrc), "ui.end_assignment", "end assignment action present");
 assert(!/\.delete\(\)/.test(apiSrc), "api.no_delete", "no assignment delete path");
 

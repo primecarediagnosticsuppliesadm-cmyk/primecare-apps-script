@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EnterpriseDataTable, StatusBadge } from "@/components/ux";
@@ -10,6 +10,20 @@ const STATUS_VARIANT = {
   suspended: "warning",
 };
 
+function resolveChangeAssignmentRow(assignmentIntent, adminModel) {
+  if (!assignmentIntent?.profileUserId) return null;
+  const rows = adminModel?.assignmentRows || [];
+  if (assignmentIntent.assignmentId) {
+    const byId = rows.find((row) => row.id === assignmentIntent.assignmentId);
+    if (byId) return byId;
+  }
+  return (
+    rows.find(
+      (row) => row.profileUserId === assignmentIntent.profileUserId && row.status === "active"
+    ) || null
+  );
+}
+
 export default function CompensationPlanAssignmentsTab({
   adminModel,
   permissions,
@@ -17,6 +31,8 @@ export default function CompensationPlanAssignmentsTab({
   onEndAssignment,
   onAssignEmployee,
   onViewAssignment,
+  assignmentIntent = null,
+  onAssignmentIntentConsumed,
   busy = false,
 }) {
   const [changeTarget, setChangeTarget] = useState(null);
@@ -27,6 +43,54 @@ export default function CompensationPlanAssignmentsTab({
   const [roleFilter, setRoleFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("active");
   const [search, setSearch] = useState("");
+  const appliedIntentKeyRef = useRef("");
+
+  const closeAssignForm = () => {
+    setAssignOpen(false);
+    setAssignProfileUserId("");
+    setNewPlanId("");
+    onAssignmentIntentConsumed?.();
+  };
+
+  const closeChangeForm = () => {
+    setChangeTarget(null);
+    onAssignmentIntentConsumed?.();
+  };
+
+  useEffect(() => {
+    if (!assignmentIntent?.profileUserId) {
+      appliedIntentKeyRef.current = "";
+      return;
+    }
+
+    const intentKey = `${assignmentIntent.mode}:${assignmentIntent.profileUserId}:${assignmentIntent.assignmentId || ""}`;
+    if (appliedIntentKeyRef.current === intentKey) return;
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    if (assignmentIntent.mode === "assign") {
+      setChangeTarget(null);
+      setAssignOpen(true);
+      setAssignProfileUserId(assignmentIntent.profileUserId);
+      setNewPlanId("");
+      setEffectiveDate(today);
+      appliedIntentKeyRef.current = intentKey;
+      onAssignmentIntentConsumed?.();
+      return;
+    }
+
+    if (assignmentIntent.mode === "change") {
+      const row = resolveChangeAssignmentRow(assignmentIntent, adminModel);
+      if (!row) return;
+
+      setAssignOpen(false);
+      setChangeTarget(row);
+      setNewPlanId(row.planId || "");
+      setEffectiveDate(today);
+      appliedIntentKeyRef.current = intentKey;
+      onAssignmentIntentConsumed?.();
+    }
+  }, [adminModel, assignmentIntent, onAssignmentIntentConsumed]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -215,7 +279,7 @@ export default function CompensationPlanAssignmentsTab({
               <Input type="date" value={effectiveDate} onChange={(event) => setEffectiveDate(event.target.value)} />
             </label>
             <div className="flex items-end gap-2 md:col-span-3">
-              <Button type="button" size="sm" variant="outline" onClick={() => setAssignOpen(false)}>
+              <Button type="button" size="sm" variant="outline" onClick={closeAssignForm}>
                 Cancel
               </Button>
               <Button
@@ -224,9 +288,7 @@ export default function CompensationPlanAssignmentsTab({
                 disabled={busy || !assignProfileUserId || !newPlanId}
                 onClick={() => {
                   onAssignEmployee?.({ profileUserId: assignProfileUserId }, { planId: newPlanId, effectiveDate });
-                  setAssignOpen(false);
-                  setAssignProfileUserId("");
-                  setNewPlanId("");
+                  closeAssignForm();
                 }}
               >
                 Save Assignment
@@ -259,7 +321,7 @@ export default function CompensationPlanAssignmentsTab({
               <Input type="date" value={effectiveDate} onChange={(event) => setEffectiveDate(event.target.value)} />
             </label>
             <div className="flex items-end gap-2">
-              <Button type="button" size="sm" variant="outline" onClick={() => setChangeTarget(null)}>
+              <Button type="button" size="sm" variant="outline" onClick={closeChangeForm}>
                 Cancel
               </Button>
               <Button
@@ -268,7 +330,7 @@ export default function CompensationPlanAssignmentsTab({
                 disabled={busy || !newPlanId}
                 onClick={() => {
                   onChangePlan?.(changeTarget, { newPlanId, effectiveDate });
-                  setChangeTarget(null);
+                  closeChangeForm();
                 }}
               >
                 Save Change
