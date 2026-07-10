@@ -14,6 +14,10 @@ const assignmentsTabSrc = readFileSync(
   resolve(root, "src/components/compensation/CompensationPlanAssignmentsTab.jsx"),
   "utf8"
 );
+const assignmentsModelSrc = readFileSync(
+  resolve(root, "src/compensation/compensationAssignmentsViewModel.js"),
+  "utf8"
+);
 
 let failures = 0;
 function pass(id, detail) {
@@ -47,7 +51,11 @@ assert(/changeEmployeePlanAssignment/.test(apiSrc), "api.change_plan", "change p
 assert(/endEmployeePlanAssignment/.test(apiSrc), "api.end_assignment", "end assignment API exported");
 assert(/history_preserved/.test(apiSrc), "api.history_preserved", "assignment history preserved on change");
 assert(/Change Plan/.test(assignmentsTabSrc), "ui.change_plan", "change plan action present");
-assert(/assignmentIntent/.test(assignmentsTabSrc), "ui.assignment_intent", "assignments tab accepts directory intent");
+assert(/assignmentIntent/.test(pageSrc), "ui.assignment_intent", "page consumes directory assignment intent");
+assert(/COMPENSATION_ASSIGNMENT_SEGMENTS/.test(assignmentsTabSrc), "ui.assignment_segments", "assignments tab has segment filters");
+assert(/buildCompensationAssignmentSegmentCounts/.test(assignmentsModelSrc), "ui.segment_counts", "assignment segment count model");
+assert(/findDuplicateActiveAssignmentProfiles/.test(assignmentsModelSrc), "ui.duplicate_active", "duplicate active assignment guard");
+assert(/kind: "history"/.test(assignmentsModelSrc), "ui.history_kind", "history rows tagged separately from active");
 assert(/openDirectoryAssignmentWorkflow/.test(pageSrc), "page.directory_workflow", "page routes directory assign/change to assignments");
 assert(/End Assignment/.test(assignmentsTabSrc), "ui.end_assignment", "end assignment action present");
 assert(!/\.delete\(\)/.test(apiSrc), "api.no_delete", "no assignment delete path");

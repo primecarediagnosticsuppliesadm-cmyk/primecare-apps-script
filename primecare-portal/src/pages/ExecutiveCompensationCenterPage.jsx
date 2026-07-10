@@ -460,6 +460,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
       if (!result.success) throw new Error(result.error || "End assignment failed");
       showToast("success", `Assignment ended for ${row.employeeName}.`);
       await loadAdmin();
+      await loadEmployeeDirectory();
     } catch (err) {
       setError(err?.message || "Could not end assignment");
     } finally {
@@ -1239,7 +1240,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           permissions={adminPermissions}
           onEndAssignment={handleEndAssignment}
           onViewAssignment={(row) => openEmployee({ profileUserId: row.profileUserId, agentId: row.agentId })}
-          onOpenAssign={() => openCompensationAssign()}
+          onOpenAssign={(options) => openCompensationAssign(options || {})}
           onOpenChangePlan={openCompensationChange}
           busy={adminBusy}
         />
