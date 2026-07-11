@@ -62,6 +62,7 @@ Talent, ATS, Recruitment, Onboarding, Offboarding, Leave, Benefits, Performance 
 |--------|-----------|---------------------|
 | Dashboard | `home` | Overview (KPIs + trends; no analytics panel) |
 | Employees | `directory` | Employees |
+| Employees | `workspace` | Employee Workspace (deep-link; hidden from sub-nav) |
 | Compensation | `plans` | Compensation Plans |
 | Compensation | `assignments` | Plan Assignments |
 | Payroll | `periods` | Payroll Periods |
@@ -116,7 +117,7 @@ Full RBAC: `compensationPlanAdminWorkflow.js`, `payrollWorkflowUi.js`, `employee
 | Module | Owns (UI) | Does not own |
 |--------|-----------|--------------|
 | **Dashboard** | Reporting context, operational KPIs, trends, promotion pipeline snapshot | Payroll calculation, finance KPIs |
-| **Employees** | Directory, Employee 360 navigation | Profile provisioning (Operations Center) |
+| **Employees** | Directory, Employee Workspace, Quick View navigation | Profile provisioning (Operations Center) |
 | **Compensation** | Plans, assignments, simulator | Payroll runs, commission ledger |
 | **Payroll** | Periods, run review, workflow toolbar, ledger, activity, exports | Plan rule authoring (Compensation module) |
 | **Reports** | Analytics presentation from `model.intelligence` | New analytics math (use `analytics/*`) |
@@ -158,7 +159,9 @@ Full RBAC: `compensationPlanAdminWorkflow.js`, `payrollWorkflowUi.js`, `employee
 | `payrollDomainSupabaseApi.js` | **KEEP** |
 | `compensationPlanAdminSupabaseApi.js` | **KEEP** |
 | `employeeCompensation360SupabaseApi.js` | **KEEP** |
-| `EmployeeCompensation360Panel` | **MOVE** → Employees module |
+| `EmployeeCompensation360Panel` | **DEPRECATED** — superseded by `Employee360Workspace`; retained for verify scripts until browser UAT cleanup PR |
+| `Employee360Workspace` | **NEW** — canonical Employee Workspace (full page + Quick View compact mode) |
+| `employee360WorkspaceModel.js` | **NEW** — compose-only read model for workspace sections |
 | `CompensationPlansTab` | **MOVE** → Compensation → Plans |
 | `CompensationPlanAssignmentsTab` | **MOVE** → Compensation → Assignments |
 | `PayrollWorkflowToolbar` | **KEEP** — Payroll screens |
@@ -293,7 +296,9 @@ Each slice: build → verify → UAT → gate before next slice.
 | `verify-ownership-hierarchy.mjs` | Executive → Admin → Agent tree derivations |
 | `verify-territory-dashboard.mjs` | Territory dashboard from lab areas |
 | `verify-lab-ownership.mjs` | Lab 360 drawer, timeline, read-only |
-| `verify-employee-ownership.mjs` | Employee 360 ownership section |
+| `verify-employee-ownership.mjs` | Employee Workspace ownership tab |
+| `verify-employee360-workspace.mjs` | Employee Workspace IA, Today budget, operational status, quick actions, HR gate |
+| `verify-employee360-business-profile.mjs` | Employee Workspace business profile compose + action handler |
 | `verify-compensation-preview-readonly.mjs` | Future override preview; no payroll writes |
 | `audit-phase-8-4-certification.mjs` | Phase 8.4 ownership bundle + regression + build |
 
@@ -345,10 +350,161 @@ Phase 8.2 is **UI/UX only**. No schema, API, RLS, payroll engine, compensation e
 | Surface | Rule |
 |---------|------|
 | **Directory** | `EnterpriseDataTable` with KPI strip, filters (search, role, plan, assignment status), bulk actions |
-| **Employee 360** | Slide-over drawer — directory remains visible; selection preserved across module navigation |
+| **Employee Workspace** | Canonical full-page workspace — opened from directory row click |
+| **Employee Quick View** | Compact Today-only drawer — opened from directory overflow action |
 | **Columns** | Employee, Role, Department (placeholder), Plan, Assignment Status, Payroll Status, Updated, Actions |
 
-### Compensation module
+Directory filter/search state lives on the page shell (`employeeSearch`, role/plan/assignment filters) so it survives workspace navigation and back.
+
+---
+
+## Employee Workspace (canonical employee experience)
+
+Employee Workspace is the **benchmark 360 pattern** for future Lab, Distributor, Customer, and Vendor workspaces. It is action-oriented — not an information dump. Employee Workspace **composes** existing read models; it is **not** a new source of truth.
+
+### A. Surface architecture
+
+| Surface | Role | Entry |
+|---------|------|-------|
+| **Employee Directory** | Canonical employee list — search, filters, bulk actions | `employees/directory` |
+| **Employee Workspace** | Canonical full employee workspace | Directory row click → `employees/workspace` |
+| **Employee Quick View** | Compact Today-only drawer | Directory overflow → Quick view |
+
+The workspace screen is **deep-link only** (`navHidden: true` in `peopleOpsNavigation.js`) — it does not appear in the Employees sub-nav bar.
+
+### B. Workspace tabs
+
+| Tab | Purpose | Visibility |
+|-----|---------|------------|
+| **Today** | What should I do? Why? What happens if I don't? | Always |
+| **Compensation** | Current plan + assignment history | Always |
+| **Payroll** | Payroll + commission + adjustments by period | Always |
+| **Ownership** | Lab and territory attribution | Field roles (agents) only |
+| **History** | Business milestones + operational activity (single chronological list) | Always |
+| **Documents / Assets / Leave** | HR lifecycle modules | Hidden until `PEOPLE_OPS_HR_MODULE_ENABLED = true` |
+
+Never expose unfinished HR modules or fake-data tabs.
+
+### C. Today-tab page budget
+
+Maximum surfaces on Today (enforced in `employee360WorkspaceModel.js`):
+
+| Element | Max |
+|---------|-----|
+| Next Best Action | 1 |
+| Current Tasks | 5 |
+| Operational Status card | 1 |
+| Employee Snapshot | 1 |
+| Relationship Summary | 1 (full workspace only; omitted in Quick View) |
+
+**Prohibited on Today:** duplicated KPI grids, executive summary panels, inline write forms.
+
+Quick View renders Today only in compact mode inside `EmployeeCompensation360Drawer`.
+
+### D. Operational Status vocabulary
+
+Replace abstract numeric health scores. Only these states:
+
+| Status | Meaning |
+|--------|---------|
+| **Ready** | No blocking issues for this employee in current reporting context |
+| **Needs Attention** | Action recommended but not blocking |
+| **Blocked** | Cannot proceed safely until resolved |
+
+Built by `buildEmployee360OperationalStatus()` from existing assignment, payroll, and ownership read signals.
+
+### E. Information ownership
+
+| Domain | Owner module / SoT | Workspace role |
+|--------|-------------------|----------------|
+| Identity / profile | Operations Center / `profiles` | Snapshot + relationship summary (read compose) |
+| Compensation | Compensation module | Compensation tab + NBA/tasks |
+| Payroll + commission | Payroll module | Payroll tab |
+| Territory + lab ownership | Business Ownership / Operations Center | Ownership tab + relationship summary |
+| History | Audit + lifecycle read models | History tab (merged milestones + activity) |
+
+Employee Workspace **must not** become a write SoT or duplicate owner-module calculations.
+
+### F. Write-path rules
+
+All mutations route to owner modules — **no duplicated write behavior** inside Employee Workspace.
+
+| Action | Write path |
+|--------|------------|
+| Assign Plan | `CompensationActionDrawer` → `compensationPlanAdminSupabaseApi` assign |
+| Change Plan | `CompensationActionDrawer` → existing change write path |
+| End Assignment | Compensation → Assignments workflow (existing) |
+| Deactivate Employee | Operations Center provisioning |
+| Payroll actions | People Operations → Payroll module |
+| Ownership actions | Ownership module / Operations Center `labOwnershipApi` |
+
+Directory-launched assign/change flows lock the employee in `CompensationActionDrawer`.
+
+### G. History model
+
+`buildEmployee360History()` merges:
+
+- **Business milestones** — plan assignments, ownership changes, payroll run events (Flag icon)
+- **Operational activity** — audit and workflow activity (Zap icon)
+
+Single chronological list; event type differentiated by icon. Sources remain existing audit and lifecycle read models — no duplicate events.
+
+### H. Role and permission rules
+
+Permissions unchanged from `employeeCompensation360Permissions()` and `compensationAdminPermissions()`:
+
+| Capability | Founder | Executive | HR | Payroll Admin | Finance | Admin | Agent |
+|------------|---------|-----------|-----|---------------|---------|-------|-------|
+| View Employee Workspace | Yes | Yes | Yes | Yes | Yes | Yes | Own only |
+| Quick Actions (assign/change) | — | Yes | Assign | Assign | — | — | — |
+| Ownership tab content | View | View | View | View | View | View | Own labs only |
+| Deactivate | — | Via Ops Center | Via Ops Center | — | — | Via Ops Center | — |
+
+Do **not** broaden permissions in workspace UI. Agent self-view must not expose HR/admin actions.
+
+### I. Future 360 standard
+
+Employee Workspace is the reference pattern for:
+
+- Lab Workspace
+- Distributor Workspace
+- Customer Workspace
+- Vendor Workspace
+
+Pattern:
+
+1. Full canonical workspace page
+2. Compact quick-view drawer (Today only)
+3. Action-oriented Today tab with page budget
+4. Owner-module write routing (no inline mutations)
+5. Compose-only read model (`*WorkspaceModel.js`)
+
+### Routing (current implementation)
+
+Navigation is **in-page React state** (`peopleOpsRoute`, `selectedEmployeeProfileId`, `employee360ViewMode`) — not URL-backed.
+
+| Flow | Behavior |
+|------|----------|
+| Directory row → Workspace | Sets `employees/workspace` + loads employee 360 read |
+| Back → Directory | Clears workspace selection; directory filters preserved (page-level state) |
+| Compensation Assignments | Closes workspace by design |
+| Quick View + full Workspace | Mutually exclusive — drawer only when `employee360ViewMode === 'quick'` |
+
+**Known gap:** Browser refresh and back/forward do **not** restore Employee Workspace or selected employee. Deep URL routing is a future enhancement — not in this slice.
+
+### Implementation assets
+
+| Asset | Role |
+|-------|------|
+| `employee360WorkspaceModel.js` | Compose-only workspace sections |
+| `peopleOpsHrModuleConfig.js` | HR module gate (`PEOPLE_OPS_HR_MODULE_ENABLED`) |
+| `components/peopleOps/employee360/*` | Workspace UI components |
+| `EmployeeCompensation360Drawer.jsx` | Quick View shell |
+| `Employee360Workspace.jsx` | Full + compact workspace renderer |
+
+Verification: `verify-employee360-workspace.mjs`, `verify-employee360-business-profile.mjs`, `verify-people-operations-enterprise-ux.mjs`.
+
+---
 
 | Surface | Rule |
 |---------|------|

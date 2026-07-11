@@ -20,13 +20,16 @@ function pass(id, detail) { console.log(`PASS  ${id}: ${detail}`); }
 function fail(id, detail) { console.error(`FAIL  ${id}: ${detail}`); failures += 1; }
 function assert(c, id, d) { c ? pass(id, d) : fail(id, d); }
 
-assert(/EmployeeCompensation360Drawer/.test(pageSrc), "ui.drawer", "Employee 360 opens in drawer");
+assert(/EmployeeCompensation360Drawer/.test(pageSrc), "ui.drawer", "Employee quick view drawer");
+assert(/Employee360Workspace/.test(pageSrc), "ui.workspace", "Employee workspace page");
+assert(/screenId: "workspace"/.test(pageSrc), "ui.workspace_route", "workspace navigation");
+assert(/openEmployeeQuickView/.test(pageSrc), "ui.quick_view", "quick view from directory");
 assert(/EnterpriseDataTable/.test(directorySrc), "ui.directory_table", "directory uses EnterpriseDataTable");
 assert(/PeopleOpsTableShell/.test(directorySrc), "ui.directory_shell", "directory uses PeopleOpsTableShell");
 assert(/onBulkAssignPlan/.test(directorySrc), "ui.bulk_assign", "bulk assign action present");
 assert(/openDirectoryAssignmentWorkflow/.test(pageSrc), "ui.directory_assign_route", "directory assign opens assignments workflow");
 assert(!/onBulkAssignPlan=\{\(rows\) => \{[\s\S]*openEmployee\(rows\[0\]\)/.test(pageSrc), "ui.no_assign_via_360", "assign plan does not open employee 360");
-assert(/resolved\.moduleId === "compensation"[\s\S]*closeEmployeeDrawer/.test(pageSrc), "ui.comp_nav_closes_drawer", "compensation navigation closes employee 360 drawer");
+assert(/resolved\.moduleId === "compensation"[\s\S]*closeEmployeeWorkspace/.test(pageSrc), "ui.comp_nav_closes_workspace", "compensation assignments closes workspace");
 assert(/PeopleOpsActionMenu/.test(plansSrc), "ui.overflow_menu", "compensation plans use overflow menu");
 assert(/buildCompensationSummaryStats/.test(plansSrc), "ui.comp_summary", "compensation summary cards");
 assert(/Active Configuration/.test(settingsSrc), "ui.settings_landing", "settings landing distinguishes active vs roadmap");

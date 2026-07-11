@@ -79,6 +79,7 @@ export default function EmployeeDirectoryTab({
   search = "",
   onSearchChange,
   onOpenEmployee,
+  onQuickViewEmployee,
   onClearFilters,
   onBulkAssignPlan,
   onBulkChangePlan,
@@ -378,7 +379,8 @@ export default function EmployeeDirectoryTab({
                     <PeopleOpsActionMenu
                       ariaLabel={`Actions for ${employee.employeeName}`}
                       items={[
-                        { id: "view", label: "View Employee 360", onClick: () => onOpenEmployee?.(employee) },
+                        { id: "view", label: "Open workspace", onClick: () => onOpenEmployee?.(employee) },
+                        { id: "quick", label: "Quick view", onClick: () => onQuickViewEmployee?.(employee) },
                         permissions?.canAssignPlan && employee.assignmentStatus === "unassigned"
                           ? { id: "assign", label: "Assign Plan", onClick: () => onBulkAssignPlan?.([employee]) }
                           : null,

@@ -6,6 +6,12 @@ import { ArrowLeft, Eye, History, TrendingUp, Wallet, GitBranch } from "lucide-r
 import CompensationAttributionPreview from "@/components/peopleOps/ownership/CompensationAttributionPreview.jsx";
 import EmployeeBusinessSummaryCard from "@/components/peopleOps/EmployeeBusinessSummaryCard.jsx";
 
+/**
+ * @deprecated Superseded by Employee360Workspace (full page + Quick View drawer).
+ * Retained for verify scripts and AgentCompensation360Panel re-export until a
+ * separate cleanup PR confirms no runtime or agent-surface dependencies after browser UAT.
+ * @see components/peopleOps/employee360/Employee360Workspace.jsx
+ */
 const STATUS_VARIANT = {
   draft: "neutral",
   previewed: "info",

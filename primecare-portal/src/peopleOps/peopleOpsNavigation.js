@@ -12,7 +12,10 @@ export const PEOPLE_OPS_MODULES = Object.freeze([
   {
     id: "employees",
     label: "Employees",
-    screens: [{ id: "directory", label: "Directory" }],
+    screens: [
+      { id: "directory", label: "Directory" },
+      { id: "workspace", label: "Employee Workspace", navHidden: true },
+    ],
   },
   {
     id: "compensation",

@@ -4,6 +4,36 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-11 — Employee Workspace (canonical Employee 360)
+
+### Change
+
+- **Employee Workspace** is the canonical full-page employee experience (`employees/workspace`).
+- **Employee Quick View** is the compact Today-only drawer (directory overflow).
+- Today tab page budget: max 1 NBA, 5 tasks, 1 Operational Status, 1 Snapshot, 1 Relationship Summary.
+- **Operational Status** vocabulary: Ready / Needs Attention / Blocked (no numeric health score).
+- Timeline + Activity merged into **History** tab (milestone vs activity icons).
+- HR tabs (Documents, Assets, Leave) gated by `PEOPLE_OPS_HR_MODULE_ENABLED = false`.
+- Quick Actions route to owner modules (`CompensationActionDrawer`, Payroll, Ownership, Operations Center).
+- `EmployeeCompensation360Panel` deprecated in favor of `Employee360Workspace` (file retained for verify scripts).
+
+### Not changed
+
+- Schema, Supabase, APIs, RLS, permissions, payroll/compensation calculations, write paths, business rules.
+
+### Verification
+
+- `node scripts/verify-employee360-workspace.mjs`
+- `node scripts/verify-employee360-business-profile.mjs`
+- `node scripts/verify-people-operations-enterprise-ux.mjs`
+- `node scripts/verify-compensation-ui-actions.mjs`
+
+### Known gap
+
+- Employee Workspace route is in-page state only — browser refresh does not restore workspace/selection.
+
+---
+
 ## 2026-07-09 — RC6 Founder Dashboard Business Language & Actionability
 
 ### Change

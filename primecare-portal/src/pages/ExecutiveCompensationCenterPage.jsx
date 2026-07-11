@@ -64,6 +64,7 @@ import {
   filterPeopleOpsDataQualityWarningsForModule,
 } from "@/peopleOps/peopleOpsDataQualityModel.js";
 import EmployeeCompensation360Drawer from "@/components/peopleOps/EmployeeCompensation360Drawer.jsx";
+import Employee360Workspace from "@/components/peopleOps/employee360/Employee360Workspace.jsx";
 import PeopleOpsSettingsLanding from "@/components/peopleOps/PeopleOpsSettingsLanding.jsx";
 import PeopleOpsPayrollSummary from "@/components/peopleOps/PeopleOpsPayrollSummary.jsx";
 import PeopleOpsPayrollLineBreakdown from "@/components/peopleOps/PeopleOpsPayrollLineBreakdown.jsx";
@@ -122,6 +123,8 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
   const [selectedPeriodId, setSelectedPeriodId] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [selectedEmployeeProfileId, setSelectedEmployeeProfileId] = useState("");
+  /** @type {'workspace' | 'quick' | null} */
+  const [employee360ViewMode, setEmployee360ViewMode] = useState(null);
   const [generatingPeriodId, setGeneratingPeriodId] = useState("");
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const [adminModel, setAdminModel] = useState(null);
@@ -152,21 +155,38 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
     saveScenarioToHistory,
   } = useWorkforcePlanningState();
 
-  const closeEmployeeDrawer = useCallback(() => {
+  const closeEmployeeQuickView = useCallback(() => {
+    setEmployee360ViewMode(null);
     setSelectedEmployeeProfileId("");
     setEmployee360Model(null);
     setEmployee360Error("");
   }, []);
+
+  const closeEmployeeWorkspace = useCallback(() => {
+    setSelectedEmployeeProfileId("");
+    setEmployee360ViewMode(null);
+    setEmployee360Model(null);
+    setEmployee360Error("");
+  }, []);
+
+  /** @deprecated alias — closes quick view only */
+  const closeEmployeeDrawer = closeEmployeeQuickView;
 
   const navigatePeopleOps = useCallback(
     (next) => {
       const resolved = resolvePeopleOpsRoute(next.moduleId, next.screenId);
       if (resolved.moduleId === "compensation") {
         closeEmployeeDrawer();
+        if (resolved.screenId === "assignments") {
+          closeEmployeeWorkspace();
+        }
+      }
+      if (resolved.moduleId === "employees" && resolved.screenId === "directory") {
+        closeEmployeeWorkspace();
       }
       setPeopleOpsRoute(resolved);
     },
-    [closeEmployeeDrawer]
+    [closeEmployeeDrawer, closeEmployeeWorkspace]
   );
 
   const clearAssignmentIntent = useCallback(() => {
@@ -307,6 +327,12 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
     loadEmployeeDirectory();
     loadOwnership();
   }, [tenantId, actorUserId, actorRole]);
+
+  useEffect(() => {
+    if (activeModuleId === "employees" && activeScreenId === "workspace" && !selectedEmployeeProfileId) {
+      navigatePeopleOps({ moduleId: "employees", screenId: "directory" });
+    }
+  }, [activeModuleId, activeScreenId, navigatePeopleOps, selectedEmployeeProfileId]);
 
   useEffect(() => {
     if (selectedEmployeeProfileId) {
@@ -561,7 +587,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         return;
       }
 
-      closeEmployeeDrawer();
+      closeEmployeeWorkspace();
 
       if (mode === "change") {
         const activeAssignment = (adminModel?.assignmentRows || []).find(
@@ -583,7 +609,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
 
       navigatePeopleOps({ moduleId: "compensation", screenId: "assignments" });
     },
-    [adminModel, closeEmployeeDrawer, navigatePeopleOps, showToast]
+    [adminModel, closeEmployeeWorkspace, navigatePeopleOps, showToast]
   );
 
   const openCompensationAssign = useCallback(
@@ -938,11 +964,77 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
     }
   };
 
+  const selectedEmployeeDirectoryRow = useMemo(() => {
+    if (!selectedEmployeeProfileId) return null;
+    return employeeList.find((row) => row.profileUserId === selectedEmployeeProfileId) || null;
+  }, [employeeList, selectedEmployeeProfileId]);
+
+  const handleEmployee360Action = useCallback(
+    (actionKey, payload = {}) => {
+      const profileUserId = selectedEmployeeProfileId;
+      if (!profileUserId) return;
+
+      if (actionKey === "assign_plan") {
+        openCompensationAssign({ lockEmployee: true, profileUserId });
+        return;
+      }
+      if (actionKey === "change_plan") {
+        const row =
+          resolveActiveAssignmentRow(profileUserId, adminModel) ||
+          (employee360Model?.activeAssignment
+            ? {
+                id: employee360Model.activeAssignment.id,
+                profileUserId,
+                employeeName: employee360Model?.overview?.name,
+                planId: employee360Model.activeAssignment.plan_id,
+              }
+            : null);
+        if (row) openCompensationChange(row);
+        return;
+      }
+      if (actionKey === "view_payroll") {
+        navigatePeopleOps({ moduleId: "payroll", screenId: "run-review" });
+        return;
+      }
+      if (actionKey === "open_ownership") {
+        navigatePeopleOps({ moduleId: "ownership", screenId: "explorer" });
+        return;
+      }
+      if (actionKey === "open_lab") {
+        const labId = payload?.labId || employeeOwnershipContext?.managedLabs?.[0]?.labId;
+        if (labId) setSelectedLabId(labId);
+        return;
+      }
+      if (actionKey === "deactivate" || actionKey === "provision") {
+        showToast("info", "Employee provisioning and deactivation live in Operations Center.");
+        if (setActivePage) setActivePage("operationsCenter");
+        return;
+      }
+      if (actionKey === "view_history") {
+        navigatePeopleOps({ moduleId: "employees", screenId: "workspace" });
+        setEmployee360ViewMode("workspace");
+        return;
+      }
+    },
+    [
+      adminModel,
+      employee360Model,
+      employeeOwnershipContext,
+      navigatePeopleOps,
+      openCompensationAssign,
+      openCompensationChange,
+      selectedEmployeeProfileId,
+      setActivePage,
+      showToast,
+    ]
+  );
+
   const openEmployee = useCallback(
     (employee = {}) => {
       const profileUserId = String(employee.profileUserId || employee.profile_user_id || "").trim();
       const agentId = String(employee.agentId || employee.agent_id || "").trim();
-      navigatePeopleOps({ moduleId: "employees", screenId: "directory" });
+      setEmployee360ViewMode("workspace");
+      navigatePeopleOps({ moduleId: "employees", screenId: "workspace" });
       if (profileUserId) {
         setSelectedEmployeeProfileId(profileUserId);
         const row = employeeList.find((item) => item.profileUserId === profileUserId) || employee;
@@ -950,7 +1042,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           id: profileUserId,
           label: row.employeeName || "Employee",
           meta: row.role || "employee",
-          route: { moduleId: "employees", screenId: "directory", profileUserId },
+          route: { moduleId: "employees", screenId: "workspace", profileUserId },
           favoriteKey: `employee:${profileUserId}`,
         });
         return;
@@ -962,6 +1054,30 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
     },
     [employeeList, loadEmployee360, navigatePeopleOps, trackView]
   );
+
+  const openEmployeeQuickView = useCallback(
+    (employee = {}) => {
+      const profileUserId = String(employee.profileUserId || employee.profile_user_id || "").trim();
+      if (!profileUserId) return;
+      setSelectedEmployeeProfileId(profileUserId);
+      setEmployee360ViewMode("quick");
+      const row = employeeList.find((item) => item.profileUserId === profileUserId) || employee;
+      trackView({
+        id: profileUserId,
+        label: row.employeeName || "Employee",
+        meta: row.role || "employee",
+        route: { moduleId: "employees", screenId: "directory", profileUserId },
+        favoriteKey: `employee:${profileUserId}`,
+      });
+    },
+    [employeeList, trackView]
+  );
+
+  const openEmployeeWorkspaceFromQuickView = useCallback(() => {
+    if (!selectedEmployeeProfileId) return;
+    setEmployee360ViewMode("workspace");
+    navigatePeopleOps({ moduleId: "employees", screenId: "workspace" });
+  }, [navigatePeopleOps, selectedEmployeeProfileId]);
 
   const handleOpenProductivityRoute = useCallback(
     (route, trackItem) => {
@@ -1439,10 +1555,10 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         </PeopleOpsModuleFrame>
       ) : null}
 
-      {activeModuleId === "employees" && model ? (
+      {activeModuleId === "employees" && activeScreenId === "directory" && model ? (
         <PeopleOpsModuleFrame
           title="Employees"
-          description="Who is on the HQ team — open anyone to see identity, ownership, pay, and performance."
+          description="Who is on the HQ team — open anyone in the Employee Workspace or use Quick View from the row menu."
           breadcrumbs={breadcrumbs}
           helpModuleId="employees"
           dense
@@ -1458,9 +1574,40 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
             search={employeeSearch}
             onSearchChange={setEmployeeSearch}
             onOpenEmployee={openEmployee}
+            onQuickViewEmployee={openEmployeeQuickView}
             permissions={employee360Permissions}
             onBulkAssignPlan={(rows) => openDirectoryAssignmentWorkflow(rows, "assign")}
             onBulkChangePlan={(rows) => openDirectoryAssignmentWorkflow(rows, "change")}
+          />
+        </PeopleOpsModuleFrame>
+      ) : null}
+
+      {activeModuleId === "employees" && activeScreenId === "workspace" && model ? (
+        <PeopleOpsModuleFrame
+          title="Employee Workspace"
+          description="Canonical workspace for managing one employee — act first, drill down when needed."
+          breadcrumbs={[
+            ...buildPeopleOpsBreadcrumbs({ moduleId: "employees", screenId: "directory" }).slice(0, -1),
+            { label: "Directory" },
+            { label: selectedEmployeeSummary?.employeeName || "Employee" },
+          ]}
+          helpModuleId="employees"
+          dense
+        >
+          <Employee360Workspace
+            mode="full"
+            model={employee360Model}
+            directoryRow={selectedEmployeeDirectoryRow}
+            ownershipContext={employeeOwnershipContext}
+            permissions={employee360Permissions}
+            reportingContext={model.reportingContext}
+            loading={employee360Loading}
+            error={employee360Error}
+            onBack={() => {
+              closeEmployeeWorkspace();
+              navigatePeopleOps({ moduleId: "employees", screenId: "directory" });
+            }}
+            onAction={handleEmployee360Action}
           />
         </PeopleOpsModuleFrame>
       ) : null}
@@ -1481,19 +1628,18 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
       />
 
       <EmployeeCompensation360Drawer
-        open={Boolean(selectedEmployeeProfileId)}
-        onClose={closeEmployeeDrawer}
+        open={employee360ViewMode === "quick" && Boolean(selectedEmployeeProfileId)}
+        onClose={closeEmployeeQuickView}
+        onOpenFullWorkspace={openEmployeeWorkspaceFromQuickView}
         employeeName={selectedEmployeeSummary?.employeeName || employee360Model?.overview?.name}
         model={employee360Model}
+        directoryRow={selectedEmployeeDirectoryRow}
         ownershipContext={employeeOwnershipContext}
-        businessProfile={employeeBusinessProfile}
         permissions={employee360Permissions}
+        reportingContext={model?.reportingContext}
         loading={employee360Loading}
         error={employee360Error}
-        busy={adminBusy}
-        selectablePlans={adminModel?.selectablePlans || employee360Model?.selectablePlans || []}
-        onChangePlan={handleChangePlan}
-        onAssignPlan={handleAssignEmployee}
+        onAction={handleEmployee360Action}
       />
 
       <LabOwnership360Drawer

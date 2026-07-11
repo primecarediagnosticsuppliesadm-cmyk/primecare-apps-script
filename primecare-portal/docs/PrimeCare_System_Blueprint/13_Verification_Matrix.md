@@ -189,7 +189,8 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-executive-performance.mjs | Executive KPIs + rankings compose layer | Phase 9.3 collection compensation |
 | verify-founder-performance-cards.mjs | Founder OS rule-based performance decision cards | Phase 9.3 collection compensation |
 | verify-lab-performance-contribution.mjs | Lab 360 performance contribution read compose | Phase 9.3 collection compensation |
-| verify-employee360-business-profile.mjs | Employee 360 business profile sections | Phase 9.3 collection compensation |
+| verify-employee360-business-profile.mjs | Employee Workspace business profile sections | Phase 9.3 collection compensation |
+| verify-employee360-workspace.mjs | Employee Workspace IA, Today budget, operational status, quick actions, HR gate, routing | Employee Workspace |
 | verify-no-payroll-mutation.mjs | Phase 9.3 models do not mutate payroll | Phase 9.3 collection compensation |
 | verify-no-finance-mutation.mjs | Phase 9.3 models do not mutate finance | Phase 9.3 collection compensation |
 | audit-phase-9-3-certification.mjs | Phase 9.3 bundle + boundaries + build | Phase 9.3 collection compensation |

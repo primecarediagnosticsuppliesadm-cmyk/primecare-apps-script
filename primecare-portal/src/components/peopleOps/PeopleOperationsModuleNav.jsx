@@ -11,7 +11,8 @@ export default function PeopleOperationsModuleNav({
 }) {
   const route = resolvePeopleOpsRoute(moduleId, screenId);
   const activeModule = PEOPLE_OPS_MODULES.find((row) => row.id === route.moduleId) || PEOPLE_OPS_MODULES[0];
-  const showSubNav = activeModule.screens.length > 1;
+  const visibleScreens = activeModule.screens.filter((screen) => !screen.navHidden);
+  const showSubNav = visibleScreens.length > 1;
 
   return (
     <nav
@@ -45,7 +46,7 @@ export default function PeopleOperationsModuleNav({
       </div>
       {showSubNav ? (
         <div className="flex flex-wrap gap-2 border-b border-border pb-2" role="tablist" aria-label={`${activeModule.label} screens`}>
-          {activeModule.screens.map((screen) => (
+          {visibleScreens.map((screen) => (
             <Button
               key={screen.id}
               type="button"

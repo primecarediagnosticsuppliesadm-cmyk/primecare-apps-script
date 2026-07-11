@@ -9,6 +9,7 @@ const root = resolve(__dirname, "..");
 
 const modelSrc = readFileSync(resolve(root, "src/compensation/employee360BusinessProfileModel.js"), "utf8");
 const panelSrc = readFileSync(resolve(root, "src/components/compensation/EmployeeCompensation360Panel.jsx"), "utf8");
+const workspaceSrc = readFileSync(resolve(root, "src/components/peopleOps/employee360/Employee360Workspace.jsx"), "utf8");
 const drawerSrc = readFileSync(resolve(root, "src/components/peopleOps/EmployeeCompensation360Drawer.jsx"), "utf8");
 const pageSrc = readFileSync(resolve(root, "src/pages/ExecutiveCompensationCenterPage.jsx"), "utf8");
 
@@ -20,12 +21,11 @@ function assert(c, id, d) { c ? pass(id, d) : fail(id, d); }
 assert(/export function buildEmployee360BusinessProfile/.test(modelSrc), "model.builder", "business profile builder");
 assert(/identity|compensation|labsManaged|collections|ownership|payroll|performance/.test(modelSrc), "model.sections", "profile sections");
 assert(/previewOnly:\s*true/.test(modelSrc), "model.readonly", "read only");
-assert(/businessProfile/.test(panelSrc), "panel.prop", "panel accepts businessProfile");
-assert(/Performance|Business Ownership|Current Pay Structure|Payroll History/.test(panelSrc), "panel.ui", "business-facing 360 sections rendered");
-assert(/EmployeeBusinessSummaryCard/.test(panelSrc), "panel.summary", "employee business summary card");
-assert(/businessProfile/.test(drawerSrc), "drawer.prop", "drawer passes businessProfile");
+assert(/Employee360Workspace/.test(workspaceSrc), "workspace.ui", "action-oriented workspace");
+assert(/Employee360RelationshipSummary/.test(workspaceSrc), "workspace.relationship", "relationship summary in workspace");
+assert(/Employee360Workspace/.test(drawerSrc), "drawer.workspace", "drawer uses workspace compact mode");
 assert(/buildEmployee360BusinessProfile/.test(pageSrc), "page.builder", "page builds business profile");
-assert(/businessProfile=\{employeeBusinessProfile\}/.test(pageSrc), "page.wired", "drawer receives profile");
+assert(/handleEmployee360Action/.test(pageSrc), "page.actions", "workspace action handler");
 
 if (failures) { console.error(`\nOverall: NO-GO (${failures})`); process.exit(1); }
 console.log("\nOverall: GO — employee 360 business profile verified\n");

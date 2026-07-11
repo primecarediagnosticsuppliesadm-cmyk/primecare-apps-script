@@ -2,26 +2,25 @@ import React, { useEffect } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DataFetchError, ListSkeleton } from "@/components/ux";
-import EmployeeCompensation360Panel from "@/components/compensation/EmployeeCompensation360Panel.jsx";
+import Employee360Workspace from "@/components/peopleOps/employee360/Employee360Workspace.jsx";
 import { cn } from "@/lib/utils";
 
 /**
- * Slide-over drawer for Employee 360 — keeps directory visible underneath.
+ * Quick View drawer — compact Today tab. Full Employee Workspace is the canonical surface.
  */
 export default function EmployeeCompensation360Drawer({
   open,
   onClose,
+  onOpenFullWorkspace,
   employeeName = "",
   model,
+  directoryRow = null,
   ownershipContext = null,
-  businessProfile = null,
   permissions,
+  reportingContext = null,
   loading = false,
   error = "",
-  busy = false,
-  selectablePlans = [],
-  onChangePlan,
-  onAssignPlan,
+  onAction,
 }) {
   useEffect(() => {
     if (!open) return undefined;
@@ -40,22 +39,22 @@ export default function EmployeeCompensation360Drawer({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label="Employee 360">
+    <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label="Employee quick view">
       <button
         type="button"
         className="absolute inset-0 bg-black/40"
-        aria-label="Close employee drawer"
+        aria-label="Close employee quick view"
         onClick={onClose}
       />
       <aside
         className={cn(
-          "relative flex h-full w-full max-w-3xl flex-col border-l border-border bg-background shadow-2xl",
+          "relative flex h-full w-full max-w-lg flex-col border-l border-border bg-background shadow-2xl",
           "animate-in slide-in-from-right duration-200"
         )}
       >
         <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
           <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Employee 360</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Employee quick view</p>
             <h2 className="truncate text-lg font-semibold text-foreground">{employeeName || "Employee"}</h2>
           </div>
           <Button type="button" variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={onClose} aria-label="Close">
@@ -64,21 +63,18 @@ export default function EmployeeCompensation360Drawer({
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          {loading ? <ListSkeleton rows={8} /> : null}
+          {loading ? <ListSkeleton rows={6} /> : null}
           {error ? <DataFetchError message={error} onRetry={null} /> : null}
           {!loading && !error && model ? (
-            <EmployeeCompensation360Panel
+            <Employee360Workspace
+              mode="compact"
               model={model}
+              directoryRow={directoryRow}
               ownershipContext={ownershipContext}
-              businessProfile={businessProfile}
               permissions={permissions}
-              loading={loading}
-              error={error}
-              busy={busy}
-              selectablePlans={selectablePlans}
-              onChangePlan={onChangePlan}
-              onAssignPlan={onAssignPlan}
-              embedded
+              reportingContext={reportingContext}
+              onOpenFullWorkspace={onOpenFullWorkspace}
+              onAction={onAction}
             />
           ) : null}
         </div>
