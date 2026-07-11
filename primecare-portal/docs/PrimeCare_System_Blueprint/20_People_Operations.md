@@ -506,9 +506,137 @@ Verification: `verify-employee360-workspace.mjs`, `verify-employee360-business-p
 
 ---
 
+## Compensation Plans (operational page standard)
+
+The Compensation Plans screen answers one question:
+
+**"Are compensation plans ready, and which plan needs management?"**
+
+### A. Approved layout
+
+| Zone | Rule |
+|------|------|
+| Page title + business purpose | `PeopleOpsModuleFrame` — one sentence |
+| Primary CTA | **Create Plan** — opens `CompensationPlanActionDrawer` |
+| Readiness summary | One compact card (e.g. active count + draft review CTA) |
+| Search + status filter | Above the table |
+| Primary table | Single `EnterpriseDataTable` of compensation plans |
+| Plan details / simulation | Collapsed secondary section — only when a plan is explicitly opened |
+
+**Prohibited on the operational Plans page:**
+
+- Payroll workflow progress strip
+- Full executive summary KPI grids
+- Distribution analytics
+- Timeline analytics
+- Duplicate KPI layers
+- Inline create/edit forms
+- Unrelated enterprise blockers (Dashboard owns those)
+
+### B. Plan write workflow
+
+| Action | Surface | Write path |
+|--------|---------|------------|
+| Create | `CompensationPlanActionDrawer` (create) | `createCompensationPlan` |
+| Edit draft | Drawer or collapsed details editor | `saveCompensationPlanAdmin` |
+| Duplicate | Drawer confirmation | `duplicateCompensationPlan` |
+| Activate / Deactivate | Drawer confirmation | `activateCompensationPlan` / `deactivateCompensationPlan` |
+
+Mutation errors **must appear inside the action surface** (`ActionErrorSummary` in drawer or details panel).
+
+The page-level `DataFetchError` banner is **reserved for page-load failures** (plans failed to load, permissions unresolved).
+
+Handlers return structured results:
+
+```js
+{ success: true, data? } | { success: false, error: MappedMutationError }
+```
+
+Success UI (drawer close, toast, table refresh) runs **only when `success === true`**.
+
+### C. Platform action-feedback rule
+
+**"The result of an action must appear where the action occurred."**
+
+| Error class | Display |
+|-------------|---------|
+| Page-load failure | Page banner + retry; may show stale data note |
+| Mutation/action failure | Drawer, modal, form, or row context |
+| Global/system failure | Global banner |
+
+Mutation feedback must:
+
+- Preserve entered values
+- Keep the action surface open
+- Focus the error summary or invalid field (`role="alert"`, keyboard-focusable)
+- Use business language via `mapCompensationPlanMutationError()`
+- Provide one clear recovery action
+- Log technical detail without exposing raw database errors in production copy
+
+Shared component: `ActionErrorSummary` — reusable, minimal, not coupled to Compensation-only domains; **not** used for read/load failures.
+
+### D. Duplicate plan constraint (business mapping)
+
+Database constraint **`compensation_plans_code_version_key`** remains authoritative — **not changed**.
+
+| Field | Business copy |
+|-------|---------------|
+| Title | Plan code and version already exist |
+| Message | A compensation plan with code "{code}" and version "{version}" already exists. Choose another version or open the existing plan. |
+| Field errors | plan code, version |
+| Recovery | **Open Existing Plan**, **Change Version** |
+
+Raw PostgreSQL constraint text must not be the main production-facing message. Technical detail may appear in dev-only expandable section.
+
+Client-side pre-check: `assertNoDuplicatePlanCodeVersion()` against loaded plan rows before insert.
+
+### E. Page budget (Compensation Plans)
+
+| Element | Maximum |
+|---------|---------|
+| Readiness card | 1 |
+| Compact contextual notice | 1 (module dependency from page shell) |
+| Primary table | 1 |
+| Primary CTA | 1 |
+| Summary values above table | 4 (within readiness line) |
+| Inline forms | 0 |
+| Trend charts | 0 |
+| Unrelated payroll workflow strips | 0 |
+
+Target viewport (1366×768 / 1440×900): title, readiness, filters, and first plan rows visible without major scrolling.
+
+### F. Functional ownership
+
+| Domain | Owner surface |
+|--------|---------------|
+| Plan administration | **Compensation Plans** |
+| Employee assignment readiness | **Compensation Assignments** |
+| Payroll lifecycle | **Payroll** |
+| Historical analytics and trends | **Reports** |
+| Enterprise-wide blockers | **Dashboard** |
+
+Canonical relocations from Plans page:
+
+- Payroll status → Payroll module
+- Assignment readiness → Compensation Assignments
+- Trends/distribution/timeline → Reports or plan details when explicitly opened
+
+### Implementation assets
+
+| Asset | Role |
+|-------|------|
+| `CompensationPlanActionDrawer.jsx` | Create, edit, duplicate, activate/deactivate surfaces |
+| `mapCompensationPlanMutationError.js` | Business error mapper |
+| `ActionErrorSummary.jsx` | Shared mutation error UI |
+| `CompensationPlansTab.jsx` | Operational page layout |
+
+Verification: `verify-compensation-plan-action-feedback.mjs`, `verify-compensation-plan-management.mjs`, `verify-compensation-ui-actions.mjs`.
+
+### Compensation Assignments module
+
 | Surface | Rule |
 |---------|------|
-| **Summary cards** | Plans, Assignments, Active, Inactive, Draft counts |
+| **Summary cards** | Plans, Assignments, Active, Inactive, Draft counts (assignments context) |
 | **Row actions** | Overflow menu — View, Edit, Duplicate, Deactivate, History |
 | **Assigned count** | Clickable — navigates to Assignments filtered by plan |
 

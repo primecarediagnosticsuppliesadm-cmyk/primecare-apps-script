@@ -1,10 +1,13 @@
 import React, { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { EnterpriseDataTable, KpiCard, KpiCardGrid, StatusBadge } from "@/components/ux";
+import { Input } from "@/components/ui/input";
+import { EnterpriseDataTable, StatusBadge } from "@/components/ux";
 import { buildCompensationPlanDetailModel } from "@/compensation/compensationPlanAdminModel.js";
 import { simulateCompensationPlan } from "@/compensation/compensationPlanSimulator.js";
 import CompensationPlanDetailsPanel from "@/components/compensation/CompensationPlanDetailsPanel.jsx";
-import NewCompensationPlanWizard from "@/components/compensation/NewCompensationPlanWizard.jsx";
+import CompensationPlanActionDrawer, {
+  COMPENSATION_PLAN_ACTION_MODES,
+} from "@/components/compensation/CompensationPlanActionDrawer.jsx";
 import PeopleOpsActionMenu from "@/components/peopleOps/PeopleOpsActionMenu.jsx";
 import PeopleOpsTableShell, {
   PeopleOpsTableBody,
@@ -13,7 +16,6 @@ import PeopleOpsTableShell, {
   PeopleOpsTableRow,
 } from "@/components/peopleOps/PeopleOpsTableShell.jsx";
 import { buildCompensationSummaryStats } from "@/peopleOps/peopleOpsEnterpriseModel.js";
-import { ClipboardList, FileStack, Layers, Shield } from "lucide-react";
 
 const STATUS_VARIANT = {
   draft: "neutral",
@@ -21,10 +23,31 @@ const STATUS_VARIANT = {
   retired: "warning",
 };
 
+function PlansReadinessCard({ stats, onReviewDrafts }) {
+  const draftLabel =
+    stats.draftPlans === 1 ? "1 draft requires review" : `${stats.draftPlans} drafts require review`;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3">
+      <div>
+        <p className="text-sm font-medium text-foreground">
+          {stats.activePlans} active plans · {stats.draftPlans ? draftLabel : "all drafts cleared"}
+        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {stats.plans} total plans · {stats.assignments} assignments · {stats.inactivePlans} inactive
+        </p>
+      </div>
+      {stats.draftPlans > 0 && onReviewDrafts ? (
+        <Button type="button" size="sm" variant="outline" onClick={onReviewDrafts}>
+          Review Draft
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 export default function CompensationPlansTab({
   adminModel,
   permissions,
-  onRefresh,
   onCreatePlan,
   onSavePlan,
   onDuplicatePlan,
@@ -34,10 +57,14 @@ export default function CompensationPlansTab({
   onAssignEmployees,
   busy = false,
 }) {
-  const [wizardOpen, setWizardOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [planAction, setPlanAction] = useState(null);
+  const [planMutationError, setPlanMutationError] = useState(null);
   const [selectedPlanId, setSelectedPlanId] = useState("");
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [justCreated, setJustCreated] = useState(false);
+  const [saveMutationError, setSaveMutationError] = useState(null);
   const [simInputs, setSimInputs] = useState({
     commissionRatePct: 3,
     salary: 20000,
@@ -45,6 +72,32 @@ export default function CompensationPlansTab({
     mobile: 500,
     collectionAmount: 100000,
   });
+
+  const summary = useMemo(() => buildCompensationSummaryStats(adminModel), [adminModel]);
+
+  const filteredRows = useMemo(() => {
+    let rows = adminModel?.planRows || [];
+    if (statusFilter !== "all") {
+      rows = rows.filter((row) => row.status === statusFilter);
+    }
+    const query = search.trim().toLowerCase();
+    if (query) {
+      rows = rows.filter((row) => {
+        const haystack = [
+          row.planName,
+          row.planCode,
+          row.roleScope,
+          row.status,
+          row.version,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(query);
+      });
+    }
+    return rows;
+  }, [adminModel, search, statusFilter]);
 
   const selectedRow = useMemo(
     () => adminModel?.planRows?.find((row) => row.id === selectedPlanId) || null,
@@ -73,9 +126,11 @@ export default function CompensationPlansTab({
     });
   }, [detail, simInputs]);
 
-  const openPlan = (row) => {
+  const openPlan = (row, { expandDetails = true, openEditor = false } = {}) => {
     setSelectedPlanId(row.id);
-    setEditorOpen(false);
+    setDetailsOpen(expandDetails);
+    setEditorOpen(openEditor);
+    setSaveMutationError(null);
     setSimInputs({
       commissionRatePct: row.commissionPct,
       salary: row.salary,
@@ -85,64 +140,120 @@ export default function CompensationPlansTab({
     });
   };
 
-  const summary = useMemo(() => buildCompensationSummaryStats(adminModel), [adminModel]);
+  const openPlanAction = (mode, planRow = null) => {
+    setPlanAction({ mode, planRow });
+    setPlanMutationError(null);
+  };
+
+  const closePlanAction = () => {
+    setPlanAction(null);
+    setPlanMutationError(null);
+  };
+
+  const handlePlanActionSubmit = async ({ mode, planRow, payload }) => {
+    setPlanMutationError(null);
+    let result = { success: false };
+
+    if (mode === COMPENSATION_PLAN_ACTION_MODES.CREATE) {
+      result = (await onCreatePlan?.(payload)) || { success: false };
+    } else if (mode === COMPENSATION_PLAN_ACTION_MODES.DUPLICATE) {
+      result = (await onDuplicatePlan?.(planRow)) || { success: false };
+    } else if (mode === COMPENSATION_PLAN_ACTION_MODES.ACTIVATE) {
+      result = (await onActivatePlan?.(planRow)) || { success: false };
+    } else if (mode === COMPENSATION_PLAN_ACTION_MODES.DEACTIVATE) {
+      result = (await onDeactivatePlan?.(planRow)) || { success: false };
+    } else if (mode === COMPENSATION_PLAN_ACTION_MODES.EDIT && planRow && payload) {
+      result = (await onSavePlan?.(planRow, payload)) || { success: false };
+    }
+
+    if (!result.success) {
+      setPlanMutationError(result.error || null);
+      return;
+    }
+    closePlanAction();
+  };
+
+  const handlePlanErrorAction = (actionId) => {
+    if (actionId === "open_existing" && planMutationError?.existingPlanId) {
+      const row = (adminModel?.planRows || []).find((item) => item.id === planMutationError.existingPlanId);
+      closePlanAction();
+      if (row) openPlan(row, { expandDetails: true });
+      return;
+    }
+    if (actionId === "change_version") {
+      setPlanMutationError(null);
+    }
+  };
+
+  const handleSaveDetails = async (payload) => {
+    if (!selectedRow) return;
+    setSaveMutationError(null);
+    const result = (await onSavePlan?.(selectedRow, payload)) || { success: false };
+    if (!result.success) {
+      setSaveMutationError(result.error || null);
+      return;
+    }
+    setEditorOpen(false);
+  };
 
   return (
-    <div className="space-y-4">
-      <KpiCardGrid columns={3}>
-        <KpiCard title="Compensation Plans" value={String(summary.plans)} subtitle="Pay templates" icon={FileStack} />
-        <KpiCard title="Compensation Assignments" value={String(summary.assignments)} subtitle="Employees linked to plans" icon={ClipboardList} />
-        <KpiCard title="Active Plans" value={String(summary.activePlans)} subtitle="Ready to assign" icon={Shield} />
-        <KpiCard title="Inactive Plans" value={String(summary.inactivePlans)} subtitle="Kept for history" icon={Layers} />
-        <KpiCard title="Draft Plans" value={String(summary.draftPlans)} subtitle="Awaiting activation" icon={FileStack} />
-      </KpiCardGrid>
-
+    <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-slate-600">
-          Compensation Plans are pay templates (salary, allowances, commission). Assign each employee to a plan before payroll.
+        <p className="text-xs text-muted-foreground">
+          Are compensation plans ready, and which plan do you need to manage?
         </p>
         {permissions?.canCreatePlan ? (
-          <Button type="button" size="sm" disabled={busy} onClick={() => setWizardOpen(true)}>
-            New Compensation Plan
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy}
+            onClick={() => openPlanAction(COMPENSATION_PLAN_ACTION_MODES.CREATE)}
+          >
+            Create Plan
           </Button>
         ) : null}
       </div>
 
-      {justCreated ? (
-        <div className="rounded-lg border border-[var(--pc-success)]/30 bg-[var(--pc-success)]/5 px-3 py-2 text-xs">
-          <p className="font-semibold text-foreground">Compensation Plan created successfully.</p>
-          <p className="mt-1 text-muted-foreground">Employees assigned: 0</p>
-          <p className="mt-1 font-medium text-foreground">Next Step</p>
-          <Button
-            type="button"
-            size="sm"
-            className="mt-1.5 h-7 text-[10px]"
-            onClick={() => {
-              setJustCreated(false);
-              onAssignEmployees?.();
-              onViewAssignments?.({});
-            }}
-          >
-            Assign Employees →
-          </Button>
-        </div>
-      ) : null}
-
-      <NewCompensationPlanWizard
-        open={wizardOpen}
-        onClose={() => setWizardOpen(false)}
-        busy={busy}
-        onCreate={async (payload) => {
-          await onCreatePlan?.(payload);
-          setWizardOpen(false);
-          setJustCreated(true);
-        }}
+      <PlansReadinessCard
+        stats={summary}
+        onReviewDrafts={() => setStatusFilter("draft")}
       />
 
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="min-w-[12rem] flex-1 space-y-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Search</span>
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search plans by name, code, role, or status"
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Status</span>
+          <select
+            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+          >
+            <option value="all">All statuses</option>
+            <option value="active">Active</option>
+            <option value="draft">Draft</option>
+            <option value="retired">Retired</option>
+          </select>
+        </label>
+      </div>
+
       <EnterpriseDataTable
-        hasRows={(adminModel?.planRows || []).length > 0}
+        hasRows={filteredRows.length > 0}
         emptyTitle="No Compensation Plans yet."
         emptyDescription="Create a Compensation Plan to define salary, allowances, and commission — then Assign Employees →"
+        emptyAction={
+          permissions?.canCreatePlan ? (
+            <Button type="button" size="sm" onClick={() => openPlanAction(COMPENSATION_PLAN_ACTION_MODES.CREATE)}>
+              Create Plan
+            </Button>
+          ) : null
+        }
         desktop={
           <PeopleOpsTableShell>
             <PeopleOpsTableHead>
@@ -172,9 +283,17 @@ export default function CompensationPlansTab({
               </tr>
             </PeopleOpsTableHead>
             <PeopleOpsTableBody>
-              {(adminModel?.planRows || []).map((row) => (
+              {filteredRows.map((row) => (
                 <PeopleOpsTableRow key={row.id}>
-                  <PeopleOpsTableCell className="font-medium">{row.planName}</PeopleOpsTableCell>
+                  <PeopleOpsTableCell className="font-medium">
+                    <button
+                      type="button"
+                      className="text-left font-medium text-[var(--pc-brand-primary)] hover:underline"
+                      onClick={() => openPlan(row, { expandDetails: true })}
+                    >
+                      {row.planName}
+                    </button>
+                  </PeopleOpsTableCell>
                   <PeopleOpsTableCell>{row.roleScope}</PeopleOpsTableCell>
                   <PeopleOpsTableCell>
                     <StatusBadge variant="info">V{row.version}</StatusBadge>
@@ -205,22 +324,35 @@ export default function CompensationPlansTab({
                     <PeopleOpsActionMenu
                       ariaLabel={`Actions for ${row.planName}`}
                       items={[
-                        { id: "view", label: "View", onClick: () => openPlan(row) },
+                        { id: "view", label: "View", onClick: () => openPlan(row, { expandDetails: true }) },
                         permissions?.canEditDraftPlan || permissions?.canEditActivePlanViaVersion
                           ? {
                               id: "edit",
                               label: "Edit",
                               onClick: () => {
-                                openPlan(row);
-                                setEditorOpen(true);
+                                if (row.status === "draft") {
+                                  openPlanAction(COMPENSATION_PLAN_ACTION_MODES.EDIT, row);
+                                } else {
+                                  openPlan(row, { expandDetails: true, openEditor: true });
+                                }
                               },
                             }
                           : null,
                         permissions?.canDuplicatePlan
-                          ? { id: "duplicate", label: "Duplicate", disabled: busy, onClick: () => onDuplicatePlan?.(row) }
+                          ? {
+                              id: "duplicate",
+                              label: "Duplicate",
+                              disabled: busy,
+                              onClick: () => openPlanAction(COMPENSATION_PLAN_ACTION_MODES.DUPLICATE, row),
+                            }
                           : null,
                         permissions?.canEditDraftPlan && row.status === "draft"
-                          ? { id: "activate", label: "Activate", disabled: busy, onClick: () => onActivatePlan?.(row) }
+                          ? {
+                              id: "activate",
+                              label: "Activate",
+                              disabled: busy,
+                              onClick: () => openPlanAction(COMPENSATION_PLAN_ACTION_MODES.ACTIVATE, row),
+                            }
                           : null,
                         permissions?.canDeactivatePlan && row.status !== "retired"
                           ? {
@@ -228,10 +360,10 @@ export default function CompensationPlansTab({
                               label: "Deactivate",
                               disabled: busy,
                               destructive: true,
-                              onClick: () => onDeactivatePlan?.(row),
+                              onClick: () => openPlanAction(COMPENSATION_PLAN_ACTION_MODES.DEACTIVATE, row),
                             }
                           : null,
-                        { id: "history", label: "History", onClick: () => openPlan(row) },
+                        { id: "history", label: "History", onClick: () => openPlan(row, { expandDetails: true }) },
                       ]}
                     />
                   </PeopleOpsTableCell>
@@ -242,20 +374,39 @@ export default function CompensationPlansTab({
         }
       />
 
-      {detail ? (
-        <CompensationPlanDetailsPanel
-          detail={detail}
-          permissions={permissions}
-          editorOpen={editorOpen}
-          onCloseEditor={() => setEditorOpen(false)}
-          onSave={(payload) => onSavePlan?.(selectedRow, payload)}
-          busy={busy}
-          simulation={simulation}
-          simInputs={simInputs}
-          onSimInputChange={(key, value) => setSimInputs((prev) => ({ ...prev, [key]: value }))}
-          promotionRows={adminModel?.promotionEligibilityRows || []}
-        />
+      {detail && detailsOpen ? (
+        <details open className="rounded-xl border border-border bg-card">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-foreground">
+            Plan details · {detail.general.displayName} ({detail.general.planCode} · {detail.general.version})
+          </summary>
+          <div className="border-t border-border p-4">
+            <CompensationPlanDetailsPanel
+              detail={detail}
+              permissions={permissions}
+              editorOpen={editorOpen}
+              onCloseEditor={() => setEditorOpen(false)}
+              onSave={handleSaveDetails}
+              busy={busy}
+              mutationError={saveMutationError}
+              simulation={simulation}
+              simInputs={simInputs}
+              onSimInputChange={(key, value) => setSimInputs((prev) => ({ ...prev, [key]: value }))}
+              promotionRows={adminModel?.promotionEligibilityRows || []}
+            />
+          </div>
+        </details>
       ) : null}
+
+      <CompensationPlanActionDrawer
+        open={Boolean(planAction)}
+        mode={planAction?.mode || COMPENSATION_PLAN_ACTION_MODES.CREATE}
+        planRow={planAction?.planRow || null}
+        busy={busy}
+        mutationError={planMutationError}
+        onSubmit={handlePlanActionSubmit}
+        onCancel={closePlanAction}
+        onErrorAction={handlePlanErrorAction}
+      />
     </div>
   );
 }

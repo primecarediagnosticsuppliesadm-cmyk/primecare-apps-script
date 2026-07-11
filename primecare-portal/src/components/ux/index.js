@@ -14,6 +14,7 @@ export { default as DataFreshnessLabel } from "./DataFreshnessLabel";
 export { default as RouteTransitionOverlay } from "./RouteTransitionOverlay";
 export { default as PortalAccessCard, PortalLoadingScreen, PortalAccessAction } from "./PortalAccessCard";
 export { default as PageHeader } from "./PageHeader";
+export { default as ActionErrorSummary } from "./ActionErrorSummary";
 export { default as DataFetchError } from "./DataFetchError";
 export { default as ReadHealthBanner } from "./ReadHealthBanner";
 export { default as EnterpriseDataTable } from "./EnterpriseDataTable";

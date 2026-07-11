@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { COMPENSATION_ROLE_SCOPES } from "@/compensation/enterpriseCompensationRoles.js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import ActionErrorSummary from "@/components/ux/ActionErrorSummary.jsx";
 
 function Field({ label, value }) {
   return (
@@ -28,6 +29,7 @@ export default function CompensationPlanDetailsPanel({
   onCloseEditor,
   onSave,
   busy = false,
+  mutationError = null,
   simulation,
   simInputs,
   onSimInputChange,
@@ -66,6 +68,15 @@ export default function CompensationPlanDetailsPanel({
 
   return (
     <div className="space-y-4 rounded-xl border border-indigo-100 bg-indigo-50/40 p-4">
+      {mutationError ? (
+        <ActionErrorSummary
+          title={mutationError.title}
+          message={mutationError.message}
+          fieldErrors={mutationError.fieldErrors}
+          actions={mutationError.suggestedActions}
+          technicalReference={mutationError.rawErrorForLogging}
+        />
+      ) : null}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-sm font-bold text-slate-900">{detail.general.displayName}</h2>

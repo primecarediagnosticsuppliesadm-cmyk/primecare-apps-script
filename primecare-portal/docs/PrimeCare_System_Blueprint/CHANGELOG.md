@@ -4,6 +4,30 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-11 — Compensation Plans action feedback and page simplification
+
+### Change
+
+- **Compensation Plans** operational page simplified — answers "Are plans ready, and which plan needs management?"
+- **Create Plan** moved to `CompensationPlanActionDrawer` (no inline wizard on page).
+- **Mutation errors** appear inside drawer/details via `ActionErrorSummary` — not global page banner.
+- **False-success fix** — handlers return `{ success, error? }`; drawer closes only on `success === true`.
+- **Duplicate constraint mapping** — `compensation_plans_code_version_key` mapped to business copy with Open Existing Plan / Change Version recovery.
+- **Page budget** — one readiness card, search/filter, one table; removed executive summary stack, duplicate KPIs, payroll workflow strip from Plans screen.
+- Platform rule documented: **"The result of an action must appear where the action occurred."**
+
+### Not changed
+
+- Schema, Supabase constraints, APIs (write semantics), RLS, permissions, payroll/compensation calculations, business rules.
+
+### Verification
+
+- `node scripts/verify-compensation-plan-action-feedback.mjs`
+- `node scripts/verify-compensation-ui-actions.mjs`
+- `node scripts/verify-compensation-plan-management.mjs`
+
+---
+
 ## 2026-07-11 — Employee Workspace (canonical Employee 360)
 
 ### Change

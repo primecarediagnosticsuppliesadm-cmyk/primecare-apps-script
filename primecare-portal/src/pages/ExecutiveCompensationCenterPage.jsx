@@ -91,6 +91,11 @@ import {
   resolveCompensationActionEmployee,
 } from "@/compensation/compensationActionDrawerModel.js";
 import { compensationAdminPermissions } from "@/compensation/compensationPlanAdminWorkflow.js";
+import {
+  assertNoDuplicatePlanCodeVersion,
+  findPlanByCodeVersion,
+  mapCompensationPlanMutationError,
+} from "@/compensation/mapCompensationPlanMutationError.js";
 import { employeeCompensation360Permissions } from "@/compensation/employeeCompensation360Workflow.js";
 import { PAYROLL_UI_ACTION_IDS } from "@/payroll/payrollWorkflowUi.js";
 import { buildExecutiveCompensationModel } from "@/compensation/executiveCompensationModel.js";
@@ -349,18 +354,46 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
     if (selectedEmployeeProfileId) await loadEmployee360({ profileUserId: selectedEmployeeProfileId });
   };
 
+  const mapPlanMutationFailure = useCallback(
+    (result, planInput = {}) => {
+      const existing = findPlanByCodeVersion(
+        adminModel?.planRows,
+        planInput.plan_code || planInput.planCode,
+        planInput.version || "v1"
+      );
+      return {
+        success: false,
+        error: mapCompensationPlanMutationError(
+          { message: result?.error, errorCode: result?.errorCode },
+          planInput,
+          { existingPlanId: existing?.id || null }
+        ),
+      };
+    },
+    [adminModel]
+  );
+
   const handleCreatePlan = async (planInput) => {
+    const duplicateError = assertNoDuplicatePlanCodeVersion(
+      adminModel?.planRows,
+      planInput?.plan_code,
+      planInput?.version || "v1"
+    );
+    if (duplicateError) {
+      return { success: false, error: duplicateError };
+    }
     try {
       setAdminBusy(true);
       const result = await createCompensationPlan({
         currentUser,
         planInput,
       });
-      if (!result.success) throw new Error(result.error || "Plan create failed");
-      showToast("success", "Compensation Plan created successfully. Next: Assign Employees →");
+      if (!result.success) return mapPlanMutationFailure(result, planInput);
+      showToast("success", "Compensation Plan created successfully.");
       await loadAdmin();
+      return { success: true };
     } catch (err) {
-      setError(err?.message || "Could not create compensation plan");
+      return mapPlanMutationFailure({ error: err?.message, errorCode: err?.code }, planInput);
     } finally {
       setAdminBusy(false);
     }
@@ -374,7 +407,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         planId: row.id,
         planInput: payload,
       });
-      if (!result.success) throw new Error(result.error || "Plan save failed");
+      if (!result.success) return mapPlanMutationFailure(result, payload);
       showToast(
         "success",
         row.status === "active"
@@ -382,8 +415,9 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           : "Compensation plan updated."
       );
       await loadAdmin();
+      return { success: true };
     } catch (err) {
-      setError(err?.message || "Could not save compensation plan");
+      return mapPlanMutationFailure({ error: err?.message, errorCode: err?.code }, payload);
     } finally {
       setAdminBusy(false);
     }
@@ -393,11 +427,23 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
     try {
       setAdminBusy(true);
       const result = await duplicateCompensationPlan({ currentUser, planId: row.id });
-      if (!result.success) throw new Error(result.error || "Duplicate failed");
+      if (!result.success) {
+        return {
+          success: false,
+          error: mapCompensationPlanMutationError(
+            { message: result.error, errorCode: result.errorCode },
+            { plan_code: row.planCode, version: "v1" }
+          ),
+        };
+      }
       showToast("success", "Plan duplicated as draft.");
       await loadAdmin();
+      return { success: true };
     } catch (err) {
-      setError(err?.message || "Could not duplicate plan");
+      return {
+        success: false,
+        error: mapCompensationPlanMutationError({ message: err?.message, errorCode: err?.code }),
+      };
     } finally {
       setAdminBusy(false);
     }
@@ -407,11 +453,20 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
     try {
       setAdminBusy(true);
       const result = await deactivateCompensationPlan({ currentUser, planId: row.id });
-      if (!result.success) throw new Error(result.error || "Deactivate failed");
+      if (!result.success) {
+        return {
+          success: false,
+          error: mapCompensationPlanMutationError({ message: result.error, errorCode: result.errorCode }),
+        };
+      }
       showToast("success", `Plan ${row.planCode} ${row.version} deactivated.`);
       await loadAdmin();
+      return { success: true };
     } catch (err) {
-      setError(err?.message || "Could not deactivate plan");
+      return {
+        success: false,
+        error: mapCompensationPlanMutationError({ message: err?.message, errorCode: err?.code }),
+      };
     } finally {
       setAdminBusy(false);
     }
@@ -421,11 +476,20 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
     try {
       setAdminBusy(true);
       const result = await activateCompensationPlan({ currentUser, planId: row.id });
-      if (!result.success) throw new Error(result.error || "Activate failed");
+      if (!result.success) {
+        return {
+          success: false,
+          error: mapCompensationPlanMutationError({ message: result.error, errorCode: result.errorCode }),
+        };
+      }
       showToast("success", `Plan ${row.planCode} ${row.version} activated.`);
       await loadAdmin();
+      return { success: true };
     } catch (err) {
-      setError(err?.message || "Could not activate plan");
+      return {
+        success: false,
+        error: mapCompensationPlanMutationError({ message: err?.message, errorCode: err?.code }),
+      };
     } finally {
       setAdminBusy(false);
     }
@@ -720,7 +784,7 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
   const showWorkflowProgress =
     activeModuleId === "dashboard" ||
     activeModuleId === "payroll" ||
-    activeModuleId === "compensation";
+    (activeModuleId === "compensation" && activeScreenId === "assignments");
 
   const workforceBudget = useMemo(
     () =>
@@ -1305,16 +1369,9 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           breadcrumbs={breadcrumbs}
           helpModuleId="compensation"
         >
-        {showWorkflowProgress ? <PeopleOpsWorkflowProgress stages={productivity?.workflowProgress || []} compact /> : null}
-        <CompensationExecutiveSummary
-          adminModel={adminModel}
-          model={model}
-          onAssignEmployees={() => navigatePeopleOps({ moduleId: "compensation", screenId: "assignments" })}
-        />
         <CompensationPlansTab
           adminModel={adminModel}
           permissions={adminPermissions}
-          onRefresh={loadAdmin}
           onCreatePlan={handleCreatePlan}
           onSavePlan={handleSavePlan}
           onDuplicatePlan={handleDuplicatePlan}

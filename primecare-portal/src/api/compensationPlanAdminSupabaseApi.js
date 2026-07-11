@@ -58,7 +58,12 @@ function ensureClient(client = supabase) {
 }
 
 function failResult(error) {
-  return { success: false, error: error?.message || String(error || "compensation admin failed"), data: null };
+  return {
+    success: false,
+    error: error?.message || String(error || "compensation admin failed"),
+    errorCode: error?.code || null,
+    data: null,
+  };
 }
 
 async function insertAuditEvent(client, event) {
@@ -267,7 +272,11 @@ export async function createCompensationPlan({ currentUser, planInput = {}, clie
     });
 
     const insert = await db.from("compensation_plans").insert([payload]).select(PLAN_ADMIN_COLUMNS).single();
-    if (insert.error) throw new Error(`compensation_plans insert failed: ${insert.error.message}`);
+    if (insert.error) {
+      const err = new Error(`compensation_plans insert failed: ${insert.error.message}`);
+      err.code = insert.error.code;
+      throw err;
+    }
 
     await insertAuditEvent(db, {
       tenant_id: tenantId,
@@ -458,7 +467,11 @@ export async function duplicateCompensationPlan({ currentUser, planId, client = 
     });
 
     const insert = await db.from("compensation_plans").insert([payload]).select(PLAN_ADMIN_COLUMNS).single();
-    if (insert.error) throw new Error(`compensation_plans duplicate failed: ${insert.error.message}`);
+    if (insert.error) {
+      const err = new Error(`compensation_plans duplicate failed: ${insert.error.message}`);
+      err.code = insert.error.code;
+      throw err;
+    }
 
     await insertAuditEvent(db, {
       tenant_id: tenantId,

@@ -15,7 +15,7 @@ function pass(id, detail) { console.log(`PASS  ${id}: ${detail}`); }
 function fail(id, detail) { console.error(`FAIL  ${id}: ${detail}`); failures += 1; }
 function assert(c, id, d) { c ? pass(id, d) : fail(id, d); }
 
-assert(/NewCompensationPlanWizard/.test(plansSrc), "ui.new_plan_wizard", "new plan wizard");
+assert(/CompensationPlanActionDrawer/.test(plansSrc), "ui.new_plan_wizard", "compensation plan action drawer");
 assert(/Activate/.test(plansSrc), "ui.activate_plan", "activate plan action");
 assert(/Assign Employee/.test(assignSrc), "ui.assign_employee", "assign employee action");
 assert(/onViewAssignment/.test(assignSrc), "ui.view_assignment", "view assignment wired");
