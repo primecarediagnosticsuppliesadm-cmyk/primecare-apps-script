@@ -15,6 +15,7 @@ export default function OrdersLogisticsPanel({
   tenantId,
   setActivePage,
   orderFulfilled = false,
+  onOpenInLogistics,
 }) {
   const [loading, setLoading] = useState(false);
   const [shipment, setShipment] = useState(null);
@@ -69,12 +70,17 @@ export default function OrdersLogisticsPanel({
             size="sm"
             variant="outline"
             className="h-7 text-[11px]"
-            onClick={() =>
-              navigateToLogisticsDelivery(setActivePage, {
+            onClick={() => {
+              const payload = {
                 orderId,
                 shipmentId: shipment?.shipmentId,
-              })
-            }
+              };
+              if (typeof onOpenInLogistics === "function") {
+                onOpenInLogistics(payload);
+                return;
+              }
+              navigateToLogisticsDelivery(setActivePage, payload);
+            }}
           >
             Open in Logistics
           </Button>

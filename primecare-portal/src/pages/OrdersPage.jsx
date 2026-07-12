@@ -79,6 +79,7 @@ import {
   navigateToLabs,
   navigateToOperationsCenter,
   navigateToOrders,
+  navigateToLogisticsDelivery,
 } from "@/operations/hqWorkflowNav.js";
 import { mapLabAssignmentRow } from "@/operations/operationsCenterAdminEngine.js";
 import { resolveLabAgentForLabId } from "@/operations/labAgentResolver.js";
@@ -102,6 +103,16 @@ import {
   filterOrdersByQueue,
   queueKeyToFilterPatch,
 } from "@/orders/ordersOperationsQueueEngine.js";
+import {
+  buildFocusedOrderOutsideFiltersCopy,
+  buildOrdersContextParts,
+  buildOrdersListEmptyCopy,
+} from "@/orders/ordersContextUi.js";
+import {
+  consumeOrdersReturnContextIfArmed,
+  writeOrdersReturnContext,
+} from "@/orders/ordersWorkflowReturn.js";
+import OrdersContextStrip from "@/components/orders/OrdersContextStrip.jsx";
 import { cn } from "@/lib/utils";
 import { isQaValidationLayerEnabled } from "@/config/qaValidation.js";
 
@@ -398,7 +409,13 @@ export default function OrdersPage({
   const [invoiceByOrderId, setInvoiceByOrderId] = useState({});
   const [invoiceDrawer, setInvoiceDrawer] = useState(null);
   const [invoiceDownloadKey, setInvoiceDownloadKey] = useState("");
+  const [focusOrderId, setFocusOrderId] = useState("");
+  const [focusOutsideReason, setFocusOutsideReason] = useState("");
+  const [contextWarning, setContextWarning] = useState("");
+  const [pendingOpenOrderId, setPendingOpenOrderId] = useState("");
   const statusActionInflightRef = useRef(false);
+  const navContextConsumedRef = useRef(false);
+  const returnRestoreConsumedRef = useRef(false);
 
   const { showToast } = usePortalToast();
 
@@ -446,10 +463,52 @@ export default function OrdersPage({
   }, [allOrders, distributorScope?.tenantId, currentUser?.role, currentUser?.tenantId]);
 
   useEffect(() => {
-    if (loading || !orders.length) return;
+    if (loading || returnRestoreConsumedRef.current) return;
+    const restore = consumeOrdersReturnContextIfArmed();
+    if (!restore) return;
+    returnRestoreConsumedRef.current = true;
+    try {
+      if (restore.search) {
+        setSearchInput(restore.search);
+        setSearch(restore.search);
+      }
+      if (restore.status) setStatus(restore.status);
+      if (restore.paymentStatus) setPaymentStatus(restore.paymentStatus);
+      if (restore.labFilter) setLabFilter(restore.labFilter);
+      if (restore.dateFrom != null) setDateFrom(restore.dateFrom);
+      if (restore.dateTo != null) setDateTo(restore.dateTo);
+      if (restore.sortKey) setSortKey(restore.sortKey);
+      if (restore.activeQueueKey) setActiveQueueKey(restore.activeQueueKey);
+      if (restore.orderId) {
+        setFocusOrderId(str(restore.orderId));
+        setPendingOpenOrderId(str(restore.orderId));
+      }
+      setContextWarning("");
+    } catch (err) {
+      setContextWarning(
+        err?.message || "Could not restore previous Orders context. Clear filters and select an order."
+      );
+    }
+  }, [loading]);
+
+  useEffect(() => {
+    if (!pendingOpenOrderId || loading || !orders.length) return;
+    const id = pendingOpenOrderId;
+    setPendingOpenOrderId("");
+    void openOrder(id);
+  }, [pendingOpenOrderId, loading, orders.length]);
+
+  useEffect(() => {
+    if (loading || !orders.length || navContextConsumedRef.current) return;
     const ctx = consumeHqNavContext("orders");
-    if (ctx?.labId) setLabFilter(ctx.labId);
-    if (ctx?.orderId) void openOrder(ctx.orderId);
+    if (!ctx) return;
+    navContextConsumedRef.current = true;
+    if (ctx.labId) setLabFilter(ctx.labId);
+    if (ctx.orderId) {
+      setFocusOrderId(str(ctx.orderId));
+      setFocusOutsideReason("deep_link");
+      void openOrder(str(ctx.orderId));
+    }
   }, [loading, orders.length]);
 
   async function probeRlsOrderRows() {
@@ -607,6 +666,7 @@ export default function OrdersPage({
         throw new Error(`Order ${orderId} not found or not visible under current access.`);
       }
       setSelectedOrder(orderId);
+      setFocusOrderId(str(orderId));
       setDetails(data);
       const detailUnits = resolveOrderLineUnitCount(data.lines);
       if (detailUnits > 0) {
@@ -831,6 +891,52 @@ export default function OrdersPage({
     }
     setSelectedOrder(null);
     setDetails(null);
+    setFocusOrderId("");
+    setFocusOutsideReason("");
+  }
+
+  function captureOrdersReturnContext(overrides = {}) {
+    const detailLabId = str(details?.order?.labId);
+    writeOrdersReturnContext({
+      orderId: selectedOrder || focusOrderId,
+      labId:
+        overrides.labId ||
+        detailLabId ||
+        (labFilter !== "ALL" ? labFilter : ""),
+      activeQueueKey,
+      search,
+      status,
+      paymentStatus,
+      labFilter,
+      dateFrom,
+      dateTo,
+      sortKey,
+      ...overrides,
+    });
+  }
+
+  function clearOrdersListFilters({ keepSelection = true } = {}) {
+    setSearchInput("");
+    setSearch("");
+    setStatus("ALL");
+    setPaymentStatus("ALL");
+    setLabFilter("ALL");
+    setDateFrom("");
+    setDateTo("");
+    setActiveQueueKey("");
+    setFocusOutsideReason("");
+    setContextWarning("");
+    if (!keepSelection) {
+      setSelectedOrder(null);
+      setDetails(null);
+      setFocusOrderId("");
+    }
+  }
+
+  function returnToFulfillmentQueue() {
+    setFocusOutsideReason("");
+    setContextWarning("");
+    handleQueueSelect(ORDER_QUEUE_KEYS.AWAITING_FULFILLMENT);
   }
 
   usePredatorModuleValidation(
@@ -886,6 +992,7 @@ export default function OrdersPage({
   function handleRecordOrderPayment() {
     if (!selectedOrderSummary?.labId || !canNavigateToCollections(currentUser?.role)) return;
     const outstanding = resolveOrderOutstanding(selectedOrderSummary, selectedOrderInvoice);
+    captureOrdersReturnContext({ labId: selectedOrderSummary.labId });
     navigateToCollections(setActivePage, {
       labId: selectedOrderSummary.labId,
       orderId: selectedOrderSummary.orderId,
@@ -897,6 +1004,7 @@ export default function OrdersPage({
 
   function handleOpenCreditRisk() {
     if (!selectedOrderSummary?.labId || !canNavigateToCollections(currentUser?.role)) return;
+    captureOrdersReturnContext({ labId: selectedOrderSummary.labId });
     navigateToCollections(setActivePage, {
       labId: selectedOrderSummary.labId,
       orderId: selectedOrderSummary.orderId,
@@ -971,6 +1079,66 @@ export default function OrdersPage({
     };
   }, [selectedOrderSummary, selectedOrderInvoice, details?.lines]);
 
+  const selectedInFilteredList = useMemo(() => {
+    if (!selectedOrder) return false;
+    return filteredOrders.some((row) => str(row.orderId) === str(selectedOrder));
+  }, [filteredOrders, selectedOrder]);
+
+  const selectedExistsInScope = useMemo(() => {
+    const id = str(selectedOrder || focusOrderId);
+    if (!id) return false;
+    return (
+      orders.some((row) => str(row.orderId) === id) ||
+      allOrders.some((row) => str(row.orderId) === id)
+    );
+  }, [selectedOrder, focusOrderId, orders, allOrders]);
+
+  const showFocusOutsideFilters =
+    Boolean(selectedOrder || focusOrderId) &&
+    selectedExistsInScope &&
+    !selectedInFilteredList;
+
+  const focusOutsideCopy = showFocusOutsideFilters
+    ? buildFocusedOrderOutsideFiltersCopy({
+        orderId: selectedOrder || focusOrderId,
+        reason: focusOutsideReason || "filters",
+      })
+    : null;
+
+  const listEmptyCopy = buildOrdersListEmptyCopy({
+    ordersLength: orders.length,
+    search,
+    status,
+    paymentStatus,
+    labFilter,
+    dateFrom,
+    dateTo,
+    activeQueueKey,
+    readFailed: !ordersReadOk,
+  });
+
+  const ordersContextParts = useMemo(
+    () =>
+      buildOrdersContextParts({
+        activeQueueKey,
+        selectedOrderId: selectedOrder || focusOrderId,
+        selectedLabName:
+          selectedOrderSummary?.labName || selectedOrderSummary?.labId || "",
+        searchQuery: search,
+        freezeActive: hqStatusWriteBlocked,
+        focusOrderId,
+      }),
+    [
+      activeQueueKey,
+      selectedOrder,
+      focusOrderId,
+      selectedOrderSummary?.labName,
+      selectedOrderSummary?.labId,
+      search,
+      hqStatusWriteBlocked,
+    ]
+  );
+
   return (
     <div className={embedded ? "space-y-4" : "space-y-5"}>
       {!embedded ? (
@@ -982,6 +1150,38 @@ export default function OrdersPage({
               : "PrimeCare HQ orders — scan status, payment, and fulfillment at a glance."
           }
         />
+      ) : null}
+
+      <OrdersContextStrip parts={ordersContextParts} warning={contextWarning} />
+
+      {focusOutsideCopy ? (
+        <div
+          className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-sm text-amber-950"
+          role="status"
+        >
+          <p className="font-semibold">{focusOutsideCopy.title}</p>
+          <p className="mt-0.5 text-xs text-amber-900/90">{focusOutsideCopy.message}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs"
+              onClick={() => clearOrdersListFilters({ keepSelection: true })}
+            >
+              {focusOutsideCopy.clearLabel}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs"
+              onClick={() => returnToFulfillmentQueue()}
+            >
+              {focusOutsideCopy.queueLabel}
+            </Button>
+          </div>
+        </div>
       ) : null}
 
       {hqStatusWriteBlocked ? (
@@ -1034,6 +1234,13 @@ export default function OrdersPage({
         kpis={kpis}
         activeQueueKey={activeQueueKey}
         onSelectQueue={handleQueueSelect}
+        onReviewNextOrder={(orderId) => {
+          if (orderId) {
+            setFocusOrderId(str(orderId));
+            setFocusOutsideReason("");
+            void openOrder(str(orderId));
+          }
+        }}
         loading={loading}
       />
 
@@ -1126,10 +1333,58 @@ export default function OrdersPage({
                 Orders failed to load. Check the error banner above.
               </div>
             ) : filteredOrders.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-sm text-slate-500">
-                {orders.length === 0
-                  ? "No orders visible for your tenant."
-                  : "No orders match the current filters."}
+              <div className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-sm text-slate-600">
+                <p className="font-medium text-slate-800">{listEmptyCopy.title}</p>
+                <p className="mt-1 text-slate-500">{listEmptyCopy.message}</p>
+                <div className="mt-3 flex flex-wrap justify-center gap-2">
+                  {listEmptyCopy.action === "retry" || listEmptyCopy.action === "refresh" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs"
+                      onClick={() => void loadOrders()}
+                    >
+                      {listEmptyCopy.actionLabel}
+                    </Button>
+                  ) : null}
+                  {listEmptyCopy.action === "clear_search" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs"
+                      onClick={() => {
+                        setSearchInput("");
+                        setSearch("");
+                      }}
+                    >
+                      {listEmptyCopy.actionLabel}
+                    </Button>
+                  ) : null}
+                  {listEmptyCopy.action === "clear_filters" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs"
+                      onClick={() => clearOrdersListFilters({ keepSelection: true })}
+                    >
+                      {listEmptyCopy.actionLabel}
+                    </Button>
+                  ) : null}
+                  {listEmptyCopy.action === "clear_queue" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs"
+                      onClick={() => returnToFulfillmentQueue()}
+                    >
+                      {listEmptyCopy.actionLabel}
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             ) : (
               <>
@@ -1164,10 +1419,11 @@ export default function OrdersPage({
                       return (
                         <tr
                           key={order.orderId}
+                          aria-selected={isSelected}
                           className={cn(
                             "border-b border-slate-100 transition-colors",
                             isSelected
-                              ? "bg-slate-100"
+                              ? "bg-indigo-50 ring-2 ring-inset ring-indigo-400"
                               : highlightedOrderIds.has(order.orderId)
                                 ? "bg-amber-50/70 ring-1 ring-inset ring-amber-200"
                                 : cancelled
@@ -1194,12 +1450,16 @@ export default function OrdersPage({
                               <HqObjectLink
                                 onClick={
                                   setActivePage && (order.labId || order.labName)
-                                    ? () =>
+                                    ? () => {
+                                        captureOrdersReturnContext({
+                                          labId: order.labId || order.labName,
+                                        });
                                         navigateToLabs(setActivePage, {
                                           labId: order.labId || order.labName,
                                           labName: order.labName,
                                           openReviewDrawer: true,
-                                        })
+                                        });
+                                      }
                                     : undefined
                                 }
                                 title="Review lab"
@@ -1264,11 +1524,18 @@ export default function OrdersPage({
               <div className="space-y-2 xl:hidden">
                 {filteredOrders.map((order) => {
                   const orderStatus = normalizeOrderStatusLabel(order.orderStatus);
-                      const orderInvoice = resolveOrderInvoice(order);
-                      return (
+                  const orderInvoice = resolveOrderInvoice(order);
+                  const isSelected = selectedOrder === order.orderId;
+                  return (
                     <div
                       key={order.orderId}
-                      className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+                      aria-selected={isSelected}
+                      className={cn(
+                        "rounded-lg border bg-white p-3 shadow-sm",
+                        isSelected
+                          ? "border-indigo-300 ring-2 ring-indigo-400"
+                          : "border-slate-200"
+                      )}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
@@ -1316,7 +1583,14 @@ export default function OrdersPage({
 
         <Card className="rounded-2xl shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Order Details</CardTitle>
+            <CardTitle className="text-base">
+              Order Details
+              {selectedOrder ? (
+                <span className="ml-2 font-mono text-sm font-semibold text-slate-700">
+                  · {selectedOrder}
+                </span>
+              ) : null}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {!selectedOrder ? (
@@ -1338,6 +1612,9 @@ export default function OrdersPage({
             ) : selectedOrderSummary ? (
               <div className="space-y-4">
                 <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Selected order
+                  </div>
                   <div className="font-mono text-sm font-semibold text-slate-900">
                     {selectedOrderSummary.orderId}
                   </div>
@@ -1345,12 +1622,16 @@ export default function OrdersPage({
                     <HqObjectLink
                       onClick={
                         setActivePage && (selectedOrderSummary.labId || selectedOrderSummary.labName)
-                          ? () =>
+                          ? () => {
+                              captureOrdersReturnContext({
+                                labId: selectedOrderSummary.labId || selectedOrderSummary.labName,
+                              });
                               navigateToLabs(setActivePage, {
                                 labId: selectedOrderSummary.labId || selectedOrderSummary.labName,
                                 labName: selectedOrderSummary.labName,
                                 openReviewDrawer: true,
-                              })
+                              });
+                            }
                           : undefined
                       }
                       title="Review lab"
@@ -1665,6 +1946,10 @@ export default function OrdersPage({
                     tenantId={homeTenantId}
                     setActivePage={setActivePage}
                     orderFulfilled
+                    onOpenInLogistics={(payload) => {
+                      captureOrdersReturnContext();
+                      navigateToLogisticsDelivery(setActivePage, payload);
+                    }}
                   />
                 ) : null}
 

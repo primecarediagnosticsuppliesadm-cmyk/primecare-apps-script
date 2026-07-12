@@ -27,6 +27,10 @@ import CourierManagementPanel from "@/components/logistics/CourierManagementPane
 import DeliveryPolicyPanel from "@/components/logistics/DeliveryPolicyPanel.jsx";
 import RoutePlanningPanel from "@/components/logistics/RoutePlanningPanel.jsx";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
+import {
+  armOrdersReturnRestore,
+  hasOrdersReturnContext,
+} from "@/orders/ordersWorkflowReturn.js";
 import { usePagePerformance } from "@/hooks/usePagePerformance.js";
 import { ROLES } from "@/config/roles.js";
 import { cn } from "@/lib/utils";
@@ -96,6 +100,7 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
   const [selectedShipment, setSelectedShipment] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("dispatch");
+  const [ordersReturnActive, setOrdersReturnActive] = useState(() => hasOrdersReturnContext());
 
   usePagePerformance("Logistics");
 
@@ -210,6 +215,25 @@ export default function LogisticsDeliveryPage({ currentUser = null, setActivePag
           </Button>
         }
       />
+
+      {ordersReturnActive && typeof setActivePage === "function" ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2 text-sm text-blue-900">
+          <span>Continue from Orders</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 border-blue-200 bg-white text-xs"
+            onClick={() => {
+              armOrdersReturnRestore();
+              setOrdersReturnActive(false);
+              setActivePage("orders");
+            }}
+          >
+            Back to Orders
+          </Button>
+        </div>
+      ) : null}
 
       {error ? (
         <DataFetchError

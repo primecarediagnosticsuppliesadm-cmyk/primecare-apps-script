@@ -33,6 +33,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 |--------|--------|------|
 | verify-orders-admin-flow.mjs | KPI, fulfill ledger, freeze | Orders page |
 | verify-orders-action-feedback.mjs | Sprint 1A Status Actions inline errors, loading labels, toast success, busy/aria guards | Orders UX |
+| verify-orders-navigation-context.mjs | Sprint 1B Start Here, context strip, selection, return path, empty/focus recovery | Orders UX |
 | verify-lab-ordering-flow.mjs | Track order_id; RPC smoke; admin-on-behalf implementation must extend this gate for `adminOnBehalf` source/audit metadata and eligibility blocks | Lab portal / admin on-behalf ordering |
 | verify-transaction-integrity-rpcs.mjs | Sprint 1 RPC symbols | Order/payment RPC |
 | verify-bounded-reads.mjs | No unbounded payment/PO select | Read paths |

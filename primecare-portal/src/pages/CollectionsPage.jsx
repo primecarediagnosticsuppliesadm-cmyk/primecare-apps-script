@@ -47,6 +47,10 @@ import HqObjectLink from "@/components/hq/HqObjectLink.jsx";
 import HqCreditRiskCommandCenter from "@/components/hq/HqCreditRiskCommandCenter.jsx";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import { navigateToLabs, navigateToLabInvoiceCenter } from "@/operations/hqWorkflowNav.js";
+import {
+  armOrdersReturnRestore,
+  hasOrdersReturnContext,
+} from "@/orders/ordersWorkflowReturn.js";
 import { supabase } from "@/api/supabaseClient.js";
 import {
   logAppsScriptFallbackUsed,
@@ -1905,6 +1909,9 @@ export default function CollectionsPage({
     };
   }, [isLabAccount]);
   const { showToast } = usePortalToast();
+  const [ordersReturnActive, setOrdersReturnActive] = useState(
+    () => !embedded && !isLabAccount && hasOrdersReturnContext()
+  );
 
   const hydratedCollections = useMemo(
     () => hydrateCollectionsFromCache(currentUser, distributorScope, isLabAccount),
@@ -3167,6 +3174,25 @@ export default function CollectionsPage({
 
       {!isLabAccount && !embedded ? (
         <CollectionsContextStrip parts={collectionsContextParts} />
+      ) : null}
+
+      {ordersReturnActive && typeof setActivePage === "function" && !embedded && !isLabAccount ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2 text-sm text-blue-900">
+          <span>Continue from Orders</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 border-blue-200 bg-white text-xs"
+            onClick={() => {
+              armOrdersReturnRestore();
+              setOrdersReturnActive(false);
+              setActivePage("orders");
+            }}
+          >
+            Back to Orders
+          </Button>
+        </div>
       ) : null}
 
       {loading && collections.length === 0 ? (

@@ -32,6 +32,10 @@ import {
   consumeAgentWorkspaceReturnPath,
 } from "@/pages/agentVisitContext.js";
 import {
+  armOrdersReturnRestore,
+  hasOrdersReturnContext,
+} from "@/orders/ordersWorkflowReturn.js";
+import {
   deriveLabRecommendedAction,
   formatAgentCurrency,
 } from "@/pages/agentUxPresentation.js";
@@ -500,6 +504,9 @@ export default function LabsPage({
   const [collectionsReturnActive, setCollectionsReturnActive] = useState(
     () => isAgentView && !embedded && peekAgentWorkspaceReturnPath() === "collections"
   );
+  const [ordersReturnActive, setOrdersReturnActive] = useState(
+    () => !embedded && hasOrdersReturnContext()
+  );
   const hydratedLabs = useMemo(() => hydrateLabsFromCache(), []);
   const hadCacheOnMount = useRef(Boolean(hydratedLabs));
   const [labs, setLabs] = useState(() => hydratedLabs?.labs ?? []);
@@ -823,6 +830,24 @@ export default function LabsPage({
                 }}
               >
                 Back to Collections
+              </Button>
+            </div>
+          ) : null}
+          {ordersReturnActive && typeof setActivePage === "function" ? (
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2 text-sm text-blue-900">
+              <span>Continue from Orders</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 border-blue-200 bg-white text-xs"
+                onClick={() => {
+                  armOrdersReturnRestore();
+                  setOrdersReturnActive(false);
+                  setActivePage("orders");
+                }}
+              >
+                Back to Orders
               </Button>
             </div>
           ) : null}

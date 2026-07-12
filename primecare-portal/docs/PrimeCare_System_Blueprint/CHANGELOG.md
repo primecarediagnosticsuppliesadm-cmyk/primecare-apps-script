@@ -4,6 +4,34 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-11 — HQ Orders context & workflow continuity (Sprint 1B)
+
+### Change
+
+- **Start Here** on existing Awaiting fulfillment queue + Review Next Order CTA.
+- **OrdersContextStrip** — queue / order / lab / search / freeze orientation.
+- **Selected-order clarity** — visual + `aria-selected`; outside-filter recovery without silent auto-clear.
+- **Return context** — `primecare_orders_return_context`; Back to Orders on Collections / Labs / Logistics.
+- **Differentiated empty states** with recovery actions.
+
+### Not changed
+
+- Schema, APIs, RPCs, lifecycle, inventory, ORDER_OUT, AR, invoice/shipment, pricing, taxes, permissions, RLS.
+- Sprint 1A Status Actions mutation semantics.
+- Lab Ordering, admin on-behalf checkout, routes, workspace split.
+
+### Verification
+
+- `node scripts/verify-orders-navigation-context.mjs`
+- `node scripts/verify-orders-action-feedback.mjs`
+- `node scripts/verify-orders-admin-flow.mjs`
+- `node scripts/verify-order-payment-sync.mjs`
+- `node scripts/verify-transaction-integrity-rpcs.mjs`
+- `node scripts/verify-orders-projection-network-audit.mjs`
+- `node scripts/verify-no-finance-mutation.mjs`
+
+---
+
 ## 2026-07-11 — HQ order action feedback (Sprint 1A)
 
 ### Change

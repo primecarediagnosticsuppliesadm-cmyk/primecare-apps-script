@@ -131,10 +131,28 @@ UX-only standard for Orders → Order Details **Status Actions** (Mark Processin
 
 ---
 
+## HQ Orders context & continuity (Sprint 1B)
+
+UX-only orientation and return-path improvements. No route, lifecycle, SoT, or write-path changes. Sprint 1A Status Actions feedback remains the mutation error surface.
+
+| Rule | Detail |
+|------|--------|
+| **Start Here** | Labels existing **Awaiting fulfillment** queue as the operational starting point; **Review Next Order** opens the first queue order — no new prioritization math |
+| **Context strip** | Compact `OrdersContextStrip` — Viewing: queue · order ID · lab · search · freeze |
+| **Selected order** | Explicit row/card selected state + `aria-selected`; order ID in detail header; retained after targeted refresh |
+| **Outside filters** | If selected/focused order is hidden by filters, show recovery — Clear Filters / Return to Queue (never auto-clear silently; never silently select a different order) |
+| **Return context** | `primecare_orders_return_context` stores source=Orders, orderId, labId, queue/filters/search before Collections / Labs / Logistics navigation |
+| **Back to Orders** | Destinations show CTA; restore applies only when Back arms `pendingRestore` |
+| **Empty states** | Differentiated: no orders / search / filters / queue / focus outside / read failed — each with a recovery action |
+| **Error classes** | Page read → `DataFetchError`; status mutation → Sprint 1A `ActionErrorSummary`; restore/context → compact strip warning |
+
+---
+
 ## Verification
 
 - `verify-orders-admin-flow.mjs`
 - `verify-orders-action-feedback.mjs` (Sprint 1A UX gate)
+- `verify-orders-navigation-context.mjs` (Sprint 1B UX gate)
 - `verify-transaction-integrity-rpcs.mjs`
 - `verify-lab-ordering-flow.mjs`
 - Compensation/payroll changes must additionally prove no order lifecycle mutation and no commission from order value.
