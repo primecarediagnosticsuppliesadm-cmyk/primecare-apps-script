@@ -4,6 +4,16 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-12 — v1.0 Production Deployment pack (docs)
+
+### Change
+
+- Deployment preparation only — no application, schema, API, RLS, or UI changes.
+- Pack: `docs/operations/V1_Production_Deployment.md` (source control, build, DB tracks, env, auth/storage/monitoring, deploy order, smoke test, rollback).
+- Build verified PASS this session; production cutover **NO-GO** until env/DR/tags/smoke blockers closed. Prep stance: **CONDITIONAL GO**.
+
+---
+
 ## 2026-07-12 — v1.0 Operational Freeze (docs)
 
 ### Change
