@@ -187,7 +187,7 @@ Purchase Operations uses a **single operational queue hierarchy** (Critical Reor
 |------|------------|-----------------|
 | **Bronze** | Domain Integrity | **Met** (PO SoT + receive → PURCHASE_IN + integrity verifies) |
 | **Silver** | Operational Workspace | **Met** (Sprint 1A–1C UI/UX) |
-| **Gold** | Certified UX + Verification + Signed Browser UAT | **Not met** — Closure + signed browser UAT pending |
+| **Gold** | Certified UX + Verification + Signed Browser UAT | **CONDITIONAL** — Closure pack complete; signed browser UAT pending |
 
 ### Founder decisions (documentation only)
 
@@ -253,9 +253,24 @@ Purchase Operations uses a **single operational queue hierarchy** (Critical Reor
 | **1A** | Mutation feedback on Create / Update / Cancel / Bulk / Receive — **shipped** (UI only) | PUR-CERT-003 |
 | **1B** | **Action-oriented** Start Here + context continuity — **shipped** (UI only) | PUR-CERT-002, 004, 013 |
 | **1C** | Queue hierarchy + Suppliers honesty — **shipped** (UI only) | PUR-CERT-007, 009 |
-| **Closure** | QA pack + signed browser UAT | PUR-CERT-005, 012 |
+| **Closure** | Evidence pack + verification packaging — **shipped** (docs); signed browser UAT pending | PUR-CERT-005, 012 |
 | **Future** | PUR-CERT-015 / 010 Trust & Explainability cards | Not Gold blocker |
 | **RC2** | PUR-CERT-001 engineering split; exports; multi-line; orphan forecast page | Deferred |
+
+### Purchase Certification Closure (2026-07-12 — docs only)
+
+**Scope:** PUR-CERT-005 evidence pack · PUR-CERT-012 verification packaging.  
+**Not changed:** schema, APIs, RPCs, PO write semantics, PURCHASE_IN, ledger, reorder engines, receiving eligibility, Sprint 1A–1C UI behavior, permissions, RLS.
+
+| Concern | Behavior |
+|---------|----------|
+| Evidence | `docs/QA/modules/purchase/Certification_*` + Sprint 1A–1C UAT packs |
+| Verify | `verify-purchase-certification-closure.mjs` + Sprint 1A–1C UX scripts + lifecycle / no-finance |
+| Gold boundary | Covers Workspace · Queue · Receive · Forecast Drafts · Pending Receipts · History · Context · Trust · Navigation |
+| Not certified | Supplier Master · Approvals · Explainability cards · Engineering decomposition · Future procurement |
+| Known exclusion | `verify-procurement-inventory-flow.mjs` `@/` Node import — pre-existing; not a Purchase UX failure |
+| Gold status | **CONDITIONAL** until signed browser UAT (`Certification_Signoff_Template.md`) |
+| Freeze | After Gold approval: bugs / security / compliance only; do not begin Supplier certification |
 
 ### Do not break during Purchase UX sprints
 

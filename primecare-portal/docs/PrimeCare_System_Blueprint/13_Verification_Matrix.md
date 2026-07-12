@@ -83,6 +83,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-purchase-action-feedback.mjs | Purchase Sprint 1A create/edit/cancel/bulk/receive Action Pattern | Purchase UX |
 | verify-purchase-navigation-context.mjs | Purchase Sprint 1B Start Here, context strip, selection, return path, empty states | Purchase UX |
 | verify-purchase-workspace-simplification.mjs | Purchase Sprint 1C page budget, queue hierarchy, collapsed KPIs, Suppliers honesty, no module split | Purchase UX |
+| verify-purchase-certification-closure.mjs | Purchase Closure PUR-CERT-005 evidence docs + PUR-CERT-012 packaging; Sprint 1A–1C regression markers | Purchase UX |
 | verify-inventory-navigation-context.mjs | Sprint 1B Start Here, context strip, selection, return path, empty/focus recovery | Inventory UX |
 | verify-inventory-workspace-simplification.mjs | Sprint 1C page budget, collapsed valuation, operational-first detail, no module split | Inventory UX |
 | verify-inventory-certification-closure.mjs | Closure INV-CERT-005 evidence docs, INV-CERT-007 labels, INV-CERT-001 Purchase grouping | Inventory UX |

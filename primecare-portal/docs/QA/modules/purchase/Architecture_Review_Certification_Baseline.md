@@ -75,18 +75,18 @@ Purchase Operations currently **combines Replenishment, Receiving, and Purchase 
 |------|------------|----------------|
 | **Bronze** | **Domain Integrity** | **Met** — PO SoT, receive → stock + PURCHASE_IN, lifecycle gates, freeze, integrity verifies |
 | **Silver** | **Operational Workspace** | **Met** — Sprint 1A–1C (trust, Start Here, continuity, queue hierarchy, Suppliers honesty) |
-| **Gold** | **Certified UX + Verification + Signed Browser UAT** | **Not met** — Closure pack + signed browser UAT pending |
+| **Gold** | **Certified UX + Verification + Signed Browser UAT** | **CONDITIONAL** — Closure pack complete; signed browser UAT pending |
 
 | Lens | Verdict |
 |------|---------|
 | Bronze — Domain Integrity | **GO** |
 | Silver — Operational Workspace | **GO** (Sprint 1A–1C shipped) |
-| Gold — Certified UX + Verification + Signed Browser UAT | **NO-GO** — Closure not started |
-| Overall | **CONDITIONAL GO** for HQ procurement ops; **NO-GO** for UX freeze until Closure + signed UAT |
+| Gold — Certified UX + Verification + Signed Browser UAT | **CONDITIONAL GO** — Closure pack shipped; human signed browser UAT pending |
+| Overall | **CONDITIONAL GO** for Gold pending sign-off; freeze after Gold except bugs/security/compliance |
 
 **Silver Sprint 1 defects closed:** PUR-CERT-002, 003, 004, 007, 009 (013 partial).  
-**Gold gates:** PUR-CERT-005 (QA pack + signed browser UAT), PUR-CERT-012 (UX verifies / evidence).  
-**Not Sprint 1 blockers / not Gold blockers:** PUR-CERT-001 (operational complexity documented; engineering RC2), PUR-CERT-010 / **PUR-CERT-015** (Trust & Explainability Constitution recommendation cards), approvals, GAP-013 supplier master, exports, multi-line PO.
+**Closure defects packaged:** PUR-CERT-005 (evidence), PUR-CERT-012 (verify packaging).  
+**Not Gold blockers:** PUR-CERT-001 (RC2), PUR-CERT-010 / **015** (explainability), Approvals, GAP-013 supplier master, exports, multi-line PO.
 
 ---
 
@@ -505,13 +505,14 @@ Each sprint: one workflow, independently releasable, functional parity preserved
 | **Closes** | PUR-CERT-007, PUR-CERT-009; PUR-CERT-006 partial |
 | **Verify** | `verify-purchase-workspace-simplification.mjs` |
 
-### Certification Closure
+### Certification Closure — **shipped** (docs; 2026-07-12)
 
 | | |
 |--|--|
-| **Touch** | Remaining High Sprint UX defects; complete `docs/QA/modules/purchase/` evidence; **signed browser Manual UAT** |
-| **Does not** | GAP-013 supplier master; Approvals; PUR-CERT-001 engineering split; PUR-CERT-010 / **015** full explainability cards |
-| **Exit** | Silver → **Gold** if High Sprint defects closed + Verification + Signed Browser UAT |
+| **Touch** | PUR-CERT-005 evidence pack + PUR-CERT-012 Closure verify packaging — **shipped** |
+| **Does not** | Application redesign; Supplier Master; Approvals; PUR-CERT-001 / 015 |
+| **Exit** | **CONDITIONAL Gold** until signed browser UAT; then freeze except bugs/security/compliance |
+| **Verify** | `verify-purchase-certification-closure.mjs` |
 
 ### Browser UAT → Gold → Freeze
 
@@ -602,9 +603,9 @@ Procurement inventory flow (`--mutate` in safe tenant) · RC1 lifecycle · Inven
 | Lens | Result |
 |------|--------|
 | **Bronze — Domain Integrity** | **GO** |
-| **Silver — Operational Workspace** | **GO** — Sprint 1A–1C (PUR-CERT-002, 003, 004, 007, 009) |
-| **Gold — Certified UX + Verification + Signed Browser UAT** | **NO-GO** — Closure not started |
-| Certification Closure | **NOT STARTED** (stop after Sprint 1C) |
+| **Silver — Operational Workspace** | **GO** — Sprint 1A–1C |
+| **Gold — Certified UX + Verification + Signed Browser UAT** | **CONDITIONAL GO** — Closure pack complete; signed browser UAT pending |
+| Certification Closure | **Shipped** (docs) — human sign-off open |
 
 ### Bronze — Domain Integrity (met)
 
@@ -620,12 +621,12 @@ Procurement inventory flow (`--mutate` in safe tenant) · RC1 lifecycle · Inven
 - Context preserved across buy→receive  
 - Queue clarity + honest surfaces (Suppliers)  
 
-### Gold — Certified UX + Verification + Signed Browser UAT (not met)
+### Gold — Certified UX + Verification + Signed Browser UAT (CONDITIONAL)
 
 - Silver complete  
 - High Sprint UX defects closed (not PUR-CERT-001 / 015)  
 - Purchase QA module pack + evidence  
-- Signed browser Manual UAT  
+- Signed browser Manual UAT **pending**  
 - UX verify scripts green  
 
 ---
@@ -635,9 +636,11 @@ Procurement inventory flow (`--mutate` in safe tenant) · RC1 lifecycle · Inven
 | Gate | Status |
 |------|--------|
 | Sprint 1A / 1B / 1C | **Shipped** (UI/UX only) |
+| Certification Closure (docs) | **Shipped** |
 | Schema / API / RLS / business rules | **Unchanged** |
-| Certification Closure | **NOT STARTED** — do not begin until Founder authorizes |
+| Signed browser UAT | **Pending** — `Certification_Signoff_Template.md` |
+| Supplier certification | **NOT STARTED** — do not begin |
 
 ---
 
-**STOP.** Sprint 1C complete. Do not begin Certification Closure.
+**STOP.** Closure pack complete. Execute signed browser UAT. After Gold approval, freeze Purchase except bug fixes, security fixes, and compliance updates. Do not begin Supplier certification.

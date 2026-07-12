@@ -75,7 +75,7 @@ Action-oriented Start Here examples:
 | Module | Baseline | Status |
 |--------|----------|--------|
 | Inventory | `docs/QA/modules/inventory/Architecture_Review_Certification_Baseline.md` | Founder-finalized; Closure CONDITIONAL Gold |
-| **Purchase / Reorder** | `docs/QA/modules/purchase/Architecture_Review_Certification_Baseline.md` | **Founder-finalized 2026-07-12** — Sprint 1A ALLOWED (UX-only) |
+| **Purchase / Reorder** | `docs/QA/modules/purchase/Architecture_Review_Certification_Baseline.md` | Founder-finalized; Closure **CONDITIONAL Gold** (signed browser UAT pending) |
 
 ---
 

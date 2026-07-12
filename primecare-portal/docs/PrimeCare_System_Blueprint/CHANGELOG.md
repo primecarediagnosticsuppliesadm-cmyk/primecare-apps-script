@@ -4,6 +4,28 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-12 — Purchase Certification Closure
+
+### Change
+
+- **Docs / verification packaging only** — PUR-CERT-005 evidence pack (index, checklist, sign-off, consolidated browser UAT, parity, pre-impl) and PUR-CERT-012 Closure verify script.
+- Sprint 1A–1C application behavior unchanged. No schema, API, RPC, PURCHASE_IN, ledger, reorder, permission, or RLS changes.
+- Founder Gold boundary documented: Workspace · Queue · Receive · Forecast Drafts · Pending Receipts · History · Context · Trust · Navigation. Does **not** certify Supplier Master, Approvals, explainability cards, engineering decomposition, or future procurement.
+- Known exclusion: `verify-procurement-inventory-flow.mjs` `@/` Node import — pre-existing; not a Purchase UX failure; not fixed.
+- Gold recommendation: **CONDITIONAL GO** pending signed browser UAT. After Gold approval: freeze except bugs/security/compliance; do not begin Supplier certification.
+
+### Verification
+
+- `node scripts/verify-purchase-certification-closure.mjs`
+- `node scripts/verify-purchase-action-feedback.mjs`
+- `node scripts/verify-purchase-navigation-context.mjs`
+- `node scripts/verify-purchase-workspace-simplification.mjs`
+- `node scripts/verify-rc1-procurement-lifecycle.mjs`
+- `node scripts/verify-no-finance-mutation.mjs`
+- `npm run build`
+
+---
+
 ## 2026-07-12 — Purchase workspace simplification (Sprint 1C)
 
 ### Change
