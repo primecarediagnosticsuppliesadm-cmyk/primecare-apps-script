@@ -4,6 +4,22 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-12 — v1.0 Operational Readiness Execution (docs / ops)
+
+### Change
+
+- **No application features** — packaged Priority 1–3 operational readiness execution from Production Readiness Audit.
+- Artifacts: `docs/operations/V1_Operational_Readiness_Execution.md`, `V1_First_Customer_Operational_Gate.md`, `V1_Critical_Workflow_Recovery_SOP.md`, `scripts/verify-operational-readiness-pack.mjs`.
+- Maps auth, RLS, monitoring, logging, storage, invoice PDF, env, backup/restore, migrations, and critical workflow recovery to existing runbooks; identifies operator gaps (DR-01, prod checklists) vs by-design limits (fulfill non-atomic, CERT-004 receive).
+- Does **not** invent Supplier Master, dashboards, CRM, Distributor OS, or transactional email.
+
+### Verification
+
+- `node scripts/verify-operational-readiness-pack.mjs`
+- `node scripts/verify-rc1-production-readiness.mjs` (expected CONDITIONAL / known MON WARNs)
+
+---
+
 ## 2026-07-12 — Purchase Certification Closure
 
 ### Change

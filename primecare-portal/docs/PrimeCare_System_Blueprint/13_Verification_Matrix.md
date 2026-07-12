@@ -245,6 +245,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-sprint1-health.mjs | Sprint 1 bundle | Sprint changes |
 | verify-perf-scale-counts.mjs | PERF tenant scale | Perf testing |
 | verify-production-monitoring.mjs | RC-2 orchestrator | Release monitoring |
+| verify-operational-readiness-pack.mjs | v1.0 ops pack: first-customer gate, recovery SOP, linked RC1/HQ runbooks | Pre–first customer |
 | verify-scripts-readonly.mjs | Guard verify/check/measure/cert scripts against unconfirmed mutations | **Every release / production readiness** |
 | run-hq-performance-certification.mjs | PERF tenant benchmarks | Performance cert |
 | run-browser-certification.mjs | API prereq gate + browser checklist | O2C / release browser cert |
