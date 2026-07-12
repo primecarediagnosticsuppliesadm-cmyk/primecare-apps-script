@@ -27,6 +27,18 @@ import {
   writeAgentCollectionsSearch,
   writeAgentCollectionsSelectedLab,
 } from "@/collections/agentCollectionsUi.js";
+import {
+  resolveCollectionsWorkspace,
+  getCollectionsWorkspaceMeta,
+  COLLECTIONS_WORKSPACES,
+  isLabAccountViewMode,
+  isAgentCollectionsView,
+  isHqCreditRiskView,
+} from "@/collections/collectionsViewMode.js";
+import AgentCollectionsWorkspace from "@/components/collections/workspaces/AgentCollectionsWorkspace.jsx";
+import HqCreditRiskWorkspace from "@/components/collections/workspaces/HqCreditRiskWorkspace.jsx";
+import HqReceivablesWorkspace from "@/components/collections/workspaces/HqReceivablesWorkspace.jsx";
+import LabAccountWorkspace from "@/components/collections/workspaces/LabAccountWorkspace.jsx";
 import ActionErrorSummary from "@/components/ux/ActionErrorSummary.jsx";
 import LabCollectionPanel from "@/components/collections/LabCollectionPanel.jsx";
 import HqObjectLink from "@/components/hq/HqObjectLink.jsx";
@@ -137,7 +149,6 @@ import {
   CircleDollarSign,
   ChevronDown,
   ChevronUp,
-  Search,
   AlertTriangle,
   ShieldAlert,
   Wallet,
@@ -261,16 +272,6 @@ function creditHoldBadgeText(creditHold) {
   return raw;
 }
 
-function isAgentCollectionsView(currentUser, isLabAccount) {
-  return !isLabAccount && String(currentUser?.role || "").toLowerCase() === ROLES.AGENT;
-}
-
-function isHqCreditRiskView(currentUser, isLabAccount, isAgentView) {
-  if (isLabAccount || isAgentView) return false;
-  const role = String(currentUser?.role || "").toLowerCase();
-  return role === ROLES.ADMIN || role === ROLES.EXECUTIVE;
-}
-
 function formatMoney(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "—";
@@ -290,10 +291,6 @@ function localDateYmd(d = new Date()) {
   const mo = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${mo}-${day}`;
-}
-
-function isLabAccountViewMode(viewMode, role) {
-  return viewMode === "labAccount" || String(role || "").toLowerCase() === ROLES.LAB;
 }
 
 function accountCopy(isLabAccount, management, account) {
@@ -3025,6 +3022,25 @@ export default function CollectionsPage({
     });
   }, [isAgentView, effectiveSearch, collections.length]);
 
+  const collectionsWorkspace = useMemo(
+    () =>
+      resolveCollectionsWorkspace({
+        viewMode,
+        currentUser,
+        isLabAccount,
+        isAgentView,
+        isHqCreditRisk,
+      }),
+    [viewMode, currentUser, isLabAccount, isAgentView, isHqCreditRisk]
+  );
+
+  const workspaceMeta = useMemo(
+    () => getCollectionsWorkspaceMeta(collectionsWorkspace),
+    [collectionsWorkspace]
+  );
+
+  const showCollectionsEmpty = labDisplayCollections.length === 0;
+
   const handleScheduleFollowUp = useCallback(
     (item) => {
       startVisitFromWorkspaceItem(
@@ -3135,183 +3151,214 @@ export default function CollectionsPage({
         />
       ) : null}
 
-      <div className={isLabAccount ? "mx-auto max-w-7xl" : ""}>
-        {isLabAccount ? (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <CompactAccountKpi
-              title="Outstanding"
-              value={formatMoney(
-                labLedgerKpis?.outstanding ??
-                  summary.totalOutstanding ??
-                  filteredCollections[0]?.outstandingAmount ??
-                  0
-              )}
-              icon={IndianRupee}
-            />
-            <CompactAccountKpi
-              title="Overdue"
-              value={
-                (labLedgerKpis?.overdueDays ?? filteredCollections[0]?.overdueDays)
-                  ? `${Number(labLedgerKpis?.overdueDays ?? filteredCollections[0]?.overdueDays)}d`
-                  : "—"
-              }
-              icon={AlertTriangle}
-            />
-            <CompactAccountKpi
-              title="Total paid"
-              value={formatMoney(
-                labLedgerKpis?.totalPaid ??
-                  filteredCollections[0]?.totalPaid ??
-                  0
-              )}
-              icon={Wallet}
-            />
-            {(() => {
-              const creditKpi = labTopCreditKpiDisplay({
-                labLedgerKpis,
-                collectionRow: filteredCollections[0],
-              });
-              return (
-                <CompactAccountKpi title={creditKpi.label} value={creditKpi.value} icon={ShieldAlert} />
-              );
-            })()}
-          </div>
-        ) : isAgentView ? (
-          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-            <CompactAccountKpi
-              title="Outstanding"
-              value={formatMoney(agentQueueSummary?.totalOutstanding ?? summary.totalOutstanding)}
-              icon={IndianRupee}
-            />
-            <CompactAccountKpi
-              title="Accounts due"
-              value={String(agentQueueSummary?.accountsDue ?? filteredCollections.length)}
-              icon={Wallet}
-            />
-            <CompactAccountKpi
-              title="Med/high risk"
-              value={String(agentQueueSummary?.mediumHighRisk ?? 0)}
-              icon={ShieldAlert}
-            />
-            <CompactAccountKpi
-              title="Total collected"
-              value={formatMoney(agentQueueSummary?.totalCollected ?? 0)}
-              icon={CircleDollarSign}
-            />
-          </div>
-        ) : isHqCreditRisk ? null : (
-          <KpiCardGrid columns={4}>
-            <KpiCard
-              title="Outstanding balance"
-              value={formatMoney(summary.totalOutstanding)}
-              icon={IndianRupee}
-              highlight={financialSyncPulse}
-            />
-            <KpiCard
-              title="Overdue labs"
-              value={Number(summary.overdueCount || 0).toLocaleString("en-IN")}
-              icon={AlertTriangle}
-            />
-            <KpiCard
-              title="High risk"
-              value={Number(summary.highRiskCount || 0).toLocaleString("en-IN")}
-              icon={ShieldAlert}
-            />
-            <KpiCard
-              title="Today's collections"
-              value={formatMoney(summary.todayCollections)}
-              icon={Wallet}
-              highlight={financialSyncPulse}
-            />
-          </KpiCardGrid>
-        )}
-      </div>
-
-      {!isLabAccount ? (
-        <div className="sticky top-0 z-20 -mx-1 border-b border-border bg-background/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/90">
-          <div className="space-y-2 rounded-lg border border-border bg-card p-2 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-xs font-semibold text-slate-700">
-                {isAgentView ? "Work queue" : isHqCreditRisk ? "Filter labs" : "Receivables"}
-              </div>
-              <div className="text-[11px] text-muted-foreground">
-                {filteredCollections.length} of {collections.length} shown
-                {isAgentView && listRefreshing ? (
-                  <span className="ml-2 inline-flex items-center gap-1 text-[var(--pc-brand-primary)]">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Refreshing queue…
-                  </span>
-                ) : null}
-              </div>
-            </div>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-              <Input
-                placeholder="Search lab, agent, area…"
-                value={isAgentView ? localSearch : search}
-                onChange={(e) => {
-                  if (isAgentView) setLocalSearch(e.target.value);
-                  else setSearch(e.target.value);
-                }}
-                className="h-9 rounded-lg pl-8 text-sm"
-                aria-label="Search collections"
-              />
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {isAgentView && paymentDrawerLabId && selectedCollection ? (
-        <div className="rounded-lg border border-[var(--pc-brand-primary)]/30 bg-[var(--pc-brand-primary)]/5 px-3 py-2 text-sm">
-          <span className="text-muted-foreground">Recording for </span>
-          <span className="font-semibold text-slate-900">
-            {selectedCollection.labName || selectedCollection.labId}
-          </span>
-        </div>
-      ) : null}
-
-      {isHqCreditRisk ? (
-        <HqCreditRiskCommandCenter
+      {collectionsWorkspace === COLLECTIONS_WORKSPACES.HQ_CREDIT_RISK ? (
+        <HqCreditRiskWorkspace
           key={hqCreditAttentionFilter || "credit-default"}
-          collections={collections}
-          searchFiltered={filteredCollections}
-          searchActive={Boolean(search.trim())}
-          initialAttentionFilter={hqCreditAttentionFilter}
-          summary={summary}
-          lastPaymentByLabId={lastPaymentByLabId}
-          focusLabId={hqFocusLabId}
-          setActivePage={setActivePage}
-          currentUser={currentUser}
-          onReviewLab={handleOpenLabReview}
-          onOpenCollections={handleHqOpenCollections}
-          onRecordPayment={(labId) => openCollectionPanel(labId, "payment")}
+          meta={workspaceMeta}
+          hideWorkspaceHeader={embedded}
+          searchValue={search}
+          onSearchChange={(e) => setSearch(e.target.value)}
+          shownCount={filteredCollections.length}
+          totalCount={collections.length}
+          commandCenterProps={{
+            collections,
+            searchFiltered: filteredCollections,
+            searchActive: Boolean(search.trim()),
+            initialAttentionFilter: hqCreditAttentionFilter,
+            summary,
+            lastPaymentByLabId,
+            focusLabId: hqFocusLabId,
+            setActivePage,
+            currentUser,
+            onReviewLab: handleOpenLabReview,
+            onOpenCollections: handleHqOpenCollections,
+            onRecordPayment: (labId) => openCollectionPanel(labId, "payment"),
+          }}
         />
-      ) : labDisplayCollections.length === 0 ? (
-        isLabAccount ? (
-          labAccountLedger?.status === "loading" ? (
-            <div className="mx-auto max-w-2xl">
-              <ListSkeleton rows={4} />
-            </div>
-          ) : (
-            <EmptyState
-              title="No account records"
-              description="Your lab payment and outstanding details will appear here when available."
-            />
-          )
+      ) : showCollectionsEmpty ? (
+        collectionsWorkspace === COLLECTIONS_WORKSPACES.LAB_ACCOUNT ? (
+          <LabAccountWorkspace
+            meta={workspaceMeta}
+            showEmpty
+            summaryMetrics={
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <CompactAccountKpi
+                  title="Outstanding"
+                  value={formatMoney(
+                    labLedgerKpis?.outstanding ??
+                      summary.totalOutstanding ??
+                      filteredCollections[0]?.outstandingAmount ??
+                      0
+                  )}
+                  icon={IndianRupee}
+                />
+                <CompactAccountKpi
+                  title="Overdue"
+                  value={
+                    (labLedgerKpis?.overdueDays ?? filteredCollections[0]?.overdueDays)
+                      ? `${Number(labLedgerKpis?.overdueDays ?? filteredCollections[0]?.overdueDays)}d`
+                      : "—"
+                  }
+                  icon={AlertTriangle}
+                />
+                <CompactAccountKpi
+                  title="Total paid"
+                  value={formatMoney(labLedgerKpis?.totalPaid ?? filteredCollections[0]?.totalPaid ?? 0)}
+                  icon={Wallet}
+                />
+                {(() => {
+                  const creditKpi = labTopCreditKpiDisplay({
+                    labLedgerKpis,
+                    collectionRow: filteredCollections[0],
+                  });
+                  return (
+                    <CompactAccountKpi title={creditKpi.label} value={creditKpi.value} icon={ShieldAlert} />
+                  );
+                })()}
+              </div>
+            }
+            emptyState={
+              labAccountLedger?.status === "loading" ? (
+                <div className="mx-auto max-w-2xl">
+                  <ListSkeleton rows={4} />
+                </div>
+              ) : (
+                <EmptyState
+                  title="No account records"
+                  description="Your lab payment and outstanding details will appear here when available."
+                />
+              )
+            }
+          />
+        ) : collectionsWorkspace === COLLECTIONS_WORKSPACES.AGENT ? (
+          <AgentCollectionsWorkspace
+            meta={workspaceMeta}
+            showEmpty
+            searchValue={localSearch}
+            onSearchChange={(e) => setLocalSearch(e.target.value)}
+            shownCount={filteredCollections.length}
+            totalCount={collections.length}
+            listRefreshing={listRefreshing}
+            summaryMetrics={
+              <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                <CompactAccountKpi
+                  title="Outstanding"
+                  value={formatMoney(agentQueueSummary?.totalOutstanding ?? summary.totalOutstanding)}
+                  icon={IndianRupee}
+                />
+                <CompactAccountKpi
+                  title="Accounts due"
+                  value={String(agentQueueSummary?.accountsDue ?? filteredCollections.length)}
+                  icon={Wallet}
+                />
+                <CompactAccountKpi
+                  title="Med/high risk"
+                  value={String(agentQueueSummary?.mediumHighRisk ?? 0)}
+                  icon={ShieldAlert}
+                />
+                <CompactAccountKpi
+                  title="Total collected"
+                  value={formatMoney(agentQueueSummary?.totalCollected ?? 0)}
+                  icon={CircleDollarSign}
+                />
+              </div>
+            }
+            emptyState={
+              <EmptyState
+                title={agentEmptyCopy?.title || "No collection records"}
+                description={agentEmptyCopy?.description || "Receivables will appear here when labs have outstanding balances."}
+              />
+            }
+          />
         ) : (
-          <EmptyState
-            title={isAgentView && agentEmptyCopy ? agentEmptyCopy.title : "No collection records"}
-            description={
-              isAgentView && agentEmptyCopy
-                ? agentEmptyCopy.description
-                : collections.length === 0
-                  ? "Receivables will appear here when labs have outstanding balances."
-                  : "Try a different search term."
+          <HqReceivablesWorkspace
+            meta={workspaceMeta}
+            showEmpty
+            searchValue={search}
+            onSearchChange={(e) => setSearch(e.target.value)}
+            shownCount={filteredCollections.length}
+            totalCount={collections.length}
+            summaryMetrics={
+              <KpiCardGrid columns={4}>
+                <KpiCard
+                  title="Outstanding balance"
+                  value={formatMoney(summary.totalOutstanding)}
+                  icon={IndianRupee}
+                  highlight={financialSyncPulse}
+                />
+                <KpiCard
+                  title="Overdue labs"
+                  value={Number(summary.overdueCount || 0).toLocaleString("en-IN")}
+                  icon={AlertTriangle}
+                />
+                <KpiCard
+                  title="High risk"
+                  value={Number(summary.highRiskCount || 0).toLocaleString("en-IN")}
+                  icon={ShieldAlert}
+                />
+                <KpiCard
+                  title="Today's collections"
+                  value={formatMoney(summary.todayCollections)}
+                  icon={Wallet}
+                  highlight={financialSyncPulse}
+                />
+              </KpiCardGrid>
+            }
+            emptyState={
+              <EmptyState
+                title="No collection records"
+                description={
+                  collections.length === 0
+                    ? "Receivables will appear here when labs have outstanding balances."
+                    : "Try a different search term."
+                }
+              />
             }
           />
         )
-      ) : isLabAccount ? (
-        <div className="mx-auto max-w-7xl space-y-4" role="list">
+      ) : collectionsWorkspace === COLLECTIONS_WORKSPACES.LAB_ACCOUNT ? (
+        <LabAccountWorkspace
+          meta={workspaceMeta}
+          summaryMetrics={
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <CompactAccountKpi
+                title="Outstanding"
+                value={formatMoney(
+                  labLedgerKpis?.outstanding ??
+                    summary.totalOutstanding ??
+                    filteredCollections[0]?.outstandingAmount ??
+                    0
+                )}
+                icon={IndianRupee}
+              />
+              <CompactAccountKpi
+                title="Overdue"
+                value={
+                  (labLedgerKpis?.overdueDays ?? filteredCollections[0]?.overdueDays)
+                    ? `${Number(labLedgerKpis?.overdueDays ?? filteredCollections[0]?.overdueDays)}d`
+                    : "—"
+                }
+                icon={AlertTriangle}
+              />
+              <CompactAccountKpi
+                title="Total paid"
+                value={formatMoney(
+                  labLedgerKpis?.totalPaid ?? filteredCollections[0]?.totalPaid ?? 0
+                )}
+                icon={Wallet}
+              />
+              {(() => {
+                const creditKpi = labTopCreditKpiDisplay({
+                  labLedgerKpis,
+                  collectionRow: filteredCollections[0],
+                });
+                return (
+                  <CompactAccountKpi title={creditKpi.label} value={creditKpi.value} icon={ShieldAlert} />
+                );
+              })()}
+            </div>
+          }
+        >
           {labDisplayCollections.map((item) => {
             const key = labIdKey(item.labId);
             const isExpanded = expandedLabId === key;
@@ -3334,15 +3381,50 @@ export default function CollectionsPage({
               />
             );
           })}
-        </div>
-      ) : isAgentView ? (
-        <div className="relative">
-          {listRefreshing && collections.length > 0 ? (
-            <div className="mb-2 rounded-lg border border-border bg-card p-2">
-              <ListSkeleton rows={3} />
+        </LabAccountWorkspace>
+      ) : collectionsWorkspace === COLLECTIONS_WORKSPACES.AGENT ? (
+        <AgentCollectionsWorkspace
+          meta={workspaceMeta}
+          searchValue={localSearch}
+          onSearchChange={(e) => setLocalSearch(e.target.value)}
+          shownCount={filteredCollections.length}
+          totalCount={collections.length}
+          listRefreshing={listRefreshing}
+          summaryMetrics={
+            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+              <CompactAccountKpi
+                title="Outstanding"
+                value={formatMoney(agentQueueSummary?.totalOutstanding ?? summary.totalOutstanding)}
+                icon={IndianRupee}
+              />
+              <CompactAccountKpi
+                title="Accounts due"
+                value={String(agentQueueSummary?.accountsDue ?? filteredCollections.length)}
+                icon={Wallet}
+              />
+              <CompactAccountKpi
+                title="Med/high risk"
+                value={String(agentQueueSummary?.mediumHighRisk ?? 0)}
+                icon={ShieldAlert}
+              />
+              <CompactAccountKpi
+                title="Total collected"
+                value={formatMoney(agentQueueSummary?.totalCollected ?? 0)}
+                icon={CircleDollarSign}
+              />
             </div>
-          ) : null}
-          <div className={cn("grid gap-3", listRefreshing && collections.length > 0 && "opacity-60")} role="list">
+          }
+          contextStrip={
+            paymentDrawerLabId && selectedCollection ? (
+              <div className="rounded-lg border border-[var(--pc-brand-primary)]/30 bg-[var(--pc-brand-primary)]/5 px-3 py-2 text-sm">
+                <span className="text-muted-foreground">Recording for </span>
+                <span className="font-semibold text-slate-900">
+                  {selectedCollection.labName || selectedCollection.labId}
+                </span>
+              </div>
+            ) : null
+          }
+        >
           {filteredCollections.map((item) => {
             const key = labIdKey(item.labId);
             return (
@@ -3371,10 +3453,41 @@ export default function CollectionsPage({
               />
             );
           })}
-          </div>
-        </div>
+        </AgentCollectionsWorkspace>
       ) : (
-        <div className="space-y-2" role="list">
+        <HqReceivablesWorkspace
+          meta={workspaceMeta}
+          searchValue={search}
+          onSearchChange={(e) => setSearch(e.target.value)}
+          shownCount={filteredCollections.length}
+          totalCount={collections.length}
+          summaryMetrics={
+            <KpiCardGrid columns={4}>
+              <KpiCard
+                title="Outstanding balance"
+                value={formatMoney(summary.totalOutstanding)}
+                icon={IndianRupee}
+                highlight={financialSyncPulse}
+              />
+              <KpiCard
+                title="Overdue labs"
+                value={Number(summary.overdueCount || 0).toLocaleString("en-IN")}
+                icon={AlertTriangle}
+              />
+              <KpiCard
+                title="High risk"
+                value={Number(summary.highRiskCount || 0).toLocaleString("en-IN")}
+                icon={ShieldAlert}
+              />
+              <KpiCard
+                title="Today's collections"
+                value={formatMoney(summary.todayCollections)}
+                icon={Wallet}
+                highlight={financialSyncPulse}
+              />
+            </KpiCardGrid>
+          }
+        >
           {filteredCollections.map((item) => {
             const key = labIdKey(item.labId);
             const isExpanded = expandedLabId === key;
@@ -3417,7 +3530,7 @@ export default function CollectionsPage({
               />
             );
           })}
-        </div>
+        </HqReceivablesWorkspace>
       )}
 
       {(isAgentView || isHqCreditRisk) ? (

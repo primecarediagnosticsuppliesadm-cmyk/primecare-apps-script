@@ -53,6 +53,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-credit-risk-admin-flow.mjs | AR KPI, aging | Credit & Risk |
 | verify-collections-payment-action-feedback.mjs | Sprint 1A payment drawer inline errors, loading labels, lifecycle | Collections UX |
 | verify-agent-collections-interaction-feedback.mjs | Sprint 1B agent queue debounce, selection, refresh, evidence | Collections UX |
+| verify-collections-workspace-separation.mjs | Sprint 1C persona workspace shells, primary-question framing | Collections UX |
 | verify-agent-collections-ownership-filter.mjs | Ownership scoping | Agent collections |
 | verify-create-lab-ar-rls.mjs | Lab+AR insert RLS | Add lab |
 

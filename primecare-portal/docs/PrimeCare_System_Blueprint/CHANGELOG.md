@@ -4,6 +4,28 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-11 — Collections workspace separation (Sprint 1C)
+
+### Change
+
+- **Dedicated workspace shells** per persona — agent, HQ credit & risk, HQ receivables, lab account.
+- **`collectionsViewMode.js`** — `resolveCollectionsWorkspace`, primary-question metadata.
+- **`CollectionsWorkspaceShell`** + **`CollectionsSearchBar`** — visual boundaries and shared search chrome.
+- **Section labels** — summary / find / act areas with `aria-label` and `data-workspace`.
+
+### Not changed
+
+- APIs, schema, RLS, RPCs, payment allocation, AR calculations, business rules, routing.
+- Data loading, mutations, ownership filter, route ordering.
+
+### Verification
+
+- `node scripts/verify-collections-workspace-separation.mjs`
+- `node scripts/verify-credit-risk-admin-flow.mjs`
+- `node scripts/verify-no-finance-mutation.mjs`
+
+---
+
 ## 2026-07-11 — Agent collections interaction feedback (Sprint 1B)
 
 ### Change

@@ -72,12 +72,39 @@ Improves agent daily collection workflow predictability without changing write p
 
 ---
 
+## Sprint 1C — Workspace separation
+
+Each Collections persona renders in a dedicated workspace shell that answers **one primary business question**. `CollectionsPage` remains the data/mutation orchestrator; workspaces are presentational.
+
+| Workspace | Component | Primary question |
+|-----------|-----------|----------------|
+| Agent | `AgentCollectionsWorkspace` | Who should I collect from today? |
+| HQ Credit & Risk | `HqCreditRiskWorkspace` | Which labs need credit intervention? |
+| HQ Receivables | `HqReceivablesWorkspace` | What is our outstanding receivables position? |
+| Lab account | `LabAccountWorkspace` | What is my account health and payment activity? |
+
+| Rule | Detail |
+|------|--------|
+| **Resolver** | `collectionsViewMode.js` — `resolveCollectionsWorkspace`, `getCollectionsWorkspaceMeta` |
+| **Shell** | `CollectionsWorkspaceShell` — workspace label + primary question header |
+| **Search chrome** | `CollectionsSearchBar` — shared filter UI (client-side only) |
+| **Section boundaries** | Summary / find / act sections with `aria-label` per workspace |
+| **Secondary detail** | Payment form in drawer (agent, credit) or expandable row (receivables); lab detail in timeline tabs |
+
+### Out of scope (Sprint 1C)
+
+- APIs, schema, RLS, RPCs, payment allocation, AR calculations, business rules
+- Navigation routes, ownership filter, Daily OS ordering
+
+---
+
 ## Verification
 
 | Script | When |
 |--------|------|
 | `verify-collections-payment-action-feedback.mjs` | Sprint 1A UX gate |
 | `verify-agent-collections-interaction-feedback.mjs` | Sprint 1B agent queue gate |
+| `verify-collections-workspace-separation.mjs` | Sprint 1C workspace gate |
 | `verify-credit-risk-admin-flow.mjs` | Credit & Risk regression |
 | `verify-agent-collections-ownership-filter.mjs` | Agent scope regression |
 | `verify-collection-inconsistencies.mjs` | AR hygiene |
