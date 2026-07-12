@@ -4,6 +4,28 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-12 — Inventory workspace simplification (Sprint 1C)
+
+### Change
+
+- **UI/UX only** — operational-first Stock hub page budget; selected SKU expected action; SKU details/audit collapsed; valuation/KPI summary moved below fold in a single collapsible section.
+- Single workspace marker `data-inventory-workspace="hq"` — no module split.
+- No schema, API, RPC, ledger, ORDER_OUT, PURCHASE_IN, opening-stock logic, reorder engine, permission, or RLS changes.
+- Sprint 1A mutation feedback and Sprint 1B return-context behavior unchanged.
+
+### Verification
+
+- `node scripts/verify-inventory-workspace-simplification.mjs`
+- `node scripts/verify-inventory-navigation-context.mjs`
+- `node scripts/verify-inventory-action-feedback.mjs`
+- `node scripts/verify-inventory-admin-flow.mjs`
+- `node scripts/verify-inventory-ledger-integrity.mjs`
+- `node scripts/verify-order-inventory-sync.mjs`
+- `node scripts/verify-no-finance-mutation.mjs`
+- `npm run build`
+
+---
+
 ## 2026-07-11 — Inventory context & workflow continuity (Sprint 1B)
 
 ### Change

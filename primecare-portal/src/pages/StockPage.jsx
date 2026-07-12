@@ -33,6 +33,11 @@ import {
   consumeInventoryReturnContextIfArmed,
   writeInventoryReturnContext,
 } from "@/inventory/inventoryWorkflowReturn.js";
+import InventoryCollapsibleSection from "@/components/inventory/InventoryCollapsibleSection.jsx";
+import {
+  getInventoryExpectedActionCopy,
+  INVENTORY_WORKSPACE_PRIMARY_QUESTION,
+} from "@/inventory/inventoryWorkspaceUi.js";
 
 function hydrateStockFromCache() {
   const ui = readPageUiCache("inventory:stock");
@@ -162,7 +167,6 @@ export default function StockPage({ currentUser = null, setActivePage = null }) 
   const [healthFilter, setHealthFilter] = useState("");
   const [sortKey, setSortKey] = useState("name");
   const [selectedKey, setSelectedKey] = useState("");
-  const [summaryOpen, setSummaryOpen] = useState(false);
   const [contextWarning, setContextWarning] = useState("");
   const [economicsBundle, setEconomicsBundle] = useState(null);
   const [economicsLoading, setEconomicsLoading] = useState(false);
@@ -188,7 +192,7 @@ export default function StockPage({ currentUser = null, setActivePage = null }) 
   }, []);
 
   useEffect(() => {
-    if (activeTab !== "stock" || !summaryOpen) return;
+    if (activeTab !== "stock") return;
     let cancelled = false;
 
     async function loadEconomics() {
@@ -209,7 +213,7 @@ export default function StockPage({ currentUser = null, setActivePage = null }) 
     return () => {
       cancelled = true;
     };
-  }, [activeTab, summaryOpen]);
+  }, [activeTab]);
 
   const loadStock = useCallback(async ({ silent = false } = {}) => {
     try {
@@ -382,6 +386,19 @@ export default function StockPage({ currentUser = null, setActivePage = null }) 
     [selectedKey, selectedItem, selectedVisible]
   );
 
+  const selectedExpectedAction = useMemo(
+    () =>
+      selectedItem
+        ? getInventoryExpectedActionCopy({
+            stockHealth: selectedItem.stockHealth,
+            currentStock: selectedItem.currentStock,
+            minStock: selectedItem.minStock,
+            reorderQty: selectedItem.reorderQty,
+          })
+        : null,
+    [selectedItem]
+  );
+
   const captureReturnContext = useCallback(() => {
     writeInventoryReturnContext({
       activeTab,
@@ -473,14 +490,14 @@ export default function StockPage({ currentUser = null, setActivePage = null }) 
   };
 
   return (
-    <div style={styles.page}>
+    <div style={styles.page} data-inventory-workspace="hq" aria-label="Inventory workspace">
       <PageHeader
         title="Inventory"
-        subtitle="What inventory work needs my attention?"
+        subtitle={INVENTORY_WORKSPACE_PRIMARY_QUESTION}
         icon={Package}
         className="mb-3"
         secondaryActions={
-          <div style={styles.tabs}>
+          <div style={styles.tabs} aria-label="Inventory views">
             <button
               type="button"
               onClick={() => switchTab("stock")}
@@ -545,7 +562,7 @@ export default function StockPage({ currentUser = null, setActivePage = null }) 
             />
           ) : null}
 
-          <div className="mb-3">
+          <div className="mb-3" data-inventory-start-here-region="true">
             <InventoryStartHere
               criticalCount={portfolioStats.criticalItems}
               reorderCount={portfolioStats.reorderItems}
@@ -555,51 +572,32 @@ export default function StockPage({ currentUser = null, setActivePage = null }) 
             />
           </div>
 
-          {showPortfolioView ? (
-            <div style={styles.portfolioNote}>
-              Portfolio inventory: each row is one stock record per distributor. The same SKU may
-              appear under HQ and distributor accounts with separate on-hand quantities.
+          {focusOutsideCopy ? (
+            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+              <p className="font-semibold">{focusOutsideCopy.title}</p>
+              <p className="mt-0.5">{focusOutsideCopy.message}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button type="button" size="sm" variant="outline" className="h-7 text-[11px]" onClick={clearListFilters}>
+                  {focusOutsideCopy.clearLabel}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-[11px]"
+                  onClick={() => {
+                    clearListFilters();
+                    setActiveTab("stock");
+                    setContextWarning("");
+                  }}
+                >
+                  {focusOutsideCopy.returnLabel}
+                </Button>
+              </div>
             </div>
           ) : null}
 
-          <details
-            className="mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2"
-            open={summaryOpen}
-            onToggle={(e) => setSummaryOpen(e.currentTarget.open)}
-          >
-            <summary className="cursor-pointer text-xs font-medium text-slate-700">
-              Stock summary & valuation (secondary)
-            </summary>
-            <div className="mt-3 space-y-3">
-              <div style={styles.statsRow}>
-                <div style={styles.statCard}>
-                  <div style={styles.statLabel}>Inventory Records</div>
-                  <div style={styles.statValue}>{portfolioStats.inventoryRecords}</div>
-                </div>
-                <div style={styles.statCard}>
-                  <div style={styles.statLabel}>Unique SKUs</div>
-                  <div style={styles.statValue}>{portfolioStats.uniqueSkus}</div>
-                </div>
-                <div style={styles.statCard}>
-                  <div style={styles.statLabel}>Critical</div>
-                  <div style={styles.statValue}>{portfolioStats.criticalItems}</div>
-                </div>
-                <div style={styles.statCard}>
-                  <div style={styles.statLabel}>Reorder</div>
-                  <div style={styles.statValue}>{portfolioStats.reorderItems}</div>
-                </div>
-              </div>
-              <HqInventoryValueAnalytics
-                model={economicsBundle?.model}
-                healthRows={economicsBundle?.inventoryRows || []}
-                tenantFilter={tenantFilter}
-                homeTenantId={homeTenantId}
-                loading={economicsLoading}
-              />
-            </div>
-          </details>
-
-          <div style={styles.filterRow}>
+          <div style={styles.filterRow} data-inventory-filters="true" aria-label="Inventory search and filters">
             <select
               value={tenantFilter}
               onChange={(e) => setTenantFilter(e.target.value)}
@@ -646,54 +644,7 @@ export default function StockPage({ currentUser = null, setActivePage = null }) 
             />
           </div>
 
-          {focusOutsideCopy ? (
-            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-              <p className="font-semibold">{focusOutsideCopy.title}</p>
-              <p className="mt-0.5">{focusOutsideCopy.message}</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Button type="button" size="sm" variant="outline" className="h-7 text-[11px]" onClick={clearListFilters}>
-                  {focusOutsideCopy.clearLabel}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-[11px]"
-                  onClick={() => {
-                    clearListFilters();
-                    setActiveTab("stock");
-                    setContextWarning("");
-                  }}
-                >
-                  {focusOutsideCopy.returnLabel}
-                </Button>
-              </div>
-            </div>
-          ) : null}
-
-          {selectedItem ? (
-            <div
-              className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50/50 px-3 py-2 text-xs text-indigo-950"
-              data-inventory-selected-sku={selectedItem.productId}
-            >
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-800">
-                Selected SKU
-              </p>
-              <p className="mt-0.5 font-semibold">
-                {selectedItem.productName || "—"}{" "}
-                <span className="font-mono text-[11px] text-indigo-800">
-                  ({selectedItem.productId || "—"})
-                </span>
-              </p>
-              <p className="mt-1 text-indigo-900/80">
-                {selectedItem.category || "—"} · On hand {selectedItem.currentStock ?? 0} · Min{" "}
-                {selectedItem.minStock ?? 0} ·{" "}
-                <HealthBadge health={selectedItem.stockHealth} />
-              </p>
-            </div>
-          ) : null}
-
-          <div style={styles.tableWrap} className="hidden xl:block">
+          <div style={styles.tableWrap} className="hidden xl:block" data-inventory-list="true">
             {filteredRows.length === 0 ? (
               <div style={styles.emptyState}>
                 <p className="font-medium text-slate-800">{emptyCopy.title}</p>
@@ -764,7 +715,7 @@ export default function StockPage({ currentUser = null, setActivePage = null }) 
             )}
           </div>
 
-          <div className="space-y-2 xl:hidden">
+          <div className="space-y-2 xl:hidden" data-inventory-list-mobile="true">
             {filteredRows.length === 0 ? (
               <div style={styles.emptyState}>
                 <p className="font-medium text-slate-800">{emptyCopy.title}</p>
@@ -826,6 +777,182 @@ export default function StockPage({ currentUser = null, setActivePage = null }) 
                 );
               })
             )}
+          </div>
+
+          {selectedItem ? (
+            <div
+              className="mt-3 space-y-2 rounded-xl border border-indigo-200 bg-indigo-50/40 p-3 text-xs text-indigo-950"
+              data-inventory-selected-sku={selectedItem.productId}
+              aria-label="Selected SKU details"
+            >
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-800">
+                  Selected SKU
+                </p>
+                <p className="mt-0.5 text-sm font-semibold text-indigo-950">
+                  {selectedItem.productName || "—"}{" "}
+                  <span className="font-mono text-[11px] font-medium text-indigo-800">
+                    ({selectedItem.productId || "—"})
+                  </span>
+                </p>
+              </div>
+
+              {selectedExpectedAction ? (
+                <div
+                  className="rounded-lg border border-indigo-200 bg-white/80 px-2.5 py-2"
+                  data-inventory-expected-action="true"
+                >
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-800">
+                    Expected
+                  </p>
+                  <p className="mt-0.5 text-sm font-semibold text-indigo-950">
+                    {selectedExpectedAction.action}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-indigo-900/85">{selectedExpectedAction.reason}</p>
+                </div>
+              ) : null}
+
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-inventory-sku-ops="true">
+                <div className="rounded-lg border border-indigo-100 bg-white/70 px-2 py-1.5">
+                  <p className="text-[10px] text-indigo-700">Current stock</p>
+                  <p className="font-semibold tabular-nums">{selectedItem.currentStock ?? 0}</p>
+                </div>
+                <div className="rounded-lg border border-indigo-100 bg-white/70 px-2 py-1.5">
+                  <p className="text-[10px] text-indigo-700">Min stock</p>
+                  <p className="font-semibold tabular-nums">{selectedItem.minStock ?? 0}</p>
+                </div>
+                <div className="rounded-lg border border-indigo-100 bg-white/70 px-2 py-1.5">
+                  <p className="text-[10px] text-indigo-700">Reorder qty</p>
+                  <p className="font-semibold tabular-nums">{selectedItem.reorderQty ?? 0}</p>
+                </div>
+                <div className="rounded-lg border border-indigo-100 bg-white/70 px-2 py-1.5">
+                  <p className="text-[10px] text-indigo-700">Health</p>
+                  <HealthBadge health={selectedItem.stockHealth} />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5" aria-label="Selected SKU actions">
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-7 text-[11px]"
+                  onClick={() => navigateAway("purchase", { tab: "receive" })}
+                >
+                  Receive Stock
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 border-indigo-200 bg-white text-[11px]"
+                  onClick={() => navigateAway("purchase", { tab: "create" })}
+                >
+                  Create Purchase Order
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 border-indigo-200 bg-white text-[11px]"
+                  onClick={() => switchTab("ledger")}
+                >
+                  Open Ledger
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 border-indigo-200 bg-white text-[11px]"
+                  onClick={() => navigateAway("masterCatalog")}
+                >
+                  Catalog
+                </Button>
+              </div>
+
+              <InventoryCollapsibleSection title="SKU details">
+                <dl className="grid gap-2 text-[11px] text-slate-700 sm:grid-cols-2">
+                  <div>
+                    <dt className="text-slate-500">Category</dt>
+                    <dd className="font-medium">{selectedItem.category || "—"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">Distributor</dt>
+                    <dd className="font-medium">
+                      {resolveTenantShortName(selectedItem.tenantId, tenantNameById, homeTenantId)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">Opening stock</dt>
+                    <dd className="font-medium">
+                      Set at catalog create only. Use Receive Stock for replenishment.
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">Purchase history</dt>
+                    <dd className="font-medium">
+                      <button
+                        type="button"
+                        className="text-indigo-700 underline"
+                        onClick={() => navigateAway("purchase", { tab: "history" })}
+                      >
+                        Open Purchase history
+                      </button>
+                    </dd>
+                  </div>
+                </dl>
+              </InventoryCollapsibleSection>
+
+              <InventoryCollapsibleSection title="Audit identifiers">
+                <dl className="grid gap-2 font-mono text-[11px] text-slate-600 sm:grid-cols-2">
+                  <div>
+                    <dt className="font-sans text-slate-500">Product ID</dt>
+                    <dd>{selectedItem.productId || "—"}</dd>
+                  </div>
+                  <div>
+                    <dt className="font-sans text-slate-500">Tenant ID</dt>
+                    <dd className="break-all">{selectedItem.tenantId || "—"}</dd>
+                  </div>
+                </dl>
+              </InventoryCollapsibleSection>
+            </div>
+          ) : null}
+
+          <div className="mt-3">
+            <InventoryCollapsibleSection title="Stock summary & valuation">
+              {showPortfolioView ? (
+                <div style={{ ...styles.portfolioNote, marginBottom: 12 }}>
+                  Portfolio inventory: each row is one stock record per distributor. The same SKU may
+                  appear under HQ and distributor accounts with separate on-hand quantities.
+                </div>
+              ) : null}
+              <div style={styles.statsRow}>
+                <div style={styles.statCard}>
+                  <div style={styles.statLabel}>Inventory Records</div>
+                  <div style={styles.statValue}>{portfolioStats.inventoryRecords}</div>
+                </div>
+                <div style={styles.statCard}>
+                  <div style={styles.statLabel}>Unique SKUs</div>
+                  <div style={styles.statValue}>{portfolioStats.uniqueSkus}</div>
+                </div>
+                <div style={styles.statCard}>
+                  <div style={styles.statLabel}>Critical</div>
+                  <div style={styles.statValue}>{portfolioStats.criticalItems}</div>
+                </div>
+                <div style={styles.statCard}>
+                  <div style={styles.statLabel}>Reorder</div>
+                  <div style={styles.statValue}>{portfolioStats.reorderItems}</div>
+                </div>
+              </div>
+              <div className="mt-3">
+                <HqInventoryValueAnalytics
+                  model={economicsBundle?.model}
+                  healthRows={economicsBundle?.inventoryRows || []}
+                  tenantFilter={tenantFilter}
+                  homeTenantId={homeTenantId}
+                  loading={economicsLoading}
+                />
+              </div>
+            </InventoryCollapsibleSection>
           </div>
         </>
       )}

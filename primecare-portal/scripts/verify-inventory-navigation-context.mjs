@@ -69,8 +69,18 @@ assert(/No critical stock/.test(ctxUiSrc), "empty.critical", "critical empty cop
 assert(/No reorder candidates/.test(ctxUiSrc), "empty.reorder", "reorder empty copy");
 assert(/No inventory yet/.test(ctxUiSrc), "empty.none", "no inventory copy");
 
-assert(/Stock summary & valuation \(secondary\)/.test(pageSrc), "budget.summary_collapsed", "analytics/KPIs collapsed secondary");
-assert(/What inventory work needs my attention/.test(pageSrc), "budget.primary_question", "primary question in header");
+assert(
+  /Stock summary & valuation/.test(pageSrc),
+  "budget.summary_collapsed",
+  "analytics/KPIs collapsed secondary"
+);
+assert(
+  /INVENTORY_WORKSPACE_PRIMARY_QUESTION/.test(pageSrc) ||
+    /What inventory work should I do now/.test(pageSrc) ||
+    /What inventory work needs my attention/.test(pageSrc),
+  "budget.primary_question",
+  "primary question in header"
+);
 assert(!/data-inventory-start-here/.test(pageSrc) || /InventoryStartHere/.test(pageSrc), "budget.start_here_first", "Start Here component wired");
 
 assert(/ActionErrorSummary/.test(catalogSrc), "sprint1a.catalog_error", "Sprint 1A ActionErrorSummary still on catalog");

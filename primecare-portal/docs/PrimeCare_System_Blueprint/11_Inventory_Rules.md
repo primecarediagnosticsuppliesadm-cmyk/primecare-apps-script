@@ -67,6 +67,7 @@ Stock snapshot, ledger movements, procurement receive, catalog coupling, and **m
 - `verify-inventory-dashboard-kpi.mjs`
 - `verify-inventory-action-feedback.mjs` — Sprint 1A UX gate
 - `verify-inventory-navigation-context.mjs` — Sprint 1B UX gate
+- `verify-inventory-workspace-simplification.mjs` — Sprint 1C UX gate
 - `verify-inventory-admin-flow.mjs` — write-path parity
 - `verify-order-inventory-sync.mjs` — ORDER_OUT boundary
 
@@ -111,6 +112,22 @@ Procurement writes may be blocked when `VITE_HQ_PROCUREMENT_FROZEN` — inventor
 
 ---
 
+## Inventory workspace simplification (Sprint 1C — UI/UX only)
+
+**Scope:** Operational-first presentation hierarchy on the Stock hub. Single workspace (`data-inventory-workspace="hq"`) — no module split.  
+**Not changed:** schema, APIs, RPCs, ledger, ORDER_OUT, PURCHASE_IN, opening-stock logic, reorder engine, Sprint 1A mutation errors, Sprint 1B return-context behavior, permissions, RLS.
+
+| Concern | Behavior |
+|---------|----------|
+| Primary question | “What inventory work should I do now?” |
+| First viewport | Header → Context strip → Start Here → Search/Filters → Inventory list → Selected SKU. No stacked dashboards. |
+| Selected SKU hierarchy | Expected action + operational stock fields expanded; SKU details / audit identifiers / purchase-history note collapsed. |
+| Secondary | Stock summary & valuation (KPIs + analytics + portfolio note) collapsed below operational content. |
+| Discoverability | Within ~5s: selected SKU, expected action, and reason from existing `stockHealth`. |
+| Verify | `verify-inventory-workspace-simplification.mjs` |
+
+---
+
 ## Module UX certification (Founder-finalized 2026-07-11)
 
 **Baseline document:** [`docs/QA/modules/inventory/Architecture_Review_Certification_Baseline.md`](../QA/modules/inventory/Architecture_Review_Certification_Baseline.md)  
@@ -134,7 +151,7 @@ Purchase Operations currently combines **Receiving**, **Reordering**, and **Purc
 |--------|-------|------------------|
 | **1A** | Mutation feedback on existing Catalog / Purchase receive writes — **shipped** (UI only) | Trust slice |
 | **1B** | **Action-oriented** Start Here + context continuity — **shipped** (UI only) | INV-CERT-002, 003, 004 |
-| **1C** | Visual / cognitive workspace shells (Receiving vs Reorder vs Purchase Admin); collapse analytics | INV-CERT-001, 006 |
+| **1C** | Visual / cognitive workspace shells; collapse analytics — **shipped** (UI only) | INV-CERT-001, 006 |
 | **Closure** | High UX defects + inventory QA pack + signed Manual UAT | Path to Gold |
 | **Future** | INV-CERT-012 recommendation explainability (Current/Min/Reorder/Consumption/Rule/Reason/Trust Level; no fake %) | Not Sprint 1 blocker |
 | **RC2** | Purchase file decomposition, GAP-001 split, Adjust/Transfer (blueprint-first), exports | Deferred |
