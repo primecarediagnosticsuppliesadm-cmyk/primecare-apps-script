@@ -44,6 +44,7 @@ Do not recommend commit when:
 | Inventory/catalog | **CONDITIONAL GO (Gold pending signed UAT)** — Closure pack + Sprint 1A–1C complete; sign `docs/QA/modules/inventory/Certification_Signoff_Template.md` |
 | Purchase / Reorder | **CONDITIONAL GO (Gold pending signed browser UAT)** — Closure pack + Sprint 1A–1C complete; sign `docs/QA/modules/purchase/Certification_Signoff_Template.md`; freeze after Gold except bugs/security/compliance |
 | **First customer / ops** | **CONDITIONAL GO** — execute `docs/operations/V1_First_Customer_Operational_Gate.md` (DR, prod env, RLS, storage/PDF, golden labs); pack: `V1_Operational_Readiness_Execution.md` |
+| **Feature freeze** | **IN EFFECT** — Year-1 build complete; see `docs/operations/V1_Operational_Freeze.md` (bugs/security/compliance only) |
 | Full pilot | NO-GO — Agent E2E, manual UAT open |
 
 Update after each certification run.

@@ -4,6 +4,17 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-12 — v1.0 Operational Freeze (docs)
+
+### Change
+
+- **Feature freeze declared** — Year-1 development complete; allowed changes: bugs, security, compliance only.
+- Pack: `docs/operations/V1_Operational_Freeze.md` — freeze checklist, bug list (P0–P3), security/performance/deployment checklists.
+- No application feature, schema, API, or UX changes.
+- Verdict: **CONDITIONAL GO** for supervised pilot; **NO-GO** unrestricted GA until P0 ops gates closed.
+
+---
+
 ## 2026-07-12 — v1.0 Operational Readiness Execution (docs / ops)
 
 ### Change
