@@ -1,8 +1,8 @@
 # 16 — Certification Framework (Phase 2)
 
-**Living index for release certification — objects, screens, dependencies, browser paths, scorecards, and performance gates.**
+**Living index for release certification — objects, screens, dependencies, browser paths, scorecards, performance gates, module UX certification taxonomy, and Bronze / Silver / Gold tiers.**
 
-This blueprint doc defines **what** must be certified. Implementation lives in `docs/Certification_Framework/`.
+This blueprint doc defines **what** must be certified. Implementation lives in `docs/Certification_Framework/`. Module UX baselines live under `docs/QA/modules/<module>/`.
 
 ---
 
@@ -11,6 +11,59 @@ This blueprint doc defines **what** must be certified. Implementation lives in `
 Phase 2 moves PrimeCare from ad-hoc verify scripts to a **repeatable certification system** where every business object and screen has documented ownership, dependencies, verification, and performance targets.
 
 **Scope:** Documentation and orchestration only. No schema, RLS, or business-logic changes.
+
+---
+
+## Module UX certification methodology
+
+Use the same staged process successfully applied to People Operations, Collections / Credit & Risk, HQ Orders, and Inventory:
+
+1. **Architecture review only** — feature inventory, functional parity baseline, workspace boundaries, page-by-page evaluation, defect registry, sprint roadmap, verification + Manual UAT plan. **No implementation.**
+2. **Founder finalization** — refine defect wording, taxonomy, Sprint Start Here rules, tier definitions.
+3. **Sprint 1A / 1B / 1C** — UI/UX only; one workflow per sprint; independently releasable; functional parity preserved; no schema/API/RLS/business-rule changes unless explicitly approved.
+4. **Certification Closure** — High UX defects closed + QA module pack + signed Manual UAT → Gold.
+
+Engineering file decomposition (LOC / god-file splits) is **RC2** unless the Founder marks it as a certification blocker. Certification defects must be **user-centric** (cognitive load, discoverability, trust) — not LOC counts.
+
+---
+
+## Standard certification taxonomy
+
+**Every future module certification review must classify each defect under exactly one primary category** (secondary tags allowed in notes):
+
+| Category | Use when the defect is about… |
+|----------|-------------------------------|
+| **Architecture** | Workspace boundaries, SoT ownership, deferred structural debt (not implementation size alone) |
+| **Discoverability** | Can the operator find the next correct action in seconds? |
+| **Context** | Is orientation preserved across filters, selection, and cross-page workflows? |
+| **Explainability** | Can the operator see **why** the system recommends or labels something? |
+| **Trust** | Mutation feedback, honesty of labels, no fake confidence metrics |
+| **Page Budget** | Cognitive load: too many jobs, competing primary surfaces, analytics over ops |
+| **Functional Parity** | Capability that must not be removed by UX work |
+| **Verification** | Missing or insufficient automated verify gates |
+| **Manual UAT** | Missing role-scoped signed checklist |
+
+### Trust & Explainability (module recommendations)
+
+When a module recommends statuses or actions (e.g. Critical / Reorder / Healthy), future Gold-quality UX should expose:
+
+- Current Stock · Minimum Stock · Reorder Level · Recent Consumption
+- Business Rule · Reason for recommendation
+- Trust Level: **High / Medium / Low**
+
+**No fake percentages.** Document as Explainability defects when missing; schedule outside Sprint 1 unless Founder marks as blocker.
+
+---
+
+## Module certification tiers
+
+| Tier | Definition | Exit criteria (examples) |
+|------|------------|--------------------------|
+| **Bronze** | **Domain Integrity** | SoT clear; ledger/lifecycle rules enforced; automated integrity verifies PASS |
+| **Silver** | **Operational Workspace** | Primary actions clear; **action-oriented** Start Here (not stats-only); context preserved; cognitive load managed |
+| **Gold** | **Certified UX + Verification + Signed Manual UAT** | Silver + High UX defects closed + module QA pack + signed Manual UAT |
+
+Action-oriented Start Here examples: Receive Purchase Order · Create Purchase Order · Review Critical Stock · Investigate Stock Risk · Record Payment · Review Next Order.
 
 ---
 
@@ -83,6 +136,9 @@ Every cataloged screen documents:
 |-----|------|
 | [13_Verification_Matrix.md](./13_Verification_Matrix.md) | API/script regression index |
 | [14_Release_Gates.md](./14_Release_Gates.md) | Commit and promotion gates |
+| [11_Inventory_Rules.md](./11_Inventory_Rules.md) | Inventory domain + UX certification roadmap |
+| `docs/QA/modules/inventory/Architecture_Review_Certification_Baseline.md` | Inventory module UX certification baseline (Founder-finalized) |
+| `docs/QA/modules/*/` | Per-module Sprint / Closure packs (Orders, Collections, Inventory, …) |
 | `docs/QA/Release_Certification.md` | Environment-specific sign-off record |
 | `docs/hq-certification/*` | Historical certification evidence |
 | `docs/operations/HQ_BROWSER_DEVICE_UAT_CHECKLIST.md` | Device/browser matrix (superseded for O2C by 04/05) |
@@ -102,3 +158,4 @@ Every cataloged screen documents:
 3. **New verify script** → add to object + screen entries and `13_Verification_Matrix.md`.
 4. **Perf regression** → update `07_Performance_Certification_Matrix.md` baseline after investigation.
 5. **Release** → copy `06_Release_Scorecard.md` template into `docs/QA/` with dated filename.
+6. **Module UX certification** → classify defects with the standard taxonomy above; update module baseline under `docs/QA/modules/<module>/`; record Bronze/Silver/Gold status and CHANGELOG entry; do not treat LOC/file size as a certification defect.

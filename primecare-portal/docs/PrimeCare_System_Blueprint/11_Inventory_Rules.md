@@ -1,6 +1,6 @@
 # 11 — Inventory Rules
 
-Stock snapshot, ledger movements, procurement receive, catalog coupling.
+Stock snapshot, ledger movements, procurement receive, catalog coupling, and **module UX certification roadmap** (documentation only until Sprint 1A approval).
 
 ---
 
@@ -41,6 +41,7 @@ Stock snapshot, ledger movements, procurement receive, catalog coupling.
 
 - Master catalog create **still seeds inventory row** (GAP-001 / DA-001)
 - Do not assume ledger-first inventory without architecture change
+- UX handoffs from Stock → Catalog / Purchase address discoverability only — **do not** invent Adjust/Transfer APIs without blueprint + approval
 
 ---
 
@@ -61,11 +62,65 @@ Stock snapshot, ledger movements, procurement receive, catalog coupling.
 ## Verification
 
 - `verify-inventory-reconciliation.mjs` — no negative stock
+- `verify-inventory-ledger-integrity.mjs` — alias → reconciliation
 - `verify-procurement-inventory-flow.mjs`
 - `verify-inventory-dashboard-kpi.mjs`
+- `verify-inventory-action-feedback.mjs` — Sprint 1A UX gate
+- `verify-inventory-admin-flow.mjs` — write-path parity
+- `verify-order-inventory-sync.mjs` — ORDER_OUT boundary
 
 ---
 
 ## Freeze
 
 Procurement writes may be blocked when `VITE_HQ_PROCUREMENT_FROZEN` — inventory reads still allowed.
+
+---
+
+## Inventory action feedback (Sprint 1A — UI/UX only)
+
+**Scope:** Master Catalog create/edit/enable/disable and Purchase Receive stock.  
+**Not changed:** schema, APIs, RPCs, ledger semantics, ORDER_OUT, PURCHASE_IN, opening-stock write logic, reorder engine, permissions, RLS.
+
+| Concern | Behavior |
+|---------|----------|
+| Mutation error classification | `src/inventory/mapInventoryMutationError.js` — business-facing codes (SKU exists, SKU disabled, negative stock, opening already initialized, receipt already processed, permission denied, unexpected write). Never expose raw Postgres as primary UI copy. |
+| Inline errors | `ActionErrorSummary` at the action site (catalog modal / toggle zone / receive form) — not page-level load banners / `DataFetchError`. |
+| Busy state | Loading labels: Creating SKU… / Saving Opening Stock… / Saving SKU… / Enabling SKU… / Disabling SKU… / Receiving Stock…; `aria-busy`; duplicate-submit guards. |
+| Failure lifecycle | Modal/form remains open; entered values preserved. |
+| Success lifecycle | Toast; silent catalog refresh (preserve search/sort/scroll); receive clears form only on success; filters/tabs preserved. |
+| Verify | `verify-inventory-action-feedback.mjs` |
+
+---
+
+## Module UX certification (Founder-finalized 2026-07-11)
+
+**Baseline document:** [`docs/QA/modules/inventory/Architecture_Review_Certification_Baseline.md`](../QA/modules/inventory/Architecture_Review_Certification_Baseline.md)  
+**Methodology / taxonomy / tiers:** [16_Certification_Framework.md](./16_Certification_Framework.md)
+
+| Tier | Definition | Inventory status |
+|------|------------|------------------|
+| **Bronze** | Domain Integrity | **Met** (ledger SoT + automated integrity) |
+| **Silver** | Operational Workspace | **Not met** |
+| **Gold** | Certified UX + Verification + Signed Manual UAT | **Not met** |
+
+### Logical workspaces (identify only — do not redesign domain)
+
+Inventory Overview · Stock Ledger · Inventory Health · Receiving · Reorder · Purchase Administration · Catalog Master · (ORDER_OUT via Orders)
+
+Purchase Operations currently combines **Receiving**, **Reordering**, and **Purchase Administration** in one operational workspace. Certification issue = **cognitive load** (INV-CERT-001), not file size. Engineering decomposition = **RC2**.
+
+### Sprint roadmap (UI/UX only — no schema/API/ledger/ORDER_OUT/PURCHASE_IN/opening-stock/reorder-engine/RLS changes)
+
+| Sprint | Focus | Closes (primary) |
+|--------|-------|------------------|
+| **1A** | Mutation feedback on existing Catalog / Purchase receive writes — **shipped** (UI only) | Trust slice |
+| **1B** | **Action-oriented** Start Here (Receive PO · Create PO · Review Critical Stock · Investigate Stock Risk) + context continuity | INV-CERT-002, 003, 004 |
+| **1C** | Visual / cognitive workspace shells (Receiving vs Reorder vs Purchase Admin); collapse analytics | INV-CERT-001, 006 |
+| **Closure** | High UX defects + inventory QA pack + signed Manual UAT | Path to Gold |
+| **Future** | INV-CERT-012 recommendation explainability (Current/Min/Reorder/Consumption/Rule/Reason/Trust Level; no fake %) | Not Sprint 1 blocker |
+| **RC2** | Purchase file decomposition, GAP-001 split, Adjust/Transfer (blueprint-first), exports | Deferred |
+
+### Do not break during Inventory UX sprints
+
+Inventory ledger semantics · stock calculations · ORDER_OUT · PURCHASE_IN · opening stock write path · reorder engine · permissions · RLS · financial posting.

@@ -37,12 +37,12 @@ Read Blueprint → Inspect code/migrations → Compare doc vs implementation
 | 08 | [08_Delivery_Charge_Rules.md](./08_Delivery_Charge_Rules.md) | Phase 3A policy engine |
 | 09 | [09_Lab_Portal_Rules.md](./09_Lab_Portal_Rules.md) | Lab ordering, tracking, scope |
 | 10 | [10_Operations_Center_Rules.md](./10_Operations_Center_Rules.md) | Users, ownership, freeze |
-| 11 | [11_Inventory_Rules.md](./11_Inventory_Rules.md) | Stock, ledger, procurement |
+| 11 | [11_Inventory_Rules.md](./11_Inventory_Rules.md) | Stock, ledger, procurement, Inventory UX cert roadmap |
 | 12 | [12_Executive_Analytics_Rules.md](./12_Executive_Analytics_Rules.md) | Founder / EFI read-only analytics |
 | 13 | [13_Verification_Matrix.md](./13_Verification_Matrix.md) | All verify scripts + UAT |
 | 14 | [14_Release_Gates.md](./14_Release_Gates.md) | Build, cert, commit criteria |
 | 15 | [15_Do_Not_Break_Rules.md](./15_Do_Not_Break_Rules.md) | Hard constraints |
-| 16 | [16_Certification_Framework.md](./16_Certification_Framework.md) | Phase 2 cert framework index |
+| 16 | [16_Certification_Framework.md](./16_Certification_Framework.md) | Phase 2 cert + module UX taxonomy + Bronze/Silver/Gold |
 | 18 | [18_Domain_Projection_Architecture.md](./18_Domain_Projection_Architecture.md) | Domain projections, event pipeline, read adapters |
 | 19 | [19_Executive_Compensation_Payroll_Engine.md](./19_Executive_Compensation_Payroll_Engine.md) | HQ-owned compensation, payroll, cash-only commission, approval, export |
 | 20 | [20_People_Operations.md](./20_People_Operations.md) | People Operations product architecture, navigation, module ownership, vertical slices |
@@ -86,6 +86,7 @@ Earlier blueprint files (`01_schema_catalog.md` … `12_verification_matrix.md`)
 ## Related docs
 
 - `docs/Certification_Framework/` — Phase 2 object/screen catalogs, golden paths, scorecards
+- `docs/QA/modules/` — module UX certification baselines and Sprint packs (Orders, Collections, Inventory, …)
 - `src/projectionOps/projectionOpsCatalog.json` — canonical runtime / ops projection registry
 - `docs/Certification_Framework/08_Read_Model_Certification_Matrix.md` — human projection certification view
 - `docs/QA/` — certification, UAT, gap register

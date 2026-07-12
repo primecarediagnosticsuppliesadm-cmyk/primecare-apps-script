@@ -4,6 +4,45 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-11 — Inventory action feedback (Sprint 1A)
+
+### Change
+
+- **UI/UX only** — Master Catalog create/edit/enable/disable and Purchase Receive use certified Action Pattern (`mapInventoryMutationError`, `ActionErrorSummary`, busy labels, duplicate-submit guards, success toast, silent refresh).
+- Modal/form stays open on failure with values preserved; closes / clears only on success.
+- No schema, API, RPC, ledger, ORDER_OUT, PURCHASE_IN, opening-stock logic, reorder engine, permission, or RLS changes.
+
+### Verification
+
+- `node scripts/verify-inventory-action-feedback.mjs`
+- `node scripts/verify-inventory-admin-flow.mjs`
+- `node scripts/verify-inventory-ledger-integrity.mjs`
+- `node scripts/verify-order-inventory-sync.mjs`
+- `node scripts/verify-no-finance-mutation.mjs`
+- `npm run build`
+
+---
+
+## 2026-07-11 — Inventory module UX certification baseline (Founder-finalized)
+
+### Change
+
+- **Architecture documentation only** — no schema, API, RPC, ledger, ORDER_OUT, PURCHASE_IN, opening stock, reorder engine, permissions, or RLS changes.
+- Baseline: `docs/QA/modules/inventory/Architecture_Review_Certification_Baseline.md`
+- [11_Inventory_Rules.md](./11_Inventory_Rules.md) — module UX certification status, logical workspaces, Sprint 1A–1C / Closure / Future / RC2 roadmap.
+- [16_Certification_Framework.md](./16_Certification_Framework.md) — reusable module UX methodology; **standard certification taxonomy** (Architecture, Discoverability, Context, Explainability, Trust, Page Budget, Functional Parity, Verification, Manual UAT); Bronze = Domain Integrity · Silver = Operational Workspace · Gold = Certified UX + Verification + Signed Manual UAT.
+- Founder decisions incorporated: INV-CERT-001 = Purchase ops cognitive load (not LOC); INV-CERT-012 = recommendation explainability (future, not Sprint 1); Sprint 1B = **action-oriented** Start Here.
+
+### Not changed
+
+- Application code, inventory ledger semantics, stock calculations, procurement receive, fulfillment deduction, freeze policy, role matrix.
+
+### Verification
+
+- Documentation gate only. Domain verifies remain: `verify-inventory-reconciliation.mjs`, `verify-procurement-inventory-flow.mjs`, `verify-inventory-dashboard-kpi.mjs`.
+
+---
+
 ## 2026-07-11 — HQ Orders workspace simplification (Sprint 1C)
 
 ### Change

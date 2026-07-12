@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getPurchaseOrders,
   getSmartReorder,
@@ -28,6 +28,10 @@ import { invalidateAdminDashboardCaches } from "@/utils/dashboardInvalidate.js";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 import { isHqProcurementWriteBlocked, getHqFreezeBannerMessage } from "@/config/hqReleasePolicy.js";
 import PageSkeleton from "@/components/ux/PageSkeleton";
+import ActionErrorSummary from "@/components/ux/ActionErrorSummary.jsx";
+import { usePortalToast } from "@/components/ux";
+import { mapInventoryMutationError } from "@/inventory/mapInventoryMutationError.js";
+import { getReceiveStockLoadingLabel } from "@/inventory/inventoryActionUi.js";
 
 const emptyCreateForm = {
   productId: "",
@@ -507,6 +511,7 @@ function ActiveStepSummary({ meta, onGoToTab }) {
 }
 
 export default function PurchaseOrdersPage({ currentUser = null }) {
+  const { showToast } = usePortalToast();
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [reorderCandidates, setReorderCandidates] = useState([]);
   const [smartReorder, setSmartReorder] = useState([]);
@@ -519,6 +524,8 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   const [loading, setLoading] = useState(true);
   const [creatingPo, setCreatingPo] = useState(false);
   const [receivingPo, setReceivingPo] = useState(false);
+  const [receiveMutationError, setReceiveMutationError] = useState(null);
+  const receiveInflightRef = useRef(false);
   const [creatingAutoPoId, setCreatingAutoPoId] = useState("");
 
   const [selectedCandidate, setSelectedCandidate] = useState(null);
@@ -925,6 +932,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
     }
     setStatusMessage("");
     setErrorMessage("");
+    setReceiveMutationError(null);
 
     if (!canReceivePurchaseOrder(po)) {
       throw new Error(
@@ -1111,10 +1119,12 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   const handleReceivePurchaseOrder = async (e) => {
     e.preventDefault();
     if (procurementWriteBlocked) return;
+    if (receiveInflightRef.current || receivingPo) return;
+    receiveInflightRef.current = true;
     try {
       setReceivingPo(true);
       setStatusMessage("");
-      setErrorMessage("");
+      setReceiveMutationError(null);
 
       const payload = {
         poId: receiveForm.poId,
@@ -1174,17 +1184,27 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       if (!res?.success && !result?.success) {
         throw new Error(res?.error || result?.message || "Failed to receive purchase order");
       }
-      setStatusMessage(`Stock inward completed successfully${result.poId ? `: ${result.poId}` : ""}`);
+      const receivedPoId = result.poId || receiveForm.poId;
+      showToast(
+        "success",
+        receivedPoId ? `Stock received for ${receivedPoId}` : "Stock inward completed successfully"
+      );
       setReceiveForm(emptyReceiveForm);
       setSelectedPurchaseOrder(null);
+      setReceiveMutationError(null);
 
       await refreshAll();
       invalidateAdminDashboardCaches();
     } catch (err) {
       console.error(err);
-      setErrorMessage(err?.message || "Failed to receive purchase order");
+      setReceiveMutationError(
+        mapInventoryMutationError(err?.message || err || "Failed to receive purchase order", {
+          action: "receive",
+        })
+      );
     } finally {
       setReceivingPo(false);
+      receiveInflightRef.current = false;
     }
   };
 
@@ -1819,7 +1839,22 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
             </div>
           ) : null}
 
-          <form onSubmit={handleReceivePurchaseOrder} className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {receiveMutationError ? (
+            <ActionErrorSummary
+              className="mb-4"
+              title={receiveMutationError.title}
+              message={receiveMutationError.message}
+              fieldErrors={receiveMutationError.fieldErrors}
+              technicalReference={receiveMutationError.rawErrorForLogging}
+              onDismiss={() => setReceiveMutationError(null)}
+            />
+          ) : null}
+
+          <form
+            onSubmit={handleReceivePurchaseOrder}
+            className="grid grid-cols-1 gap-4 lg:grid-cols-2"
+            aria-busy={receivingPo}
+          >
             <div>
               <label className="mb-1 block text-sm font-medium">Received Qty</label>
               <input
@@ -1828,7 +1863,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
                 value={receiveForm.receivedQty}
                 onChange={(e) => handleReceiveFormChange("receivedQty", e.target.value)}
                 className="w-full rounded-xl border px-3 py-3 text-sm outline-none focus:ring"
-                disabled={!selectedPurchaseOrder}
+                disabled={!selectedPurchaseOrder || receivingPo}
                 required
               />
             </div>
@@ -1840,24 +1875,36 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
                 onChange={(e) => handleReceiveFormChange("grnNotes", e.target.value)}
                 rows={4}
                 className="w-full rounded-xl border px-3 py-3 text-sm outline-none focus:ring"
-                disabled={!selectedPurchaseOrder}
+                disabled={!selectedPurchaseOrder || receivingPo}
               />
             </div>
 
             <div className="lg:col-span-2 flex flex-col gap-3 sm:flex-row">
-              <button type="submit" disabled={procurementWriteBlocked || receivingPo || !selectedPurchaseOrder || !receiveForm.poId || Number(receiveForm.receivedQty || 0) <= 0} className="rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50">
-                {receivingPo ? "Receiving..." : "Receive Purchase Order"}
+              <button
+                type="submit"
+                disabled={
+                  procurementWriteBlocked ||
+                  receivingPo ||
+                  !selectedPurchaseOrder ||
+                  !receiveForm.poId ||
+                  Number(receiveForm.receivedQty || 0) <= 0
+                }
+                aria-busy={receivingPo}
+                className="rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {receivingPo ? getReceiveStockLoadingLabel() : "Receive Purchase Order"}
               </button>
 
               <button
                 type="button"
+                disabled={receivingPo}
                 onClick={() => {
                   setReceiveForm(emptyReceiveForm);
                   setSelectedPurchaseOrder(null);
                   setStatusMessage("Receive stock form reset.");
-                  setErrorMessage("");
+                  setReceiveMutationError(null);
                 }}
-                className="rounded-xl border bg-white px-4 py-3 text-sm font-medium hover:bg-slate-50"
+                className="rounded-xl border bg-white px-4 py-3 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
               >
                 Reset
               </button>
