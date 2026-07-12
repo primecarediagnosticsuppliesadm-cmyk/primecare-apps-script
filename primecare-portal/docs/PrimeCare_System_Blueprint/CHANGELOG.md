@@ -4,6 +4,33 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-11 — Collections payment action feedback (Sprint 1A)
+
+### Change
+
+- **Drawer-local `ActionErrorSummary`** for payment / follow-up mutation failures on `CollectionsPage`.
+- **`mapCollectionMutationError.js`** — business-facing error mapping for known collection write failures.
+- **Context-aware loading labels** — `Recording payment…`, `Saving follow-up…`, `Uploading proof…`.
+- **Success/failure lifecycle** — agent / Credit & Risk payment drawer closes only on successful save; entered values preserved on failure.
+
+### Not changed
+
+- Navigation, Command Center, Agent Queue, workspace split, routing.
+- APIs (`createPaymentWrite`, `updateCollectionNotesWrite`), RPCs, payment allocation, AR calculations.
+- Schema, RLS, permissions.
+
+### Verification
+
+- `node scripts/verify-collections-payment-action-feedback.mjs`
+- `node scripts/verify-credit-risk-admin-flow.mjs`
+- `node scripts/verify-agent-collections-ownership-filter.mjs`
+
+### Blueprint
+
+- New: `24_Collections_Credit_Risk.md`
+
+---
+
 ## 2026-07-11 — People Operations navigation & context (Sprint 1D)
 
 ### Change

@@ -51,6 +51,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-lab-lifecycle-status-flow.mjs | Lifecycle transition contract: admin/executive-only writes, confirmation/reason requirements, `ACTIVE -> INACTIVE` forces `ordering_mode = suspended`, `INACTIVE -> ACTIVE` does not restore ordering mode, financial/history domains unchanged | Lab lifecycle |
 | verify-labs-projection-parity.mjs | Read-only `v_labs_credit` vs `read_labs_list_v1` parity, lifecycle status + ordering mode parity, deterministic ordering/limit window, role scope, freshness, SECURITY DEFINER vs table-RLS visibility | Labs projection |
 | verify-credit-risk-admin-flow.mjs | AR KPI, aging | Credit & Risk |
+| verify-collections-payment-action-feedback.mjs | Sprint 1A payment drawer inline errors, loading labels, lifecycle | Collections UX |
 | verify-agent-collections-ownership-filter.mjs | Ownership scoping | Agent collections |
 | verify-create-lab-ar-rls.mjs | Lab+AR insert RLS | Add lab |
 

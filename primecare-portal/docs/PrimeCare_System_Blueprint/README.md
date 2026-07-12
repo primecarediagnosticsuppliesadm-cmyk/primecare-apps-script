@@ -49,6 +49,7 @@ Read Blueprint → Inspect code/migrations → Compare doc vs implementation
 | 21 | [21_Commercial_CRM.md](./21_Commercial_CRM.md) | Commercial workspace compose layer |
 | 22 | [22_Platform_Consolidation.md](./22_Platform_Consolidation.md) | Navigation consolidation, KPI/report ownership, Architecture Readiness |
 | 23 | [23_Founder_Operating_System.md](./23_Founder_Operating_System.md) | Founder OS decision cockpit (compose-only) |
+| 24 | [24_Collections_Credit_Risk.md](./24_Collections_Credit_Risk.md) | Collections / Credit & Risk payment UX, action feedback |
 | — | [CHANGELOG.md](./CHANGELOG.md) | Gaps, conflicts, structural changes |
 
 ### Templates

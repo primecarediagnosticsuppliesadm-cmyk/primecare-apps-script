@@ -17,6 +17,9 @@ import {
 } from "@/api/primecareSupabaseApi";
 import { selectOpenOrdersForLab } from "@/collections/collectionsOpenOrders.js";
 import { loadLabPaymentHistoryForDisplay } from "@/collections/collectionsPaymentHistory.js";
+import { mapCollectionMutationError } from "@/collections/mapCollectionMutationError.js";
+import { getCollectionSaveLoadingLabel } from "@/collections/collectionsPaymentUi.js";
+import ActionErrorSummary from "@/components/ux/ActionErrorSummary.jsx";
 import LabCollectionPanel from "@/components/collections/LabCollectionPanel.jsx";
 import HqObjectLink from "@/components/hq/HqObjectLink.jsx";
 import HqCreditRiskCommandCenter from "@/components/hq/HqCreditRiskCommandCenter.jsx";
@@ -1469,7 +1472,15 @@ function CollectionExpandedPanel({
   collectionEvidence = [],
   focusSection = "",
   isAgentView = false,
+  paymentMutationError = null,
+  onDismissPaymentMutationError,
 }) {
+  const saveLoadingLabel = getCollectionSaveLoadingLabel({
+    amountCollected,
+    evidenceUploading,
+    saving,
+  });
+  const saveBusy = saving || evidenceUploading;
   if (detailsLoading) {
     return (
       <div className="border-t border-slate-200 bg-slate-50/80 px-3 py-6">
@@ -1543,6 +1554,16 @@ function CollectionExpandedPanel({
             <h3 className="text-xs font-semibold text-slate-700">
               {isAgentView ? "Record payment" : "Record payment & follow-up"}
             </h3>
+
+            {paymentMutationError ? (
+              <ActionErrorSummary
+                title={paymentMutationError.title}
+                message={paymentMutationError.message}
+                fieldErrors={paymentMutationError.fieldErrors}
+                technicalReference={paymentMutationError.rawErrorForLogging}
+                onDismiss={onDismissPaymentMutationError}
+              />
+            ) : null}
 
             <div className="space-y-2">
               <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
@@ -1642,12 +1663,13 @@ function CollectionExpandedPanel({
                 type="button"
                 className="h-11 flex-1 rounded-lg"
                 onClick={onSave}
-                disabled={saving}
+                disabled={saveBusy}
+                aria-busy={saveBusy}
               >
-                {saving ? (
+                {saveBusy ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Saving…
+                    {saveLoadingLabel}
                   </>
                 ) : (
                   <>
@@ -1885,6 +1907,7 @@ export default function CollectionsPage({
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsError, setDetailsError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [paymentMutationError, setPaymentMutationError] = useState(null);
   const [completingTask, setCompletingTask] = useState(false);
 
   const [loadError, setLoadError] = useState("");
@@ -2397,13 +2420,31 @@ export default function CollectionsPage({
   }
 
   async function handleSaveCollection() {
-    if (isLabAccount) return;
+    if (isLabAccount) return { success: false, error: null };
     const selectedLabId = expandedLabId || paymentDrawerLabId;
-    if (!selectedLabId) return;
+    if (!selectedLabId) return { success: false, error: null };
+
+    const failMutation = (errorInput) => {
+      const mapped = mapCollectionMutationError(errorInput, { amountCollected });
+      setPaymentMutationError(mapped);
+      return { success: false, error: mapped };
+    };
+
+    const closeDrawerOnSuccess = () => {
+      if ((isAgentView || isHqCreditRisk) && paymentDrawerLabId) {
+        setPaymentDrawerLabId("");
+        setSelectedCollection(null);
+        setHistory([]);
+        setPaymentMutationError(null);
+        return true;
+      }
+      return false;
+    };
 
     return predatorTrace("Collections", "page.save", async () => {
       try {
         setSaving(true);
+        setPaymentMutationError(null);
 
         const basePayload = {
           labId: selectedLabId,
@@ -2437,15 +2478,18 @@ export default function CollectionsPage({
                 : "Collection updated successfully"
             );
             await loadCollections();
-            await openCollection(selectedLabId, {
-              fromTask: !!pendingTaskContext,
-              taskContext: pendingTaskContext,
-            });
-            return;
+            const closedDrawer = closeDrawerOnSuccess();
+            if (!closedDrawer) {
+              await openCollection(selectedLabId, {
+                fromTask: !!pendingTaskContext,
+                taskContext: pendingTaskContext,
+              });
+            }
+            return { success: true };
           }
 
           if (import.meta.env.DEV) {
-            throw new Error(notesRes.error || "Supabase collection notes write failed.");
+            return failMutation(notesRes.error || "Supabase collection notes write failed.");
           }
 
           logAppsScriptFallbackUsed("Collections.notesWrite", {
@@ -2455,7 +2499,7 @@ export default function CollectionsPage({
             metricKey: "collectionsSummary",
             reason: notesRes.error,
           });
-          throw new Error(
+          return failMutation(
             notesRes.error ||
               "Failed to save collection notes. Apps Script does not support zero-amount updates."
           );
@@ -2532,21 +2576,18 @@ export default function CollectionsPage({
             });
 
             await loadCollections();
-            if ((isAgentView || isHqCreditRisk) && paymentDrawerLabId) {
-              setPaymentDrawerLabId("");
-              setSelectedCollection(null);
-              setHistory([]);
-            } else {
+            const closedDrawer = closeDrawerOnSuccess();
+            if (!closedDrawer) {
               await openCollection(selectedLabId, {
                 fromTask: !!pendingTaskContext,
                 taskContext: pendingTaskContext,
               });
             }
-            return;
+            return { success: true };
           }
 
           if (import.meta.env.DEV || !ALLOW_LEGACY_APPS_SCRIPT) {
-            throw new Error(sbRes.error || "Supabase payment write failed.");
+            return failMutation(sbRes.error || "Supabase payment write failed.");
           }
 
           logAppsScriptFallbackUsed("Collections.paymentWrite", {
@@ -2560,7 +2601,7 @@ export default function CollectionsPage({
         }
 
         if (amt <= 0) {
-          throw new Error(
+          return failMutation(
             "Enter an amount collected or save notes via Supabase when configured."
           );
         }
@@ -2577,13 +2618,13 @@ export default function CollectionsPage({
           });
         }
         if (!ALLOW_LEGACY_APPS_SCRIPT) {
-          throw new Error("Supabase collections write is required for pilot access.");
+          return failMutation("Supabase collections write is required for pilot access.");
         }
         const res = await updateCollection(basePayload);
         const responsePayload = res?.data || res || {};
 
         if (!responsePayload?.success) {
-          throw new Error(responsePayload?.message || "Failed to update collection");
+          return failMutation(responsePayload?.message || "Failed to update collection");
         }
 
         showToast(
@@ -2594,12 +2635,16 @@ export default function CollectionsPage({
         );
 
         await loadCollections();
-        await openCollection(selectedLabId, {
-          fromTask: !!pendingTaskContext,
-          taskContext: pendingTaskContext,
-        });
+        const closedDrawer = closeDrawerOnSuccess();
+        if (!closedDrawer) {
+          await openCollection(selectedLabId, {
+            fromTask: !!pendingTaskContext,
+            taskContext: pendingTaskContext,
+          });
+        }
+        return { success: true };
       } catch (err) {
-        showToast("error", err.message || "Failed to save collection update");
+        return failMutation(err?.message || "Failed to save collection update");
       } finally {
         setSaving(false);
       }
@@ -2788,6 +2833,9 @@ export default function CollectionsPage({
     if (focusSection !== "payment") {
       setPaymentOrderId("");
     }
+    if (focusSection === "payment") {
+      setPaymentMutationError(null);
+    }
     if ((isAgentView || isHqCreditRisk) && focusSection === "payment") {
       setPaymentDrawerLabId(key);
       void openCollection(labId, { focusSection, suppressExpand: true });
@@ -2839,6 +2887,8 @@ export default function CollectionsPage({
     collectionEvidence,
     paymentOrderId,
     onPaymentOrderIdChange: setPaymentOrderId,
+    paymentMutationError,
+    onDismissPaymentMutationError: () => setPaymentMutationError(null),
   };
 
   const handleScheduleFollowUp = useCallback(
@@ -3215,6 +3265,7 @@ export default function CollectionsPage({
             setPaymentDrawerLabId("");
             setSelectedCollection(null);
             setHistory([]);
+            setPaymentMutationError(null);
           }}
           labName={selectedCollection?.labName}
           loading={detailsLoading && Boolean(paymentDrawerLabId)}
