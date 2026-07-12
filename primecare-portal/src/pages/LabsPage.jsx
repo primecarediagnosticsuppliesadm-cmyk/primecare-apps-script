@@ -28,6 +28,8 @@ import { filterLabsForUser } from "@/utils/accessFilters.js";
 import {
   startCollectionFromWorkspaceItem,
   startVisitFromWorkspaceItem,
+  peekAgentWorkspaceReturnPath,
+  consumeAgentWorkspaceReturnPath,
 } from "@/pages/agentVisitContext.js";
 import {
   deriveLabRecommendedAction,
@@ -495,6 +497,9 @@ export default function LabsPage({
   const { orderByLabId, workspace: agentWorkspace } = useAgentDailyOs(currentUser, {
     enabled: isAgentView && !isDistributorOs,
   });
+  const [collectionsReturnActive, setCollectionsReturnActive] = useState(
+    () => isAgentView && !embedded && peekAgentWorkspaceReturnPath() === "collections"
+  );
   const hydratedLabs = useMemo(() => hydrateLabsFromCache(), []);
   const hadCacheOnMount = useRef(Boolean(hydratedLabs));
   const [labs, setLabs] = useState(() => hydratedLabs?.labs ?? []);
@@ -802,6 +807,24 @@ export default function LabsPage({
             <p className="mt-1 text-xs font-medium text-indigo-700">
               Distributor context: {selectedDistributorName || selectedDistributorTenantId}
             </p>
+          ) : null}
+          {collectionsReturnActive && typeof setActivePage === "function" ? (
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2 text-sm text-blue-900">
+              <span>Continue from Collections work queue</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 border-blue-200 bg-white text-xs"
+                onClick={() => {
+                  consumeAgentWorkspaceReturnPath();
+                  setCollectionsReturnActive(false);
+                  setActivePage("collections");
+                }}
+              >
+                Back to Collections
+              </Button>
+            </div>
           ) : null}
         </div>
         {canAddLab && (isDistributorOs || currentUser?.role !== ROLES.EXECUTIVE || defaultTenantId) ? (

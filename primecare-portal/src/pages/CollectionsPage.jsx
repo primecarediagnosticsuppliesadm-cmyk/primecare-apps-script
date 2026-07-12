@@ -39,6 +39,8 @@ import AgentCollectionsWorkspace from "@/components/collections/workspaces/Agent
 import HqCreditRiskWorkspace from "@/components/collections/workspaces/HqCreditRiskWorkspace.jsx";
 import HqReceivablesWorkspace from "@/components/collections/workspaces/HqReceivablesWorkspace.jsx";
 import LabAccountWorkspace from "@/components/collections/workspaces/LabAccountWorkspace.jsx";
+import CollectionsContextStrip from "@/components/collections/CollectionsContextStrip.jsx";
+import { buildCollectionsContextParts } from "@/collections/collectionsContextUi.js";
 import ActionErrorSummary from "@/components/ux/ActionErrorSummary.jsx";
 import LabCollectionPanel from "@/components/collections/LabCollectionPanel.jsx";
 import HqObjectLink from "@/components/hq/HqObjectLink.jsx";
@@ -102,13 +104,16 @@ import {
 import { ROLES } from "@/config/roles";
 import { getAgentActiveLabOwnershipRowsRead } from "@/api/labOwnershipApi.js";
 import { filterCollectionsForUser } from "@/utils/accessFilters.js";
-import { notifyAgentWorkspaceRefresh } from "@/pages/agentVisitContext.js";
+import {
+  notifyAgentWorkspaceRefresh,
+  startVisitFromWorkspaceItem,
+  writeAgentWorkspaceReturnPath,
+} from "@/pages/agentVisitContext.js";
 import {
   notifyFinancialSyncCompleted,
   onFinancialSyncCompleted,
 } from "@/operations/financialSyncEvents.js";
 import { useFinancialSyncPulse } from "@/hooks/useFinancialSyncPulse.js";
-import { startVisitFromWorkspaceItem } from "@/pages/agentVisitContext.js";
 import {
   countMediumHighRisk,
   computeCollectionProgressPct,
@@ -1962,6 +1967,7 @@ export default function CollectionsPage({
   const [labOrdersLoadingByLabId, setLabOrdersLoadingByLabId] = useState({});
   const [hqFocusLabId, setHqFocusLabId] = useState("");
   const [hqCreditAttentionFilter, setHqCreditAttentionFilter] = useState("");
+  const [hqCreditDeepLinkKey, setHqCreditDeepLinkKey] = useState("credit-default");
 
   const isAgentView = useMemo(
     () => isAgentCollectionsView(currentUser, isLabAccount),
@@ -2249,6 +2255,7 @@ export default function CollectionsPage({
 
     if (ctx.attentionFilter && isHqCreditRiskView(currentUser, isLabAccount, isAgentView)) {
       setHqCreditAttentionFilter(str(ctx.attentionFilter));
+      setHqCreditDeepLinkKey(`credit-${str(ctx.attentionFilter)}-${Date.now()}`);
     }
 
     if (!ctx.labId) return;
@@ -3051,12 +3058,59 @@ export default function CollectionsPage({
           outstanding: item.outstandingAmount,
           daysOverdue: item.overdueDays,
         },
-        { visitType: "Follow-up", followUpType: "Call", source: "collections_work_queue" }
+        {
+          visitType: "Follow-up",
+          followUpType: "Call",
+          source: "collections_work_queue",
+          returnPath: "collections",
+        }
       );
       setActivePage?.("visits");
     },
     [setActivePage]
   );
+
+  const handleOpenLabFromQueue = useCallback(
+    (labId) => {
+      writeAgentWorkspaceReturnPath("collections");
+      if (labId && setActivePage) {
+        navigateToLabs(setActivePage, { labId, openReviewDrawer: false });
+        return;
+      }
+      setActivePage?.("labs");
+    },
+    [setActivePage]
+  );
+
+  const collectionsContextParts = useMemo(() => {
+    if (isLabAccount || embedded) return [];
+    const selectedLabName =
+      paymentDrawerLabId && selectedCollection
+        ? selectedCollection.labName || selectedCollection.labId
+        : "";
+    const focusLabName = hqFocusLabId
+      ? findCollectionByLabId(collections, hqFocusLabId)?.labName || hqFocusLabId
+      : "";
+    return buildCollectionsContextParts({
+      workspaceLabel: workspaceMeta.workspaceLabel,
+      attentionFilter: isHqCreditRisk ? hqCreditAttentionFilter : "",
+      selectedLabName,
+      searchActive: Boolean(effectiveSearch.trim()),
+      searchQuery: effectiveSearch.trim(),
+      focusLabName: !selectedLabName ? focusLabName : "",
+    });
+  }, [
+    isLabAccount,
+    embedded,
+    paymentDrawerLabId,
+    selectedCollection,
+    hqFocusLabId,
+    collections,
+    workspaceMeta.workspaceLabel,
+    isHqCreditRisk,
+    hqCreditAttentionFilter,
+    effectiveSearch,
+  ]);
 
   return (
     <div
@@ -3111,6 +3165,10 @@ export default function CollectionsPage({
         />
       ) : null}
 
+      {!isLabAccount && !embedded ? (
+        <CollectionsContextStrip parts={collectionsContextParts} />
+      ) : null}
+
       {loading && collections.length === 0 ? (
         <>
           <PageSkeleton kpiCount={4} kpiColumns={4} showList={false} />
@@ -3153,13 +3211,14 @@ export default function CollectionsPage({
 
       {collectionsWorkspace === COLLECTIONS_WORKSPACES.HQ_CREDIT_RISK ? (
         <HqCreditRiskWorkspace
-          key={hqCreditAttentionFilter || "credit-default"}
+          key={hqCreditDeepLinkKey}
           meta={workspaceMeta}
           hideWorkspaceHeader={embedded}
           searchValue={search}
           onSearchChange={(e) => setSearch(e.target.value)}
           shownCount={filteredCollections.length}
           totalCount={collections.length}
+          onAttentionFilterChange={setHqCreditAttentionFilter}
           commandCenterProps={{
             collections,
             searchFiltered: filteredCollections,
@@ -3445,7 +3504,7 @@ export default function CollectionsPage({
                 isAgentView
                 isSelected={paymentDrawerLabId === key}
                 onRecordPayment={() => openCollectionPanel(item.labId, "payment")}
-                onOpenLab={() => setActivePage?.("labs")}
+                onOpenLab={() => handleOpenLabFromQueue(item.labId)}
                 onScheduleFollowUp={() => handleScheduleFollowUp(item)}
                 routeStopNumber={orderByLabId.get(labIdKey(item.labId))}
                 recentVisits={agentWorkspace?.recentVisits}

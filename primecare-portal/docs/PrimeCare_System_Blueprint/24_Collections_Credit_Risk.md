@@ -98,6 +98,23 @@ Each Collections persona renders in a dedicated workspace shell that answers **o
 
 ---
 
+## Certification closure (COL-CERT-011 / 003 / 004)
+
+UI/UX-only closure of remaining product certification blockers.
+
+| Defect | Fix |
+|--------|-----|
+| **COL-CERT-011** | HQ Credit & Risk: High-Risk Interventions promoted to top “Start here” queue; primary CTA = Record Payment |
+| **COL-CERT-003** | `CollectionsContextStrip` — workspace, attention filter, selected/focused lab, active search |
+| **COL-CERT-004** | Agent exit to Visits/Labs writes return path `collections`; Back to Collections CTA on Visits + Labs |
+
+### Out of scope (RC2 polish)
+
+- God-page orchestrator LOC reduction
+- Duplicate headers, hero metrics, search optimization, accordion hints
+
+---
+
 ## Verification
 
 | Script | When |
@@ -105,6 +122,7 @@ Each Collections persona renders in a dedicated workspace shell that answers **o
 | `verify-collections-payment-action-feedback.mjs` | Sprint 1A UX gate |
 | `verify-agent-collections-interaction-feedback.mjs` | Sprint 1B agent queue gate |
 | `verify-collections-workspace-separation.mjs` | Sprint 1C workspace gate |
+| `verify-collections-certification-closure.mjs` | Certification closure (011/003/004) |
 | `verify-credit-risk-admin-flow.mjs` | Credit & Risk regression |
 | `verify-agent-collections-ownership-filter.mjs` | Agent scope regression |
 | `verify-collection-inconsistencies.mjs` | AR hygiene |

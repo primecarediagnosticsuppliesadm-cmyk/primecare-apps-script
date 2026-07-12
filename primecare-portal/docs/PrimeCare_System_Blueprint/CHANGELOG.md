@@ -4,6 +4,27 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-11 — Collections certification closure (COL-CERT-011 / 003 / 004)
+
+### Change
+
+- **COL-CERT-011:** High-Risk Interventions “Start here” queue at top of Credit & Risk; Record Payment primary CTA.
+- **COL-CERT-003:** `CollectionsContextStrip` for workspace / filter / selected lab orientation.
+- **COL-CERT-004:** Agent Visits/Labs return path to Collections with Back to Collections CTA.
+
+### Not changed
+
+- Business rules, finance, APIs, schema, RLS, routing, allocation.
+- God-page orchestrator, RC2 polish items.
+
+### Verification
+
+- `node scripts/verify-collections-certification-closure.mjs`
+- `node scripts/verify-credit-risk-admin-flow.mjs`
+- `node scripts/verify-no-finance-mutation.mjs`
+
+---
+
 ## 2026-07-11 — Collections workspace separation (Sprint 1C)
 
 ### Change

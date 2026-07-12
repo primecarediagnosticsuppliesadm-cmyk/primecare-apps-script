@@ -69,6 +69,7 @@ node scripts/verify-hq-rls-reads.mjs
 | `verify-collections-payment-action-feedback.mjs` | Sprint 1A payment drawer inline errors, loading labels, lifecycle | Collections UX |
 | `verify-agent-collections-interaction-feedback.mjs` | Sprint 1B agent queue debounce, selection, refresh, evidence | Collections UX |
 | `verify-collections-workspace-separation.mjs` | Sprint 1C persona workspace shells, primary-question framing | Collections UX |
+| `verify-collections-certification-closure.mjs` | COL-CERT-011/003/004 discoverability, context, continuity | Collections UX |
 | `verify-agent-collections-ownership-filter.mjs` | Agent sees only owned labs | Ownership + collections |
 | `verify-create-lab-ar-rls.mjs` | Lab create + AR insert RLS | Add Lab flow |
 

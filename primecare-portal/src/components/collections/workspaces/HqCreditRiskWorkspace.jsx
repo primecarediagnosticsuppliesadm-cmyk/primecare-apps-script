@@ -12,6 +12,7 @@ export default function HqCreditRiskWorkspace({
   shownCount = 0,
   totalCount = 0,
   commandCenterProps,
+  onAttentionFilterChange,
 }) {
   const workspaceMeta = meta || {
     title: "Credit & risk operations",
@@ -39,7 +40,10 @@ export default function HqCreditRiskWorkspace({
       </section>
 
       <section aria-label="Credit intervention command center">
-        <HqCreditRiskCommandCenter {...commandCenterProps} />
+        <HqCreditRiskCommandCenter
+          {...commandCenterProps}
+          onAttentionFilterChange={onAttentionFilterChange}
+        />
       </section>
     </CollectionsWorkspaceShell>
   );

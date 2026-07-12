@@ -51,6 +51,7 @@ import {
 import {
   AGENT_VISIT_CONTEXT_KEY,
   consumeAgentWorkspaceReturnPath,
+  peekAgentWorkspaceReturnPath,
   notifyAgentWorkspaceRefresh,
   AGENT_PENDING_VISIT_TASK_KEY,
 } from "@/pages/agentVisitContext.js";
@@ -899,6 +900,7 @@ function VisitSaveSuccessPanel({
   onBackToWorkspace,
   onLogAnother,
   showWorkspaceCta,
+  workspaceReturnLabel = "Back to Agent Workspace",
 }) {
   return (
     <section className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/90 p-4">
@@ -923,7 +925,7 @@ function VisitSaveSuccessPanel({
       <div className="flex flex-col gap-2 sm:flex-row">
         {showWorkspaceCta ? (
           <Button type="button" className="h-11 flex-1 rounded-lg" onClick={onBackToWorkspace}>
-            Back to Agent Workspace
+            {workspaceReturnLabel}
           </Button>
         ) : null}
         <Button
@@ -971,6 +973,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
   const [saveError, setSaveError] = useState("");
   const [savedVisitSummary, setSavedVisitSummary] = useState(null);
   const [showWorkspaceReturnCta, setShowWorkspaceReturnCta] = useState(false);
+  const [workspaceReturnPath, setWorkspaceReturnPath] = useState(() => peekAgentWorkspaceReturnPath());
   const lastSavedVisitRef = useRef(null);
 
   const hasLoadedDataRef = useRef(false);
@@ -1874,8 +1877,10 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
   }
 
   function handleBackToAgentWorkspace() {
+    const path = consumeAgentWorkspaceReturnPath() || workspaceReturnPath || "dashboard";
+    setWorkspaceReturnPath("");
     if (typeof setActivePage === "function") {
-      setActivePage("dashboard");
+      setActivePage(path === "collections" ? "collections" : "dashboard");
     }
     resetVisitWizardForAnother();
   }
@@ -1987,7 +1992,9 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
 
       const savedVisitId = res.data?.visitId || "";
       const hadProof = Boolean(visitProofFile || collectionProofFile);
-      const fromWorkspace = consumeAgentWorkspaceReturnPath() === "dashboard";
+      const returnPath = consumeAgentWorkspaceReturnPath();
+      const fromWorkspace = returnPath === "dashboard" || returnPath === "collections";
+      setWorkspaceReturnPath(returnPath || "");
       setShowWorkspaceReturnCta(fromWorkspace);
 
       const evidenceResult = await uploadVisitEvidenceFiles({
@@ -2124,6 +2131,21 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
         subtitle="Quick guided visit log — tap through each step, then save on review."
         icon={ClipboardCheck}
       />
+
+      {workspaceReturnPath === "collections" && typeof setActivePage === "function" ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2 text-sm text-blue-900">
+          <span>Continue from Collections work queue</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 border-blue-200 bg-white text-xs"
+            onClick={handleBackToAgentWorkspace}
+          >
+            Back to Collections
+          </Button>
+        </div>
+      ) : null}
 
       <div className="sm:hidden">
         <CompactVisitKpiStrip
@@ -2838,6 +2860,11 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
                   showWorkspaceCta={
                     typeof setActivePage === "function" &&
                     (showWorkspaceReturnCta || isAgentUser(currentUser))
+                  }
+                  workspaceReturnLabel={
+                    workspaceReturnPath === "collections"
+                      ? "Back to Collections"
+                      : "Back to Agent Workspace"
                   }
                   onBackToWorkspace={handleBackToAgentWorkspace}
                   onLogAnother={handleLogAnotherVisit}
