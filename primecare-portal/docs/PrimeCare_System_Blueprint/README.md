@@ -37,7 +37,7 @@ Read Blueprint → Inspect code/migrations → Compare doc vs implementation
 | 08 | [08_Delivery_Charge_Rules.md](./08_Delivery_Charge_Rules.md) | Phase 3A policy engine |
 | 09 | [09_Lab_Portal_Rules.md](./09_Lab_Portal_Rules.md) | Lab ordering, tracking, scope |
 | 10 | [10_Operations_Center_Rules.md](./10_Operations_Center_Rules.md) | Users, ownership, freeze |
-| 11 | [11_Inventory_Rules.md](./11_Inventory_Rules.md) | Stock, ledger, procurement, Inventory UX cert roadmap |
+| 11 | [11_Inventory_Rules.md](./11_Inventory_Rules.md) | Stock, ledger, procurement, Inventory UX cert + **Purchase UX cert roadmap** |
 | 12 | [12_Executive_Analytics_Rules.md](./12_Executive_Analytics_Rules.md) | Founder / EFI read-only analytics |
 | 13 | [13_Verification_Matrix.md](./13_Verification_Matrix.md) | All verify scripts + UAT |
 | 14 | [14_Release_Gates.md](./14_Release_Gates.md) | Build, cert, commit criteria |

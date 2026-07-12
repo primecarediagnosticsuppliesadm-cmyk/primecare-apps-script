@@ -4,6 +4,48 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-12 — Purchase action feedback (Sprint 1A)
+
+### Change
+
+- **UI/UX only** — Purchase Create / Edit / Cancel / Bulk Critical drafts / Receive / Freeze use certified Action Pattern (`mapPurchaseMutationError`, `ActionErrorSummary`, busy labels, inflight guards, success toast, silent refresh).
+- Receive mutation mapper ownership moved from Inventory helper to Purchase (`mapPurchaseMutationError`).
+- No schema, API, RPC, PURCHASE_IN, ledger, ORDER_OUT, reorder engine, receiving eligibility, finance, permission, or RLS changes.
+- Closes **PUR-CERT-003** (Trust). Does not begin Sprint 1B.
+
+### Verification
+
+- `node scripts/verify-purchase-action-feedback.mjs`
+- `node scripts/verify-procurement-inventory-flow.mjs`
+- `node scripts/verify-rc1-procurement-lifecycle.mjs`
+- `node scripts/verify-no-finance-mutation.mjs`
+- `node scripts/verify-inventory-action-feedback.mjs`
+- `npm run build`
+
+---
+
+## 2026-07-12 — Purchase Architecture Review Finalization
+
+### Change
+
+- Founder-finalized Purchase / Reorder module UX certification baseline: `docs/QA/modules/purchase/Architecture_Review_Certification_Baseline.md`.
+- **PUR-CERT-001** reframed: operational complexity of combining Replenishment + Receiving + Purchase Administration — **not** engineering structure; file decomposition **RC2**; **not a Sprint 1 blocker**.
+- **PUR-CERT-015** added: Explainability — recommendations without WHY; future cards (Current Stock · Min · Forecast · Supplier · Rule · Reason · Trust High/Med/Low; no percentages); **not Sprint 1; not Gold blocker**.
+- Sprint 1B must use **action-oriented** Start Here (Create Purchase Orders · Receive Pending Deliveries · Review Critical Reorders · Investigate Blocked Purchase Orders) — no stats-only cards.
+- Standard taxonomy enforced on all PUR-CERT defects; tiers clarified: Bronze = Domain Integrity · Silver = Operational Workspace · Gold = Certified UX + Verification + Signed Browser UAT.
+- Blueprint: [11_Inventory_Rules.md](./11_Inventory_Rules.md) Purchase cert roadmap; [16_Certification_Framework.md](./16_Certification_Framework.md) methodology + Purchase baseline index.
+- **No** schema, API, RPC, PO write, PURCHASE_IN, ledger, reorder engine, receiving rule, finance, permission, or RLS changes.
+
+### Gate
+
+Documentation only. Sprint 1A (UX-only) **ALLOWED**. Application code remains blocked until Sprint 1A kickoff.
+
+### Verification
+
+Domain integrity (unchanged): `verify-procurement-inventory-flow.mjs`, `verify-rc1-procurement-lifecycle.mjs`. UX verify scripts deferred to sprints.
+
+---
+
 ## 2026-07-12 — Inventory Certification Closure
 
 ### Change

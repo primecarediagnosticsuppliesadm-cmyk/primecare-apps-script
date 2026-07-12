@@ -157,7 +157,7 @@ Procurement writes may be blocked when `VITE_HQ_PROCUREMENT_FROZEN` — inventor
 
 Inventory Overview · Stock Ledger · Inventory Health · Receiving · Reorder · Purchase Administration · Catalog Master · (ORDER_OUT via Orders)
 
-Purchase Operations uses **visual workspace groups** (Replenishment · Receiving · Purchase administration) for cognitive load (INV-CERT-001 Closure). Dedicated Purchase module certification remains deferred. Engineering file decomposition remains RC2.
+Purchase Operations uses **visual workspace groups** (Replenishment · Receiving · Purchase administration) for cognitive load (INV-CERT-001 Closure). **Dedicated Purchase module certification** is Founder-authorized as a **separate track** (baseline finalized 2026-07-12) — do not start it *from* Inventory Closure alone. Engineering file decomposition remains RC2 and is **not** a Purchase Sprint 1 blocker (PUR-CERT-001).
 
 ### Sprint roadmap (UI/UX only — no schema/API/ledger/ORDER_OUT/PURCHASE_IN/opening-stock/reorder-engine/RLS changes)
 
@@ -174,7 +174,58 @@ Purchase Operations uses **visual workspace groups** (Replenishment · Receiving
 
 - Ledger non-opening `IN` display: **Historical Inventory Movement** (not actionable Adjustment).
 - Evidence: `docs/QA/modules/inventory/Certification_*`.
-- After signed Manual UAT: Inventory **Gold**; freeze except bug fixes and security updates. Do not begin Purchase certification from Inventory Closure.
+- After signed Manual UAT: Inventory **Gold**; freeze except bug fixes and security updates. Do not begin Purchase certification **from Inventory Closure** — use the Purchase baseline track below.
+
+---
+
+## Purchase / Reorder module UX certification (Founder-finalized 2026-07-12)
+
+**Baseline document:** [`docs/QA/modules/purchase/Architecture_Review_Certification_Baseline.md`](../QA/modules/purchase/Architecture_Review_Certification_Baseline.md)  
+**Methodology / taxonomy / tiers:** [16_Certification_Framework.md](./16_Certification_Framework.md)
+
+| Tier | Definition | Purchase status |
+|------|------------|-----------------|
+| **Bronze** | Domain Integrity | **Met** (PO SoT + receive → PURCHASE_IN + integrity verifies) |
+| **Silver** | Operational Workspace | **Not met** |
+| **Gold** | Certified UX + Verification + Signed Browser UAT | **Not met** |
+
+### Founder decisions (documentation only)
+
+| ID | Decision |
+|----|----------|
+| **PUR-CERT-001** | One workspace combining Replenishment + Receiving + Purchase Administration = **operational complexity** (user), not engineering structure. Engineering decomposition **RC2**. **Not a Sprint 1 blocker.** |
+| **PUR-CERT-015** | Recommendations without WHY → future cards (Current Stock · Min · Forecast · Supplier · Rule · Reason · Trust High/Med/Low; **no %**). **Not Sprint 1. Not Gold blocker.** |
+| **Sprint 1B** | **Action-oriented** Start Here only: Create Purchase Orders · Receive Pending Deliveries · Review Critical Reorders · Investigate Blocked Purchase Orders — **no stats-only cards** |
+
+### Purchase Sprint 1A — Action feedback & trust (2026-07-12 — UI only)
+
+**Scope:** Create / Edit / Cancel / Bulk Critical drafts / Receive / Freeze interaction feedback.  
+**Not changed:** schema, APIs, RPCs, PURCHASE_IN semantics, ledger, ORDER_OUT, reorder engines, receiving eligibility, finance, permissions, RLS, layout, Start Here, queues, Suppliers, explainability.
+
+| Concern | Behavior |
+|---------|----------|
+| Mutation errors | `mapPurchaseMutationError` → business titles (already exists / frozen / already received / supplier unavailable / permission denied / unexpected). **Never** primary Postgres text. |
+| Error placement | `ActionErrorSummary` at the action site (Create form, Forecast, Receive form, History, Edit dialog) — not page-level mutation banners |
+| Busy labels | Creating / Saving / Cancelling / Receiving Purchase Order... · Creating Critical Purchase Orders... |
+| Interaction | Inflight refs · `aria-busy` · disable duplicate submit · edit dialog stays open on failure · preserve form values on failure |
+| Success | Toast · `refreshAll({ silent: true })` preserves search/filters/tab |
+| Verify | `verify-purchase-action-feedback.mjs` |
+| Closes | **PUR-CERT-003** (Trust) |
+
+### Purchase Sprint roadmap (UI/UX only — no schema/API/RPC/PURCHASE_IN/ledger/reorder-engine/RLS/permission changes)
+
+| Sprint | Focus | Closes (primary) |
+|--------|-------|------------------|
+| **1A** | Mutation feedback on Create / Update / Cancel / Bulk / Receive — **shipped** (UI only) | PUR-CERT-003 |
+| **1B** | **Action-oriented** Start Here + context continuity | PUR-CERT-002, 004, 013 |
+| **1C** | Queue hierarchy + Suppliers honesty | PUR-CERT-007, 009 |
+| **Closure** | QA pack + signed browser UAT | PUR-CERT-005, 012 |
+| **Future** | PUR-CERT-015 / 010 Trust & Explainability cards | Not Gold blocker |
+| **RC2** | PUR-CERT-001 engineering split; exports; multi-line; orphan forecast page | Deferred |
+
+### Do not break during Purchase UX sprints
+
+Purchase order write semantics · PURCHASE_IN · inventory ledger · ORDER_OUT · reorder calculation engines · receiving eligibility rules · financial posting · permissions · RLS.
 
 ### Do not break during Inventory UX sprints
 

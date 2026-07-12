@@ -38,14 +38,15 @@ assert(/getSkuToggleLoadingLabel/.test(catalogSrc), "catalog.toggle_loading", "c
 assert(!/setError\(err\?\.message \|\| \"Failed to save product\"\)/.test(catalogSrc), "catalog.no_raw_form_setError", "form failures use ActionErrorSummary");
 assert(!/setStatusMessage\(\s*\n?\s*nextActive/.test(catalogSrc), "catalog.no_status_banner_toggle", "toggle success uses toast not status banner");
 
-assert(/mapInventoryMutationError/.test(purchaseSrc), "receive.mutation_mapper", "receive uses inventory mutation mapper");
+assert(/mapPurchaseMutationError/.test(purchaseSrc), "receive.mutation_mapper", "receive uses purchase mutation mapper (Purchase Sprint 1A)");
 assert(/receiveMutationError/.test(purchaseSrc), "receive.mutation_error_state", "receive mutation error state present");
 assert(/receiveInflightRef/.test(purchaseSrc), "receive.inflight_guard", "receive duplicate submission guard");
 assert(/ActionErrorSummary/.test(purchaseSrc), "receive.error_summary", "receive shows ActionErrorSummary");
-assert(/getReceiveStockLoadingLabel/.test(purchaseSrc), "receive.loading_helper", "receive loading label helper");
+assert(/getReceivePurchaseOrderLoadingLabel/.test(purchaseSrc), "receive.loading_helper", "receive loading label helper");
 assert(/aria-busy=\{receivingPo\}/.test(purchaseSrc), "receive.aria_busy", "receive button exposes aria-busy");
 assert(/showToast\(\s*\"success\"/.test(purchaseSrc), "receive.success_toast", "receive success uses toast");
 assert(!/setErrorMessage\(err\?\.message \|\| \"Failed to receive purchase order\"\)/.test(purchaseSrc), "receive.no_page_top_error", "receive failures no longer use page-top errorMessage");
+assert(!/mapInventoryMutationError/.test(purchaseSrc), "receive.no_inventory_mapper", "purchase page no longer uses inventory mapper");
 
 assert(/SKU already exists/.test(mapperSrc), "map.sku_exists", "SKU already exists mapped");
 assert(/SKU disabled/.test(mapperSrc), "map.sku_disabled", "SKU disabled mapped");

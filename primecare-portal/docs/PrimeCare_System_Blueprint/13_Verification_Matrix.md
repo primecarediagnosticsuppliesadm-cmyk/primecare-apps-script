@@ -79,7 +79,8 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-inventory-dashboard-kpi.mjs | Valuation KPIs | Inventory dashboard |
 | verify-inventory-reconciliation.mjs | No negative stock | Inventory writes |
 | verify-inventory-ledger-integrity.mjs | Alias → reconciliation (Sprint 1A naming) | Inventory writes |
-| verify-inventory-action-feedback.mjs | Sprint 1A catalog/receive inline errors, loading labels, toast, busy/aria | Inventory UX |
+| verify-inventory-action-feedback.mjs | Sprint 1A catalog inline errors; receive feedback owned by Purchase mapper | Inventory UX |
+| verify-purchase-action-feedback.mjs | Purchase Sprint 1A create/edit/cancel/bulk/receive Action Pattern | Purchase UX |
 | verify-inventory-navigation-context.mjs | Sprint 1B Start Here, context strip, selection, return path, empty/focus recovery | Inventory UX |
 | verify-inventory-workspace-simplification.mjs | Sprint 1C page budget, collapsed valuation, operational-first detail, no module split | Inventory UX |
 | verify-inventory-certification-closure.mjs | Closure INV-CERT-005 evidence docs, INV-CERT-007 labels, INV-CERT-001 Purchase grouping | Inventory UX |

@@ -16,14 +16,14 @@ Phase 2 moves PrimeCare from ad-hoc verify scripts to a **repeatable certificati
 
 ## Module UX certification methodology
 
-Use the same staged process successfully applied to People Operations, Collections / Credit & Risk, HQ Orders, and Inventory:
+Use the same staged process successfully applied to People Operations, Collections / Credit & Risk, HQ Orders, Inventory, and **Purchase / Reorder**:
 
 1. **Architecture review only** — feature inventory, functional parity baseline, workspace boundaries, page-by-page evaluation, defect registry, sprint roadmap, verification + Manual UAT plan. **No implementation.**
-2. **Founder finalization** — refine defect wording, taxonomy, Sprint Start Here rules, tier definitions.
+2. **Founder finalization** — refine defect wording, taxonomy, Sprint **action-oriented** Start Here rules, tier definitions.
 3. **Sprint 1A / 1B / 1C** — UI/UX only; one workflow per sprint; independently releasable; functional parity preserved; no schema/API/RLS/business-rule changes unless explicitly approved.
-4. **Certification Closure** — High UX defects closed + QA module pack + signed Manual UAT → Gold.
+4. **Certification Closure** — High Sprint UX defects closed + QA module pack + signed **browser** Manual UAT → Gold.
 
-Engineering file decomposition (LOC / god-file splits) is **RC2** unless the Founder marks it as a certification blocker. Certification defects must be **user-centric** (cognitive load, discoverability, trust) — not LOC counts.
+Engineering file decomposition (LOC / god-file splits) is **RC2** unless the Founder marks it as a certification blocker. Certification defects must be **user-centric** (operational complexity, discoverability, trust) — not LOC counts. Combining logical jobs in one workspace is an **Architecture / Page Budget** user issue when cited — not an engineering-structure defect by default.
 
 ---
 
@@ -45,13 +45,14 @@ Engineering file decomposition (LOC / god-file splits) is **RC2** unless the Fou
 
 ### Trust & Explainability (module recommendations)
 
-When a module recommends statuses or actions (e.g. Critical / Reorder / Healthy), future Gold-quality UX should expose:
+When a module recommends statuses or actions (e.g. Critical / Reorder / Healthy / Receive / Supplier), future recommendation cards should expose:
 
-- Current Stock · Minimum Stock · Reorder Level · Recent Consumption
+- Current Stock · Minimum Stock · Forecast (or Reorder Level / Recent Consumption as domain-appropriate)
+- Supplier (when procurement)
 - Business Rule · Reason for recommendation
 - Trust Level: **High / Medium / Low**
 
-**No fake percentages.** Document as Explainability defects when missing; schedule outside Sprint 1 unless Founder marks as blocker.
+**No fake percentages.** Document as Explainability defects when missing (e.g. INV-CERT-012, PUR-CERT-015); schedule outside Sprint 1 unless Founder marks as blocker. **Not a Gold blocker** unless Founder elevates.
 
 ---
 
@@ -61,9 +62,20 @@ When a module recommends statuses or actions (e.g. Critical / Reorder / Healthy)
 |------|------------|--------------------------|
 | **Bronze** | **Domain Integrity** | SoT clear; ledger/lifecycle rules enforced; automated integrity verifies PASS |
 | **Silver** | **Operational Workspace** | Primary actions clear; **action-oriented** Start Here (not stats-only); context preserved; cognitive load managed |
-| **Gold** | **Certified UX + Verification + Signed Manual UAT** | Silver + High UX defects closed + module QA pack + signed Manual UAT |
+| **Gold** | **Certified UX + Verification + Signed Browser Manual UAT** | Silver + High Sprint UX defects closed + module QA pack + signed browser UAT |
 
-Action-oriented Start Here examples: Receive Purchase Order · Create Purchase Order · Review Critical Stock · Investigate Stock Risk · Record Payment · Review Next Order.
+Action-oriented Start Here examples:
+
+- Inventory: Receive Purchase Order · Create Purchase Order · Review Critical Stock · Investigate Stock Risk
+- Purchase: **Create Purchase Orders** · **Receive Pending Deliveries** · **Review Critical Reorders** · **Investigate Blocked Purchase Orders**
+- Collections: Record Payment · Review Next Order
+
+### Module UX baselines
+
+| Module | Baseline | Status |
+|--------|----------|--------|
+| Inventory | `docs/QA/modules/inventory/Architecture_Review_Certification_Baseline.md` | Founder-finalized; Closure CONDITIONAL Gold |
+| **Purchase / Reorder** | `docs/QA/modules/purchase/Architecture_Review_Certification_Baseline.md` | **Founder-finalized 2026-07-12** — Sprint 1A ALLOWED (UX-only) |
 
 ---
 
@@ -136,9 +148,10 @@ Every cataloged screen documents:
 |-----|------|
 | [13_Verification_Matrix.md](./13_Verification_Matrix.md) | API/script regression index |
 | [14_Release_Gates.md](./14_Release_Gates.md) | Commit and promotion gates |
-| [11_Inventory_Rules.md](./11_Inventory_Rules.md) | Inventory domain + UX certification roadmap |
+| [11_Inventory_Rules.md](./11_Inventory_Rules.md) | Inventory domain + Inventory UX cert + **Purchase module UX cert roadmap** |
 | `docs/QA/modules/inventory/Architecture_Review_Certification_Baseline.md` | Inventory module UX certification baseline (Founder-finalized) |
-| `docs/QA/modules/*/` | Per-module Sprint / Closure packs (Orders, Collections, Inventory, …) |
+| `docs/QA/modules/purchase/Architecture_Review_Certification_Baseline.md` | Purchase / Reorder module UX certification baseline (Founder-finalized 2026-07-12) |
+| `docs/QA/modules/*/` | Per-module Sprint / Closure packs (Orders, Collections, Inventory, Purchase, …) |
 | `docs/QA/Release_Certification.md` | Environment-specific sign-off record |
 | `docs/hq-certification/*` | Historical certification evidence |
 | `docs/operations/HQ_BROWSER_DEVICE_UAT_CHECKLIST.md` | Device/browser matrix (superseded for O2C by 04/05) |

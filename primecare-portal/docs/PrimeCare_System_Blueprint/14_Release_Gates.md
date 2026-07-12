@@ -41,7 +41,8 @@ Do not recommend commit when:
 | Labs admin | GO |
 | Credit & Risk | GO |
 | Ops Center | GO |
-| Inventory/catalog/procurement | **CONDITIONAL GO (Gold pending signed UAT)** — Closure pack + Sprint 1A–1C complete; sign `docs/QA/modules/inventory/Certification_Signoff_Template.md` |
+| Inventory/catalog | **CONDITIONAL GO (Gold pending signed UAT)** — Closure pack + Sprint 1A–1C complete; sign `docs/QA/modules/inventory/Certification_Signoff_Template.md` |
+| Purchase / Reorder | **Architecture baseline Founder-finalized** — Bronze GO; Silver/Gold NO-GO; Sprint 1A UX-only ALLOWED — `docs/QA/modules/purchase/Architecture_Review_Certification_Baseline.md` |
 | Full pilot | NO-GO — Agent E2E, manual UAT open |
 
 Update after each certification run.

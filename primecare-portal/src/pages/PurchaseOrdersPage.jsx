@@ -31,8 +31,14 @@ import PageSkeleton from "@/components/ux/PageSkeleton";
 import ActionErrorSummary from "@/components/ux/ActionErrorSummary.jsx";
 import { usePortalToast } from "@/components/ux";
 import { Button } from "@/components/ui/button";
-import { mapInventoryMutationError } from "@/inventory/mapInventoryMutationError.js";
-import { getReceiveStockLoadingLabel } from "@/inventory/inventoryActionUi.js";
+import { mapPurchaseMutationError } from "@/purchase/mapPurchaseMutationError.js";
+import {
+  getBulkCreateCriticalPurchaseOrdersLoadingLabel,
+  getCancelPurchaseOrderLoadingLabel,
+  getCreatePurchaseOrderLoadingLabel,
+  getReceivePurchaseOrderLoadingLabel,
+  getSavePurchaseOrderLoadingLabel,
+} from "@/purchase/purchaseActionUi.js";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import {
   armInventoryReturnRestore,
@@ -552,8 +558,17 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
   const [loading, setLoading] = useState(true);
   const [creatingPo, setCreatingPo] = useState(false);
   const [receivingPo, setReceivingPo] = useState(false);
+  const [createMutationError, setCreateMutationError] = useState(null);
   const [receiveMutationError, setReceiveMutationError] = useState(null);
+  const [editMutationError, setEditMutationError] = useState(null);
+  const [historyMutationError, setHistoryMutationError] = useState(null);
+  const [forecastMutationError, setForecastMutationError] = useState(null);
+  const createInflightRef = useRef(false);
   const receiveInflightRef = useRef(false);
+  const editInflightRef = useRef(false);
+  const cancelInflightRef = useRef(false);
+  const bulkInflightRef = useRef(false);
+  const triggerInflightRef = useRef(false);
   const [creatingAutoPoId, setCreatingAutoPoId] = useState("");
 
   const [selectedCandidate, setSelectedCandidate] = useState(null);
@@ -796,15 +811,20 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
     }
   };
 
-  const refreshAll = async () => {
+  const refreshAll = async ({ silent = false } = {}) => {
     try {
-      setErrorMessage("");
+      if (!silent) setErrorMessage("");
       await Promise.all([loadPurchaseDashboard(), loadCatalogProducts()]);
     } catch (err) {
       console.error(err);
-      setErrorMessage(err?.message || "Failed to load purchase dashboard.");
+      if (!silent) {
+        setErrorMessage(err?.message || "Failed to load purchase dashboard.");
+      }
     }
   };
+
+  const frozenMutationError = (action) =>
+    mapPurchaseMutationError("Purchase Order frozen", { action });
 
   useEffect(() => {
     async function initialLoad() {
@@ -1052,11 +1072,15 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
   };
 
   const handleBulkCreateCriticalDraftPos = async () => {
-    if (procurementWriteBlocked) return;
+    if (procurementWriteBlocked) {
+      setForecastMutationError(frozenMutationError("bulk"));
+      return;
+    }
+    if (bulkInflightRef.current || bulkCreating) return;
+    bulkInflightRef.current = true;
     try {
       setBulkCreating(true);
-      setStatusMessage("");
-      setErrorMessage("");
+      setForecastMutationError(null);
 
       let result = {};
       if (supabase) {
@@ -1080,9 +1104,21 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
           summary: {
             createdCount: results.filter((r) => r.status === "fulfilled" && r.value?.success).length,
             skippedCount: Math.max(0, critical.length - results.length),
-            failedCount: results.filter((r) => r.status === "rejected" || !r.value?.success).length,
+            failedCount: results.filter(
+              (r) => r.status === "rejected" || (r.status === "fulfilled" && !r.value?.success)
+            ).length,
           },
         };
+        const firstFailure = results.find(
+          (r) => r.status === "rejected" || (r.status === "fulfilled" && !r.value?.success)
+        );
+        if (firstFailure && result.summary.createdCount === 0 && result.summary.failedCount > 0) {
+          const failMsg =
+            firstFailure.status === "rejected"
+              ? firstFailure.reason?.message || firstFailure.reason
+              : firstFailure.value?.error;
+          throw new Error(failMsg || "Failed to bulk create draft purchase orders");
+        }
       } else {
         if (!ALLOW_LEGACY_APPS_SCRIPT) {
           throw new Error("Supabase bulk purchase order creation is required for pilot access.");
@@ -1098,26 +1134,47 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
         });
         result = res?.data || {};
       }
-      setStatusMessage(
-        `Bulk draft PO run complete: Created ${result?.summary?.createdCount || 0}, Skipped ${result?.summary?.skippedCount || 0}, Failed ${result?.summary?.failedCount || 0}`
+      const created = result?.summary?.createdCount || 0;
+      const skipped = result?.summary?.skippedCount || 0;
+      const failed = result?.summary?.failedCount || 0;
+      showToast(
+        "success",
+        `Critical draft POs: Created ${created}, Skipped ${skipped}, Failed ${failed}`
       );
+      if (failed > 0) {
+        setForecastMutationError(
+          mapPurchaseMutationError(
+            `${failed} critical draft purchase order(s) could not be created. Review Forecast Suggestions and retry.`,
+            { action: "bulk" }
+          )
+        );
+      }
 
-      await refreshAll();
+      await refreshAll({ silent: true });
     } catch (err) {
       console.error(err);
-      setErrorMessage(err?.message || "Failed to bulk create draft purchase orders");
+      setForecastMutationError(
+        mapPurchaseMutationError(err?.message || err || "Failed to bulk create draft purchase orders", {
+          action: "bulk",
+        })
+      );
     } finally {
       setBulkCreating(false);
+      bulkInflightRef.current = false;
     }
   };
 
   const handleCreatePurchaseOrder = async (e) => {
     e.preventDefault();
-    if (procurementWriteBlocked) return;
+    if (procurementWriteBlocked) {
+      setCreateMutationError(frozenMutationError("create"));
+      return;
+    }
+    if (createInflightRef.current || creatingPo) return;
+    createInflightRef.current = true;
     try {
       setCreatingPo(true);
-      setStatusMessage("");
-      setErrorMessage("");
+      setCreateMutationError(null);
 
       const payload = {
         ...validateCreateForm(),
@@ -1144,27 +1201,36 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
       if (!res?.success && !result?.success) {
         throw new Error(res?.error || result?.message || "Failed to create purchase order");
       }
-      setStatusMessage(`Purchase order created successfully: ${result.poId || ""}`);
+      const createdPoId = result.poId || "";
+      showToast("success", createdPoId ? `Purchase order created: ${createdPoId}` : "Purchase order created");
       setCreateForm(emptyCreateForm);
       setSelectedCandidate(null);
+      setCreateMutationError(null);
 
-      await refreshAll();
+      await refreshAll({ silent: true });
     } catch (err) {
       console.error(err);
-      setErrorMessage(err?.message || "Failed to create purchase order");
+      setCreateMutationError(
+        mapPurchaseMutationError(err?.message || err || "Failed to create purchase order", {
+          action: "create",
+        })
+      );
     } finally {
       setCreatingPo(false);
+      createInflightRef.current = false;
     }
   };
 
   const handleReceivePurchaseOrder = async (e) => {
     e.preventDefault();
-    if (procurementWriteBlocked) return;
+    if (procurementWriteBlocked) {
+      setReceiveMutationError(frozenMutationError("receive"));
+      return;
+    }
     if (receiveInflightRef.current || receivingPo) return;
     receiveInflightRef.current = true;
     try {
       setReceivingPo(true);
-      setStatusMessage("");
       setReceiveMutationError(null);
 
       const payload = {
@@ -1234,12 +1300,12 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
       setSelectedPurchaseOrder(null);
       setReceiveMutationError(null);
 
-      await refreshAll();
+      await refreshAll({ silent: true });
       invalidateAdminDashboardCaches();
     } catch (err) {
       console.error(err);
       setReceiveMutationError(
-        mapInventoryMutationError(err?.message || err || "Failed to receive purchase order", {
+        mapPurchaseMutationError(err?.message || err || "Failed to receive purchase order", {
           action: "receive",
         })
       );
@@ -1260,18 +1326,22 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
       supplier: po.supplier || "",
       status: po.status || "Draft",
     });
-    setErrorMessage("");
-    setStatusMessage("");
+    setEditMutationError(null);
+    setHistoryMutationError(null);
   };
 
   const handleSaveEditPo = async (e) => {
     e.preventDefault();
-    if (procurementWriteBlocked) return;
+    if (procurementWriteBlocked) {
+      setEditMutationError(frozenMutationError("update"));
+      return;
+    }
     if (!editingPo?.poId) return;
+    if (editInflightRef.current || savingEdit) return;
+    editInflightRef.current = true;
     try {
       setSavingEdit(true);
-      setStatusMessage("");
-      setErrorMessage("");
+      setEditMutationError(null);
 
       const product = resolveCatalogProduct(editForm.productId);
       if (!product) throw new Error("Select a valid product from catalog.");
@@ -1291,57 +1361,79 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
       });
       if (!res?.success) throw new Error(res?.error || "Failed to update purchase order");
 
-      setStatusMessage(`Purchase order updated: ${editingPo.poId}`);
+      showToast("success", `Purchase order updated: ${editingPo.poId}`);
       setEditingPo(null);
       setEditForm(emptyCreateForm);
-      await refreshAll();
+      setEditMutationError(null);
+      await refreshAll({ silent: true });
     } catch (err) {
       console.error(err);
-      setErrorMessage(err?.message || "Failed to update purchase order");
+      setEditMutationError(
+        mapPurchaseMutationError(err?.message || err || "Failed to update purchase order", {
+          action: "update",
+        })
+      );
     } finally {
       setSavingEdit(false);
+      editInflightRef.current = false;
     }
   };
 
   const handleCancelPo = async (po) => {
-    if (procurementWriteBlocked) return;
+    if (procurementWriteBlocked) {
+      setHistoryMutationError(frozenMutationError("cancel"));
+      return;
+    }
     if (!canEditOrCancelPurchaseOrder(po)) return;
+    if (cancelInflightRef.current || cancellingPoId) return;
     const confirmed =
       typeof window === "undefined" ||
       window.confirm(`Cancel purchase order ${po.poId}? This cannot be undone.`);
     if (!confirmed) return;
 
+    cancelInflightRef.current = true;
     try {
       setCancellingPoId(po.poId);
-      setStatusMessage("");
-      setErrorMessage("");
+      setHistoryMutationError(null);
       const res = await cancelPurchaseOrderWrite(po.poId, { tenantId: operatingTenantId });
       if (!res?.success) throw new Error(res?.error || "Failed to cancel purchase order");
-      setStatusMessage(`Purchase order cancelled: ${po.poId}`);
+      showToast("success", `Purchase order cancelled: ${po.poId}`);
       if (editingPo?.poId === po.poId) {
         setEditingPo(null);
         setEditForm(emptyCreateForm);
+        setEditMutationError(null);
       }
-      await refreshAll();
+      await refreshAll({ silent: true });
     } catch (err) {
       console.error(err);
-      setErrorMessage(err?.message || "Failed to cancel purchase order");
+      setHistoryMutationError(
+        mapPurchaseMutationError(err?.message || err || "Failed to cancel purchase order", {
+          action: "cancel",
+        })
+      );
     } finally {
       setCancellingPoId("");
+      cancelInflightRef.current = false;
     }
   };
 
   const handleCreateDraftPoFromTrigger = async (item) => {
-    if (procurementWriteBlocked) return;
+    if (procurementWriteBlocked) {
+      setForecastMutationError(frozenMutationError("create"));
+      return;
+    }
+    if (triggerInflightRef.current || creatingAutoPoId) return;
     try {
       if (!item?.canAutoCreate) {
-        setErrorMessage("Open PO already exists for this product.");
+        setForecastMutationError(
+          mapPurchaseMutationError("Open PO already exists for this product.", { action: "create" })
+        );
         return;
       }
 
+      triggerInflightRef.current = true;
       setCreatingAutoPoId(item.productId);
-      setStatusMessage("");
-      setErrorMessage("");
+      setForecastMutationError(null);
 
       const payload = {
         productId: item.productId,
@@ -1373,14 +1465,22 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
       if (!res?.success && !result?.success) {
         throw new Error(res?.error || result?.message || "Failed to create draft purchase order");
       }
-      setStatusMessage(`Draft purchase order created: ${result.poId || ""}`);
+      showToast(
+        "success",
+        result.poId ? `Draft purchase order created: ${result.poId}` : "Draft purchase order created"
+      );
 
-      await refreshAll();
+      await refreshAll({ silent: true });
     } catch (err) {
       console.error(err);
-      setErrorMessage(err?.message || "Failed to create draft purchase order");
+      setForecastMutationError(
+        mapPurchaseMutationError(err?.message || err || "Failed to create draft purchase order", {
+          action: "create",
+        })
+      );
     } finally {
       setCreatingAutoPoId("");
+      triggerInflightRef.current = false;
     }
   };
 
@@ -1573,15 +1673,27 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
             <div className="mb-3 flex justify-end">
               <button
                 type="button"
-                onClick={handleBulkCreateCriticalDraftPos}
+                onClick={() => void handleBulkCreateCriticalDraftPos()}
                 disabled={procurementWriteBlocked || bulkCreating}
+                aria-busy={bulkCreating}
                 className="rounded-xl bg-black px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
               >
                 {bulkCreating
-                  ? "Creating Critical Draft POs..."
+                  ? getBulkCreateCriticalPurchaseOrdersLoadingLabel()
                   : "Create Draft POs for All Critical"}
               </button>
             </div>
+          ) : null}
+
+          {forecastMutationError ? (
+            <ActionErrorSummary
+              className="mb-4"
+              title={forecastMutationError.title}
+              message={forecastMutationError.message}
+              fieldErrors={forecastMutationError.fieldErrors}
+              technicalReference={forecastMutationError.rawErrorForLogging}
+              onDismiss={() => setForecastMutationError(null)}
+            />
           ) : null}
 
           <div className="space-y-3">
@@ -1646,12 +1758,18 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
 
                       <button
                         type="button"
-                        onClick={() => handleCreateDraftPoFromTrigger(item)}
-                        disabled={procurementWriteBlocked || creatingAutoPoId === item.productId || !item.canAutoCreate}
+                        onClick={() => void handleCreateDraftPoFromTrigger(item)}
+                        disabled={
+                          procurementWriteBlocked ||
+                          Boolean(creatingAutoPoId) ||
+                          bulkCreating ||
+                          !item.canAutoCreate
+                        }
+                        aria-busy={creatingAutoPoId === item.productId}
                         className="rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50"
                       >
                         {creatingAutoPoId === item.productId
-                          ? "Creating Draft PO..."
+                          ? getCreatePurchaseOrderLoadingLabel()
                           : !item.canAutoCreate
                           ? "Open PO Already Exists"
                           : "Create Draft PO"}
@@ -1778,7 +1896,22 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
             </div>
           ) : null}
 
-          <form onSubmit={handleCreatePurchaseOrder} className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {createMutationError ? (
+            <ActionErrorSummary
+              className="mb-4"
+              title={createMutationError.title}
+              message={createMutationError.message}
+              fieldErrors={createMutationError.fieldErrors}
+              technicalReference={createMutationError.rawErrorForLogging}
+              onDismiss={() => setCreateMutationError(null)}
+            />
+          ) : null}
+
+          <form
+            onSubmit={handleCreatePurchaseOrder}
+            className="grid grid-cols-1 gap-4 lg:grid-cols-2"
+            aria-busy={creatingPo}
+          >
             <div className="lg:col-span-2">
               <label className="mb-1 block text-sm font-medium">Product</label>
               {catalogProductsError ? (
@@ -1845,19 +1978,25 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
             </div>
 
             <div className="lg:col-span-2 flex flex-col gap-3 sm:flex-row">
-              <button type="submit" disabled={procurementWriteBlocked || creatingPo} className="rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50">
-                {creatingPo ? "Creating..." : "Create Purchase Order"}
+              <button
+                type="submit"
+                disabled={procurementWriteBlocked || creatingPo}
+                aria-busy={creatingPo}
+                className="rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {creatingPo ? getCreatePurchaseOrderLoadingLabel() : "Create Purchase Order"}
               </button>
 
               <button
                 type="button"
+                disabled={creatingPo}
                 onClick={() => {
                   setCreateForm(emptyCreateForm);
                   setSelectedCandidate(null);
+                  setCreateMutationError(null);
                   setStatusMessage("Create purchase order form reset.");
-                  setErrorMessage("");
                 }}
-                className="rounded-xl border bg-white px-4 py-3 text-sm font-medium hover:bg-slate-50"
+                className="rounded-xl border bg-white px-4 py-3 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
               >
                 Reset
               </button>
@@ -1976,7 +2115,7 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
                 aria-busy={receivingPo}
                 className="rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50"
               >
-                {receivingPo ? getReceiveStockLoadingLabel() : "Receive Purchase Order"}
+                {receivingPo ? getReceivePurchaseOrderLoadingLabel() : "Receive Purchase Order"}
               </button>
 
               <button
@@ -2010,6 +2149,17 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
                 <option value="Cancelled">Cancelled</option>
             </select>
           </div>
+
+          {historyMutationError ? (
+            <ActionErrorSummary
+              className="mb-4"
+              title={historyMutationError.title}
+              message={historyMutationError.message}
+              fieldErrors={historyMutationError.fieldErrors}
+              technicalReference={historyMutationError.rawErrorForLogging}
+              onDismiss={() => setHistoryMutationError(null)}
+            />
+          ) : null}
 
           <div className="space-y-3">
             {filteredPurchaseOrders.length === 0 ? (
@@ -2061,10 +2211,13 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
                           <button
                             type="button"
                             onClick={() => void handleCancelPo(po)}
-                            disabled={procurementWriteBlocked || cancellingPoId === po.poId}
+                            disabled={procurementWriteBlocked || Boolean(cancellingPoId)}
+                            aria-busy={cancellingPoId === po.poId}
                             className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
                           >
-                            {cancellingPoId === po.poId ? "Cancelling…" : "Cancel PO"}
+                            {cancellingPoId === po.poId
+                              ? getCancelPurchaseOrderLoadingLabel()
+                              : "Cancel PO"}
                           </button>
                         </>
                       ) : null}
@@ -2129,20 +2282,33 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
           <form
             onSubmit={handleSaveEditPo}
             className="w-full max-w-lg rounded-2xl border bg-white p-4 shadow-lg"
+            aria-busy={savingEdit}
           >
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-900">Edit purchase order · {editingPo.poId}</h3>
               <button
                 type="button"
+                disabled={savingEdit}
                 onClick={() => {
                   setEditingPo(null);
                   setEditForm(emptyCreateForm);
+                  setEditMutationError(null);
                 }}
-                className="text-sm text-slate-500 hover:text-slate-800"
+                className="text-sm text-slate-500 hover:text-slate-800 disabled:opacity-50"
               >
                 Close
               </button>
             </div>
+            {editMutationError ? (
+              <ActionErrorSummary
+                className="mb-3"
+                title={editMutationError.title}
+                message={editMutationError.message}
+                fieldErrors={editMutationError.fieldErrors}
+                technicalReference={editMutationError.rawErrorForLogging}
+                onDismiss={() => setEditMutationError(null)}
+              />
+            ) : null}
             <div className="space-y-3">
               <div>
                 <label className="mb-1 block text-sm font-medium">Product</label>
@@ -2171,6 +2337,7 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
                     value={editForm.quantity}
                     onChange={(e) => setEditForm((prev) => ({ ...prev, quantity: e.target.value }))}
                     className="w-full rounded-xl border px-3 py-2 text-sm"
+                    disabled={savingEdit}
                     required
                   />
                 </div>
@@ -2183,6 +2350,7 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
                     value={editForm.unitCost}
                     onChange={(e) => setEditForm((prev) => ({ ...prev, unitCost: e.target.value }))}
                     className="w-full rounded-xl border px-3 py-2 text-sm"
+                    disabled={savingEdit}
                     required
                   />
                 </div>
@@ -2194,6 +2362,7 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
                   value={editForm.supplier}
                   onChange={(e) => setEditForm((prev) => ({ ...prev, supplier: e.target.value }))}
                   className="w-full rounded-xl border px-3 py-2 text-sm"
+                  disabled={savingEdit}
                 />
               </div>
               <div>
@@ -2202,6 +2371,7 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
                   value={editForm.status}
                   onChange={(e) => setEditForm((prev) => ({ ...prev, status: e.target.value }))}
                   className="w-full rounded-xl border px-3 py-2 text-sm"
+                  disabled={savingEdit}
                 >
                   <option value="Draft">Draft</option>
                   <option value="Ordered">Ordered</option>
@@ -2211,20 +2381,23 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
+                disabled={savingEdit}
                 onClick={() => {
                   setEditingPo(null);
                   setEditForm(emptyCreateForm);
+                  setEditMutationError(null);
                 }}
-                className="rounded-xl border px-4 py-2 text-sm"
+                className="rounded-xl border px-4 py-2 text-sm disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={procurementWriteBlocked || savingEdit}
+                aria-busy={savingEdit}
                 className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
-                {savingEdit ? "Saving…" : "Save changes"}
+                {savingEdit ? getSavePurchaseOrderLoadingLabel() : "Save changes"}
               </button>
             </div>
           </form>
