@@ -33,6 +33,10 @@ import {
   consumeInventoryReturnContextIfArmed,
   writeInventoryReturnContext,
 } from "@/inventory/inventoryWorkflowReturn.js";
+import {
+  armPurchaseReturnRestore,
+  hasPurchaseReturnContext,
+} from "@/purchase/purchaseWorkflowReturn.js";
 import InventoryCollapsibleSection from "@/components/inventory/InventoryCollapsibleSection.jsx";
 import {
   getInventoryExpectedActionCopy,
@@ -168,6 +172,7 @@ export default function StockPage({ currentUser = null, setActivePage = null }) 
   const [sortKey, setSortKey] = useState("name");
   const [selectedKey, setSelectedKey] = useState("");
   const [contextWarning, setContextWarning] = useState("");
+  const [purchaseReturnActive, setPurchaseReturnActive] = useState(() => hasPurchaseReturnContext());
   const [economicsBundle, setEconomicsBundle] = useState(null);
   const [economicsLoading, setEconomicsLoading] = useState(false);
 
@@ -491,6 +496,39 @@ export default function StockPage({ currentUser = null, setActivePage = null }) 
 
   return (
     <div style={styles.page} data-inventory-workspace="hq" aria-label="Inventory workspace">
+      {purchaseReturnActive && typeof setActivePage === "function" ? (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+            marginBottom: 12,
+            padding: "8px 12px",
+            borderRadius: 8,
+            border: "1px solid #bfdbfe",
+            background: "#eff6ff",
+            color: "#1e3a8a",
+            fontSize: 14,
+          }}
+        >
+          <span>Continue from Purchase</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 border-blue-200 bg-white text-xs"
+            onClick={() => {
+              armPurchaseReturnRestore();
+              setPurchaseReturnActive(false);
+              setActivePage("purchase");
+            }}
+          >
+            Back to Purchase
+          </Button>
+        </div>
+      ) : null}
       <PageHeader
         title="Inventory"
         subtitle={INVENTORY_WORKSPACE_PRIMARY_QUESTION}

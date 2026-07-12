@@ -39,11 +39,25 @@ import {
   getReceivePurchaseOrderLoadingLabel,
   getSavePurchaseOrderLoadingLabel,
 } from "@/purchase/purchaseActionUi.js";
-import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
+import { consumeHqNavContext, persistHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import {
   armInventoryReturnRestore,
   hasInventoryReturnContext,
 } from "@/inventory/inventoryWorkflowReturn.js";
+import {
+  consumePurchaseReturnContextIfArmed,
+  writePurchaseReturnContext,
+} from "@/purchase/purchaseWorkflowReturn.js";
+import {
+  PURCHASE_WORKSPACE_PRIMARY_QUESTION,
+  buildFocusedPoOutsideFiltersCopy,
+  buildPurchaseContextParts,
+  buildPurchaseListEmptyCopy,
+  poRowKey,
+  purchaseSortLabel,
+} from "@/purchase/purchaseContextUi.js";
+import PurchaseStartHere from "@/components/purchase/PurchaseStartHere.jsx";
+import PurchaseContextStrip from "@/components/purchase/PurchaseContextStrip.jsx";
 
 const emptyCreateForm = {
   productId: "",
@@ -581,9 +595,12 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
 
   const [poSearch, setPoSearch] = useState("");
   const [poStatusFilter, setPoStatusFilter] = useState("");
+  const [poSortKey, setPoSortKey] = useState("date");
+  const [selectedHistoryPoId, setSelectedHistoryPoId] = useState("");
   const [activeTab, setActiveTab] = useState("triggers");
   const [inventoryReturnActive, setInventoryReturnActive] = useState(() => hasInventoryReturnContext());
   const navConsumedRef = useRef(false);
+  const purchaseRestoreRef = useRef(false);
   const [bulkCreating, setBulkCreating] = useState(false);
   const [catalogProducts, setCatalogProducts] = useState([]);
   const [catalogProductsError, setCatalogProductsError] = useState("");
@@ -604,6 +621,29 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
       setActiveTab(tab);
     }
     setInventoryReturnActive(hasInventoryReturnContext());
+  }, []);
+
+  useEffect(() => {
+    if (purchaseRestoreRef.current) return;
+    purchaseRestoreRef.current = true;
+    const restored = consumePurchaseReturnContextIfArmed();
+    if (!restored) return;
+    const tab = String(restored.activeTab || "").trim();
+    if (
+      tab === "receive" ||
+      tab === "create" ||
+      tab === "triggers" ||
+      tab === "smart" ||
+      tab === "history" ||
+      tab === "suppliers" ||
+      tab === "reorder"
+    ) {
+      setActiveTab(tab);
+    }
+    if (restored.poSearch != null) setPoSearch(String(restored.poSearch || ""));
+    if (restored.poStatusFilter != null) setPoStatusFilter(String(restored.poStatusFilter || ""));
+    if (restored.poSortKey) setPoSortKey(String(restored.poSortKey || "date"));
+    if (restored.selectedPoId) setSelectedHistoryPoId(String(restored.selectedPoId || ""));
   }, []);
 
   const loadCatalogProducts = useCallback(async () => {
@@ -848,7 +888,7 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
   }, [loadCatalogProducts]);
 
   const filteredPurchaseOrders = useMemo(() => {
-    return purchaseOrders.filter((po) => {
+    const rows = purchaseOrders.filter((po) => {
       const matchesSearch =
         !poSearch ||
         String(po.poId || "").toLowerCase().includes(poSearch.toLowerCase()) ||
@@ -862,7 +902,72 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
 
       return matchesSearch && matchesStatus;
     });
-  }, [purchaseOrders, poSearch, poStatusFilter]);
+
+    const sorted = [...rows];
+    sorted.sort((a, b) => {
+      if (poSortKey === "status") {
+        return String(a.status || "").localeCompare(String(b.status || ""));
+      }
+      if (poSortKey === "product") {
+        return String(a.productName || a.productId || "").localeCompare(
+          String(b.productName || b.productId || "")
+        );
+      }
+      return String(b.poDate || "").localeCompare(String(a.poDate || ""));
+    });
+    return sorted;
+  }, [purchaseOrders, poSearch, poStatusFilter, poSortKey]);
+
+  const selectedHistoryPo = useMemo(
+    () => purchaseOrders.find((po) => poRowKey(po) === selectedHistoryPoId) || null,
+    [purchaseOrders, selectedHistoryPoId]
+  );
+
+  const selectedHistoryVisible = useMemo(
+    () => filteredPurchaseOrders.some((po) => poRowKey(po) === selectedHistoryPoId),
+    [filteredPurchaseOrders, selectedHistoryPoId]
+  );
+
+  const focusedPoOutsideFilters = useMemo(() => {
+    if (!selectedHistoryPoId || !selectedHistoryPo) return null;
+    if (selectedHistoryVisible) return null;
+    if (!poSearch && !poStatusFilter) return null;
+    return buildFocusedPoOutsideFiltersCopy({ poId: selectedHistoryPoId });
+  }, [selectedHistoryPoId, selectedHistoryPo, selectedHistoryVisible, poSearch, poStatusFilter]);
+
+  const contextStripParts = useMemo(() => {
+    const selectedPo = selectedHistoryPo || selectedPurchaseOrder;
+    return buildPurchaseContextParts({
+      activeTab,
+      selectedPoId: selectedPo?.poId || selectedHistoryPoId || "",
+      supplier: selectedPo?.supplier || "",
+      searchQuery: poSearch,
+      statusFilter: poStatusFilter,
+      sortLabel: activeTab === "history" ? purchaseSortLabel(poSortKey) : "",
+      freezeActive: procurementWriteBlocked,
+    });
+  }, [
+    activeTab,
+    selectedHistoryPo,
+    selectedPurchaseOrder,
+    selectedHistoryPoId,
+    poSearch,
+    poStatusFilter,
+    poSortKey,
+    procurementWriteBlocked,
+  ]);
+
+  const historyEmptyCopy = useMemo(
+    () =>
+      buildPurchaseListEmptyCopy({
+        purchaseOrderLength: purchaseOrders.length,
+        search: poSearch,
+        statusFilter: poStatusFilter,
+        readFailed: Boolean(errorMessage) && purchaseOrders.length === 0,
+        listKind: "history",
+      }),
+    [purchaseOrders.length, poSearch, poStatusFilter, errorMessage]
+  );
 
   const poStats = useMemo(() => {
     const receivedPos = purchaseOrders.filter(
@@ -891,6 +996,107 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
   const openPurchaseOrders = useMemo(
     () => purchaseOrders.filter((po) => canReceivePurchaseOrder(po)),
     [purchaseOrders]
+  );
+
+  const receiveEmptyCopy = useMemo(
+    () =>
+      buildPurchaseListEmptyCopy({
+        pendingReceiptLength: openPurchaseOrders.length,
+        listKind: "receive",
+      }),
+    [openPurchaseOrders.length]
+  );
+
+  const blockedTriggerCount = useMemo(
+    () => autoTriggers.filter((item) => item.hasOpenPo).length,
+    [autoTriggers]
+  );
+
+  const criticalTriggerCount = useMemo(
+    () =>
+      autoTriggers.filter((item) => String(item.urgency || "").toUpperCase() === "CRITICAL")
+        .length,
+    [autoTriggers]
+  );
+
+  const clearHistoryFilters = useCallback(() => {
+    setPoSearch("");
+    setPoStatusFilter("");
+  }, []);
+
+  const captureReturnContext = useCallback(() => {
+    writePurchaseReturnContext({
+      activeTab,
+      poSearch,
+      poStatusFilter,
+      poSortKey,
+      selectedPoId: selectedHistoryPoId || selectedPurchaseOrder?.poId || "",
+    });
+  }, [
+    activeTab,
+    poSearch,
+    poStatusFilter,
+    poSortKey,
+    selectedHistoryPoId,
+    selectedPurchaseOrder?.poId,
+  ]);
+
+  const navigateAway = useCallback(
+    (target, { tab } = {}) => {
+      captureReturnContext();
+      if (tab) {
+        persistHqNavContext({ page: target, tab });
+      } else {
+        persistHqNavContext({ page: target });
+      }
+      if (typeof setActivePage === "function") {
+        setActivePage(target);
+      }
+    },
+    [captureReturnContext, setActivePage]
+  );
+
+  const handleStartHereAction = useCallback(
+    (action) => {
+      if (!action) return;
+      if (action.kind === "tab" && action.tab) {
+        setActiveTab(action.tab);
+        return;
+      }
+      if (action.kind === "navigate" && action.target) {
+        navigateAway(action.target, action.tab ? { tab: action.tab } : {});
+      }
+    },
+    [navigateAway]
+  );
+
+  const handleEmptyAction = useCallback(
+    (action) => {
+      if (action === "retry" || action === "refresh") {
+        void refreshAll();
+        return;
+      }
+      if (action === "clear_search") {
+        setPoSearch("");
+        return;
+      }
+      if (action === "clear_filters") {
+        clearHistoryFilters();
+        return;
+      }
+      if (action === "open_create") {
+        setActiveTab("create");
+        return;
+      }
+      if (action === "open_history") {
+        setActiveTab("history");
+        return;
+      }
+      if (action === "open_triggers") {
+        setActiveTab("triggers");
+      }
+    },
+    [clearHistoryFilters, refreshAll]
   );
 
   const resolveCatalogProduct = (productId) =>
@@ -1516,6 +1722,9 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Purchase &amp; Reorder Operations</h1>
+          <p className="mt-1 text-sm text-slate-700" data-purchase-primary-question="true">
+            {PURCHASE_WORKSPACE_PRIMARY_QUESTION}
+          </p>
           <p className="mt-1 text-sm text-slate-500">
             Adjacent to Inventory — replenish, receive, and administer POs. Stock levels remain owned by
             Inventory.
@@ -1531,11 +1740,29 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={refreshAll}
+            onClick={() => void refreshAll()}
             className="rounded-xl border bg-white px-4 py-2 text-sm font-medium shadow-sm hover:bg-slate-50"
           >
-            Refresh Dashboard
+            Refresh
           </button>
+          {typeof setActivePage === "function" ? (
+            <>
+              <button
+                type="button"
+                onClick={() => navigateAway("inventory")}
+                className="rounded-xl border bg-white px-4 py-2 text-sm font-medium shadow-sm hover:bg-slate-50"
+              >
+                Open Inventory
+              </button>
+              <button
+                type="button"
+                onClick={() => navigateAway("orders")}
+                className="rounded-xl border bg-white px-4 py-2 text-sm font-medium shadow-sm hover:bg-slate-50"
+              >
+                Open Orders
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
 
@@ -1557,34 +1784,16 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <div className="text-xs text-slate-500">Total POs</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">All statuses · current tenant</div>
-          <div className="mt-1 text-2xl font-semibold">{poStats.total}</div>
-        </div>
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <div className="text-xs text-slate-500">Open POs</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">
-            Ordered or Partially Received with remaining qty · {currency(poStats.openValue)}
-          </div>
-          <div className="mt-1 text-2xl font-semibold">{poStats.open}</div>
-        </div>
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <div className="text-xs text-slate-500">Received</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">
-            Status = Received (lifetime) · {currency(poStats.receivedValue)}
-          </div>
-          <div className="mt-1 text-2xl font-semibold">{poStats.received}</div>
-        </div>
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <div className="text-xs text-slate-500">Total PO Value</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">
-            Sum of PO header total_cost · all statuses
-          </div>
-          <div className="mt-1 text-2xl font-semibold">{currency(poStats.totalValue)}</div>
-        </div>
-      </div>
+      <PurchaseContextStrip parts={contextStripParts} />
+
+      <PurchaseStartHere
+        pendingReceiptCount={openPurchaseOrders.length}
+        criticalCount={criticalTriggerCount}
+        blockedCount={blockedTriggerCount}
+        purchaseOrderCount={purchaseOrders.length}
+        loading={loading}
+        onAction={handleStartHereAction}
+      />
 
       <ProcurementWorkflowGuide />
 
@@ -2024,8 +2233,16 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
           </div>
 
           {openPurchaseOrders.length === 0 ? (
-            <div className="mb-4 rounded-xl border border-dashed p-4 text-sm text-slate-500">
-              No open purchase orders available for receipt.
+            <div className="mb-4 rounded-xl border border-dashed p-4 text-sm text-slate-600">
+              <p className="font-medium text-slate-800">{receiveEmptyCopy.title}</p>
+              <p className="mt-1 text-slate-500">{receiveEmptyCopy.message}</p>
+              <button
+                type="button"
+                className="mt-3 rounded-xl border bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50"
+                onClick={() => handleEmptyAction(receiveEmptyCopy.action)}
+              >
+                {receiveEmptyCopy.actionLabel}
+              </button>
             </div>
           ) : null}
 
@@ -2138,17 +2355,64 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
 
       {activeTab === "history" && (
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <input type="text" value={poSearch} onChange={(e) => setPoSearch(e.target.value)} placeholder="Search PO / product / supplier" className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring" />
-            <select value={poStatusFilter} onChange={(e) => setPoStatusFilter(e.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring">
-                <option value="">All Statuses</option>
-                <option value="Draft">Draft</option>
-                <option value="Ordered">Ordered</option>
-                <option value="Partially Received">Partially Received</option>
-                <option value="Received">Received</option>
-                <option value="Cancelled">Cancelled</option>
+          <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <input
+              type="text"
+              value={poSearch}
+              onChange={(e) => setPoSearch(e.target.value)}
+              placeholder="Search PO / product / supplier"
+              className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring"
+            />
+            <select
+              value={poStatusFilter}
+              onChange={(e) => setPoStatusFilter(e.target.value)}
+              className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring"
+            >
+              <option value="">All Statuses</option>
+              <option value="Draft">Draft</option>
+              <option value="Ordered">Ordered</option>
+              <option value="Partially Received">Partially Received</option>
+              <option value="Received">Received</option>
+              <option value="Cancelled">Cancelled</option>
+            </select>
+            <select
+              value={poSortKey}
+              onChange={(e) => setPoSortKey(e.target.value)}
+              className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring"
+              aria-label="Sort purchase orders"
+            >
+              <option value="date">Sort: Date</option>
+              <option value="status">Sort: Status</option>
+              <option value="product">Sort: Product</option>
             </select>
           </div>
+
+          {focusedPoOutsideFilters ? (
+            <div
+              className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950"
+              role="status"
+              data-purchase-focus-outside="true"
+            >
+              <p className="font-medium">{focusedPoOutsideFilters.title}</p>
+              <p className="mt-1 text-xs text-amber-900/80">{focusedPoOutsideFilters.message}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium"
+                  onClick={clearHistoryFilters}
+                >
+                  {focusedPoOutsideFilters.clearLabel}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium"
+                  onClick={clearHistoryFilters}
+                >
+                  {focusedPoOutsideFilters.returnLabel}
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           {historyMutationError ? (
             <ActionErrorSummary
@@ -2161,14 +2425,81 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
             />
           ) : null}
 
+          {selectedHistoryPo ? (
+            <div
+              className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50/60 p-4 text-sm"
+              data-purchase-selected-po="true"
+            >
+              <div className="font-medium text-indigo-950">Selected Purchase Order</div>
+              <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                <div>
+                  <div className="text-xs text-slate-500">PO ID</div>
+                  <div className="font-medium">{selectedHistoryPo.poId}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Product</div>
+                  <div className="font-medium">{selectedHistoryPo.productName || "-"}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Supplier</div>
+                  <div className="font-medium">{selectedHistoryPo.supplier || "-"}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Status</div>
+                  <div className="font-medium">{selectedHistoryPo.status || "-"}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Qty</div>
+                  <div className="font-medium">{selectedHistoryPo.quantity || 0}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Total</div>
+                  <div className="font-medium">{currency(selectedHistoryPo.totalCost || 0)}</div>
+                </div>
+              </div>
+              {!selectedHistoryVisible ? (
+                <p className="mt-2 text-xs text-amber-800">
+                  Selected PO is outside the current search/filters — use Clear Filters to reveal it.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="space-y-3">
             {filteredPurchaseOrders.length === 0 ? (
-              <div className="rounded-xl border border-dashed p-6 text-sm text-slate-500">
-                No purchase orders found.
+              <div className="rounded-xl border border-dashed p-6 text-sm text-slate-600">
+                <p className="font-medium text-slate-800">{historyEmptyCopy.title}</p>
+                <p className="mt-1 text-slate-500">{historyEmptyCopy.message}</p>
+                <button
+                  type="button"
+                  className="mt-3 rounded-xl border bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50"
+                  onClick={() => handleEmptyAction(historyEmptyCopy.action)}
+                >
+                  {historyEmptyCopy.actionLabel}
+                </button>
               </div>
             ) : (
-              filteredPurchaseOrders.map((po) => (
-                <div key={po.poId} className="rounded-2xl border p-4 shadow-sm">
+              filteredPurchaseOrders.map((po) => {
+                const isSelected = poRowKey(po) === selectedHistoryPoId;
+                return (
+                <div
+                  key={po.poId}
+                  role="button"
+                  tabIndex={0}
+                  aria-selected={isSelected}
+                  onClick={() =>
+                    setSelectedHistoryPoId((prev) => (prev === po.poId ? "" : po.poId))
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelectedHistoryPoId((prev) => (prev === po.poId ? "" : po.poId));
+                    }
+                  }}
+                  className={`rounded-2xl border p-4 shadow-sm ${
+                    isSelected ? "ring-2 ring-indigo-400 bg-indigo-50/40" : ""
+                  }`}
+                >
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -2189,7 +2520,7 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
                       </div>
                     </div>
 
-                    <div className="flex w-full flex-col gap-2 lg:w-auto lg:min-w-[12rem]">
+                    <div className="flex w-full flex-col gap-2 lg:w-auto lg:min-w-[12rem]" onClick={(e) => e.stopPropagation()}>
                       {canReceivePurchaseOrder(po) ? (
                         <button
                           type="button"
@@ -2224,7 +2555,8 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
                     </div>
                   </div>
                 </div>
-              ))
+              );
+              })
             )}
           </div>
         </div>
@@ -2276,6 +2608,43 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
           </div>
         </div>
       )}
+
+      <details
+        className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
+        data-purchase-summary-collapsed="true"
+      >
+        <summary className="cursor-pointer text-sm font-medium text-slate-800">
+          Purchase summary (secondary)
+        </summary>
+        <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="rounded-2xl border bg-white p-4 shadow-sm">
+            <div className="text-xs text-slate-500">Total POs</div>
+            <div className="mt-0.5 text-[11px] text-slate-400">All statuses · current tenant</div>
+            <div className="mt-1 text-2xl font-semibold">{poStats.total}</div>
+          </div>
+          <div className="rounded-2xl border bg-white p-4 shadow-sm">
+            <div className="text-xs text-slate-500">Open POs</div>
+            <div className="mt-0.5 text-[11px] text-slate-400">
+              Ordered or Partially Received with remaining qty · {currency(poStats.openValue)}
+            </div>
+            <div className="mt-1 text-2xl font-semibold">{poStats.open}</div>
+          </div>
+          <div className="rounded-2xl border bg-white p-4 shadow-sm">
+            <div className="text-xs text-slate-500">Received</div>
+            <div className="mt-0.5 text-[11px] text-slate-400">
+              Status = Received (lifetime) · {currency(poStats.receivedValue)}
+            </div>
+            <div className="mt-1 text-2xl font-semibold">{poStats.received}</div>
+          </div>
+          <div className="rounded-2xl border bg-white p-4 shadow-sm">
+            <div className="text-xs text-slate-500">Total PO Value</div>
+            <div className="mt-0.5 text-[11px] text-slate-400">
+              Sum of PO header total_cost · all statuses
+            </div>
+            <div className="mt-1 text-2xl font-semibold">{currency(poStats.totalValue)}</div>
+          </div>
+        </div>
+      </details>
 
       {editingPo ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

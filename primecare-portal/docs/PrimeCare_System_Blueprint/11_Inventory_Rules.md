@@ -212,12 +212,29 @@ Purchase Operations uses **visual workspace groups** (Replenishment · Receiving
 | Verify | `verify-purchase-action-feedback.mjs` |
 | Closes | **PUR-CERT-003** (Trust) |
 
+### Purchase Sprint 1B — Context & workflow continuity (2026-07-12 — UI only)
+
+**Scope:** Action-oriented Start Here, context strip, History selection, return context to Inventory/Orders, differentiated empty states, page budget (KPIs secondary).  
+**Not changed:** schema, APIs, RPCs, PURCHASE_IN, ledger, ORDER_OUT, reorder engines, Sprint 1A mutation behavior, permissions, RLS, queue hierarchy, Suppliers honesty, explainability.
+
+| Concern | Behavior |
+|---------|----------|
+| Start Here | Create Purchase Orders · Receive Pending Deliveries · Review Critical Reorders · Investigate Blocked Purchase Orders — existing counts only |
+| Context strip | View · Selected PO · Supplier · Search · Status · Sort · Writes frozen |
+| Selection | History `aria-selected` + Selected Purchase Order panel; outside-filter Clear Filters / Return to Purchase |
+| Return | `primecare_purchase_return_context`; Back to Purchase on Inventory / Orders; Inventory return preserved |
+| Empty states | No POs / search / filter / pending receipts / critical / read failure — one recovery each |
+| Page budget | Header → Strip → Start Here → queues → Selected PO; KPI summary collapsed secondary |
+| Verify | `verify-purchase-navigation-context.mjs` |
+| Closes | **PUR-CERT-002**, **PUR-CERT-004**; **PUR-CERT-013** partial |
+| Known verify blocker | `verify-procurement-inventory-flow.mjs` `@/` Node import — documented; not fixed in Sprint 1B |
+
 ### Purchase Sprint roadmap (UI/UX only — no schema/API/RPC/PURCHASE_IN/ledger/reorder-engine/RLS/permission changes)
 
 | Sprint | Focus | Closes (primary) |
 |--------|-------|------------------|
 | **1A** | Mutation feedback on Create / Update / Cancel / Bulk / Receive — **shipped** (UI only) | PUR-CERT-003 |
-| **1B** | **Action-oriented** Start Here + context continuity | PUR-CERT-002, 004, 013 |
+| **1B** | **Action-oriented** Start Here + context continuity — **shipped** (UI only) | PUR-CERT-002, 004, 013 |
 | **1C** | Queue hierarchy + Suppliers honesty | PUR-CERT-007, 009 |
 | **Closure** | QA pack + signed browser UAT | PUR-CERT-005, 012 |
 | **Future** | PUR-CERT-015 / 010 Trust & Explainability cards | Not Gold blocker |

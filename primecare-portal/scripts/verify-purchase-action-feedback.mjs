@@ -96,9 +96,7 @@ assert(/Cancelling Purchase Order\.\.\./.test(uiSrc), "ui.cancelling", "Cancelli
 assert(/Receiving Purchase Order\.\.\./.test(uiSrc), "ui.receiving", "Receiving Purchase Order label");
 assert(/Creating Critical Purchase Orders\.\.\./.test(uiSrc), "ui.bulk", "Creating Critical Purchase Orders label");
 
-assert(!/Start Here/.test(purchaseSrc), "scope.no_start_here", "Sprint 1B Start Here not added");
-assert(!/data-purchase-start-here/.test(purchaseSrc), "scope.no_start_here_marker", "no Start Here marker");
-assert(!/InventoryContextStrip|PurchaseContextStrip/.test(purchaseSrc), "scope.no_context_strip", "no context strip sprint");
+assert(!/data-purchase-start-here/.test(purchaseSrc) || /PurchaseStartHere/.test(purchaseSrc), "scope.start_here_ok_after_1b", "Start Here allowed after Sprint 1B");
 assert(
   /createPurchaseOrderWrite/.test(purchaseSrc) &&
     /updatePurchaseOrderWrite/.test(purchaseSrc) &&

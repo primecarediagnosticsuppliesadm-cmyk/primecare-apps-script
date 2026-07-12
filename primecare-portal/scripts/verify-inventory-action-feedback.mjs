@@ -66,7 +66,7 @@ assert(/Enabling SKU…/.test(uiSrc), "ui.enabling", "Enabling SKU label");
 assert(/Disabling SKU…/.test(uiSrc), "ui.disabling", "Disabling SKU label");
 
 assert(!/Start Here/.test(catalogSrc), "scope.no_start_here_catalog", "Sprint 1B Start Here not in catalog");
-assert(!/Start Here/.test(purchaseSrc), "scope.no_start_here_purchase", "Sprint 1B Start Here not in purchase");
+assert(/PurchaseStartHere|data-purchase-start-here/.test(purchaseSrc), "scope.purchase_start_here_1b", "Purchase Sprint 1B Start Here present");
 assert(!/adjustStock|transferStock|cycleCount/i.test(catalogSrc + purchaseSrc), "scope.no_new_workflows", "no Adjust/Transfer/Cycle Count workflows added");
 
 if (failures) {

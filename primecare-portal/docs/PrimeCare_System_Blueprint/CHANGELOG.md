@@ -4,6 +4,26 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-12 — Purchase context & workflow continuity (Sprint 1B)
+
+### Change
+
+- **UI/UX only** — Purchase action-oriented Start Here (existing pending/critical/blocked counts), context strip, History selection + outside-filter recovery, `primecare_purchase_return_context` with Back to Purchase on Inventory/Orders, differentiated empty states, KPI summary moved below operational work.
+- Sprint 1A mutation feedback unchanged.
+- No schema, API, RPC, PURCHASE_IN, ledger, ORDER_OUT, reorder engine, permission, or RLS changes.
+- Closes **PUR-CERT-002**, **PUR-CERT-004**; **PUR-CERT-013** partial. Does not begin Sprint 1C.
+- Documented known blocker: `verify-procurement-inventory-flow.mjs` fails under plain Node due to `@/` imports (not fixed in this sprint).
+
+### Verification
+
+- `node scripts/verify-purchase-navigation-context.mjs`
+- `node scripts/verify-purchase-action-feedback.mjs`
+- `node scripts/verify-rc1-procurement-lifecycle.mjs`
+- `node scripts/verify-no-finance-mutation.mjs`
+- `npm run build`
+
+---
+
 ## 2026-07-12 — Purchase action feedback (Sprint 1A)
 
 ### Change
