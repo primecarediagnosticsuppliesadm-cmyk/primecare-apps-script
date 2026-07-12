@@ -76,9 +76,7 @@ export default function HqOrdersOperationsQueue({
         </section>
       ) : null}
 
-      <p className="text-xs text-slate-500">
-        Click a queue bucket to filter and highlight matching orders.
-      </p>
+      <p className="text-xs text-slate-500">Queue buckets filter and highlight matching orders.</p>
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {queue.map((item) => {
           const Icon = QUEUE_ICONS[item.id] || Package;

@@ -4,6 +4,32 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-11 — HQ Orders workspace simplification (Sprint 1C)
+
+### Change
+
+- **Operational-first page budget** — header primary question; Start Here before portfolio KPIs.
+- **Collapsed secondary** — Order portfolio summary, order metadata, activity/notes.
+- **Detail hierarchy** — expected action + Status Actions elevated; empty-detail mini KPI grid removed.
+- **No module split** — single HQ Orders workspace (`data-orders-workspace="hq"`).
+
+### Not changed
+
+- Schema, APIs, RPCs, lifecycle, inventory, finance, permissions, RLS, queue calculations, routing.
+- Sprint 1A mutation feedback; Sprint 1B context strip / return path.
+
+### Verification
+
+- `node scripts/verify-orders-workspace-simplification.mjs`
+- `node scripts/verify-orders-navigation-context.mjs`
+- `node scripts/verify-orders-action-feedback.mjs`
+- `node scripts/verify-orders-admin-flow.mjs`
+- `node scripts/verify-order-payment-sync.mjs`
+- `node scripts/verify-transaction-integrity-rpcs.mjs`
+- `node scripts/verify-no-finance-mutation.mjs`
+
+---
+
 ## 2026-07-11 — HQ Orders context & workflow continuity (Sprint 1B)
 
 ### Change

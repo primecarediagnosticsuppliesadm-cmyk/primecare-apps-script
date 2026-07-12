@@ -148,11 +148,27 @@ UX-only orientation and return-path improvements. No route, lifecycle, SoT, or w
 
 ---
 
+## HQ Orders workspace simplification (Sprint 1C)
+
+Presentation-only page budget. **Does not** split Orders into persona workspaces. Queue math, routing, and write paths unchanged.
+
+| Rule | Detail |
+|------|--------|
+| **Primary question** | Header answers: *What order work needs my attention?* |
+| **Page budget** | Header → Context strip → Start Here → Search/filters + Order queue → Selected order → Expandable secondary |
+| **Collapsed** | Order portfolio KPI summary; order metadata (contact/phone); activity/notes |
+| **Operational-first detail** | Selected order + expected action + Status Actions expanded; invoice/payment/logistics/items remain available |
+| **No stacked dashboards** | Empty-detail mini KPI grid removed; portfolio KPIs not in first viewport |
+| **Sprint 1A–1B** | Mutation errors stay in Status Actions; context strip + Start Here + return path retained |
+
+---
+
 ## Verification
 
 - `verify-orders-admin-flow.mjs`
 - `verify-orders-action-feedback.mjs` (Sprint 1A UX gate)
 - `verify-orders-navigation-context.mjs` (Sprint 1B UX gate)
+- `verify-orders-workspace-simplification.mjs` (Sprint 1C UX gate)
 - `verify-transaction-integrity-rpcs.mjs`
 - `verify-lab-ordering-flow.mjs`
 - Compensation/payroll changes must additionally prove no order lifecycle mutation and no commission from order value.

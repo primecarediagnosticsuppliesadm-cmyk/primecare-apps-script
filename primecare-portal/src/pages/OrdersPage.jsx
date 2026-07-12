@@ -113,6 +113,11 @@ import {
   writeOrdersReturnContext,
 } from "@/orders/ordersWorkflowReturn.js";
 import OrdersContextStrip from "@/components/orders/OrdersContextStrip.jsx";
+import OrdersCollapsibleSection from "@/components/orders/OrdersCollapsibleSection.jsx";
+import {
+  getOrdersExpectedActionCopy,
+  ORDERS_WORKSPACE_PRIMARY_QUESTION,
+} from "@/orders/ordersWorkspaceUi.js";
 import { cn } from "@/lib/utils";
 import { isQaValidationLayerEnabled } from "@/config/qaValidation.js";
 
@@ -227,16 +232,15 @@ function canRecordOrderPayment(order, invoice, orderUx) {
 }
 
 function OrdersDetailEmptyState({
-  kpis,
-  loading,
   filteredOrders,
   onShowPending,
   onShowPendingPayment,
   onOpenFirst,
   activeQueueKey = "",
   queue = [],
+  kpis,
 }) {
-  const pending = kpis.placed + kpis.processing;
+  const pending = Number(kpis?.placed || 0) + Number(kpis?.processing || 0);
   const activeQueue = queue.find((q) => q.id === activeQueueKey);
   const suggestions = [];
 
@@ -246,69 +250,32 @@ function OrdersDetailEmptyState({
       action: onShowPending,
     });
   }
-  if (kpis.pendingPayment > 0) {
+  if (Number(kpis?.pendingPayment || 0) > 0) {
     suggestions.push({
       label: `Check ${kpis.pendingPayment} order${kpis.pendingPayment === 1 ? "" : "s"} with pending payment`,
       action: onShowPendingPayment,
     });
   }
-  if (kpis.cancelled > 0) {
-    suggestions.push({
-      label: `${kpis.cancelled} cancelled order${kpis.cancelled === 1 ? "" : "s"} on file — audit if disputes arise`,
-      action: () => onShowPending?.(),
-    });
-  }
   if (filteredOrders.length > 0) {
     suggestions.push({
-      label: `Open latest order: ${filteredOrders[0].orderId}`,
+      label: `Open next order: ${filteredOrders[0].orderId}`,
       action: () => onOpenFirst?.(filteredOrders[0].orderId),
     });
   }
   if (suggestions.length === 0) {
     suggestions.push({
-      label: "No orders in scope — adjust filters or wait for new placements",
+      label: "No orders need action in the current view — adjust filters or wait for new placements",
       action: null,
     });
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3" aria-label="Select an order to continue">
       <p className="text-sm text-slate-600">
         {activeQueue
-          ? `${activeQueue.label}: ${activeQueue.count} order${activeQueue.count === 1 ? "" : "s"} in this bucket. Select one from the list to review details.`
-          : "Select an order from the list to review lines, payment status, and fulfillment actions."}
+          ? `${activeQueue.label}: ${activeQueue.count} order${activeQueue.count === 1 ? "" : "s"} in this bucket. Select one from the queue to act.`
+          : "Select an order from the queue to review fulfillment actions, lines, and payment."}
       </p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Pending orders</p>
-          <p className="text-xl font-bold tabular-nums text-slate-900">{loading ? "—" : pending}</p>
-          <p className="text-[11px] text-slate-500">Placed + Processing</p>
-        </div>
-        <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-800">Pending payment</p>
-          <p className="text-xl font-bold tabular-nums text-amber-950">{loading ? "—" : kpis.pendingPayment}</p>
-          <p className="text-[11px] text-amber-800/80">Excludes cancelled</p>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Cancelled</p>
-          <p className="text-xl font-bold tabular-nums text-slate-900">{loading ? "—" : kpis.cancelled}</p>
-        </div>
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 px-3 py-2.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">Recently fulfilled</p>
-          <p className="text-xl font-bold tabular-nums text-emerald-950">
-            {loading
-              ? "—"
-              : (queue.find((q) => q.id === ORDER_QUEUE_KEYS.RECENTLY_FULFILLED)?.count ?? kpis.fulfilled)}
-          </p>
-          <p className="text-[11px] text-emerald-800/80">Last 14 days</p>
-        </div>
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 px-3 py-2.5 sm:col-span-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">Active order value</p>
-          <p className="text-lg font-bold tabular-nums text-emerald-950">
-            {loading ? "—" : formatCurrency(kpis.totalOrderValue)}
-          </p>
-        </div>
-      </div>
       <div>
         <p className="mb-2 text-xs font-semibold text-slate-700">Suggested next actions</p>
         <ul className="space-y-1.5">
@@ -1139,15 +1106,29 @@ export default function OrdersPage({
     ]
   );
 
+  const expectedAction = useMemo(
+    () =>
+      getOrdersExpectedActionCopy({
+        cancelled: Boolean(selectedOrderUx?.cancelled),
+        fulfilled: Boolean(selectedOrderUx?.fulfilled),
+        orderStatus: selectedOrderUx?.orderStatus || selectedOrderSummary?.orderStatus,
+      }),
+    [selectedOrderUx, selectedOrderSummary?.orderStatus]
+  );
+
   return (
-    <div className={embedded ? "space-y-4" : "space-y-5"}>
+    <div
+      className={embedded ? "space-y-3" : "space-y-3"}
+      data-orders-workspace="hq"
+      aria-label="Orders workspace"
+    >
       {!embedded ? (
         <PageHeader
           title="Orders"
           subtitle={
             distributorScope?.tenantId
               ? `Orders for ${distributorScope.tenantName || "selected distributor"} labs only.`
-              : "PrimeCare HQ orders — scan status, payment, and fulfillment at a glance."
+              : ORDERS_WORKSPACE_PRIMARY_QUESTION
           }
         />
       ) : null}
@@ -1214,42 +1195,30 @@ export default function OrdersPage({
         </div>
       ) : null}
 
-      <KpiCardGrid columns={4} className="lg:grid-cols-4 xl:grid-cols-7">
-        <KpiCard title="Total Orders" value={kpis.totalOrders} loading={loading} />
-        <KpiCard title="Placed" value={kpis.placed} loading={loading} />
-        <KpiCard title="Processing" value={kpis.processing} loading={loading} />
-        <KpiCard title="Fulfilled" value={kpis.fulfilled} loading={loading} />
-        <KpiCard title="Cancelled" value={kpis.cancelled} loading={loading} />
-        <KpiCard title="Pending Payment" value={kpis.pendingPayment} loading={loading} highlight={financialSyncPulse} />
-        <KpiCard
-          title="Active Order Value"
-          value={formatCurrency(kpis.totalOrderValue)}
-          subtitle="Excludes cancelled orders"
+      <section aria-label="Start here and order queues">
+        <HqOrdersOperationsQueue
+          orders={orders}
+          kpis={kpis}
+          activeQueueKey={activeQueueKey}
+          onSelectQueue={handleQueueSelect}
+          onReviewNextOrder={(orderId) => {
+            if (orderId) {
+              setFocusOrderId(str(orderId));
+              setFocusOutsideReason("");
+              void openOrder(str(orderId));
+            }
+          }}
           loading={loading}
         />
-      </KpiCardGrid>
+      </section>
 
-      <HqOrdersOperationsQueue
-        orders={orders}
-        kpis={kpis}
-        activeQueueKey={activeQueueKey}
-        onSelectQueue={handleQueueSelect}
-        onReviewNextOrder={(orderId) => {
-          if (orderId) {
-            setFocusOrderId(str(orderId));
-            setFocusOutsideReason("");
-            void openOrder(str(orderId));
-          }
-        }}
-        loading={loading}
-      />
-
-      <div className="grid gap-5 xl:grid-cols-[1.35fr_1fr]">
-        <Card className="rounded-2xl shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Orders</CardTitle>
+      <div className="grid gap-4 xl:grid-cols-[1.35fr_1fr]">
+        <Card className="rounded-2xl shadow-sm" aria-label="Order queue">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Order queue</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
+            <div className="space-y-2" aria-label="Search and filters">
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               <Input
                 placeholder="Search order ID, lab, status…"
@@ -1320,6 +1289,7 @@ export default function OrdersPage({
                   title="To date"
                 />
               </div>
+            </div>
             </div>
 
             <div className="text-xs text-slate-500">
@@ -1581,10 +1551,10 @@ export default function OrdersPage({
           </CardContent>
         </Card>
 
-        <Card className="rounded-2xl shadow-sm">
-          <CardHeader className="pb-3">
+        <Card className="rounded-2xl shadow-sm" aria-label="Selected order">
+          <CardHeader className="pb-2">
             <CardTitle className="text-base">
-              Order Details
+              Selected order
               {selectedOrder ? (
                 <span className="ml-2 font-mono text-sm font-semibold text-slate-700">
                   · {selectedOrder}
@@ -1596,7 +1566,6 @@ export default function OrdersPage({
             {!selectedOrder ? (
               <OrdersDetailEmptyState
                 kpis={kpis}
-                loading={loading}
                 filteredOrders={filteredOrders}
                 activeQueueKey={activeQueueKey}
                 queue={operationsQueue}
@@ -1610,11 +1579,8 @@ export default function OrdersPage({
                 Loading details…
               </div>
             ) : selectedOrderSummary ? (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                    Selected order
-                  </div>
                   <div className="font-mono text-sm font-semibold text-slate-900">
                     {selectedOrderSummary.orderId}
                   </div>
@@ -1639,8 +1605,26 @@ export default function OrdersPage({
                       {selectedOrderSummary.labName || selectedOrderSummary.labId}
                     </HqObjectLink>
                   </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <StatusBadge
+                      variant={orderStatusToVariant(
+                        normalizeOrderStatusLabel(selectedOrderSummary.orderStatus)
+                      )}
+                    >
+                      {normalizeOrderStatusLabel(selectedOrderSummary.orderStatus)}
+                    </StatusBadge>
+                    <StatusBadge
+                      variant={paymentStatusToVariant(selectedOrderUx?.paymentLabel)}
+                    >
+                      {selectedOrderUx?.paymentLabel}
+                    </StatusBadge>
+                  </div>
+                  <div className="mt-2 rounded-lg border border-indigo-100 bg-indigo-50/70 px-2.5 py-2 text-xs text-indigo-950">
+                    <p className="font-semibold">Expected: {expectedAction.action}</p>
+                    <p className="mt-0.5 text-indigo-900/80">{expectedAction.reason}</p>
+                  </div>
                   {setActivePage ? (
-                    <p className="mt-1 text-xs text-slate-600">
+                    <p className="mt-2 text-xs text-slate-600">
                       Assigned agent:{" "}
                       {selectedLabAgent.isAssigned ? (
                         <HqObjectLink
@@ -1661,7 +1645,7 @@ export default function OrdersPage({
                     </p>
                   ) : null}
                   {setActivePage ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    <div className="mt-2 flex flex-wrap gap-2">
                       <Button
                         type="button"
                         size="sm"
@@ -1692,21 +1676,120 @@ export default function OrdersPage({
                       ) : null}
                     </div>
                   ) : null}
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <StatusBadge
-                      variant={orderStatusToVariant(
-                        normalizeOrderStatusLabel(selectedOrderSummary.orderStatus)
-                      )}
-                    >
-                      {normalizeOrderStatusLabel(selectedOrderSummary.orderStatus)}
-                    </StatusBadge>
-                    <StatusBadge
-                      variant={paymentStatusToVariant(selectedOrderUx?.paymentLabel)}
-                    >
-                      {selectedOrderUx?.paymentLabel}
-                    </StatusBadge>
-                  </div>
                 </div>
+
+                <section className="space-y-2" aria-label="Status actions">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Status Actions
+                  </h3>
+                  {statusMutationError ? (
+                    <ActionErrorSummary
+                      title={statusMutationError.title}
+                      message={statusMutationError.message}
+                      fieldErrors={statusMutationError.fieldErrors}
+                      technicalReference={statusMutationError.rawErrorForLogging}
+                      onDismiss={() => setStatusMutationError(null)}
+                    />
+                  ) : null}
+                  <Textarea
+                    placeholder="Optional note for this status update…"
+                    value={statusNote}
+                    onChange={(e) => setStatusNote(e.target.value)}
+                    disabled={updatingStatus || hqStatusWriteBlocked || detailsLoading}
+                    className="min-h-[72px] rounded-lg text-sm"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={
+                        updatingStatus ||
+                        hqStatusWriteBlocked ||
+                        detailsLoading ||
+                        selectedOrderUx?.cancelled ||
+                        selectedOrderUx?.fulfilled
+                      }
+                      aria-busy={updatingStatus && pendingStatusAction === "Processing"}
+                      onClick={() => handleUpdateStatus("Processing")}
+                    >
+                      {updatingStatus && pendingStatusAction === "Processing" ? (
+                        <>
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          {getOrderStatusActionLoadingLabel("Processing")}
+                        </>
+                      ) : (
+                        "Mark Processing"
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={
+                        updatingStatus ||
+                        hqStatusWriteBlocked ||
+                        detailsLoading ||
+                        selectedOrderUx?.cancelled ||
+                        selectedOrderUx?.fulfilled
+                      }
+                      aria-busy={updatingStatus && pendingStatusAction === "Fulfilled"}
+                      onClick={() => handleUpdateStatus("Fulfilled")}
+                    >
+                      {updatingStatus && pendingStatusAction === "Fulfilled" ? (
+                        <>
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          {getOrderStatusActionLoadingLabel("Fulfilled")}
+                        </>
+                      ) : (
+                        "Mark Fulfilled"
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={
+                        updatingStatus ||
+                        hqStatusWriteBlocked ||
+                        detailsLoading ||
+                        selectedOrderUx?.cancelled ||
+                        selectedOrderUx?.fulfilled
+                      }
+                      aria-busy={updatingStatus && pendingStatusAction === "Placed"}
+                      onClick={() => handleUpdateStatus("Placed")}
+                    >
+                      {updatingStatus && pendingStatusAction === "Placed" ? (
+                        <>
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          {getOrderStatusActionLoadingLabel("Placed")}
+                        </>
+                      ) : (
+                        "Reset to Placed"
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-red-200 text-red-600 hover:bg-red-50"
+                      disabled={
+                        updatingStatus ||
+                        hqStatusWriteBlocked ||
+                        detailsLoading ||
+                        selectedOrderUx?.cancelled ||
+                        selectedOrderUx?.fulfilled
+                      }
+                      aria-busy={updatingStatus && pendingStatusAction === "Cancelled"}
+                      onClick={() => handleUpdateStatus("Cancelled")}
+                    >
+                      {updatingStatus && pendingStatusAction === "Cancelled" ? (
+                        <>
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          {getOrderStatusActionLoadingLabel("Cancelled")}
+                        </>
+                      ) : (
+                        "Cancel Order"
+                      )}
+                    </Button>
+                  </div>
+                </section>
 
                 <OrderAmountDetailBreakdown
                   order={selectedOrderSummary}
@@ -1740,10 +1823,7 @@ export default function OrdersPage({
                   </section>
                 ) : null}
 
-                <section className="space-y-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Order Summary
-                  </h3>
+                <OrdersCollapsibleSection title="Order metadata">
                   <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
                     <dt className="text-slate-500">Order Date</dt>
                     <dd className="text-slate-900">
@@ -1774,7 +1854,7 @@ export default function OrdersPage({
                       {formatMissingField(selectedOrderSummary.mobileNumber)}
                     </dd>
                   </dl>
-                </section>
+                </OrdersCollapsibleSection>
 
                 <section className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
@@ -1953,123 +2033,7 @@ export default function OrdersPage({
                   />
                 ) : null}
 
-                <section className="space-y-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Status Actions
-                  </h3>
-                  {statusMutationError ? (
-                    <ActionErrorSummary
-                      title={statusMutationError.title}
-                      message={statusMutationError.message}
-                      fieldErrors={statusMutationError.fieldErrors}
-                      technicalReference={statusMutationError.rawErrorForLogging}
-                      onDismiss={() => setStatusMutationError(null)}
-                    />
-                  ) : null}
-                  <Textarea
-                    placeholder="Optional note for this status update…"
-                    value={statusNote}
-                    onChange={(e) => setStatusNote(e.target.value)}
-                    disabled={updatingStatus || hqStatusWriteBlocked || detailsLoading}
-                    className="min-h-[72px] rounded-lg text-sm"
-                  />
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={
-                        updatingStatus ||
-                        hqStatusWriteBlocked ||
-                        detailsLoading ||
-                        selectedOrderUx?.cancelled ||
-                        selectedOrderUx?.fulfilled
-                      }
-                      aria-busy={updatingStatus && pendingStatusAction === "Processing"}
-                      onClick={() => handleUpdateStatus("Processing")}
-                    >
-                      {updatingStatus && pendingStatusAction === "Processing" ? (
-                        <>
-                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                          {getOrderStatusActionLoadingLabel("Processing")}
-                        </>
-                      ) : (
-                        "Mark Processing"
-                      )}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={
-                        updatingStatus ||
-                        hqStatusWriteBlocked ||
-                        detailsLoading ||
-                        selectedOrderUx?.cancelled ||
-                        selectedOrderUx?.fulfilled
-                      }
-                      aria-busy={updatingStatus && pendingStatusAction === "Fulfilled"}
-                      onClick={() => handleUpdateStatus("Fulfilled")}
-                    >
-                      {updatingStatus && pendingStatusAction === "Fulfilled" ? (
-                        <>
-                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                          {getOrderStatusActionLoadingLabel("Fulfilled")}
-                        </>
-                      ) : (
-                        "Mark Fulfilled"
-                      )}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={
-                        updatingStatus ||
-                        hqStatusWriteBlocked ||
-                        detailsLoading ||
-                        selectedOrderUx?.cancelled ||
-                        selectedOrderUx?.fulfilled
-                      }
-                      aria-busy={updatingStatus && pendingStatusAction === "Placed"}
-                      onClick={() => handleUpdateStatus("Placed")}
-                    >
-                      {updatingStatus && pendingStatusAction === "Placed" ? (
-                        <>
-                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                          {getOrderStatusActionLoadingLabel("Placed")}
-                        </>
-                      ) : (
-                        "Reset to Placed"
-                      )}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-red-200 text-red-600 hover:bg-red-50"
-                      disabled={
-                        updatingStatus ||
-                        hqStatusWriteBlocked ||
-                        detailsLoading ||
-                        selectedOrderUx?.cancelled ||
-                        selectedOrderUx?.fulfilled
-                      }
-                      aria-busy={updatingStatus && pendingStatusAction === "Cancelled"}
-                      onClick={() => handleUpdateStatus("Cancelled")}
-                    >
-                      {updatingStatus && pendingStatusAction === "Cancelled" ? (
-                        <>
-                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                          {getOrderStatusActionLoadingLabel("Cancelled")}
-                        </>
-                      ) : (
-                        "Cancel Order"
-                      )}
-                    </Button>
-                  </div>
-                </section>
-
-                <section className="space-y-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Activity / Notes
-                  </h3>
+                <OrdersCollapsibleSection title="Activity and notes">
                   {statusNote ? (
                     <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-950">
                       <div className="text-xs font-medium text-amber-800">Pending status note</div>
@@ -2085,15 +2049,15 @@ export default function OrdersPage({
                     <div className="text-sm text-slate-500">No order notes on file.</div>
                   )}
                   {formatDateTime(selectedOrderSummary.updatedAt) ? (
-                    <div className="text-xs text-slate-500">
+                    <div className="mt-2 text-xs text-slate-500">
                       Last updated: {formatDateTime(selectedOrderSummary.updatedAt)}
                     </div>
                   ) : selectedOrderSummary.createdAt ? (
-                    <div className="text-xs text-slate-500">
+                    <div className="mt-2 text-xs text-slate-500">
                       Created: {formatDateTime(selectedOrderSummary.createdAt)}
                     </div>
                   ) : null}
-                </section>
+                </OrdersCollapsibleSection>
               </div>
             ) : (
               <div className="text-sm text-slate-500">No details available for this order.</div>
@@ -2101,6 +2065,28 @@ export default function OrdersPage({
           </CardContent>
         </Card>
       </div>
+
+      <OrdersCollapsibleSection title="Order portfolio summary">
+        <KpiCardGrid columns={4} className="lg:grid-cols-4 xl:grid-cols-7">
+          <KpiCard title="Total Orders" value={kpis.totalOrders} loading={loading} />
+          <KpiCard title="Placed" value={kpis.placed} loading={loading} />
+          <KpiCard title="Processing" value={kpis.processing} loading={loading} />
+          <KpiCard title="Fulfilled" value={kpis.fulfilled} loading={loading} />
+          <KpiCard title="Cancelled" value={kpis.cancelled} loading={loading} />
+          <KpiCard
+            title="Pending Payment"
+            value={kpis.pendingPayment}
+            loading={loading}
+            highlight={financialSyncPulse}
+          />
+          <KpiCard
+            title="Active Order Value"
+            value={formatCurrency(kpis.totalOrderValue)}
+            subtitle="Excludes cancelled orders"
+            loading={loading}
+          />
+        </KpiCardGrid>
+      </OrdersCollapsibleSection>
 
       <InvoiceDetailsDrawer
         open={Boolean(invoiceDrawer)}
