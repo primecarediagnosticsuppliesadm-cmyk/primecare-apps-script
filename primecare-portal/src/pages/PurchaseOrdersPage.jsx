@@ -56,8 +56,16 @@ import {
   poRowKey,
   purchaseSortLabel,
 } from "@/purchase/purchaseContextUi.js";
+import {
+  PURCHASE_QUEUE_HIERARCHY,
+  PURCHASE_QUEUE_SECONDARY,
+  PURCHASE_SUPPLIERS_HONESTY,
+  getPurchaseExpectedActionCopy,
+  resolvePurchaseQueueId,
+} from "@/purchase/purchaseWorkspaceUi.js";
 import PurchaseStartHere from "@/components/purchase/PurchaseStartHere.jsx";
 import PurchaseContextStrip from "@/components/purchase/PurchaseContextStrip.jsx";
+import PurchaseCollapsibleSection from "@/components/purchase/PurchaseCollapsibleSection.jsx";
 
 const emptyCreateForm = {
   productId: "",
@@ -455,7 +463,7 @@ const PURCHASE_TAB_ORDER = [
   "suppliers",
 ];
 
-/** Visual grouping only (INV-CERT-001) — does not change routes, tabs, or write paths. */
+/** Legacy visual groups (INV-CERT-001) — superseded in Sprint 1C by PURCHASE_QUEUE_HIERARCHY presentation. */
 const PURCHASE_WORKSPACE_GROUPS = [
   {
     id: "replenishment",
@@ -479,23 +487,23 @@ const PURCHASE_WORKSPACE_GROUPS = [
 
 const PURCHASE_TAB_META = {
   triggers: {
-    label: "Forecast Suggestions",
-    shortDescription: "Velocity-based suggestions from Inventory Health (30-day ORDER_OUT).",
-    purposeSentence: "Review projected stockouts before purchasing — aligned with Inventory → Health urgency.",
-    nextStepLabel: "Reorder Candidates",
+    label: "Critical Reorders",
+    shortDescription: "Velocity-based Critical/High/Medium suggestions (Inventory Health).",
+    purposeSentence: "Review projected stockouts before purchasing — start with Critical.",
+    nextStepLabel: "Forecast Drafts",
     nextStepTab: "reorder",
   },
   reorder: {
-    label: "Reorder Candidates",
-    shortDescription: "Items below reorder level that may need purchase.",
-    purposeSentence: "Confirm SKUs below safe stock that need replenishment.",
+    label: "Forecast Drafts",
+    shortDescription: "Min-stock reorder candidates for draft POs.",
+    purposeSentence: "Confirm SKUs below safe stock that need a draft purchase order.",
     nextStepLabel: "Create PO",
     nextStepTab: "create",
   },
   smart: {
-    label: "Smart Reorder",
-    shortDescription: "System-suggested PO quantities.",
-    purposeSentence: "Use velocity-based quantities when basic reorder levels are not enough.",
+    label: "Smart quantities",
+    shortDescription: "System-suggested PO quantities (same Forecast Drafts queue).",
+    purposeSentence: "Use suggested quantities when basic reorder levels are not enough.",
     nextStepLabel: "Create PO",
     nextStepTab: "create",
   },
@@ -503,46 +511,39 @@ const PURCHASE_TAB_META = {
     label: "Create PO",
     shortDescription: "Create a purchase order for supplier stock.",
     purposeSentence: "Draft or submit a purchase order for supplier stock.",
-    nextStepLabel: "Receive Stock",
+    nextStepLabel: "Pending Receipts",
     nextStepTab: "receive",
   },
   receive: {
-    label: "Receive Stock",
+    label: "Pending Receipts",
     shortDescription: "Record goods received and increase inventory.",
     purposeSentence: "Record inbound goods against an open PO and update stock.",
-    nextStepLabel: "Purchase Orders",
+    nextStepLabel: "Purchase History",
     nextStepTab: "history",
   },
   history: {
-    label: "Purchase Orders",
+    label: "Purchase History",
     shortDescription: "Track open, received, and completed POs.",
     purposeSentence: "Track open, received, and completed purchase orders.",
-    nextStepLabel: "Receive Stock",
+    nextStepLabel: "Pending Receipts",
     nextStepTab: "receive",
   },
   suppliers: {
     label: "Suppliers",
-    shortDescription: "Manage supplier details.",
-    purposeSentence: "Review supplier activity and open PO history by vendor.",
+    shortDescription: "Year-1 reference only.",
+    purposeSentence: "Supplier management is planned for a future release.",
     nextStepLabel: "Create PO",
     nextStepTab: "create",
   },
 };
 
-function ProcurementWorkflowGuide() {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 sm:text-sm">
-      <span className="font-medium text-slate-700">Procurement: </span>
-      Forecast → Reorder → Create PO → Receive → Track
-    </div>
-  );
-}
+void PURCHASE_WORKSPACE_GROUPS;
 
 function ActiveStepSummary({ meta, onGoToTab }) {
   if (!meta) return null;
 
   return (
-    <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+    <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" data-purchase-queue-purpose="true">
       <div className="font-medium text-slate-900">{meta.label}</div>
       <p className="mt-0.5 text-slate-600">{meta.purposeSentence}</p>
       {meta.nextStepLabel && meta.nextStepTab && onGoToTab ? (
@@ -1733,7 +1734,7 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
             className="mt-2 text-xs font-medium text-slate-600"
             data-purchase-workspace-framing="true"
           >
-            Workspace groups: Replenishment · Receiving · Purchase administration
+            Purchase Queue: Critical Reorders · Forecast Drafts · Pending Receipts · Purchase History
           </p>
         </div>
 
@@ -1795,87 +1796,113 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
         onAction={handleStartHereAction}
       />
 
-      <ProcurementWorkflowGuide />
-
-      <div className="space-y-3" data-purchase-workspace-groups="true">
-        {PURCHASE_WORKSPACE_GROUPS.map((group) => (
-          <section
-            key={group.id}
-            className="rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5"
-            aria-label={`${group.title} — ${group.purpose}`}
-            data-purchase-group={group.id}
-          >
-            <div className="mb-2">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-700">
-                {group.title}
-              </h2>
-              <p className="text-[11px] text-slate-500">{group.purpose}</p>
-            </div>
-            <div className="flex gap-2 overflow-x-auto pb-0.5">
-              {group.tabs.map((tab) => {
-                const meta = PURCHASE_TAB_META[tab];
-                const isActive = activeTab === tab;
-                return (
-                  <button
-                    key={tab}
-                    type="button"
-                    onClick={() => setActiveTab(tab)}
-                    aria-current={isActive ? "page" : undefined}
-                    className={`flex shrink-0 flex-col items-start rounded-xl px-3 py-2 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 ${
-                      isActive
-                        ? "min-w-[9rem] bg-black text-white shadow-md ring-2 ring-black ring-offset-2"
-                        : "border bg-white text-slate-700 hover:bg-slate-50"
-                    }`}
-                  >
-                    <span className="font-medium leading-tight">{meta.label}</span>
-                    {isActive ? (
-                      <span className="mt-0.5 line-clamp-1 text-xs leading-snug text-slate-300">
-                        {meta.shortDescription}
-                      </span>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-        ))}
-      </div>
+      <section
+        className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
+        aria-label="Purchase Queue"
+        data-purchase-queue-hierarchy="true"
+        data-purchase-workspace="hq"
+      >
+        <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-700">
+              Purchase Queue
+            </h2>
+            <p className="text-[11px] text-slate-500">
+              Critical Reorders → Forecast Drafts → Pending Receipts → Purchase History
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-0.5" data-purchase-queue="true">
+          {PURCHASE_QUEUE_HIERARCHY.map((item) => {
+            const isActive = resolvePurchaseQueueId(activeTab) === item.id;
+            const count =
+              item.id === "critical"
+                ? criticalTriggerCount
+                : item.id === "forecast"
+                  ? reorderCandidates.length + smartReorder.length
+                  : item.id === "pending"
+                    ? openPurchaseOrders.length
+                    : purchaseOrders.length;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveTab(item.tab)}
+                aria-current={isActive ? "page" : undefined}
+                data-purchase-queue-item={item.id}
+                className={`flex shrink-0 flex-col items-start rounded-xl px-3 py-2 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 ${
+                  isActive
+                    ? "min-w-[9.5rem] bg-black text-white shadow-md ring-2 ring-black ring-offset-2"
+                    : "border bg-slate-50 text-slate-700 hover:bg-white"
+                }`}
+              >
+                <span className="font-medium leading-tight">{item.label}</span>
+                <span
+                  className={`mt-0.5 text-[11px] ${isActive ? "text-slate-300" : "text-slate-500"}`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1.5 border-t border-slate-100 pt-2">
+          {PURCHASE_QUEUE_SECONDARY.map((item) => {
+            const isActive = activeTab === item.tab;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveTab(item.tab)}
+                aria-current={isActive ? "page" : undefined}
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                  isActive
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
       <ActiveStepSummary meta={PURCHASE_TAB_META[activeTab]} onGoToTab={setActiveTab} />
 
       {activeTab === "triggers" && (
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border bg-white p-4 shadow-sm" data-purchase-queue-panel="critical">
           <p className="mb-3 text-xs text-slate-500">
-            Uses the same 30-day ORDER_OUT velocity and urgency thresholds as Inventory → Health:
-            Critical (at/below min stock), High (stockout within lead time + 7 days), Medium
-            (within 30 days). Reorder Candidates below still lists min-stock SKUs from{" "}
-            <code className="rounded bg-slate-100 px-1">v_reorder_candidates</code>.
+            Use Critical Reorders when urgency is Critical or High (same 30-day ORDER_OUT velocity rules as
+            Inventory → Health). Forecast Drafts below cover min-stock and smart quantities.
           </p>
           {autoTriggerSummary ? (
-            <div className="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-5">
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-slate-500">Critical</div>
-                <div className="text-xl font-semibold">{autoTriggerSummary.criticalCount || 0}</div>
-              </div>
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-slate-500">High</div>
-                <div className="text-xl font-semibold">{autoTriggerSummary.highCount || 0}</div>
-              </div>
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-slate-500">Medium</div>
-                <div className="text-xl font-semibold">{autoTriggerSummary.mediumCount || 0}</div>
-              </div>
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-slate-500">Blocked by Open PO</div>
-                <div className="text-xl font-semibold">{autoTriggerSummary.blockedByOpenPo || 0}</div>
-              </div>
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-slate-500">Estimated PO Value</div>
-                <div className="text-xl font-semibold">
-                  {currency(autoTriggerSummary.totalEstimatedCost || 0)}
+            <PurchaseCollapsibleSection title="Forecast attention counts" className="mb-3">
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+                <div className="rounded-xl border p-3">
+                  <div className="text-xs text-slate-500">Critical</div>
+                  <div className="text-xl font-semibold">{autoTriggerSummary.criticalCount || 0}</div>
+                </div>
+                <div className="rounded-xl border p-3">
+                  <div className="text-xs text-slate-500">High</div>
+                  <div className="text-xl font-semibold">{autoTriggerSummary.highCount || 0}</div>
+                </div>
+                <div className="rounded-xl border p-3">
+                  <div className="text-xs text-slate-500">Medium</div>
+                  <div className="text-xl font-semibold">{autoTriggerSummary.mediumCount || 0}</div>
+                </div>
+                <div className="rounded-xl border p-3">
+                  <div className="text-xs text-slate-500">Blocked by Open PO</div>
+                  <div className="text-xl font-semibold">{autoTriggerSummary.blockedByOpenPo || 0}</div>
+                </div>
+                <div className="rounded-xl border p-3">
+                  <div className="text-xs text-slate-500">Estimated PO Value</div>
+                  <div className="text-xl font-semibold">
+                    {currency(autoTriggerSummary.totalEstimatedCost || 0)}
+                  </div>
                 </div>
               </div>
-            </div>
+            </PurchaseCollapsibleSection>
           ) : null}
 
           {criticalActionableTriggers.length > 0 ? (
@@ -1992,8 +2019,39 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
         </div>
       )}
 
+      {(activeTab === "reorder" || activeTab === "smart") && (
+        <div className="mb-3 flex flex-wrap gap-2" data-purchase-forecast-subnav="true">
+          <button
+            type="button"
+            onClick={() => setActiveTab("reorder")}
+            className={`rounded-full border px-3 py-1 text-xs font-medium ${
+              activeTab === "reorder"
+                ? "border-slate-900 bg-slate-900 text-white"
+                : "border-slate-200 bg-white text-slate-700"
+            }`}
+          >
+            Min-stock candidates
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("smart")}
+            className={`rounded-full border px-3 py-1 text-xs font-medium ${
+              activeTab === "smart"
+                ? "border-slate-900 bg-slate-900 text-white"
+                : "border-slate-200 bg-white text-slate-700"
+            }`}
+          >
+            Smart quantities
+          </button>
+          <p className="w-full text-[11px] text-slate-500">
+            Forecast Drafts: use min-stock when thresholds matter; use smart quantities when suggested
+            order qty is available. Same Create PO path.
+          </p>
+        </div>
+      )}
+
       {activeTab === "reorder" && (
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border bg-white p-4 shadow-sm" data-purchase-queue-panel="forecast">
           <div className="space-y-3">
             {reorderCandidates.length === 0 ? (
               <div className="rounded-xl border border-dashed p-6 text-sm text-slate-500">
@@ -2037,14 +2095,16 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
       )}
 
       {activeTab === "smart" && (
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border bg-white p-4 shadow-sm" data-purchase-queue-panel="forecast-smart">
           {smartReorderSummary ? (
-            <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Critical</div><div className="text-xl font-semibold">{smartReorderSummary.criticalCount || 0}</div></div>
-              <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">High</div><div className="text-xl font-semibold">{smartReorderSummary.highUrgencyItems || 0}</div></div>
-              <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Medium</div><div className="text-xl font-semibold">{smartReorderSummary.mediumUrgencyItems || 0}</div></div>
-              <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Suggested Qty</div><div className="text-xl font-semibold">{smartReorderSummary.totalSuggestedOrderQty || 0}</div></div>
-            </div>
+            <PurchaseCollapsibleSection title="Smart quantity summary" className="mb-4">
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Critical</div><div className="text-xl font-semibold">{smartReorderSummary.criticalCount || 0}</div></div>
+                <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">High</div><div className="text-xl font-semibold">{smartReorderSummary.highUrgencyItems || 0}</div></div>
+                <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Medium</div><div className="text-xl font-semibold">{smartReorderSummary.mediumUrgencyItems || 0}</div></div>
+                <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Suggested Qty</div><div className="text-xl font-semibold">{smartReorderSummary.totalSuggestedOrderQty || 0}</div></div>
+              </div>
+            </PurchaseCollapsibleSection>
           ) : null}
 
           <div className="space-y-3">
@@ -2215,7 +2275,7 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
       )}
 
       {activeTab === "receive" && (
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border bg-white p-4 shadow-sm" data-purchase-queue-panel="pending">
           <div className="mb-4">
             <label className="mb-1 block text-sm font-medium">Open Purchase Order</label>
             <select
@@ -2354,7 +2414,7 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
       )}
 
       {activeTab === "history" && (
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border bg-white p-4 shadow-sm" data-purchase-queue-panel="history">
           <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
             <input
               type="text"
@@ -2431,6 +2491,28 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
               data-purchase-selected-po="true"
             >
               <div className="font-medium text-indigo-950">Selected Purchase Order</div>
+              {(() => {
+                const expected = getPurchaseExpectedActionCopy({
+                  status: selectedHistoryPo.status,
+                  remainingQty: Math.max(
+                    0,
+                    Number(selectedHistoryPo.quantity || 0) - Number(selectedHistoryPo.receivedQty || 0)
+                  ),
+                  receivedQty: selectedHistoryPo.receivedQty,
+                });
+                return (
+                  <div
+                    className="mt-2 rounded-lg border border-indigo-100 bg-white/80 px-3 py-2"
+                    data-purchase-expected-action="true"
+                  >
+                    <div className="text-xs font-semibold uppercase tracking-wide text-indigo-800">
+                      Expected action
+                    </div>
+                    <div className="mt-0.5 font-medium text-indigo-950">{expected.action}</div>
+                    <div className="mt-0.5 text-xs text-indigo-900/80">{expected.reason}</div>
+                  </div>
+                );
+              })()}
               <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                 <div>
                   <div className="text-xs text-slate-500">PO ID</div>
@@ -2457,6 +2539,26 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
                   <div className="font-medium">{currency(selectedHistoryPo.totalCost || 0)}</div>
                 </div>
               </div>
+              <PurchaseCollapsibleSection title="Advanced PO details" className="mt-3">
+                <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+                  <div>
+                    <div className="text-xs text-slate-500">Product ID</div>
+                    <div className="font-medium">{selectedHistoryPo.productId || "-"}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500">Unit Cost</div>
+                    <div className="font-medium">{currency(selectedHistoryPo.unitCost || 0)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500">Received Qty</div>
+                    <div className="font-medium">{selectedHistoryPo.receivedQty || 0}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500">PO Date</div>
+                    <div className="font-medium">{selectedHistoryPo.poDate || "-"}</div>
+                  </div>
+                </div>
+              </PurchaseCollapsibleSection>
               {!selectedHistoryVisible ? (
                 <p className="mt-2 text-xs text-amber-800">
                   Selected PO is outside the current search/filters — use Clear Filters to reveal it.
@@ -2563,49 +2665,23 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
       )}
 
       {activeTab === "suppliers" && (
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          {supplierSummary ? (
-            <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Total Suppliers</div><div className="text-xl font-semibold">{supplierSummary.totalSuppliers || 0}</div></div>
-              <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Active Suppliers</div><div className="text-xl font-semibold">{supplierSummary.activeSuppliers || 0}</div></div>
-              <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Suppliers With Open POs</div><div className="text-xl font-semibold">{supplierSummary.suppliersWithOpenPos || 0}</div></div>
-              <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Total PO Value</div><div className="text-xl font-semibold">{currency(supplierSummary.totalPoValue || 0)}</div></div>
-            </div>
-          ) : null}
-
-          <div className="space-y-3">
-            {supplierDashboard.length === 0 ? (
-              <div className="rounded-xl border border-dashed p-6 text-sm text-slate-500">
-                No supplier data found.
-              </div>
-            ) : (
-              supplierDashboard.map((supplier) => (
-                <div key={supplier.supplierName} className="rounded-2xl border p-4 shadow-sm">
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-base font-semibold">{supplier.supplierName}</h3>
-                        {supplier.openPOs > 0 ? (
-                          <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
-                            {supplier.openPOs} Open
-                          </span>
-                        ) : null}
-                      </div>
-
-                      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-                        <div><div className="text-xs text-slate-500">Total POs</div><div className="font-medium">{supplier.totalPOs}</div></div>
-                        <div><div className="text-xs text-slate-500">Received</div><div className="font-medium">{supplier.receivedPOs}</div></div>
-                        <div><div className="text-xs text-slate-500">Qty Ordered</div><div className="font-medium">{supplier.totalOrderedQty}</div></div>
-                        <div><div className="text-xs text-slate-500">Value</div><div className="font-medium">{currency(supplier.totalOrderedValue)}</div></div>
-                        <div><div className="text-xs text-slate-500">Avg Unit Cost</div><div className="font-medium">{currency(supplier.averageUnitCost)}</div></div>
-                        <div><div className="text-xs text-slate-500">Last PO Date</div><div className="font-medium">{supplier.lastPODate || "-"}</div></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+        <div
+          className="rounded-2xl border border-amber-200 bg-amber-50/50 p-4 shadow-sm"
+          data-purchase-suppliers-honesty="true"
+        >
+          <h3 className="text-sm font-semibold text-amber-950">{PURCHASE_SUPPLIERS_HONESTY.title}</h3>
+          <p className="mt-2 text-sm text-amber-900/90">{PURCHASE_SUPPLIERS_HONESTY.message}</p>
+          <p className="mt-3 text-xs text-amber-800">
+            This area currently provides reference information only. There are no supplier actions in
+            Year-1.
+          </p>
+          <button
+            type="button"
+            className="mt-4 rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-950 hover:bg-amber-50"
+            onClick={() => setActiveTab("create")}
+          >
+            Create Purchase Order
+          </button>
         </div>
       )}
 

@@ -4,6 +4,27 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-12 — Purchase workspace simplification (Sprint 1C)
+
+### Change
+
+- **UI/UX only** — Purchase operational-first page budget (primary question: What purchasing work should I do now?); single queue hierarchy (Critical Reorders → Forecast Drafts → Pending Receipts → Purchase History); collapsed KPIs/advanced details; Suppliers honesty surface; selected-PO expected action copy.
+- Sprint 1A mutation feedback and Sprint 1B Start Here / strip / return context unchanged.
+- No schema, API, RPC, PURCHASE_IN, ledger, ORDER_OUT, reorder engine, permission, or RLS changes.
+- Closes **PUR-CERT-007**, **PUR-CERT-009**. Silver (Operational Workspace) **Met**. Does not begin Certification Closure.
+- Documented known blocker: `verify-procurement-inventory-flow.mjs` fails under plain Node due to `@/` imports (not fixed in this sprint).
+
+### Verification
+
+- `node scripts/verify-purchase-workspace-simplification.mjs`
+- `node scripts/verify-purchase-navigation-context.mjs`
+- `node scripts/verify-purchase-action-feedback.mjs`
+- `node scripts/verify-rc1-procurement-lifecycle.mjs`
+- `node scripts/verify-no-finance-mutation.mjs`
+- `npm run build`
+
+---
+
 ## 2026-07-12 — Purchase context & workflow continuity (Sprint 1B)
 
 ### Change

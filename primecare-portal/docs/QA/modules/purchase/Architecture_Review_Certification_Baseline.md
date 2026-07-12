@@ -74,19 +74,18 @@ Purchase Operations currently **combines Replenishment, Receiving, and Purchase 
 | Tier | Definition | Purchase today |
 |------|------------|----------------|
 | **Bronze** | **Domain Integrity** | **Met** — PO SoT, receive → stock + PURCHASE_IN, lifecycle gates, freeze, integrity verifies |
-| **Silver** | **Operational Workspace** | **Not met** — needs action-oriented Start Here, trust feedback on all writes, context continuity, honest surfaces, queue clarity |
-| **Gold** | **Certified UX + Verification + Signed Browser UAT** | **Not met** — Silver + High Sprint defects closed + QA pack + signed browser UAT |
+| **Silver** | **Operational Workspace** | **Met** — Sprint 1A–1C (trust, Start Here, continuity, queue hierarchy, Suppliers honesty) |
+| **Gold** | **Certified UX + Verification + Signed Browser UAT** | **Not met** — Closure pack + signed browser UAT pending |
 
 | Lens | Verdict |
 |------|---------|
 | Bronze — Domain Integrity | **GO** |
-| Silver — Operational Workspace | **NO-GO** |
-| Gold — Certified UX + Verification + Signed Browser UAT | **NO-GO** |
-| Start Sprint 1A (UX-only) | **ALLOWED** (Founder-finalized baseline) |
-| Overall | **CONDITIONAL GO** for HQ procurement ops continuation; **NO-GO** for UX freeze |
+| Silver — Operational Workspace | **GO** (Sprint 1A–1C shipped) |
+| Gold — Certified UX + Verification + Signed Browser UAT | **NO-GO** — Closure not started |
+| Overall | **CONDITIONAL GO** for HQ procurement ops; **NO-GO** for UX freeze until Closure + signed UAT |
 
-**Primary Silver blockers (Sprint 1):** PUR-CERT-002 (no action-oriented Start Here), PUR-CERT-003 (write-action trust incomplete), PUR-CERT-004 (workflow context), PUR-CERT-007 (Suppliers dead surface), PUR-CERT-009 (overlapping replenishment queues).  
-**Gold gates:** PUR-CERT-005 (QA pack + signed browser UAT), PUR-CERT-012 (UX verifies).  
+**Silver Sprint 1 defects closed:** PUR-CERT-002, 003, 004, 007, 009 (013 partial).  
+**Gold gates:** PUR-CERT-005 (QA pack + signed browser UAT), PUR-CERT-012 (UX verifies / evidence).  
 **Not Sprint 1 blockers / not Gold blockers:** PUR-CERT-001 (operational complexity documented; engineering RC2), PUR-CERT-010 / **PUR-CERT-015** (Trust & Explainability Constitution recommendation cards), approvals, GAP-013 supplier master, exports, multi-line PO.
 
 ---
@@ -496,13 +495,13 @@ Each sprint: one workflow, independently releasable, functional parity preserved
 | **Closes** | PUR-CERT-002, PUR-CERT-004, PUR-CERT-013 (partial) |
 | **Verify** | `verify-purchase-navigation-context.mjs` |
 
-### Sprint 1C — Workspace simplification
+### Sprint 1C — Workspace simplification — **shipped** (2026-07-12)
 
 | | |
 |--|--|
-| **Touch** | Cognitive hierarchy within existing groups; queue guidance (“use Forecast when… / Reorder when…”); collapse competing KPIs; **Suppliers honesty** (hide or explicit unavailable) |
+| **Touch** | Single Purchase Queue hierarchy; Forecast Drafts sub-nav; collapse competing KPIs; Suppliers honesty; selected-PO expected action — **shipped** |
 | **Pattern** | Orders / Collections / Inventory 1C shells |
-| **Does not** | Engineering LOC file split (**RC2** — PUR-CERT-001); remove F01–F03 without waiver; PUR-CERT-015 cards |
+| **Does not** | Engineering LOC file split (**RC2** — PUR-CERT-001); remove F01–F03 without waiver; PUR-CERT-015 cards; Certification Closure |
 | **Closes** | PUR-CERT-007, PUR-CERT-009; PUR-CERT-006 partial |
 | **Verify** | `verify-purchase-workspace-simplification.mjs` |
 
@@ -603,9 +602,9 @@ Procurement inventory flow (`--mutate` in safe tenant) · RC1 lifecycle · Inven
 | Lens | Result |
 |------|--------|
 | **Bronze — Domain Integrity** | **GO** |
-| **Silver — Operational Workspace** | **NO-GO** — PUR-CERT-002, 003, 004, 007, 009 |
-| **Gold — Certified UX + Verification + Signed Browser UAT** | **NO-GO** |
-| Start Sprint 1A | **ALLOWED** (Founder-finalized; UX-only, parity-preserving) |
+| **Silver — Operational Workspace** | **GO** — Sprint 1A–1C (PUR-CERT-002, 003, 004, 007, 009) |
+| **Gold — Certified UX + Verification + Signed Browser UAT** | **NO-GO** — Closure not started |
+| Certification Closure | **NOT STARTED** (stop after Sprint 1C) |
 
 ### Bronze — Domain Integrity (met)
 
@@ -614,7 +613,7 @@ Procurement inventory flow (`--mutate` in safe tenant) · RC1 lifecycle · Inven
 - Automated integrity verifies available  
 - Freeze boundary  
 
-### Silver — Operational Workspace (not met)
+### Silver — Operational Workspace (met — Sprint 1A–1C)
 
 - **Action-oriented** Start Here (not stats-only)  
 - Primary actions obvious within &lt;5s  
@@ -635,11 +634,10 @@ Procurement inventory flow (`--mutate` in safe tenant) · RC1 lifecycle · Inven
 
 | Gate | Status |
 |------|--------|
-| Architecture review + Founder finalization | **YES** (this document) |
-| Application code changes | **BLOCKED** until Sprint 1A kickoff |
-| Schema / API / RLS / business rules | **BLOCKED** |
-| Sprint 1A | **ALLOWED** (UX-only, parity-preserving) |
+| Sprint 1A / 1B / 1C | **Shipped** (UI/UX only) |
+| Schema / API / RLS / business rules | **Unchanged** |
+| Certification Closure | **NOT STARTED** — do not begin until Founder authorizes |
 
 ---
 
-**STOP.** Architecture documentation only. No implementation. No code changes.
+**STOP.** Sprint 1C complete. Do not begin Certification Closure.

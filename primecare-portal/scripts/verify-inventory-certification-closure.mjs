@@ -53,8 +53,16 @@ assert(
   "no Adjust Stock workflow added"
 );
 
-assert(/PURCHASE_WORKSPACE_GROUPS/.test(purchaseSrc), "cert001.groups_defined", "Purchase workspace groups defined");
-assert(/data-purchase-workspace-groups/.test(purchaseSrc), "cert001.groups_wired", "Purchase groups rendered");
+assert(
+  /PURCHASE_WORKSPACE_GROUPS/.test(purchaseSrc) || /PURCHASE_QUEUE_HIERARCHY/.test(purchaseSrc),
+  "cert001.groups_defined",
+  "Purchase visual groups or queue hierarchy defined"
+);
+assert(
+  /data-purchase-workspace-groups/.test(purchaseSrc) || /data-purchase-queue-hierarchy/.test(purchaseSrc),
+  "cert001.groups_wired",
+  "Purchase groups or queue hierarchy rendered"
+);
 assert(/Replenishment/.test(purchaseSrc) && /Receiving/.test(purchaseSrc) && /Purchase administration/.test(purchaseSrc), "cert001.group_titles", "group titles present");
 assert(/receivePurchaseOrderWrite/.test(purchaseSrc), "cert001.receive_api", "receive write path unchanged");
 assert(/Back to Inventory/.test(purchaseSrc), "cert001.return_intact", "Sprint 1B Back to Inventory intact");

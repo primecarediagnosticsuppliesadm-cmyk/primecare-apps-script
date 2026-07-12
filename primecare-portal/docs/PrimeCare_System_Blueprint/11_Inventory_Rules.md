@@ -157,7 +157,7 @@ Procurement writes may be blocked when `VITE_HQ_PROCUREMENT_FROZEN` — inventor
 
 Inventory Overview · Stock Ledger · Inventory Health · Receiving · Reorder · Purchase Administration · Catalog Master · (ORDER_OUT via Orders)
 
-Purchase Operations uses **visual workspace groups** (Replenishment · Receiving · Purchase administration) for cognitive load (INV-CERT-001 Closure). **Dedicated Purchase module certification** is Founder-authorized as a **separate track** (baseline finalized 2026-07-12) — do not start it *from* Inventory Closure alone. Engineering file decomposition remains RC2 and is **not** a Purchase Sprint 1 blocker (PUR-CERT-001).
+Purchase Operations uses a **single operational queue hierarchy** (Critical Reorders → Forecast Drafts → Pending Receipts → Purchase History) for cognitive load (Purchase Sprint 1C; INV-CERT-001 Closure satisfied via hierarchy or legacy visual groups). **Dedicated Purchase module certification** is Founder-authorized as a **separate track** (baseline finalized 2026-07-12) — do not start it *from* Inventory Closure alone. Engineering file decomposition remains RC2 and is **not** a Purchase Sprint 1 blocker (PUR-CERT-001).
 
 ### Sprint roadmap (UI/UX only — no schema/API/ledger/ORDER_OUT/PURCHASE_IN/opening-stock/reorder-engine/RLS changes)
 
@@ -186,8 +186,8 @@ Purchase Operations uses **visual workspace groups** (Replenishment · Receiving
 | Tier | Definition | Purchase status |
 |------|------------|-----------------|
 | **Bronze** | Domain Integrity | **Met** (PO SoT + receive → PURCHASE_IN + integrity verifies) |
-| **Silver** | Operational Workspace | **Not met** |
-| **Gold** | Certified UX + Verification + Signed Browser UAT | **Not met** |
+| **Silver** | Operational Workspace | **Met** (Sprint 1A–1C UI/UX) |
+| **Gold** | Certified UX + Verification + Signed Browser UAT | **Not met** — Closure + signed browser UAT pending |
 
 ### Founder decisions (documentation only)
 
@@ -229,13 +229,30 @@ Purchase Operations uses **visual workspace groups** (Replenishment · Receiving
 | Closes | **PUR-CERT-002**, **PUR-CERT-004**; **PUR-CERT-013** partial |
 | Known verify blocker | `verify-procurement-inventory-flow.mjs` `@/` Node import — documented; not fixed in Sprint 1B |
 
+### Purchase Sprint 1C — Workspace simplification (2026-07-12 — UI only)
+
+**Scope:** Operational-first page budget; single Purchase Queue hierarchy; collapse KPIs / advanced details; Suppliers honesty; selected-PO expected action.  
+**Not changed:** schema, APIs, RPCs, PURCHASE_IN, ledger, ORDER_OUT, reorder engines, receiving eligibility, Sprint 1A mutation behavior, Sprint 1B return/Start Here/strip, permissions, RLS, explainability.
+
+| Concern | Behavior |
+|---------|----------|
+| Primary question | What purchasing work should I do now? |
+| Page budget | Header → Context Strip → Start Here → Purchase Queue → Selected PO → Expandable details |
+| Queue hierarchy | Critical Reorders → Forecast Drafts (reorder/smart sub-nav) → Pending Receipts → Purchase History; Create/Suppliers secondary |
+| Collapse | Forecast/Smart/portfolio KPIs; advanced PO / audit details |
+| Suppliers | Honesty copy only — no fake KPI dashboard or empty interactive controls |
+| Discoverability | Selected PO + expected action (status / remaining qty only) |
+| Verify | `verify-purchase-workspace-simplification.mjs` |
+| Closes | **PUR-CERT-007**, **PUR-CERT-009** |
+| Known verify blocker | `verify-procurement-inventory-flow.mjs` `@/` Node import — documented; not fixed in Sprint 1C |
+
 ### Purchase Sprint roadmap (UI/UX only — no schema/API/RPC/PURCHASE_IN/ledger/reorder-engine/RLS/permission changes)
 
 | Sprint | Focus | Closes (primary) |
 |--------|-------|------------------|
 | **1A** | Mutation feedback on Create / Update / Cancel / Bulk / Receive — **shipped** (UI only) | PUR-CERT-003 |
 | **1B** | **Action-oriented** Start Here + context continuity — **shipped** (UI only) | PUR-CERT-002, 004, 013 |
-| **1C** | Queue hierarchy + Suppliers honesty | PUR-CERT-007, 009 |
+| **1C** | Queue hierarchy + Suppliers honesty — **shipped** (UI only) | PUR-CERT-007, 009 |
 | **Closure** | QA pack + signed browser UAT | PUR-CERT-005, 012 |
 | **Future** | PUR-CERT-015 / 010 Trust & Explainability cards | Not Gold blocker |
 | **RC2** | PUR-CERT-001 engineering split; exports; multi-line; orphan forecast page | Deferred |

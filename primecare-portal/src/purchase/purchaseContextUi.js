@@ -225,4 +225,4 @@ export function poRowKey(po = {}) {
 }
 
 export const PURCHASE_WORKSPACE_PRIMARY_QUESTION =
-  "What purchasing work needs my attention today?";
+  "What purchasing work should I do now?";
