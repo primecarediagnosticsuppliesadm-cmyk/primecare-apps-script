@@ -490,7 +490,11 @@ Each sprint: one workflow, independently releasable, functional parity preserved
 
 | | |
 |--|--|
-| **1B** | **Action-oriented** Start Here + context continuity — **shipped** (UI only) | PUR-CERT-002, 004, 013 (partial) |
+| **Touch** | **Action-oriented Start Here** + context strip + History selection + return paths + empty states + page budget — **shipped** |
+| **Example actions** | **Create Purchase Orders** · **Receive Pending Deliveries** · **Review Critical Reorders** · **Investigate Blocked Purchase Orders** |
+| **Does not** | Stats-only Start Here; invent Approvals; PUR-CERT-001 / 015 |
+| **Closes** | PUR-CERT-002, PUR-CERT-004, PUR-CERT-013 (partial) |
+| **Verify** | `verify-purchase-navigation-context.mjs` |
 
 ### Sprint 1C — Workspace simplification
 
