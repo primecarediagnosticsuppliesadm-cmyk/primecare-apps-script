@@ -4,6 +4,30 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-11 — Employee Directory interaction feedback (Sprint 1C)
+
+### Change
+
+- Debounced search (300ms) with search-aware empty states.
+- Stronger selected-row styling; bulk bar only when rows selected.
+- Directory refresh with inline errors, scroll preservation, filter/search retention.
+- Export CSV: progress label, success toast, inline failure.
+- Quick View: retry on error, focus returns to originating row on close.
+- Open Workspace: immediate loading state.
+
+### Not changed
+
+- Employee Workspace architecture, APIs, schema, RLS, permissions.
+- Compensation Assignments, Payroll, Navigation, Budgeting.
+
+### Verification
+
+- `node scripts/verify-employee-directory-interaction-feedback.mjs`
+- `node scripts/verify-people-operations-enterprise-ux.mjs`
+- `node scripts/verify-no-finance-mutation.mjs`
+
+---
+
 ## 2026-07-11 — Payroll workflow action feedback (Sprint 1B)
 
 ### Change

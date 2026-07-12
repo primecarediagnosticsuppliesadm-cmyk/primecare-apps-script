@@ -114,6 +114,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-compensation-plan-action-feedback.mjs | Drawer create flow, local mutation errors, duplicate constraint mapping, page budget, no inline wizard, no raw PG copy | Compensation Plans UX |
 | verify-compensation-assignment-action-feedback.mjs | Assignment drawer/dialog local errors, end confirmation, loading labels, no global banner for assign/change/end | Compensation Assignments UX (Sprint 1A) |
 | verify-payroll-workflow-action-feedback.mjs | Payroll toolbar/modal local errors, confirm modals, loading labels, modal closes on success only, no global banner | Payroll Workflow UX (Sprint 1B) |
+| verify-employee-directory-interaction-feedback.mjs | Directory debounced search, selection styling, bulk/export/refresh feedback, quick view retry/focus return | Employee Directory UX (Sprint 1C) |
 | verify-compensation-plan-versioning.mjs | Active plan edit creates new version; draft in-place edit; assignment preservation | Phase 5A versioning |
 | verify-compensation-plan-assignment.mjs | Plan Assignments tab, change/end assignment, history preserved, no delete | Phase 5A assignments |
 | verify-compensation-simulator.mjs | Preview-only simulator outputs; no persistence | Phase 5A simulator |

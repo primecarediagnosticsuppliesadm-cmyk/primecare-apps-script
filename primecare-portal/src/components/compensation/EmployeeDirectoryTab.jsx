@@ -1,7 +1,15 @@
-import React, { useMemo, useState, useCallback, useEffect } from "react";
+import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { Download, UserPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { EmptyState, EnterpriseDataTable, KpiCard, KpiCardGrid, StatusBadge, RoleChip } from "@/components/ux";
+import {
+  EmptyState,
+  EnterpriseDataTable,
+  KpiCard,
+  KpiCardGrid,
+  StatusBadge,
+  RoleChip,
+} from "@/components/ux";
+import ActionErrorSummary from "@/components/ux/ActionErrorSummary.jsx";
 import PeopleOpsFilterBar from "@/components/peopleOps/PeopleOpsFilterBar.jsx";
 import PeopleOpsActionMenu from "@/components/peopleOps/PeopleOpsActionMenu.jsx";
 import PeopleOpsTableToolbar, { usePeopleOpsTableDensity } from "@/components/peopleOps/PeopleOpsTableToolbar.jsx";
@@ -14,7 +22,10 @@ import PeopleOpsTableShell, {
 import { PEOPLE_OPS_PAYROLL_STATUS_VARIANT } from "@/components/peopleOps/peopleOpsStatusTokens.js";
 import { buildEmployeeDirectoryStats } from "@/peopleOps/peopleOpsEnterpriseModel.js";
 import { COMPENSATION_EMPLOYEE_PROFILE_ROLES } from "@/compensation/enterpriseCompensationRoles.js";
+import { mapEmployeeDirectoryActionError } from "@/peopleOps/mapEmployeeDirectoryActionError.js";
 import { cn } from "@/lib/utils";
+
+const SEARCH_DEBOUNCE_MS = 300;
 
 const ASSIGNMENT_VARIANT = {
   active: "success",
@@ -45,6 +56,7 @@ function employeeAvatarClass(role) {
 }
 
 function exportEmployeesCsv(rows = []) {
+  if (!rows.length) throw new Error("export_requires_rows");
   const header = ["Employee", "Role", "Department", "Plan", "Assignment Status", "Payroll Status", "Updated"];
   const lines = rows.map((row) =>
     [
@@ -83,6 +95,11 @@ export default function EmployeeDirectoryTab({
   onClearFilters,
   onBulkAssignPlan,
   onBulkChangePlan,
+  onRefresh,
+  refreshing = false,
+  onExportSuccess,
+  focusProfileId = "",
+  onFocusProfileHandled,
   permissions,
 }) {
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -90,6 +107,39 @@ export default function EmployeeDirectoryTab({
   const [density, setDensity] = usePeopleOpsTableDensity("compact");
   const [visibleColumns, setVisibleColumns] = useState(() => DIRECTORY_COLUMNS.map((col) => col.id));
   const [savedFilters, setSavedFilters] = useState([]);
+  const [localSearch, setLocalSearch] = useState(search);
+  const [debouncedSearch, setDebouncedSearch] = useState(search);
+  const [directoryError, setDirectoryError] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const scrollContainerRef = useRef(null);
+  const searchDebounceRef = useRef(null);
+
+  useEffect(() => {
+    setLocalSearch(search);
+    setDebouncedSearch(search);
+  }, [search]);
+
+  useEffect(() => {
+    if (searchDebounceRef.current) window.clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = window.setTimeout(() => {
+      setDebouncedSearch(localSearch);
+      onSearchChange?.(localSearch);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      if (searchDebounceRef.current) window.clearTimeout(searchDebounceRef.current);
+    };
+  }, [localSearch, onSearchChange]);
+
+  useEffect(() => {
+    if (!focusProfileId) return;
+    const row = scrollContainerRef.current?.querySelector(`[data-employee-row="${focusProfileId}"]`);
+    if (row) {
+      row.focus();
+      row.scrollIntoView({ block: "nearest" });
+    }
+    onFocusProfileHandled?.();
+  }, [focusProfileId, onFocusProfileHandled]);
 
   const planOptions = useMemo(() => {
     const codes = [...new Set(employees.map((row) => row.planCode).filter(Boolean))].sort();
@@ -97,7 +147,7 @@ export default function EmployeeDirectoryTab({
   }, [employees]);
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = debouncedSearch.trim().toLowerCase();
     return employees.filter((row) => {
       if (roleFilter !== "all" && row.role !== roleFilter) return false;
       if (planFilter !== "all" && row.planCode !== planFilter) return false;
@@ -110,10 +160,15 @@ export default function EmployeeDirectoryTab({
         String(row.department || "").toLowerCase().includes(q)
       );
     });
-  }, [employees, roleFilter, planFilter, assignmentFilter, search]);
+  }, [employees, roleFilter, planFilter, assignmentFilter, debouncedSearch]);
 
   useEffect(() => {
     setFocusedIndex(-1);
+    setSelectedIds((prev) => {
+      const visible = new Set(filtered.map((row) => row.profileUserId));
+      const next = new Set([...prev].filter((id) => visible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
   }, [filtered]);
 
   const handleTableKeyDown = useCallback(
@@ -139,6 +194,11 @@ export default function EmployeeDirectoryTab({
     [filtered, selectedIds]
   );
   const allVisibleSelected = filtered.length > 0 && filtered.every((row) => selectedIds.has(row.profileUserId));
+  const hasActiveFilters =
+    Boolean(debouncedSearch.trim()) ||
+    roleFilter !== "all" ||
+    planFilter !== "all" ||
+    assignmentFilter !== "all";
 
   const toggleAll = () => {
     if (allVisibleSelected) {
@@ -157,6 +217,58 @@ export default function EmployeeDirectoryTab({
     });
   };
 
+  const handleRefresh = async () => {
+    if (!onRefresh) return;
+    const scrollTop = scrollContainerRef.current?.scrollTop ?? 0;
+    setDirectoryError(null);
+    const result = await onRefresh();
+    if (scrollContainerRef.current) scrollContainerRef.current.scrollTop = scrollTop;
+    if (result?.success === false && result?.error) {
+      setDirectoryError(result.error);
+      return;
+    }
+    if (result?.success) setDirectoryError(null);
+  };
+
+  const handleExport = async (rows) => {
+    if (!rows.length || exporting) return;
+    setDirectoryError(null);
+    setExporting(true);
+    try {
+      exportEmployeesCsv(rows);
+      onExportSuccess?.(rows.length);
+    } catch (err) {
+      setDirectoryError(
+        mapEmployeeDirectoryActionError({ message: err?.message }, { action: "export" })
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const runBulkAction = async (rows, handler) => {
+    if (!handler || bulkBusy) return;
+    setBulkBusy(true);
+    setDirectoryError(null);
+    try {
+      handler(rows);
+    } finally {
+      window.setTimeout(() => setBulkBusy(false), 400);
+    }
+  };
+
+  const emptyTitle = employees.length
+    ? debouncedSearch.trim()
+      ? `No employees match "${debouncedSearch.trim()}"`
+      : "No employees match your filters"
+    : "No employees assigned yet.";
+
+  const emptyDescription = employees.length
+    ? debouncedSearch.trim()
+      ? "Try a different search term or clear filters to see more employees."
+      : "Try clearing filters or broadening your search."
+    : "Employees appear after they are provisioned in Operations Center. Then Assign Compensation Plans →";
+
   return (
     <div className="space-y-2">
       <KpiCardGrid columns={3} dense>
@@ -169,9 +281,20 @@ export default function EmployeeDirectoryTab({
         <KpiCard dense title="Admins" value={String(stats.admins)} subtitle="Admin profiles" icon={Users} />
       </KpiCardGrid>
 
+      {directoryError ? (
+        <ActionErrorSummary
+          title={directoryError.title}
+          message={directoryError.message}
+          fieldErrors={directoryError.fieldErrors}
+          actions={directoryError.suggestedActions}
+          technicalReference={directoryError.rawErrorForLogging}
+          onDismiss={() => setDirectoryError(null)}
+        />
+      ) : null}
+
       <PeopleOpsFilterBar
-        search={search}
-        onSearchChange={onSearchChange}
+        search={localSearch}
+        onSearchChange={setLocalSearch}
         searchPlaceholder="Search employee, role, department, or plan"
         filters={[
           {
@@ -209,9 +332,13 @@ export default function EmployeeDirectoryTab({
         ]}
         resultCount={filtered.length}
         totalCount={employees.length}
+        onRefresh={onRefresh ? () => void handleRefresh() : undefined}
+        refreshing={refreshing}
         onClear={
           onClearFilters ||
           (() => {
+            setLocalSearch("");
+            setDebouncedSearch("");
             onSearchChange?.("");
             onRoleFilterChange?.("all");
             onPlanFilterChange?.("all");
@@ -233,6 +360,7 @@ export default function EmployeeDirectoryTab({
           onRoleFilterChange?.(preset.roleFilter || "all");
           onPlanFilterChange?.(preset.planFilter || "all");
           onAssignmentFilterChange?.(preset.assignmentFilter || "all");
+          setLocalSearch(preset.search || "");
           onSearchChange?.(preset.search || "");
         }}
         onSaveFilter={() => {
@@ -242,25 +370,27 @@ export default function EmployeeDirectoryTab({
             roleFilter,
             planFilter,
             assignmentFilter,
-            search,
+            search: debouncedSearch,
           };
           setSavedFilters((prev) => [...prev.slice(-4), preset]);
         }}
       />
 
       {selectedRows.length ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
-          <span className="text-sm font-medium text-foreground">{selectedRows.length} selected</span>
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--pc-brand-primary)]/30 bg-[var(--pc-brand-primary)]/5 px-3 py-2 shadow-sm">
+          <span className="text-sm font-semibold text-foreground">
+            {selectedRows.length} selected
+          </span>
           {permissions?.canAssignPlan ? (
             <Button
               type="button"
               size="sm"
               variant="outline"
-              disabled={selectedRows.length > 1}
+              disabled={bulkBusy || selectedRows.length > 1}
               title={selectedRows.length > 1 ? "Assign one employee at a time" : undefined}
-              onClick={() => onBulkAssignPlan?.(selectedRows)}
+              onClick={() => void runBulkAction(selectedRows, onBulkAssignPlan)}
             >
-              Assign Plan
+              {bulkBusy ? "Opening…" : "Assign Plan"}
             </Button>
           ) : null}
           {permissions?.canChangePlan ? (
@@ -268,35 +398,40 @@ export default function EmployeeDirectoryTab({
               type="button"
               size="sm"
               variant="outline"
-              disabled={selectedRows.length > 1}
+              disabled={bulkBusy || selectedRows.length > 1}
               title={selectedRows.length > 1 ? "Change one employee at a time" : undefined}
-              onClick={() => onBulkChangePlan?.(selectedRows)}
+              onClick={() => void runBulkAction(selectedRows, onBulkChangePlan)}
             >
-              Change Plan
+              {bulkBusy ? "Opening…" : "Change Plan"}
             </Button>
           ) : null}
-          <Button type="button" size="sm" variant="outline" onClick={() => exportEmployeesCsv(selectedRows)}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={exporting || bulkBusy}
+            onClick={() => void handleExport(selectedRows)}
+            aria-busy={exporting}
+          >
             <Download className="mr-1 h-4 w-4" />
-            Export
+            {exporting ? "Exporting…" : "Export"}
           </Button>
         </div>
       ) : null}
 
       <EnterpriseDataTable
         hasRows={filtered.length > 0}
-        emptyTitle={employees.length ? "No employees match your filters" : "No employees assigned yet."}
-        emptyDescription={
-          employees.length
-            ? "Try clearing filters or broadening your search."
-            : "Employees appear after they are provisioned in Operations Center. Then Assign Compensation Plans →"
-        }
+        emptyTitle={emptyTitle}
+        emptyDescription={emptyDescription}
         emptyAction={
-          employees.length ? (
+          employees.length && hasActiveFilters ? (
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={() => {
+                setLocalSearch("");
+                setDebouncedSearch("");
                 onSearchChange?.("");
                 onRoleFilterChange?.("all");
                 onPlanFilterChange?.("all");
@@ -308,7 +443,13 @@ export default function EmployeeDirectoryTab({
           ) : null
         }
         desktop={
-          <div tabIndex={0} onKeyDown={handleTableKeyDown} aria-label="Employee directory table" className="outline-none focus-visible:ring-2 focus-visible:ring-[var(--pc-brand-primary)] rounded-xl">
+          <div
+            ref={scrollContainerRef}
+            tabIndex={0}
+            onKeyDown={handleTableKeyDown}
+            aria-label="Employee directory table"
+            className="max-h-[min(70vh,720px)] overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-[var(--pc-brand-primary)] rounded-xl"
+          >
           <PeopleOpsTableShell>
             <PeopleOpsTableHead>
               <tr>
@@ -331,16 +472,24 @@ export default function EmployeeDirectoryTab({
               </tr>
             </PeopleOpsTableHead>
             <PeopleOpsTableBody>
-              {filtered.map((employee, index) => (
+              {filtered.map((employee, index) => {
+                const isSelected = selectedIds.has(employee.profileUserId);
+                const isFocused = focusedIndex === index;
+                return (
                 <PeopleOpsTableRow
                   key={employee.profileUserId}
-                  className={cn(focusedIndex === index && "bg-muted/60 ring-1 ring-inset ring-[var(--pc-brand-primary)]/30")}
+                  data-employee-row={employee.profileUserId}
+                  tabIndex={-1}
+                  className={cn(
+                    isSelected && "bg-[var(--pc-brand-primary)]/10 ring-2 ring-inset ring-[var(--pc-brand-primary)]/50",
+                    !isSelected && isFocused && "bg-muted/60 ring-1 ring-inset ring-[var(--pc-brand-primary)]/30"
+                  )}
                   onClick={() => onOpenEmployee?.(employee)}
                 >
                   <PeopleOpsTableCell onClick={(event) => event.stopPropagation()}>
                     <input
                       type="checkbox"
-                      checked={selectedIds.has(employee.profileUserId)}
+                      checked={isSelected}
                       onChange={() => toggleRow(employee.profileUserId)}
                       aria-label={`Select ${employee.employeeName}`}
                       className="h-4 w-4 rounded border-border"
@@ -391,7 +540,8 @@ export default function EmployeeDirectoryTab({
                     />
                   </PeopleOpsTableCell>
                 </PeopleOpsTableRow>
-              ))}
+              );
+              })}
             </PeopleOpsTableBody>
           </PeopleOpsTableShell>
           </div>
@@ -402,7 +552,12 @@ export default function EmployeeDirectoryTab({
               <button
                 key={employee.profileUserId}
                 type="button"
-                className="w-full rounded-xl border border-border bg-card p-4 text-left"
+                className={cn(
+                  "w-full rounded-xl border bg-card p-4 text-left",
+                  selectedIds.has(employee.profileUserId)
+                    ? "border-[var(--pc-brand-primary)]/50 ring-2 ring-[var(--pc-brand-primary)]/30"
+                    : "border-border"
+                )}
                 onClick={() => onOpenEmployee?.(employee)}
               >
                 <div className="flex items-start justify-between gap-2">

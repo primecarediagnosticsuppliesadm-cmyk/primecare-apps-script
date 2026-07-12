@@ -28,11 +28,12 @@ export function PeopleOpsTableBody({ children, className, ...props }) {
   );
 }
 
-export function PeopleOpsTableRow({ children, className, onClick }) {
+export function PeopleOpsTableRow({ children, className, onClick, ...props }) {
   return (
     <tr
       className={cn("transition-colors hover:bg-muted/40", onClick && "cursor-pointer", className)}
       onClick={onClick}
+      {...props}
     >
       {children}
     </tr>

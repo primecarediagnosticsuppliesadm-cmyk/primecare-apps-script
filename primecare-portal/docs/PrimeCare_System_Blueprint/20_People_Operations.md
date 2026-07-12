@@ -356,6 +356,21 @@ Phase 8.2 is **UI/UX only**. No schema, API, RLS, payroll engine, compensation e
 
 Directory filter/search state lives on the page shell (`employeeSearch`, role/plan/assignment filters) so it survives workspace navigation and back.
 
+#### Directory interaction feedback (Sprint 1C)
+
+| Action | Feedback |
+|--------|----------|
+| Search | Debounced (300ms); page state preserved on refresh/back |
+| Refresh | Inline `ActionErrorSummary`; scroll position preserved |
+| Export CSV | "Exporting…" label + success toast + inline error |
+| Bulk assign/change | Busy guard; routes unchanged |
+| Quick View | Loading skeleton, retry on error, ESC close, focus returns to row |
+| Open Workspace | Immediate loading state; filters preserved on back |
+
+Mapper: `mapEmployeeDirectoryActionError.js`
+
+Verification: `verify-employee-directory-interaction-feedback.mjs`
+
 ---
 
 ## Employee Workspace (canonical employee experience)

@@ -99,6 +99,7 @@ import {
 } from "@/compensation/mapCompensationPlanMutationError.js";
 import { mapCompensationAssignmentMutationError } from "@/compensation/mapCompensationAssignmentMutationError.js";
 import { mapPayrollWorkflowMutationError } from "@/payroll/mapPayrollWorkflowMutationError.js";
+import { mapEmployeeDirectoryActionError } from "@/peopleOps/mapEmployeeDirectoryActionError.js";
 import { employeeCompensation360Permissions } from "@/compensation/employeeCompensation360Workflow.js";
 import { PAYROLL_UI_ACTION_IDS } from "@/payroll/payrollWorkflowUi.js";
 import { buildExecutiveCompensationModel } from "@/compensation/executiveCompensationModel.js";
@@ -145,6 +146,8 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
   const [employeePlanFilter, setEmployeePlanFilter] = useState("all");
   const [employeeAssignmentFilter, setEmployeeAssignmentFilter] = useState("all");
   const [employeeSearch, setEmployeeSearch] = useState("");
+  const [directoryRefreshing, setDirectoryRefreshing] = useState(false);
+  const [directoryFocusProfileId, setDirectoryFocusProfileId] = useState("");
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState("");
   const [ownershipPayload, setOwnershipPayload] = useState(null);
@@ -167,11 +170,13 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
   } = useWorkforcePlanningState();
 
   const closeEmployeeQuickView = useCallback(() => {
+    const returnProfileId = selectedEmployeeProfileId;
     setEmployee360ViewMode(null);
     setSelectedEmployeeProfileId("");
     setEmployee360Model(null);
     setEmployee360Error("");
-  }, []);
+    if (returnProfileId) setDirectoryFocusProfileId(returnProfileId);
+  }, [selectedEmployeeProfileId]);
 
   const closeEmployeeWorkspace = useCallback(() => {
     setSelectedEmployeeProfileId("");
@@ -307,6 +312,31 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
       setError(err?.message || "Could not load employee directory");
     }
   }, [employee360Permissions, currentUser]);
+
+  const refreshEmployeeDirectory = useCallback(async () => {
+    if (!employee360Permissions.canView360) {
+      return { success: false, error: mapEmployeeDirectoryActionError({ message: "forbidden" }) };
+    }
+    try {
+      setDirectoryRefreshing(true);
+      const result = await loadEmployeeCompensationDirectoryRead({ currentUser });
+      if (!result.success) {
+        return {
+          success: false,
+          error: mapEmployeeDirectoryActionError({ message: result.error }, { action: "refresh" }),
+        };
+      }
+      setEmployeeDirectory(result.data?.employees || []);
+      return { success: true };
+    } catch (err) {
+      return {
+        success: false,
+        error: mapEmployeeDirectoryActionError({ message: err?.message }, { action: "refresh" }),
+      };
+    } finally {
+      setDirectoryRefreshing(false);
+    }
+  }, [currentUser, employee360Permissions.canView360]);
 
   const loadEmployee360 = useCallback(
     async ({ profileUserId, agentId } = {}) => {
@@ -1198,6 +1228,8 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
     (employee = {}) => {
       const profileUserId = String(employee.profileUserId || employee.profile_user_id || "").trim();
       const agentId = String(employee.agentId || employee.agent_id || "").trim();
+      setEmployee360Loading(true);
+      setEmployee360Error("");
       setEmployee360ViewMode("workspace");
       navigatePeopleOps({ moduleId: "employees", screenId: "workspace" });
       if (profileUserId) {
@@ -1224,6 +1256,8 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
     (employee = {}) => {
       const profileUserId = String(employee.profileUserId || employee.profile_user_id || "").trim();
       if (!profileUserId) return;
+      setEmployee360Loading(true);
+      setEmployee360Error("");
       setSelectedEmployeeProfileId(profileUserId);
       setEmployee360ViewMode("quick");
       const row = employeeList.find((item) => item.profileUserId === profileUserId) || employee;
@@ -1739,6 +1773,13 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
             permissions={employee360Permissions}
             onBulkAssignPlan={(rows) => openDirectoryAssignmentWorkflow(rows, "assign")}
             onBulkChangePlan={(rows) => openDirectoryAssignmentWorkflow(rows, "change")}
+            onRefresh={refreshEmployeeDirectory}
+            refreshing={directoryRefreshing}
+            onExportSuccess={(count) =>
+              showToast("success", `Exported ${count} employee${count === 1 ? "" : "s"} to CSV.`)
+            }
+            focusProfileId={directoryFocusProfileId}
+            onFocusProfileHandled={() => setDirectoryFocusProfileId("")}
           />
         </PeopleOpsModuleFrame>
       ) : null}
@@ -1812,6 +1853,11 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         reportingContext={model?.reportingContext}
         loading={employee360Loading}
         error={employee360Error}
+        onRetry={
+          selectedEmployeeProfileId
+            ? () => loadEmployee360({ profileUserId: selectedEmployeeProfileId })
+            : undefined
+        }
         onAction={handleEmployee360Action}
       />
 

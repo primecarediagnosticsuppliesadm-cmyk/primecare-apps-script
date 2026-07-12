@@ -20,6 +20,7 @@ export default function EmployeeCompensation360Drawer({
   reportingContext = null,
   loading = false,
   error = "",
+  onRetry,
   onAction,
 }) {
   useEffect(() => {
@@ -64,7 +65,7 @@ export default function EmployeeCompensation360Drawer({
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {loading ? <ListSkeleton rows={6} /> : null}
-          {error ? <DataFetchError message={error} onRetry={null} /> : null}
+          {error ? <DataFetchError message={error} onRetry={onRetry} retrying={loading} /> : null}
           {!loading && !error && model ? (
             <Employee360Workspace
               mode="compact"
