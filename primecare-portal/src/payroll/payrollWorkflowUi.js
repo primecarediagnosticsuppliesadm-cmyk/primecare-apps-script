@@ -105,3 +105,39 @@ export function payrollWorkflowConfirmMessage(actionId, periodYm) {
       return `Continue with this payroll workflow action for ${period}?`;
   }
 }
+
+export function payrollWorkflowConfirmTitle(actionId) {
+  switch (actionId) {
+    case PAYROLL_UI_ACTION_IDS.SUBMIT:
+      return "Submit Payroll Preview";
+    case PAYROLL_UI_ACTION_IDS.APPROVE:
+      return "Approve Payroll";
+    case PAYROLL_UI_ACTION_IDS.LOCK:
+      return "Lock Payroll";
+    case PAYROLL_UI_ACTION_IDS.EXPORT:
+      return "Generate Payroll Export";
+    default:
+      return "Confirm Payroll Action";
+  }
+}
+
+export function payrollWorkflowActionLoadingLabel(actionId) {
+  switch (actionId) {
+    case PAYROLL_UI_ACTION_IDS.GENERATE_PREVIEW:
+      return "Generating payroll preview…";
+    case PAYROLL_UI_ACTION_IDS.SUBMIT:
+      return "Submitting preview…";
+    case PAYROLL_UI_ACTION_IDS.APPROVE:
+      return "Approving payroll…";
+    case PAYROLL_UI_ACTION_IDS.REJECT:
+      return "Rejecting payroll…";
+    case PAYROLL_UI_ACTION_IDS.LOCK:
+      return "Locking payroll…";
+    case PAYROLL_UI_ACTION_IDS.EXPORT:
+      return "Exporting payroll…";
+    case PAYROLL_UI_ACTION_IDS.MARK_PAID:
+      return "Marking payroll paid…";
+    default:
+      return "Processing…";
+  }
+}

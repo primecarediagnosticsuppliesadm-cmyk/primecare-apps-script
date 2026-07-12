@@ -4,6 +4,30 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-11 — Payroll workflow action feedback (Sprint 1B)
+
+### Change
+
+- **Payroll workflow** mutation errors appear inside `PayrollWorkflowToolbar` or workflow modals via `ActionErrorSummary` — not global page banner.
+- **Confirm modals** replace `window.confirm` for submit, approve, lock, and export.
+- Workflow/reject/paid modals **close only on `success === true`**.
+- **Loading labels** on all workflow actions (generate, approve, lock, export, mark paid, reject, submit).
+- Mapper: `mapPayrollWorkflowMutationError.js`.
+
+### Not changed
+
+- Schema, APIs (write semantics), RLS, permissions, payroll calculations, business rules.
+- Compensation Assignments (Sprint 1A), Directory, Budgeting, Navigation.
+
+### Verification
+
+- `node scripts/verify-payroll-workflow-action-feedback.mjs`
+- `node scripts/verify-payroll-rbac.mjs`
+- `node scripts/verify-no-payroll-mutation.mjs`
+- `node scripts/verify-no-finance-mutation.mjs`
+
+---
+
 ## 2026-07-11 — Compensation Assignments action feedback (Sprint 1A)
 
 ### Change

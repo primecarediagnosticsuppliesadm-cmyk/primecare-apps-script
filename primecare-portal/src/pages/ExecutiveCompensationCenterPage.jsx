@@ -98,6 +98,7 @@ import {
   mapCompensationPlanMutationError,
 } from "@/compensation/mapCompensationPlanMutationError.js";
 import { mapCompensationAssignmentMutationError } from "@/compensation/mapCompensationAssignmentMutationError.js";
+import { mapPayrollWorkflowMutationError } from "@/payroll/mapPayrollWorkflowMutationError.js";
 import { employeeCompensation360Permissions } from "@/compensation/employeeCompensation360Workflow.js";
 import { PAYROLL_UI_ACTION_IDS } from "@/payroll/payrollWorkflowUi.js";
 import { buildExecutiveCompensationModel } from "@/compensation/executiveCompensationModel.js";
@@ -970,16 +971,19 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
 
   const handlePayrollWorkflowAction = async (periodRow, actionId, payload = {}) => {
     if (!periodRow?.runId && actionId !== PAYROLL_UI_ACTION_IDS.GENERATE_PREVIEW) {
-      setError("Generate a payroll preview before running workflow actions.");
-      return;
+      return {
+        success: false,
+        error: mapPayrollWorkflowMutationError(
+          { message: "payroll_preview_required" },
+          { actionId }
+        ),
+      };
     }
     if (actionId === PAYROLL_UI_ACTION_IDS.GENERATE_PREVIEW) {
-      await handleGeneratePreview(periodRow);
-      return;
+      return handleGeneratePreview(periodRow);
     }
     try {
       setWorkflowBusy(true);
-      setError("");
       const base = {
         ...workflowActorOptions,
         payrollRunId: periodRow.runId,
@@ -993,7 +997,15 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
             ...base,
             reason: payload.reason || "preview_ready_for_submission",
           });
-          if (!previewResult.success) throw new Error(previewResult.error || "Preview transition failed");
+          if (!previewResult.success) {
+            return {
+              success: false,
+              error: mapPayrollWorkflowMutationError(
+                { message: previewResult.error },
+                { actionId }
+              ),
+            };
+          }
         }
         result = await submitPayrollRunWrite({
           ...base,
@@ -1028,9 +1040,20 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
           reason: payload.reason || "payroll_paid_evidence_recorded",
         });
       } else {
-        throw new Error(`Unsupported payroll workflow action: ${actionId}`);
+        return {
+          success: false,
+          error: mapPayrollWorkflowMutationError(
+            { message: `Unsupported payroll workflow action: ${actionId}` },
+            { actionId }
+          ),
+        };
       }
-      if (!result?.success) throw new Error(result?.error || "Payroll workflow action failed");
+      if (!result?.success) {
+        return {
+          success: false,
+          error: mapPayrollWorkflowMutationError({ message: result.error }, { actionId }),
+        };
+      }
       await load({ refresh: true });
       setSelectedPeriodId(periodRow.periodId);
       setSelectedRunId(result.data?.payrollRunId || periodRow.runId || "");
@@ -1038,8 +1061,15 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         "success",
         `${periodRow.periodYm}: ${result.data?.fromStatus || periodRow.status} → ${result.data?.toStatus || result.data?.status || "updated"}`
       );
+      return { success: true, data: result.data };
     } catch (err) {
-      setError(err?.message || "Payroll workflow action failed");
+      return {
+        success: false,
+        error: mapPayrollWorkflowMutationError(
+          { message: err?.message, errorCode: err?.code },
+          { actionId }
+        ),
+      };
     } finally {
       setWorkflowBusy(false);
     }
@@ -1061,7 +1091,6 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
   const handleGeneratePreview = async (periodRow) => {
     try {
       setGeneratingPeriodId(periodRow.periodId);
-      setError("");
       const result = await generatePayrollPreview({
         currentUser,
         tenantId: currentUser?.tenantId || currentUser?.tenant_id,
@@ -1070,7 +1099,13 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         actorUserId: currentUser?.id || currentUser?.userId || null,
       });
       if (!result.success) {
-        throw new Error(result.error || "Payroll preview generation failed");
+        return {
+          success: false,
+          error: mapPayrollWorkflowMutationError(
+            { message: result.error },
+            { actionId: PAYROLL_UI_ACTION_IDS.GENERATE_PREVIEW }
+          ),
+        };
       }
       await load({ refresh: true });
       setSelectedPeriodId(periodRow.periodId);
@@ -1080,8 +1115,15 @@ export default function PeopleOperationsPage({ currentUser = null, setActivePage
         `Generated draft preview for ${periodRow.periodYm}: ${result.data?.payrollRunLineCount || 0} employee lines, commission ${result.data?.totals?.commission_amount ?? 0}, net ${result.data?.totals?.net_payable ?? 0}.`
       );
       navigatePeopleOps({ moduleId: "payroll", screenId: "run-review" });
+      return { success: true, data: result.data };
     } catch (err) {
-      setError(err?.message || "Could not generate payroll preview");
+      return {
+        success: false,
+        error: mapPayrollWorkflowMutationError(
+          { message: err?.message, errorCode: err?.code },
+          { actionId: PAYROLL_UI_ACTION_IDS.GENERATE_PREVIEW }
+        ),
+      };
     } finally {
       setGeneratingPeriodId("");
     }
