@@ -637,8 +637,34 @@ Verification: `verify-compensation-plan-action-feedback.mjs`, `verify-compensati
 | Surface | Rule |
 |---------|------|
 | **Summary cards** | Plans, Assignments, Active, Inactive, Draft counts (assignments context) |
-| **Row actions** | Overflow menu — View, Edit, Duplicate, Deactivate, History |
+| **Row actions** | Assign, Change Plan, End Assignment, View — table actions on assignments screen |
 | **Assigned count** | Clickable — navigates to Assignments filtered by plan |
+
+#### Assignment write workflow (Sprint 1A)
+
+| Action | Surface | Write path |
+|--------|---------|------------|
+| Assign | `CompensationActionDrawer` (assign) | `assignEmployeeToPlan` |
+| Change plan | `CompensationActionDrawer` (change) | `changeEmployeePlanAssignment` |
+| End assignment | `CompensationEndAssignmentDialog` (confirm) | `endEmployeePlanAssignment` |
+
+Mutation errors **must appear inside the action surface** (`ActionErrorSummary` in drawer or end dialog).
+
+Handlers return structured results:
+
+```js
+{ success: true } | { success: false, error: MappedAssignmentMutationError }
+```
+
+Success UI (drawer/dialog close, toast, table refresh) runs **only when `success === true`**.
+
+End assignment requires explicit confirmation before calling `endEmployeePlanAssignment`.
+
+Submit buttons show processing labels (`Assigning plan…`, `Saving change…`, `Ending assignment…`) while async.
+
+Mapper: `mapCompensationAssignmentMutationError.js` — business copy for active assignment, role mismatch, not found, forbidden.
+
+Verification: `verify-compensation-assignment-action-feedback.mjs`, `verify-compensation-plan-assignment.mjs`.
 
 ### Payroll module
 

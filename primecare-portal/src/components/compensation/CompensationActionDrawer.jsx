@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { RoleChip } from "@/components/ux";
+import ActionErrorSummary from "@/components/ux/ActionErrorSummary.jsx";
 import {
   COMPENSATION_ACTION_MODES,
   buildPlanPreview,
@@ -54,8 +55,10 @@ export default function CompensationActionDrawer({
   selectableEmployees = [],
   promotionEligibilityRows = [],
   payrollCycleLabel = "—",
+  mutationError = null,
   onSubmit,
   onCancel,
+  onDismissError,
 }) {
   const panelRef = useRef(null);
   const copy = COMPENSATION_ACTION_MODES[mode] || COMPENSATION_ACTION_MODES.assign;
@@ -176,6 +179,12 @@ export default function CompensationActionDrawer({
     Boolean(effectiveDate) &&
     (mode !== "change" || planId !== String(currentAssignment?.planId || ""));
 
+  const submitLabel = busy
+    ? mode === "change"
+      ? "Saving change…"
+      : "Assigning plan…"
+    : copy.submitLabel;
+
   const handleSubmit = () => {
     if (!canSubmit) return;
     onSubmit?.({
@@ -236,6 +245,17 @@ export default function CompensationActionDrawer({
         </header>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+          {mutationError ? (
+            <ActionErrorSummary
+              title={mutationError.title}
+              message={mutationError.message}
+              fieldErrors={mutationError.fieldErrors}
+              actions={mutationError.suggestedActions}
+              technicalReference={mutationError.rawErrorForLogging}
+              onDismiss={onDismissError}
+            />
+          ) : null}
+
           <SectionShell title="Employee">
             {lockEmployee && displayEmployee ? (
               <div className="flex items-center gap-3">
@@ -358,8 +378,8 @@ export default function CompensationActionDrawer({
           <Button type="button" variant="outline" onClick={requestClose} disabled={busy}>
             Cancel
           </Button>
-          <Button type="button" onClick={handleSubmit} disabled={busy || !canSubmit}>
-            {copy.submitLabel}
+          <Button type="button" onClick={handleSubmit} disabled={busy || !canSubmit} aria-busy={busy}>
+            {submitLabel}
           </Button>
         </footer>
       </aside>

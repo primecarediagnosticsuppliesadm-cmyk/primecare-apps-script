@@ -4,6 +4,29 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-11 — Compensation Assignments action feedback (Sprint 1A)
+
+### Change
+
+- **Assign / Change plan** mutation errors appear inside `CompensationActionDrawer` via `ActionErrorSummary` — not global page banner.
+- **End assignment** requires `CompensationEndAssignmentDialog` confirmation; errors appear inside dialog.
+- Handlers return `{ success, error? }`; drawer/dialog close only on `success === true`.
+- **Loading labels** on assign, change, and end submit buttons while async.
+- Mapper: `mapCompensationAssignmentMutationError.js` — active assignment, role mismatch, not found, forbidden.
+
+### Not changed
+
+- Schema, APIs (write semantics), RLS, permissions, payroll/compensation calculations, business rules.
+- Payroll, Directory, Budgeting, Navigation (deferred to Sprint 1B+).
+
+### Verification
+
+- `node scripts/verify-compensation-assignment-action-feedback.mjs`
+- `node scripts/verify-compensation-plan-assignment.mjs`
+- `node scripts/verify-compensation-no-finance-mutation.mjs`
+
+---
+
 ## 2026-07-11 — Compensation Plans action feedback and page simplification
 
 ### Change
