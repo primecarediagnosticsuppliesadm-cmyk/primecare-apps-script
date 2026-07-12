@@ -4,6 +4,29 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-11 — HQ order action feedback (Sprint 1A)
+
+### Change
+
+- **Status Actions inline `ActionErrorSummary`** for Mark Processing / Fulfilled / Cancel / Reset failures on `OrdersPage`.
+- **`mapOrderMutationError.js`** — business-facing messages (already fulfilled, cannot cancel, not found, inventory unavailable, permission denied, unexpected write failure).
+- **Loading labels** + `aria-busy` + duplicate-submit guard; success toast; refresh affected order only (preserve selection/filters/search/scroll).
+
+### Not changed
+
+- Schema, APIs, RPCs, order lifecycle, inventory deduction, ORDER_OUT, AR posting, invoice/shipment generation, pricing, taxes, permissions, RLS.
+- Checkout, Lab Ordering, layout, routing, workspace split.
+
+### Verification
+
+- `node scripts/verify-orders-action-feedback.mjs`
+- `node scripts/verify-orders-admin-flow.mjs`
+- `node scripts/verify-order-payment-sync.mjs`
+- `node scripts/verify-transaction-integrity-rpcs.mjs`
+- `node scripts/verify-no-finance-mutation.mjs`
+
+---
+
 ## 2026-07-11 — Collections certification closure (COL-CERT-011 / 003 / 004)
 
 ### Change

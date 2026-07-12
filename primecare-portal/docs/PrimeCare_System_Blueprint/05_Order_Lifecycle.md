@@ -106,9 +106,35 @@ Enforcement: `lab_ordering_allows_lab_initiate()` in `create_lab_order` RPC + `o
 
 ---
 
+## HQ Status Actions — interaction feedback (Sprint 1A)
+
+UX-only standard for Orders → Order Details **Status Actions** (Mark Processing, Mark Fulfilled, Cancel Order, Reset to Placed). Write path remains `updateOrderStatusWrite` — no lifecycle, inventory, finance, permission, or layout changes.
+
+| Rule | Detail |
+|------|--------|
+| **Error mapper** | `mapOrderMutationError.js` — business-facing titles for known failures |
+| **Error placement** | `ActionErrorSummary` inside Status Actions — never page-top for status mutations |
+| **Loading labels** | Marking Processing… / Fulfilling Order… / Cancelling Order… / Resetting Order… |
+| **Busy state** | Disable all status buttons while in flight; `aria-busy` on active action; duplicate-submit guard |
+| **Success** | Toast; patch affected order in list + refresh detail; preserve selection, filters, search, scroll |
+| **Note field** | Optional status note retained on failure |
+
+### Mapped error families
+
+- Order already fulfilled / cannot fulfill from current status
+- Order cannot be cancelled
+- Order no longer exists
+- Inventory unavailable
+- Permission denied
+- Status write frozen / service unavailable
+- Unexpected write failure
+
+---
+
 ## Verification
 
 - `verify-orders-admin-flow.mjs`
+- `verify-orders-action-feedback.mjs` (Sprint 1A UX gate)
 - `verify-transaction-integrity-rpcs.mjs`
 - `verify-lab-ordering-flow.mjs`
 - Compensation/payroll changes must additionally prove no order lifecycle mutation and no commission from order value.

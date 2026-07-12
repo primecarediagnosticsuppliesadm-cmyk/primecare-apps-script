@@ -33,6 +33,7 @@ import {
   StatusBadge,
   PageHeader,
   DataFetchError,
+  ActionErrorSummary,
   usePortalToast,
 } from "@/components/ux";
 import { orderStatusToVariant, paymentStatusToVariant } from "@/utils/statusTokens";
@@ -59,6 +60,8 @@ import {
   normalizePaymentStatusLabel,
   diagnoseOrdersReadDrift,
 } from "@/orders/ordersMonitorEngine.js";
+import { mapOrderMutationError } from "@/orders/mapOrderMutationError.js";
+import { getOrderStatusActionLoadingLabel } from "@/orders/ordersActionUi.js";
 import {
   extractLatestCancellationNote,
   formatOrderPaymentLabel,
@@ -384,8 +387,10 @@ export default function OrdersPage({
   const [listRefreshing, setListRefreshing] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [pendingStatusAction, setPendingStatusAction] = useState("");
   const [statusNote, setStatusNote] = useState("");
   const [error, setError] = useState("");
+  const [statusMutationError, setStatusMutationError] = useState(null);
   const [ordersReadOk, setOrdersReadOk] = useState(() => hydratedOrders?.ordersReadOk ?? true);
   const [successMessage, setSuccessMessage] = useState("");
   const [labAssignments, setLabAssignments] = useState([]);
@@ -393,6 +398,7 @@ export default function OrdersPage({
   const [invoiceByOrderId, setInvoiceByOrderId] = useState({});
   const [invoiceDrawer, setInvoiceDrawer] = useState(null);
   const [invoiceDownloadKey, setInvoiceDownloadKey] = useState("");
+  const statusActionInflightRef = useRef(false);
 
   const { showToast } = usePortalToast();
 
@@ -564,11 +570,27 @@ export default function OrdersPage({
     }
   }
 
+  function patchOrderStatusInLists(orderId, nextStatus) {
+    const patchRows = (rows) =>
+      rows.map((row) =>
+        str(row.orderId) === str(orderId)
+          ? {
+              ...row,
+              orderStatus: nextStatus,
+              status: nextStatus,
+            }
+          : row
+      );
+    setAllOrders((prev) => patchRows(prev));
+    setOrders((prev) => patchRows(prev));
+  }
+
   async function openOrder(orderId, options = {}) {
     const { preserveSuccess = false } = options;
     try {
       setDetailsLoading(true);
       setError("");
+      setStatusMutationError(null);
       if (!preserveSuccess) {
         setSuccessMessage("");
       }
@@ -595,6 +617,11 @@ export default function OrdersPage({
         setAllOrders((prev) => patchRows(prev));
         setOrders((prev) => patchRows(prev));
       }
+      const rawDetailStatus =
+        data.order?.orderStatus ?? data.order?.status ?? data.order?.order_status;
+      if (rawDetailStatus) {
+        patchOrderStatusInLists(orderId, normalizeOrderStatusLabel(rawDetailStatus));
+      }
       const currentIdx = orders.findIndex((row) => str(row.orderId) === str(orderId));
       const nextLikelyOrderId = currentIdx >= 0 ? str(orders[currentIdx + 1]?.orderId) : "";
       if (nextLikelyOrderId) {
@@ -614,16 +641,23 @@ export default function OrdersPage({
 
   async function handleUpdateStatus(nextStatus) {
     if (!selectedOrder) return;
+    if (statusActionInflightRef.current || updatingStatus) return;
     if (hqStatusWriteBlocked) {
-      setError("Order status changes are frozen for this certified HQ release.");
+      setStatusMutationError(
+        mapOrderMutationError("Order status changes are frozen for this certified HQ release.", {
+          nextStatus,
+        })
+      );
       return;
     }
 
     const id = selectedOrder;
 
     try {
+      statusActionInflightRef.current = true;
       setUpdatingStatus(true);
-      setError("");
+      setPendingStatusAction(nextStatus);
+      setStatusMutationError(null);
       setSuccessMessage("");
 
       const statusPayload = { note: statusNote, orderStatus: nextStatus };
@@ -638,9 +672,9 @@ export default function OrdersPage({
           );
         }
 
-        setSuccessMessage(orderStatusSuccessMessage(nextStatus));
+        showToast("success", orderStatusSuccessMessage(nextStatus));
         setStatusNote("");
-        await loadOrders({ silent: true });
+        patchOrderStatusInLists(id, nextStatus);
         await openOrder(id, { preserveSuccess: true });
         if (nextStatus === "Fulfilled") {
           await refreshInvoicesForOrders([id]);
@@ -672,19 +706,26 @@ export default function OrdersPage({
         throw new Error(result?.message || "Failed to update status");
       }
 
-      setSuccessMessage(
+      showToast(
+        "success",
         nextStatus === "Fulfilled"
           ? "Order marked Fulfilled. Inventory updated."
           : orderStatusSuccessMessage(nextStatus)
       );
       setStatusNote("");
-      await loadOrders({ silent: true });
+      patchOrderStatusInLists(id, nextStatus);
       await openOrder(id, { preserveSuccess: true });
       invalidateAdminDashboardCaches();
     } catch (err) {
-      setError(err.message || "Failed to update order status");
+      setStatusMutationError(
+        mapOrderMutationError(err?.message || err || "Failed to update order status", {
+          nextStatus,
+        })
+      );
     } finally {
+      statusActionInflightRef.current = false;
       setUpdatingStatus(false);
+      setPendingStatusAction("");
     }
   }
 
@@ -1631,6 +1672,15 @@ export default function OrdersPage({
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                     Status Actions
                   </h3>
+                  {statusMutationError ? (
+                    <ActionErrorSummary
+                      title={statusMutationError.title}
+                      message={statusMutationError.message}
+                      fieldErrors={statusMutationError.fieldErrors}
+                      technicalReference={statusMutationError.rawErrorForLogging}
+                      onDismiss={() => setStatusMutationError(null)}
+                    />
+                  ) : null}
                   <Textarea
                     placeholder="Optional note for this status update…"
                     value={statusNote}
@@ -1649,12 +1699,13 @@ export default function OrdersPage({
                         selectedOrderUx?.cancelled ||
                         selectedOrderUx?.fulfilled
                       }
+                      aria-busy={updatingStatus && pendingStatusAction === "Processing"}
                       onClick={() => handleUpdateStatus("Processing")}
                     >
-                      {updatingStatus ? (
+                      {updatingStatus && pendingStatusAction === "Processing" ? (
                         <>
                           <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                          Updating…
+                          {getOrderStatusActionLoadingLabel("Processing")}
                         </>
                       ) : (
                         "Mark Processing"
@@ -1670,9 +1721,17 @@ export default function OrdersPage({
                         selectedOrderUx?.cancelled ||
                         selectedOrderUx?.fulfilled
                       }
+                      aria-busy={updatingStatus && pendingStatusAction === "Fulfilled"}
                       onClick={() => handleUpdateStatus("Fulfilled")}
                     >
-                      Mark Fulfilled
+                      {updatingStatus && pendingStatusAction === "Fulfilled" ? (
+                        <>
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          {getOrderStatusActionLoadingLabel("Fulfilled")}
+                        </>
+                      ) : (
+                        "Mark Fulfilled"
+                      )}
                     </Button>
                     <Button
                       variant="outline"
@@ -1684,9 +1743,17 @@ export default function OrdersPage({
                         selectedOrderUx?.cancelled ||
                         selectedOrderUx?.fulfilled
                       }
+                      aria-busy={updatingStatus && pendingStatusAction === "Placed"}
                       onClick={() => handleUpdateStatus("Placed")}
                     >
-                      Reset to Placed
+                      {updatingStatus && pendingStatusAction === "Placed" ? (
+                        <>
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          {getOrderStatusActionLoadingLabel("Placed")}
+                        </>
+                      ) : (
+                        "Reset to Placed"
+                      )}
                     </Button>
                     <Button
                       variant="outline"
@@ -1699,9 +1766,17 @@ export default function OrdersPage({
                         selectedOrderUx?.cancelled ||
                         selectedOrderUx?.fulfilled
                       }
+                      aria-busy={updatingStatus && pendingStatusAction === "Cancelled"}
                       onClick={() => handleUpdateStatus("Cancelled")}
                     >
-                      Cancel Order
+                      {updatingStatus && pendingStatusAction === "Cancelled" ? (
+                        <>
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          {getOrderStatusActionLoadingLabel("Cancelled")}
+                        </>
+                      ) : (
+                        "Cancel Order"
+                      )}
                     </Button>
                   </div>
                 </section>
