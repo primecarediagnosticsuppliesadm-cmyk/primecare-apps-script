@@ -4,6 +4,32 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-11 — Agent collections interaction feedback (Sprint 1B)
+
+### Change
+
+- **Selected lab highlight** — queue card ring + context strip when payment drawer open.
+- **Debounced search (300ms)** — agent work queue filter; search-aware empty states.
+- **Queue refresh feedback** — success toast, list skeleton overlay, drawer re-hydrate on refresh.
+- **Session persistence** — agent search + selected lab in `sessionStorage`.
+- **Evidence upload UX** — field `uploadStatus`, progress %, drawer stays open on proof failure after payment.
+- **Duplicate submission guard** — in-flight ref on `handleSaveCollection`.
+
+### Not changed
+
+- Payment write APIs, allocation, AR calculations, RPCs, schema, RLS.
+- Navigation architecture, HQ Command Center, routing, distributor embed.
+- Ownership filtering, route ordering, Daily OS prioritization.
+
+### Verification
+
+- `node scripts/verify-agent-collections-interaction-feedback.mjs`
+- `node scripts/verify-agent-collections-ownership-filter.mjs`
+- `node scripts/verify-credit-risk-admin-flow.mjs`
+- `node scripts/verify-no-finance-mutation.mjs`
+
+---
+
 ## 2026-07-11 — Collections payment action feedback (Sprint 1A)
 
 ### Change

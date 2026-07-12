@@ -45,9 +45,30 @@ Mutation errors appear **where the action occurred** via `ActionErrorSummary` â€
 
 ## Out of scope (Sprint 1A)
 
-- Navigation, Command Center, Agent Queue, workspace split, routing
+- Navigation, Command Center, workspace split, routing
 - Payment allocation logic, AR calculations, RPCs, schema, RLS
-- God-page decomposition (Sprint 1B+)
+
+---
+
+## Sprint 1B â€” Agent work queue interaction
+
+Improves agent daily collection workflow predictability without changing write paths, ownership rules, or route prioritization.
+
+| Rule | Detail |
+|------|--------|
+| **Selected lab** | Queue card ring highlight + context strip when payment drawer open |
+| **Debounced search** | 300ms (`localSearch` â†’ `debouncedSearch`); HQ/non-agent paths unchanged |
+| **Empty states** | Search-aware copy via `buildAgentCollectionsEmptyCopy` |
+| **Refresh feedback** | Success toast "Work queue updated"; `ListSkeleton` during `listRefreshing`; re-hydrate open drawer |
+| **Persistence** | `sessionStorage` for agent search + selected lab (cleared on drawer close / payment success) |
+| **Evidence upload** | `uploadStatus` on `EvidenceUploadField`; progress % message; drawer stays open on proof failure after payment |
+| **Duplicate guard** | `saveInflightRef` + early return when `saving` or `evidenceUploading` |
+
+### Out of scope (Sprint 1B)
+
+- Payment APIs, allocation, AR calculations, RPCs, schema, RLS
+- Navigation architecture, HQ Command Center, routing, distributor embed
+- Ownership filtering, Daily OS prioritization, route ordering
 
 ---
 
@@ -56,6 +77,7 @@ Mutation errors appear **where the action occurred** via `ActionErrorSummary` â€
 | Script | When |
 |--------|------|
 | `verify-collections-payment-action-feedback.mjs` | Sprint 1A UX gate |
+| `verify-agent-collections-interaction-feedback.mjs` | Sprint 1B agent queue gate |
 | `verify-credit-risk-admin-flow.mjs` | Credit & Risk regression |
 | `verify-agent-collections-ownership-filter.mjs` | Agent scope regression |
 | `verify-collection-inconsistencies.mjs` | AR hygiene |

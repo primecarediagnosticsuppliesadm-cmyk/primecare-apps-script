@@ -67,6 +67,7 @@ node scripts/verify-hq-rls-reads.mjs
 | `verify-labs-admin-flow.mjs` | 26 labs scoped; AR dedup; ownership sync; RLS | Labs page |
 | `verify-credit-risk-admin-flow.mjs` | KPI = Σ AR; aging; golden allocation | Credit & Risk |
 | `verify-collections-payment-action-feedback.mjs` | Sprint 1A payment drawer inline errors, loading labels, lifecycle | Collections UX |
+| `verify-agent-collections-interaction-feedback.mjs` | Sprint 1B agent queue debounce, selection, refresh, evidence | Collections UX |
 | `verify-agent-collections-ownership-filter.mjs` | Agent sees only owned labs | Ownership + collections |
 | `verify-create-lab-ar-rls.mjs` | Lab create + AR insert RLS | Add Lab flow |
 

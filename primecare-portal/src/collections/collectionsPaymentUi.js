@@ -11,3 +11,9 @@ export function getCollectionSaveLoadingLabel({
   if (amt > 0) return "Recording payment…";
   return "Saving follow-up…";
 }
+
+export function getEvidenceUploadProgressMessage(percent = 0) {
+  const pct = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+  if (pct > 0 && pct < 100) return `Uploading proof… ${pct}%`;
+  return "Uploading proof…";
+}
