@@ -7,6 +7,9 @@ import PageSkeleton from "@/components/ux/PageSkeleton";
 import PageHeader from "@/components/ux/PageHeader";
 import DataFetchError from "@/components/ux/DataFetchError";
 import HqInventoryValueAnalytics from "@/components/hq/HqInventoryValueAnalytics.jsx";
+import InventoryContextStrip from "@/components/inventory/InventoryContextStrip.jsx";
+import InventoryStartHere from "@/components/inventory/InventoryStartHere.jsx";
+import { Button } from "@/components/ui/button";
 import { Package } from "lucide-react";
 import {
   distributorNamesFromRegistry,
@@ -14,6 +17,22 @@ import {
 } from "@/inventory/inventoryEconomicsData.js";
 import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
 import { useOperatingTenantId } from "@/tenant/useOperatingTenantId.js";
+import { persistHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
+import {
+  isHqCatalogWriteBlocked,
+  isHqProcurementWriteBlocked,
+} from "@/config/hqReleasePolicy.js";
+import {
+  buildFocusedSkuOutsideFiltersCopy,
+  buildInventoryContextParts,
+  buildInventoryListEmptyCopy,
+  inventorySortLabel,
+  skuRowKey,
+} from "@/inventory/inventoryContextUi.js";
+import {
+  consumeInventoryReturnContextIfArmed,
+  writeInventoryReturnContext,
+} from "@/inventory/inventoryWorkflowReturn.js";
 
 function hydrateStockFromCache() {
   const ui = readPageUiCache("inventory:stock");
@@ -53,11 +72,6 @@ function countHealthBuckets(rows) {
   return { criticalItems, reorderItems };
 }
 
-/**
- * @param {string} tenantId
- * @param {Map<string, string>} tenantNameById
- * @param {string} homeTenantId
- */
 function resolveTenantLabel(tenantId, tenantNameById, homeTenantId) {
   const id = str(tenantId);
   if (!id) return "Distributor: unknown";
@@ -105,9 +119,36 @@ function HealthBadge({ health }) {
   );
 }
 
-export default function StockPage({ currentUser = null }) {
+function healthSortRank(health) {
+  const value = normalizeStockHealth(health);
+  if (value === "Critical") return 0;
+  if (value === "Reorder") return 1;
+  if (value === "Healthy") return 2;
+  return 3;
+}
+
+function sortInventoryRows(rows, sortKey) {
+  const key = str(sortKey) || "name";
+  return [...(rows || [])].sort((a, b) => {
+    if (key === "stock") {
+      return Number(b.currentStock || 0) - Number(a.currentStock || 0);
+    }
+    if (key === "health") {
+      const diff = healthSortRank(a.stockHealth) - healthSortRank(b.stockHealth);
+      if (diff !== 0) return diff;
+    }
+    return str(a.productName || a.productId).localeCompare(
+      str(b.productName || b.productId),
+      undefined,
+      { sensitivity: "base" }
+    );
+  });
+}
+
+export default function StockPage({ currentUser = null, setActivePage = null }) {
   const hydratedStock = useMemo(() => hydrateStockFromCache(), []);
   const hadCacheOnMount = useRef(Boolean(hydratedStock));
+  const restoredRef = useRef(false);
   const [activeTab, setActiveTab] = useState("stock");
   const [data, setData] = useState(() => hydratedStock?.data ?? { stats: {}, inventory: [] });
   const [tenantNameById, setTenantNameById] = useState(
@@ -118,14 +159,36 @@ export default function StockPage({ currentUser = null }) {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [tenantFilter, setTenantFilter] = useState("hq");
+  const [healthFilter, setHealthFilter] = useState("");
+  const [sortKey, setSortKey] = useState("name");
+  const [selectedKey, setSelectedKey] = useState("");
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [contextWarning, setContextWarning] = useState("");
   const [economicsBundle, setEconomicsBundle] = useState(null);
   const [economicsLoading, setEconomicsLoading] = useState(false);
 
   const operatingTenantId = useOperatingTenantId(currentUser);
   const homeTenantId = operatingTenantId;
+  const freezeActive = isHqCatalogWriteBlocked() || isHqProcurementWriteBlocked();
 
   useEffect(() => {
-    if (activeTab !== "stock") return;
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    const restored = consumeInventoryReturnContextIfArmed();
+    if (!restored) return;
+    setActiveTab(str(restored.activeTab) || "stock");
+    setSearch(str(restored.search));
+    setTenantFilter(str(restored.tenantFilter) || "hq");
+    setHealthFilter(str(restored.healthFilter));
+    setSortKey(str(restored.sortKey) || "name");
+    if (str(restored.selectedProductId)) {
+      setSelectedKey(`${str(restored.selectedTenantId)}|${str(restored.selectedProductId)}`);
+    }
+    setContextWarning("Restored your previous Inventory search, filters, and selection.");
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== "stock" || !summaryOpen) return;
     let cancelled = false;
 
     async function loadEconomics() {
@@ -146,7 +209,7 @@ export default function StockPage({ currentUser = null }) {
     return () => {
       cancelled = true;
     };
-  }, [activeTab]);
+  }, [activeTab, summaryOpen]);
 
   const loadStock = useCallback(async ({ silent = false } = {}) => {
     try {
@@ -242,18 +305,158 @@ export default function StockPage({ currentUser = null }) {
 
   const filteredRows = useMemo(() => {
     const q = search.toLowerCase().trim();
-    if (!q) return tenantFilteredRows;
+    let rows = tenantFilteredRows;
+    if (healthFilter) {
+      rows = rows.filter((item) => normalizeStockHealth(item.stockHealth) === healthFilter);
+    }
+    if (q) {
+      rows = rows.filter((item) => {
+        const tenantLabel = resolveTenantLabel(item.tenantId, tenantNameById, homeTenantId).toLowerCase();
+        return (
+          (item.productName || "").toLowerCase().includes(q) ||
+          (item.productId || "").toLowerCase().includes(q) ||
+          (item.category || "").toLowerCase().includes(q) ||
+          tenantLabel.includes(q)
+        );
+      });
+    }
+    return sortInventoryRows(rows, sortKey);
+  }, [tenantFilteredRows, search, healthFilter, sortKey, tenantNameById, homeTenantId]);
 
-    return tenantFilteredRows.filter((item) => {
-      const tenantLabel = resolveTenantLabel(item.tenantId, tenantNameById, homeTenantId).toLowerCase();
-      return (
-        (item.productName || "").toLowerCase().includes(q) ||
-        (item.productId || "").toLowerCase().includes(q) ||
-        (item.category || "").toLowerCase().includes(q) ||
-        tenantLabel.includes(q)
-      );
+  const selectedItem = useMemo(() => {
+    if (!selectedKey) return null;
+    return (data.inventory || []).find((item) => skuRowKey(item) === selectedKey) || null;
+  }, [data.inventory, selectedKey]);
+
+  const selectedVisible = useMemo(() => {
+    if (!selectedKey) return true;
+    return filteredRows.some((item) => skuRowKey(item) === selectedKey);
+  }, [filteredRows, selectedKey]);
+
+  const tenantFilterLabel = useMemo(() => {
+    const match = tenantFilterOptions.find((option) => option.value === tenantFilter);
+    return match?.label || "";
+  }, [tenantFilterOptions, tenantFilter]);
+
+  const inventoryContextParts = useMemo(
+    () =>
+      buildInventoryContextParts({
+        activeTab,
+        selectedProductId: selectedItem?.productId || "",
+        selectedCategory: selectedItem?.category || "",
+        warehouseLabel: str(selectedItem?.warehouseName || selectedItem?.warehouse || ""),
+        searchQuery: search,
+        tenantFilterLabel,
+        healthFilter,
+        sortLabel: inventorySortLabel(sortKey),
+        freezeActive,
+      }),
+    [
+      activeTab,
+      selectedItem,
+      search,
+      tenantFilterLabel,
+      healthFilter,
+      sortKey,
+      freezeActive,
+    ]
+  );
+
+  const emptyCopy = useMemo(
+    () =>
+      buildInventoryListEmptyCopy({
+        inventoryLength: (data.inventory || []).length,
+        search,
+        tenantFilter,
+        healthFilter,
+        readFailed: Boolean(error && !hasInventoryRows),
+      }),
+    [data.inventory, search, tenantFilter, healthFilter, error, hasInventoryRows]
+  );
+
+  const focusOutsideCopy = useMemo(
+    () =>
+      selectedKey && selectedItem && !selectedVisible
+        ? buildFocusedSkuOutsideFiltersCopy({ productId: selectedItem.productId })
+        : null,
+    [selectedKey, selectedItem, selectedVisible]
+  );
+
+  const captureReturnContext = useCallback(() => {
+    writeInventoryReturnContext({
+      activeTab,
+      search,
+      tenantFilter,
+      healthFilter,
+      sortKey,
+      selectedProductId: selectedItem?.productId || "",
+      selectedTenantId: selectedItem?.tenantId || "",
     });
-  }, [tenantFilteredRows, search, tenantNameById, homeTenantId]);
+  }, [activeTab, search, tenantFilter, healthFilter, sortKey, selectedItem]);
+
+  const navigateAway = useCallback(
+    (pageKey, navExtra = {}) => {
+      if (typeof setActivePage !== "function") return;
+      captureReturnContext();
+      if (pageKey === "purchase" || pageKey === "masterCatalog" || pageKey === "orders") {
+        persistHqNavContext({ page: pageKey, ...navExtra });
+      }
+      setActivePage(pageKey);
+    },
+    [setActivePage, captureReturnContext]
+  );
+
+  const clearListFilters = useCallback(() => {
+    setSearch("");
+    setHealthFilter("");
+    setTenantFilter("hq");
+    setContextWarning("");
+  }, []);
+
+  const handleEmptyAction = useCallback(
+    (action) => {
+      if (action === "retry" || action === "refresh") {
+        void loadStock({ silent: hasInventoryRows });
+        return;
+      }
+      if (action === "clear_search") {
+        setSearch("");
+        return;
+      }
+      if (action === "clear_health") {
+        setHealthFilter("");
+        return;
+      }
+      if (action === "clear_filters") {
+        clearListFilters();
+        return;
+      }
+      if (action === "open_catalog") {
+        navigateAway("masterCatalog");
+      }
+    },
+    [loadStock, hasInventoryRows, clearListFilters, navigateAway]
+  );
+
+  const handleStartHereAction = useCallback(
+    (action) => {
+      if (!action) return;
+      setContextWarning("");
+      if (action.kind === "filter" && action.healthFilter) {
+        setActiveTab("stock");
+        setHealthFilter(action.healthFilter);
+        return;
+      }
+      if (action.kind === "tab" && action.tab) {
+        setActiveTab(action.tab);
+        return;
+      }
+      if (action.kind === "navigate" && action.target) {
+        navigateAway(action.target, action.tab ? { tab: action.tab } : {});
+      }
+    },
+    [navigateAway]
+  );
 
   const switchTab = (nextTab) => {
     console.log("INVENTORY PAGE TAB SWITCH", {
@@ -263,11 +466,17 @@ export default function StockPage({ currentUser = null }) {
     setActiveTab(nextTab);
   };
 
+  const selectSku = (item) => {
+    const key = skuRowKey(item);
+    setSelectedKey((prev) => (prev === key ? "" : key));
+    setContextWarning("");
+  };
+
   return (
     <div style={styles.page}>
       <PageHeader
         title="Inventory"
-        subtitle="Stock levels, reorder signals, and distributor inventory across your network."
+        subtitle="What inventory work needs my attention?"
         icon={Package}
         className="mb-3"
         secondaryActions={
@@ -306,12 +515,18 @@ export default function StockPage({ currentUser = null }) {
         }
       />
 
+      <InventoryContextStrip
+        className="mb-3"
+        parts={inventoryContextParts}
+        warning={contextWarning}
+      />
+
       {activeTab === "health" ? (
         <InventoryHealthPage />
       ) : activeTab === "ledger" ? (
         <InventoryLedgerPage operatingTenantId={operatingTenantId} />
       ) : loading && !hasInventoryRows ? (
-        <PageSkeleton kpiCount={4} kpiColumns={4} listRows={8} className="p-4" />
+        <PageSkeleton kpiCount={0} listRows={8} className="p-4" />
       ) : error && !hasInventoryRows ? (
         <DataFetchError
           message={error}
@@ -329,6 +544,17 @@ export default function StockPage({ currentUser = null }) {
               className="mb-3"
             />
           ) : null}
+
+          <div className="mb-3">
+            <InventoryStartHere
+              criticalCount={portfolioStats.criticalItems}
+              reorderCount={portfolioStats.reorderItems}
+              inventoryLength={portfolioStats.inventoryRecords}
+              loading={loading || listRefreshing}
+              onAction={handleStartHereAction}
+            />
+          </div>
+
           {showPortfolioView ? (
             <div style={styles.portfolioNote}>
               Portfolio inventory: each row is one stock record per distributor. The same SKU may
@@ -336,35 +562,42 @@ export default function StockPage({ currentUser = null }) {
             </div>
           ) : null}
 
-          <HqInventoryValueAnalytics
-            model={economicsBundle?.model}
-            healthRows={economicsBundle?.inventoryRows || []}
-            tenantFilter={tenantFilter}
-            homeTenantId={homeTenantId}
-            loading={economicsLoading}
-          />
-
-          <div style={styles.statsRow}>
-            <div style={styles.statCard}>
-              <div style={styles.statLabel}>Inventory Records</div>
-              <div style={styles.statValue}>{portfolioStats.inventoryRecords}</div>
+          <details
+            className="mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2"
+            open={summaryOpen}
+            onToggle={(e) => setSummaryOpen(e.currentTarget.open)}
+          >
+            <summary className="cursor-pointer text-xs font-medium text-slate-700">
+              Stock summary & valuation (secondary)
+            </summary>
+            <div className="mt-3 space-y-3">
+              <div style={styles.statsRow}>
+                <div style={styles.statCard}>
+                  <div style={styles.statLabel}>Inventory Records</div>
+                  <div style={styles.statValue}>{portfolioStats.inventoryRecords}</div>
+                </div>
+                <div style={styles.statCard}>
+                  <div style={styles.statLabel}>Unique SKUs</div>
+                  <div style={styles.statValue}>{portfolioStats.uniqueSkus}</div>
+                </div>
+                <div style={styles.statCard}>
+                  <div style={styles.statLabel}>Critical</div>
+                  <div style={styles.statValue}>{portfolioStats.criticalItems}</div>
+                </div>
+                <div style={styles.statCard}>
+                  <div style={styles.statLabel}>Reorder</div>
+                  <div style={styles.statValue}>{portfolioStats.reorderItems}</div>
+                </div>
+              </div>
+              <HqInventoryValueAnalytics
+                model={economicsBundle?.model}
+                healthRows={economicsBundle?.inventoryRows || []}
+                tenantFilter={tenantFilter}
+                homeTenantId={homeTenantId}
+                loading={economicsLoading}
+              />
             </div>
-
-            <div style={styles.statCard}>
-              <div style={styles.statLabel}>Unique SKUs</div>
-              <div style={styles.statValue}>{portfolioStats.uniqueSkus}</div>
-            </div>
-
-            <div style={styles.statCard}>
-              <div style={styles.statLabel}>Critical</div>
-              <div style={styles.statValue}>{portfolioStats.criticalItems}</div>
-            </div>
-
-            <div style={styles.statCard}>
-              <div style={styles.statLabel}>Reorder</div>
-              <div style={styles.statValue}>{portfolioStats.reorderItems}</div>
-            </div>
-          </div>
+          </details>
 
           <div style={styles.filterRow}>
             <select
@@ -380,18 +613,101 @@ export default function StockPage({ currentUser = null }) {
               ))}
             </select>
 
+            <select
+              value={healthFilter}
+              onChange={(e) => setHealthFilter(e.target.value)}
+              style={styles.tenantFilter}
+              aria-label="Filter inventory by health"
+            >
+              <option value="">All health</option>
+              <option value="Critical">Critical</option>
+              <option value="Reorder">Reorder</option>
+              <option value="Healthy">Healthy</option>
+            </select>
+
+            <select
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value)}
+              style={styles.tenantFilter}
+              aria-label="Sort inventory"
+            >
+              <option value="name">Sort: Name</option>
+              <option value="health">Sort: Health</option>
+              <option value="stock">Sort: On hand</option>
+            </select>
+
             <input
               type="text"
               placeholder="Search by product, ID, category, distributor..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               style={styles.search}
+              aria-label="Search inventory"
             />
           </div>
 
+          {focusOutsideCopy ? (
+            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+              <p className="font-semibold">{focusOutsideCopy.title}</p>
+              <p className="mt-0.5">{focusOutsideCopy.message}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button type="button" size="sm" variant="outline" className="h-7 text-[11px]" onClick={clearListFilters}>
+                  {focusOutsideCopy.clearLabel}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-[11px]"
+                  onClick={() => {
+                    clearListFilters();
+                    setActiveTab("stock");
+                    setContextWarning("");
+                  }}
+                >
+                  {focusOutsideCopy.returnLabel}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {selectedItem ? (
+            <div
+              className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50/50 px-3 py-2 text-xs text-indigo-950"
+              data-inventory-selected-sku={selectedItem.productId}
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-800">
+                Selected SKU
+              </p>
+              <p className="mt-0.5 font-semibold">
+                {selectedItem.productName || "—"}{" "}
+                <span className="font-mono text-[11px] text-indigo-800">
+                  ({selectedItem.productId || "—"})
+                </span>
+              </p>
+              <p className="mt-1 text-indigo-900/80">
+                {selectedItem.category || "—"} · On hand {selectedItem.currentStock ?? 0} · Min{" "}
+                {selectedItem.minStock ?? 0} ·{" "}
+                <HealthBadge health={selectedItem.stockHealth} />
+              </p>
+            </div>
+          ) : null}
+
           <div style={styles.tableWrap} className="hidden xl:block">
             {filteredRows.length === 0 ? (
-              <div style={styles.emptyState}>No stock items found.</div>
+              <div style={styles.emptyState}>
+                <p className="font-medium text-slate-800">{emptyCopy.title}</p>
+                <p className="mt-1">{emptyCopy.message}</p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="mt-3 h-8"
+                  onClick={() => handleEmptyAction(emptyCopy.action)}
+                >
+                  {emptyCopy.actionLabel}
+                </Button>
+              </div>
             ) : (
               <table style={styles.table}>
                 <thead>
@@ -407,28 +723,42 @@ export default function StockPage({ currentUser = null }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRows.map((item) => (
-                    <tr key={`${item.tenantId || "tenant"}-${item.productId}`} style={styles.tr}>
-                      <td style={styles.td}>
-                        <div style={styles.productName}>{item.productName || "—"}</div>
-                      </td>
-                      <td style={{ ...styles.td, ...styles.tdMono }}>{item.productId || "—"}</td>
-                      <td style={styles.td}>{item.category || "—"}</td>
-                      <td style={{ ...styles.td, ...styles.tdNumeric }}>{item.currentStock ?? 0}</td>
-                      <td style={{ ...styles.td, ...styles.tdNumeric }}>{item.minStock ?? 0}</td>
-                      <td style={{ ...styles.td, ...styles.tdNumeric }}>{item.reorderQty ?? 0}</td>
-                      <td style={styles.td}>
-                        <HealthBadge health={item.stockHealth} />
-                      </td>
-                      {showPortfolioView ? (
+                  {filteredRows.map((item) => {
+                    const key = skuRowKey(item);
+                    const isSelected = selectedKey === key;
+                    return (
+                      <tr
+                        key={key}
+                        style={{
+                          ...styles.tr,
+                          ...(isSelected ? styles.trSelected : {}),
+                          cursor: "pointer",
+                        }}
+                        className={isSelected ? "ring-2 ring-indigo-400 ring-inset" : undefined}
+                        aria-selected={isSelected}
+                        onClick={() => selectSku(item)}
+                      >
                         <td style={styles.td}>
-                          <span style={styles.tenantBadge}>
-                            {resolveTenantShortName(item.tenantId, tenantNameById, homeTenantId)}
-                          </span>
+                          <div style={styles.productName}>{item.productName || "—"}</div>
                         </td>
-                      ) : null}
-                    </tr>
-                  ))}
+                        <td style={{ ...styles.td, ...styles.tdMono }}>{item.productId || "—"}</td>
+                        <td style={styles.td}>{item.category || "—"}</td>
+                        <td style={{ ...styles.td, ...styles.tdNumeric }}>{item.currentStock ?? 0}</td>
+                        <td style={{ ...styles.td, ...styles.tdNumeric }}>{item.minStock ?? 0}</td>
+                        <td style={{ ...styles.td, ...styles.tdNumeric }}>{item.reorderQty ?? 0}</td>
+                        <td style={styles.td}>
+                          <HealthBadge health={item.stockHealth} />
+                        </td>
+                        {showPortfolioView ? (
+                          <td style={styles.td}>
+                            <span style={styles.tenantBadge}>
+                              {resolveTenantShortName(item.tenantId, tenantNameById, homeTenantId)}
+                            </span>
+                          </td>
+                        ) : null}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -436,42 +766,65 @@ export default function StockPage({ currentUser = null }) {
 
           <div className="space-y-2 xl:hidden">
             {filteredRows.length === 0 ? (
-              <div style={styles.emptyState}>No stock items found.</div>
-            ) : (
-              filteredRows.map((item) => (
-                <div
-                  key={`${item.tenantId || "tenant"}-${item.productId}-mobile`}
-                  className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+              <div style={styles.emptyState}>
+                <p className="font-medium text-slate-800">{emptyCopy.title}</p>
+                <p className="mt-1">{emptyCopy.message}</p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="mt-3 h-8"
+                  onClick={() => handleEmptyAction(emptyCopy.action)}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-slate-900">{item.productName || "—"}</p>
-                      <p className="font-mono text-xs text-slate-600">{item.productId || "—"}</p>
+                  {emptyCopy.actionLabel}
+                </Button>
+              </div>
+            ) : (
+              filteredRows.map((item) => {
+                const key = skuRowKey(item);
+                const isSelected = selectedKey === key;
+                return (
+                  <button
+                    type="button"
+                    key={`${key}-mobile`}
+                    aria-selected={isSelected}
+                    onClick={() => selectSku(item)}
+                    className={`w-full rounded-lg border bg-white p-3 text-left shadow-sm ${
+                      isSelected
+                        ? "border-indigo-400 ring-2 ring-indigo-400"
+                        : "border-slate-200"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900">{item.productName || "—"}</p>
+                        <p className="font-mono text-xs text-slate-600">{item.productId || "—"}</p>
+                      </div>
+                      <HealthBadge health={item.stockHealth} />
                     </div>
-                    <HealthBadge health={item.stockHealth} />
-                  </div>
-                  <dl className="mt-2 grid grid-cols-3 gap-2 text-xs">
-                    <div>
-                      <dt className="text-slate-500">On hand</dt>
-                      <dd className="font-semibold tabular-nums">{item.currentStock ?? 0}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-slate-500">Min</dt>
-                      <dd className="font-semibold tabular-nums">{item.minStock ?? 0}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-slate-500">Reorder</dt>
-                      <dd className="font-semibold tabular-nums">{item.reorderQty ?? 0}</dd>
-                    </div>
-                  </dl>
-                  <p className="mt-2 text-xs text-slate-600">{item.category || "—"}</p>
-                  {showPortfolioView ? (
-                    <p className="mt-1 text-[11px] text-slate-500">
-                      {resolveTenantShortName(item.tenantId, tenantNameById, homeTenantId)}
-                    </p>
-                  ) : null}
-                </div>
-              ))
+                    <dl className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                      <div>
+                        <dt className="text-slate-500">On hand</dt>
+                        <dd className="font-semibold tabular-nums">{item.currentStock ?? 0}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-slate-500">Min</dt>
+                        <dd className="font-semibold tabular-nums">{item.minStock ?? 0}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-slate-500">Reorder</dt>
+                        <dd className="font-semibold tabular-nums">{item.reorderQty ?? 0}</dd>
+                      </div>
+                    </dl>
+                    <p className="mt-2 text-xs text-slate-600">{item.category || "—"}</p>
+                    {showPortfolioView ? (
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        {resolveTenantShortName(item.tenantId, tenantNameById, homeTenantId)}
+                      </p>
+                    ) : null}
+                  </button>
+                );
+              })
             )}
           </div>
         </>
@@ -486,16 +839,6 @@ const styles = {
     fontFamily: "Arial, sans-serif",
     background: "#f8fafc",
     minHeight: "100vh",
-  },
-  title: {
-    margin: 0,
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "12px",
-    marginBottom: "20px",
   },
   tabs: {
     display: "flex",
@@ -547,7 +890,7 @@ const styles = {
   },
   filterRow: {
     display: "grid",
-    gridTemplateColumns: "minmax(180px, 240px) minmax(0, 1fr)",
+    gridTemplateColumns: "minmax(140px, 1fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) minmax(0, 1.4fr)",
     gap: "12px",
     marginBottom: "16px",
   },
@@ -597,6 +940,9 @@ const styles = {
   },
   tr: {
     borderBottom: "1px solid #f1f5f9",
+  },
+  trSelected: {
+    background: "#eef2ff",
   },
   td: {
     padding: "10px 12px",

@@ -80,6 +80,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-inventory-reconciliation.mjs | No negative stock | Inventory writes |
 | verify-inventory-ledger-integrity.mjs | Alias → reconciliation (Sprint 1A naming) | Inventory writes |
 | verify-inventory-action-feedback.mjs | Sprint 1A catalog/receive inline errors, loading labels, toast, busy/aria | Inventory UX |
+| verify-inventory-navigation-context.mjs | Sprint 1B Start Here, context strip, selection, return path, empty/focus recovery | Inventory UX |
 | verify-inventory-admin-flow.mjs | Catalog/receive write-path parity (no workflow redesign) | Inventory UX |
 | verify-order-inventory-sync.mjs | ORDER_OUT remain on Orders; Inventory UX does not mutate fulfill path | Inventory / Orders |
 | verify-procurement-inventory-flow.mjs | PO receive → stock | Procurement |

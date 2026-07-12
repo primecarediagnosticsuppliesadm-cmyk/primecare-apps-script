@@ -112,6 +112,10 @@ import {
   consumeOrdersReturnContextIfArmed,
   writeOrdersReturnContext,
 } from "@/orders/ordersWorkflowReturn.js";
+import {
+  armInventoryReturnRestore,
+  hasInventoryReturnContext,
+} from "@/inventory/inventoryWorkflowReturn.js";
 import OrdersContextStrip from "@/components/orders/OrdersContextStrip.jsx";
 import OrdersCollapsibleSection from "@/components/orders/OrdersCollapsibleSection.jsx";
 import {
@@ -368,6 +372,7 @@ export default function OrdersPage({
   const [pendingStatusAction, setPendingStatusAction] = useState("");
   const [statusNote, setStatusNote] = useState("");
   const [error, setError] = useState("");
+  const [inventoryReturnActive, setInventoryReturnActive] = useState(() => hasInventoryReturnContext());
   const [statusMutationError, setStatusMutationError] = useState(null);
   const [ordersReadOk, setOrdersReadOk] = useState(() => hydratedOrders?.ordersReadOk ?? true);
   const [successMessage, setSuccessMessage] = useState("");
@@ -1131,6 +1136,25 @@ export default function OrdersPage({
               : ORDERS_WORKSPACE_PRIMARY_QUESTION
           }
         />
+      ) : null}
+
+      {inventoryReturnActive && typeof setActivePage === "function" && !embedded ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2 text-sm text-blue-900">
+          <span>Continue from Inventory</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 border-blue-200 bg-white text-xs"
+            onClick={() => {
+              armInventoryReturnRestore();
+              setInventoryReturnActive(false);
+              setActivePage("inventory");
+            }}
+          >
+            Back to Inventory
+          </Button>
+        </div>
       ) : null}
 
       <OrdersContextStrip parts={ordersContextParts} warning={contextWarning} />

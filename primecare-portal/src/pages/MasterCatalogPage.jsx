@@ -19,6 +19,10 @@ import {
   getCatalogEditLoadingLabel,
   getSkuToggleLoadingLabel,
 } from "@/inventory/inventoryActionUi.js";
+import {
+  armInventoryReturnRestore,
+  hasInventoryReturnContext,
+} from "@/inventory/inventoryWorkflowReturn.js";
 
 const EMPTY_ADD_FORM = {
   productId: "",
@@ -331,7 +335,7 @@ function ProductFormModal({ mode, initial, tenantId, createdBy, onClose, onSaved
   );
 }
 
-export default function MasterCatalogPage({ currentUser = null }) {
+export default function MasterCatalogPage({ currentUser = null, setActivePage = null }) {
   const { showToast } = usePortalToast();
   const [loading, setLoading] = useState(true);
   const [catalog, setCatalog] = useState(null);
@@ -343,6 +347,7 @@ export default function MasterCatalogPage({ currentUser = null }) {
   const [search, setSearch] = useState("");
   const [sortField, setSortField] = useState("productId");
   const [sortDir, setSortDir] = useState("asc");
+  const [inventoryReturnActive, setInventoryReturnActive] = useState(() => hasInventoryReturnContext());
   const toggleInflightRef = useRef(false);
 
   const tenantId = useOperatingTenantId(currentUser);
@@ -449,6 +454,25 @@ export default function MasterCatalogPage({ currentUser = null }) {
 
   return (
     <div className="mx-auto max-w-5xl space-y-3 p-3 pb-8">
+      {inventoryReturnActive && typeof setActivePage === "function" ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2 text-sm text-blue-900">
+          <span>Continue from Inventory</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 border-blue-200 bg-white text-xs"
+            onClick={() => {
+              armInventoryReturnRestore();
+              setInventoryReturnActive(false);
+              setActivePage("inventory");
+            }}
+          >
+            Back to Inventory
+          </Button>
+        </div>
+      ) : null}
+
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h1 className="flex items-center gap-2 text-lg font-bold text-slate-900">

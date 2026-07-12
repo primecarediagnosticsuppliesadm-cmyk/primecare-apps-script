@@ -202,7 +202,7 @@ export default function PrimeCareWebPortal({
       case "purchase":
       case "purchase-orders":
       case "procurement":
-        return <PurchaseOrdersPage currentUser={currentUser} />;
+        return <PurchaseOrdersPage currentUser={currentUser} setActivePage={setActivePage} />;
 
       case "collections":
         return (
@@ -223,11 +223,11 @@ export default function PrimeCareWebPortal({
         );
 
       case "masterCatalog":
-        return <MasterCatalogPage currentUser={currentUser} />;
+        return <MasterCatalogPage currentUser={currentUser} setActivePage={setActivePage} />;
 
       case "inventory":
       case "stock":
-        return <StockPage currentUser={currentUser} />;
+        return <StockPage currentUser={currentUser} setActivePage={setActivePage} />;
 
       case "inventory-ledger":
       case "inventory-movements":

@@ -66,6 +66,7 @@ Stock snapshot, ledger movements, procurement receive, catalog coupling, and **m
 - `verify-procurement-inventory-flow.mjs`
 - `verify-inventory-dashboard-kpi.mjs`
 - `verify-inventory-action-feedback.mjs` — Sprint 1A UX gate
+- `verify-inventory-navigation-context.mjs` — Sprint 1B UX gate
 - `verify-inventory-admin-flow.mjs` — write-path parity
 - `verify-order-inventory-sync.mjs` — ORDER_OUT boundary
 
@@ -93,6 +94,23 @@ Procurement writes may be blocked when `VITE_HQ_PROCUREMENT_FROZEN` — inventor
 
 ---
 
+## Inventory context & continuity (Sprint 1B — UI/UX only)
+
+**Scope:** Stock hub Start Here, context strip, SKU selection, differentiated empty states, return paths to Purchase / Master Catalog / Orders.  
+**Not changed:** schema, APIs, RPCs, ledger, ORDER_OUT, PURCHASE_IN, opening-stock logic, reorder engine, Sprint 1A mutation behavior, permissions, RLS.
+
+| Concern | Behavior |
+|---------|----------|
+| Start Here | Action-oriented CTAs from existing `stockHealth` Critical/Reorder counts only — Receive PO, Review Critical, Create PO, Review Reorder, Investigate Risk, Set Opening Stock (empty inventory). No invented prioritization. |
+| Context strip | One compact Viewing row: view, selected SKU, category, warehouse (if present), search, filters, sort, freeze. |
+| Selection | Obvious selected row + `aria-selected` + Selected SKU panel; survives silent refresh; outside-filter recovery via Clear Filters / Return to Inventory (never silent clear). |
+| Return context | `primecare_inventory_return_context`; destinations show Back to Inventory and restore search/filters/selection/tab. |
+| Empty states | No inventory / search / filters / critical / reorder / focused outside / read failure — each with one recovery action. |
+| Page budget | First viewport: header, strip, Start Here, filters, list, selected SKU. Valuation/KPI summary collapsed secondary. |
+| Verify | `verify-inventory-navigation-context.mjs` |
+
+---
+
 ## Module UX certification (Founder-finalized 2026-07-11)
 
 **Baseline document:** [`docs/QA/modules/inventory/Architecture_Review_Certification_Baseline.md`](../QA/modules/inventory/Architecture_Review_Certification_Baseline.md)  
@@ -115,7 +133,7 @@ Purchase Operations currently combines **Receiving**, **Reordering**, and **Purc
 | Sprint | Focus | Closes (primary) |
 |--------|-------|------------------|
 | **1A** | Mutation feedback on existing Catalog / Purchase receive writes — **shipped** (UI only) | Trust slice |
-| **1B** | **Action-oriented** Start Here (Receive PO · Create PO · Review Critical Stock · Investigate Stock Risk) + context continuity | INV-CERT-002, 003, 004 |
+| **1B** | **Action-oriented** Start Here + context continuity — **shipped** (UI only) | INV-CERT-002, 003, 004 |
 | **1C** | Visual / cognitive workspace shells (Receiving vs Reorder vs Purchase Admin); collapse analytics | INV-CERT-001, 006 |
 | **Closure** | High UX defects + inventory QA pack + signed Manual UAT | Path to Gold |
 | **Future** | INV-CERT-012 recommendation explainability (Current/Min/Reorder/Consumption/Rule/Reason/Trust Level; no fake %) | Not Sprint 1 blocker |

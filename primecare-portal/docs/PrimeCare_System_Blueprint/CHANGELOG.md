@@ -4,6 +4,27 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-11 — Inventory context & workflow continuity (Sprint 1B)
+
+### Change
+
+- **UI/UX only** — Stock hub Start Here (existing `stockHealth` counts), Inventory context strip, SKU selection + outside-filter recovery, differentiated empty states, `primecare_inventory_return_context` with Back to Inventory on Purchase / Master Catalog / Orders.
+- Valuation/KPI summary collapsed to secondary details (not removed).
+- No schema, API, RPC, ledger, ORDER_OUT, PURCHASE_IN, opening-stock logic, reorder engine, permission, or RLS changes.
+- Sprint 1A mutation feedback unchanged.
+
+### Verification
+
+- `node scripts/verify-inventory-navigation-context.mjs`
+- `node scripts/verify-inventory-action-feedback.mjs`
+- `node scripts/verify-inventory-admin-flow.mjs`
+- `node scripts/verify-inventory-ledger-integrity.mjs`
+- `node scripts/verify-order-inventory-sync.mjs`
+- `node scripts/verify-no-finance-mutation.mjs`
+- `npm run build`
+
+---
+
 ## 2026-07-11 — Inventory action feedback (Sprint 1A)
 
 ### Change

@@ -30,8 +30,14 @@ import { isHqProcurementWriteBlocked, getHqFreezeBannerMessage } from "@/config/
 import PageSkeleton from "@/components/ux/PageSkeleton";
 import ActionErrorSummary from "@/components/ux/ActionErrorSummary.jsx";
 import { usePortalToast } from "@/components/ux";
+import { Button } from "@/components/ui/button";
 import { mapInventoryMutationError } from "@/inventory/mapInventoryMutationError.js";
 import { getReceiveStockLoadingLabel } from "@/inventory/inventoryActionUi.js";
+import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
+import {
+  armInventoryReturnRestore,
+  hasInventoryReturnContext,
+} from "@/inventory/inventoryWorkflowReturn.js";
 
 const emptyCreateForm = {
   productId: "",
@@ -510,7 +516,7 @@ function ActiveStepSummary({ meta, onGoToTab }) {
   );
 }
 
-export default function PurchaseOrdersPage({ currentUser = null }) {
+export default function PurchaseOrdersPage({ currentUser = null, setActivePage = null }) {
   const { showToast } = usePortalToast();
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [reorderCandidates, setReorderCandidates] = useState([]);
@@ -539,6 +545,8 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   const [poSearch, setPoSearch] = useState("");
   const [poStatusFilter, setPoStatusFilter] = useState("");
   const [activeTab, setActiveTab] = useState("triggers");
+  const [inventoryReturnActive, setInventoryReturnActive] = useState(() => hasInventoryReturnContext());
+  const navConsumedRef = useRef(false);
   const [bulkCreating, setBulkCreating] = useState(false);
   const [catalogProducts, setCatalogProducts] = useState([]);
   const [catalogProductsError, setCatalogProductsError] = useState("");
@@ -549,6 +557,17 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
   const operatingTenantId = useOperatingTenantId(currentUser);
   const procurementWriteBlocked = isHqProcurementWriteBlocked();
+
+  useEffect(() => {
+    if (navConsumedRef.current) return;
+    navConsumedRef.current = true;
+    const ctx = consumeHqNavContext("purchase");
+    const tab = String(ctx?.tab || "").trim();
+    if (tab === "receive" || tab === "create" || tab === "triggers" || tab === "smart" || tab === "history" || tab === "suppliers") {
+      setActiveTab(tab);
+    }
+    setInventoryReturnActive(hasInventoryReturnContext());
+  }, []);
 
   const loadCatalogProducts = useCallback(async () => {
     if (!supabase) {
@@ -1353,6 +1372,25 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
   return (
     <div className="space-y-4 p-4 sm:p-6">
+      {inventoryReturnActive && typeof setActivePage === "function" ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2 text-sm text-blue-900">
+          <span>Continue from Inventory</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 border-blue-200 bg-white text-xs"
+            onClick={() => {
+              armInventoryReturnRestore();
+              setInventoryReturnActive(false);
+              setActivePage("inventory");
+            }}
+          >
+            Back to Inventory
+          </Button>
+        </div>
+      ) : null}
+
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Purchase &amp; Reorder Operations</h1>
