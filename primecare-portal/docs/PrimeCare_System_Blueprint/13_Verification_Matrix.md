@@ -149,6 +149,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | audit-phase-8-1b-certification.mjs | Phase 8.1B productivity certification bundle + regression + build | Phase 8.1B productivity |
 | verify-people-operations-enterprise-ux.mjs | Enterprise drawer, overflow menus, settings landing, KPI strips | Phase 8.2 enterprise UX |
 | verify-people-operations-navigation.mjs | Breadcrumbs, sticky module navigation | Phase 8.2 enterprise UX |
+| verify-people-operations-navigation-context.mjs | Clickable breadcrumbs, reporting context persistence, context strip, active states | Sprint 1D navigation & context |
 | verify-people-operations-dashboard.mjs | Reporting-context KPI derivation, dashboard/report separation | Phase 8.2 enterprise UX |
 | verify-people-operations-payroll-layout.mjs | Payroll summary strip, workflow progress on run review | Phase 8.2 enterprise UX |
 | verify-people-operations-table-standardization.mjs | EnterpriseDataTable + PeopleOpsTableShell adoption | Phase 8.2 enterprise UX |

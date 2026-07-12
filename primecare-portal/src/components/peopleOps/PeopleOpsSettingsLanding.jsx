@@ -46,12 +46,18 @@ const ROADMAP_SETTINGS = [
   },
 ];
 
-export default function PeopleOpsSettingsLanding({ breadcrumbs = [] }) {
+export default function PeopleOpsSettingsLanding({
+  breadcrumbs = [],
+  onBreadcrumbNavigate = null,
+  context = null,
+}) {
   return (
     <PeopleOpsModuleFrame
       title="Settings"
       description="People Operations configuration — active governance vs roadmap capabilities."
       breadcrumbs={breadcrumbs}
+      onBreadcrumbNavigate={onBreadcrumbNavigate}
+      context={context}
     >
       <PeopleOpsSectionCard
         title="Active Configuration"

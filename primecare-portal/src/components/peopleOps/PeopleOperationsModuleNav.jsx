@@ -32,7 +32,10 @@ export default function PeopleOperationsModuleNav({
             role="tab"
             aria-selected={route.moduleId === module.id}
             variant={route.moduleId === module.id ? "default" : "ghost"}
-            className="h-9 rounded-lg"
+            className={cn(
+              "h-9 rounded-lg",
+              route.moduleId === module.id && "ring-2 ring-[var(--pc-brand-primary)]/35 shadow-sm"
+            )}
             onClick={() =>
               onNavigate?.({
                 moduleId: module.id,
@@ -54,7 +57,10 @@ export default function PeopleOperationsModuleNav({
               role="tab"
               aria-selected={route.screenId === screen.id}
               variant={route.screenId === screen.id ? "secondary" : "ghost"}
-              className="h-8 rounded-lg text-xs"
+              className={cn(
+                "h-8 rounded-lg text-xs",
+                route.screenId === screen.id && "font-semibold ring-1 ring-[var(--pc-brand-primary)]/30"
+              )}
               onClick={() =>
                 onNavigate?.({
                   moduleId: activeModule.id,

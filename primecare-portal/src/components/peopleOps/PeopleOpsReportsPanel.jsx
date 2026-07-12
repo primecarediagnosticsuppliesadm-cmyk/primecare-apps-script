@@ -72,6 +72,8 @@ export default function PeopleOpsReportsPanel({
   executivePerformance,
   compensationPlans = [],
   breadcrumbs = [],
+  onBreadcrumbNavigate = null,
+  context = null,
   onNavigatePayroll,
 }) {
   if (!model || !intelligence) return null;
@@ -91,6 +93,8 @@ export default function PeopleOpsReportsPanel({
       title="Analytics & Reports"
       description="Business summary first — then trends and rankings. Read-only."
       breadcrumbs={breadcrumbs}
+      onBreadcrumbNavigate={onBreadcrumbNavigate}
+      context={context}
       helpModuleId="reports"
       dense
       summary={<ReportsExecutiveSummary model={model} executivePerformance={executivePerformance} />}

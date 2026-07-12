@@ -97,11 +97,32 @@ export function moduleForRoute({ moduleId, screenId }) {
   return PEOPLE_OPS_MODULES.find((row) => row.id === route.moduleId) || PEOPLE_OPS_MODULES[0];
 }
 
-export function buildPeopleOpsBreadcrumbs({ moduleId, screenId } = {}) {
+export function buildPeopleOpsBreadcrumbs({ moduleId, screenId, employeeName } = {}) {
   const route = resolvePeopleOpsRoute(moduleId, screenId);
   const module = PEOPLE_OPS_MODULES.find((row) => row.id === route.moduleId) || PEOPLE_OPS_MODULES[0];
+  const visibleScreens = module.screens.filter((row) => !row.navHidden);
   const screen = module.screens.find((row) => row.id === route.screenId) || module.screens[0];
-  const items = [{ label: "People Operations" }, { label: module.label }];
-  if (module.screens.length > 1) items.push({ label: screen.label });
+  const defaultScreenId = visibleScreens[0]?.id || module.screens[0].id;
+
+  const items = [
+    { label: "People Operations", route: defaultPeopleOpsRoute() },
+    { label: module.label, route: { moduleId: module.id, screenId: defaultScreenId } },
+  ];
+
+  if (route.moduleId === "employees" && route.screenId === "workspace") {
+    items.push({ label: "Directory", route: { moduleId: "employees", screenId: "directory" } });
+    if (employeeName) items.push({ label: employeeName });
+    return items;
+  }
+
+  if (visibleScreens.length > 1) {
+    items.push({ label: screen.label });
+  }
+
   return items;
+}
+
+export function breadcrumbRouteForItem(item) {
+  if (!item?.route?.moduleId) return null;
+  return resolvePeopleOpsRoute(item.route.moduleId, item.route.screenId);
 }

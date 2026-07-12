@@ -12,6 +12,7 @@ export default function PeopleOpsModuleFrame({
   title,
   description = "",
   breadcrumbs = null,
+  onBreadcrumbNavigate = null,
   context = null,
   actions = null,
   summary = null,
@@ -27,7 +28,13 @@ export default function PeopleOpsModuleFrame({
     <div className={cn(dense ? "space-y-1.5" : "space-y-2", className)}>
       <header className={cn("flex flex-wrap items-start justify-between gap-1.5 border-b border-border", dense ? "pb-1.5" : "pb-2")}>
         <div className="min-w-0 flex-1 space-y-0.5">
-          {breadcrumbs ? <PeopleOpsBreadcrumbs items={breadcrumbs} className="mb-0.5" /> : null}
+          {breadcrumbs ? (
+            <PeopleOpsBreadcrumbs
+              items={breadcrumbs}
+              onNavigate={onBreadcrumbNavigate}
+              className="mb-0.5"
+            />
+          ) : null}
           <h2 className={typography.pageTitle}>{title}</h2>
           {description ? <p className={typography.pageSubtitle}>{description}</p> : null}
           {context ? <div className="pt-0.5">{context}</div> : null}

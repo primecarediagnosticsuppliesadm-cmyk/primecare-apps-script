@@ -10,6 +10,7 @@ export default function PeopleOpsPayrollEmptyState({
   hasEmployees = true,
   hasAssignments = true,
   hasRun = false,
+  reportingPeriodLabel = null,
   onGeneratePreview,
   onOpenEmployees,
   onOpenCompensation,
@@ -21,12 +22,17 @@ export default function PeopleOpsPayrollEmptyState({
     hasRun,
     hasCollectionsHint: true,
   });
+  const periodHint = reportingPeriodLabel ? ` for ${reportingPeriodLabel}` : "";
 
   return (
     <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
       <EmptyState
         title={guidance.title}
-        description="Check the reasons below, then take the next action."
+        description={
+          reportingPeriodLabel
+            ? `No payroll lines${periodHint}. Check the reasons below, then take the next action.`
+            : "Select a pay period or check the reasons below, then take the next action."
+        }
       />
       <ul className="space-y-1.5 text-xs">
         {guidance.reasons.map((reason) => (

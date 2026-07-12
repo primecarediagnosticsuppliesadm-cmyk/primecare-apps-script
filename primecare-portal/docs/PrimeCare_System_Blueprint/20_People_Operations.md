@@ -728,6 +728,19 @@ Configuration landing with phased cards (Payroll Policies, Approval Matrix, Expo
 
 Every module: page title, description, breadcrumb (`People Operations > Module > Screen`). Sticky module nav and sticky filter bars.
 
+**Sprint 1D (certified orientation layer):**
+
+| Capability | Implementation |
+|------------|----------------|
+| Clickable breadcrumbs | `PeopleOpsBreadcrumbs` + `buildPeopleOpsBreadcrumbs` route metadata → `navigatePeopleOps` |
+| Reporting period persistence | `peopleOpsReportingContextStorage.js` — `sessionStorage` keys for period/run |
+| Context strip | `PeopleOpsContextStrip` — **Viewing:** period, run, employee, plan filter |
+| Active module/screen | `PeopleOperationsModuleNav` brand rings |
+| Workspace trail | `employees/workspace` → Directory crumb links back to directory |
+| Empty payroll preview | `PeopleOpsPayrollEmptyState.reportingPeriodLabel` |
+
+Verification: `verify-people-operations-navigation-context.mjs`. Pre-implementation pack: `docs/QA/modules/people-ops-navigation/Sprint1D_PreImplementation.md`.
+
 ### QA seed
 
 `seed-qa-people-ops-display-names.mjs` — realistic QA persona display names only; no production changes.

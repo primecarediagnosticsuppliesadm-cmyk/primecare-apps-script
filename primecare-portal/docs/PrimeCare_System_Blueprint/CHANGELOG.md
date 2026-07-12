@@ -4,6 +4,31 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-11 — People Operations navigation & context (Sprint 1D)
+
+### Change
+
+- **Clickable breadcrumbs** with route metadata — ancestors navigate via `navigatePeopleOps`.
+- **Reporting period/run** persisted in `sessionStorage`; restored on refresh.
+- **Context strip** (`Viewing:`) on module frames — period, run, employee, plan filter.
+- **Stronger active states** on module nav and selected payroll period row.
+- **Workspace breadcrumb** unified: People Operations > Employees > Directory > {name}.
+- **Payroll preview empty state** mentions selected period when available.
+
+### Not changed
+
+- Assignment workflow (1A), payroll workflow (1B), directory interaction (1C).
+- Budgeting, Collections, Distributor OS business logic.
+- Schema, APIs, RLS, permissions, calculations.
+
+### Verification
+
+- `node scripts/verify-people-operations-navigation-context.mjs`
+- `node scripts/verify-people-operations-enterprise-ux.mjs`
+- `node scripts/verify-no-finance-mutation.mjs`
+
+---
+
 ## 2026-07-11 — Employee Directory interaction feedback (Sprint 1C)
 
 ### Change

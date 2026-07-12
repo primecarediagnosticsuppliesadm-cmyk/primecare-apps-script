@@ -21,6 +21,8 @@ import { getPayrollCycleCopy } from "@/peopleOps/peopleOpsBusinessCopy.js";
 export default function PeopleOpsDashboard({
   model,
   breadcrumbs = [],
+  onBreadcrumbNavigate = null,
+  context = null,
   employeeCount = 0,
   employeeList = [],
   ownershipWorkspace = null,
@@ -74,6 +76,8 @@ export default function PeopleOpsDashboard({
       title="People Operations"
       description="What needs attention today, where payroll stands, and what changed."
       breadcrumbs={breadcrumbs}
+      onBreadcrumbNavigate={onBreadcrumbNavigate}
+      context={context}
       helpModuleId="dashboard"
       dense
       summary={
