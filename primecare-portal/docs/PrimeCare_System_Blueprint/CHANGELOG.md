@@ -4,6 +4,34 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-07-12 — Inventory Certification Closure
+
+### Change
+
+- **INV-CERT-005** — Consolidated certification evidence pack under `docs/QA/modules/inventory/Certification_*`.
+- **INV-CERT-007** — Ledger display: non-opening `IN` → Historical Inventory Movement (no Adjust workflow).
+- **INV-CERT-001** — Purchase visual grouping (Replenishment / Receiving / Purchase administration); dedicated Purchase certification deferred.
+- No schema, API, RPC, ledger write, ORDER_OUT, PURCHASE_IN, opening-stock logic, reorder engine, permission, or RLS changes.
+- Sprint 1A–1C semantics unchanged.
+
+### Gold recommendation
+
+**CONDITIONAL GO** until signed Closure Manual UAT. After sign-off: Inventory Gold; freeze except bug fixes and security updates. Do not begin Purchase certification.
+
+### Verification
+
+- `node scripts/verify-inventory-certification-closure.mjs`
+- `node scripts/verify-inventory-action-feedback.mjs`
+- `node scripts/verify-inventory-navigation-context.mjs`
+- `node scripts/verify-inventory-workspace-simplification.mjs`
+- `node scripts/verify-inventory-admin-flow.mjs`
+- `node scripts/verify-inventory-ledger-integrity.mjs`
+- `node scripts/verify-order-inventory-sync.mjs`
+- `node scripts/verify-no-finance-mutation.mjs`
+- `npm run build`
+
+---
+
 ## 2026-07-12 — Inventory workspace simplification (Sprint 1C)
 
 ### Change

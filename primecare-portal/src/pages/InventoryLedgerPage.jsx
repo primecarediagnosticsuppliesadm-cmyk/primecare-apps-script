@@ -16,7 +16,8 @@ function movementLabel(type, row = {}) {
   if (t === "IN") {
     const ref = str(row.orderId);
     if (ref.startsWith("OPENING-")) return "Opening Stock";
-    return "Inventory Adjustment";
+    // Year-1: no user-facing stock-adjust control — historical IN only.
+    return "Historical Inventory Movement";
   }
   if (t === "OUT") return "Stock Removal";
   return str(type) || "—";

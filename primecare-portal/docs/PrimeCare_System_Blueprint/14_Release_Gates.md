@@ -41,7 +41,7 @@ Do not recommend commit when:
 | Labs admin | GO |
 | Credit & Risk | GO |
 | Ops Center | GO |
-| Inventory/catalog/procurement | CONDITIONAL GO — Bronze (domain) met; Silver/Gold UX baseline open (`docs/QA/modules/inventory/Architecture_Review_Certification_Baseline.md`) |
+| Inventory/catalog/procurement | **CONDITIONAL GO (Gold pending signed UAT)** — Closure pack + Sprint 1A–1C complete; sign `docs/QA/modules/inventory/Certification_Signoff_Template.md` |
 | Full pilot | NO-GO — Agent E2E, manual UAT open |
 
 Update after each certification run.

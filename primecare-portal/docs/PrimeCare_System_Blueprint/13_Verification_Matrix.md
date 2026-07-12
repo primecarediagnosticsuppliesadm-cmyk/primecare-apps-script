@@ -82,6 +82,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-inventory-action-feedback.mjs | Sprint 1A catalog/receive inline errors, loading labels, toast, busy/aria | Inventory UX |
 | verify-inventory-navigation-context.mjs | Sprint 1B Start Here, context strip, selection, return path, empty/focus recovery | Inventory UX |
 | verify-inventory-workspace-simplification.mjs | Sprint 1C page budget, collapsed valuation, operational-first detail, no module split | Inventory UX |
+| verify-inventory-certification-closure.mjs | Closure INV-CERT-005 evidence docs, INV-CERT-007 labels, INV-CERT-001 Purchase grouping | Inventory UX |
 | verify-inventory-admin-flow.mjs | Catalog/receive write-path parity (no workflow redesign) | Inventory UX |
 | verify-order-inventory-sync.mjs | ORDER_OUT remain on Orders; Inventory UX does not mutate fulfill path | Inventory / Orders |
 | verify-procurement-inventory-flow.mjs | PO receive → stock | Procurement |

@@ -68,6 +68,7 @@ Stock snapshot, ledger movements, procurement receive, catalog coupling, and **m
 - `verify-inventory-action-feedback.mjs` — Sprint 1A UX gate
 - `verify-inventory-navigation-context.mjs` — Sprint 1B UX gate
 - `verify-inventory-workspace-simplification.mjs` — Sprint 1C UX gate
+- `verify-inventory-certification-closure.mjs` — Closure (INV-CERT-005/007/001)
 - `verify-inventory-admin-flow.mjs` — write-path parity
 - `verify-order-inventory-sync.mjs` — ORDER_OUT boundary
 
@@ -128,6 +129,18 @@ Procurement writes may be blocked when `VITE_HQ_PROCUREMENT_FROZEN` — inventor
 
 ---
 
+## Certification Closure (2026-07-12 — UI/docs only)
+
+| Concern | Behavior |
+|---------|----------|
+| INV-CERT-005 | Consolidated UAT + evidence index/checklist/sign-off under `docs/QA/modules/inventory/Certification_*` |
+| INV-CERT-007 | Movements: non-opening `IN` → **Historical Inventory Movement** (no Adjust UI) |
+| INV-CERT-001 | Purchase visual groups Replenishment / Receiving / Purchase administration; Purchase cert deferred |
+| Gold | **CONDITIONAL** until signed Closure UAT; then freeze except bugs/security |
+| Verify | `verify-inventory-certification-closure.mjs` |
+
+---
+
 ## Module UX certification (Founder-finalized 2026-07-11)
 
 **Baseline document:** [`docs/QA/modules/inventory/Architecture_Review_Certification_Baseline.md`](../QA/modules/inventory/Architecture_Review_Certification_Baseline.md)  
@@ -136,14 +149,15 @@ Procurement writes may be blocked when `VITE_HQ_PROCUREMENT_FROZEN` — inventor
 | Tier | Definition | Inventory status |
 |------|------------|------------------|
 | **Bronze** | Domain Integrity | **Met** (ledger SoT + automated integrity) |
-| **Silver** | Operational Workspace | **Not met** |
-| **Gold** | Certified UX + Verification + Signed Manual UAT | **Not met** |
+| **Silver** | Operational Workspace | **Met** (Stock hub — Sprint 1A–1C) |
+| **Gold** | Certified UX + Verification + Signed Manual UAT | **CONDITIONAL** — Closure pack complete; human UAT sign-off pending |
+
 
 ### Logical workspaces (identify only — do not redesign domain)
 
 Inventory Overview · Stock Ledger · Inventory Health · Receiving · Reorder · Purchase Administration · Catalog Master · (ORDER_OUT via Orders)
 
-Purchase Operations currently combines **Receiving**, **Reordering**, and **Purchase Administration** in one operational workspace. Certification issue = **cognitive load** (INV-CERT-001), not file size. Engineering decomposition = **RC2**.
+Purchase Operations uses **visual workspace groups** (Replenishment · Receiving · Purchase administration) for cognitive load (INV-CERT-001 Closure). Dedicated Purchase module certification remains deferred. Engineering file decomposition remains RC2.
 
 ### Sprint roadmap (UI/UX only — no schema/API/ledger/ORDER_OUT/PURCHASE_IN/opening-stock/reorder-engine/RLS changes)
 
@@ -152,9 +166,15 @@ Purchase Operations currently combines **Receiving**, **Reordering**, and **Purc
 | **1A** | Mutation feedback on existing Catalog / Purchase receive writes — **shipped** (UI only) | Trust slice |
 | **1B** | **Action-oriented** Start Here + context continuity — **shipped** (UI only) | INV-CERT-002, 003, 004 |
 | **1C** | Visual / cognitive workspace shells; collapse analytics — **shipped** (UI only) | INV-CERT-001, 006 |
-| **Closure** | High UX defects + inventory QA pack + signed Manual UAT | Path to Gold |
-| **Future** | INV-CERT-012 recommendation explainability (Current/Min/Reorder/Consumption/Rule/Reason/Trust Level; no fake %) | Not Sprint 1 blocker |
+| **Closure** | Evidence pack + Adjustment label honesty + Purchase visual grouping — **shipped** (UI/docs) | INV-CERT-005 / 007 / 001 |
+| **Future** | INV-CERT-012 recommendation explainability (Current/Min/Reorder/Consumption/Rule/Reason/Trust Level; no fake %) | Not Gold blocker |
 | **RC2** | Purchase file decomposition, GAP-001 split, Adjust/Transfer (blueprint-first), exports | Deferred |
+
+### Certification Closure notes (2026-07-12)
+
+- Ledger non-opening `IN` display: **Historical Inventory Movement** (not actionable Adjustment).
+- Evidence: `docs/QA/modules/inventory/Certification_*`.
+- After signed Manual UAT: Inventory **Gold**; freeze except bug fixes and security updates. Do not begin Purchase certification from Inventory Closure.
 
 ### Do not break during Inventory UX sprints
 

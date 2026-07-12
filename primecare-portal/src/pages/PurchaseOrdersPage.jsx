@@ -435,6 +435,28 @@ const PURCHASE_TAB_ORDER = [
   "suppliers",
 ];
 
+/** Visual grouping only (INV-CERT-001) — does not change routes, tabs, or write paths. */
+const PURCHASE_WORKSPACE_GROUPS = [
+  {
+    id: "replenishment",
+    title: "Replenishment",
+    purpose: "Decide what to buy",
+    tabs: ["triggers", "reorder", "smart"],
+  },
+  {
+    id: "receiving",
+    title: "Receiving",
+    purpose: "Put away inbound stock",
+    tabs: ["receive"],
+  },
+  {
+    id: "administration",
+    title: "Purchase administration",
+    purpose: "Create and track purchase orders",
+    tabs: ["create", "history", "suppliers"],
+  },
+];
+
 const PURCHASE_TAB_META = {
   triggers: {
     label: "Forecast Suggestions",
@@ -1395,7 +1417,14 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Purchase &amp; Reorder Operations</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Manage reorder candidates, purchase orders, stock inward, and forecast-based draft PO suggestions.
+            Adjacent to Inventory — replenish, receive, and administer POs. Stock levels remain owned by
+            Inventory.
+          </p>
+          <p
+            className="mt-2 text-xs font-medium text-slate-600"
+            data-purchase-workspace-framing="true"
+          >
+            Workspace groups: Replenishment · Receiving · Purchase administration
           </p>
         </div>
 
@@ -1459,31 +1488,48 @@ export default function PurchaseOrdersPage({ currentUser = null, setActivePage =
 
       <ProcurementWorkflowGuide />
 
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {PURCHASE_TAB_ORDER.map((tab) => {
-          const meta = PURCHASE_TAB_META[tab];
-          const isActive = activeTab === tab;
-          return (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => setActiveTab(tab)}
-              aria-current={isActive ? "page" : undefined}
-              className={`flex shrink-0 flex-col items-start rounded-xl px-3 py-2 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 ${
-                isActive
-                  ? "min-w-[9rem] bg-black text-white shadow-md ring-2 ring-black ring-offset-2"
-                  : "border bg-white text-slate-700 hover:bg-slate-50"
-              }`}
-            >
-              <span className="font-medium leading-tight">{meta.label}</span>
-              {isActive ? (
-                <span className="mt-0.5 line-clamp-1 text-xs leading-snug text-slate-300">
-                  {meta.shortDescription}
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
+      <div className="space-y-3" data-purchase-workspace-groups="true">
+        {PURCHASE_WORKSPACE_GROUPS.map((group) => (
+          <section
+            key={group.id}
+            className="rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5"
+            aria-label={`${group.title} — ${group.purpose}`}
+            data-purchase-group={group.id}
+          >
+            <div className="mb-2">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-700">
+                {group.title}
+              </h2>
+              <p className="text-[11px] text-slate-500">{group.purpose}</p>
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-0.5">
+              {group.tabs.map((tab) => {
+                const meta = PURCHASE_TAB_META[tab];
+                const isActive = activeTab === tab;
+                return (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setActiveTab(tab)}
+                    aria-current={isActive ? "page" : undefined}
+                    className={`flex shrink-0 flex-col items-start rounded-xl px-3 py-2 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 ${
+                      isActive
+                        ? "min-w-[9rem] bg-black text-white shadow-md ring-2 ring-black ring-offset-2"
+                        : "border bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span className="font-medium leading-tight">{meta.label}</span>
+                    {isActive ? (
+                      <span className="mt-0.5 line-clamp-1 text-xs leading-snug text-slate-300">
+                        {meta.shortDescription}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ))}
       </div>
 
       <ActiveStepSummary meta={PURCHASE_TAB_META[activeTab]} onGoToTab={setActiveTab} />
