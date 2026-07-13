@@ -25,11 +25,15 @@ import {
   Radio,
   Shield,
   TrendingUp,
+  Truck,
+  Database,
+  ShieldCheck,
 } from "lucide-react";
 
 const ICONS = {
   dashboard: LayoutDashboard,
   founderNavigation: Compass,
+  founderOperatingSystem: Compass,
   founderStrategy: Target,
   founderFinancialIntelligence: BarChart3,
   revenueFunnel: TrendingUp,
@@ -39,6 +43,7 @@ const ICONS = {
   distributorOs: Building2,
   distributorProvisioning: ClipboardList,
   commissionEngine: Coins,
+  compensationPayroll: Wallet,
   labContractEngine: FileText,
   operationsCenter: Radio,
   accessAudit: Shield,
@@ -49,6 +54,7 @@ const ICONS = {
   masterCatalog: Package,
   inventory: Boxes,
   orders: ShoppingCart,
+  logisticsDelivery: Truck,
   risk: AlertTriangle,
   qualificationReview: ClipboardCheck,
   performance: BarChart3,
@@ -56,6 +62,10 @@ const ICONS = {
   labOrders: Package,
   predatorDebug: Bug,
   notifications: Bell,
+  projectionOpsCenter: Database,
+  qaCommandCenter: ClipboardCheck,
+  productionReadiness: ShieldCheck,
+  commercialCrm: Briefcase,
 };
 
 function titleCase(value) {

@@ -1,0 +1,99 @@
+{
+  "version": "1.0.0",
+  "updated": "2026-07-03",
+  "deployed_registry_ids": [
+    "PRJ-ORD-ORDER-v1",
+    "PRJ-COL-LAB-v1",
+    "PRJ-LAB-PROFILE-v1",
+    "PRJ-ORD-METRICS-v1",
+    "PRJ-COL-METRICS-v1",
+    "PRJ-DSH-METRICS-v1",
+    "PRJ-EXE-METRICS-v1"
+  ],
+  "projections": [
+    {
+      "registryId": "PRJ-ORD-ORDER-v1",
+      "table": "proj_order_v1",
+      "class": "core",
+      "status": "shadow",
+      "adapterRpc": "read_orders_list_v1",
+      "featureFlag": "VITE_READ_ADAPTER_ORDERS_V1",
+      "stalenessSlaMs": 60000,
+      "parityScript": "verify-projection-parity.mjs",
+      "rebuildable": true
+    },
+    {
+      "registryId": "PRJ-COL-LAB-v1",
+      "table": "proj_lab_receivable_v1",
+      "class": "core",
+      "status": "shadow",
+      "adapterRpc": "read_lab_receivables_list_v1",
+      "featureFlag": "VITE_READ_ADAPTER_RECEIVABLES_V1",
+      "stalenessSlaMs": 60000,
+      "parityScript": "verify-projection-parity.mjs",
+      "rebuildable": true
+    },
+    {
+      "registryId": "PRJ-LAB-PROFILE-v1",
+      "table": "proj_lab_profile_v1",
+      "class": "core",
+      "status": "shadow",
+      "adapterRpc": "read_labs_list_v1",
+      "featureFlag": "VITE_READ_ADAPTER_LABS_V1",
+      "stalenessSlaMs": 60000,
+      "parityScript": "verify-labs-projection-parity.mjs",
+      "rebuildable": true
+    },
+    {
+      "registryId": "PRJ-ORD-METRICS-v1",
+      "table": "proj_tenant_order_metrics_v1",
+      "class": "domain_metrics",
+      "status": "design",
+      "adapterRpc": null,
+      "featureFlag": null,
+      "stalenessSlaMs": 90000,
+      "parityScript": "verify-dashboard-projection-parity.mjs",
+      "rebuildable": true
+    },
+    {
+      "registryId": "PRJ-COL-METRICS-v1",
+      "table": "proj_tenant_receivable_metrics_v1",
+      "class": "domain_metrics",
+      "status": "design",
+      "adapterRpc": null,
+      "featureFlag": null,
+      "stalenessSlaMs": 90000,
+      "parityScript": "verify-dashboard-projection-parity.mjs",
+      "rebuildable": true
+    },
+    {
+      "registryId": "PRJ-DSH-METRICS-v1",
+      "table": "proj_tenant_dashboard_metrics_v1",
+      "class": "composite",
+      "status": "design",
+      "adapterRpc": "read_tenant_dashboard_v1",
+      "featureFlag": "VITE_READ_ADAPTER_DASHBOARD_V1",
+      "stalenessSlaMs": 90000,
+      "parityScript": "verify-dashboard-projection-parity.mjs",
+      "rebuildable": true
+    },
+    {
+      "registryId": "PRJ-EXE-METRICS-v1",
+      "table": "proj_tenant_executive_metrics_v1",
+      "class": "composite",
+      "status": "design",
+      "adapterRpc": "read_tenant_executive_v1",
+      "featureFlag": "VITE_READ_ADAPTER_EXECUTIVE_V1",
+      "stalenessSlaMs": 180000,
+      "parityScript": "verify-executive-projection-parity.mjs",
+      "rebuildable": true
+    }
+  ],
+  "rebuild_cascade": [
+    "PRJ-ORD-ORDER-v1",
+    "PRJ-COL-LAB-v1",
+    "PRJ-LAB-PROFILE-v1",
+    "PRJ-DSH-METRICS-v1",
+    "PRJ-EXE-METRICS-v1"
+  ]
+}

@@ -12,23 +12,15 @@ function optionalPositiveCost(value) {
 /**
  * Resolve inventory valuation unit cost without inventing estimates.
  * Priority: inventory unit cost → products.cost_price → missing.
- *
- * @param {{
- *   tenantId?: string,
- *   productId?: string,
- *   currentStock?: number,
- *   inventoryUnitCost?: number|null,
- *   productCostPrice?: number|null,
- *   logQa?: boolean,
- * }} [params]
  */
+import { hqDebugLog } from "@/utils/hqDebugLog.js";
 export function resolveInventoryUnitCost({
   tenantId = "",
   productId = "",
   currentStock = 0,
   inventoryUnitCost = null,
   productCostPrice = null,
-  logQa = true,
+  logQa = false,
 } = {}) {
   const inventoryCost = optionalPositiveCost(inventoryUnitCost);
   const productCost = optionalPositiveCost(productCostPrice);
@@ -60,7 +52,7 @@ export function resolveInventoryUnitCost({
   };
 
   if (logQa) {
-    console.log("[inventoryValuation]", payload);
+    hqDebugLog("[inventoryValuation]", payload);
   }
 
   return {

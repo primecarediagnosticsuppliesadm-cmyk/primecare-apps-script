@@ -212,6 +212,7 @@ export default function HqCreditRiskCommandCenter({
   onReviewLab,
   onOpenCollections,
   onRecordPayment,
+  onAttentionFilterChange,
 }) {
   const [attentionFilter, setAttentionFilter] = useState(
     () => str(initialAttentionFilter) || "ALL"
@@ -221,6 +222,15 @@ export default function HqCreditRiskCommandCenter({
   const financialSyncPulse = useFinancialSyncPulse();
 
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
+
+  useEffect(() => {
+    onAttentionFilterChange?.(attentionFilter);
+  }, [attentionFilter, onAttentionFilterChange]);
+
+  useEffect(() => {
+    const next = str(initialAttentionFilter) || "ALL";
+    setAttentionFilter(next);
+  }, [initialAttentionFilter]);
 
   useEffect(() => {
     if (!homeTenantId) return;
@@ -351,9 +361,75 @@ export default function HqCreditRiskCommandCenter({
       ) : null}
 
       <p className="text-sm text-slate-600">
-        What needs attention? Who owns it? How much is at risk? Use the queue below to prioritize
-        collections, credit holds, and exposure.
+        What needs attention? Who owns it? How much is at risk? Start with high-risk interventions,
+        then use the attention queue and workspace below.
       </p>
+
+      {interventions.length > 0 ? (
+        <section
+          aria-label="Start here — high-risk interventions"
+          className="rounded-xl border border-red-300 bg-red-50/50 p-3 shadow-sm"
+        >
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-red-800">
+                Start here
+              </p>
+              <h2 className="text-sm font-semibold text-red-900">High-Risk Interventions</h2>
+            </div>
+            <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-semibold text-red-800">
+              {Math.min(interventions.length, 8)} priority
+            </span>
+          </div>
+          <p className="mb-3 text-[11px] text-red-800">
+            Record payment or review ownership for critical and high-exposure accounts first.
+          </p>
+          <div className="space-y-2">
+            {interventions.slice(0, 8).map((row) => (
+              <div
+                key={row.labId}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-red-100 bg-white p-2.5"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <HqObjectLink onClick={() => handleReviewLab(row.labId)} title="Review lab">
+                      <span className="text-sm font-semibold text-slate-900">{row.labName}</span>
+                    </HqObjectLink>
+                    <RiskBadge level={row.riskLevel} />
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-slate-600">
+                    {formatCreditRiskCurrency(row.outstanding)}
+                    {row.overdueDays > 0 ? ` · ${row.overdueDays}d overdue` : ""}
+                    {" · "}
+                    Agent: {row.agent}
+                    {" · "}
+                    Last visit: {row.lastVisit}
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => onRecordPayment?.(row.labId)}
+                  >
+                    Record Payment
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs"
+                    onClick={() => handleReviewLab(row.labId)}
+                  >
+                    Review Lab
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section aria-label="Collections requiring attention">
         <h2 className="mb-2 text-sm font-semibold text-slate-900">Attention Queue</h2>
@@ -481,48 +557,6 @@ export default function HqCreditRiskCommandCenter({
           </div>
         </div>
       </section>
-
-      {interventions.length > 0 ? (
-        <section aria-label="Intervention workflow" className="rounded-xl border border-red-200 bg-red-50/40 p-3">
-          <h2 className="mb-2 text-sm font-semibold text-red-900">High-Risk Interventions</h2>
-          <p className="mb-3 text-[11px] text-red-800">
-            Critical and high exposure accounts — review ownership and follow-up priority.
-          </p>
-          <div className="space-y-2">
-            {interventions.slice(0, 8).map((row) => (
-              <div
-                key={row.labId}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-red-100 bg-white p-2.5"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <HqObjectLink onClick={() => handleReviewLab(row.labId)} title="Review lab">
-                      <span className="text-sm font-semibold text-slate-900">{row.labName}</span>
-                    </HqObjectLink>
-                    <RiskBadge level={row.riskLevel} />
-                  </div>
-                  <p className="mt-0.5 text-[11px] text-slate-600">
-                    {formatCreditRiskCurrency(row.outstanding)}
-                    {row.overdueDays > 0 ? ` · ${row.overdueDays}d overdue` : ""}
-                    {" · "}
-                    Agent: {row.agent}
-                    {" · "}
-                    Last visit: {row.lastVisit}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-8 shrink-0 text-xs"
-                  onClick={() => handleReviewLab(row.labId)}
-                >
-                  Review Lab
-                </Button>
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
 
       <section
         id="hq-credit-exposure"

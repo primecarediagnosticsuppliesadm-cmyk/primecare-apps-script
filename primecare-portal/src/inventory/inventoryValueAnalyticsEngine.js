@@ -1,4 +1,5 @@
 import { formatInventoryInr } from "@/inventory/inventoryEconomicsEngine.js";
+import { hqDebugLog } from "@/utils/hqDebugLog.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -87,7 +88,7 @@ export function buildInventoryValueAnalytics(model, healthRows = [], options = {
     );
     const skuKeys = econRows.map((r) => `${str(r.tenantId)}::${str(r.productId)}`);
     const uniqueSkuKeys = new Set(skuKeys);
-    console.log("[inventoryValuationReconciliation]", {
+    hqDebugLog("[inventoryValuationReconciliation]", {
       tenantFilter,
       homeTenantId,
       skuCount: econRows.length,

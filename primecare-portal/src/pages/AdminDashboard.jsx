@@ -6,15 +6,17 @@ import {
   getRecentVisits,
 } from "@/api/primecareApi";
 import {
-  getStockDashboard,
-  getLabsCredit,
   getReorderForecastRead,
   getAdminDashboardRead,
-  invalidateAdminDashboardReadCache,
   peekAdminDashboardReadCache,
   normalizeAdminDashboardPayload,
   resolveAdminVisitRevenue,
 } from "@/api/primecareSupabaseApi";
+import {
+  readLabsCreditBroker,
+  readStockDashboardBroker,
+} from "@/api/sharedReadBroker.js";
+import { invalidateAllHqReads } from "@/api/hqReadCoordinator.js";
 import {
   logHybridSourceWarning,
   logAppsScriptPrimarySource,
@@ -42,9 +44,12 @@ import {
 import { adminDashboardModelFromMerge } from "@/pages/adminDashboardState.js";
 import AdminDashboardQaValidationPanel from "@/components/qa/AdminDashboardQaValidationPanel.jsx";
 import HqPrioritiesStrip from "@/components/hq/HqPrioritiesStrip.jsx";
+import LogisticsKpiWidget from "@/components/logistics/LogisticsKpiWidget.jsx";
 import { onFinancialSyncCompleted } from "@/operations/financialSyncEvents.js";
 import { useFinancialSyncPulse } from "@/hooks/useFinancialSyncPulse.js";
+import { usePagePerformance } from "@/hooks/usePagePerformance.js";
 import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
+import { scheduleIdleTask } from "@/utils/scheduleIdleTask.js";
 import { hqDebugLog } from "@/utils/hqDebugLog.js";
 import {
   KpiCard,
@@ -56,9 +61,11 @@ import {
   StatusBadge,
   DataFreshnessLabel,
   PageHeader,
+  ReadHealthBanner,
   visitTypeToVariant,
   insightSeverityToVariant,
 } from "@/components/ux";
+import { extractReadHealth } from "@/observability/readHealth.js";
 import { cn } from "@/lib/utils";
 import { typography } from "@/styles/designTokens";
 import {
@@ -73,6 +80,10 @@ import {
 } from "lucide-react";
 
 const DASHBOARD_CACHE_TTL = 60 * 1000;
+
+function str(v) {
+  return String(v ?? "").trim();
+}
 
 /**
  * When true, AdminDashboard does not call Apps Script reads (getDashboard,
@@ -166,11 +177,11 @@ function AdminDashboardLoading() {
 
 function SectionCard({ title, subtitle, children, rightAction = null }) {
   return (
-    <section className="rounded-2xl border border-border bg-card p-4 shadow-[var(--pc-shadow-card)] sm:p-5">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+    <section className="rounded-xl border border-border bg-card p-3 shadow-sm">
+      <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <h2 className={typography.sectionTitle}>{title}</h2>
-          {subtitle ? <p className={cn(typography.sectionSubtitle, "mt-1")}>{subtitle}</p> : null}
+          {subtitle ? <p className={cn(typography.sectionSubtitle, "mt-0.5")}>{subtitle}</p> : null}
         </div>
         {rightAction}
       </div>
@@ -445,7 +456,7 @@ function mergeKpiModels(prev, next) {
  * @param {{ success?: boolean, data?: object }|null|undefined} result
  */
 function normalizeDashboardFromReadResult(result) {
-  if (!result?.success || !result?.data) return null;
+  if (!result?.data) return null;
 
   const raw = unwrapDashboardReadData(result.data);
   if (!raw) return null;
@@ -531,11 +542,13 @@ function commitDashboardHydration(
   return hasVisibleKpis(mergedKpis);
 }
 
-async function fetchSupabaseAdminSlice({ force = false } = {}) {
+async function fetchSupabaseAdminSlice({ force = false, tenantId = "" } = {}) {
+  const tid = str(tenantId);
+  const readOpts = { force, ...(tid ? { tenantId: tid } : {}) };
   const slice = { stock: null, labs: null, forecast: null, dashboardRead: null };
   const endPrimary = perfTime("AdminDashboard.getAdminDashboardRead");
   try {
-    slice.dashboardRead = await getAdminDashboardRead({ force });
+    slice.dashboardRead = await getAdminDashboardRead(readOpts);
     endPrimary({ success: slice.dashboardRead?.success, force });
   } catch (e) {
     console.warn("[AdminDashboard] Supabase dashboard read skipped:", e?.message || e);
@@ -551,8 +564,8 @@ async function fetchSupabaseAdminSlice({ force = false } = {}) {
 
   const endFallback = perfTime("AdminDashboard.fallbackSliceFetches");
   const [stockSettled, labsSettled, forecastSettled] = await Promise.allSettled([
-    getStockDashboard(),
-    getLabsCredit(),
+    readStockDashboardBroker(readOpts),
+    readLabsCreditBroker(readOpts),
     getReorderForecastRead(),
   ]);
   if (stockSettled.status === "fulfilled") slice.stock = stockSettled.value;
@@ -568,7 +581,7 @@ async function fetchSupabaseAdminSlice({ force = false } = {}) {
 function mergeAdminDashboardWithSupabase(supabaseSlice, summaryIn, executiveIn) {
   const legacySummary = adminDashboardSkipAppsScriptReads() ? {} : summaryIn;
   const legacyExecutive = adminDashboardSkipAppsScriptReads() ? {} : executiveIn;
-  const dash = supabaseSlice.dashboardRead?.success ? supabaseSlice.dashboardRead.data : null;
+  const dash = supabaseSlice.dashboardRead?.data ?? null;
 
   if (dash?.summary && dash?.executive) {
     const merged = adminDashboardModelFromMerge({
@@ -784,6 +797,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   const [backgroundLoading, setBackgroundLoading] = useState(false);
   const [dataLoadedAt, setDataLoadedAt] = useState(() => (initialBundle ? Date.now() : null));
   const [errorMessage, setErrorMessage] = useState("");
+  const [readHealth, setReadHealth] = useState(null);
   const [domKpiValues, setDomKpiValues] = useState({});
   const loadGenerationRef = useRef(0);
   const loadAllInFlightRef = useRef(null);
@@ -793,6 +807,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   const lastRawReadRef = useRef(null);
   const summaryDataRef = useRef(summaryData);
   const financialSyncPulse = useFinancialSyncPulse();
+  usePagePerformance("Admin Dashboard");
   const executiveDataRef = useRef(executiveData);
 
   useEffect(() => {
@@ -823,21 +838,30 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     if (shouldUseQaDirectDashboardRead()) {
       if (force) {
         clearAdminDashboardModuleCache();
-        invalidateAdminDashboardReadCache();
+        invalidateAllHqReads(currentUser?.tenantId ?? currentUser?.tenant_id ?? null);
       }
 
-      const result = await getAdminDashboardRead({ force });
+      const homeTenantId = str(currentUser?.tenantId ?? currentUser?.tenant_id);
+      const result = await getAdminDashboardRead({
+        force,
+        ...(homeTenantId ? { tenantId: homeTenantId } : {}),
+      });
       if (loadId !== loadGenerationRef.current) return;
 
       lastRawReadRef.current = result;
+      setReadHealth(extractReadHealth(result));
       hqDebugLog("[AdminDashboard] getAdminDashboardRead raw", result);
 
       const hydrated = normalizeDashboardFromReadResult(result);
       if (!hydrated) {
-        console.warn("[AdminDashboard] QA direct read returned no normalizable dashboard model", {
-          success: result?.success,
-          hasData: Boolean(result?.data),
-        });
+        if (result?.readFailed) {
+          setErrorMessage(result.error || "Dashboard read failed — KPIs unavailable");
+        } else {
+          console.warn("[AdminDashboard] QA direct read returned no normalizable dashboard model", {
+            success: result?.success,
+            hasData: Boolean(result?.data),
+          });
+        }
         return;
       }
 
@@ -876,7 +900,11 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       apis: ["getAdminDashboardRead", "getStockDashboard?", "getLabsCredit?", "getReorderForecastRead?"],
     });
     const endLoad = perfTime("AdminDashboard.loadPrimaryData");
-    const supabaseSlice = await fetchSupabaseAdminSlice({ force });
+    const homeTenantId = str(currentUser?.tenantId ?? currentUser?.tenant_id);
+    const supabaseSlice = await fetchSupabaseAdminSlice({
+      force,
+      tenantId: homeTenantId,
+    });
     if (loadId !== loadGenerationRef.current) return;
     endLoad({ force });
 
@@ -920,7 +948,10 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
     }
 
     const readResult = supabaseSlice.dashboardRead;
-    if (readResult?.success && readResult?.data) {
+    if (readResult) {
+      setReadHealth(extractReadHealth(readResult));
+    }
+    if (readResult?.data) {
       lastRawReadRef.current = readResult;
       hqDebugLog("[AdminDashboard] getAdminDashboardRead raw", readResult);
       const fromRead = normalizeDashboardFromReadResult(readResult);
@@ -1106,8 +1137,10 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       }
 
       if (!shouldUseQaDirectDashboardRead()) {
-        loadSecondaryData({ force }).catch((err) => {
-          console.warn("[AdminDashboard] secondary panels:", err?.message || err);
+        scheduleIdleTask(() => {
+          loadSecondaryData({ force }).catch((err) => {
+            console.warn("[AdminDashboard] secondary panels:", err?.message || err);
+          });
         });
       }
     })();
@@ -1171,6 +1204,7 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   const displayKpis = kpiModel ?? kpiModelRef.current;
   const dashboardHydrated = hasVisibleKpis(displayKpis);
   const kpisReady = dashboardHydrated && !kpisLoading;
+  const showSecondaryPanels = kpisReady;
   const insights = Array.isArray(insightsData?.insights)
     ? insightsData.insights.map(normalizeInsight)
     : [];
@@ -1283,11 +1317,12 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
   }, [kpisLoading, qaValidationSnapshot, displayKpis]);
 
   return (
-    <div className="space-y-5 p-4 sm:p-6">
+    <div className="space-y-3 p-3 sm:p-4">
       <PageHeader
-        title="Admin Dashboard"
-        subtitle="Operational control across stock, revenue, receivables, risk, and field execution."
+        title="Executive Command Center"
+        subtitle="Today's business pulse — revenue, collections, operations, people, and risk."
         icon={Activity}
+        compact
         freshness={
           <DataFreshnessLabel
             loadedAt={dataLoadedAt}
@@ -1308,6 +1343,10 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
         }
       />
 
+      {readHealth && (readHealth.readFailed || readHealth.degraded || readHealth.itemMetricsDegraded) ? (
+        <ReadHealthBanner health={readHealth} title="Dashboard read status" />
+      ) : null}
+
       {errorMessage ? (
         <div
           role="alert"
@@ -1321,11 +1360,6 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
         <AdminDashboardQaValidationPanel renderedSnapshot={qaValidationSnapshot} />
       ) : null}
 
-      <HqPrioritiesStrip
-        tenantId={currentUser?.tenantId ?? currentUser?.tenant_id ?? null}
-        setActivePage={setActivePage}
-      />
-
       {backgroundLoading ? (
         <div className="rounded-2xl border border-[var(--pc-info-border)] bg-[var(--pc-info-bg)] px-4 py-3 text-sm text-[var(--pc-info)]">
           Loading secondary dashboard panels in background...
@@ -1333,14 +1367,16 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
       ) : null}
 
       {kpisReady ? (
-        <KpiCardGrid columns={6}>
+        <KpiCardGrid columns={6} dense>
           <KpiCard
+            dense
             title="Today's Revenue"
             value={currency(displayKpis.todaysRevenue)}
             subtitle="Current day visible revenue"
             icon={TrendingUp}
           />
           <KpiCard
+            dense
             title="Receivables"
             value={currency(displayKpis.outstandingReceivables)}
             subtitle="Outstanding collections"
@@ -1349,25 +1385,23 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
             kpiRawValue={displayKpis.outstandingReceivables}
             highlight={financialSyncPulse}
           />
-          <KpiCard
-            title="Credit Risk Labs"
+          <KpiCard dense title="Credit Risk Labs"
             value={displayKpis.labsAtCreditRisk}
             subtitle="Labs needing attention"
             icon={ShieldAlert}
           />
-          <KpiCard
-            title="Near Stockout"
+          <KpiCard dense title="Near Stockout"
             value={displayKpis.productsNearStockout}
             subtitle="Critical + reorder items"
             icon={Package}
           />
-          <KpiCard
-            title="Recent Visits"
+          <KpiCard dense title="Recent Visits"
             value={displayKpis.recentVisits}
             subtitle="Latest field activity"
             icon={Activity}
           />
           <KpiCard
+            dense
             title="Total Sold Value"
             value={currency(displayKpis.totalSoldValue)}
             subtitle="Tracked visit-linked sales"
@@ -1377,12 +1411,25 @@ export default function AdminDashboard({ currentUser, setActivePage }) {
           />
         </KpiCardGrid>
       ) : (
-        <KpiCardGrid columns={6}>
+        <KpiCardGrid columns={6} dense>
           {Array.from({ length: 6 }).map((_, i) => (
             <KpiSkeleton key={i} />
           ))}
         </KpiCardGrid>
       )}
+
+      <HqPrioritiesStrip
+        tenantId={currentUser?.tenantId ?? currentUser?.tenant_id ?? null}
+        setActivePage={setActivePage}
+        enabled={showSecondaryPanels}
+      />
+
+      {showSecondaryPanels ? (
+        <LogisticsKpiWidget
+          tenantId={currentUser?.tenantId ?? currentUser?.tenant_id ?? null}
+          setActivePage={setActivePage}
+        />
+      ) : null}
 
       <div className="grid gap-4 xl:grid-cols-2 xl:gap-6">
         <SectionCard

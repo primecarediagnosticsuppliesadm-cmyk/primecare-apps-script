@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getPurchaseOrders,
   getSmartReorder,
@@ -28,6 +28,44 @@ import { invalidateAdminDashboardCaches } from "@/utils/dashboardInvalidate.js";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 import { isHqProcurementWriteBlocked, getHqFreezeBannerMessage } from "@/config/hqReleasePolicy.js";
 import PageSkeleton from "@/components/ux/PageSkeleton";
+import ActionErrorSummary from "@/components/ux/ActionErrorSummary.jsx";
+import { usePortalToast } from "@/components/ux";
+import { Button } from "@/components/ui/button";
+import { mapPurchaseMutationError } from "@/purchase/mapPurchaseMutationError.js";
+import {
+  getBulkCreateCriticalPurchaseOrdersLoadingLabel,
+  getCancelPurchaseOrderLoadingLabel,
+  getCreatePurchaseOrderLoadingLabel,
+  getReceivePurchaseOrderLoadingLabel,
+  getSavePurchaseOrderLoadingLabel,
+} from "@/purchase/purchaseActionUi.js";
+import { consumeHqNavContext, persistHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
+import {
+  armInventoryReturnRestore,
+  hasInventoryReturnContext,
+} from "@/inventory/inventoryWorkflowReturn.js";
+import {
+  consumePurchaseReturnContextIfArmed,
+  writePurchaseReturnContext,
+} from "@/purchase/purchaseWorkflowReturn.js";
+import {
+  PURCHASE_WORKSPACE_PRIMARY_QUESTION,
+  buildFocusedPoOutsideFiltersCopy,
+  buildPurchaseContextParts,
+  buildPurchaseListEmptyCopy,
+  poRowKey,
+  purchaseSortLabel,
+} from "@/purchase/purchaseContextUi.js";
+import {
+  PURCHASE_QUEUE_HIERARCHY,
+  PURCHASE_QUEUE_SECONDARY,
+  PURCHASE_SUPPLIERS_HONESTY,
+  getPurchaseExpectedActionCopy,
+  resolvePurchaseQueueId,
+} from "@/purchase/purchaseWorkspaceUi.js";
+import PurchaseStartHere from "@/components/purchase/PurchaseStartHere.jsx";
+import PurchaseContextStrip from "@/components/purchase/PurchaseContextStrip.jsx";
+import PurchaseCollapsibleSection from "@/components/purchase/PurchaseCollapsibleSection.jsx";
 
 const emptyCreateForm = {
   productId: "",
@@ -425,25 +463,47 @@ const PURCHASE_TAB_ORDER = [
   "suppliers",
 ];
 
+/** Legacy visual groups (INV-CERT-001) — superseded in Sprint 1C by PURCHASE_QUEUE_HIERARCHY presentation. */
+const PURCHASE_WORKSPACE_GROUPS = [
+  {
+    id: "replenishment",
+    title: "Replenishment",
+    purpose: "Decide what to buy",
+    tabs: ["triggers", "reorder", "smart"],
+  },
+  {
+    id: "receiving",
+    title: "Receiving",
+    purpose: "Put away inbound stock",
+    tabs: ["receive"],
+  },
+  {
+    id: "administration",
+    title: "Purchase administration",
+    purpose: "Create and track purchase orders",
+    tabs: ["create", "history", "suppliers"],
+  },
+];
+
 const PURCHASE_TAB_META = {
   triggers: {
-    label: "Forecast Suggestions",
-    shortDescription: "Velocity-based suggestions from Inventory Health (30-day ORDER_OUT).",
-    purposeSentence: "Review projected stockouts before purchasing — aligned with Inventory → Health urgency.",
-    nextStepLabel: "Reorder Candidates",
+    label: "Critical Reorders",
+    shortDescription: "Velocity-based Critical/High/Medium suggestions (Inventory Health).",
+    purposeSentence: "Review projected stockouts before purchasing — start with Critical.",
+    nextStepLabel: "Forecast Drafts",
     nextStepTab: "reorder",
   },
   reorder: {
-    label: "Reorder Candidates",
-    shortDescription: "Items below reorder level that may need purchase.",
-    purposeSentence: "Confirm SKUs below safe stock that need replenishment.",
+    label: "Forecast Drafts",
+    shortDescription: "Min-stock reorder candidates for draft POs.",
+    purposeSentence: "Confirm SKUs below safe stock that need a draft purchase order.",
     nextStepLabel: "Create PO",
     nextStepTab: "create",
   },
   smart: {
-    label: "Smart Reorder",
-    shortDescription: "System-suggested PO quantities.",
-    purposeSentence: "Use velocity-based quantities when basic reorder levels are not enough.",
+    label: "Smart quantities",
+    shortDescription: "System-suggested PO quantities (same Forecast Drafts queue).",
+    purposeSentence: "Use suggested quantities when basic reorder levels are not enough.",
     nextStepLabel: "Create PO",
     nextStepTab: "create",
   },
@@ -451,46 +511,39 @@ const PURCHASE_TAB_META = {
     label: "Create PO",
     shortDescription: "Create a purchase order for supplier stock.",
     purposeSentence: "Draft or submit a purchase order for supplier stock.",
-    nextStepLabel: "Receive Stock",
+    nextStepLabel: "Pending Receipts",
     nextStepTab: "receive",
   },
   receive: {
-    label: "Receive Stock",
+    label: "Pending Receipts",
     shortDescription: "Record goods received and increase inventory.",
     purposeSentence: "Record inbound goods against an open PO and update stock.",
-    nextStepLabel: "Purchase Orders",
+    nextStepLabel: "Purchase History",
     nextStepTab: "history",
   },
   history: {
-    label: "Purchase Orders",
+    label: "Purchase History",
     shortDescription: "Track open, received, and completed POs.",
     purposeSentence: "Track open, received, and completed purchase orders.",
-    nextStepLabel: "Receive Stock",
+    nextStepLabel: "Pending Receipts",
     nextStepTab: "receive",
   },
   suppliers: {
     label: "Suppliers",
-    shortDescription: "Manage supplier details.",
-    purposeSentence: "Review supplier activity and open PO history by vendor.",
+    shortDescription: "Year-1 reference only.",
+    purposeSentence: "Supplier management is planned for a future release.",
     nextStepLabel: "Create PO",
     nextStepTab: "create",
   },
 };
 
-function ProcurementWorkflowGuide() {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 sm:text-sm">
-      <span className="font-medium text-slate-700">Procurement: </span>
-      Forecast → Reorder → Create PO → Receive → Track
-    </div>
-  );
-}
+void PURCHASE_WORKSPACE_GROUPS;
 
 function ActiveStepSummary({ meta, onGoToTab }) {
   if (!meta) return null;
 
   return (
-    <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+    <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" data-purchase-queue-purpose="true">
       <div className="font-medium text-slate-900">{meta.label}</div>
       <p className="mt-0.5 text-slate-600">{meta.purposeSentence}</p>
       {meta.nextStepLabel && meta.nextStepTab && onGoToTab ? (
@@ -506,7 +559,8 @@ function ActiveStepSummary({ meta, onGoToTab }) {
   );
 }
 
-export default function PurchaseOrdersPage({ currentUser = null }) {
+export default function PurchaseOrdersPage({ currentUser = null, setActivePage = null }) {
+  const { showToast } = usePortalToast();
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [reorderCandidates, setReorderCandidates] = useState([]);
   const [smartReorder, setSmartReorder] = useState([]);
@@ -519,6 +573,17 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   const [loading, setLoading] = useState(true);
   const [creatingPo, setCreatingPo] = useState(false);
   const [receivingPo, setReceivingPo] = useState(false);
+  const [createMutationError, setCreateMutationError] = useState(null);
+  const [receiveMutationError, setReceiveMutationError] = useState(null);
+  const [editMutationError, setEditMutationError] = useState(null);
+  const [historyMutationError, setHistoryMutationError] = useState(null);
+  const [forecastMutationError, setForecastMutationError] = useState(null);
+  const createInflightRef = useRef(false);
+  const receiveInflightRef = useRef(false);
+  const editInflightRef = useRef(false);
+  const cancelInflightRef = useRef(false);
+  const bulkInflightRef = useRef(false);
+  const triggerInflightRef = useRef(false);
   const [creatingAutoPoId, setCreatingAutoPoId] = useState("");
 
   const [selectedCandidate, setSelectedCandidate] = useState(null);
@@ -531,7 +596,12 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
   const [poSearch, setPoSearch] = useState("");
   const [poStatusFilter, setPoStatusFilter] = useState("");
+  const [poSortKey, setPoSortKey] = useState("date");
+  const [selectedHistoryPoId, setSelectedHistoryPoId] = useState("");
   const [activeTab, setActiveTab] = useState("triggers");
+  const [inventoryReturnActive, setInventoryReturnActive] = useState(() => hasInventoryReturnContext());
+  const navConsumedRef = useRef(false);
+  const purchaseRestoreRef = useRef(false);
   const [bulkCreating, setBulkCreating] = useState(false);
   const [catalogProducts, setCatalogProducts] = useState([]);
   const [catalogProductsError, setCatalogProductsError] = useState("");
@@ -542,6 +612,40 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
   const operatingTenantId = useOperatingTenantId(currentUser);
   const procurementWriteBlocked = isHqProcurementWriteBlocked();
+
+  useEffect(() => {
+    if (navConsumedRef.current) return;
+    navConsumedRef.current = true;
+    const ctx = consumeHqNavContext("purchase");
+    const tab = String(ctx?.tab || "").trim();
+    if (tab === "receive" || tab === "create" || tab === "triggers" || tab === "smart" || tab === "history" || tab === "suppliers") {
+      setActiveTab(tab);
+    }
+    setInventoryReturnActive(hasInventoryReturnContext());
+  }, []);
+
+  useEffect(() => {
+    if (purchaseRestoreRef.current) return;
+    purchaseRestoreRef.current = true;
+    const restored = consumePurchaseReturnContextIfArmed();
+    if (!restored) return;
+    const tab = String(restored.activeTab || "").trim();
+    if (
+      tab === "receive" ||
+      tab === "create" ||
+      tab === "triggers" ||
+      tab === "smart" ||
+      tab === "history" ||
+      tab === "suppliers" ||
+      tab === "reorder"
+    ) {
+      setActiveTab(tab);
+    }
+    if (restored.poSearch != null) setPoSearch(String(restored.poSearch || ""));
+    if (restored.poStatusFilter != null) setPoStatusFilter(String(restored.poStatusFilter || ""));
+    if (restored.poSortKey) setPoSortKey(String(restored.poSortKey || "date"));
+    if (restored.selectedPoId) setSelectedHistoryPoId(String(restored.selectedPoId || ""));
+  }, []);
 
   const loadCatalogProducts = useCallback(async () => {
     if (!supabase) {
@@ -662,7 +766,9 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
       const forecast = forecastRes.data?.forecast || [];
       const rows = forecast.map(mapForecastToPurchaseReorderCandidate);
-      console.log("SUPABASE PURCHASE REORDER:", rows);
+      if (IS_DEV || IS_QA) {
+        console.info("[PurchaseOrders] SUPABASE PURCHASE REORDER:", rows);
+      }
       setReorderCandidates(rows);
 
       const smartItems = forecast
@@ -685,7 +791,9 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
         healthRes?.data?.rows || [],
         pos
       );
-      console.log("INVENTORY HEALTH AUTO PURCHASE TRIGGERS:", triggerRows);
+      if (IS_DEV || IS_QA) {
+        console.info("[PurchaseOrders] INVENTORY HEALTH AUTO PURCHASE TRIGGERS:", triggerRows);
+      }
       setAutoTriggers(triggerRows);
       setAutoTriggerSummary(summarizePlaceholderTriggers(triggerRows));
 
@@ -744,15 +852,20 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
     }
   };
 
-  const refreshAll = async () => {
+  const refreshAll = async ({ silent = false } = {}) => {
     try {
-      setErrorMessage("");
+      if (!silent) setErrorMessage("");
       await Promise.all([loadPurchaseDashboard(), loadCatalogProducts()]);
     } catch (err) {
       console.error(err);
-      setErrorMessage(err?.message || "Failed to load purchase dashboard.");
+      if (!silent) {
+        setErrorMessage(err?.message || "Failed to load purchase dashboard.");
+      }
     }
   };
+
+  const frozenMutationError = (action) =>
+    mapPurchaseMutationError("Purchase Order frozen", { action });
 
   useEffect(() => {
     async function initialLoad() {
@@ -776,7 +889,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   }, [loadCatalogProducts]);
 
   const filteredPurchaseOrders = useMemo(() => {
-    return purchaseOrders.filter((po) => {
+    const rows = purchaseOrders.filter((po) => {
       const matchesSearch =
         !poSearch ||
         String(po.poId || "").toLowerCase().includes(poSearch.toLowerCase()) ||
@@ -790,7 +903,72 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
       return matchesSearch && matchesStatus;
     });
-  }, [purchaseOrders, poSearch, poStatusFilter]);
+
+    const sorted = [...rows];
+    sorted.sort((a, b) => {
+      if (poSortKey === "status") {
+        return String(a.status || "").localeCompare(String(b.status || ""));
+      }
+      if (poSortKey === "product") {
+        return String(a.productName || a.productId || "").localeCompare(
+          String(b.productName || b.productId || "")
+        );
+      }
+      return String(b.poDate || "").localeCompare(String(a.poDate || ""));
+    });
+    return sorted;
+  }, [purchaseOrders, poSearch, poStatusFilter, poSortKey]);
+
+  const selectedHistoryPo = useMemo(
+    () => purchaseOrders.find((po) => poRowKey(po) === selectedHistoryPoId) || null,
+    [purchaseOrders, selectedHistoryPoId]
+  );
+
+  const selectedHistoryVisible = useMemo(
+    () => filteredPurchaseOrders.some((po) => poRowKey(po) === selectedHistoryPoId),
+    [filteredPurchaseOrders, selectedHistoryPoId]
+  );
+
+  const focusedPoOutsideFilters = useMemo(() => {
+    if (!selectedHistoryPoId || !selectedHistoryPo) return null;
+    if (selectedHistoryVisible) return null;
+    if (!poSearch && !poStatusFilter) return null;
+    return buildFocusedPoOutsideFiltersCopy({ poId: selectedHistoryPoId });
+  }, [selectedHistoryPoId, selectedHistoryPo, selectedHistoryVisible, poSearch, poStatusFilter]);
+
+  const contextStripParts = useMemo(() => {
+    const selectedPo = selectedHistoryPo || selectedPurchaseOrder;
+    return buildPurchaseContextParts({
+      activeTab,
+      selectedPoId: selectedPo?.poId || selectedHistoryPoId || "",
+      supplier: selectedPo?.supplier || "",
+      searchQuery: poSearch,
+      statusFilter: poStatusFilter,
+      sortLabel: activeTab === "history" ? purchaseSortLabel(poSortKey) : "",
+      freezeActive: procurementWriteBlocked,
+    });
+  }, [
+    activeTab,
+    selectedHistoryPo,
+    selectedPurchaseOrder,
+    selectedHistoryPoId,
+    poSearch,
+    poStatusFilter,
+    poSortKey,
+    procurementWriteBlocked,
+  ]);
+
+  const historyEmptyCopy = useMemo(
+    () =>
+      buildPurchaseListEmptyCopy({
+        purchaseOrderLength: purchaseOrders.length,
+        search: poSearch,
+        statusFilter: poStatusFilter,
+        readFailed: Boolean(errorMessage) && purchaseOrders.length === 0,
+        listKind: "history",
+      }),
+    [purchaseOrders.length, poSearch, poStatusFilter, errorMessage]
+  );
 
   const poStats = useMemo(() => {
     const receivedPos = purchaseOrders.filter(
@@ -819,6 +997,107 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   const openPurchaseOrders = useMemo(
     () => purchaseOrders.filter((po) => canReceivePurchaseOrder(po)),
     [purchaseOrders]
+  );
+
+  const receiveEmptyCopy = useMemo(
+    () =>
+      buildPurchaseListEmptyCopy({
+        pendingReceiptLength: openPurchaseOrders.length,
+        listKind: "receive",
+      }),
+    [openPurchaseOrders.length]
+  );
+
+  const blockedTriggerCount = useMemo(
+    () => autoTriggers.filter((item) => item.hasOpenPo).length,
+    [autoTriggers]
+  );
+
+  const criticalTriggerCount = useMemo(
+    () =>
+      autoTriggers.filter((item) => String(item.urgency || "").toUpperCase() === "CRITICAL")
+        .length,
+    [autoTriggers]
+  );
+
+  const clearHistoryFilters = useCallback(() => {
+    setPoSearch("");
+    setPoStatusFilter("");
+  }, []);
+
+  const captureReturnContext = useCallback(() => {
+    writePurchaseReturnContext({
+      activeTab,
+      poSearch,
+      poStatusFilter,
+      poSortKey,
+      selectedPoId: selectedHistoryPoId || selectedPurchaseOrder?.poId || "",
+    });
+  }, [
+    activeTab,
+    poSearch,
+    poStatusFilter,
+    poSortKey,
+    selectedHistoryPoId,
+    selectedPurchaseOrder?.poId,
+  ]);
+
+  const navigateAway = useCallback(
+    (target, { tab } = {}) => {
+      captureReturnContext();
+      if (tab) {
+        persistHqNavContext({ page: target, tab });
+      } else {
+        persistHqNavContext({ page: target });
+      }
+      if (typeof setActivePage === "function") {
+        setActivePage(target);
+      }
+    },
+    [captureReturnContext, setActivePage]
+  );
+
+  const handleStartHereAction = useCallback(
+    (action) => {
+      if (!action) return;
+      if (action.kind === "tab" && action.tab) {
+        setActiveTab(action.tab);
+        return;
+      }
+      if (action.kind === "navigate" && action.target) {
+        navigateAway(action.target, action.tab ? { tab: action.tab } : {});
+      }
+    },
+    [navigateAway]
+  );
+
+  const handleEmptyAction = useCallback(
+    (action) => {
+      if (action === "retry" || action === "refresh") {
+        void refreshAll();
+        return;
+      }
+      if (action === "clear_search") {
+        setPoSearch("");
+        return;
+      }
+      if (action === "clear_filters") {
+        clearHistoryFilters();
+        return;
+      }
+      if (action === "open_create") {
+        setActiveTab("create");
+        return;
+      }
+      if (action === "open_history") {
+        setActiveTab("history");
+        return;
+      }
+      if (action === "open_triggers") {
+        setActiveTab("triggers");
+      }
+    },
+    [clearHistoryFilters, refreshAll]
   );
 
   const resolveCatalogProduct = (productId) =>
@@ -916,9 +1195,12 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   };
 
   const applyReceivePoSelection = (po, { switchTab = false } = {}) => {
-    console.log("APPLY RECEIVE PO SELECTION", po);
+    if (IS_DEV || IS_QA) {
+      console.info("[PurchaseOrders] APPLY RECEIVE PO SELECTION", po);
+    }
     setStatusMessage("");
     setErrorMessage("");
+    setReceiveMutationError(null);
 
     if (!canReceivePurchaseOrder(po)) {
       throw new Error(
@@ -997,11 +1279,15 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
   };
 
   const handleBulkCreateCriticalDraftPos = async () => {
-    if (procurementWriteBlocked) return;
+    if (procurementWriteBlocked) {
+      setForecastMutationError(frozenMutationError("bulk"));
+      return;
+    }
+    if (bulkInflightRef.current || bulkCreating) return;
+    bulkInflightRef.current = true;
     try {
       setBulkCreating(true);
-      setStatusMessage("");
-      setErrorMessage("");
+      setForecastMutationError(null);
 
       let result = {};
       if (supabase) {
@@ -1025,9 +1311,21 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
           summary: {
             createdCount: results.filter((r) => r.status === "fulfilled" && r.value?.success).length,
             skippedCount: Math.max(0, critical.length - results.length),
-            failedCount: results.filter((r) => r.status === "rejected" || !r.value?.success).length,
+            failedCount: results.filter(
+              (r) => r.status === "rejected" || (r.status === "fulfilled" && !r.value?.success)
+            ).length,
           },
         };
+        const firstFailure = results.find(
+          (r) => r.status === "rejected" || (r.status === "fulfilled" && !r.value?.success)
+        );
+        if (firstFailure && result.summary.createdCount === 0 && result.summary.failedCount > 0) {
+          const failMsg =
+            firstFailure.status === "rejected"
+              ? firstFailure.reason?.message || firstFailure.reason
+              : firstFailure.value?.error;
+          throw new Error(failMsg || "Failed to bulk create draft purchase orders");
+        }
       } else {
         if (!ALLOW_LEGACY_APPS_SCRIPT) {
           throw new Error("Supabase bulk purchase order creation is required for pilot access.");
@@ -1043,26 +1341,47 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
         });
         result = res?.data || {};
       }
-      setStatusMessage(
-        `Bulk draft PO run complete: Created ${result?.summary?.createdCount || 0}, Skipped ${result?.summary?.skippedCount || 0}, Failed ${result?.summary?.failedCount || 0}`
+      const created = result?.summary?.createdCount || 0;
+      const skipped = result?.summary?.skippedCount || 0;
+      const failed = result?.summary?.failedCount || 0;
+      showToast(
+        "success",
+        `Critical draft POs: Created ${created}, Skipped ${skipped}, Failed ${failed}`
       );
+      if (failed > 0) {
+        setForecastMutationError(
+          mapPurchaseMutationError(
+            `${failed} critical draft purchase order(s) could not be created. Review Forecast Suggestions and retry.`,
+            { action: "bulk" }
+          )
+        );
+      }
 
-      await refreshAll();
+      await refreshAll({ silent: true });
     } catch (err) {
       console.error(err);
-      setErrorMessage(err?.message || "Failed to bulk create draft purchase orders");
+      setForecastMutationError(
+        mapPurchaseMutationError(err?.message || err || "Failed to bulk create draft purchase orders", {
+          action: "bulk",
+        })
+      );
     } finally {
       setBulkCreating(false);
+      bulkInflightRef.current = false;
     }
   };
 
   const handleCreatePurchaseOrder = async (e) => {
     e.preventDefault();
-    if (procurementWriteBlocked) return;
+    if (procurementWriteBlocked) {
+      setCreateMutationError(frozenMutationError("create"));
+      return;
+    }
+    if (createInflightRef.current || creatingPo) return;
+    createInflightRef.current = true;
     try {
       setCreatingPo(true);
-      setStatusMessage("");
-      setErrorMessage("");
+      setCreateMutationError(null);
 
       const payload = {
         ...validateCreateForm(),
@@ -1089,26 +1408,37 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       if (!res?.success && !result?.success) {
         throw new Error(res?.error || result?.message || "Failed to create purchase order");
       }
-      setStatusMessage(`Purchase order created successfully: ${result.poId || ""}`);
+      const createdPoId = result.poId || "";
+      showToast("success", createdPoId ? `Purchase order created: ${createdPoId}` : "Purchase order created");
       setCreateForm(emptyCreateForm);
       setSelectedCandidate(null);
+      setCreateMutationError(null);
 
-      await refreshAll();
+      await refreshAll({ silent: true });
     } catch (err) {
       console.error(err);
-      setErrorMessage(err?.message || "Failed to create purchase order");
+      setCreateMutationError(
+        mapPurchaseMutationError(err?.message || err || "Failed to create purchase order", {
+          action: "create",
+        })
+      );
     } finally {
       setCreatingPo(false);
+      createInflightRef.current = false;
     }
   };
 
   const handleReceivePurchaseOrder = async (e) => {
     e.preventDefault();
-    if (procurementWriteBlocked) return;
+    if (procurementWriteBlocked) {
+      setReceiveMutationError(frozenMutationError("receive"));
+      return;
+    }
+    if (receiveInflightRef.current || receivingPo) return;
+    receiveInflightRef.current = true;
     try {
       setReceivingPo(true);
-      setStatusMessage("");
-      setErrorMessage("");
+      setReceiveMutationError(null);
 
       const payload = {
         poId: receiveForm.poId,
@@ -1168,17 +1498,27 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       if (!res?.success && !result?.success) {
         throw new Error(res?.error || result?.message || "Failed to receive purchase order");
       }
-      setStatusMessage(`Stock inward completed successfully${result.poId ? `: ${result.poId}` : ""}`);
+      const receivedPoId = result.poId || receiveForm.poId;
+      showToast(
+        "success",
+        receivedPoId ? `Stock received for ${receivedPoId}` : "Stock inward completed successfully"
+      );
       setReceiveForm(emptyReceiveForm);
       setSelectedPurchaseOrder(null);
+      setReceiveMutationError(null);
 
-      await refreshAll();
+      await refreshAll({ silent: true });
       invalidateAdminDashboardCaches();
     } catch (err) {
       console.error(err);
-      setErrorMessage(err?.message || "Failed to receive purchase order");
+      setReceiveMutationError(
+        mapPurchaseMutationError(err?.message || err || "Failed to receive purchase order", {
+          action: "receive",
+        })
+      );
     } finally {
       setReceivingPo(false);
+      receiveInflightRef.current = false;
     }
   };
 
@@ -1193,18 +1533,22 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       supplier: po.supplier || "",
       status: po.status || "Draft",
     });
-    setErrorMessage("");
-    setStatusMessage("");
+    setEditMutationError(null);
+    setHistoryMutationError(null);
   };
 
   const handleSaveEditPo = async (e) => {
     e.preventDefault();
-    if (procurementWriteBlocked) return;
+    if (procurementWriteBlocked) {
+      setEditMutationError(frozenMutationError("update"));
+      return;
+    }
     if (!editingPo?.poId) return;
+    if (editInflightRef.current || savingEdit) return;
+    editInflightRef.current = true;
     try {
       setSavingEdit(true);
-      setStatusMessage("");
-      setErrorMessage("");
+      setEditMutationError(null);
 
       const product = resolveCatalogProduct(editForm.productId);
       if (!product) throw new Error("Select a valid product from catalog.");
@@ -1224,57 +1568,79 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       });
       if (!res?.success) throw new Error(res?.error || "Failed to update purchase order");
 
-      setStatusMessage(`Purchase order updated: ${editingPo.poId}`);
+      showToast("success", `Purchase order updated: ${editingPo.poId}`);
       setEditingPo(null);
       setEditForm(emptyCreateForm);
-      await refreshAll();
+      setEditMutationError(null);
+      await refreshAll({ silent: true });
     } catch (err) {
       console.error(err);
-      setErrorMessage(err?.message || "Failed to update purchase order");
+      setEditMutationError(
+        mapPurchaseMutationError(err?.message || err || "Failed to update purchase order", {
+          action: "update",
+        })
+      );
     } finally {
       setSavingEdit(false);
+      editInflightRef.current = false;
     }
   };
 
   const handleCancelPo = async (po) => {
-    if (procurementWriteBlocked) return;
+    if (procurementWriteBlocked) {
+      setHistoryMutationError(frozenMutationError("cancel"));
+      return;
+    }
     if (!canEditOrCancelPurchaseOrder(po)) return;
+    if (cancelInflightRef.current || cancellingPoId) return;
     const confirmed =
       typeof window === "undefined" ||
       window.confirm(`Cancel purchase order ${po.poId}? This cannot be undone.`);
     if (!confirmed) return;
 
+    cancelInflightRef.current = true;
     try {
       setCancellingPoId(po.poId);
-      setStatusMessage("");
-      setErrorMessage("");
+      setHistoryMutationError(null);
       const res = await cancelPurchaseOrderWrite(po.poId, { tenantId: operatingTenantId });
       if (!res?.success) throw new Error(res?.error || "Failed to cancel purchase order");
-      setStatusMessage(`Purchase order cancelled: ${po.poId}`);
+      showToast("success", `Purchase order cancelled: ${po.poId}`);
       if (editingPo?.poId === po.poId) {
         setEditingPo(null);
         setEditForm(emptyCreateForm);
+        setEditMutationError(null);
       }
-      await refreshAll();
+      await refreshAll({ silent: true });
     } catch (err) {
       console.error(err);
-      setErrorMessage(err?.message || "Failed to cancel purchase order");
+      setHistoryMutationError(
+        mapPurchaseMutationError(err?.message || err || "Failed to cancel purchase order", {
+          action: "cancel",
+        })
+      );
     } finally {
       setCancellingPoId("");
+      cancelInflightRef.current = false;
     }
   };
 
   const handleCreateDraftPoFromTrigger = async (item) => {
-    if (procurementWriteBlocked) return;
+    if (procurementWriteBlocked) {
+      setForecastMutationError(frozenMutationError("create"));
+      return;
+    }
+    if (triggerInflightRef.current || creatingAutoPoId) return;
     try {
       if (!item?.canAutoCreate) {
-        setErrorMessage("Open PO already exists for this product.");
+        setForecastMutationError(
+          mapPurchaseMutationError("Open PO already exists for this product.", { action: "create" })
+        );
         return;
       }
 
+      triggerInflightRef.current = true;
       setCreatingAutoPoId(item.productId);
-      setStatusMessage("");
-      setErrorMessage("");
+      setForecastMutationError(null);
 
       const payload = {
         productId: item.productId,
@@ -1306,14 +1672,22 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       if (!res?.success && !result?.success) {
         throw new Error(res?.error || result?.message || "Failed to create draft purchase order");
       }
-      setStatusMessage(`Draft purchase order created: ${result.poId || ""}`);
+      showToast(
+        "success",
+        result.poId ? `Draft purchase order created: ${result.poId}` : "Draft purchase order created"
+      );
 
-      await refreshAll();
+      await refreshAll({ silent: true });
     } catch (err) {
       console.error(err);
-      setErrorMessage(err?.message || "Failed to create draft purchase order");
+      setForecastMutationError(
+        mapPurchaseMutationError(err?.message || err || "Failed to create draft purchase order", {
+          action: "create",
+        })
+      );
     } finally {
       setCreatingAutoPoId("");
+      triggerInflightRef.current = false;
     }
   };
 
@@ -1327,22 +1701,69 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
   return (
     <div className="space-y-4 p-4 sm:p-6">
+      {inventoryReturnActive && typeof setActivePage === "function" ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2 text-sm text-blue-900">
+          <span>Continue from Inventory</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 border-blue-200 bg-white text-xs"
+            onClick={() => {
+              armInventoryReturnRestore();
+              setInventoryReturnActive(false);
+              setActivePage("inventory");
+            }}
+          >
+            Back to Inventory
+          </Button>
+        </div>
+      ) : null}
+
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Purchase &amp; Reorder Operations</h1>
+          <p className="mt-1 text-sm text-slate-700" data-purchase-primary-question="true">
+            {PURCHASE_WORKSPACE_PRIMARY_QUESTION}
+          </p>
           <p className="mt-1 text-sm text-slate-500">
-            Manage reorder candidates, purchase orders, stock inward, and forecast-based draft PO suggestions.
+            Adjacent to Inventory — replenish, receive, and administer POs. Stock levels remain owned by
+            Inventory.
+          </p>
+          <p
+            className="mt-2 text-xs font-medium text-slate-600"
+            data-purchase-workspace-framing="true"
+          >
+            Purchase Queue: Critical Reorders · Forecast Drafts · Pending Receipts · Purchase History
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={refreshAll}
+            onClick={() => void refreshAll()}
             className="rounded-xl border bg-white px-4 py-2 text-sm font-medium shadow-sm hover:bg-slate-50"
           >
-            Refresh Dashboard
+            Refresh
           </button>
+          {typeof setActivePage === "function" ? (
+            <>
+              <button
+                type="button"
+                onClick={() => navigateAway("inventory")}
+                className="rounded-xl border bg-white px-4 py-2 text-sm font-medium shadow-sm hover:bg-slate-50"
+              >
+                Open Inventory
+              </button>
+              <button
+                type="button"
+                onClick={() => navigateAway("orders")}
+                className="rounded-xl border bg-white px-4 py-2 text-sm font-medium shadow-sm hover:bg-slate-50"
+              >
+                Open Orders
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
 
@@ -1364,114 +1785,151 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <div className="text-xs text-slate-500">Total POs</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">All statuses · current tenant</div>
-          <div className="mt-1 text-2xl font-semibold">{poStats.total}</div>
-        </div>
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <div className="text-xs text-slate-500">Open POs</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">
-            Ordered or Partially Received with remaining qty · {currency(poStats.openValue)}
-          </div>
-          <div className="mt-1 text-2xl font-semibold">{poStats.open}</div>
-        </div>
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <div className="text-xs text-slate-500">Received</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">
-            Status = Received (lifetime) · {currency(poStats.receivedValue)}
-          </div>
-          <div className="mt-1 text-2xl font-semibold">{poStats.received}</div>
-        </div>
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <div className="text-xs text-slate-500">Total PO Value</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">
-            Sum of PO header total_cost · all statuses
-          </div>
-          <div className="mt-1 text-2xl font-semibold">{currency(poStats.totalValue)}</div>
-        </div>
-      </div>
+      <PurchaseContextStrip parts={contextStripParts} />
 
-      <ProcurementWorkflowGuide />
+      <PurchaseStartHere
+        pendingReceiptCount={openPurchaseOrders.length}
+        criticalCount={criticalTriggerCount}
+        blockedCount={blockedTriggerCount}
+        purchaseOrderCount={purchaseOrders.length}
+        loading={loading}
+        onAction={handleStartHereAction}
+      />
 
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {PURCHASE_TAB_ORDER.map((tab) => {
-          const meta = PURCHASE_TAB_META[tab];
-          const isActive = activeTab === tab;
-          return (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => setActiveTab(tab)}
-              aria-current={isActive ? "page" : undefined}
-              className={`flex shrink-0 flex-col items-start rounded-xl px-3 py-2 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 ${
-                isActive
-                  ? "min-w-[9rem] bg-black text-white shadow-md ring-2 ring-black ring-offset-2"
-                  : "border bg-white text-slate-700 hover:bg-slate-50"
-              }`}
-            >
-              <span className="font-medium leading-tight">{meta.label}</span>
-              {isActive ? (
-                <span className="mt-0.5 line-clamp-1 text-xs leading-snug text-slate-300">
-                  {meta.shortDescription}
+      <section
+        className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
+        aria-label="Purchase Queue"
+        data-purchase-queue-hierarchy="true"
+        data-purchase-workspace="hq"
+      >
+        <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-700">
+              Purchase Queue
+            </h2>
+            <p className="text-[11px] text-slate-500">
+              Critical Reorders → Forecast Drafts → Pending Receipts → Purchase History
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-0.5" data-purchase-queue="true">
+          {PURCHASE_QUEUE_HIERARCHY.map((item) => {
+            const isActive = resolvePurchaseQueueId(activeTab) === item.id;
+            const count =
+              item.id === "critical"
+                ? criticalTriggerCount
+                : item.id === "forecast"
+                  ? reorderCandidates.length + smartReorder.length
+                  : item.id === "pending"
+                    ? openPurchaseOrders.length
+                    : purchaseOrders.length;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveTab(item.tab)}
+                aria-current={isActive ? "page" : undefined}
+                data-purchase-queue-item={item.id}
+                className={`flex shrink-0 flex-col items-start rounded-xl px-3 py-2 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 ${
+                  isActive
+                    ? "min-w-[9.5rem] bg-black text-white shadow-md ring-2 ring-black ring-offset-2"
+                    : "border bg-slate-50 text-slate-700 hover:bg-white"
+                }`}
+              >
+                <span className="font-medium leading-tight">{item.label}</span>
+                <span
+                  className={`mt-0.5 text-[11px] ${isActive ? "text-slate-300" : "text-slate-500"}`}
+                >
+                  {count}
                 </span>
-              ) : null}
-            </button>
-          );
-        })}
-      </div>
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1.5 border-t border-slate-100 pt-2">
+          {PURCHASE_QUEUE_SECONDARY.map((item) => {
+            const isActive = activeTab === item.tab;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveTab(item.tab)}
+                aria-current={isActive ? "page" : undefined}
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                  isActive
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
       <ActiveStepSummary meta={PURCHASE_TAB_META[activeTab]} onGoToTab={setActiveTab} />
 
       {activeTab === "triggers" && (
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border bg-white p-4 shadow-sm" data-purchase-queue-panel="critical">
           <p className="mb-3 text-xs text-slate-500">
-            Uses the same 30-day ORDER_OUT velocity and urgency thresholds as Inventory → Health:
-            Critical (at/below min stock), High (stockout within lead time + 7 days), Medium
-            (within 30 days). Reorder Candidates below still lists min-stock SKUs from{" "}
-            <code className="rounded bg-slate-100 px-1">v_reorder_candidates</code>.
+            Use Critical Reorders when urgency is Critical or High (same 30-day ORDER_OUT velocity rules as
+            Inventory → Health). Forecast Drafts below cover min-stock and smart quantities.
           </p>
           {autoTriggerSummary ? (
-            <div className="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-5">
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-slate-500">Critical</div>
-                <div className="text-xl font-semibold">{autoTriggerSummary.criticalCount || 0}</div>
-              </div>
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-slate-500">High</div>
-                <div className="text-xl font-semibold">{autoTriggerSummary.highCount || 0}</div>
-              </div>
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-slate-500">Medium</div>
-                <div className="text-xl font-semibold">{autoTriggerSummary.mediumCount || 0}</div>
-              </div>
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-slate-500">Blocked by Open PO</div>
-                <div className="text-xl font-semibold">{autoTriggerSummary.blockedByOpenPo || 0}</div>
-              </div>
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-slate-500">Estimated PO Value</div>
-                <div className="text-xl font-semibold">
-                  {currency(autoTriggerSummary.totalEstimatedCost || 0)}
+            <PurchaseCollapsibleSection title="Forecast attention counts" className="mb-3">
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+                <div className="rounded-xl border p-3">
+                  <div className="text-xs text-slate-500">Critical</div>
+                  <div className="text-xl font-semibold">{autoTriggerSummary.criticalCount || 0}</div>
+                </div>
+                <div className="rounded-xl border p-3">
+                  <div className="text-xs text-slate-500">High</div>
+                  <div className="text-xl font-semibold">{autoTriggerSummary.highCount || 0}</div>
+                </div>
+                <div className="rounded-xl border p-3">
+                  <div className="text-xs text-slate-500">Medium</div>
+                  <div className="text-xl font-semibold">{autoTriggerSummary.mediumCount || 0}</div>
+                </div>
+                <div className="rounded-xl border p-3">
+                  <div className="text-xs text-slate-500">Blocked by Open PO</div>
+                  <div className="text-xl font-semibold">{autoTriggerSummary.blockedByOpenPo || 0}</div>
+                </div>
+                <div className="rounded-xl border p-3">
+                  <div className="text-xs text-slate-500">Estimated PO Value</div>
+                  <div className="text-xl font-semibold">
+                    {currency(autoTriggerSummary.totalEstimatedCost || 0)}
+                  </div>
                 </div>
               </div>
-            </div>
+            </PurchaseCollapsibleSection>
           ) : null}
 
           {criticalActionableTriggers.length > 0 ? (
             <div className="mb-3 flex justify-end">
               <button
                 type="button"
-                onClick={handleBulkCreateCriticalDraftPos}
+                onClick={() => void handleBulkCreateCriticalDraftPos()}
                 disabled={procurementWriteBlocked || bulkCreating}
+                aria-busy={bulkCreating}
                 className="rounded-xl bg-black px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
               >
                 {bulkCreating
-                  ? "Creating Critical Draft POs..."
+                  ? getBulkCreateCriticalPurchaseOrdersLoadingLabel()
                   : "Create Draft POs for All Critical"}
               </button>
             </div>
+          ) : null}
+
+          {forecastMutationError ? (
+            <ActionErrorSummary
+              className="mb-4"
+              title={forecastMutationError.title}
+              message={forecastMutationError.message}
+              fieldErrors={forecastMutationError.fieldErrors}
+              technicalReference={forecastMutationError.rawErrorForLogging}
+              onDismiss={() => setForecastMutationError(null)}
+            />
           ) : null}
 
           <div className="space-y-3">
@@ -1536,12 +1994,18 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
 
                       <button
                         type="button"
-                        onClick={() => handleCreateDraftPoFromTrigger(item)}
-                        disabled={procurementWriteBlocked || creatingAutoPoId === item.productId || !item.canAutoCreate}
+                        onClick={() => void handleCreateDraftPoFromTrigger(item)}
+                        disabled={
+                          procurementWriteBlocked ||
+                          Boolean(creatingAutoPoId) ||
+                          bulkCreating ||
+                          !item.canAutoCreate
+                        }
+                        aria-busy={creatingAutoPoId === item.productId}
                         className="rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50"
                       >
                         {creatingAutoPoId === item.productId
-                          ? "Creating Draft PO..."
+                          ? getCreatePurchaseOrderLoadingLabel()
                           : !item.canAutoCreate
                           ? "Open PO Already Exists"
                           : "Create Draft PO"}
@@ -1555,8 +2019,39 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
         </div>
       )}
 
+      {(activeTab === "reorder" || activeTab === "smart") && (
+        <div className="mb-3 flex flex-wrap gap-2" data-purchase-forecast-subnav="true">
+          <button
+            type="button"
+            onClick={() => setActiveTab("reorder")}
+            className={`rounded-full border px-3 py-1 text-xs font-medium ${
+              activeTab === "reorder"
+                ? "border-slate-900 bg-slate-900 text-white"
+                : "border-slate-200 bg-white text-slate-700"
+            }`}
+          >
+            Min-stock candidates
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("smart")}
+            className={`rounded-full border px-3 py-1 text-xs font-medium ${
+              activeTab === "smart"
+                ? "border-slate-900 bg-slate-900 text-white"
+                : "border-slate-200 bg-white text-slate-700"
+            }`}
+          >
+            Smart quantities
+          </button>
+          <p className="w-full text-[11px] text-slate-500">
+            Forecast Drafts: use min-stock when thresholds matter; use smart quantities when suggested
+            order qty is available. Same Create PO path.
+          </p>
+        </div>
+      )}
+
       {activeTab === "reorder" && (
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border bg-white p-4 shadow-sm" data-purchase-queue-panel="forecast">
           <div className="space-y-3">
             {reorderCandidates.length === 0 ? (
               <div className="rounded-xl border border-dashed p-6 text-sm text-slate-500">
@@ -1600,14 +2095,16 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       )}
 
       {activeTab === "smart" && (
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border bg-white p-4 shadow-sm" data-purchase-queue-panel="forecast-smart">
           {smartReorderSummary ? (
-            <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Critical</div><div className="text-xl font-semibold">{smartReorderSummary.criticalCount || 0}</div></div>
-              <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">High</div><div className="text-xl font-semibold">{smartReorderSummary.highUrgencyItems || 0}</div></div>
-              <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Medium</div><div className="text-xl font-semibold">{smartReorderSummary.mediumUrgencyItems || 0}</div></div>
-              <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Suggested Qty</div><div className="text-xl font-semibold">{smartReorderSummary.totalSuggestedOrderQty || 0}</div></div>
-            </div>
+            <PurchaseCollapsibleSection title="Smart quantity summary" className="mb-4">
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Critical</div><div className="text-xl font-semibold">{smartReorderSummary.criticalCount || 0}</div></div>
+                <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">High</div><div className="text-xl font-semibold">{smartReorderSummary.highUrgencyItems || 0}</div></div>
+                <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Medium</div><div className="text-xl font-semibold">{smartReorderSummary.mediumUrgencyItems || 0}</div></div>
+                <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Suggested Qty</div><div className="text-xl font-semibold">{smartReorderSummary.totalSuggestedOrderQty || 0}</div></div>
+              </div>
+            </PurchaseCollapsibleSection>
           ) : null}
 
           <div className="space-y-3">
@@ -1668,7 +2165,22 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
             </div>
           ) : null}
 
-          <form onSubmit={handleCreatePurchaseOrder} className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {createMutationError ? (
+            <ActionErrorSummary
+              className="mb-4"
+              title={createMutationError.title}
+              message={createMutationError.message}
+              fieldErrors={createMutationError.fieldErrors}
+              technicalReference={createMutationError.rawErrorForLogging}
+              onDismiss={() => setCreateMutationError(null)}
+            />
+          ) : null}
+
+          <form
+            onSubmit={handleCreatePurchaseOrder}
+            className="grid grid-cols-1 gap-4 lg:grid-cols-2"
+            aria-busy={creatingPo}
+          >
             <div className="lg:col-span-2">
               <label className="mb-1 block text-sm font-medium">Product</label>
               {catalogProductsError ? (
@@ -1735,19 +2247,25 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
             </div>
 
             <div className="lg:col-span-2 flex flex-col gap-3 sm:flex-row">
-              <button type="submit" disabled={procurementWriteBlocked || creatingPo} className="rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50">
-                {creatingPo ? "Creating..." : "Create Purchase Order"}
+              <button
+                type="submit"
+                disabled={procurementWriteBlocked || creatingPo}
+                aria-busy={creatingPo}
+                className="rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {creatingPo ? getCreatePurchaseOrderLoadingLabel() : "Create Purchase Order"}
               </button>
 
               <button
                 type="button"
+                disabled={creatingPo}
                 onClick={() => {
                   setCreateForm(emptyCreateForm);
                   setSelectedCandidate(null);
+                  setCreateMutationError(null);
                   setStatusMessage("Create purchase order form reset.");
-                  setErrorMessage("");
                 }}
-                className="rounded-xl border bg-white px-4 py-3 text-sm font-medium hover:bg-slate-50"
+                className="rounded-xl border bg-white px-4 py-3 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
               >
                 Reset
               </button>
@@ -1757,7 +2275,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       )}
 
       {activeTab === "receive" && (
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border bg-white p-4 shadow-sm" data-purchase-queue-panel="pending">
           <div className="mb-4">
             <label className="mb-1 block text-sm font-medium">Open Purchase Order</label>
             <select
@@ -1775,8 +2293,16 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
           </div>
 
           {openPurchaseOrders.length === 0 ? (
-            <div className="mb-4 rounded-xl border border-dashed p-4 text-sm text-slate-500">
-              No open purchase orders available for receipt.
+            <div className="mb-4 rounded-xl border border-dashed p-4 text-sm text-slate-600">
+              <p className="font-medium text-slate-800">{receiveEmptyCopy.title}</p>
+              <p className="mt-1 text-slate-500">{receiveEmptyCopy.message}</p>
+              <button
+                type="button"
+                className="mt-3 rounded-xl border bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50"
+                onClick={() => handleEmptyAction(receiveEmptyCopy.action)}
+              >
+                {receiveEmptyCopy.actionLabel}
+              </button>
             </div>
           ) : null}
 
@@ -1813,7 +2339,22 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
             </div>
           ) : null}
 
-          <form onSubmit={handleReceivePurchaseOrder} className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {receiveMutationError ? (
+            <ActionErrorSummary
+              className="mb-4"
+              title={receiveMutationError.title}
+              message={receiveMutationError.message}
+              fieldErrors={receiveMutationError.fieldErrors}
+              technicalReference={receiveMutationError.rawErrorForLogging}
+              onDismiss={() => setReceiveMutationError(null)}
+            />
+          ) : null}
+
+          <form
+            onSubmit={handleReceivePurchaseOrder}
+            className="grid grid-cols-1 gap-4 lg:grid-cols-2"
+            aria-busy={receivingPo}
+          >
             <div>
               <label className="mb-1 block text-sm font-medium">Received Qty</label>
               <input
@@ -1822,7 +2363,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
                 value={receiveForm.receivedQty}
                 onChange={(e) => handleReceiveFormChange("receivedQty", e.target.value)}
                 className="w-full rounded-xl border px-3 py-3 text-sm outline-none focus:ring"
-                disabled={!selectedPurchaseOrder}
+                disabled={!selectedPurchaseOrder || receivingPo}
                 required
               />
             </div>
@@ -1834,24 +2375,36 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
                 onChange={(e) => handleReceiveFormChange("grnNotes", e.target.value)}
                 rows={4}
                 className="w-full rounded-xl border px-3 py-3 text-sm outline-none focus:ring"
-                disabled={!selectedPurchaseOrder}
+                disabled={!selectedPurchaseOrder || receivingPo}
               />
             </div>
 
             <div className="lg:col-span-2 flex flex-col gap-3 sm:flex-row">
-              <button type="submit" disabled={procurementWriteBlocked || receivingPo || !selectedPurchaseOrder || !receiveForm.poId || Number(receiveForm.receivedQty || 0) <= 0} className="rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50">
-                {receivingPo ? "Receiving..." : "Receive Purchase Order"}
+              <button
+                type="submit"
+                disabled={
+                  procurementWriteBlocked ||
+                  receivingPo ||
+                  !selectedPurchaseOrder ||
+                  !receiveForm.poId ||
+                  Number(receiveForm.receivedQty || 0) <= 0
+                }
+                aria-busy={receivingPo}
+                className="rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {receivingPo ? getReceivePurchaseOrderLoadingLabel() : "Receive Purchase Order"}
               </button>
 
               <button
                 type="button"
+                disabled={receivingPo}
                 onClick={() => {
                   setReceiveForm(emptyReceiveForm);
                   setSelectedPurchaseOrder(null);
                   setStatusMessage("Receive stock form reset.");
-                  setErrorMessage("");
+                  setReceiveMutationError(null);
                 }}
-                className="rounded-xl border bg-white px-4 py-3 text-sm font-medium hover:bg-slate-50"
+                className="rounded-xl border bg-white px-4 py-3 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
               >
                 Reset
               </button>
@@ -1861,27 +2414,194 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
       )}
 
       {activeTab === "history" && (
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <input type="text" value={poSearch} onChange={(e) => setPoSearch(e.target.value)} placeholder="Search PO / product / supplier" className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring" />
-            <select value={poStatusFilter} onChange={(e) => setPoStatusFilter(e.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring">
-                <option value="">All Statuses</option>
-                <option value="Draft">Draft</option>
-                <option value="Ordered">Ordered</option>
-                <option value="Partially Received">Partially Received</option>
-                <option value="Received">Received</option>
-                <option value="Cancelled">Cancelled</option>
+        <div className="rounded-2xl border bg-white p-4 shadow-sm" data-purchase-queue-panel="history">
+          <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <input
+              type="text"
+              value={poSearch}
+              onChange={(e) => setPoSearch(e.target.value)}
+              placeholder="Search PO / product / supplier"
+              className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring"
+            />
+            <select
+              value={poStatusFilter}
+              onChange={(e) => setPoStatusFilter(e.target.value)}
+              className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring"
+            >
+              <option value="">All Statuses</option>
+              <option value="Draft">Draft</option>
+              <option value="Ordered">Ordered</option>
+              <option value="Partially Received">Partially Received</option>
+              <option value="Received">Received</option>
+              <option value="Cancelled">Cancelled</option>
+            </select>
+            <select
+              value={poSortKey}
+              onChange={(e) => setPoSortKey(e.target.value)}
+              className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring"
+              aria-label="Sort purchase orders"
+            >
+              <option value="date">Sort: Date</option>
+              <option value="status">Sort: Status</option>
+              <option value="product">Sort: Product</option>
             </select>
           </div>
 
+          {focusedPoOutsideFilters ? (
+            <div
+              className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950"
+              role="status"
+              data-purchase-focus-outside="true"
+            >
+              <p className="font-medium">{focusedPoOutsideFilters.title}</p>
+              <p className="mt-1 text-xs text-amber-900/80">{focusedPoOutsideFilters.message}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium"
+                  onClick={clearHistoryFilters}
+                >
+                  {focusedPoOutsideFilters.clearLabel}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium"
+                  onClick={clearHistoryFilters}
+                >
+                  {focusedPoOutsideFilters.returnLabel}
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {historyMutationError ? (
+            <ActionErrorSummary
+              className="mb-4"
+              title={historyMutationError.title}
+              message={historyMutationError.message}
+              fieldErrors={historyMutationError.fieldErrors}
+              technicalReference={historyMutationError.rawErrorForLogging}
+              onDismiss={() => setHistoryMutationError(null)}
+            />
+          ) : null}
+
+          {selectedHistoryPo ? (
+            <div
+              className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50/60 p-4 text-sm"
+              data-purchase-selected-po="true"
+            >
+              <div className="font-medium text-indigo-950">Selected Purchase Order</div>
+              {(() => {
+                const expected = getPurchaseExpectedActionCopy({
+                  status: selectedHistoryPo.status,
+                  remainingQty: Math.max(
+                    0,
+                    Number(selectedHistoryPo.quantity || 0) - Number(selectedHistoryPo.receivedQty || 0)
+                  ),
+                  receivedQty: selectedHistoryPo.receivedQty,
+                });
+                return (
+                  <div
+                    className="mt-2 rounded-lg border border-indigo-100 bg-white/80 px-3 py-2"
+                    data-purchase-expected-action="true"
+                  >
+                    <div className="text-xs font-semibold uppercase tracking-wide text-indigo-800">
+                      Expected action
+                    </div>
+                    <div className="mt-0.5 font-medium text-indigo-950">{expected.action}</div>
+                    <div className="mt-0.5 text-xs text-indigo-900/80">{expected.reason}</div>
+                  </div>
+                );
+              })()}
+              <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                <div>
+                  <div className="text-xs text-slate-500">PO ID</div>
+                  <div className="font-medium">{selectedHistoryPo.poId}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Product</div>
+                  <div className="font-medium">{selectedHistoryPo.productName || "-"}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Supplier</div>
+                  <div className="font-medium">{selectedHistoryPo.supplier || "-"}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Status</div>
+                  <div className="font-medium">{selectedHistoryPo.status || "-"}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Qty</div>
+                  <div className="font-medium">{selectedHistoryPo.quantity || 0}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Total</div>
+                  <div className="font-medium">{currency(selectedHistoryPo.totalCost || 0)}</div>
+                </div>
+              </div>
+              <PurchaseCollapsibleSection title="Advanced PO details" className="mt-3">
+                <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+                  <div>
+                    <div className="text-xs text-slate-500">Product ID</div>
+                    <div className="font-medium">{selectedHistoryPo.productId || "-"}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500">Unit Cost</div>
+                    <div className="font-medium">{currency(selectedHistoryPo.unitCost || 0)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500">Received Qty</div>
+                    <div className="font-medium">{selectedHistoryPo.receivedQty || 0}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500">PO Date</div>
+                    <div className="font-medium">{selectedHistoryPo.poDate || "-"}</div>
+                  </div>
+                </div>
+              </PurchaseCollapsibleSection>
+              {!selectedHistoryVisible ? (
+                <p className="mt-2 text-xs text-amber-800">
+                  Selected PO is outside the current search/filters — use Clear Filters to reveal it.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="space-y-3">
             {filteredPurchaseOrders.length === 0 ? (
-              <div className="rounded-xl border border-dashed p-6 text-sm text-slate-500">
-                No purchase orders found.
+              <div className="rounded-xl border border-dashed p-6 text-sm text-slate-600">
+                <p className="font-medium text-slate-800">{historyEmptyCopy.title}</p>
+                <p className="mt-1 text-slate-500">{historyEmptyCopy.message}</p>
+                <button
+                  type="button"
+                  className="mt-3 rounded-xl border bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50"
+                  onClick={() => handleEmptyAction(historyEmptyCopy.action)}
+                >
+                  {historyEmptyCopy.actionLabel}
+                </button>
               </div>
             ) : (
-              filteredPurchaseOrders.map((po) => (
-                <div key={po.poId} className="rounded-2xl border p-4 shadow-sm">
+              filteredPurchaseOrders.map((po) => {
+                const isSelected = poRowKey(po) === selectedHistoryPoId;
+                return (
+                <div
+                  key={po.poId}
+                  role="button"
+                  tabIndex={0}
+                  aria-selected={isSelected}
+                  onClick={() =>
+                    setSelectedHistoryPoId((prev) => (prev === po.poId ? "" : po.poId))
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelectedHistoryPoId((prev) => (prev === po.poId ? "" : po.poId));
+                    }
+                  }}
+                  className={`rounded-2xl border p-4 shadow-sm ${
+                    isSelected ? "ring-2 ring-indigo-400 bg-indigo-50/40" : ""
+                  }`}
+                >
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -1902,7 +2622,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
                       </div>
                     </div>
 
-                    <div className="flex w-full flex-col gap-2 lg:w-auto lg:min-w-[12rem]">
+                    <div className="flex w-full flex-col gap-2 lg:w-auto lg:min-w-[12rem]" onClick={(e) => e.stopPropagation()}>
                       {canReceivePurchaseOrder(po) ? (
                         <button
                           type="button"
@@ -1924,88 +2644,116 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
                           <button
                             type="button"
                             onClick={() => void handleCancelPo(po)}
-                            disabled={procurementWriteBlocked || cancellingPoId === po.poId}
+                            disabled={procurementWriteBlocked || Boolean(cancellingPoId)}
+                            aria-busy={cancellingPoId === po.poId}
                             className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
                           >
-                            {cancellingPoId === po.poId ? "Cancelling…" : "Cancel PO"}
+                            {cancellingPoId === po.poId
+                              ? getCancelPurchaseOrderLoadingLabel()
+                              : "Cancel PO"}
                           </button>
                         </>
                       ) : null}
                     </div>
                   </div>
                 </div>
-              ))
+              );
+              })
             )}
           </div>
         </div>
       )}
 
       {activeTab === "suppliers" && (
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          {supplierSummary ? (
-            <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Total Suppliers</div><div className="text-xl font-semibold">{supplierSummary.totalSuppliers || 0}</div></div>
-              <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Active Suppliers</div><div className="text-xl font-semibold">{supplierSummary.activeSuppliers || 0}</div></div>
-              <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Suppliers With Open POs</div><div className="text-xl font-semibold">{supplierSummary.suppliersWithOpenPos || 0}</div></div>
-              <div className="rounded-xl border p-3"><div className="text-xs text-slate-500">Total PO Value</div><div className="text-xl font-semibold">{currency(supplierSummary.totalPoValue || 0)}</div></div>
-            </div>
-          ) : null}
-
-          <div className="space-y-3">
-            {supplierDashboard.length === 0 ? (
-              <div className="rounded-xl border border-dashed p-6 text-sm text-slate-500">
-                No supplier data found.
-              </div>
-            ) : (
-              supplierDashboard.map((supplier) => (
-                <div key={supplier.supplierName} className="rounded-2xl border p-4 shadow-sm">
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-base font-semibold">{supplier.supplierName}</h3>
-                        {supplier.openPOs > 0 ? (
-                          <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
-                            {supplier.openPOs} Open
-                          </span>
-                        ) : null}
-                      </div>
-
-                      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-                        <div><div className="text-xs text-slate-500">Total POs</div><div className="font-medium">{supplier.totalPOs}</div></div>
-                        <div><div className="text-xs text-slate-500">Received</div><div className="font-medium">{supplier.receivedPOs}</div></div>
-                        <div><div className="text-xs text-slate-500">Qty Ordered</div><div className="font-medium">{supplier.totalOrderedQty}</div></div>
-                        <div><div className="text-xs text-slate-500">Value</div><div className="font-medium">{currency(supplier.totalOrderedValue)}</div></div>
-                        <div><div className="text-xs text-slate-500">Avg Unit Cost</div><div className="font-medium">{currency(supplier.averageUnitCost)}</div></div>
-                        <div><div className="text-xs text-slate-500">Last PO Date</div><div className="font-medium">{supplier.lastPODate || "-"}</div></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+        <div
+          className="rounded-2xl border border-amber-200 bg-amber-50/50 p-4 shadow-sm"
+          data-purchase-suppliers-honesty="true"
+        >
+          <h3 className="text-sm font-semibold text-amber-950">{PURCHASE_SUPPLIERS_HONESTY.title}</h3>
+          <p className="mt-2 text-sm text-amber-900/90">{PURCHASE_SUPPLIERS_HONESTY.message}</p>
+          <p className="mt-3 text-xs text-amber-800">
+            This area currently provides reference information only. There are no supplier actions in
+            Year-1.
+          </p>
+          <button
+            type="button"
+            className="mt-4 rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-950 hover:bg-amber-50"
+            onClick={() => setActiveTab("create")}
+          >
+            Create Purchase Order
+          </button>
         </div>
       )}
+
+      <details
+        className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
+        data-purchase-summary-collapsed="true"
+      >
+        <summary className="cursor-pointer text-sm font-medium text-slate-800">
+          Purchase summary (secondary)
+        </summary>
+        <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="rounded-2xl border bg-white p-4 shadow-sm">
+            <div className="text-xs text-slate-500">Total POs</div>
+            <div className="mt-0.5 text-[11px] text-slate-400">All statuses · current tenant</div>
+            <div className="mt-1 text-2xl font-semibold">{poStats.total}</div>
+          </div>
+          <div className="rounded-2xl border bg-white p-4 shadow-sm">
+            <div className="text-xs text-slate-500">Open POs</div>
+            <div className="mt-0.5 text-[11px] text-slate-400">
+              Ordered or Partially Received with remaining qty · {currency(poStats.openValue)}
+            </div>
+            <div className="mt-1 text-2xl font-semibold">{poStats.open}</div>
+          </div>
+          <div className="rounded-2xl border bg-white p-4 shadow-sm">
+            <div className="text-xs text-slate-500">Received</div>
+            <div className="mt-0.5 text-[11px] text-slate-400">
+              Status = Received (lifetime) · {currency(poStats.receivedValue)}
+            </div>
+            <div className="mt-1 text-2xl font-semibold">{poStats.received}</div>
+          </div>
+          <div className="rounded-2xl border bg-white p-4 shadow-sm">
+            <div className="text-xs text-slate-500">Total PO Value</div>
+            <div className="mt-0.5 text-[11px] text-slate-400">
+              Sum of PO header total_cost · all statuses
+            </div>
+            <div className="mt-1 text-2xl font-semibold">{currency(poStats.totalValue)}</div>
+          </div>
+        </div>
+      </details>
 
       {editingPo ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <form
             onSubmit={handleSaveEditPo}
             className="w-full max-w-lg rounded-2xl border bg-white p-4 shadow-lg"
+            aria-busy={savingEdit}
           >
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-900">Edit purchase order · {editingPo.poId}</h3>
               <button
                 type="button"
+                disabled={savingEdit}
                 onClick={() => {
                   setEditingPo(null);
                   setEditForm(emptyCreateForm);
+                  setEditMutationError(null);
                 }}
-                className="text-sm text-slate-500 hover:text-slate-800"
+                className="text-sm text-slate-500 hover:text-slate-800 disabled:opacity-50"
               >
                 Close
               </button>
             </div>
+            {editMutationError ? (
+              <ActionErrorSummary
+                className="mb-3"
+                title={editMutationError.title}
+                message={editMutationError.message}
+                fieldErrors={editMutationError.fieldErrors}
+                technicalReference={editMutationError.rawErrorForLogging}
+                onDismiss={() => setEditMutationError(null)}
+              />
+            ) : null}
             <div className="space-y-3">
               <div>
                 <label className="mb-1 block text-sm font-medium">Product</label>
@@ -2034,6 +2782,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
                     value={editForm.quantity}
                     onChange={(e) => setEditForm((prev) => ({ ...prev, quantity: e.target.value }))}
                     className="w-full rounded-xl border px-3 py-2 text-sm"
+                    disabled={savingEdit}
                     required
                   />
                 </div>
@@ -2046,6 +2795,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
                     value={editForm.unitCost}
                     onChange={(e) => setEditForm((prev) => ({ ...prev, unitCost: e.target.value }))}
                     className="w-full rounded-xl border px-3 py-2 text-sm"
+                    disabled={savingEdit}
                     required
                   />
                 </div>
@@ -2057,6 +2807,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
                   value={editForm.supplier}
                   onChange={(e) => setEditForm((prev) => ({ ...prev, supplier: e.target.value }))}
                   className="w-full rounded-xl border px-3 py-2 text-sm"
+                  disabled={savingEdit}
                 />
               </div>
               <div>
@@ -2065,6 +2816,7 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
                   value={editForm.status}
                   onChange={(e) => setEditForm((prev) => ({ ...prev, status: e.target.value }))}
                   className="w-full rounded-xl border px-3 py-2 text-sm"
+                  disabled={savingEdit}
                 >
                   <option value="Draft">Draft</option>
                   <option value="Ordered">Ordered</option>
@@ -2074,20 +2826,23 @@ export default function PurchaseOrdersPage({ currentUser = null }) {
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
+                disabled={savingEdit}
                 onClick={() => {
                   setEditingPo(null);
                   setEditForm(emptyCreateForm);
+                  setEditMutationError(null);
                 }}
-                className="rounded-xl border px-4 py-2 text-sm"
+                className="rounded-xl border px-4 py-2 text-sm disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={procurementWriteBlocked || savingEdit}
+                aria-busy={savingEdit}
                 className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
-                {savingEdit ? "Saving…" : "Save changes"}
+                {savingEdit ? getSavePurchaseOrderLoadingLabel() : "Save changes"}
               </button>
             </div>
           </form>

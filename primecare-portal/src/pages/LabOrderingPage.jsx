@@ -32,9 +32,24 @@ import {
   getCollectionHistoryRead,
   getCollectionsRead,
   getLabCatalogRead,
+  getLabOrderingContextRead,
   getLabRecentOrdersRead,
+  LAB_CHECKOUT_CONFIRM_ERROR,
+  buildLabCheckoutClientRequestId,
   mapOrderRow,
 } from "@/api/primecareSupabaseApi";
+import {
+  adminOrderingBlockedMessage,
+  canAdminInitiateOrder,
+  canLabInitiateOrder,
+  isHqManagedOrdering,
+  isSuspendedOrdering,
+  labCatalogOrderingDisabled,
+  labOrderingBannerMessage,
+  labOrderingBlockedMessage,
+  normalizeOrderingMode,
+  orderingModeLabel,
+} from "@/labOrdering/orderingGovernance.js";
 import { supabase } from "@/api/supabaseClient.js";
 import { getInvoicesForLabRead } from "@/api/invoiceSupabaseApi.js";
 import { buildLabAccountLedger } from "@/collections/labAccountLedger.js";
@@ -47,17 +62,26 @@ import {
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
+import { buildDeliveryQuoteForLabOrder } from "@/api/deliveryChargeSupabaseApi.js";
+import {
+  DELIVERY_METHOD_INTENT,
+  deliveryChargeReasonLabel,
+} from "@/logistics/deliveryChargeEngine.js";
 import { cn } from "@/lib/utils";
 import { hqDebugLog } from "@/utils/hqDebugLog.js";
 import OrderTrackingDrawer from "@/components/lab/OrderTrackingDrawer.jsx";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
 import OrderProgressMini from "@/components/lab/OrderProgressMini.jsx";
+import { OrderAmountLabBreakdown } from "@/components/orders/OrderDeliveryAmountDisplay.jsx";
 import { StatusBadge, usePortalToast, PageHeader, DataFetchError } from "@/components/ux";
 import {
+  buildConfirmedCheckoutTrackingDetails,
   fetchScopedOrderDetails,
+  findLocalOrderForTracking,
   formatOrderPaymentLabel,
   isCancelledStatus,
   logOrderTrackingEvent,
+  mapLocalOrderRowToTrackingDetails,
   orderStatusChipVariant,
 } from "@/utils/orderTracking.js";
 import { paymentStatusToVariant } from "@/utils/statusTokens.js";
@@ -68,6 +92,12 @@ import {
   formatCartStockViolationMessage,
   onlyAvailableLabel,
 } from "@/utils/labOrderingStock.js";
+import { filterCollectionsForUser } from "@/utils/accessFilters.js";
+import { clearHqNavContext, readHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
+
+function str(v) {
+  return String(v ?? "").trim();
+}
 
 function formatOrderDateShort(iso) {
   if (!iso) return null;
@@ -329,7 +359,11 @@ function buildCartHash(items) {
   );
 }
 
-export default function LabOrderingPage({ currentUser, setActivePage }) {
+export default function LabOrderingPage({ currentUser, setActivePage, adminOnBehalfRequired = false }) {
+  const [adminOnBehalfContext] = useState(() => {
+    const ctx = readHqNavContext("adminOnBehalfOrder");
+    return ctx?.adminOnBehalf ? ctx : null;
+  });
   const [activeTab, setActiveTab] = useState("catalog");
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [cartSections, setCartSections] = useState({
@@ -353,30 +387,62 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
   const [loadingOrders, setLoadingOrders] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState(null);
+  const [deliveryQuote, setDeliveryQuote] = useState(null);
+  const [orderingMode, setOrderingMode] = useState(normalizeOrderingMode(null));
+  const [lifecycleStatus, setLifecycleStatus] = useState(
+    str(adminOnBehalfContext?.selectedLifecycleStatus).toUpperCase() || "ACTIVE"
+  );
+  const [loadingOrderingMode, setLoadingOrderingMode] = useState(true);
   const submitLockRef = useRef(false);
   const hydratedDraftRef = useRef(false);
   const lastSubmittedHashRef = useRef("");
+  const lastCheckoutOrderRef = useRef(null);
+  const checkoutInFlightRef = useRef(false);
+  const trackingRequestSeqRef = useRef(0);
 
   const [trackingOpen, setTrackingOpen] = useState(false);
   const [trackingOrder, setTrackingOrder] = useState(null);
   const [trackingLoading, setTrackingLoading] = useState(false);
+  const [trackingConfirming, setTrackingConfirming] = useState(false);
   const [trackingError, setTrackingError] = useState("");
   const [repeatLoading, setRepeatLoading] = useState(false);
   const [invoiceDownloadKey, setInvoiceDownloadKey] = useState("");
   const { showToast } = usePortalToast();
 
-  const labId =
-    currentUser?.labId ||
-    currentUser?.labCode ||
-    currentUser?.accountId ||
-    currentUser?.id ||
-    "";
+  useEffect(() => {
+    if (adminOnBehalfContext?.adminOnBehalf) {
+      clearHqNavContext("adminOnBehalfOrder");
+    }
+  }, [adminOnBehalfContext]);
 
-  const labName = currentUser?.labName || currentUser?.name || "Lab";
+  const currentRole = str(currentUser?.role).toLowerCase();
+  const isHqOnBehalfActor = currentRole === "admin" || currentRole === "executive";
+  const isAdminOnBehalf = Boolean(adminOnBehalfContext?.adminOnBehalf && isHqOnBehalfActor);
+  const adminOnBehalfMissing = Boolean(adminOnBehalfRequired && !isAdminOnBehalf);
+  const labId = adminOnBehalfMissing
+    ? ""
+    : isAdminOnBehalf
+    ? str(adminOnBehalfContext?.selectedLabId)
+    : currentUser?.labId ||
+      currentUser?.labCode ||
+      currentUser?.accountId ||
+      currentUser?.id ||
+      "";
+  const tenantId = adminOnBehalfMissing
+    ? ""
+    : isAdminOnBehalf
+    ? str(adminOnBehalfContext?.selectedTenantId)
+    : str(currentUser?.tenantId || currentUser?.tenant_id);
+  const labName = adminOnBehalfMissing
+    ? "Selected lab"
+    : isAdminOnBehalf
+    ? str(adminOnBehalfContext?.selectedLabName) || labId || "Selected lab"
+    : currentUser?.labName || currentUser?.name || "Lab";
   const cartDraftStorageKey = useMemo(() => {
     const key = labIdKey(labId);
-    return key ? `lab-ordering-cart-draft:${key}` : "";
-  }, [labId]);
+    const prefix = isAdminOnBehalf ? "admin-on-behalf" : "lab-ordering";
+    return key ? `${prefix}-cart-draft:${key}` : "";
+  }, [isAdminOnBehalf, labId]);
   const cartHandoffStorageKey = useMemo(() => {
     const key = labIdKey(labId);
     return key ? `lab-ordering-handoff:${key}` : "";
@@ -390,6 +456,18 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
   const creditReason = currentUser?.creditReason || "";
   const isCreditHold = creditStatus === "HOLD";
   const isNearLimit = creditStatus === "NEAR_LIMIT";
+  const labCanInitiateOrder = isAdminOnBehalf
+    ? canAdminInitiateOrder(orderingMode, lifecycleStatus)
+    : canLabInitiateOrder(orderingMode);
+  const catalogOrderingDisabled = isAdminOnBehalf
+    ? !labCanInitiateOrder
+    : labCatalogOrderingDisabled(orderingMode);
+  const orderingBanner = isAdminOnBehalf
+    ? "Admin on-behalf mode: customer is the selected lab; actor is your HQ user account."
+    : labOrderingBannerMessage(orderingMode);
+  const orderingBlockedCopy = isAdminOnBehalf
+    ? adminOrderingBlockedMessage(orderingMode, lifecycleStatus)
+    : labOrderingBlockedMessage(orderingMode);
 
   const profileLabKey = labIdKey(labId);
 
@@ -433,6 +511,14 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
     });
   }, [recentOrders, profileLabKey]);
 
+  const showLabDeliveryAmounts = useMemo(
+    () =>
+      scopedRecentOrders.some(
+        (order) => order.hasDeliveryEstimate || Number(order.deliveryChargeAmount) > 0
+      ),
+    [scopedRecentOrders]
+  );
+
   const crossLabOrderCount = useMemo(() => {
     if (!profileLabKey) return 0;
     return recentOrders.filter((o) => {
@@ -463,7 +549,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
       trackingDrawerOpen: trackingOpen,
       cartDrawerOpen: isCartOpen,
       submitting,
-      canCheckout: !submitting && cartItems.length > 0 && !isCreditHold,
+      canCheckout: !submitting && cartItems.length > 0 && !isCreditHold && labCanInitiateOrder,
       submitLocked: submitLockRef.current,
       submitSuccess: Boolean(submitResult?.success),
       productQtyInSync: cartItems.every(
@@ -477,8 +563,28 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
     loadCatalog();
     loadRecentOrders();
     loadAccountOutstanding();
+    void loadOrderingMode();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labId]);
+
+  async function loadOrderingMode() {
+    if (!labId || !tenantId) {
+      setLoadingOrderingMode(false);
+      return;
+    }
+    setLoadingOrderingMode(true);
+    try {
+      const res = await getLabOrderingContextRead({ tenantId, labId });
+      if (res?.success) {
+        setOrderingMode(normalizeOrderingMode(res.orderingMode));
+        setLifecycleStatus(str(res.lifecycleStatus).toUpperCase() || "ACTIVE");
+      }
+    } catch (err) {
+      console.warn("[LabOrderingPage] loadOrderingMode:", err?.message || err);
+    } finally {
+      setLoadingOrderingMode(false);
+    }
+  }
 
   useEffect(() => {
     if (!cartDraftStorageKey || hydratedDraftRef.current) return;
@@ -587,11 +693,14 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
 
   async function loadAccountOutstanding() {
     try {
-      const tenantId = currentUser?.tenantId || currentUser?.tenant_id || null;
-      const res = await getCollectionsRead();
+      const res = await getCollectionsRead({ tenantId });
       const allRows = Array.isArray(res?.data?.collections) ? res.data.collections : [];
       const rows = filterCollectionsForUser(allRows, currentUser);
-      const own = rows[0];
+      const targetLabKey = labIdKey(labId);
+      const own =
+        rows.find((row) => labIdKey(row?.labId ?? row?.lab_id) === targetLabKey) ||
+        allRows.find((row) => labIdKey(row?.labId ?? row?.lab_id) === targetLabKey) ||
+        rows[0];
       const amount = Number(own?.outstandingAmount ?? own?.outstanding_amount ?? 0);
       if (Number.isFinite(amount) && amount > 0) {
         setOutstandingBalance(amount);
@@ -625,7 +734,6 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
 
       if (supabase) {
         logSupabaseFeatureSource("LabOrdering.catalog", { api: "getLabCatalogRead" });
-        const tenantId = currentUser?.tenantId || currentUser?.tenant_id || null;
         const sbRes = await getLabCatalogRead({ tenantId });
         if (!sbRes?.success) {
           throw new Error(sbRes?.error || "Supabase lab catalog read failed.");
@@ -671,7 +779,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
     }
   }
 
-  async function loadRecentOrders() {
+  async function loadRecentOrders(mergeOrders = []) {
     try {
       setLoadingOrders(true);
       setOrdersFetchError("");
@@ -696,15 +804,16 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
       }
 
       const byId = new Map();
-      for (const o of [...supabaseOrders, ...scriptOrders]) {
+      const seedOrders = Array.isArray(mergeOrders) ? mergeOrders : [];
+      for (const o of [...seedOrders, ...supabaseOrders, ...scriptOrders]) {
         const id = String(o?.orderId || o?.order_id || "").trim();
         if (!id) continue;
         if (!byId.has(id)) byId.set(id, o);
       }
 
       const merged = Array.from(byId.values()).sort((a, b) => {
-        const da = String(a.orderDate || a.order_date || a.date || "");
-        const db = String(b.orderDate || b.order_date || b.date || "");
+        const da = String(a.orderDate || a.order_date || a.date || a.createdAt || a.created_at || "");
+        const db = String(b.orderDate || b.order_date || b.date || b.createdAt || b.created_at || "");
         return db.localeCompare(da);
       });
 
@@ -717,15 +826,66 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
     }
   }
 
-  async function openOrderTracking(orderId) {
-    if (!orderId) return null;
-    try {
+  function resolveLocalTrackingOrder(orderId) {
+    return findLocalOrderForTracking(orderId, [
+      lastCheckoutOrderRef.current,
+      submitResult?.orderSnapshot,
+      scopedRecentOrders,
+      recentOrders,
+    ]);
+  }
+
+  async function openOrderTracking(orderId, options = {}) {
+    const oid = String(orderId || "").trim();
+    if (!oid) return null;
+
+    const requestSeq = ++trackingRequestSeqRef.current;
+    const isActiveRequest = () => requestSeq === trackingRequestSeqRef.current;
+
+    if (checkoutInFlightRef.current && !options.confirmedDetails) {
       setTrackingOpen(true);
-      setTrackingLoading(true);
+      setTrackingLoading(false);
+      setTrackingConfirming(true);
       setTrackingError("");
       setTrackingOrder(null);
-      logOrderTrackingEvent("order_tracking.drawer_open", { orderId, source: "lab_ordering" });
-      const details = await fetchScopedOrderDetails(orderId, profileLabKey);
+      logOrderTrackingEvent("order_tracking.confirming", {
+        orderId: oid,
+        source: "lab_ordering",
+      });
+      return null;
+    }
+
+    const prefilled =
+      options.confirmedDetails ||
+      mapLocalOrderRowToTrackingDetails(resolveLocalTrackingOrder(oid));
+
+    try {
+      setTrackingOpen(true);
+      setTrackingConfirming(false);
+      setTrackingError("");
+      if (isActiveRequest()) {
+        setTrackingOrder(prefilled);
+        setTrackingLoading(true);
+      }
+      logOrderTrackingEvent("order_tracking.drawer_open", {
+        orderId: oid,
+        source: options.source || "lab_ordering",
+        hadLocalSnapshot: Boolean(prefilled),
+        checkoutConfirmed: Boolean(options.confirmedDetails),
+      });
+
+      const details = await fetchScopedOrderDetails(oid, {
+        labKey: profileLabKey,
+        labId,
+        tenantId: currentUser?.tenantId || currentUser?.tenant_id || null,
+      });
+
+      if (!isActiveRequest()) return null;
+
+      if (String(details?.orderId || "").trim() !== oid) {
+        throw new Error(`Order not found: ${oid}`);
+      }
+
       setTrackingOrder(details);
       logOrderTrackingEvent("order_tracking.status_render", {
         orderId: details.orderId,
@@ -734,17 +894,28 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
       return details;
     } catch (error) {
       console.error("Failed to load order tracking", error);
-      setTrackingError(error.message || "Unable to load order details right now.");
+      if (!isActiveRequest()) return null;
+      if (prefilled && String(prefilled.orderId || "").trim() === oid) {
+        setTrackingOrder(prefilled);
+        setTrackingError("");
+        return prefilled;
+      }
+      setTrackingOrder(null);
+      setTrackingError(error.message || `Order not found: ${oid}`);
       return null;
     } finally {
-      setTrackingLoading(false);
+      if (isActiveRequest()) {
+        setTrackingLoading(false);
+      }
     }
   }
 
   function closeOrderTracking() {
+    trackingRequestSeqRef.current += 1;
     setTrackingOpen(false);
     setTrackingOrder(null);
     setTrackingError("");
+    setTrackingConfirming(false);
   }
 
   async function handleInvoiceDownload(orderOrDetails) {
@@ -914,6 +1085,28 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
     }, 0);
   }, [cartItems]);
 
+  useEffect(() => {
+    if (!labId || !tenantId || cartSubTotal <= 0) {
+      setDeliveryQuote(null);
+      return;
+    }
+    let cancelled = false;
+    void buildDeliveryQuoteForLabOrder({
+      tenantId,
+      labId,
+      merchandiseSubtotal: cartSubTotal,
+      deliveryMethodIntent: DELIVERY_METHOD_INTENT.DELIVERY,
+    }).then((res) => {
+      if (!cancelled && res.success) setDeliveryQuote(res.quote);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [labId, tenantId, cartSubTotal]);
+
+  const estimatedDeliveryCharge = Number(deliveryQuote?.amount ?? 0);
+  const estimatedOrderTotal = cartSubTotal + estimatedDeliveryCharge;
+
   const cartQtyByProduct = useMemo(() => {
     const map = new Map();
     for (const item of cartItems) {
@@ -922,7 +1115,8 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
     return map;
   }, [cartItems]);
 
-  const canCheckout = !submitting && cartItems.length > 0 && !isCreditHold;
+  const canCheckout =
+    !submitting && cartItems.length > 0 && !isCreditHold && labCanInitiateOrder;
 
   const clearCartState = useCallback(
     ({ closeDrawer = true } = {}) => {
@@ -1062,6 +1256,10 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
   }
 
   function handleRepeatOrder(orderDetails) {
+    if (!labCanInitiateOrder) {
+      setErrorMessage(orderingBlockedCopy);
+      return;
+    }
     if (!orderDetails?.lines?.length) {
       setErrorMessage("No line items found to repeat.");
       return;
@@ -1139,6 +1337,10 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
 
   async function handleSubmitOrder() {
     if (submitLockRef.current || submitting) return;
+    if (!labCanInitiateOrder) {
+      setErrorMessage(orderingBlockedCopy);
+      return;
+    }
     if (!labId) {
       setErrorMessage("Lab identity is missing. Please refresh and try again.");
       return;
@@ -1170,6 +1372,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
 
     try {
       submitLockRef.current = true;
+      checkoutInFlightRef.current = true;
       setSubmitting(true);
       setErrorMessage("");
       setStatusMessage("");
@@ -1179,7 +1382,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
         labId,
         labName,
         notes,
-        tenantId: currentUser?.tenantId || currentUser?.tenant_id || null,
+        tenantId: tenantId || null,
         createdBy:
           currentUser?.email ||
           currentUser?.userId ||
@@ -1187,7 +1390,15 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
           labName ||
           labId ||
           null,
-        clientRequestId: `CRQ-${labIdKey(labId)}-${cartHash.slice(0, 48)}`,
+        source: isAdminOnBehalf ? "admin_on_behalf" : "lab_ordering",
+        adminOnBehalf: isAdminOnBehalf,
+        actorRole: currentRole,
+        actorUserId: str(currentUser?.userId || currentUser?.user_id || currentUser?.id),
+        actorEmail: str(currentUser?.email),
+        customerLabId: isAdminOnBehalf ? labId : undefined,
+        customerTenantId: isAdminOnBehalf ? tenantId : undefined,
+        customerLabName: isAdminOnBehalf ? labName : undefined,
+        clientRequestId: buildLabCheckoutClientRequestId(labId),
         items: cartSnapshot.map((item) => ({
           productId: item.productId,
           productName:
@@ -1200,40 +1411,72 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
       if (supabase) {
         logSupabaseFeatureSource("LabOrdering.submit", { api: "createOrderWrite" });
         const sbRes = await createOrderWrite(requestPayload);
-        if (sbRes?.success) {
-          const orderId =
-            sbRes.data?.orderId ?? sbRes.data?.order?.order_id ?? "";
+        checkoutInFlightRef.current = false;
+        if (sbRes?.success && sbRes.data?.confirmed && sbRes.data?.order) {
+          const orderId = String(sbRes.data.orderId ?? sbRes.data.order?.order_id ?? "").trim();
+          const orderSnapshot = mapOrderRow(sbRes.data.order, labName, 0);
+          const confirmedItemCount = Number(sbRes.data.itemCount ?? itemCount);
+          const confirmedTotal = Number(sbRes.data.total ?? total);
+          const isIdempotentReplay = Boolean(sbRes.data?.idempotent);
+
+          const confirmedDetails = buildConfirmedCheckoutTrackingDetails({
+            orderRow: sbRes.data.order,
+            lines: sbRes.data.lines,
+            labName,
+          });
+
+          lastCheckoutOrderRef.current = orderSnapshot;
           setSubmitResult({
             success: true,
+            confirmed: true,
+            isNewOrder: !isIdempotentReplay,
+            idempotentReplay: isIdempotentReplay,
             orderId,
+            orderSnapshot,
+            lines: sbRes.data.lines || [],
             invoiceId: null,
-            itemCount,
-            total,
+            itemCount: confirmedItemCount,
+            total: confirmedTotal,
             submittedAt: new Date().toISOString(),
           });
           lastSubmittedHashRef.current = cartHash;
           clearCartState({ closeDrawer: true });
 
-          if (sbRes?.data?.order) {
-            setRecentOrders((prev) => {
-              const mapped = mapOrderRow(sbRes.data.order, labName, 0);
-              const rest = prev.filter((o) => o.orderId !== mapped.orderId);
-              return [mapped, ...rest];
-            });
-          }
+          setRecentOrders((prev) => {
+            const rest = prev.filter((o) => o.orderId !== orderSnapshot.orderId);
+            return [orderSnapshot, ...rest];
+          });
 
-          await loadRecentOrders();
+          await loadRecentOrders([orderSnapshot]);
           await loadCatalog();
 
           if (orderId) {
-            await openOrderTracking(orderId);
+            await openOrderTracking(orderId, {
+              confirmedDetails,
+              source: "lab_checkout_confirmed",
+            });
           }
           return;
+        }
+        if (sbRes?.data?.diagnostic) {
+          console.error("Lab checkout persistence failed", {
+            orderId: sbRes.data.diagnostic.orderId,
+            clientRequestId: requestPayload.clientRequestId,
+            tenantId: requestPayload.tenantId,
+            labId: requestPayload.labId,
+            userEmail: requestPayload.createdBy,
+            cartItemCount: requestPayload.items?.length ?? 0,
+            diagnostic: sbRes.data.diagnostic,
+          });
         }
         if (!ALLOW_LEGACY_APPS_SCRIPT) {
           throw new Error(sbRes?.error || "Supabase order submission failed.");
         }
         logAppsScriptFallbackUsed("LabOrdering.submit", sbRes?.error);
+      }
+
+      if (isAdminOnBehalf) {
+        throw new Error("Supabase order submission is required for admin on-behalf orders.");
       }
 
       if (!ALLOW_LEGACY_APPS_SCRIPT) {
@@ -1269,8 +1512,15 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
       }
     } catch (error) {
       console.error("Submit order failed", error);
-      setErrorMessage(error.message || "Unable to submit order right now.");
+      const message =
+        String(error?.message || "")
+          .trim()
+          .includes("could not be confirmed") || error?.message === LAB_CHECKOUT_CONFIRM_ERROR
+          ? LAB_CHECKOUT_CONFIRM_ERROR
+          : error.message || "Unable to submit order right now.";
+      setErrorMessage(message);
     } finally {
+      checkoutInFlightRef.current = false;
       setSubmitting(false);
       submitLockRef.current = false;
     }
@@ -1280,14 +1530,47 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
     setCartSections((prev) => ({ ...prev, [key]: !prev[key] }));
   }
 
+  if (adminOnBehalfMissing) {
+    return (
+      <div className="space-y-4 pb-[max(7rem,env(safe-area-inset-bottom))] lg:pb-6">
+        <PageHeader
+          title="Create HQ Order"
+          subtitle="Select an eligible active lab from Lab 360 before opening admin on-behalf ordering."
+          icon={ShoppingCart}
+        />
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          Admin on-behalf ordering requires selected lab context. Normal lab self-ordering remains
+          available only to lab users.
+        </div>
+        {setActivePage ? (
+          <Button type="button" variant="outline" onClick={() => setActivePage("labs")}>
+            Back to Labs
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4 pb-[max(7rem,env(safe-area-inset-bottom))] lg:pb-6">
       <PageHeader
-        title="Lab Ordering"
+        title={isAdminOnBehalf ? "Create HQ Order" : "Lab Ordering"}
         subtitle={
           <>
-            {labName} — place orders for your lab. Outstanding and payments are under{" "}
-            {setActivePage ? (
+            {isAdminOnBehalf ? (
+              <>
+                Customer: <span className="font-semibold text-slate-800">{labName}</span>. Actor:{" "}
+                <span className="font-semibold text-slate-800">
+                  {currentUser?.email || currentUser?.name || currentRole || "HQ user"}
+                </span>
+                . This is not impersonation.
+              </>
+            ) : (
+              <>
+                {labName} — place orders for your lab. Outstanding and payments are under{" "}
+              </>
+            )}
+            {!isAdminOnBehalf && setActivePage ? (
               <button
                 type="button"
                 className="font-medium text-[var(--pc-brand-primary)] underline-offset-2 hover:underline"
@@ -1295,14 +1578,32 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
               >
                 Payments &amp; Account
               </button>
-            ) : (
+            ) : !isAdminOnBehalf ? (
               <span className="font-medium text-slate-700">Payments &amp; Account</span>
-            )}
-            .
+            ) : null}
+            {!isAdminOnBehalf ? "." : null}
           </>
         }
         icon={ShoppingCart}
       />
+
+      {isAdminOnBehalf ? (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+          <p className="font-semibold">Admin on-behalf ordering</p>
+          <p className="mt-1">
+            The selected lab is the customer. Your authenticated HQ account remains the actor and
+            checkout records `source=admin_on_behalf`.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full bg-white px-2 py-1 font-medium">
+              Lifecycle: {lifecycleStatus || "ACTIVE"}
+            </span>
+            <span className="rounded-full bg-white px-2 py-1 font-medium">
+              Ordering: {orderingModeLabel(orderingMode)}
+            </span>
+          </div>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
         <QuickStat
@@ -1311,7 +1612,11 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
           icon={IndianRupee}
         />
         <QuickStat title="Cart Items" value={cartCount} icon={ShoppingCart} />
-        <QuickStat title="Your Orders" value={scopedRecentOrders.length} icon={FileText} />
+        <QuickStat
+          title={isAdminOnBehalf ? "Customer Orders" : "Your Orders"}
+          value={scopedRecentOrders.length}
+          icon={FileText}
+        />
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -1336,6 +1641,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
           variant="outline"
           className="rounded-full"
           onClick={() => setIsCartOpen(true)}
+          disabled={catalogOrderingDisabled}
         >
           <ShoppingCart className="mr-2 h-4 w-4" />
           Cart ({cartCount})
@@ -1349,6 +1655,68 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
       {isCreditHold ? (
         <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           🚫 Credit Hold: {creditReason || "You cannot place orders until payment is cleared."}
+        </div>
+      ) : null}
+
+      {!loadingOrderingMode && catalogOrderingDisabled ? (
+        <div
+          className={cn(
+            "rounded-xl border p-4 text-sm",
+            isSuspendedOrdering(orderingMode)
+              ? "border-amber-200 bg-amber-50 text-amber-900"
+              : "border-indigo-200 bg-indigo-50 text-indigo-900"
+          )}
+        >
+          <p className="font-semibold">
+            {isAdminOnBehalf
+              ? "HQ order creation blocked"
+              : isHqManagedOrdering(orderingMode)
+                ? "HQ-managed ordering"
+                : "Ordering suspended"}
+          </p>
+          <p className="mt-1">{orderingBlockedCopy}</p>
+          <p className="mt-2 text-xs opacity-90">
+            {isAdminOnBehalf
+              ? "Orders history, invoices, payments, shipments, Track Order, and audit history remain available."
+              : "Please contact PrimeCare to place your next order. You can still track orders, view invoices, and manage payments."}
+          </p>
+          {setActivePage && !isAdminOnBehalf ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs"
+                onClick={() => setActiveTab("orders")}
+              >
+                Track Orders
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs"
+                onClick={() => setActivePage("labInvoices")}
+              >
+                Invoices
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs"
+                onClick={() => setActivePage("labAccount")}
+              >
+                Payments
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {!loadingOrderingMode && orderingBanner ? (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+          {orderingBanner}
         </div>
       ) : null}
 
@@ -1371,12 +1739,36 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
         <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{errorMessage}</div>
       ) : null}
 
-      {submitResult?.success ? (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
+      {submitResult?.success && submitResult?.confirmed ? (
+        <div
+          className={`rounded-xl border p-3 shadow-sm ${
+            submitResult.idempotentReplay
+              ? "border-amber-200 bg-amber-50"
+              : "border-emerald-200 bg-emerald-50"
+          }`}
+        >
           <div className="flex items-start gap-2.5">
-            <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-700" />
+            <CheckCircle2
+              className={`mt-0.5 h-5 w-5 ${
+                submitResult.idempotentReplay ? "text-amber-700" : "text-emerald-700"
+              }`}
+            />
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-emerald-800">Order placed successfully</div>
+              <div
+                className={`text-sm font-semibold ${
+                  submitResult.idempotentReplay ? "text-amber-900" : "text-emerald-800"
+                }`}
+              >
+                {submitResult.idempotentReplay
+                  ? "Existing order confirmed"
+                  : "Order placed successfully"}
+              </div>
+              {submitResult.idempotentReplay ? (
+                <div className="mt-1 text-xs text-amber-800">
+                  This checkout matched an order already on file from a recent duplicate submit.
+                  No new order was created.
+                </div>
+              ) : null}
               <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-emerald-700">
                 <span>
                   Order ID: <span className="font-semibold">{submitResult.orderId || "—"}</span>
@@ -1400,7 +1792,16 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
                   onClick={() => {
                     setActiveTab("orders");
                     if (submitResult.orderId) {
-                      void openOrderTracking(submitResult.orderId);
+                      void openOrderTracking(submitResult.orderId, {
+                        confirmedDetails: submitResult.orderSnapshot
+                          ? buildConfirmedCheckoutTrackingDetails({
+                              orderRow: submitResult.orderSnapshot,
+                              lines: submitResult.lines || [],
+                              labName,
+                            })
+                          : null,
+                        source: "lab_success_banner",
+                      });
                     }
                   }}
                 >
@@ -1425,6 +1826,16 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
 
       {activeTab === "catalog" ? (
         <div className="space-y-3">
+          {catalogOrderingDisabled ? (
+            <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-600">
+              <p className="font-medium text-slate-800">Product catalog ordering is not available</p>
+              <p className="mt-1 text-xs">
+                Mode: {orderingModeLabel(orderingMode)}. Use Previous Orders to track fulfillment or
+                open Invoices / Payments from the menu.
+              </p>
+            </div>
+          ) : (
+          <>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Input
               placeholder="Search products…"
@@ -1528,6 +1939,8 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
               </section>
             </div>
           )}
+          </>
+          )}
         </div>
       ) : null}
 
@@ -1569,7 +1982,9 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
                         <th className="px-2 py-1.5 font-medium">Order</th>
                         <th className="px-2 py-1.5 font-medium">Status</th>
                         <th className="px-2 py-1.5 font-medium">Progress</th>
-                        <th className="px-2 py-1.5 font-medium text-right">Total</th>
+                        <th className="px-2 py-1.5 font-medium text-right">
+                          {showLabDeliveryAmounts ? "Amounts" : "Total"}
+                        </th>
                         <th className="px-2 py-1.5 font-medium text-right">Actions</th>
                       </tr>
                     </thead>
@@ -1617,8 +2032,8 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
                                 <OrderProgressMini status={orderStatus} />
                               )}
                             </td>
-                            <td className="px-2 py-2 text-right tabular-nums font-semibold">
-                              ₹{Number(order.orderTotal ?? order.total ?? 0).toLocaleString("en-IN")}
+                            <td className="px-2 py-2 text-right">
+                              <OrderAmountLabBreakdown order={order} />
                             </td>
                             <td className="px-2 py-2">
                               <div className="flex justify-end gap-1">
@@ -1715,9 +2130,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
                           )}
                         </div>
                         <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px]">
-                          <span className="font-semibold tabular-nums">
-                            ₹{Number(order.orderTotal ?? order.total ?? 0).toLocaleString("en-IN")}
-                          </span>
+                          <OrderAmountLabBreakdown order={order} compact className="text-left" />
                           <StatusBadge variant={paymentStatusToVariant(payment)}>{payment}</StatusBadge>
                         </div>
                         <div className="mt-2 flex flex-wrap gap-1.5">
@@ -1775,6 +2188,7 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
         onClose={closeOrderTracking}
         order={trackingOrder}
         loading={trackingLoading}
+        confirming={trackingConfirming}
         error={trackingError}
         repeatLoading={repeatLoading}
         invoiceLoading={Boolean(invoiceDownloadKey)}
@@ -1910,10 +2324,30 @@ export default function LabOrderingPage({ currentUser, setActivePage }) {
                     <span>Items</span>
                     <span className="tabular-nums font-medium">{cartCount}</span>
                   </div>
-                  <div className="flex justify-between font-semibold text-slate-900">
-                    <span>Subtotal</span>
-                    <span className="tabular-nums">₹{cartSubTotal.toLocaleString()}</span>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Merchandise subtotal</span>
+                    <span className="tabular-nums">₹{cartSubTotal.toLocaleString("en-IN")}</span>
                   </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Estimated delivery</span>
+                    <span className="tabular-nums">
+                      ₹{estimatedDeliveryCharge.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                  {deliveryQuote?.reason ? (
+                    <p className="text-[10px] text-slate-500">
+                      {deliveryChargeReasonLabel(deliveryQuote.reason)}
+                    </p>
+                  ) : null}
+                  <div className="flex justify-between font-semibold text-slate-900">
+                    <span>Estimated total</span>
+                    <span className="tabular-nums">
+                      ₹{estimatedOrderTotal.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                  <p className="text-[10px] leading-snug text-slate-500">
+                    Delivery charge shown for planning; billing integration comes later.
+                  </p>
                 </div>
               </CollapsibleSection>
               <div className="flex gap-2 px-3 pt-2 pb-[max(calc(6rem+env(safe-area-inset-bottom)),1.25rem)] md:pb-[max(0.75rem,env(safe-area-inset-bottom))]">

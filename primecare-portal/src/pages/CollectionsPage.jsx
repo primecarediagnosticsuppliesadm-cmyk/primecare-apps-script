@@ -7,9 +7,7 @@ import {
 } from "@/api/primecareApi";
 import {
   createPaymentWrite,
-  getCollectionDetailRead,
   getCollectionHistoryRead,
-  getCollectionsRead,
   peekCollectionsReadCache,
   getLabRecentOrdersRead,
   updateCollectionNotesWrite,
@@ -19,11 +17,40 @@ import {
 } from "@/api/primecareSupabaseApi";
 import { selectOpenOrdersForLab } from "@/collections/collectionsOpenOrders.js";
 import { loadLabPaymentHistoryForDisplay } from "@/collections/collectionsPaymentHistory.js";
+import { mapCollectionMutationError } from "@/collections/mapCollectionMutationError.js";
+import { getCollectionSaveLoadingLabel, getEvidenceUploadProgressMessage } from "@/collections/collectionsPaymentUi.js";
+import {
+  AGENT_COLLECTIONS_SEARCH_DEBOUNCE_MS,
+  buildAgentCollectionsEmptyCopy,
+  readAgentCollectionsSearch,
+  readAgentCollectionsSelectedLab,
+  writeAgentCollectionsSearch,
+  writeAgentCollectionsSelectedLab,
+} from "@/collections/agentCollectionsUi.js";
+import {
+  resolveCollectionsWorkspace,
+  getCollectionsWorkspaceMeta,
+  COLLECTIONS_WORKSPACES,
+  isLabAccountViewMode,
+  isAgentCollectionsView,
+  isHqCreditRiskView,
+} from "@/collections/collectionsViewMode.js";
+import AgentCollectionsWorkspace from "@/components/collections/workspaces/AgentCollectionsWorkspace.jsx";
+import HqCreditRiskWorkspace from "@/components/collections/workspaces/HqCreditRiskWorkspace.jsx";
+import HqReceivablesWorkspace from "@/components/collections/workspaces/HqReceivablesWorkspace.jsx";
+import LabAccountWorkspace from "@/components/collections/workspaces/LabAccountWorkspace.jsx";
+import CollectionsContextStrip from "@/components/collections/CollectionsContextStrip.jsx";
+import { buildCollectionsContextParts } from "@/collections/collectionsContextUi.js";
+import ActionErrorSummary from "@/components/ux/ActionErrorSummary.jsx";
 import LabCollectionPanel from "@/components/collections/LabCollectionPanel.jsx";
 import HqObjectLink from "@/components/hq/HqObjectLink.jsx";
 import HqCreditRiskCommandCenter from "@/components/hq/HqCreditRiskCommandCenter.jsx";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import { navigateToLabs, navigateToLabInvoiceCenter } from "@/operations/hqWorkflowNav.js";
+import {
+  armOrdersReturnRestore,
+  hasOrdersReturnContext,
+} from "@/orders/ordersWorkflowReturn.js";
 import { supabase } from "@/api/supabaseClient.js";
 import {
   logAppsScriptFallbackUsed,
@@ -51,7 +78,11 @@ import {
 } from "@/utils/statusTokens";
 import { cn } from "@/lib/utils";
 import { labIdKey } from "@/utils/labId.js";
-import { getInvoicesForLabRead } from "@/api/invoiceSupabaseApi.js";
+import {
+  readCollectionDetailBroker,
+  readCollectionsBroker,
+  readLabInvoicesBroker,
+} from "@/api/sharedReadBroker.js";
 import { HQ_INVOICE_LIST_MAX_LIMIT } from "@/api/hqReadBounds.js";
 import { buildLabAccountLedger } from "@/collections/labAccountLedger.js";
 import {
@@ -77,13 +108,16 @@ import {
 import { ROLES } from "@/config/roles";
 import { getAgentActiveLabOwnershipRowsRead } from "@/api/labOwnershipApi.js";
 import { filterCollectionsForUser } from "@/utils/accessFilters.js";
-import { notifyAgentWorkspaceRefresh } from "@/pages/agentVisitContext.js";
+import {
+  notifyAgentWorkspaceRefresh,
+  startVisitFromWorkspaceItem,
+  writeAgentWorkspaceReturnPath,
+} from "@/pages/agentVisitContext.js";
 import {
   notifyFinancialSyncCompleted,
   onFinancialSyncCompleted,
 } from "@/operations/financialSyncEvents.js";
 import { useFinancialSyncPulse } from "@/hooks/useFinancialSyncPulse.js";
-import { startVisitFromWorkspaceItem } from "@/pages/agentVisitContext.js";
 import {
   countMediumHighRisk,
   computeCollectionProgressPct,
@@ -124,7 +158,6 @@ import {
   CircleDollarSign,
   ChevronDown,
   ChevronUp,
-  Search,
   AlertTriangle,
   ShieldAlert,
   Wallet,
@@ -248,16 +281,6 @@ function creditHoldBadgeText(creditHold) {
   return raw;
 }
 
-function isAgentCollectionsView(currentUser, isLabAccount) {
-  return !isLabAccount && String(currentUser?.role || "").toLowerCase() === ROLES.AGENT;
-}
-
-function isHqCreditRiskView(currentUser, isLabAccount, isAgentView) {
-  if (isLabAccount || isAgentView) return false;
-  const role = String(currentUser?.role || "").toLowerCase();
-  return role === ROLES.ADMIN || role === ROLES.EXECUTIVE;
-}
-
 function formatMoney(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "—";
@@ -277,10 +300,6 @@ function localDateYmd(d = new Date()) {
   const mo = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${mo}-${day}`;
-}
-
-function isLabAccountViewMode(viewMode, role) {
-  return viewMode === "labAccount" || String(role || "").toLowerCase() === ROLES.LAB;
 }
 
 function accountCopy(isLabAccount, management, account) {
@@ -646,7 +665,7 @@ function LabAccountTimeline({
   useEffect(() => {
     let cancelled = false;
     if (!labId) return undefined;
-    void getInvoicesForLabRead(labId, { tenantId }).then((res) => {
+    void readLabInvoicesBroker(labId, { tenantId }).then((res) => {
       if (!cancelled && res.success) {
         setServerInvoices(res.rows || []);
       }
@@ -1063,6 +1082,7 @@ function AgentCollectionWorkQueueRow({
   onRecordPayment,
   onOpenLab,
   onScheduleFollowUp,
+  isSelected = false,
 }) {
   const outstanding = Number(item.outstandingAmount || 0);
   const totalPaid = Number(item.totalPaid || 0);
@@ -1071,7 +1091,15 @@ function AgentCollectionWorkQueueRow({
   const progressPct = computeCollectionProgressPct(outstanding, totalPaid);
 
   return (
-    <article className="rounded-xl border border-border bg-card p-3 shadow-sm">
+    <article
+      className={cn(
+        "rounded-xl border bg-card p-3 shadow-sm transition-shadow",
+        isSelected
+          ? "border-[var(--pc-brand-primary)] ring-2 ring-[var(--pc-brand-primary)]/25"
+          : "border-border"
+      )}
+      aria-current={isSelected ? "true" : undefined}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="mb-1 flex flex-wrap items-center gap-1.5">
@@ -1467,7 +1495,19 @@ function CollectionExpandedPanel({
   collectionEvidence = [],
   focusSection = "",
   isAgentView = false,
+  paymentMutationError = null,
+  onDismissPaymentMutationError,
+  evidenceUploadStatus = "idle",
+  evidenceUploadMessage = "",
+  evidenceUploadPercent = 0,
+  onEvidenceFileChange,
 }) {
+  const saveLoadingLabel = getCollectionSaveLoadingLabel({
+    amountCollected,
+    evidenceUploading,
+    saving,
+  });
+  const saveBusy = saving || evidenceUploading;
   if (detailsLoading) {
     return (
       <div className="border-t border-slate-200 bg-slate-50/80 px-3 py-6">
@@ -1541,6 +1581,16 @@ function CollectionExpandedPanel({
             <h3 className="text-xs font-semibold text-slate-700">
               {isAgentView ? "Record payment" : "Record payment & follow-up"}
             </h3>
+
+            {paymentMutationError ? (
+              <ActionErrorSummary
+                title={paymentMutationError.title}
+                message={paymentMutationError.message}
+                fieldErrors={paymentMutationError.fieldErrors}
+                technicalReference={paymentMutationError.rawErrorForLogging}
+                onDismiss={onDismissPaymentMutationError}
+              />
+            ) : null}
 
             <div className="space-y-2">
               <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
@@ -1616,10 +1666,12 @@ function CollectionExpandedPanel({
 
             <EvidenceUploadField
               file={collectionProofFile}
-              onFileChange={setCollectionProofFile}
+              onFileChange={onEvidenceFileChange || setCollectionProofFile}
               label="Payment / receipt proof (optional)"
               disabled={saving || evidenceUploading}
               hint="Receipt, UPI screenshot, or signed slip"
+              uploadStatus={evidenceUploadStatus}
+              statusMessage={evidenceUploadMessage}
             />
             <div className="space-y-1">
               <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
@@ -1633,19 +1685,23 @@ function CollectionExpandedPanel({
                 disabled={saving || evidenceUploading}
               />
             </div>
-            <EvidenceUploadProgress uploading={evidenceUploading} />
+            <EvidenceUploadProgress
+              uploading={evidenceUploading}
+              message={getEvidenceUploadProgressMessage(evidenceUploadPercent)}
+            />
 
             <div className="flex flex-col gap-2 sm:flex-row">
               <Button
                 type="button"
                 className="h-11 flex-1 rounded-lg"
                 onClick={onSave}
-                disabled={saving}
+                disabled={saveBusy}
+                aria-busy={saveBusy}
               >
-                {saving ? (
+                {saveBusy ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Saving…
+                    {saveLoadingLabel}
                   </>
                 ) : (
                   <>
@@ -1758,6 +1814,7 @@ function CollectionListItem({
   ordersLoading = false,
   paymentStatusLabel = "Pending",
   useTabbedPanel = false,
+  isSelected = false,
 }) {
   if (isAgentView) {
     return (
@@ -1769,6 +1826,7 @@ function CollectionListItem({
         onRecordPayment={onRecordPayment}
         onOpenLab={onOpenLab}
         onScheduleFollowUp={onScheduleFollowUp}
+        isSelected={isSelected}
       />
     );
   }
@@ -1851,6 +1909,9 @@ export default function CollectionsPage({
     };
   }, [isLabAccount]);
   const { showToast } = usePortalToast();
+  const [ordersReturnActive, setOrdersReturnActive] = useState(
+    () => !embedded && !isLabAccount && hasOrdersReturnContext()
+  );
 
   const hydratedCollections = useMemo(
     () => hydrateCollectionsFromCache(currentUser, distributorScope, isLabAccount),
@@ -1877,12 +1938,15 @@ export default function CollectionsPage({
   const [history, setHistory] = useState([]);
 
   const [search, setSearch] = useState("");
+  const [localSearch, setLocalSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [loading, setLoading] = useState(() => !hydratedCollections);
   const [listRefreshing, setListRefreshing] = useState(false);
   const [dataLoadedAt, setDataLoadedAt] = useState(() => (hydratedCollections ? Date.now() : null));
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsError, setDetailsError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [paymentMutationError, setPaymentMutationError] = useState(null);
   const [completingTask, setCompletingTask] = useState(false);
 
   const [loadError, setLoadError] = useState("");
@@ -1899,6 +1963,9 @@ export default function CollectionsPage({
   const [collectionProofFile, setCollectionProofFile] = useState(null);
   const [proofRemarks, setProofRemarks] = useState("");
   const [evidenceUploading, setEvidenceUploading] = useState(false);
+  const [evidenceUploadStatus, setEvidenceUploadStatus] = useState("idle");
+  const [evidenceUploadMessage, setEvidenceUploadMessage] = useState("");
+  const [evidenceUploadPercent, setEvidenceUploadPercent] = useState(0);
   const [expandFocus, setExpandFocus] = useState("");
   const [paymentDrawerLabId, setPaymentDrawerLabId] = useState("");
   const [paymentOrderId, setPaymentOrderId] = useState("");
@@ -1907,6 +1974,7 @@ export default function CollectionsPage({
   const [labOrdersLoadingByLabId, setLabOrdersLoadingByLabId] = useState({});
   const [hqFocusLabId, setHqFocusLabId] = useState("");
   const [hqCreditAttentionFilter, setHqCreditAttentionFilter] = useState("");
+  const [hqCreditDeepLinkKey, setHqCreditDeepLinkKey] = useState("credit-default");
 
   const isAgentView = useMemo(
     () => isAgentCollectionsView(currentUser, isLabAccount),
@@ -1919,6 +1987,53 @@ export default function CollectionsPage({
   );
 
   const { orderByLabId, workspace: agentWorkspace } = useAgentDailyOs(currentUser, { enabled: isAgentView });
+
+  const effectiveSearch = isAgentView ? debouncedSearch : search;
+
+  useEffect(() => {
+    if (!isAgentView) return;
+    const saved = readAgentCollectionsSearch();
+    if (saved) {
+      setLocalSearch(saved);
+      setDebouncedSearch(saved);
+      setSearch(saved);
+    }
+  }, [isAgentView]);
+
+  useEffect(() => {
+    if (!isAgentView) return undefined;
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(localSearch);
+      setSearch(localSearch);
+      writeAgentCollectionsSearch(localSearch);
+    }, AGENT_COLLECTIONS_SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [localSearch, isAgentView]);
+
+  useEffect(() => {
+    if (!isAgentView) return;
+    if (paymentDrawerLabId) {
+      writeAgentCollectionsSelectedLab(paymentDrawerLabId);
+    }
+  }, [paymentDrawerLabId, isAgentView]);
+
+  useEffect(() => {
+    if (!isAgentView || loading || agentSelectionRestoredRef.current) return;
+    const savedLab = readAgentCollectionsSelectedLab();
+    if (!savedLab || paymentDrawerLabId) return;
+    if (!collections.some((row) => labIdKey(row.labId) === savedLab)) return;
+    agentSelectionRestoredRef.current = true;
+    openCollectionPanel(savedLab, "payment");
+    // Restore agent drawer once per session after collections load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAgentView, loading, collections, paymentDrawerLabId]);
+
+  const handleEvidenceFileChange = useCallback((file) => {
+    setCollectionProofFile(file);
+    setEvidenceUploadStatus("idle");
+    setEvidenceUploadMessage("");
+    setEvidenceUploadPercent(0);
+  }, []);
 
   const tenantId =
     distributorScope?.tenantId ||
@@ -1933,6 +2048,8 @@ export default function CollectionsPage({
   const openCollectionInflightRef = useRef("");
   const labAutoOpenedRef = useRef("");
   const labLedgerLoadKeyRef = useRef("");
+  const saveInflightRef = useRef(false);
+  const agentSelectionRestoredRef = useRef(false);
   collectionsLengthRef.current = collections.length;
   const [collectionEvidence, setCollectionEvidence] = useState([]);
 
@@ -2020,8 +2137,10 @@ export default function CollectionsPage({
 
         logSupabaseFeatureSource("Collections.list", { api: "getCollectionsRead" });
         const [res, ownershipRes] = await Promise.all([
-          getCollectionsRead({
-            force: userRole === ROLES.AGENT ? true : silent,
+          readCollectionsBroker({
+            force: silent,
+            ...(tenantId ? { tenantId } : {}),
+            currentUser,
           }),
           userRole === ROLES.AGENT
             ? getAgentActiveLabOwnershipRowsRead()
@@ -2046,29 +2165,9 @@ export default function CollectionsPage({
           summary: built.summary,
         });
 
-        const rows = built.collections;
-        if (
-          !isLabAccount &&
-          userRole !== ROLES.AGENT &&
-          supabase &&
-          rows.length
-        ) {
-          const paidLabs = rows.filter((row) => Number(row.totalPaid || 0) > 0);
-          if (paidLabs.length) {
-            void (async () => {
-              const next = {};
-              await Promise.all(
-                paidLabs.map(async (row) => {
-                  const hist = await getCollectionHistoryRead(row.labId);
-                  const date = deriveLastPaymentDateFromHistory(hist?.data?.history);
-                  if (date) next[labIdKey(row.labId)] = date;
-                })
-              );
-              if (Object.keys(next).length) {
-                setLastPaymentByLabId((prev) => ({ ...prev, ...next }));
-              }
-            })();
-          }
+        const lastPaymentFromRead = payload.lastPaymentByLabId;
+        if (lastPaymentFromRead && typeof lastPaymentFromRead === "object") {
+          setLastPaymentByLabId((prev) => ({ ...prev, ...lastPaymentFromRead }));
         }
       } catch (err) {
         console.warn("CollectionsPage loadCollections:", err);
@@ -2112,12 +2211,12 @@ export default function CollectionsPage({
 
     try {
       const [invoiceRes, historyRes, detailRes] = await Promise.all([
-        getInvoicesForLabRead(profileLabId, {
+        readLabInvoicesBroker(profileLabId, {
           tenantId,
           pageSize: HQ_INVOICE_LIST_MAX_LIMIT,
         }),
         getCollectionHistoryRead(profileLabId),
-        getCollectionDetailRead(profileLabId),
+        readCollectionDetailBroker(profileLabId, { tenantId, currentUser }),
       ]);
 
       const ledger = buildLabAccountLedger({
@@ -2163,6 +2262,7 @@ export default function CollectionsPage({
 
     if (ctx.attentionFilter && isHqCreditRiskView(currentUser, isLabAccount, isAgentView)) {
       setHqCreditAttentionFilter(str(ctx.attentionFilter));
+      setHqCreditDeepLinkKey(`credit-${str(ctx.attentionFilter)}-${Date.now()}`);
     }
 
     if (!ctx.labId) return;
@@ -2239,7 +2339,10 @@ export default function CollectionsPage({
 
         try {
           logSupabaseFeatureSource("Collections.details", { api: "getCollectionDetailRead" });
-          const detailRead = await getCollectionDetailRead(canonicalLabId);
+          const detailRead = await readCollectionDetailBroker(canonicalLabId, {
+            tenantId,
+            currentUser,
+          });
           sbDetailOk = Boolean(detailRead?.success);
           sbDetail = detailRead?.data?.collection ?? null;
         } catch (detailErr) {
@@ -2377,13 +2480,32 @@ export default function CollectionsPage({
     labAutoOpenedRef.current = "";
     labLedgerLoadKeyRef.current = "";
     openCollectionInflightRef.current = "";
+    const drawerLabId = paymentDrawerLabId;
     await loadCollections({ silent: true });
     if (isLabAccount && profileLabId) {
       await loadLabAccountLedger();
       labAutoOpenedRef.current = "";
       await openCollection(profileLabId, { force: true });
     }
-  }, [loadCollections, loadLabAccountLedger, isLabAccount, profileLabId]);
+    if (isAgentView && drawerLabId) {
+      await openCollection(drawerLabId, {
+        focusSection: "payment",
+        suppressExpand: true,
+        force: true,
+      });
+    }
+    if (isAgentView) {
+      showToast("success", "Work queue updated");
+    }
+  }, [
+    loadCollections,
+    loadLabAccountLedger,
+    isLabAccount,
+    profileLabId,
+    isAgentView,
+    paymentDrawerLabId,
+    showToast,
+  ]);
 
   function hydratePendingCollectionTask() {
     const raw = sessionStorage.getItem("primecare_pending_collection_task");
@@ -2410,13 +2532,36 @@ export default function CollectionsPage({
   }
 
   async function handleSaveCollection() {
-    if (isLabAccount) return;
+    if (isLabAccount) return { success: false, error: null };
     const selectedLabId = expandedLabId || paymentDrawerLabId;
-    if (!selectedLabId) return;
+    if (!selectedLabId) return { success: false, error: null };
+    if (saving || evidenceUploading || saveInflightRef.current) {
+      return { success: false, error: null };
+    }
+    saveInflightRef.current = true;
+
+    const failMutation = (errorInput) => {
+      const mapped = mapCollectionMutationError(errorInput, { amountCollected });
+      setPaymentMutationError(mapped);
+      return { success: false, error: mapped };
+    };
+
+    const closeDrawerOnSuccess = () => {
+      if ((isAgentView || isHqCreditRisk) && paymentDrawerLabId) {
+        setPaymentDrawerLabId("");
+        setSelectedCollection(null);
+        setHistory([]);
+        setPaymentMutationError(null);
+        if (isAgentView) writeAgentCollectionsSelectedLab("");
+        return true;
+      }
+      return false;
+    };
 
     return predatorTrace("Collections", "page.save", async () => {
       try {
         setSaving(true);
+        setPaymentMutationError(null);
 
         const basePayload = {
           labId: selectedLabId,
@@ -2450,15 +2595,18 @@ export default function CollectionsPage({
                 : "Collection updated successfully"
             );
             await loadCollections();
-            await openCollection(selectedLabId, {
-              fromTask: !!pendingTaskContext,
-              taskContext: pendingTaskContext,
-            });
-            return;
+            const closedDrawer = closeDrawerOnSuccess();
+            if (!closedDrawer) {
+              await openCollection(selectedLabId, {
+                fromTask: !!pendingTaskContext,
+                taskContext: pendingTaskContext,
+              });
+            }
+            return { success: true };
           }
 
           if (import.meta.env.DEV) {
-            throw new Error(notesRes.error || "Supabase collection notes write failed.");
+            return failMutation(notesRes.error || "Supabase collection notes write failed.");
           }
 
           logAppsScriptFallbackUsed("Collections.notesWrite", {
@@ -2468,7 +2616,7 @@ export default function CollectionsPage({
             metricKey: "collectionsSummary",
             reason: notesRes.error,
           });
-          throw new Error(
+          return failMutation(
             notesRes.error ||
               "Failed to save collection notes. Apps Script does not support zero-amount updates."
           );
@@ -2499,8 +2647,11 @@ export default function CollectionsPage({
               "";
 
             const hadProof = Boolean(collectionProofFile);
+            let proofUploadFailed = false;
             if (hadProof && paymentId) {
               setEvidenceUploading(true);
+              setEvidenceUploadStatus("uploading");
+              setEvidenceUploadPercent(0);
               const up = await uploadOperationalEvidence({
                 file: collectionProofFile,
                 tenantId,
@@ -2510,21 +2661,27 @@ export default function CollectionsPage({
                 uploadedBy: currentUser?.name || "System User",
                 uploadedByRole: currentUser?.role || ROLES.AGENT,
                 remarks: proofRemarks || note,
-                onProgress: () => {},
+                onProgress: (pct) => setEvidenceUploadPercent(Number(pct) || 0),
               });
               setEvidenceUploading(false);
               if (!up.success) {
-                showToast("warning", up.error || "Payment saved; proof upload failed.");
+                proofUploadFailed = true;
+                setEvidenceUploadStatus("failed");
+                setEvidenceUploadMessage(up.error || "Upload failed");
+                showToast("warning", up.error || "Payment saved; proof upload failed — retry in drawer.");
+              } else {
+                setEvidenceUploadStatus("success");
+                setEvidenceUploadMessage("");
+                setCollectionProofFile(null);
+                setProofRemarks("");
               }
-              setCollectionProofFile(null);
-              setProofRemarks("");
             }
 
             showToast(
               "success",
               pendingTaskContext?.taskId
-                ? `Payment recorded${hadProof ? " · Proof attached" : ""}. You can mark the linked task complete.`
-                : `Payment recorded successfully${hadProof ? " · Proof attached" : ""}`
+                ? `Payment recorded${hadProof && !proofUploadFailed ? " · Proof attached" : proofUploadFailed ? " · Proof upload failed" : ""}. You can mark the linked task complete.`
+                : `Payment recorded successfully${hadProof && !proofUploadFailed ? " · Proof attached" : proofUploadFailed ? " · Proof upload failed" : ""}`
             );
             notifyAgentWorkspaceRefresh({
               source: "collection_payment",
@@ -2545,21 +2702,21 @@ export default function CollectionsPage({
             });
 
             await loadCollections();
-            if ((isAgentView || isHqCreditRisk) && paymentDrawerLabId) {
-              setPaymentDrawerLabId("");
-              setSelectedCollection(null);
-              setHistory([]);
-            } else {
+            if (proofUploadFailed) {
+              return { success: true };
+            }
+            const closedDrawer = closeDrawerOnSuccess();
+            if (!closedDrawer) {
               await openCollection(selectedLabId, {
                 fromTask: !!pendingTaskContext,
                 taskContext: pendingTaskContext,
               });
             }
-            return;
+            return { success: true };
           }
 
           if (import.meta.env.DEV || !ALLOW_LEGACY_APPS_SCRIPT) {
-            throw new Error(sbRes.error || "Supabase payment write failed.");
+            return failMutation(sbRes.error || "Supabase payment write failed.");
           }
 
           logAppsScriptFallbackUsed("Collections.paymentWrite", {
@@ -2573,7 +2730,7 @@ export default function CollectionsPage({
         }
 
         if (amt <= 0) {
-          throw new Error(
+          return failMutation(
             "Enter an amount collected or save notes via Supabase when configured."
           );
         }
@@ -2590,13 +2747,13 @@ export default function CollectionsPage({
           });
         }
         if (!ALLOW_LEGACY_APPS_SCRIPT) {
-          throw new Error("Supabase collections write is required for pilot access.");
+          return failMutation("Supabase collections write is required for pilot access.");
         }
         const res = await updateCollection(basePayload);
         const responsePayload = res?.data || res || {};
 
         if (!responsePayload?.success) {
-          throw new Error(responsePayload?.message || "Failed to update collection");
+          return failMutation(responsePayload?.message || "Failed to update collection");
         }
 
         showToast(
@@ -2607,14 +2764,19 @@ export default function CollectionsPage({
         );
 
         await loadCollections();
-        await openCollection(selectedLabId, {
-          fromTask: !!pendingTaskContext,
-          taskContext: pendingTaskContext,
-        });
+        const closedDrawer = closeDrawerOnSuccess();
+        if (!closedDrawer) {
+          await openCollection(selectedLabId, {
+            fromTask: !!pendingTaskContext,
+            taskContext: pendingTaskContext,
+          });
+        }
+        return { success: true };
       } catch (err) {
-        showToast("error", err.message || "Failed to save collection update");
+        return failMutation(err?.message || "Failed to save collection update");
       } finally {
         setSaving(false);
+        saveInflightRef.current = false;
       }
     });
   }
@@ -2654,7 +2816,7 @@ export default function CollectionsPage({
     if (isLabAccount) {
       return [...collections];
     }
-    const q = search.trim().toLowerCase();
+    const q = effectiveSearch.trim().toLowerCase();
     const filtered = collections.filter((item) =>
       `${item.labId} ${item.labName} ${item.assignedAgent} ${item.area}`
         .toLowerCase()
@@ -2666,7 +2828,7 @@ export default function CollectionsPage({
     return [...filtered].sort(
       (a, b) => Number(b.outstandingAmount || 0) - Number(a.outstandingAmount || 0)
     );
-  }, [collections, search, isLabAccount, isAgentView, orderByLabId]);
+  }, [collections, effectiveSearch, isLabAccount, isAgentView, orderByLabId]);
 
   const labDisplayCollections = useMemo(() => {
     if (!isLabAccount) return filteredCollections;
@@ -2801,6 +2963,12 @@ export default function CollectionsPage({
     if (focusSection !== "payment") {
       setPaymentOrderId("");
     }
+    if (focusSection === "payment") {
+      setPaymentMutationError(null);
+      setEvidenceUploadStatus("idle");
+      setEvidenceUploadMessage("");
+      setEvidenceUploadPercent(0);
+    }
     if ((isAgentView || isHqCreditRisk) && focusSection === "payment") {
       setPaymentDrawerLabId(key);
       void openCollection(labId, { focusSection, suppressExpand: true });
@@ -2852,7 +3020,40 @@ export default function CollectionsPage({
     collectionEvidence,
     paymentOrderId,
     onPaymentOrderIdChange: setPaymentOrderId,
+    paymentMutationError,
+    onDismissPaymentMutationError: () => setPaymentMutationError(null),
+    evidenceUploadStatus,
+    evidenceUploadMessage,
+    evidenceUploadPercent,
+    onEvidenceFileChange: handleEvidenceFileChange,
   };
+
+  const agentEmptyCopy = useMemo(() => {
+    if (!isAgentView) return null;
+    return buildAgentCollectionsEmptyCopy({
+      debouncedSearch: effectiveSearch,
+      collectionsCount: collections.length,
+    });
+  }, [isAgentView, effectiveSearch, collections.length]);
+
+  const collectionsWorkspace = useMemo(
+    () =>
+      resolveCollectionsWorkspace({
+        viewMode,
+        currentUser,
+        isLabAccount,
+        isAgentView,
+        isHqCreditRisk,
+      }),
+    [viewMode, currentUser, isLabAccount, isAgentView, isHqCreditRisk]
+  );
+
+  const workspaceMeta = useMemo(
+    () => getCollectionsWorkspaceMeta(collectionsWorkspace),
+    [collectionsWorkspace]
+  );
+
+  const showCollectionsEmpty = labDisplayCollections.length === 0;
 
   const handleScheduleFollowUp = useCallback(
     (item) => {
@@ -2864,12 +3065,59 @@ export default function CollectionsPage({
           outstanding: item.outstandingAmount,
           daysOverdue: item.overdueDays,
         },
-        { visitType: "Follow-up", followUpType: "Call", source: "collections_work_queue" }
+        {
+          visitType: "Follow-up",
+          followUpType: "Call",
+          source: "collections_work_queue",
+          returnPath: "collections",
+        }
       );
       setActivePage?.("visits");
     },
     [setActivePage]
   );
+
+  const handleOpenLabFromQueue = useCallback(
+    (labId) => {
+      writeAgentWorkspaceReturnPath("collections");
+      if (labId && setActivePage) {
+        navigateToLabs(setActivePage, { labId, openReviewDrawer: false });
+        return;
+      }
+      setActivePage?.("labs");
+    },
+    [setActivePage]
+  );
+
+  const collectionsContextParts = useMemo(() => {
+    if (isLabAccount || embedded) return [];
+    const selectedLabName =
+      paymentDrawerLabId && selectedCollection
+        ? selectedCollection.labName || selectedCollection.labId
+        : "";
+    const focusLabName = hqFocusLabId
+      ? findCollectionByLabId(collections, hqFocusLabId)?.labName || hqFocusLabId
+      : "";
+    return buildCollectionsContextParts({
+      workspaceLabel: workspaceMeta.workspaceLabel,
+      attentionFilter: isHqCreditRisk ? hqCreditAttentionFilter : "",
+      selectedLabName,
+      searchActive: Boolean(effectiveSearch.trim()),
+      searchQuery: effectiveSearch.trim(),
+      focusLabName: !selectedLabName ? focusLabName : "",
+    });
+  }, [
+    isLabAccount,
+    embedded,
+    paymentDrawerLabId,
+    selectedCollection,
+    hqFocusLabId,
+    collections,
+    workspaceMeta.workspaceLabel,
+    isHqCreditRisk,
+    hqCreditAttentionFilter,
+    effectiveSearch,
+  ]);
 
   return (
     <div
@@ -2924,6 +3172,29 @@ export default function CollectionsPage({
         />
       ) : null}
 
+      {!isLabAccount && !embedded ? (
+        <CollectionsContextStrip parts={collectionsContextParts} />
+      ) : null}
+
+      {ordersReturnActive && typeof setActivePage === "function" && !embedded && !isLabAccount ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2 text-sm text-blue-900">
+          <span>Continue from Orders</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 border-blue-200 bg-white text-xs"
+            onClick={() => {
+              armOrdersReturnRestore();
+              setOrdersReturnActive(false);
+              setActivePage("orders");
+            }}
+          >
+            Back to Orders
+          </Button>
+        </div>
+      ) : null}
+
       {loading && collections.length === 0 ? (
         <>
           <PageSkeleton kpiCount={4} kpiColumns={4} showList={false} />
@@ -2964,163 +3235,215 @@ export default function CollectionsPage({
         />
       ) : null}
 
-      <div className={isLabAccount ? "mx-auto max-w-7xl" : ""}>
-        {isLabAccount ? (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <CompactAccountKpi
-              title="Outstanding"
-              value={formatMoney(
-                labLedgerKpis?.outstanding ??
-                  summary.totalOutstanding ??
-                  filteredCollections[0]?.outstandingAmount ??
-                  0
-              )}
-              icon={IndianRupee}
-            />
-            <CompactAccountKpi
-              title="Overdue"
-              value={
-                (labLedgerKpis?.overdueDays ?? filteredCollections[0]?.overdueDays)
-                  ? `${Number(labLedgerKpis?.overdueDays ?? filteredCollections[0]?.overdueDays)}d`
-                  : "—"
-              }
-              icon={AlertTriangle}
-            />
-            <CompactAccountKpi
-              title="Total paid"
-              value={formatMoney(
-                labLedgerKpis?.totalPaid ??
-                  filteredCollections[0]?.totalPaid ??
-                  0
-              )}
-              icon={Wallet}
-            />
-            {(() => {
-              const creditKpi = labTopCreditKpiDisplay({
-                labLedgerKpis,
-                collectionRow: filteredCollections[0],
-              });
-              return (
-                <CompactAccountKpi title={creditKpi.label} value={creditKpi.value} icon={ShieldAlert} />
-              );
-            })()}
-          </div>
-        ) : isAgentView ? (
-          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-            <CompactAccountKpi
-              title="Outstanding"
-              value={formatMoney(agentQueueSummary?.totalOutstanding ?? summary.totalOutstanding)}
-              icon={IndianRupee}
-            />
-            <CompactAccountKpi
-              title="Accounts due"
-              value={String(agentQueueSummary?.accountsDue ?? filteredCollections.length)}
-              icon={Wallet}
-            />
-            <CompactAccountKpi
-              title="Med/high risk"
-              value={String(agentQueueSummary?.mediumHighRisk ?? 0)}
-              icon={ShieldAlert}
-            />
-            <CompactAccountKpi
-              title="Total collected"
-              value={formatMoney(agentQueueSummary?.totalCollected ?? 0)}
-              icon={CircleDollarSign}
-            />
-          </div>
-        ) : isHqCreditRisk ? null : (
-          <KpiCardGrid columns={4}>
-            <KpiCard
-              title="Outstanding balance"
-              value={formatMoney(summary.totalOutstanding)}
-              icon={IndianRupee}
-              highlight={financialSyncPulse}
-            />
-            <KpiCard
-              title="Overdue labs"
-              value={Number(summary.overdueCount || 0).toLocaleString("en-IN")}
-              icon={AlertTriangle}
-            />
-            <KpiCard
-              title="High risk"
-              value={Number(summary.highRiskCount || 0).toLocaleString("en-IN")}
-              icon={ShieldAlert}
-            />
-            <KpiCard
-              title="Today's collections"
-              value={formatMoney(summary.todayCollections)}
-              icon={Wallet}
-              highlight={financialSyncPulse}
-            />
-          </KpiCardGrid>
-        )}
-      </div>
-
-      {!isLabAccount ? (
-        <div className="sticky top-0 z-20 -mx-1 border-b border-border bg-background/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/90">
-          <div className="space-y-2 rounded-lg border border-border bg-card p-2 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-xs font-semibold text-slate-700">
-                {isAgentView ? "Work queue" : isHqCreditRisk ? "Filter labs" : "Receivables"}
-              </div>
-              <div className="text-[11px] text-muted-foreground">
-                {filteredCollections.length} of {collections.length} shown
-              </div>
-            </div>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-              <Input
-                placeholder="Search lab, agent, area…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-9 rounded-lg pl-8 text-sm"
-                aria-label="Search collections"
-              />
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {isHqCreditRisk ? (
-        <HqCreditRiskCommandCenter
-          key={hqCreditAttentionFilter || "credit-default"}
-          collections={collections}
-          searchFiltered={filteredCollections}
-          searchActive={Boolean(search.trim())}
-          initialAttentionFilter={hqCreditAttentionFilter}
-          summary={summary}
-          lastPaymentByLabId={lastPaymentByLabId}
-          focusLabId={hqFocusLabId}
-          setActivePage={setActivePage}
-          currentUser={currentUser}
-          onReviewLab={handleOpenLabReview}
-          onOpenCollections={handleHqOpenCollections}
-          onRecordPayment={(labId) => openCollectionPanel(labId, "payment")}
+      {collectionsWorkspace === COLLECTIONS_WORKSPACES.HQ_CREDIT_RISK ? (
+        <HqCreditRiskWorkspace
+          key={hqCreditDeepLinkKey}
+          meta={workspaceMeta}
+          hideWorkspaceHeader={embedded}
+          searchValue={search}
+          onSearchChange={(e) => setSearch(e.target.value)}
+          shownCount={filteredCollections.length}
+          totalCount={collections.length}
+          onAttentionFilterChange={setHqCreditAttentionFilter}
+          commandCenterProps={{
+            collections,
+            searchFiltered: filteredCollections,
+            searchActive: Boolean(search.trim()),
+            initialAttentionFilter: hqCreditAttentionFilter,
+            summary,
+            lastPaymentByLabId,
+            focusLabId: hqFocusLabId,
+            setActivePage,
+            currentUser,
+            onReviewLab: handleOpenLabReview,
+            onOpenCollections: handleHqOpenCollections,
+            onRecordPayment: (labId) => openCollectionPanel(labId, "payment"),
+          }}
         />
-      ) : labDisplayCollections.length === 0 ? (
-        isLabAccount ? (
-          labAccountLedger?.status === "loading" ? (
-            <div className="mx-auto max-w-2xl">
-              <ListSkeleton rows={4} />
-            </div>
-          ) : (
-            <EmptyState
-              title="No account records"
-              description="Your lab payment and outstanding details will appear here when available."
-            />
-          )
+      ) : showCollectionsEmpty ? (
+        collectionsWorkspace === COLLECTIONS_WORKSPACES.LAB_ACCOUNT ? (
+          <LabAccountWorkspace
+            meta={workspaceMeta}
+            showEmpty
+            summaryMetrics={
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <CompactAccountKpi
+                  title="Outstanding"
+                  value={formatMoney(
+                    labLedgerKpis?.outstanding ??
+                      summary.totalOutstanding ??
+                      filteredCollections[0]?.outstandingAmount ??
+                      0
+                  )}
+                  icon={IndianRupee}
+                />
+                <CompactAccountKpi
+                  title="Overdue"
+                  value={
+                    (labLedgerKpis?.overdueDays ?? filteredCollections[0]?.overdueDays)
+                      ? `${Number(labLedgerKpis?.overdueDays ?? filteredCollections[0]?.overdueDays)}d`
+                      : "—"
+                  }
+                  icon={AlertTriangle}
+                />
+                <CompactAccountKpi
+                  title="Total paid"
+                  value={formatMoney(labLedgerKpis?.totalPaid ?? filteredCollections[0]?.totalPaid ?? 0)}
+                  icon={Wallet}
+                />
+                {(() => {
+                  const creditKpi = labTopCreditKpiDisplay({
+                    labLedgerKpis,
+                    collectionRow: filteredCollections[0],
+                  });
+                  return (
+                    <CompactAccountKpi title={creditKpi.label} value={creditKpi.value} icon={ShieldAlert} />
+                  );
+                })()}
+              </div>
+            }
+            emptyState={
+              labAccountLedger?.status === "loading" ? (
+                <div className="mx-auto max-w-2xl">
+                  <ListSkeleton rows={4} />
+                </div>
+              ) : (
+                <EmptyState
+                  title="No account records"
+                  description="Your lab payment and outstanding details will appear here when available."
+                />
+              )
+            }
+          />
+        ) : collectionsWorkspace === COLLECTIONS_WORKSPACES.AGENT ? (
+          <AgentCollectionsWorkspace
+            meta={workspaceMeta}
+            showEmpty
+            searchValue={localSearch}
+            onSearchChange={(e) => setLocalSearch(e.target.value)}
+            shownCount={filteredCollections.length}
+            totalCount={collections.length}
+            listRefreshing={listRefreshing}
+            summaryMetrics={
+              <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                <CompactAccountKpi
+                  title="Outstanding"
+                  value={formatMoney(agentQueueSummary?.totalOutstanding ?? summary.totalOutstanding)}
+                  icon={IndianRupee}
+                />
+                <CompactAccountKpi
+                  title="Accounts due"
+                  value={String(agentQueueSummary?.accountsDue ?? filteredCollections.length)}
+                  icon={Wallet}
+                />
+                <CompactAccountKpi
+                  title="Med/high risk"
+                  value={String(agentQueueSummary?.mediumHighRisk ?? 0)}
+                  icon={ShieldAlert}
+                />
+                <CompactAccountKpi
+                  title="Total collected"
+                  value={formatMoney(agentQueueSummary?.totalCollected ?? 0)}
+                  icon={CircleDollarSign}
+                />
+              </div>
+            }
+            emptyState={
+              <EmptyState
+                title={agentEmptyCopy?.title || "No collection records"}
+                description={agentEmptyCopy?.description || "Receivables will appear here when labs have outstanding balances."}
+              />
+            }
+          />
         ) : (
-          <EmptyState
-            title="No collection records"
-            description={
-              collections.length === 0
-                ? "Receivables will appear here when labs have outstanding balances."
-                : "Try a different search term."
+          <HqReceivablesWorkspace
+            meta={workspaceMeta}
+            showEmpty
+            searchValue={search}
+            onSearchChange={(e) => setSearch(e.target.value)}
+            shownCount={filteredCollections.length}
+            totalCount={collections.length}
+            summaryMetrics={
+              <KpiCardGrid columns={4}>
+                <KpiCard
+                  title="Outstanding balance"
+                  value={formatMoney(summary.totalOutstanding)}
+                  icon={IndianRupee}
+                  highlight={financialSyncPulse}
+                />
+                <KpiCard
+                  title="Overdue labs"
+                  value={Number(summary.overdueCount || 0).toLocaleString("en-IN")}
+                  icon={AlertTriangle}
+                />
+                <KpiCard
+                  title="High risk"
+                  value={Number(summary.highRiskCount || 0).toLocaleString("en-IN")}
+                  icon={ShieldAlert}
+                />
+                <KpiCard
+                  title="Today's collections"
+                  value={formatMoney(summary.todayCollections)}
+                  icon={Wallet}
+                  highlight={financialSyncPulse}
+                />
+              </KpiCardGrid>
+            }
+            emptyState={
+              <EmptyState
+                title="No collection records"
+                description={
+                  collections.length === 0
+                    ? "Receivables will appear here when labs have outstanding balances."
+                    : "Try a different search term."
+                }
+              />
             }
           />
         )
-      ) : isLabAccount ? (
-        <div className="mx-auto max-w-7xl space-y-4" role="list">
+      ) : collectionsWorkspace === COLLECTIONS_WORKSPACES.LAB_ACCOUNT ? (
+        <LabAccountWorkspace
+          meta={workspaceMeta}
+          summaryMetrics={
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <CompactAccountKpi
+                title="Outstanding"
+                value={formatMoney(
+                  labLedgerKpis?.outstanding ??
+                    summary.totalOutstanding ??
+                    filteredCollections[0]?.outstandingAmount ??
+                    0
+                )}
+                icon={IndianRupee}
+              />
+              <CompactAccountKpi
+                title="Overdue"
+                value={
+                  (labLedgerKpis?.overdueDays ?? filteredCollections[0]?.overdueDays)
+                    ? `${Number(labLedgerKpis?.overdueDays ?? filteredCollections[0]?.overdueDays)}d`
+                    : "—"
+                }
+                icon={AlertTriangle}
+              />
+              <CompactAccountKpi
+                title="Total paid"
+                value={formatMoney(
+                  labLedgerKpis?.totalPaid ?? filteredCollections[0]?.totalPaid ?? 0
+                )}
+                icon={Wallet}
+              />
+              {(() => {
+                const creditKpi = labTopCreditKpiDisplay({
+                  labLedgerKpis,
+                  collectionRow: filteredCollections[0],
+                });
+                return (
+                  <CompactAccountKpi title={creditKpi.label} value={creditKpi.value} icon={ShieldAlert} />
+                );
+              })()}
+            </div>
+          }
+        >
           {labDisplayCollections.map((item) => {
             const key = labIdKey(item.labId);
             const isExpanded = expandedLabId === key;
@@ -3143,9 +3466,50 @@ export default function CollectionsPage({
               />
             );
           })}
-        </div>
-      ) : isAgentView ? (
-        <div className="grid gap-3" role="list">
+        </LabAccountWorkspace>
+      ) : collectionsWorkspace === COLLECTIONS_WORKSPACES.AGENT ? (
+        <AgentCollectionsWorkspace
+          meta={workspaceMeta}
+          searchValue={localSearch}
+          onSearchChange={(e) => setLocalSearch(e.target.value)}
+          shownCount={filteredCollections.length}
+          totalCount={collections.length}
+          listRefreshing={listRefreshing}
+          summaryMetrics={
+            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+              <CompactAccountKpi
+                title="Outstanding"
+                value={formatMoney(agentQueueSummary?.totalOutstanding ?? summary.totalOutstanding)}
+                icon={IndianRupee}
+              />
+              <CompactAccountKpi
+                title="Accounts due"
+                value={String(agentQueueSummary?.accountsDue ?? filteredCollections.length)}
+                icon={Wallet}
+              />
+              <CompactAccountKpi
+                title="Med/high risk"
+                value={String(agentQueueSummary?.mediumHighRisk ?? 0)}
+                icon={ShieldAlert}
+              />
+              <CompactAccountKpi
+                title="Total collected"
+                value={formatMoney(agentQueueSummary?.totalCollected ?? 0)}
+                icon={CircleDollarSign}
+              />
+            </div>
+          }
+          contextStrip={
+            paymentDrawerLabId && selectedCollection ? (
+              <div className="rounded-lg border border-[var(--pc-brand-primary)]/30 bg-[var(--pc-brand-primary)]/5 px-3 py-2 text-sm">
+                <span className="text-muted-foreground">Recording for </span>
+                <span className="font-semibold text-slate-900">
+                  {selectedCollection.labName || selectedCollection.labId}
+                </span>
+              </div>
+            ) : null
+          }
+        >
           {filteredCollections.map((item) => {
             const key = labIdKey(item.labId);
             return (
@@ -3164,8 +3528,9 @@ export default function CollectionsPage({
                 readOnly={false}
                 copy={accountLabels}
                 isAgentView
+                isSelected={paymentDrawerLabId === key}
                 onRecordPayment={() => openCollectionPanel(item.labId, "payment")}
-                onOpenLab={() => setActivePage?.("labs")}
+                onOpenLab={() => handleOpenLabFromQueue(item.labId)}
                 onScheduleFollowUp={() => handleScheduleFollowUp(item)}
                 routeStopNumber={orderByLabId.get(labIdKey(item.labId))}
                 recentVisits={agentWorkspace?.recentVisits}
@@ -3173,9 +3538,41 @@ export default function CollectionsPage({
               />
             );
           })}
-        </div>
+        </AgentCollectionsWorkspace>
       ) : (
-        <div className="space-y-2" role="list">
+        <HqReceivablesWorkspace
+          meta={workspaceMeta}
+          searchValue={search}
+          onSearchChange={(e) => setSearch(e.target.value)}
+          shownCount={filteredCollections.length}
+          totalCount={collections.length}
+          summaryMetrics={
+            <KpiCardGrid columns={4}>
+              <KpiCard
+                title="Outstanding balance"
+                value={formatMoney(summary.totalOutstanding)}
+                icon={IndianRupee}
+                highlight={financialSyncPulse}
+              />
+              <KpiCard
+                title="Overdue labs"
+                value={Number(summary.overdueCount || 0).toLocaleString("en-IN")}
+                icon={AlertTriangle}
+              />
+              <KpiCard
+                title="High risk"
+                value={Number(summary.highRiskCount || 0).toLocaleString("en-IN")}
+                icon={ShieldAlert}
+              />
+              <KpiCard
+                title="Today's collections"
+                value={formatMoney(summary.todayCollections)}
+                icon={Wallet}
+                highlight={financialSyncPulse}
+              />
+            </KpiCardGrid>
+          }
+        >
           {filteredCollections.map((item) => {
             const key = labIdKey(item.labId);
             const isExpanded = expandedLabId === key;
@@ -3218,7 +3615,7 @@ export default function CollectionsPage({
               />
             );
           })}
-        </div>
+        </HqReceivablesWorkspace>
       )}
 
       {(isAgentView || isHqCreditRisk) ? (
@@ -3228,6 +3625,10 @@ export default function CollectionsPage({
             setPaymentDrawerLabId("");
             setSelectedCollection(null);
             setHistory([]);
+            setPaymentMutationError(null);
+            setEvidenceUploadStatus("idle");
+            setEvidenceUploadMessage("");
+            if (isAgentView) writeAgentCollectionsSelectedLab("");
           }}
           labName={selectedCollection?.labName}
           loading={detailsLoading && Boolean(paymentDrawerLabId)}

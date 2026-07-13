@@ -6,6 +6,17 @@ import tailwindcss from "@tailwindcss/vite";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const gitCommitFull =
+  process.env.VERCEL_GIT_COMMIT_SHA ||
+  process.env.GITHUB_SHA ||
+  "";
+const appBuildStamp =
+  gitCommitFull.slice(0, 7) || `local-${new Date().toISOString().slice(0, 19)}`;
+const appGitBranch =
+  process.env.VERCEL_GIT_COMMIT_REF ||
+  process.env.GITHUB_REF_NAME ||
+  "local";
+
 /**
  * Vite dev does not run Vercel serverless routes, so /api/primecare would fall
  * through and return non-JSON (e.g. text/javascript). Mirror api/primecare.js
@@ -114,6 +125,11 @@ function primecareLocalApiProxy() {
 
 export default defineConfig({
   plugins: [primecareLocalApiProxy(), react(), tailwindcss()],
+  define: {
+    "import.meta.env.VITE_APP_BUILD_STAMP": JSON.stringify(appBuildStamp),
+    "import.meta.env.VITE_APP_COMMIT_HASH": JSON.stringify(gitCommitFull.slice(0, 12) || appBuildStamp),
+    "import.meta.env.VITE_APP_GIT_BRANCH": JSON.stringify(appGitBranch),
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -123,7 +139,11 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (!id.includes("node_modules")) return;
+          if (!id.includes("node_modules")) {
+            if (id.includes("/src/predator/")) return "predator-tools";
+            if (id.includes("/src/projectionOps/")) return "projection-ops";
+            return;
+          }
           if (id.includes("@supabase")) return "supabase-vendor";
           if (/node_modules[/\\](react-dom|react|scheduler)[/\\]/.test(id)) {
             return "react-vendor";

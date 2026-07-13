@@ -1,0 +1,789 @@
+{
+  "generated_at": "2026-07-02T20:21:31.263Z",
+  "aggregate_score": 63,
+  "failed": true,
+  "dimensions": {
+    "Architecture": 70,
+    "Blueprint": 80,
+    "API": 0,
+    "Documentation": 100
+  },
+  "reports": [
+    {
+      "name": "Architecture",
+      "score": 70,
+      "stats": {
+        "error": 3,
+        "warn": 0,
+        "info": 0,
+        "pass": 2
+      },
+      "findings": [
+        {
+          "severity": "error",
+          "code": "ARCH-UNDOC-TABLE",
+          "message": "Table \"invoice_number_sequences\" in migration but not documented in Blueprint 01",
+          "file": "primecare-portal/supabase/migrations/20260624120002_invoice_system_phase1.sql",
+          "scope": "global"
+        },
+        {
+          "severity": "error",
+          "code": "ARCH-UNDOC-TABLE",
+          "message": "Table \"hq_projection_meta_v1\" in migration but not documented in Blueprint 01",
+          "file": "primecare-portal/supabase/migrations/20260705120000_sprint2_domain_projections_phase1.sql",
+          "scope": "global"
+        },
+        {
+          "severity": "error",
+          "code": "ARCH-PROJECTION-BYPASS",
+          "message": "OrdersPage.jsx contains forbidden pattern \".from(\"orders\")\" when projection PRJ-ORD-ORDER-v1 exists — use readOrdersListV1",
+          "file": "primecare-portal/src/pages/OrdersPage.jsx",
+          "scope": "global"
+        }
+      ]
+    },
+    {
+      "name": "Blueprint",
+      "score": 80,
+      "stats": {
+        "error": 2,
+        "warn": 0,
+        "info": 7,
+        "pass": 0
+      },
+      "findings": [
+        {
+          "severity": "error",
+          "code": "BP-UNDOC-VERIFY",
+          "message": "Verify script verify-projection-parity.mjs not listed in Verification Matrix 13",
+          "file": null,
+          "scope": "global"
+        },
+        {
+          "severity": "error",
+          "code": "BP-UNDOC-VERIFY",
+          "message": "Verify script verify-projection-staleness.mjs not listed in Verification Matrix 13",
+          "file": null,
+          "scope": "global"
+        },
+        {
+          "severity": "info",
+          "code": "BP-OPEN-GAP",
+          "message": "GAP-BP-021 is OPEN — track in health dashboard",
+          "file": null,
+          "scope": "global"
+        },
+        {
+          "severity": "info",
+          "code": "BP-OPEN-GAP",
+          "message": "GAP-BP-017 is OPEN — track in health dashboard",
+          "file": null,
+          "scope": "global"
+        },
+        {
+          "severity": "info",
+          "code": "BP-OPEN-GAP",
+          "message": "GAP-BP-020 is OPEN — track in health dashboard",
+          "file": null,
+          "scope": "global"
+        },
+        {
+          "severity": "info",
+          "code": "BP-OPEN-GAP",
+          "message": "GAP-BP-001 is OPEN — track in health dashboard",
+          "file": null,
+          "scope": "global"
+        },
+        {
+          "severity": "info",
+          "code": "BP-OPEN-GAP",
+          "message": "GAP-BP-003 is OPEN — track in health dashboard",
+          "file": null,
+          "scope": "global"
+        },
+        {
+          "severity": "info",
+          "code": "BP-OPEN-GAP",
+          "message": "GAP-BP-005 is OPEN — track in health dashboard",
+          "file": null,
+          "scope": "global"
+        },
+        {
+          "severity": "info",
+          "code": "BP-DRIFT-COUNT",
+          "message": "Blueprint drift items: 87",
+          "file": null,
+          "scope": "global"
+        }
+      ]
+    },
+    {
+      "name": "API",
+      "score": 0,
+      "stats": {
+        "error": 9,
+        "warn": 82,
+        "info": 0,
+        "pass": 2
+      },
+      "findings": [
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getTenantDeliveryPolicyRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/deliveryChargeSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API upsertTenantDeliveryPolicyWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/deliveryChargeSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API hasLabL1bDeliveryBenefitRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/deliveryChargeSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API persistOrderDeliverySnapshotWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/deliveryChargeSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getOrderDeliverySnapshotRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/deliveryChargeSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getOrderInvoiceForDeliveryOverrideRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/deliveryChargeSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API applyOrderDeliveryOverrideWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/deliveryChargeSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API syncShipmentDeliveryMirrorWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/deliveryChargeSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API reconcileDeliveryChargeForShipmentWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/deliveryChargeSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "error",
+          "code": "API-UNBOUNDED-SELECT",
+          "message": "Read function uses select(*) without bounded helper",
+          "file": "primecare-portal/src/api/deliveryChargeSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getInvoiceOpenBalanceRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/invoiceSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getInvoiceAllocationsRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/invoiceSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getInvoiceByOrderRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/invoiceSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getInvoiceDetailRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/invoiceSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getLabOwnershipRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/labOwnershipApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getAgentActiveLabOwnershipRowsRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/labOwnershipApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getAgentOwnedLabsRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/labOwnershipApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getManagerOwnedLabsRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/labOwnershipApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getUnassignedLabsRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/labOwnershipApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API assignPrimaryLabOwnerWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/labOwnershipApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API unassignPrimaryLabOwnerWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/labOwnershipApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getShipmentEventsRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API updateShipmentAssignmentWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getLogisticsCouriersRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API upsertLogisticsCourierWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API setLogisticsCourierActiveWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getLogisticsWarehousesRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API upsertLogisticsWarehouseWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getDeliveryRouteStopsRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getShipmentRouteAssignmentRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getLabPreferredDeliveryDaysRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API updateLabPreferredDeliveryDayWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API createDeliveryRouteWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API updateDeliveryRouteWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API assignShipmentToRouteWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API reorderRouteStopsWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API removeShipmentFromRouteWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API completeDeliveryRouteWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getUnassignedShipmentsForPlanningRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "error",
+          "code": "API-UNBOUNDED-SELECT",
+          "message": "Read function uses select(*) without bounded helper",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "error",
+          "code": "API-UNBOUNDED-SELECT",
+          "message": "Read function uses select(*) without bounded helper",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "error",
+          "code": "API-UNBOUNDED-SELECT",
+          "message": "Read function uses select(*) without bounded helper",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "error",
+          "code": "API-UNBOUNDED-SELECT",
+          "message": "Read function uses select(*) without bounded helper",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "error",
+          "code": "API-UNBOUNDED-SELECT",
+          "message": "Read function uses select(*) without bounded helper",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "error",
+          "code": "API-UNBOUNDED-SELECT",
+          "message": "Read function uses select(*) without bounded helper",
+          "file": "primecare-portal/src/api/logisticsSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getNotificationEventsRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/notificationApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API updateNotificationEventStatusWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/notificationApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API createHqProductWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API updateHqProductWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API setHqProductActiveWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getTenantActiveProductsRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getReorderForecastRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getAgentVisitPageContextRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getLabQualificationRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API upsertLabQualificationWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getQualificationReviewRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API updateQualificationFounderReviewWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API updateQualificationPipelineWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getAgentWorkspaceRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API createAgentVisitWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getInventoryLedgerRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getInventoryHealthRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API cancelPurchaseOrderWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API updatePurchaseOrderWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getLabOrderingContextRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API updateLabOrderingModeWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API confirmLabOrderPersistedRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getOperationsOperationalAgentsRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getOperationsAgentsRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API createOperationsAgentWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API updateOperationsAgentWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API setOperationsAgentActiveWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getOperationsPlatformUsersRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API createOperationsPlatformUserWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API updateOperationsPlatformUserWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API setOperationsPlatformUserActiveWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getOperationsDistributorsRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getOperationsDistributorAssignmentsRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API updateDistributorAgentAssignmentWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getOperationsLabAssignmentsRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API updateLabAgentAssignmentWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API transferLabAssignmentWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/primecareSupabaseApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "error",
+          "code": "API-ADAPTER-NAMING",
+          "message": "getSidebarSummary uses screen-oriented naming — use read_*_vN adapter pattern",
+          "file": "primecare-portal/src/api/sidebarSummaryApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API resetPlatformUserPasswordWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/userProvisioningApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API deactivatePlatformUserWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/userProvisioningApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API reactivatePlatformUserWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/userProvisioningApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API touchPlatformUserLastLoginWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/userProvisioningApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API getUserProvisioningEventsRead not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/userProvisioningApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API insertProvisioningEventWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/userProvisioningApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "warn",
+          "code": "API-UNDOC-READ",
+          "message": "API insertLabAssignmentHistoryWrite not mapped in Domain_API_Map.json",
+          "file": "primecare-portal/src/api/userProvisioningApi.js",
+          "scope": "global"
+        },
+        {
+          "severity": "error",
+          "code": "API-DEPRECATED-BRIDGE",
+          "message": "Page imports legacy primecareApi.js — use Supabase module APIs",
+          "file": "primecare-portal/src/pages/DashboardPage.jsx",
+          "scope": "global"
+        }
+      ]
+    },
+    {
+      "name": "Documentation",
+      "score": 100,
+      "stats": {
+        "error": 0,
+        "warn": 0,
+        "info": 1,
+        "pass": 0
+      },
+      "findings": [
+        {
+          "severity": "info",
+          "code": "DOC-NO-CHANGES",
+          "message": "No staged/changed files — documentation gate skipped",
+          "file": null,
+          "scope": "global"
+        }
+      ]
+    }
+  ]
+}

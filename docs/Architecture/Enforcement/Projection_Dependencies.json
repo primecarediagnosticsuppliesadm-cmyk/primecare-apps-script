@@ -1,0 +1,65 @@
+{
+  "version": "1.0.0",
+  "updated": "2026-07-02",
+  "description": "Acyclic projection dependency graph for enforcement validation.",
+  "nodes": [
+    { "registry_id": "PRJ-ORD-ORDER-v1", "table": "proj_order_v1", "class": "core", "status": "shadow" },
+    { "registry_id": "PRJ-COL-LAB-v1", "table": "proj_lab_receivable_v1", "class": "core", "status": "shadow" },
+    { "registry_id": "PRJ-ORD-METRICS-v1", "table": "proj_tenant_order_metrics_v1", "class": "domain_metrics", "status": "design" },
+    { "registry_id": "PRJ-COL-METRICS-v1", "table": "proj_tenant_receivable_metrics_v1", "class": "domain_metrics", "status": "design" },
+    { "registry_id": "PRJ-INV-SKU-v1", "table": "proj_sku_stock_v1", "class": "core", "status": "planned" },
+    { "registry_id": "PRJ-LOG-SHIP-v1", "table": "proj_shipment_v1", "class": "core", "status": "planned" },
+    { "registry_id": "PRJ-DSH-METRICS-v1", "table": "proj_tenant_dashboard_metrics_v1", "class": "composite", "status": "design" },
+    { "registry_id": "PRJ-EXE-METRICS-v1", "table": "proj_tenant_executive_metrics_v1", "class": "composite", "status": "design" },
+    { "registry_id": "PRJ-OPS-METRICS-v1", "table": "proj_tenant_ops_metrics_v1", "class": "domain_metrics", "status": "planned" }
+  ],
+  "edges": [
+    { "from": "PRJ-ORD-ORDER-v1", "to": "PRJ-ORD-METRICS-v1", "type": "rollup" },
+    { "from": "PRJ-COL-LAB-v1", "to": "PRJ-COL-METRICS-v1", "type": "rollup" },
+    { "from": "PRJ-ORD-METRICS-v1", "to": "PRJ-DSH-METRICS-v1", "type": "composite" },
+    { "from": "PRJ-COL-METRICS-v1", "to": "PRJ-DSH-METRICS-v1", "type": "composite" },
+    { "from": "PRJ-INV-SKU-v1", "to": "PRJ-DSH-METRICS-v1", "type": "composite" },
+    { "from": "PRJ-LOG-SHIP-v1", "to": "PRJ-DSH-METRICS-v1", "type": "composite" },
+    { "from": "PRJ-ORD-METRICS-v1", "to": "PRJ-EXE-METRICS-v1", "type": "composite" },
+    { "from": "PRJ-COL-METRICS-v1", "to": "PRJ-EXE-METRICS-v1", "type": "composite" },
+    { "from": "PRJ-OPS-METRICS-v1", "to": "PRJ-EXE-METRICS-v1", "type": "composite" },
+    { "from": "PRJ-OPS-METRICS-v1", "to": "PRJ-DSH-METRICS-v1", "type": "composite" }
+  ],
+  "status_transitions": {
+    "allowed": [
+      ["planned", "shadow"],
+      ["shadow", "active"],
+      ["active", "deprecated"],
+      ["deprecated", "retired"]
+    ],
+    "certification_required": {
+      "design": ["blueprint-18", "projection-registry", "kpi-catalog"],
+      "shadow": [
+        "verify-projection-deploy.mjs",
+        "verify-projection-parity.mjs",
+        "verify-dashboard-projection-parity.mjs",
+        "verify-executive-projection-parity.mjs"
+      ],
+      "active": [
+        "verify-projection-parity.mjs",
+        "verify-projection-staleness.mjs",
+        "verify-dashboard-projection-parity.mjs",
+        "verify-executive-projection-parity.mjs",
+        "measure-dashboard-projection-reads.mjs",
+        "14-day-shadow"
+      ]
+    },
+    "staleness_sla_ms": {
+      "PRJ-ORD-ORDER-v1": 60000,
+      "PRJ-COL-LAB-v1": 60000,
+      "PRJ-ORD-METRICS-v1": 90000,
+      "PRJ-COL-METRICS-v1": 90000,
+      "PRJ-DSH-METRICS-v1": 90000,
+      "PRJ-EXE-METRICS-v1": 180000
+    }
+  },
+  "forbidden_edges": [
+    { "from_class": "composite", "to_class": "core", "reason": "Composites must not depend directly on SoT refresh" },
+    { "from_class": "composite", "to_class": "core", "via": "read_time_sot_scan", "reason": "No SoT scan at adapter read time" }
+  ]
+}

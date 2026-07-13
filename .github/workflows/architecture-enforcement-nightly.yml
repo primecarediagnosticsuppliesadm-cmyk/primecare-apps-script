@@ -1,0 +1,58 @@
+name: Architecture Enforcement Nightly
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  nightly-enforcement:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: primecare-portal
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: primecare-portal/package-lock.json
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Full architecture enforcement
+        env:
+          ENFORCEMENT_MODE: full
+        run: node scripts/enforcement/run-architecture-enforcement.mjs --profile nightly --all
+
+      - name: Generate health dashboard
+        run: node scripts/enforcement/generate-health-dashboard.mjs
+
+      - name: Projection parity (QA — optional)
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -z "$VITE_SUPABASE_URL" ]; then
+            echo "SKIP: QA credentials not configured"
+            exit 0
+          fi
+          printf 'VITE_SUPABASE_URL=%s\nVITE_SUPABASE_ANON_KEY=%s\n' \
+            "$VITE_SUPABASE_URL" "$VITE_SUPABASE_ANON_KEY" > .env.local
+          [ -n "$SUPABASE_SERVICE_ROLE_KEY" ] && \
+            printf 'SUPABASE_SERVICE_ROLE_KEY=%s\n' "$SUPABASE_SERVICE_ROLE_KEY" >> .env.local
+          node scripts/verify-projection-parity.mjs || true
+          node scripts/verify-projection-staleness.mjs || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: architecture-health-dashboard
+          path: |
+            docs/Architecture/Enforcement/reports/health-dashboard.json
+            docs/Architecture/Enforcement/reports/health-dashboard.md
+            docs/Architecture/Enforcement/reports/enforcement-nightly-*.json

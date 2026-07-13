@@ -1,10 +1,13 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { StatusBadge, PageSkeleton, KpiCard, KpiCardGrid, usePortalToast, DataFreshnessLabel, PageHeader, DataFetchError } from "@/components/ux";
+import { StatusBadge, PageSkeleton, KpiCard, KpiCardGrid, usePortalToast, DataFreshnessLabel, PageHeader, DataFetchError, ReadHealthBanner } from "@/components/ux";
 import OperationalLabDrawer from "@/components/operations/OperationalLabDrawer.jsx";
 import OwnershipStatusCard from "@/components/operations/OwnershipStatusCard.jsx";
 import LabOwnershipDrawer from "@/components/operations/LabOwnershipDrawer.jsx";
-import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
+import {
+  loadOperationsCommandCenterData,
+  peekOperationsCommandCenterCache,
+} from "@/operations/operationsCommandCenterLoader.js";
 import { buildOperationsCommandCenterModel } from "@/operations/operationsCommandCenterModel.js";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import {
@@ -135,8 +138,14 @@ function HealthTile({ tile, onNavigate }) {
 }
 
 export default function OperationsCommandCenter({ currentUser, setActivePage }) {
-  const [opsModel, setOpsModel] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const initialOpsModel = useMemo(() => {
+    const cached = peekOperationsCommandCenterCache(currentUser);
+    return cached ? buildOperationsCommandCenterModel(cached) : null;
+  }, [currentUser]);
+
+  const [opsModel, setOpsModel] = useState(initialOpsModel);
+  const [loading, setLoading] = useState(() => !initialOpsModel);
+  const [extendedLoading, setExtendedLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [drawerLabId, setDrawerLabId] = useState("");
@@ -153,12 +162,25 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
         else setLoading(true);
         setError("");
 
+        let paintedCore = false;
         const model = await traceOperationsCenterLoad(async () => {
-          const payload = await loadOperationsCommandCenterData(currentUser);
+          const payload = await loadOperationsCommandCenterData(currentUser, {
+            force: isRefresh,
+            progressive: !isRefresh,
+            onCoreReady: (corePayload) => {
+              paintedCore = true;
+              setOpsModel(buildOperationsCommandCenterModel(corePayload));
+              setLoading(false);
+              setExtendedLoading(true);
+              setDataLoadedAt(Date.now());
+            },
+          });
           return buildOperationsCommandCenterModel(payload);
         });
         setOpsModel(model);
         setDataLoadedAt(Date.now());
+        if (!paintedCore) setLoading(false);
+        setExtendedLoading(false);
       } catch (err) {
         console.error(err);
         setError(err?.message || "Failed to load operations center");
@@ -351,6 +373,11 @@ export default function OperationsCommandCenter({ currentUser, setActivePage }) 
             Refresh
           </Button>
         }
+      />
+
+      <ReadHealthBanner
+        health={ownershipPayload.readHealth}
+        title="Operations data status"
       />
 
       {error ? (

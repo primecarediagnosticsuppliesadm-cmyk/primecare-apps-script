@@ -1,0 +1,67 @@
+#!/usr/bin/env node
+/**
+ * Phase 5A compensation plan assignment verification.
+ */
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const root = resolve(__dirname, "..");
+const pageSrc = readFileSync(resolve(root, "src/pages/ExecutiveCompensationCenterPage.jsx"), "utf8");
+const apiSrc = readFileSync(resolve(root, "src/api/compensationPlanAdminSupabaseApi.js"), "utf8");
+const assignmentsTabSrc = readFileSync(
+  resolve(root, "src/components/compensation/CompensationPlanAssignmentsTab.jsx"),
+  "utf8"
+);
+const assignmentsModelSrc = readFileSync(
+  resolve(root, "src/compensation/compensationAssignmentsViewModel.js"),
+  "utf8"
+);
+
+let failures = 0;
+function pass(id, detail) {
+  console.log(`PASS  ${id}: ${detail}`);
+}
+function fail(id, detail) {
+  console.error(`FAIL  ${id}: ${detail}`);
+  failures += 1;
+}
+function assert(condition, id, detail) {
+  if (condition) pass(id, detail);
+  else fail(id, detail);
+}
+
+for (const column of [
+  "Employee",
+  "Role",
+  "Current Plan",
+  "Plan Version",
+  "Effective From",
+  "Effective To",
+  "Status",
+  "Assigned By",
+  "Actions",
+]) {
+  assert(assignmentsTabSrc.includes(column), `assignments.column.${column}`, `${column} column present`);
+}
+
+assert(/Compensation Assignments/.test(pageSrc), "page.assignments_tab", "Compensation Assignments tab wired");
+assert(/changeEmployeePlanAssignment/.test(apiSrc), "api.change_plan", "change plan API exported");
+assert(/endEmployeePlanAssignment/.test(apiSrc), "api.end_assignment", "end assignment API exported");
+assert(/history_preserved/.test(apiSrc), "api.history_preserved", "assignment history preserved on change");
+assert(/Change Plan/.test(assignmentsTabSrc), "ui.change_plan", "change plan action present");
+assert(/assignmentIntent/.test(pageSrc), "ui.assignment_intent", "page consumes directory assignment intent");
+assert(/COMPENSATION_ASSIGNMENT_SEGMENTS/.test(assignmentsTabSrc), "ui.assignment_segments", "assignments tab has segment filters");
+assert(/buildCompensationAssignmentSegmentCounts/.test(assignmentsModelSrc), "ui.segment_counts", "assignment segment count model");
+assert(/findDuplicateActiveAssignmentProfiles/.test(assignmentsModelSrc), "ui.duplicate_active", "duplicate active assignment guard");
+assert(/kind: "history"/.test(assignmentsModelSrc), "ui.history_kind", "history rows tagged separately from active");
+assert(/openDirectoryAssignmentWorkflow/.test(pageSrc), "page.directory_workflow", "page routes directory assign/change to assignments");
+assert(/End Assignment/.test(assignmentsTabSrc), "ui.end_assignment", "end assignment action present");
+assert(!/\.delete\(\)/.test(apiSrc), "api.no_delete", "no assignment delete path");
+
+if (failures) {
+  console.error(`\nOverall: NO-GO (${failures} failure(s))`);
+  process.exit(1);
+}
+console.log("\nOverall: GO\n");

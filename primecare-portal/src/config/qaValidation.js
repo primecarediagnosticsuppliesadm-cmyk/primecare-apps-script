@@ -33,5 +33,25 @@ export function isQaCommandCenterEnabled() {
   return envFlagOrDefault("VITE_QA_COMMAND_CENTER", IS_QA || IS_DEV);
 }
 
+/** Projection Operations Center — executive-only ops monitoring; QA/dev default. */
+export function isProjectionOpsCenterEnabled() {
+  if (!hasSupabaseForValidation()) return false;
+  if (IS_PROD) {
+    return envFlagOrDefault("VITE_PROJECTION_OPS_CENTER", false);
+  }
+  return envFlagOrDefault("VITE_PROJECTION_OPS_CENTER", IS_QA || IS_DEV);
+}
+
+/** Production Readiness Dashboard — HQ executive + admin; QA/dev default. */
+export function isProductionReadinessDashboardEnabled(role) {
+  if (!hasSupabaseForValidation()) return false;
+  const normalizedRole = String(role || "").toLowerCase();
+  if (normalizedRole !== "executive" && normalizedRole !== "admin") return false;
+  if (IS_PROD) {
+    return envFlagOrDefault("VITE_PRODUCTION_READINESS_DASHBOARD", false);
+  }
+  return envFlagOrDefault("VITE_PRODUCTION_READINESS_DASHBOARD", IS_QA || IS_DEV);
+}
+
 /** Phase 2: tenant + role isolation — re-export for config consumers. */
 export { isTenantRoleIsolationValidationEnabled } from "@/validation/tenantRoleIsolationValidation.js";

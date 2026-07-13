@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState, memo } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import LoginPage from "./pages/LoginPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import { useAuth } from "./context/AuthContext";
@@ -29,8 +29,12 @@ import { platformRoleLabel } from "./config/rolePermissionMatrix.js";
 import { TenantViewProvider } from "@/context/TenantViewContext.jsx";
 import OperatingZoneSync from "@/components/OperatingZoneSync.jsx";
 import { loadHqNavBadgeCounts } from "@/operations/hqNavBadgeCounts.js";
+import { ADMIN_DASHBOARD_INVALIDATE_EVENT } from "@/utils/dashboardInvalidate.js";
 import { prefetchLikelyRoutes } from "@/utils/routePrefetch.js";
 import { isNavigationPageCacheWarm } from "@/utils/hqNavigationWarmth.js";
+import { QA_DIAGNOSTICS_ENABLED } from "@/config/environment.js";
+
+const QaDiagnosticsPanel = lazy(() => import("@/components/qa/QaDiagnosticsPanel.jsx"));
 
 function canRoleAccessPage(role, pageKey) {
   if (!role || !pageKey) return false;
@@ -142,10 +146,6 @@ export default function App() {
   const isResetPasswordRoute =
     typeof window !== "undefined" &&
     window.location.pathname.replace(/\/$/, "") === "/reset-password";
-
-  if (isResetPasswordRoute) {
-    return <ResetPasswordPage />;
-  }
 
   const [role, setRole] = useState(null);
   const [activePage, setActivePage] = useState(null);
@@ -261,11 +261,15 @@ export default function App() {
     }
 
     let cancelled = false;
-    const refreshBadges = async () => {
+    let intervalId = null;
+    let invalidateDebounceId = null;
+
+    const refreshBadges = async (force = false) => {
       try {
         const badges = await loadHqNavBadgeCounts({
           tenantId: currentUser.tenantId,
           role,
+          force,
         });
         if (!cancelled) setNavBadges(badges);
       } catch {
@@ -273,18 +277,48 @@ export default function App() {
       }
     };
 
-    void refreshBadges();
-    const interval = window.setInterval(refreshBadges, 120000);
+    const scheduleInvalidateRefresh = () => {
+      if (invalidateDebounceId != null) window.clearTimeout(invalidateDebounceId);
+      invalidateDebounceId = window.setTimeout(() => {
+        invalidateDebounceId = null;
+        void refreshBadges(true);
+      }, 400);
+    };
+
+    const startPolling = () => {
+      if (cancelled) return;
+      void refreshBadges(false);
+      intervalId = window.setInterval(() => refreshBadges(false), 120000);
+    };
+
+    window.addEventListener(ADMIN_DASHBOARD_INVALIDATE_EVENT, scheduleInvalidateRefresh);
+
+    let deferHandle;
+    let usedIdleCallback = false;
+    if (typeof window.requestIdleCallback === "function") {
+      usedIdleCallback = true;
+      deferHandle = window.requestIdleCallback(startPolling, { timeout: 3000 });
+    } else {
+      deferHandle = window.setTimeout(startPolling, 1500);
+    }
+
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      window.removeEventListener(ADMIN_DASHBOARD_INVALIDATE_EVENT, scheduleInvalidateRefresh);
+      if (invalidateDebounceId != null) window.clearTimeout(invalidateDebounceId);
+      if (usedIdleCallback && deferHandle != null && typeof window.cancelIdleCallback === "function") {
+        window.cancelIdleCallback(deferHandle);
+      } else if (deferHandle != null) {
+        window.clearTimeout(deferHandle);
+      }
+      if (intervalId != null) window.clearInterval(intervalId);
     };
   }, [isAuthenticated, role, currentUser?.tenantId]);
 
   useEffect(() => {
     if (!role || !activePage) return;
-    prefetchLikelyRoutes(role, activePage);
-  }, [role, activePage]);
+    prefetchLikelyRoutes(role, activePage, currentUser);
+  }, [role, activePage, currentUser]);
 
   useEffect(() => {
     if (!role) return;
@@ -328,6 +362,10 @@ export default function App() {
     () => isNavigationPageCacheWarm(activePage, role, currentUser),
     [activePage, role, currentUser]
   );
+
+  if (isResetPasswordRoute) {
+    return <ResetPasswordPage />;
+  }
 
   if (loading) {
     return (
@@ -383,6 +421,11 @@ export default function App() {
               setActivePage={navigateToPage}
               authToken={authToken}
             />
+            {QA_DIAGNOSTICS_ENABLED ? (
+              <Suspense fallback={null}>
+                <QaDiagnosticsPanel currentUser={currentUser} />
+              </Suspense>
+            ) : null}
           </RouteTransitionOverlay>
         </PortalLayout>
         </TenantViewProvider>

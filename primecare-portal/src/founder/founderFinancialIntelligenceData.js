@@ -1,5 +1,8 @@
 import { loadDistributorOsPortfolio } from "@/distributor/distributorOsPortfolioData.js";
-import { loadOperationsCommandCenterData } from "@/operations/operationsCommandCenterLoader.js";
+import {
+  loadOperationsCommandCenterData,
+  peekOperationsCommandCenterCache,
+} from "@/operations/operationsCommandCenterLoader.js";
 import { loadVisibleLabContracts } from "@/labContract/labContractStore.js";
 import { loadFounderCommissionMetrics } from "@/commission/commissionData.js";
 import { filterDistributorRegistry } from "@/distributor/distributorOsEngine.js";
@@ -21,24 +24,32 @@ function str(v) {
 export async function loadFounderFinancialIntelligenceData(currentUser, options = {}) {
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
   const loadOpts = { force: options.force };
+  const skipOpsLoad = options.skipOpsLoad === true && options.opsPayload;
+  const cachedOps =
+    !options.force && !skipOpsLoad ? peekOperationsCommandCenterCache(currentUser) : null;
+  const preloadedOps = skipOpsLoad ? options.opsPayload : cachedOps;
 
   const [portfolio, opsPayload, contracts] = await Promise.all([
     loadDistributorOsPortfolio(currentUser, loadOpts),
-    loadOperationsCommandCenterData(currentUser, loadOpts),
+    preloadedOps
+      ? Promise.resolve(preloadedOps)
+      : loadOperationsCommandCenterData(currentUser, {
+          ...loadOpts,
+          progressive: !loadOpts.force,
+        }),
     loadVisibleLabContracts(),
   ]);
 
   const distributors = filterDistributorRegistry(portfolio.bundle?.registry || portfolio.distributors || [], homeTenantId);
   const distributorIds = distributors.map((d) => d.id).filter(Boolean);
   const distributorNames = distributorNamesFromRegistry(distributors);
-  const [inventoryEconomicsRes, catalogMirrorSummary] = await Promise.all([
+  const [inventoryEconomicsRes, catalogMirrorSummary, commissionRes] = await Promise.all([
     loadInventoryEconomicsBundle({ distributorNames }),
     buildPortfolioCatalogMirrorSummary(distributors),
+    loadFounderCommissionMetrics(distributorIds, {
+      homeTenantId,
+    }),
   ]);
-
-  const commissionRes = await loadFounderCommissionMetrics(distributorIds, {
-    homeTenantId,
-  });
 
   return {
     homeTenantId,

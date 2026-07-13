@@ -1,12 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { updateOrderStatus } from "@/api/primecareApi";
 import {
-  getOrdersRead,
-  getOrderDetailsRead,
   updateOrderStatusWrite,
   peekOrdersReadCache,
+  enrichOrdersListWithItemCounts,
   getOperationsLabAssignmentsRead,
 } from "@/api/primecareSupabaseApi";
+import {
+  prefetchBrokerRead,
+  readOrderDetailBroker,
+  readOrdersListBroker,
+} from "@/api/sharedReadBroker.js";
 import { supabase } from "@/api/supabaseClient.js";
 import {
   logAppsScriptFallbackUsed,
@@ -14,6 +18,7 @@ import {
 } from "@/utils/migrationTrace.js";
 import { invalidateAdminDashboardCaches } from "@/utils/dashboardInvalidate.js";
 import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
+import { scheduleIdleTask } from "@/utils/scheduleIdleTask.js";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 import { isHqOrderStatusWriteBlocked, getHqFreezeBannerMessage } from "@/config/hqReleasePolicy.js";
 import { isPredatorAutoValidationEnabled } from "@/predator/predatorGuards.js";
@@ -28,6 +33,7 @@ import {
   StatusBadge,
   PageHeader,
   DataFetchError,
+  ActionErrorSummary,
   usePortalToast,
 } from "@/components/ux";
 import { orderStatusToVariant, paymentStatusToVariant } from "@/utils/statusTokens";
@@ -47,10 +53,15 @@ import {
   buildLabFilterOptions,
   formatMissingField,
   formatItemCount,
+  resolveOrderLineUnitCount,
+  filterVerificationTestOrders,
+  isVerificationTestOrderId,
   normalizeOrderStatusLabel,
   normalizePaymentStatusLabel,
   diagnoseOrdersReadDrift,
 } from "@/orders/ordersMonitorEngine.js";
+import { mapOrderMutationError } from "@/orders/mapOrderMutationError.js";
+import { getOrderStatusActionLoadingLabel } from "@/orders/ordersActionUi.js";
 import {
   extractLatestCancellationNote,
   formatOrderPaymentLabel,
@@ -68,6 +79,7 @@ import {
   navigateToLabs,
   navigateToOperationsCenter,
   navigateToOrders,
+  navigateToLogisticsDelivery,
 } from "@/operations/hqWorkflowNav.js";
 import { mapLabAssignmentRow } from "@/operations/operationsCenterAdminEngine.js";
 import { resolveLabAgentForLabId } from "@/operations/labAgentResolver.js";
@@ -76,15 +88,46 @@ import InvoiceDetailsDrawer from "@/components/invoice/InvoiceDetailsDrawer.jsx"
 import InvoiceStatusBadge from "@/components/invoice/InvoiceStatusBadge.jsx";
 import { getInvoicesByOrderIdsRead } from "@/api/invoiceSupabaseApi.js";
 import { onFinancialSyncCompleted } from "@/operations/financialSyncEvents.js";
+import { usePagePerformance } from "@/hooks/usePagePerformance.js";
 import { useFinancialSyncPulse } from "@/hooks/useFinancialSyncPulse.js";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
+import OrdersLogisticsPanel from "@/components/logistics/OrdersLogisticsPanel.jsx";
+import {
+  OrderAmountDetailBreakdown,
+  OrderAmountListStack,
+  OrderAmountTableCells,
+} from "@/components/orders/OrderDeliveryAmountDisplay.jsx";
 import {
   ORDER_QUEUE_KEYS,
   buildOrdersOperationsQueue,
   filterOrdersByQueue,
   queueKeyToFilterPatch,
 } from "@/orders/ordersOperationsQueueEngine.js";
+import {
+  buildFocusedOrderOutsideFiltersCopy,
+  buildOrdersContextParts,
+  buildOrdersListEmptyCopy,
+} from "@/orders/ordersContextUi.js";
+import {
+  consumeOrdersReturnContextIfArmed,
+  writeOrdersReturnContext,
+} from "@/orders/ordersWorkflowReturn.js";
+import {
+  armInventoryReturnRestore,
+  hasInventoryReturnContext,
+} from "@/inventory/inventoryWorkflowReturn.js";
+import {
+  armPurchaseReturnRestore,
+  hasPurchaseReturnContext,
+} from "@/purchase/purchaseWorkflowReturn.js";
+import OrdersContextStrip from "@/components/orders/OrdersContextStrip.jsx";
+import OrdersCollapsibleSection from "@/components/orders/OrdersCollapsibleSection.jsx";
+import {
+  getOrdersExpectedActionCopy,
+  ORDERS_WORKSPACE_PRIMARY_QUESTION,
+} from "@/orders/ordersWorkspaceUi.js";
 import { cn } from "@/lib/utils";
+import { isQaValidationLayerEnabled } from "@/config/qaValidation.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -197,16 +240,15 @@ function canRecordOrderPayment(order, invoice, orderUx) {
 }
 
 function OrdersDetailEmptyState({
-  kpis,
-  loading,
   filteredOrders,
   onShowPending,
   onShowPendingPayment,
   onOpenFirst,
   activeQueueKey = "",
   queue = [],
+  kpis,
 }) {
-  const pending = kpis.placed + kpis.processing;
+  const pending = Number(kpis?.placed || 0) + Number(kpis?.processing || 0);
   const activeQueue = queue.find((q) => q.id === activeQueueKey);
   const suggestions = [];
 
@@ -216,69 +258,32 @@ function OrdersDetailEmptyState({
       action: onShowPending,
     });
   }
-  if (kpis.pendingPayment > 0) {
+  if (Number(kpis?.pendingPayment || 0) > 0) {
     suggestions.push({
       label: `Check ${kpis.pendingPayment} order${kpis.pendingPayment === 1 ? "" : "s"} with pending payment`,
       action: onShowPendingPayment,
     });
   }
-  if (kpis.cancelled > 0) {
-    suggestions.push({
-      label: `${kpis.cancelled} cancelled order${kpis.cancelled === 1 ? "" : "s"} on file — audit if disputes arise`,
-      action: () => onShowPending?.(),
-    });
-  }
   if (filteredOrders.length > 0) {
     suggestions.push({
-      label: `Open latest order: ${filteredOrders[0].orderId}`,
+      label: `Open next order: ${filteredOrders[0].orderId}`,
       action: () => onOpenFirst?.(filteredOrders[0].orderId),
     });
   }
   if (suggestions.length === 0) {
     suggestions.push({
-      label: "No orders in scope — adjust filters or wait for new placements",
+      label: "No orders need action in the current view — adjust filters or wait for new placements",
       action: null,
     });
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3" aria-label="Select an order to continue">
       <p className="text-sm text-slate-600">
         {activeQueue
-          ? `${activeQueue.label}: ${activeQueue.count} order${activeQueue.count === 1 ? "" : "s"} in this bucket. Select one from the list to review details.`
-          : "Select an order from the list to review lines, payment status, and fulfillment actions."}
+          ? `${activeQueue.label}: ${activeQueue.count} order${activeQueue.count === 1 ? "" : "s"} in this bucket. Select one from the queue to act.`
+          : "Select an order from the queue to review fulfillment actions, lines, and payment."}
       </p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Pending orders</p>
-          <p className="text-xl font-bold tabular-nums text-slate-900">{loading ? "—" : pending}</p>
-          <p className="text-[11px] text-slate-500">Placed + Processing</p>
-        </div>
-        <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-800">Pending payment</p>
-          <p className="text-xl font-bold tabular-nums text-amber-950">{loading ? "—" : kpis.pendingPayment}</p>
-          <p className="text-[11px] text-amber-800/80">Excludes cancelled</p>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Cancelled</p>
-          <p className="text-xl font-bold tabular-nums text-slate-900">{loading ? "—" : kpis.cancelled}</p>
-        </div>
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 px-3 py-2.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">Recently fulfilled</p>
-          <p className="text-xl font-bold tabular-nums text-emerald-950">
-            {loading
-              ? "—"
-              : (queue.find((q) => q.id === ORDER_QUEUE_KEYS.RECENTLY_FULFILLED)?.count ?? kpis.fulfilled)}
-          </p>
-          <p className="text-[11px] text-emerald-800/80">Last 14 days</p>
-        </div>
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 px-3 py-2.5 sm:col-span-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">Active order value</p>
-          <p className="text-lg font-bold tabular-nums text-emerald-950">
-            {loading ? "—" : formatCurrency(kpis.totalOrderValue)}
-          </p>
-        </div>
-      </div>
       <div>
         <p className="mb-2 text-xs font-semibold text-slate-700">Suggested next actions</p>
         <ul className="space-y-1.5">
@@ -356,6 +361,7 @@ export default function OrdersPage({
   const [allOrders, setAllOrders] = useState(() => hydratedOrders?.allOrders ?? []);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [details, setDetails] = useState(null);
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("ALL");
   const [paymentStatus, setPaymentStatus] = useState("ALL");
@@ -367,8 +373,12 @@ export default function OrdersPage({
   const [listRefreshing, setListRefreshing] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [pendingStatusAction, setPendingStatusAction] = useState("");
   const [statusNote, setStatusNote] = useState("");
   const [error, setError] = useState("");
+  const [inventoryReturnActive, setInventoryReturnActive] = useState(() => hasInventoryReturnContext());
+  const [purchaseReturnActive, setPurchaseReturnActive] = useState(() => hasPurchaseReturnContext());
+  const [statusMutationError, setStatusMutationError] = useState(null);
   const [ordersReadOk, setOrdersReadOk] = useState(() => hydratedOrders?.ordersReadOk ?? true);
   const [successMessage, setSuccessMessage] = useState("");
   const [labAssignments, setLabAssignments] = useState([]);
@@ -376,8 +386,17 @@ export default function OrdersPage({
   const [invoiceByOrderId, setInvoiceByOrderId] = useState({});
   const [invoiceDrawer, setInvoiceDrawer] = useState(null);
   const [invoiceDownloadKey, setInvoiceDownloadKey] = useState("");
+  const [focusOrderId, setFocusOrderId] = useState("");
+  const [focusOutsideReason, setFocusOutsideReason] = useState("");
+  const [contextWarning, setContextWarning] = useState("");
+  const [pendingOpenOrderId, setPendingOpenOrderId] = useState("");
+  const statusActionInflightRef = useRef(false);
+  const navContextConsumedRef = useRef(false);
+  const returnRestoreConsumedRef = useRef(false);
 
   const { showToast } = usePortalToast();
+
+  usePagePerformance("Admin Orders");
 
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
   const hqStatusWriteBlocked = isHqOrderStatusWriteBlocked();
@@ -401,6 +420,11 @@ export default function OrdersPage({
   }, []);
 
   useEffect(() => {
+    const handle = window.setTimeout(() => setSearch(searchInput), 300);
+    return () => window.clearTimeout(handle);
+  }, [searchInput]);
+
+  useEffect(() => {
     if (distributorScope?.tenantId) {
       setOrders(
         filterRowsByTenant(allOrders, distributorScope.tenantId, { tenantKey: rowTenantId })
@@ -416,15 +440,60 @@ export default function OrdersPage({
   }, [allOrders, distributorScope?.tenantId, currentUser?.role, currentUser?.tenantId]);
 
   useEffect(() => {
-    if (loading || !orders.length) return;
+    if (loading || returnRestoreConsumedRef.current) return;
+    const restore = consumeOrdersReturnContextIfArmed();
+    if (!restore) return;
+    returnRestoreConsumedRef.current = true;
+    try {
+      if (restore.search) {
+        setSearchInput(restore.search);
+        setSearch(restore.search);
+      }
+      if (restore.status) setStatus(restore.status);
+      if (restore.paymentStatus) setPaymentStatus(restore.paymentStatus);
+      if (restore.labFilter) setLabFilter(restore.labFilter);
+      if (restore.dateFrom != null) setDateFrom(restore.dateFrom);
+      if (restore.dateTo != null) setDateTo(restore.dateTo);
+      if (restore.sortKey) setSortKey(restore.sortKey);
+      if (restore.activeQueueKey) setActiveQueueKey(restore.activeQueueKey);
+      if (restore.orderId) {
+        setFocusOrderId(str(restore.orderId));
+        setPendingOpenOrderId(str(restore.orderId));
+      }
+      setContextWarning("");
+    } catch (err) {
+      setContextWarning(
+        err?.message || "Could not restore previous Orders context. Clear filters and select an order."
+      );
+    }
+  }, [loading]);
+
+  useEffect(() => {
+    if (!pendingOpenOrderId || loading || !orders.length) return;
+    const id = pendingOpenOrderId;
+    setPendingOpenOrderId("");
+    void openOrder(id);
+  }, [pendingOpenOrderId, loading, orders.length]);
+
+  useEffect(() => {
+    if (loading || !orders.length || navContextConsumedRef.current) return;
     const ctx = consumeHqNavContext("orders");
-    if (ctx?.labId) setLabFilter(ctx.labId);
-    if (ctx?.orderId) void openOrder(ctx.orderId);
+    if (!ctx) return;
+    navContextConsumedRef.current = true;
+    if (ctx.labId) setLabFilter(ctx.labId);
+    if (ctx.orderId) {
+      setFocusOrderId(str(ctx.orderId));
+      setFocusOutsideReason("deep_link");
+      void openOrder(str(ctx.orderId));
+    }
   }, [loading, orders.length]);
 
   async function probeRlsOrderRows() {
     if (!supabase) return [];
-    const { data, error } = await supabase.from("orders").select("*");
+    const { data, error } = await supabase
+      .from("orders")
+      .select("order_id,id,tenant_id,lab_id,status,order_date")
+      .limit(500);
     if (error) {
       console.warn("[OrdersPage] RLS probe failed:", error.message);
       return null;
@@ -442,7 +511,11 @@ export default function OrdersPage({
         setListRefreshing(true);
       }
       setError("");
-      const res = await getOrdersRead();
+      const res = await readOrdersListBroker({
+        skipLineCounts: true,
+        ...(homeTenantId ? { tenantId: homeTenantId } : {}),
+        currentUser,
+      });
       if (res?.success === false) {
         throw new Error(res.error || "Failed to load orders from Supabase.");
       }
@@ -488,6 +561,34 @@ export default function OrdersPage({
         orders: scoped,
         ordersReadOk: true,
       });
+
+      // Sprint 6A — when list comes from proj_order_v1 (adapter ON), item_count is
+      // already embedded per row; skip the transactional order_lines/order_items
+      // fan-out entirely. Detail drawer still reads SoT on demand.
+      const listFromProjection = res?.projection === true;
+      const rowsMissingCounts = rows.some((r) => !Number(r?.itemCount));
+      if (!listFromProjection && rowsMissingCounts) {
+        const scheduleLineEnrich = () => {
+          void enrichOrdersListWithItemCounts(rows).then((enriched) => {
+            if (!Array.isArray(enriched) || !enriched.length) return;
+            const patchRows = (prev) => {
+              if (!Array.isArray(prev) || !prev.length) return prev;
+              const byId = new Map(enriched.map((o) => [str(o.orderId), o]));
+              return prev.map((row) => {
+                const next = byId.get(str(row.orderId));
+                return next && next.itemCount !== row.itemCount ? { ...row, itemCount: next.itemCount } : row;
+              });
+            };
+            setAllOrders((prev) => patchRows(prev));
+            setOrders((prev) => patchRows(prev));
+          });
+        };
+        if (typeof window.requestIdleCallback === "function") {
+          window.requestIdleCallback(scheduleLineEnrich, { timeout: 2500 });
+        } else {
+          window.setTimeout(scheduleLineEnrich, 0);
+        }
+      }
     } catch (err) {
       console.warn("OrdersPage loadOrders:", err);
       const message = err?.message || "Failed to load orders.";
@@ -505,15 +606,34 @@ export default function OrdersPage({
     }
   }
 
+  function patchOrderStatusInLists(orderId, nextStatus) {
+    const patchRows = (rows) =>
+      rows.map((row) =>
+        str(row.orderId) === str(orderId)
+          ? {
+              ...row,
+              orderStatus: nextStatus,
+              status: nextStatus,
+            }
+          : row
+      );
+    setAllOrders((prev) => patchRows(prev));
+    setOrders((prev) => patchRows(prev));
+  }
+
   async function openOrder(orderId, options = {}) {
     const { preserveSuccess = false } = options;
     try {
       setDetailsLoading(true);
       setError("");
+      setStatusMutationError(null);
       if (!preserveSuccess) {
         setSuccessMessage("");
       }
-      const res = await getOrderDetailsRead(orderId);
+      const res = await readOrderDetailBroker(orderId, {
+        ...(homeTenantId ? { tenantId: homeTenantId } : {}),
+        currentUser,
+      });
       const result = res?.data || res || {};
       const data = {
         order: result.order || null,
@@ -523,7 +643,30 @@ export default function OrdersPage({
         throw new Error(`Order ${orderId} not found or not visible under current access.`);
       }
       setSelectedOrder(orderId);
+      setFocusOrderId(str(orderId));
       setDetails(data);
+      const detailUnits = resolveOrderLineUnitCount(data.lines);
+      if (detailUnits > 0) {
+        const patchRows = (rows) =>
+          rows.map((row) =>
+            str(row.orderId) === str(orderId) ? { ...row, itemCount: detailUnits } : row
+          );
+        setAllOrders((prev) => patchRows(prev));
+        setOrders((prev) => patchRows(prev));
+      }
+      const rawDetailStatus =
+        data.order?.orderStatus ?? data.order?.status ?? data.order?.order_status;
+      if (rawDetailStatus) {
+        patchOrderStatusInLists(orderId, normalizeOrderStatusLabel(rawDetailStatus));
+      }
+      const currentIdx = orders.findIndex((row) => str(row.orderId) === str(orderId));
+      const nextLikelyOrderId = currentIdx >= 0 ? str(orders[currentIdx + 1]?.orderId) : "";
+      if (nextLikelyOrderId) {
+        prefetchBrokerRead(readOrderDetailBroker, [
+          nextLikelyOrderId,
+          { ...(homeTenantId ? { tenantId: homeTenantId } : {}), currentUser },
+        ]);
+      }
     } catch (err) {
       console.warn("OrdersPage openOrder:", err);
       setError(err?.message || "Failed to load order details.");
@@ -535,16 +678,23 @@ export default function OrdersPage({
 
   async function handleUpdateStatus(nextStatus) {
     if (!selectedOrder) return;
+    if (statusActionInflightRef.current || updatingStatus) return;
     if (hqStatusWriteBlocked) {
-      setError("Order status changes are frozen for this certified HQ release.");
+      setStatusMutationError(
+        mapOrderMutationError("Order status changes are frozen for this certified HQ release.", {
+          nextStatus,
+        })
+      );
       return;
     }
 
     const id = selectedOrder;
 
     try {
+      statusActionInflightRef.current = true;
       setUpdatingStatus(true);
-      setError("");
+      setPendingStatusAction(nextStatus);
+      setStatusMutationError(null);
       setSuccessMessage("");
 
       const statusPayload = { note: statusNote, orderStatus: nextStatus };
@@ -559,9 +709,9 @@ export default function OrdersPage({
           );
         }
 
-        setSuccessMessage(orderStatusSuccessMessage(nextStatus));
+        showToast("success", orderStatusSuccessMessage(nextStatus));
         setStatusNote("");
-        await loadOrders({ silent: true });
+        patchOrderStatusInLists(id, nextStatus);
         await openOrder(id, { preserveSuccess: true });
         if (nextStatus === "Fulfilled") {
           await refreshInvoicesForOrders([id]);
@@ -593,19 +743,26 @@ export default function OrdersPage({
         throw new Error(result?.message || "Failed to update status");
       }
 
-      setSuccessMessage(
+      showToast(
+        "success",
         nextStatus === "Fulfilled"
           ? "Order marked Fulfilled. Inventory updated."
           : orderStatusSuccessMessage(nextStatus)
       );
       setStatusNote("");
-      await loadOrders({ silent: true });
+      patchOrderStatusInLists(id, nextStatus);
       await openOrder(id, { preserveSuccess: true });
       invalidateAdminDashboardCaches();
     } catch (err) {
-      setError(err.message || "Failed to update order status");
+      setStatusMutationError(
+        mapOrderMutationError(err?.message || err || "Failed to update order status", {
+          nextStatus,
+        })
+      );
     } finally {
+      statusActionInflightRef.current = false;
       setUpdatingStatus(false);
+      setPendingStatusAction("");
     }
   }
 
@@ -623,8 +780,19 @@ export default function OrdersPage({
     const queueFiltered = activeQueueKey
       ? filterOrdersByQueue(filtered, activeQueueKey)
       : filtered;
-    return sortOrders(queueFiltered, sortKey);
+    const sorted = sortOrders(queueFiltered, sortKey);
+    return filterVerificationTestOrders(sorted, {
+      showTestOrders: isQaValidationLayerEnabled(),
+    });
   }, [orders, search, status, paymentStatus, labFilter, dateFrom, dateTo, sortKey, activeQueueKey]);
+
+  const showDeliveryAmountColumns = useMemo(
+    () =>
+      filteredOrders.some(
+        (order) => order.hasDeliveryEstimate || Number(order.deliveryChargeAmount) > 0
+      ),
+    [filteredOrders]
+  );
 
   const kpis = useMemo(() => computeOrdersKpis(orders), [orders]);
   const financialSyncPulse = useFinancialSyncPulse();
@@ -664,16 +832,16 @@ export default function OrdersPage({
       return undefined;
     }
     let cancelled = false;
-    const timer = window.setTimeout(() => {
+    const cancelIdle = scheduleIdleTask(() => {
       void getInvoicesByOrderIdsRead(invoicePrefetchIds, { tenantId: homeTenantId }).then((res) => {
         if (!cancelled && res.success) {
           setInvoiceByOrderId(res.byOrderId || {});
         }
       });
-    }, 200);
+    }, { timeout: 3000 });
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      cancelIdle();
     };
   }, [invoicePrefetchIds.join("|"), homeTenantId]);
 
@@ -700,6 +868,52 @@ export default function OrdersPage({
     }
     setSelectedOrder(null);
     setDetails(null);
+    setFocusOrderId("");
+    setFocusOutsideReason("");
+  }
+
+  function captureOrdersReturnContext(overrides = {}) {
+    const detailLabId = str(details?.order?.labId);
+    writeOrdersReturnContext({
+      orderId: selectedOrder || focusOrderId,
+      labId:
+        overrides.labId ||
+        detailLabId ||
+        (labFilter !== "ALL" ? labFilter : ""),
+      activeQueueKey,
+      search,
+      status,
+      paymentStatus,
+      labFilter,
+      dateFrom,
+      dateTo,
+      sortKey,
+      ...overrides,
+    });
+  }
+
+  function clearOrdersListFilters({ keepSelection = true } = {}) {
+    setSearchInput("");
+    setSearch("");
+    setStatus("ALL");
+    setPaymentStatus("ALL");
+    setLabFilter("ALL");
+    setDateFrom("");
+    setDateTo("");
+    setActiveQueueKey("");
+    setFocusOutsideReason("");
+    setContextWarning("");
+    if (!keepSelection) {
+      setSelectedOrder(null);
+      setDetails(null);
+      setFocusOrderId("");
+    }
+  }
+
+  function returnToFulfillmentQueue() {
+    setFocusOutsideReason("");
+    setContextWarning("");
+    handleQueueSelect(ORDER_QUEUE_KEYS.AWAITING_FULFILLMENT);
   }
 
   usePredatorModuleValidation(
@@ -755,6 +969,7 @@ export default function OrdersPage({
   function handleRecordOrderPayment() {
     if (!selectedOrderSummary?.labId || !canNavigateToCollections(currentUser?.role)) return;
     const outstanding = resolveOrderOutstanding(selectedOrderSummary, selectedOrderInvoice);
+    captureOrdersReturnContext({ labId: selectedOrderSummary.labId });
     navigateToCollections(setActivePage, {
       labId: selectedOrderSummary.labId,
       orderId: selectedOrderSummary.orderId,
@@ -766,6 +981,7 @@ export default function OrdersPage({
 
   function handleOpenCreditRisk() {
     if (!selectedOrderSummary?.labId || !canNavigateToCollections(currentUser?.role)) return;
+    captureOrdersReturnContext({ labId: selectedOrderSummary.labId });
     navigateToCollections(setActivePage, {
       labId: selectedOrderSummary.labId,
       orderId: selectedOrderSummary.orderId,
@@ -840,17 +1056,161 @@ export default function OrdersPage({
     };
   }, [selectedOrderSummary, selectedOrderInvoice, details?.lines]);
 
+  const selectedInFilteredList = useMemo(() => {
+    if (!selectedOrder) return false;
+    return filteredOrders.some((row) => str(row.orderId) === str(selectedOrder));
+  }, [filteredOrders, selectedOrder]);
+
+  const selectedExistsInScope = useMemo(() => {
+    const id = str(selectedOrder || focusOrderId);
+    if (!id) return false;
+    return (
+      orders.some((row) => str(row.orderId) === id) ||
+      allOrders.some((row) => str(row.orderId) === id)
+    );
+  }, [selectedOrder, focusOrderId, orders, allOrders]);
+
+  const showFocusOutsideFilters =
+    Boolean(selectedOrder || focusOrderId) &&
+    selectedExistsInScope &&
+    !selectedInFilteredList;
+
+  const focusOutsideCopy = showFocusOutsideFilters
+    ? buildFocusedOrderOutsideFiltersCopy({
+        orderId: selectedOrder || focusOrderId,
+        reason: focusOutsideReason || "filters",
+      })
+    : null;
+
+  const listEmptyCopy = buildOrdersListEmptyCopy({
+    ordersLength: orders.length,
+    search,
+    status,
+    paymentStatus,
+    labFilter,
+    dateFrom,
+    dateTo,
+    activeQueueKey,
+    readFailed: !ordersReadOk,
+  });
+
+  const ordersContextParts = useMemo(
+    () =>
+      buildOrdersContextParts({
+        activeQueueKey,
+        selectedOrderId: selectedOrder || focusOrderId,
+        selectedLabName:
+          selectedOrderSummary?.labName || selectedOrderSummary?.labId || "",
+        searchQuery: search,
+        freezeActive: hqStatusWriteBlocked,
+        focusOrderId,
+      }),
+    [
+      activeQueueKey,
+      selectedOrder,
+      focusOrderId,
+      selectedOrderSummary?.labName,
+      selectedOrderSummary?.labId,
+      search,
+      hqStatusWriteBlocked,
+    ]
+  );
+
+  const expectedAction = useMemo(
+    () =>
+      getOrdersExpectedActionCopy({
+        cancelled: Boolean(selectedOrderUx?.cancelled),
+        fulfilled: Boolean(selectedOrderUx?.fulfilled),
+        orderStatus: selectedOrderUx?.orderStatus || selectedOrderSummary?.orderStatus,
+      }),
+    [selectedOrderUx, selectedOrderSummary?.orderStatus]
+  );
+
   return (
-    <div className={embedded ? "space-y-4" : "space-y-5"}>
+    <div
+      className={embedded ? "space-y-3" : "space-y-3"}
+      data-orders-workspace="hq"
+      aria-label="Orders workspace"
+    >
       {!embedded ? (
         <PageHeader
           title="Orders"
           subtitle={
             distributorScope?.tenantId
               ? `Orders for ${distributorScope.tenantName || "selected distributor"} labs only.`
-              : "PrimeCare HQ orders — scan status, payment, and fulfillment at a glance."
+              : ORDERS_WORKSPACE_PRIMARY_QUESTION
           }
         />
+      ) : null}
+
+      {inventoryReturnActive && typeof setActivePage === "function" && !embedded ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2 text-sm text-blue-900">
+          <span>Continue from Inventory</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 border-blue-200 bg-white text-xs"
+            onClick={() => {
+              armInventoryReturnRestore();
+              setInventoryReturnActive(false);
+              setActivePage("inventory");
+            }}
+          >
+            Back to Inventory
+          </Button>
+        </div>
+      ) : null}
+
+      {purchaseReturnActive && typeof setActivePage === "function" && !embedded ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2 text-sm text-blue-900">
+          <span>Continue from Purchase</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 border-blue-200 bg-white text-xs"
+            onClick={() => {
+              armPurchaseReturnRestore();
+              setPurchaseReturnActive(false);
+              setActivePage("purchase");
+            }}
+          >
+            Back to Purchase
+          </Button>
+        </div>
+      ) : null}
+
+      <OrdersContextStrip parts={ordersContextParts} warning={contextWarning} />
+
+      {focusOutsideCopy ? (
+        <div
+          className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-sm text-amber-950"
+          role="status"
+        >
+          <p className="font-semibold">{focusOutsideCopy.title}</p>
+          <p className="mt-0.5 text-xs text-amber-900/90">{focusOutsideCopy.message}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs"
+              onClick={() => clearOrdersListFilters({ keepSelection: true })}
+            >
+              {focusOutsideCopy.clearLabel}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs"
+              onClick={() => returnToFulfillmentQueue()}
+            >
+              {focusOutsideCopy.queueLabel}
+            </Button>
+          </div>
+        </div>
       ) : null}
 
       {hqStatusWriteBlocked ? (
@@ -883,40 +1243,35 @@ export default function OrdersPage({
         </div>
       ) : null}
 
-      <KpiCardGrid columns={4} className="lg:grid-cols-4 xl:grid-cols-7">
-        <KpiCard title="Total Orders" value={kpis.totalOrders} loading={loading} />
-        <KpiCard title="Placed" value={kpis.placed} loading={loading} />
-        <KpiCard title="Processing" value={kpis.processing} loading={loading} />
-        <KpiCard title="Fulfilled" value={kpis.fulfilled} loading={loading} />
-        <KpiCard title="Cancelled" value={kpis.cancelled} loading={loading} />
-        <KpiCard title="Pending Payment" value={kpis.pendingPayment} loading={loading} highlight={financialSyncPulse} />
-        <KpiCard
-          title="Active Order Value"
-          value={formatCurrency(kpis.totalOrderValue)}
-          subtitle="Excludes cancelled orders"
+      <section aria-label="Start here and order queues">
+        <HqOrdersOperationsQueue
+          orders={orders}
+          kpis={kpis}
+          activeQueueKey={activeQueueKey}
+          onSelectQueue={handleQueueSelect}
+          onReviewNextOrder={(orderId) => {
+            if (orderId) {
+              setFocusOrderId(str(orderId));
+              setFocusOutsideReason("");
+              void openOrder(str(orderId));
+            }
+          }}
           loading={loading}
         />
-      </KpiCardGrid>
+      </section>
 
-      <HqOrdersOperationsQueue
-        orders={orders}
-        kpis={kpis}
-        activeQueueKey={activeQueueKey}
-        onSelectQueue={handleQueueSelect}
-        loading={loading}
-      />
-
-      <div className="grid gap-5 xl:grid-cols-[1.35fr_1fr]">
-        <Card className="rounded-2xl shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Orders</CardTitle>
+      <div className="grid gap-4 xl:grid-cols-[1.35fr_1fr]">
+        <Card className="rounded-2xl shadow-sm" aria-label="Order queue">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Order queue</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
+            <div className="space-y-2" aria-label="Search and filters">
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               <Input
                 placeholder="Search order ID, lab, status…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 className="h-9 rounded-lg text-sm lg:col-span-2"
               />
               <select
@@ -983,6 +1338,7 @@ export default function OrdersPage({
                 />
               </div>
             </div>
+            </div>
 
             <div className="text-xs text-slate-500">
               Showing {filteredOrders.length} of {orders.length} orders
@@ -995,10 +1351,58 @@ export default function OrdersPage({
                 Orders failed to load. Check the error banner above.
               </div>
             ) : filteredOrders.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-sm text-slate-500">
-                {orders.length === 0
-                  ? "No orders visible for your tenant."
-                  : "No orders match the current filters."}
+              <div className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-sm text-slate-600">
+                <p className="font-medium text-slate-800">{listEmptyCopy.title}</p>
+                <p className="mt-1 text-slate-500">{listEmptyCopy.message}</p>
+                <div className="mt-3 flex flex-wrap justify-center gap-2">
+                  {listEmptyCopy.action === "retry" || listEmptyCopy.action === "refresh" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs"
+                      onClick={() => void loadOrders()}
+                    >
+                      {listEmptyCopy.actionLabel}
+                    </Button>
+                  ) : null}
+                  {listEmptyCopy.action === "clear_search" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs"
+                      onClick={() => {
+                        setSearchInput("");
+                        setSearch("");
+                      }}
+                    >
+                      {listEmptyCopy.actionLabel}
+                    </Button>
+                  ) : null}
+                  {listEmptyCopy.action === "clear_filters" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs"
+                      onClick={() => clearOrdersListFilters({ keepSelection: true })}
+                    >
+                      {listEmptyCopy.actionLabel}
+                    </Button>
+                  ) : null}
+                  {listEmptyCopy.action === "clear_queue" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs"
+                      onClick={() => returnToFulfillmentQueue()}
+                    >
+                      {listEmptyCopy.actionLabel}
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             ) : (
               <>
@@ -1014,6 +1418,12 @@ export default function OrdersPage({
                       <th className="px-2 py-2 font-medium">Invoice</th>
                       <th className="px-2 py-2 font-medium">Invoice Status</th>
                       <th className="px-2 py-2 font-medium text-right">Amount</th>
+                      {showDeliveryAmountColumns ? (
+                        <>
+                          <th className="px-2 py-2 font-medium text-right">Delivery est.</th>
+                          <th className="px-2 py-2 font-medium text-right">Est. total</th>
+                        </>
+                      ) : null}
                       <th className="px-2 py-2 font-medium">Items</th>
                       <th className="px-2 py-2 font-medium" />
                     </tr>
@@ -1027,10 +1437,11 @@ export default function OrdersPage({
                       return (
                         <tr
                           key={order.orderId}
+                          aria-selected={isSelected}
                           className={cn(
                             "border-b border-slate-100 transition-colors",
                             isSelected
-                              ? "bg-slate-100"
+                              ? "bg-indigo-50 ring-2 ring-inset ring-indigo-400"
                               : highlightedOrderIds.has(order.orderId)
                                 ? "bg-amber-50/70 ring-1 ring-inset ring-amber-200"
                                 : cancelled
@@ -1045,18 +1456,28 @@ export default function OrdersPage({
                             >
                               {order.orderId}
                             </HqObjectLink>
+                            {isQaValidationLayerEnabled() &&
+                            isVerificationTestOrderId(order.orderId) ? (
+                              <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-semibold uppercase text-amber-800">
+                                Test
+                              </span>
+                            ) : null}
                           </td>
                           <td className="px-2 py-2 text-slate-700">
                             <div className="max-w-[140px] truncate" title={order.labName}>
                               <HqObjectLink
                                 onClick={
                                   setActivePage && (order.labId || order.labName)
-                                    ? () =>
+                                    ? () => {
+                                        captureOrdersReturnContext({
+                                          labId: order.labId || order.labName,
+                                        });
                                         navigateToLabs(setActivePage, {
                                           labId: order.labId || order.labName,
                                           labName: order.labName,
                                           openReviewDrawer: true,
-                                        })
+                                        });
+                                      }
                                     : undefined
                                 }
                                 title="Review lab"
@@ -1092,9 +1513,11 @@ export default function OrdersPage({
                               <span className="text-slate-400">—</span>
                             )}
                           </td>
-                          <td className="px-2 py-2 text-right font-medium tabular-nums text-slate-900">
-                            {formatCurrency(order.orderTotal)}
-                          </td>
+                          <OrderAmountTableCells
+                            order={order}
+                            formatCurrency={formatCurrency}
+                            showDeliveryColumns={showDeliveryAmountColumns}
+                          />
                           <td className="px-2 py-2 text-slate-600">
                             {formatItemCount(order.itemCount ?? 0)}
                           </td>
@@ -1119,11 +1542,18 @@ export default function OrdersPage({
               <div className="space-y-2 xl:hidden">
                 {filteredOrders.map((order) => {
                   const orderStatus = normalizeOrderStatusLabel(order.orderStatus);
-                      const orderInvoice = resolveOrderInvoice(order);
-                      return (
+                  const orderInvoice = resolveOrderInvoice(order);
+                  const isSelected = selectedOrder === order.orderId;
+                  return (
                     <div
                       key={order.orderId}
-                      className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+                      aria-selected={isSelected}
+                      className={cn(
+                        "rounded-lg border bg-white p-3 shadow-sm",
+                        isSelected
+                          ? "border-indigo-300 ring-2 ring-indigo-400"
+                          : "border-slate-200"
+                      )}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
@@ -1133,9 +1563,7 @@ export default function OrdersPage({
                           <p className="truncate text-sm text-slate-700">
                             {order.labName || order.labId || "—"}
                           </p>
-                          <p className="mt-1 text-base font-bold tabular-nums">
-                            {formatCurrency(order.orderTotal)}
-                          </p>
+                          <OrderAmountListStack order={order} formatCurrency={formatCurrency} />
                           <p className="text-[10px] text-muted-foreground">
                             {order.orderDate || "—"} · {formatItemCount(order.itemCount ?? 0)}
                           </p>
@@ -1171,15 +1599,21 @@ export default function OrdersPage({
           </CardContent>
         </Card>
 
-        <Card className="rounded-2xl shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Order Details</CardTitle>
+        <Card className="rounded-2xl shadow-sm" aria-label="Selected order">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">
+              Selected order
+              {selectedOrder ? (
+                <span className="ml-2 font-mono text-sm font-semibold text-slate-700">
+                  · {selectedOrder}
+                </span>
+              ) : null}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {!selectedOrder ? (
               <OrdersDetailEmptyState
                 kpis={kpis}
-                loading={loading}
                 filteredOrders={filteredOrders}
                 activeQueueKey={activeQueueKey}
                 queue={operationsQueue}
@@ -1193,7 +1627,7 @@ export default function OrdersPage({
                 Loading details…
               </div>
             ) : selectedOrderSummary ? (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
                   <div className="font-mono text-sm font-semibold text-slate-900">
                     {selectedOrderSummary.orderId}
@@ -1202,12 +1636,16 @@ export default function OrdersPage({
                     <HqObjectLink
                       onClick={
                         setActivePage && (selectedOrderSummary.labId || selectedOrderSummary.labName)
-                          ? () =>
+                          ? () => {
+                              captureOrdersReturnContext({
+                                labId: selectedOrderSummary.labId || selectedOrderSummary.labName,
+                              });
                               navigateToLabs(setActivePage, {
                                 labId: selectedOrderSummary.labId || selectedOrderSummary.labName,
                                 labName: selectedOrderSummary.labName,
                                 openReviewDrawer: true,
-                              })
+                              });
+                            }
                           : undefined
                       }
                       title="Review lab"
@@ -1215,8 +1653,26 @@ export default function OrdersPage({
                       {selectedOrderSummary.labName || selectedOrderSummary.labId}
                     </HqObjectLink>
                   </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <StatusBadge
+                      variant={orderStatusToVariant(
+                        normalizeOrderStatusLabel(selectedOrderSummary.orderStatus)
+                      )}
+                    >
+                      {normalizeOrderStatusLabel(selectedOrderSummary.orderStatus)}
+                    </StatusBadge>
+                    <StatusBadge
+                      variant={paymentStatusToVariant(selectedOrderUx?.paymentLabel)}
+                    >
+                      {selectedOrderUx?.paymentLabel}
+                    </StatusBadge>
+                  </div>
+                  <div className="mt-2 rounded-lg border border-indigo-100 bg-indigo-50/70 px-2.5 py-2 text-xs text-indigo-950">
+                    <p className="font-semibold">Expected: {expectedAction.action}</p>
+                    <p className="mt-0.5 text-indigo-900/80">{expectedAction.reason}</p>
+                  </div>
                   {setActivePage ? (
-                    <p className="mt-1 text-xs text-slate-600">
+                    <p className="mt-2 text-xs text-slate-600">
                       Assigned agent:{" "}
                       {selectedLabAgent.isAssigned ? (
                         <HqObjectLink
@@ -1237,7 +1693,7 @@ export default function OrdersPage({
                     </p>
                   ) : null}
                   {setActivePage ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    <div className="mt-2 flex flex-wrap gap-2">
                       <Button
                         type="button"
                         size="sm"
@@ -1268,24 +1724,125 @@ export default function OrdersPage({
                       ) : null}
                     </div>
                   ) : null}
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <StatusBadge
-                      variant={orderStatusToVariant(
-                        normalizeOrderStatusLabel(selectedOrderSummary.orderStatus)
-                      )}
-                    >
-                      {normalizeOrderStatusLabel(selectedOrderSummary.orderStatus)}
-                    </StatusBadge>
-                    <StatusBadge
-                      variant={paymentStatusToVariant(selectedOrderUx?.paymentLabel)}
-                    >
-                      {selectedOrderUx?.paymentLabel}
-                    </StatusBadge>
-                    <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-900">
-                      {formatCurrency(selectedOrderSummary.orderTotal)}
-                    </span>
-                  </div>
                 </div>
+
+                <section className="space-y-2" aria-label="Status actions">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Status Actions
+                  </h3>
+                  {statusMutationError ? (
+                    <ActionErrorSummary
+                      title={statusMutationError.title}
+                      message={statusMutationError.message}
+                      fieldErrors={statusMutationError.fieldErrors}
+                      technicalReference={statusMutationError.rawErrorForLogging}
+                      onDismiss={() => setStatusMutationError(null)}
+                    />
+                  ) : null}
+                  <Textarea
+                    placeholder="Optional note for this status update…"
+                    value={statusNote}
+                    onChange={(e) => setStatusNote(e.target.value)}
+                    disabled={updatingStatus || hqStatusWriteBlocked || detailsLoading}
+                    className="min-h-[72px] rounded-lg text-sm"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={
+                        updatingStatus ||
+                        hqStatusWriteBlocked ||
+                        detailsLoading ||
+                        selectedOrderUx?.cancelled ||
+                        selectedOrderUx?.fulfilled
+                      }
+                      aria-busy={updatingStatus && pendingStatusAction === "Processing"}
+                      onClick={() => handleUpdateStatus("Processing")}
+                    >
+                      {updatingStatus && pendingStatusAction === "Processing" ? (
+                        <>
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          {getOrderStatusActionLoadingLabel("Processing")}
+                        </>
+                      ) : (
+                        "Mark Processing"
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={
+                        updatingStatus ||
+                        hqStatusWriteBlocked ||
+                        detailsLoading ||
+                        selectedOrderUx?.cancelled ||
+                        selectedOrderUx?.fulfilled
+                      }
+                      aria-busy={updatingStatus && pendingStatusAction === "Fulfilled"}
+                      onClick={() => handleUpdateStatus("Fulfilled")}
+                    >
+                      {updatingStatus && pendingStatusAction === "Fulfilled" ? (
+                        <>
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          {getOrderStatusActionLoadingLabel("Fulfilled")}
+                        </>
+                      ) : (
+                        "Mark Fulfilled"
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={
+                        updatingStatus ||
+                        hqStatusWriteBlocked ||
+                        detailsLoading ||
+                        selectedOrderUx?.cancelled ||
+                        selectedOrderUx?.fulfilled
+                      }
+                      aria-busy={updatingStatus && pendingStatusAction === "Placed"}
+                      onClick={() => handleUpdateStatus("Placed")}
+                    >
+                      {updatingStatus && pendingStatusAction === "Placed" ? (
+                        <>
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          {getOrderStatusActionLoadingLabel("Placed")}
+                        </>
+                      ) : (
+                        "Reset to Placed"
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-red-200 text-red-600 hover:bg-red-50"
+                      disabled={
+                        updatingStatus ||
+                        hqStatusWriteBlocked ||
+                        detailsLoading ||
+                        selectedOrderUx?.cancelled ||
+                        selectedOrderUx?.fulfilled
+                      }
+                      aria-busy={updatingStatus && pendingStatusAction === "Cancelled"}
+                      onClick={() => handleUpdateStatus("Cancelled")}
+                    >
+                      {updatingStatus && pendingStatusAction === "Cancelled" ? (
+                        <>
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          {getOrderStatusActionLoadingLabel("Cancelled")}
+                        </>
+                      ) : (
+                        "Cancel Order"
+                      )}
+                    </Button>
+                  </div>
+                </section>
+
+                <OrderAmountDetailBreakdown
+                  order={selectedOrderSummary}
+                  formatCurrency={formatCurrency}
+                />
 
                 {selectedOrderUx?.cancelled ? (
                   <section className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-900">
@@ -1314,10 +1871,7 @@ export default function OrdersPage({
                   </section>
                 ) : null}
 
-                <section className="space-y-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Order Summary
-                  </h3>
+                <OrdersCollapsibleSection title="Order metadata">
                   <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
                     <dt className="text-slate-500">Order Date</dt>
                     <dd className="text-slate-900">
@@ -1348,7 +1902,7 @@ export default function OrdersPage({
                       {formatMissingField(selectedOrderSummary.mobileNumber)}
                     </dd>
                   </dl>
-                </section>
+                </OrdersCollapsibleSection>
 
                 <section className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
@@ -1514,89 +2068,20 @@ export default function OrdersPage({
                   </section>
                 ) : null}
 
-                <section className="space-y-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Status Actions
-                  </h3>
-                  <Textarea
-                    placeholder="Optional note for this status update…"
-                    value={statusNote}
-                    onChange={(e) => setStatusNote(e.target.value)}
-                    disabled={updatingStatus || hqStatusWriteBlocked || detailsLoading}
-                    className="min-h-[72px] rounded-lg text-sm"
+                {selectedOrderUx?.fulfilled ? (
+                  <OrdersLogisticsPanel
+                    orderId={selectedOrderSummary?.orderId || selectedOrderSummary?.order_id}
+                    tenantId={homeTenantId}
+                    setActivePage={setActivePage}
+                    orderFulfilled
+                    onOpenInLogistics={(payload) => {
+                      captureOrdersReturnContext();
+                      navigateToLogisticsDelivery(setActivePage, payload);
+                    }}
                   />
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={
-                        updatingStatus ||
-                        hqStatusWriteBlocked ||
-                        detailsLoading ||
-                        selectedOrderUx?.cancelled ||
-                        selectedOrderUx?.fulfilled
-                      }
-                      onClick={() => handleUpdateStatus("Processing")}
-                    >
-                      {updatingStatus ? (
-                        <>
-                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                          Updating…
-                        </>
-                      ) : (
-                        "Mark Processing"
-                      )}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={
-                        updatingStatus ||
-                        hqStatusWriteBlocked ||
-                        detailsLoading ||
-                        selectedOrderUx?.cancelled ||
-                        selectedOrderUx?.fulfilled
-                      }
-                      onClick={() => handleUpdateStatus("Fulfilled")}
-                    >
-                      Mark Fulfilled
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={
-                        updatingStatus ||
-                        hqStatusWriteBlocked ||
-                        detailsLoading ||
-                        selectedOrderUx?.cancelled ||
-                        selectedOrderUx?.fulfilled
-                      }
-                      onClick={() => handleUpdateStatus("Placed")}
-                    >
-                      Reset to Placed
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-red-200 text-red-600 hover:bg-red-50"
-                      disabled={
-                        updatingStatus ||
-                        hqStatusWriteBlocked ||
-                        detailsLoading ||
-                        selectedOrderUx?.cancelled ||
-                        selectedOrderUx?.fulfilled
-                      }
-                      onClick={() => handleUpdateStatus("Cancelled")}
-                    >
-                      Cancel Order
-                    </Button>
-                  </div>
-                </section>
+                ) : null}
 
-                <section className="space-y-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Activity / Notes
-                  </h3>
+                <OrdersCollapsibleSection title="Activity and notes">
                   {statusNote ? (
                     <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-950">
                       <div className="text-xs font-medium text-amber-800">Pending status note</div>
@@ -1612,15 +2097,15 @@ export default function OrdersPage({
                     <div className="text-sm text-slate-500">No order notes on file.</div>
                   )}
                   {formatDateTime(selectedOrderSummary.updatedAt) ? (
-                    <div className="text-xs text-slate-500">
+                    <div className="mt-2 text-xs text-slate-500">
                       Last updated: {formatDateTime(selectedOrderSummary.updatedAt)}
                     </div>
                   ) : selectedOrderSummary.createdAt ? (
-                    <div className="text-xs text-slate-500">
+                    <div className="mt-2 text-xs text-slate-500">
                       Created: {formatDateTime(selectedOrderSummary.createdAt)}
                     </div>
                   ) : null}
-                </section>
+                </OrdersCollapsibleSection>
               </div>
             ) : (
               <div className="text-sm text-slate-500">No details available for this order.</div>
@@ -1628,6 +2113,28 @@ export default function OrdersPage({
           </CardContent>
         </Card>
       </div>
+
+      <OrdersCollapsibleSection title="Order portfolio summary">
+        <KpiCardGrid columns={4} className="lg:grid-cols-4 xl:grid-cols-7">
+          <KpiCard title="Total Orders" value={kpis.totalOrders} loading={loading} />
+          <KpiCard title="Placed" value={kpis.placed} loading={loading} />
+          <KpiCard title="Processing" value={kpis.processing} loading={loading} />
+          <KpiCard title="Fulfilled" value={kpis.fulfilled} loading={loading} />
+          <KpiCard title="Cancelled" value={kpis.cancelled} loading={loading} />
+          <KpiCard
+            title="Pending Payment"
+            value={kpis.pendingPayment}
+            loading={loading}
+            highlight={financialSyncPulse}
+          />
+          <KpiCard
+            title="Active Order Value"
+            value={formatCurrency(kpis.totalOrderValue)}
+            subtitle="Excludes cancelled orders"
+            loading={loading}
+          />
+        </KpiCardGrid>
+      </OrdersCollapsibleSection>
 
       <InvoiceDetailsDrawer
         open={Boolean(invoiceDrawer)}

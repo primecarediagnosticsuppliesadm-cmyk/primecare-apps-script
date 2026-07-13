@@ -20,6 +20,7 @@ export function logAppsScriptFallbackUsed(feature, reason = "") {
 }
 
 export function logPartialMigrationWarning(feature, message = "") {
+  if (!import.meta.env.DEV) return;
   console.warn("PARTIAL MIGRATION WARNING", feature, message);
 }
 
@@ -35,5 +36,6 @@ export function logStaleFieldMapping(feature, field, expected, actual) {
 
 /** Log when a page intentionally uses Apps Script as primary (not yet migrated). */
 export function logAppsScriptPrimarySource(feature, action = "") {
-  console.log("APPS_SCRIPT PRIMARY SOURCE", feature, action);
+  if (!import.meta.env.DEV) return;
+  console.info("APPS_SCRIPT PRIMARY SOURCE", feature, action);
 }

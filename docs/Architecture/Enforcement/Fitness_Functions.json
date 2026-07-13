@@ -1,0 +1,138 @@
+{
+  "version": "1.0.0",
+  "description": "Maps Enterprise Architecture Governance fitness functions to enforcement validators and existing verify scripts.",
+  "fitness_functions": [
+    {
+      "id": "FF-01",
+      "name": "Blueprint gap scanner",
+      "validator": "blueprint-validator",
+      "codes": ["BP-UNDOC-TABLE", "BP-UNDOC-RPC"],
+      "legacy_script": null,
+      "cadence": ["pre-commit", "pr"]
+    },
+    {
+      "id": "FF-02",
+      "name": "Registry completeness",
+      "validator": "projection-validator",
+      "codes": ["PRJ-UNREGISTERED-TABLE", "PRJ-MISSING-META"],
+      "legacy_script": null,
+      "cadence": ["pre-commit", "pr"]
+    },
+    {
+      "id": "FF-03",
+      "name": "Dependency acyclic",
+      "validator": "projection-validator",
+      "codes": ["PRJ-CYCLE-DETECTED", "PRJ-FORBIDDEN-EDGE"],
+      "legacy_script": null,
+      "cadence": ["pr", "nightly"]
+    },
+    {
+      "id": "FF-04",
+      "name": "KPI ownership lint",
+      "validator": "architecture-validator",
+      "codes": ["KPI-DUPLICATE-OWNER", "KPI-MISSING-OWNER"],
+      "legacy_script": null,
+      "cadence": ["pr"]
+    },
+    {
+      "id": "FF-05",
+      "name": "Parity suite",
+      "validator": "projection-validator",
+      "codes": ["PRJ-PARITY-SKIP"],
+      "legacy_script": "verify-projection-parity.mjs",
+      "cadence": ["qa-deploy", "nightly"]
+    },
+    {
+      "id": "FF-06",
+      "name": "Staleness probe",
+      "validator": "projection-validator",
+      "codes": ["PRJ-STALENESS-SKIP"],
+      "legacy_script": "verify-projection-staleness.mjs",
+      "cadence": ["nightly"]
+    },
+    {
+      "id": "FF-07",
+      "name": "Performance probe",
+      "validator": "performance-validator",
+      "codes": ["PERF-UNBOUNDED-SELECT", "PERF-NPLUS1-PATTERN"],
+      "legacy_script": "run-hq-performance-certification.mjs",
+      "cadence": ["pr", "qa-deploy"]
+    },
+    {
+      "id": "FF-08",
+      "name": "Never-break suite",
+      "validator": "architecture-validator",
+      "codes": ["ARCH-NEVER-BREAK-TOUCH"],
+      "legacy_script": "verify-financial-reconciliation.mjs",
+      "cadence": ["pr", "prod-deploy"]
+    },
+    {
+      "id": "FF-09",
+      "name": "RLS smoke",
+      "validator": "security-validator",
+      "codes": ["SEC-MISSING-RLS", "SEC-TENANT-LEAK"],
+      "legacy_script": "verify-hq-rls-reads.mjs",
+      "cadence": ["pr", "prod-deploy"]
+    },
+    {
+      "id": "FF-10",
+      "name": "Adapter naming lint",
+      "validator": "api-validator",
+      "codes": ["API-ADAPTER-NAMING", "API-UNDOC-READ"],
+      "legacy_script": null,
+      "cadence": ["pre-commit", "pr"]
+    },
+    {
+      "id": "FF-11",
+      "name": "Client KPI lint",
+      "validator": "architecture-validator",
+      "codes": ["ARCH-CLIENT-KPI-NEW", "ARCH-DUPLICATE-METRICS"],
+      "legacy_script": null,
+      "cadence": ["pre-commit", "pr"]
+    },
+    {
+      "id": "FF-12",
+      "name": "Documentation completeness",
+      "validator": "documentation-validator",
+      "codes": ["DOC-MISSING-BLUEPRINT", "DOC-MISSING-CHANGELOG", "DOC-MISSING-REGISTRY"],
+      "legacy_script": null,
+      "cadence": ["pre-commit", "pr"]
+    }
+  ],
+  "execution_profiles": {
+    "pre-commit": {
+      "validators": ["architecture-validator", "blueprint-validator", "api-validator", "documentation-validator"],
+      "mode": "incremental",
+      "max_duration_ms": 15000
+    },
+    "pr": {
+      "validators": ["architecture-validator", "blueprint-validator", "projection-validator", "api-validator", "performance-validator", "security-validator", "documentation-validator"],
+      "mode": "incremental",
+      "max_duration_ms": 120000
+    },
+    "qa-deploy": {
+      "validators": ["architecture-validator", "blueprint-validator", "projection-validator", "api-validator", "performance-validator", "security-validator", "documentation-validator"],
+      "mode": "full",
+      "legacy_scripts": ["verify-projection-parity.mjs", "verify-bounded-reads.mjs", "npm run build"],
+      "max_duration_ms": 600000
+    },
+    "prod-deploy": {
+      "validators": ["architecture-validator", "blueprint-validator", "projection-validator", "api-validator", "security-validator", "documentation-validator"],
+      "mode": "full",
+      "legacy_scripts": ["verify-primecare-production-golden-path.mjs", "verify-production-monitoring.mjs", "verify-financial-reconciliation.mjs"],
+      "max_duration_ms": 900000
+    },
+    "nightly": {
+      "validators": ["architecture-validator", "blueprint-validator", "projection-validator", "api-validator", "performance-validator", "security-validator", "documentation-validator"],
+      "mode": "full",
+      "legacy_scripts": ["verify-projection-parity.mjs", "verify-projection-staleness.mjs"],
+      "max_duration_ms": 900000
+    },
+    "quarterly-arb": {
+      "validators": ["architecture-validator", "blueprint-validator", "projection-validator", "api-validator", "performance-validator", "security-validator", "documentation-validator"],
+      "mode": "full",
+      "generate_health_dashboard": true,
+      "max_duration_ms": 1800000
+    }
+  }
+}

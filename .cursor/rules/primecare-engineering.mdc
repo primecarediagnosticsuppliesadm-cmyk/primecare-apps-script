@@ -1,0 +1,86 @@
+---
+description: PrimeCare engineering governance — Blueprint SoT, pre-code review, never-break domains, completion gates
+alwaysApply: true
+---
+
+# PrimeCare Engineering Rules
+
+## Source of Truth
+
+Before making **any** code change:
+
+1. Read everything under `docs/PrimeCare_System_Blueprint/`.
+2. Treat the Blueprint as the business source of truth.
+3. Compare the Blueprint against: current codebase, Supabase schema, APIs, RLS policies, verification scripts.
+
+If documentation and code disagree:
+
+- Stop.
+- Explain the conflict.
+- Update the Blueprint first.
+- Then implement.
+
+---
+
+## Before Coding
+
+Always perform: architecture review, impact assessment, regression assessment, security/RLS review, performance review.
+
+Return before implementation:
+
+- Objects, tables, APIs, pages, roles affected
+- Existing business rules affected
+- Regression risk
+- Verification scripts to run
+- Manual UAT checklist
+
+---
+
+## Documentation Rule
+
+If the request introduces a new table, column, field, API, page, workflow, lifecycle, permission, business rule, or verification:
+
+1. Update `docs/PrimeCare_System_Blueprint/` first.
+2. Explain impact.
+3. Implement.
+4. Update verification scripts.
+5. Update UAT documentation.
+
+---
+
+## Never Break (without explicit approval)
+
+- Orders lifecycle
+- Invoice lifecycle
+- Payment allocation
+- Collections
+- AR
+- Inventory ledger
+- Financial reconciliation
+- RLS
+- Authentication
+- Multi-tenant isolation
+
+See `docs/PrimeCare_System_Blueprint/15_Do_Not_Break_Rules.md` for full list.
+
+---
+
+## Engineering Standards
+
+- Never guess. Never assume schema — inspect existing implementation first.
+- Reuse existing services; never duplicate business logic or create another SoT.
+- Never use `SELECT *` in production-sensitive paths — use `hqReadBounds.js`.
+- Prefer extension over replacement.
+- Every feature: verification script + regression validation + manual UAT.
+
+---
+
+## Completion Gates
+
+Before recommending commit:
+
+- Build passes (`npm run build`)
+- Relevant `scripts/verify-*.mjs` pass (see `13_Verification_Matrix.md`)
+- Manual UAT checklist written
+- Blueprint updated if behavior changed
+- No regression detected

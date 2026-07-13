@@ -2,11 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  createTodaysWorkCardLoaders,
   getHqTodaysWorkCacheMeta,
   invalidateHqTodaysWorkCache,
+  loadHqTodaysWorkBundle,
   peekHqTodaysWorkBundle,
-  storeHqTodaysWorkBundle,
   TODAYS_WORK_CARD_IDS,
 } from "@/operations/hqCommandCenterData.js";
 import { buildHqPriorityCards } from "@/operations/hqCommandCenterEngine.js";
@@ -63,7 +62,25 @@ function initialCardState(ids, value) {
   return Object.fromEntries(ids.map((id) => [id, value]));
 }
 
-export default function HqPrioritiesStrip({ tenantId, setActivePage }) {
+function applyBundleToState(bundle, setters) {
+  const { setBundleParts, setCardLoading, setCardErrors, setDataLoadedAt } = setters;
+  setBundleParts({
+    dashboard: bundle.dashboard,
+    collections: bundle.collections,
+    orders: bundle.orders,
+    directoryUsers: bundle.directoryUsers,
+    auditEvents: bundle.auditEvents,
+  });
+  setCardLoading(initialCardState(TODAYS_WORK_CARD_IDS, false));
+  setCardErrors(bundle.error ? { _bundle: String(bundle.error) } : {});
+  setDataLoadedAt(Date.now());
+}
+
+/**
+ * @param {{ tenantId: string|null, setActivePage?: function, enabled?: boolean }} props
+ * enabled=false skips fetch until primary dashboard KPIs have painted.
+ */
+export default function HqPrioritiesStrip({ tenantId, setActivePage, enabled = true }) {
   const [bundleParts, setBundleParts] = useState({});
   const [cardLoading, setCardLoading] = useState(() =>
     initialCardState(TODAYS_WORK_CARD_IDS, true)
@@ -75,23 +92,23 @@ export default function HqPrioritiesStrip({ tenantId, setActivePage }) {
 
   const load = useCallback(
     (opts = {}) => {
+      const tid = String(tenantId || "").trim();
+      if (!tid || !enabled) return;
+
       const isRefresh = opts.refresh === true;
       if (isRefresh) {
         invalidateHqTodaysWorkCache();
         setRefreshing(true);
       } else {
-        const cached = peekHqTodaysWorkBundle(tenantId);
+        const cached = peekHqTodaysWorkBundle(tid);
         if (cached) {
-          setBundleParts({
-            dashboard: cached.dashboard,
-            collections: cached.collections,
-            orders: cached.orders,
-            directoryUsers: cached.directoryUsers,
-            auditEvents: cached.auditEvents,
+          applyBundleToState(cached, {
+            setBundleParts,
+            setCardLoading,
+            setCardErrors,
+            setDataLoadedAt,
           });
-          setCardLoading(initialCardState(TODAYS_WORK_CARD_IDS, false));
-          setCardErrors({});
-          const meta = getHqTodaysWorkCacheMeta(tenantId);
+          const meta = getHqTodaysWorkCacheMeta(tid);
           if (meta?.loadedAt) setDataLoadedAt(meta.loadedAt);
           return;
         }
@@ -101,53 +118,26 @@ export default function HqPrioritiesStrip({ tenantId, setActivePage }) {
       setCardLoading(initialCardState(TODAYS_WORK_CARD_IDS, true));
 
       const gen = ++loadGenRef.current;
-      const loaders = createTodaysWorkCardLoaders(tenantId, { force: isRefresh });
-
-      let completed = 0;
-      const merged = {
-        ok: true,
-        error: null,
-        dashboard: null,
-        collections: [],
-        orders: [],
-        directoryUsers: [],
-        auditEvents: [],
-      };
-
-      for (const cardId of TODAYS_WORK_CARD_IDS) {
-        void loaders[cardId]()
-          .then(({ slice, error }) => {
-            if (gen !== loadGenRef.current) return;
-            Object.assign(merged, slice);
-            setBundleParts((prev) => ({ ...prev, ...slice }));
-            setCardLoading((prev) => ({ ...prev, [cardId]: false }));
-            if (error) {
-              setCardErrors((prev) => ({ ...prev, [cardId]: String(error) }));
-              merged.error = merged.error || error;
-            }
-            completed += 1;
-            if (completed === TODAYS_WORK_CARD_IDS.length) {
-              storeHqTodaysWorkBundle(tenantId, { ...merged, ok: !merged.error });
-              setDataLoadedAt(Date.now());
-            }
-          })
-          .catch((err) => {
-            if (gen !== loadGenRef.current) return;
-            setCardLoading((prev) => ({ ...prev, [cardId]: false }));
-            setCardErrors((prev) => ({
-              ...prev,
-              [cardId]: err?.message || "Failed to load card",
-            }));
+      void loadHqTodaysWorkBundle(tid, { force: isRefresh })
+        .then((bundle) => {
+          if (gen !== loadGenRef.current) return;
+          applyBundleToState(bundle, {
+            setBundleParts,
+            setCardLoading,
+            setCardErrors,
+            setDataLoadedAt,
           });
-      }
-
-      if (isRefresh) {
-        Promise.allSettled(TODAYS_WORK_CARD_IDS.map((id) => loaders[id]())).finally(() => {
-          if (gen === loadGenRef.current) setRefreshing(false);
+        })
+        .catch((err) => {
+          if (gen !== loadGenRef.current) return;
+          setCardLoading(initialCardState(TODAYS_WORK_CARD_IDS, false));
+          setCardErrors({ _bundle: err?.message || "Failed to load Today's Work" });
+        })
+        .finally(() => {
+          if (gen === loadGenRef.current && isRefresh) setRefreshing(false);
         });
-      }
     },
-    [tenantId]
+    [tenantId, enabled]
   );
 
   useEffect(() => {
@@ -159,7 +149,18 @@ export default function HqPrioritiesStrip({ tenantId, setActivePage }) {
     () => Object.fromEntries(cards.map((card) => [card.id, card])),
     [cards]
   );
-  const anyLoading = TODAYS_WORK_CARD_IDS.some((id) => cardLoading[id]);
+  const anyLoading = enabled && TODAYS_WORK_CARD_IDS.some((id) => cardLoading[id]);
+
+  if (!enabled) {
+    return (
+      <section
+        className="rounded-2xl border border-dashed border-border bg-muted/20 p-4 sm:p-5"
+        aria-label="Today's Work loading"
+      >
+        <p className="text-xs text-muted-foreground">Loading Today&apos;s Work after dashboard KPIs…</p>
+      </section>
+    );
+  }
 
   return (
     <section
@@ -196,7 +197,7 @@ export default function HqPrioritiesStrip({ tenantId, setActivePage }) {
           const card = cardsById[cardId];
           const Icon = CARD_ICONS[cardId] || AlertTriangle;
           const loading = cardLoading[cardId];
-          const error = cardErrors[cardId];
+          const error = cardErrors[cardId] || cardErrors._bundle;
           const title = card?.title || CARD_TITLES[cardId] || cardId;
 
           return (

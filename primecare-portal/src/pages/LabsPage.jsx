@@ -15,8 +15,11 @@ import {
   IndianRupee,
   ArrowRight,
 } from "lucide-react";
-import { createLabWrite, getLabsCredit, peekLabsCreditReadCache } from "@/api/primecareSupabaseApi";
-import { loadLabOwnershipMetricsBundle } from "@/operations/operationsCenterAdminData.js";
+import { createLabWrite, peekLabsCreditReadCache } from "@/api/primecareSupabaseApi";
+import {
+  readLabOwnershipBundleBroker,
+  readLabsCreditBroker,
+} from "@/api/sharedReadBroker.js";
 import AssignLabOwnerPromptModal from "@/components/operations/AssignLabOwnerPromptModal.jsx";
 import { ROLES } from "@/config/roles";
 import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
@@ -25,7 +28,13 @@ import { filterLabsForUser } from "@/utils/accessFilters.js";
 import {
   startCollectionFromWorkspaceItem,
   startVisitFromWorkspaceItem,
+  peekAgentWorkspaceReturnPath,
+  consumeAgentWorkspaceReturnPath,
 } from "@/pages/agentVisitContext.js";
+import {
+  armOrdersReturnRestore,
+  hasOrdersReturnContext,
+} from "@/orders/ordersWorkflowReturn.js";
 import {
   deriveLabRecommendedAction,
   formatAgentCurrency,
@@ -49,6 +58,9 @@ import { cn } from "@/lib/utils";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import HqLabsAdminView from "@/components/hq/HqLabsAdminView.jsx";
 import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
+import { scheduleIdleTask } from "@/utils/scheduleIdleTask.js";
+import ListSkeleton from "@/components/ux/ListSkeleton";
+import KpiSkeleton from "@/components/ux/KpiSkeleton";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -338,6 +350,12 @@ function normalizeLab(lab) {
     creditTerms: lab.creditTerms || "",
     visitCount: Number(lab.visitCount || 0),
     revenue: Number(lab.revenue || 0),
+    orderingMode: lab.orderingMode || lab.ordering_mode || "hq_managed",
+    ordering_mode: lab.orderingMode || lab.ordering_mode || "hq_managed",
+    orderingEligible: lab.orderingEligible ?? lab.ordering_eligible,
+    ordering_eligible: lab.orderingEligible ?? lab.ordering_eligible,
+    preferredDeliveryDay: lab.preferredDeliveryDay || lab.preferred_delivery_day || "",
+    preferred_delivery_day: lab.preferredDeliveryDay || lab.preferred_delivery_day || "",
   };
 }
 
@@ -483,6 +501,12 @@ export default function LabsPage({
   const { orderByLabId, workspace: agentWorkspace } = useAgentDailyOs(currentUser, {
     enabled: isAgentView && !isDistributorOs,
   });
+  const [collectionsReturnActive, setCollectionsReturnActive] = useState(
+    () => isAgentView && !embedded && peekAgentWorkspaceReturnPath() === "collections"
+  );
+  const [ordersReturnActive, setOrdersReturnActive] = useState(
+    () => !embedded && hasOrdersReturnContext()
+  );
   const hydratedLabs = useMemo(() => hydrateLabsFromCache(), []);
   const hadCacheOnMount = useRef(Boolean(hydratedLabs));
   const [labs, setLabs] = useState(() => hydratedLabs?.labs ?? []);
@@ -537,14 +561,21 @@ export default function LabsPage({
     Boolean(canAddLab)
   );
 
+  const hasLoadedLabsRef = useRef(hadCacheOnMount.current);
+
   const loadLabs = useCallback(async ({ silent = false } = {}) => {
     try {
       if (silent) setListRefreshing(true);
-      else if (!labs.length) setLoading(true);
+      else if (!hasLoadedLabsRef.current) setLoading(true);
       else setListRefreshing(true);
       setError("");
 
-      const res = await getLabsCredit({ force: silent });
+      const homeTenantId = str(currentUser?.tenantId ?? currentUser?.tenant_id);
+      const res = await readLabsCreditBroker({
+        force: silent,
+        ...(homeTenantId ? { tenantId: homeTenantId } : {}),
+        currentUser,
+      });
 
       if (!res?.success) {
         throw new Error(res?.error || "Failed to load labs");
@@ -560,6 +591,7 @@ export default function LabsPage({
       const nextSummary = summarizeLabsCreditPortfolio(rows);
       setLabs(rows);
       setSummary(nextSummary);
+      hasLoadedLabsRef.current = true;
       writePageUiCache("labs:credit", { labs: rows, summary: nextSummary });
     } catch (err) {
       console.error("Failed to load labs", err);
@@ -568,7 +600,7 @@ export default function LabsPage({
       setLoading(false);
       setListRefreshing(false);
     }
-  }, [labs.length]);
+  }, []);
 
   useEffect(() => {
     void loadLabs({ silent: hadCacheOnMount.current });
@@ -596,8 +628,11 @@ export default function LabsPage({
 
   useEffect(() => {
     if (!canAddLab || !homeTenantId) return;
-    void loadLabOwnershipMetricsBundle(homeTenantId).then((data) => {
-      setProvisionAgents((data?.agents || []).filter((a) => a.active !== false));
+    return scheduleIdleTask(() => {
+      void readLabOwnershipBundleBroker(homeTenantId, { currentUser }).then((res) => {
+        const data = res?.data || null;
+        setProvisionAgents((data?.agents || []).filter((a) => a.active !== false));
+      });
     });
   }, [canAddLab, homeTenantId]);
 
@@ -614,29 +649,31 @@ export default function LabsPage({
 
   useEffect(() => {
     if (!canAddLab || !isDistributorOs) return;
-    async function loadDistributors() {
-      try {
-        const foundation = await loadTenantFoundationRegistry(currentUser, {
-          skipLiveLoad: true,
-        });
-        const homeId = foundation.homeTenantId;
-        const rows = (foundation.tenants || [])
-          .filter((t) => t.id && t.id !== homeId && !t.isHome)
-          .map((t) => ({ id: t.id, name: t.name || t.config?.companyName || t.id }));
-        if (currentUser?.role === ROLES.ADMIN && currentUser?.tenantId) {
-          const own = rows.find((d) => d.id === currentUser.tenantId);
-          setDistributors(own ? [own] : [{ id: currentUser.tenantId, name: "My distributor" }]);
-        } else {
-          setDistributors(rows);
-        }
-      } catch (err) {
-        console.warn("[LabsPage] distributor list", err);
-        if (currentUser?.tenantId) {
-          setDistributors([{ id: currentUser.tenantId, name: "Current tenant" }]);
+    return scheduleIdleTask(() => {
+      async function loadDistributors() {
+        try {
+          const foundation = await loadTenantFoundationRegistry(currentUser, {
+            skipLiveLoad: true,
+          });
+          const homeId = foundation.homeTenantId;
+          const rows = (foundation.tenants || [])
+            .filter((t) => t.id && t.id !== homeId && !t.isHome)
+            .map((t) => ({ id: t.id, name: t.name || t.config?.companyName || t.id }));
+          if (currentUser?.role === ROLES.ADMIN && currentUser?.tenantId) {
+            const own = rows.find((d) => d.id === currentUser.tenantId);
+            setDistributors(own ? [own] : [{ id: currentUser.tenantId, name: "My distributor" }]);
+          } else {
+            setDistributors(rows);
+          }
+        } catch (err) {
+          console.warn("[LabsPage] distributor list", err);
+          if (currentUser?.tenantId) {
+            setDistributors([{ id: currentUser.tenantId, name: "Current tenant" }]);
+          }
         }
       }
-    }
-    void loadDistributors();
+      void loadDistributors();
+    });
   }, [canAddLab, currentUser, isDistributorOs]);
 
   const visibleLabs = useMemo(() => {
@@ -704,15 +741,26 @@ export default function LabsPage({
 
   if (loading && !labs.length) {
     return (
-      <PageSkeleton
-        kpiCount={4}
-        kpiColumns={4}
-        listRows={8}
+      <div
         className={cn(
-          embedded ? "space-y-4" : "space-y-6 p-4",
+          embedded ? "space-y-4" : "space-y-6",
           isAgentView && !embedded && !isDistributorOs && "mx-auto w-full max-w-[1360px]"
         )}
-      />
+      >
+        {!embedded ? (
+          <PageHeader
+            title={isAgentView ? "My Laboratories" : "Laboratories"}
+            subtitle="Laboratory accounts, credit status, and assignments."
+            icon={Building2}
+          />
+        ) : null}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <KpiSkeleton key={i} />
+          ))}
+        </div>
+        <ListSkeleton rows={8} />
+      </div>
     );
   }
 
@@ -766,6 +814,42 @@ export default function LabsPage({
             <p className="mt-1 text-xs font-medium text-indigo-700">
               Distributor context: {selectedDistributorName || selectedDistributorTenantId}
             </p>
+          ) : null}
+          {collectionsReturnActive && typeof setActivePage === "function" ? (
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2 text-sm text-blue-900">
+              <span>Continue from Collections work queue</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 border-blue-200 bg-white text-xs"
+                onClick={() => {
+                  consumeAgentWorkspaceReturnPath();
+                  setCollectionsReturnActive(false);
+                  setActivePage("collections");
+                }}
+              >
+                Back to Collections
+              </Button>
+            </div>
+          ) : null}
+          {ordersReturnActive && typeof setActivePage === "function" ? (
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2 text-sm text-blue-900">
+              <span>Continue from Orders</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 border-blue-200 bg-white text-xs"
+                onClick={() => {
+                  armOrdersReturnRestore();
+                  setOrdersReturnActive(false);
+                  setActivePage("orders");
+                }}
+              >
+                Back to Orders
+              </Button>
+            </div>
           ) : null}
         </div>
         {canAddLab && (isDistributorOs || currentUser?.role !== ROLES.EXECUTIVE || defaultTenantId) ? (
@@ -904,6 +988,7 @@ export default function LabsPage({
           currentUser={currentUser}
           focusLabId={focusLabId}
           initialReviewLabId={initialReviewLabId}
+          onRefresh={() => loadLabs({ silent: true })}
         />
       ) : (
         <>

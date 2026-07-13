@@ -4,7 +4,7 @@
  *
  * Usage:
  *   node scripts/verify-invoice-phase3.mjs
- *   node scripts/verify-invoice-phase3.mjs --remote
+ *   node scripts/verify-invoice-phase3.mjs --remote --apply
  */
 import { createClient } from "@supabase/supabase-js";
 import { createHash } from "crypto";
@@ -20,6 +20,7 @@ const DOWNLOAD_PATH = resolve(root, "src/utils/invoiceDownload.js");
 const EDGE_PATH = resolve(root, "supabase/functions/generate-invoice-pdf/index.ts");
 const HQ_TENANT = "f168b98f-47a6-42c3-b788-24c00436fac2";
 const REMOTE = process.argv.includes("--remote");
+const APPLY = process.argv.includes("--apply") || process.env.CONFIRM_MUTATION === "true";
 
 const results = [];
 
@@ -227,17 +228,19 @@ async function verifyRemote(env) {
     total: Number(invoiceRow.total_amount),
   };
 
-  if (invoiceRow.order_id && serviceKey) {
+  if (invoiceRow.order_id && serviceKey && APPLY) {
     await readSb
       .from("orders")
       .update({ total_amount: 999999 })
       .eq("order_id", invoiceRow.order_id)
       .eq("tenant_id", HQ_TENANT);
+  } else if (invoiceRow.order_id && serviceKey) {
+    skip("R-30", "Order mutation immutability probe skipped — rerun --remote --apply");
   } else if (invoiceRow.order_id) {
     skip("R-30", "Order mutation test skipped (requires SUPABASE_SERVICE_ROLE_KEY)");
   }
 
-  if (invoiceRow.order_id && serviceKey) {
+  if (invoiceRow.order_id && serviceKey && APPLY) {
     const { data: afterMutate } = await readSb
       .from("invoices")
       .select("subtotal,tax_amount,total_amount")
@@ -255,11 +258,16 @@ async function verifyRemote(env) {
     }
   }
 
-  const gen2 = await callGenerateEdge(env, adminToken, invoiceId, Boolean(serviceKey && invoiceRow.order_id));
+  const gen2 = await callGenerateEdge(env, adminToken, invoiceId, Boolean(serviceKey && invoiceRow.order_id && APPLY));
   if (!gen2.ok) {
     fail("R-31", `Regenerate failed: ${gen2.body?.error}`);
   } else {
-    pass("R-31", serviceKey && invoiceRow.order_id ? "Regenerate after order mutation succeeded" : "PDF reuse path succeeded");
+    pass(
+      "R-31",
+      serviceKey && invoiceRow.order_id && APPLY
+        ? "Regenerate after order mutation succeeded"
+        : "PDF reuse path succeeded"
+    );
   }
 
   const { data: signed2 } = await adminEnv.sb.storage

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ListSkeleton } from "@/components/ux";
-import { getInvoiceDetailRead } from "@/api/invoiceSupabaseApi.js";
+import { readInvoiceDetailBroker } from "@/api/sharedReadBroker.js";
 import { downloadInvoicePdf } from "@/utils/invoiceDownload.js";
 import InvoiceStatusBadge from "@/components/invoice/InvoiceStatusBadge.jsx";
 import { cn } from "@/lib/utils";
@@ -67,7 +67,7 @@ export default function InvoiceDetailsDrawer({
       setLoading(true);
       setError("");
       try {
-        const res = await getInvoiceDetailRead(resolvedId);
+        const res = await readInvoiceDetailBroker(resolvedId, { tenantId });
         if (cancelled) return;
         if (!res.success || !res.data) {
           setError(res.error || "Unable to load invoice details");

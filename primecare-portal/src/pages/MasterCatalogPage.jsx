@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { PageSkeleton } from "@/components/ux";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PageSkeleton, ActionErrorSummary, usePortalToast } from "@/components/ux";
 import { loadMasterCatalog } from "@/catalog/masterCatalogData.js";
 import { formatInr, formatMarginPct, formatPriceOrNotConfigured } from "@/catalog/masterCatalogEngine.js";
 import {
@@ -13,6 +13,16 @@ import { Badge } from "@/components/ui/badge";
 import { ChevronDown, ChevronUp, Package, Pencil, Plus, Search, X } from "lucide-react";
 import { useOperatingTenantId } from "@/tenant/useOperatingTenantId.js";
 import { isHqCatalogWriteBlocked, getHqFreezeBannerMessage } from "@/config/hqReleasePolicy.js";
+import { mapInventoryMutationError } from "@/inventory/mapInventoryMutationError.js";
+import {
+  getCatalogCreateLoadingLabel,
+  getCatalogEditLoadingLabel,
+  getSkuToggleLoadingLabel,
+} from "@/inventory/inventoryActionUi.js";
+import {
+  armInventoryReturnRestore,
+  hasInventoryReturnContext,
+} from "@/inventory/inventoryWorkflowReturn.js";
 
 const EMPTY_ADD_FORM = {
   productId: "",
@@ -98,8 +108,9 @@ function ProductFormModal({ mode, initial, tenantId, createdBy, onClose, onSaved
         }
       : { ...EMPTY_ADD_FORM }
   );
-  const [error, setError] = useState("");
+  const [mutationError, setMutationError] = useState(null);
   const [saving, setSaving] = useState(false);
+  const submitInflightRef = useRef(false);
 
   function patch(fields) {
     setForm((prev) => ({ ...prev, ...fields }));
@@ -107,7 +118,9 @@ function ProductFormModal({ mode, initial, tenantId, createdBy, onClose, onSaved
 
   async function handleSubmit(e) {
     e.preventDefault();
-    setError("");
+    if (submitInflightRef.current || saving) return;
+    submitInflightRef.current = true;
+    setMutationError(null);
     setSaving(true);
     try {
       if (!tenantId) throw new Error("Tenant context is missing. Re-login and try again.");
@@ -140,31 +153,50 @@ function ProductFormModal({ mode, initial, tenantId, createdBy, onClose, onSaved
         throw new Error(res?.error || "Failed to save product");
       }
 
-      onSaved?.(res.data);
+      onSaved?.(res.data, { mode: isEdit ? "edit" : "create", productId: form.productId });
       onClose?.();
     } catch (err) {
-      setError(err?.message || "Failed to save product");
+      setMutationError(
+        mapInventoryMutationError(err?.message || err || "Failed to save product", {
+          action: isEdit ? "edit" : "create",
+        })
+      );
     } finally {
       setSaving(false);
+      submitInflightRef.current = false;
     }
   }
+
+  const busyLabel = isEdit
+    ? getCatalogEditLoadingLabel()
+    : getCatalogCreateLoadingLabel(form.openingStock);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <form
         onSubmit={(e) => void handleSubmit(e)}
         className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border bg-white p-4 shadow-lg"
+        aria-busy={saving}
       >
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-bold text-slate-900">
             {isEdit ? "Edit product" : "Add product"}
           </h3>
-          <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="Close">
+          <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="Close" disabled={saving}>
             <X className="h-4 w-4" />
           </Button>
         </div>
 
-        {error ? <p className="mb-3 text-xs text-red-600">{error}</p> : null}
+        {mutationError ? (
+          <ActionErrorSummary
+            className="mb-3"
+            title={mutationError.title}
+            message={mutationError.message}
+            fieldErrors={mutationError.fieldErrors}
+            technicalReference={mutationError.rawErrorForLogging}
+            onDismiss={() => setMutationError(null)}
+          />
+        ) : null}
 
         <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
           <label className="sm:col-span-2 block text-xs text-slate-600">
@@ -175,6 +207,7 @@ function ProductFormModal({ mode, initial, tenantId, createdBy, onClose, onSaved
               onChange={(e) => patch({ productId: e.target.value })}
               readOnly={isEdit}
               required
+              disabled={saving}
             />
           </label>
           <label className="sm:col-span-2 block text-xs text-slate-600">
@@ -184,6 +217,7 @@ function ProductFormModal({ mode, initial, tenantId, createdBy, onClose, onSaved
               value={form.productName}
               onChange={(e) => patch({ productName: e.target.value })}
               required
+              disabled={saving}
             />
           </label>
           <label className="block text-xs text-slate-600">
@@ -192,6 +226,7 @@ function ProductFormModal({ mode, initial, tenantId, createdBy, onClose, onSaved
               className="mt-1"
               value={form.category}
               onChange={(e) => patch({ category: e.target.value })}
+              disabled={saving}
             />
           </label>
           <label className="block text-xs text-slate-600">
@@ -201,6 +236,7 @@ function ProductFormModal({ mode, initial, tenantId, createdBy, onClose, onSaved
               value={form.unit}
               onChange={(e) => patch({ unit: e.target.value })}
               placeholder="e.g. kit, box"
+              disabled={saving}
             />
           </label>
           <label className="block text-xs text-slate-600">
@@ -212,6 +248,7 @@ function ProductFormModal({ mode, initial, tenantId, createdBy, onClose, onSaved
               step="0.01"
               value={form.sellingPrice}
               onChange={(e) => patch({ sellingPrice: e.target.value })}
+              disabled={saving}
             />
           </label>
           <label className="block text-xs text-slate-600">
@@ -223,6 +260,7 @@ function ProductFormModal({ mode, initial, tenantId, createdBy, onClose, onSaved
               step="0.01"
               value={form.costPrice}
               onChange={(e) => patch({ costPrice: e.target.value })}
+              disabled={saving}
             />
           </label>
           <label className="sm:col-span-2 block text-xs text-slate-600">
@@ -231,6 +269,7 @@ function ProductFormModal({ mode, initial, tenantId, createdBy, onClose, onSaved
               className="mt-1"
               value={form.preferredSupplier}
               onChange={(e) => patch({ preferredSupplier: e.target.value })}
+              disabled={saving}
             />
           </label>
           {!isEdit ? (
@@ -243,6 +282,7 @@ function ProductFormModal({ mode, initial, tenantId, createdBy, onClose, onSaved
                 step="1"
                 value={form.openingStock}
                 onChange={(e) => patch({ openingStock: e.target.value })}
+                disabled={saving}
               />
             </label>
           ) : (
@@ -265,6 +305,7 @@ function ProductFormModal({ mode, initial, tenantId, createdBy, onClose, onSaved
               step="1"
               value={form.minStock}
               onChange={(e) => patch({ minStock: e.target.value })}
+              disabled={saving}
             />
           </label>
           <label className="block text-xs text-slate-600">
@@ -276,6 +317,7 @@ function ProductFormModal({ mode, initial, tenantId, createdBy, onClose, onSaved
               step="1"
               value={form.reorderQty}
               onChange={(e) => patch({ reorderQty: e.target.value })}
+              disabled={saving}
             />
           </label>
         </div>
@@ -284,8 +326,8 @@ function ProductFormModal({ mode, initial, tenantId, createdBy, onClose, onSaved
           <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
-          <Button type="submit" disabled={saving}>
-            {saving ? "Saving…" : isEdit ? "Save changes" : "Create product"}
+          <Button type="submit" disabled={saving} aria-busy={saving}>
+            {saving ? busyLabel : isEdit ? "Save changes" : "Create product"}
           </Button>
         </div>
       </form>
@@ -293,33 +335,36 @@ function ProductFormModal({ mode, initial, tenantId, createdBy, onClose, onSaved
   );
 }
 
-export default function MasterCatalogPage({ currentUser = null }) {
+export default function MasterCatalogPage({ currentUser = null, setActivePage = null }) {
+  const { showToast } = usePortalToast();
   const [loading, setLoading] = useState(true);
   const [catalog, setCatalog] = useState(null);
-  const [error, setError] = useState("");
-  const [statusMessage, setStatusMessage] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [formMode, setFormMode] = useState(null);
   const [editingProduct, setEditingProduct] = useState(null);
   const [togglingId, setTogglingId] = useState("");
+  const [toggleMutationError, setToggleMutationError] = useState(null);
   const [search, setSearch] = useState("");
   const [sortField, setSortField] = useState("productId");
   const [sortDir, setSortDir] = useState("asc");
+  const [inventoryReturnActive, setInventoryReturnActive] = useState(() => hasInventoryReturnContext());
+  const toggleInflightRef = useRef(false);
 
   const tenantId = useOperatingTenantId(currentUser);
   const catalogWriteBlocked = isHqCatalogWriteBlocked();
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
-      setError("");
+      if (!silent) setLoading(true);
+      setLoadError("");
       const data = await loadMasterCatalog({ tenantId });
       setCatalog(data);
-      if (!data.ok && data.error) setError(data.error);
+      if (!data.ok && data.error) setLoadError(data.error);
     } catch (err) {
-      setError(err?.message || "Failed to load master catalog");
-      setCatalog(null);
+      setLoadError(err?.message || "Failed to load master catalog");
+      if (!silent) setCatalog(null);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [tenantId]);
 
@@ -330,6 +375,7 @@ export default function MasterCatalogPage({ currentUser = null }) {
   async function handleToggleActive(product) {
     if (catalogWriteBlocked) return;
     if (!product?.productId || !tenantId) return;
+    if (toggleInflightRef.current || togglingId) return;
     const nextActive = !product.active;
     const label = nextActive ? "enable" : "disable";
     if (
@@ -339,31 +385,36 @@ export default function MasterCatalogPage({ currentUser = null }) {
       return;
     }
 
+    toggleInflightRef.current = true;
+    setToggleMutationError(null);
     try {
       setTogglingId(product.productId);
-      setStatusMessage("");
-      setError("");
       const res = await setHqProductActiveWrite(product.productId, nextActive, { tenantId });
       if (!res?.success) throw new Error(res?.error || `Failed to ${label} product`);
-      setStatusMessage(
-        nextActive ? `${product.productName} enabled` : `${product.productName} disabled`
-      );
-      await load();
+      showToast("success", nextActive ? `${product.productName} enabled` : `${product.productName} disabled`);
+      await load({ silent: true });
     } catch (err) {
-      setError(err?.message || `Failed to ${label} product`);
+      setToggleMutationError(
+        mapInventoryMutationError(err?.message || err || `Failed to ${label} product`, {
+          action: label,
+        })
+      );
     } finally {
       setTogglingId("");
+      toggleInflightRef.current = false;
     }
   }
 
   function openAdd() {
     if (catalogWriteBlocked) return;
+    setToggleMutationError(null);
     setEditingProduct(null);
     setFormMode("add");
   }
 
   function openEdit(product) {
     if (catalogWriteBlocked) return;
+    setToggleMutationError(null);
     setEditingProduct(product);
     setFormMode("edit");
   }
@@ -373,9 +424,14 @@ export default function MasterCatalogPage({ currentUser = null }) {
     setEditingProduct(null);
   }
 
-  async function handleSaved() {
-    setStatusMessage(formMode === "edit" ? "Product updated" : "Product created");
-    await load();
+  async function handleSaved(_data, meta = {}) {
+    const productId = meta.productId || _data?.productId || "";
+    if (meta.mode === "edit") {
+      showToast("success", productId ? `SKU ${productId} updated` : "Product updated");
+    } else {
+      showToast("success", productId ? `SKU ${productId} created` : "Product created");
+    }
+    await load({ silent: true });
   }
 
   const items = catalog?.items || [];
@@ -398,6 +454,25 @@ export default function MasterCatalogPage({ currentUser = null }) {
 
   return (
     <div className="mx-auto max-w-5xl space-y-3 p-3 pb-8">
+      {inventoryReturnActive && typeof setActivePage === "function" ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2 text-sm text-blue-900">
+          <span>Continue from Inventory</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 border-blue-200 bg-white text-xs"
+            onClick={() => {
+              armInventoryReturnRestore();
+              setInventoryReturnActive(false);
+              setActivePage("inventory");
+            }}
+          >
+            Back to Inventory
+          </Button>
+        </div>
+      ) : null}
+
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h1 className="flex items-center gap-2 text-lg font-bold text-slate-900">
@@ -420,8 +495,7 @@ export default function MasterCatalogPage({ currentUser = null }) {
         </p>
       ) : null}
 
-      {error ? <p className="text-xs text-amber-700">{error}</p> : null}
-      {statusMessage ? <p className="text-xs text-green-700">{statusMessage}</p> : null}
+      {loadError ? <p className="text-xs text-amber-700">{loadError}</p> : null}
 
       <div className="grid grid-cols-3 gap-2 text-xs">
         <div className="rounded-lg border bg-white p-2">
@@ -451,6 +525,16 @@ export default function MasterCatalogPage({ currentUser = null }) {
           aria-label="Search master catalog"
         />
       </div>
+
+      {toggleMutationError ? (
+        <ActionErrorSummary
+          title={toggleMutationError.title}
+          message={toggleMutationError.message}
+          fieldErrors={toggleMutationError.fieldErrors}
+          technicalReference={toggleMutationError.rawErrorForLogging}
+          onDismiss={() => setToggleMutationError(null)}
+        />
+      ) : null}
 
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         <table className="w-full min-w-[960px] text-xs">
@@ -495,7 +579,9 @@ export default function MasterCatalogPage({ currentUser = null }) {
                 </td>
               </tr>
             ) : null}
-            {displayItems.map((p) => (
+            {displayItems.map((p) => {
+              const rowBusy = togglingId === p.productId;
+              return (
               <tr
                 key={p.productId}
                 className={`border-b border-slate-100 ${p.active ? "" : "bg-slate-50/80 opacity-80"}`}
@@ -530,7 +616,7 @@ export default function MasterCatalogPage({ currentUser = null }) {
                       variant="outline"
                       size="sm"
                       className="h-7 gap-1 px-2 text-[10px]"
-                      disabled={catalogWriteBlocked}
+                      disabled={catalogWriteBlocked || Boolean(togglingId)}
                       onClick={() => openEdit(p)}
                     >
                       <Pencil className="h-3 w-3" />
@@ -541,15 +627,21 @@ export default function MasterCatalogPage({ currentUser = null }) {
                       variant="outline"
                       size="sm"
                       className="h-7 px-2 text-[10px]"
-                      disabled={catalogWriteBlocked || togglingId === p.productId}
+                      disabled={catalogWriteBlocked || Boolean(togglingId)}
+                      aria-busy={rowBusy}
                       onClick={() => void handleToggleActive(p)}
                     >
-                      {p.active ? "Disable" : "Enable"}
+                      {rowBusy
+                        ? getSkuToggleLoadingLabel(!p.active)
+                        : p.active
+                          ? "Disable"
+                          : "Enable"}
                     </Button>
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentUser, loginUser, logoutUser } from "@/api/primecareApi";
 import { resolveLoginEmailForAuth } from "@/api/primecareSupabaseApi.js";
 import { touchPlatformUserLastLoginWrite } from "@/api/userProvisioningApi.js";
@@ -103,6 +103,8 @@ export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState("");
+  /** Legacy Apps Script token at first mount only — bootstrap must not re-run on token refresh. */
+  const initialLegacyAuthTokenRef = useRef(authToken);
 
   const applySupabaseSession = useCallback(async (session, { recordLastLogin = false } = {}) => {
     setAuthError("");
@@ -226,7 +228,7 @@ export function AuthProvider({ children }) {
           throw new Error("Legacy Apps Script auth is disabled in this environment.");
         }
 
-        await bootstrapUser(authToken);
+        await bootstrapUser(initialLegacyAuthTokenRef.current);
         perfMark("auth.bootstrap.end");
       } catch (err) {
         console.error("Auth bootstrap failed", err);
@@ -251,7 +253,9 @@ export function AuthProvider({ children }) {
     return () => {
       mounted = false;
     };
-  }, [applySupabaseSession, authToken, bootstrapUser, useSupabaseAuth]);
+    // authToken intentionally omitted: Supabase TOKEN_REFRESHED updates the token silently;
+    // re-bootstrapping would set authLoading=true and unmount the entire portal shell.
+  }, [applySupabaseSession, bootstrapUser, useSupabaseAuth]);
 
   useEffect(() => {
     if (!useSupabaseAuth) return undefined;
@@ -260,8 +264,9 @@ export function AuthProvider({ children }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "TOKEN_REFRESHED") {
-        if (session?.access_token) {
-          setAuthToken(session.access_token);
+        const nextToken = session?.access_token;
+        if (nextToken) {
+          setAuthToken((prev) => (prev === nextToken ? prev : nextToken));
         }
         return;
       }

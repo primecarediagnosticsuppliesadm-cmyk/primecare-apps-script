@@ -19,4 +19,9 @@ export const QA_LAB = {
   password: "1234",
 };
 
+export const QA_HR = {
+  email: "qa.hr@primecare.test",
+  password: "1234",
+};
+
 export const QA_HQ_TENANT_ID = "f168b98f-47a6-42c3-b788-24c00436fac2";

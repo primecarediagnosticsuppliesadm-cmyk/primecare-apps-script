@@ -25,8 +25,34 @@ export const HQ_INVOICE_LIST_MAX_LIMIT = 100;
 export const HQ_INVOICE_ORDER_LOOKUP_CHUNK = 100;
 export const HQ_READ_CACHE_TTL_MS = 45_000;
 
+export const HQ_COMPENSATION_PERIODS_LIMIT = 120;
+export const HQ_COMPENSATION_RUNS_LIMIT = 500;
+export const HQ_COMPENSATION_LINES_LIMIT = 2000;
+export const HQ_COMPENSATION_COMMISSION_LIMIT = 2000;
+export const HQ_COMPENSATION_AUDIT_LIMIT = 1000;
+export const HQ_COMPENSATION_EXPORT_LIMIT = 500;
+
+export const HQ_PAYROLL_PERIOD_READ_COLUMNS =
+  "id,tenant_id,period_ym,period_start,period_end,pay_date,status,submitted_at,approved_at,locked_at,exported_at,metadata,created_at,updated_at";
+export const HQ_PAYROLL_RUN_READ_COLUMNS =
+  "id,tenant_id,period_id,run_number,status,generated_at,submitted_at,approved_at,locked_at,exported_at,totals_json,metadata,created_at,updated_at";
+export const HQ_PAYROLL_LINE_READ_COLUMNS =
+  "id,tenant_id,payroll_run_id,period_id,plan_assignment_id,commission_entry_id,agent_id,agent_name,profile_user_id,employee_name,employee_role,salary_amount,fuel_allowance,mobile_allowance,commission_amount,collection_incentive,delivery_incentive,qualification_incentive,attendance_incentive,quarterly_bonus,annual_bonus,manual_adjustments_total,penalties_total,recoveries_total,gross_pay,deductions_total,net_payable,line_status,calculation_snapshot,metadata,created_at,updated_at";
+export const HQ_COMPENSATION_PLAN_READ_COLUMNS =
+  "id,tenant_id,plan_code,version,role_scope,effective_from,effective_to,base_salary,fuel_allowance,mobile_allowance,commission_rate_bps,promotion_salary,promotion_commission_rate_bps,promotion_collection_threshold,promotion_min_efficiency_pct,promotion_max_overdue_days,status";
+export const HQ_COMPENSATION_ASSIGNMENT_READ_COLUMNS =
+  "id,tenant_id,plan_id,profile_user_id,agent_id,agent_name,employee_name,employee_role,assignment_status,start_date,end_date";
+export const HQ_COMPENSATION_COMMISSION_READ_COLUMNS =
+  "id,tenant_id,period_id,agent_id,agent_name,profile_user_id,attributable_cash_collected,commission_rate_bps,commission_amount,eligibility_status,blocked_reason,rule_version,status,metadata,created_at,updated_at";
+export const HQ_COMPENSATION_AUDIT_READ_COLUMNS =
+  "id,tenant_id,event_type,entity_type,entity_id,actor_user_id,actor_role,before_json,after_json,reason,metadata,created_at";
+export const HQ_COMPENSATION_EXPORT_READ_COLUMNS =
+  "id,tenant_id,payroll_run_id,period_id,export_format,storage_path,checksum,metadata,created_at,generated_by";
+export const HQ_COMPENSATION_ADJUSTMENT_READ_COLUMNS =
+  "id,tenant_id,period_id,payroll_run_id,payroll_run_line_id,agent_id,agent_name,adjustment_type,component,amount,reason,notes,requested_by,approved_by,approved_at,status,metadata,created_at,updated_at";
+
 export const HQ_ORDER_LIST_COLUMNS =
-  "id,order_id,lab_id,status,order_date,created_at,total_amount,tenant_id,created_by,notes,agent_id,inventory_updated,fulfilled_at,invoice_id";
+  "id,order_id,lab_id,status,order_date,created_at,total_amount,merchandise_subtotal,delivery_charge_amount,delivery_charge_reason,delivery_method_intent,delivery_charge_status,tenant_id,created_by,notes,agent_id,inventory_updated,fulfilled_at,invoice_id";
 
 export const HQ_ORDER_LINE_COUNT_COLUMNS = "order_id";
 
@@ -62,7 +88,7 @@ export const HQ_V_LABS_CREDIT_COLUMNS =
 
 /** Full v_labs_credit projection for LabsPage / Agent workspace mapping (view-safe columns only). */
 export const HQ_V_LABS_CREDIT_LIST_COLUMNS =
-  "lab_id,lab_name,tenant_id,area,owner_name,phone,assigned_agent_id,status,credit_hold,credit_limit,credit_status,days_overdue,outstanding,allowed_overdue_days";
+  "lab_id,lab_name,tenant_id,area,owner_name,phone,assigned_agent_id,status,ordering_mode,credit_hold,credit_limit,credit_status,days_overdue,outstanding,allowed_overdue_days";
 
 export const HQ_INVENTORY_COLUMNS =
   "tenant_id,product_id,current_stock,min_stock,reorder_qty,stock_in,stock_out,last_updated";

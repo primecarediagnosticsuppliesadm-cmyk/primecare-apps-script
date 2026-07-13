@@ -43,6 +43,28 @@ export function collectOrderRowIds(ordersRaw) {
   return ids.sort();
 }
 
+/** Business order_id keys only — avoids UUID duplication in bulk line lookups. */
+export function collectOrderBusinessIds(ordersRaw) {
+  const ids = new Set();
+  for (const o of ordersRaw || []) {
+    const business = str(o.order_id ?? o.orderId);
+    if (business) ids.add(business);
+  }
+  return [...ids].sort();
+}
+
+/** Business order_id + UUID keys for line/item metric lookups (legacy rows may use either). */
+export function collectOrderMetricLookupIds(ordersRaw) {
+  const ids = new Set();
+  for (const o of ordersRaw || []) {
+    const business = str(o.order_id ?? o.orderId);
+    const uuid = o.id != null ? str(o.id) : "";
+    if (business) ids.add(business);
+    if (uuid && uuid !== business) ids.add(uuid);
+  }
+  return [...ids].sort();
+}
+
 export function normalizedOrderRowStatus(orderRow) {
   return str(
     orderRow?.status ??

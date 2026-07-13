@@ -20,6 +20,7 @@ import {
 } from "@/operations/labAgentResolver.js";
 import { enterDistributorOs } from "@/tenant/tenantFoundationStore.js";
 import {
+  navigateToAdminOnBehalfOrder,
   navigateToCollections,
   navigateToCreditRisk,
   navigateToOperationsCenter,
@@ -271,6 +272,7 @@ export default function HqLabsAdminView({
   currentUser,
   focusLabId = "",
   initialReviewLabId = "",
+  onRefresh,
 }) {
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
   const [reviewLabId, setReviewLabId] = useState("");
@@ -386,7 +388,22 @@ export default function HqLabsAdminView({
 
   function handleDrawerAction(action, snapshot) {
     const lab = reviewLab;
+    if (action === "refreshLabs") {
+      void loadOps();
+      void onRefresh?.();
+      return;
+    }
     setReviewLabId("");
+    if (action === "createHqOrder") {
+      navigateToAdminOnBehalfOrder(setActivePage, {
+        selectedLabId: lab?.labId || snapshot?.labId || "",
+        selectedTenantId: lab?.tenantId || lab?.tenant_id || currentUser?.tenantId || "",
+        selectedLabName: lab?.labName || snapshot?.labName || "",
+        selectedLifecycleStatus: snapshot?.status || lab?.status || "ACTIVE",
+        selectedOrderingMode: snapshot?.orderingMode || lab?.orderingMode || lab?.ordering_mode || "",
+      });
+      return;
+    }
     if (action === "operationsCenter") {
       navigateToOperationsCenter(setActivePage, {
         agentId: labAssignedAgentId(lab) || "",
@@ -521,8 +538,8 @@ export default function HqLabsAdminView({
           {[
             { label: "Total Labs", value: portfolio.totalLabs },
             { label: "Active Labs", value: portfolio.activeLabs },
-            { label: "Revenue", value: formatLabsCurrency(portfolio.revenue) },
-            { label: "Outstanding", value: formatLabsCurrency(portfolio.outstanding) },
+            { label: "Order-Eligible Labs", value: portfolio.orderEligibleLabs },
+            { label: "Ordering Suspended", value: portfolio.orderingSuspendedLabs },
           ].map((kpi) => (
             <div key={kpi.label} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
               <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{kpi.label}</p>

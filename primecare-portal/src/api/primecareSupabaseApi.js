@@ -1,4 +1,22 @@
 import { getAgentActiveLabOwnershipRowsRead } from "@/api/labOwnershipApi.js";
+import { createShipmentForFulfilledOrderWrite } from "@/api/logisticsSupabaseApi.js";
+import {
+  getOrderDeliverySnapshotRead,
+  persistOrderDeliverySnapshotWrite,
+} from "@/api/deliveryChargeSupabaseApi.js";
+import {
+  DELIVERY_METHOD_INTENT,
+  mapOrderDeliveryFields,
+} from "@/logistics/deliveryChargeEngine.js";
+import {
+  ORDERING_MODE,
+  adminOrderingBlockedMessage,
+  canAdminInitiateOrder,
+  canLabInitiateOrder,
+  isHqOpsRole,
+  labOrderingBlockedMessage,
+  normalizeOrderingMode,
+} from "@/labOrdering/orderingGovernance.js";
 import { supabase } from "./supabaseClient.js";
 import {
   autoAllocatePaymentToOrderInvoice,
@@ -6,7 +24,7 @@ import {
   getInvoiceByOrderRead,
   INVOICE_PAYMENT_FINALIZE_ERROR,
 } from "@/api/invoiceSupabaseApi.js";
-import { fetchOrderDetailLinesForOrder } from "@/api/orderLineMetricsSupport.js";
+import { fetchOrderDetailLinesForOrder, fetchOrderUnitCountsForOrders } from "@/api/orderLineMetricsSupport.js";
 import {
   filterCollectionsForUser,
   filterLabsForUser,
@@ -29,6 +47,8 @@ import {
 import {
   buildOrdersByLabDateIndex,
   collectOrderRowIds,
+  collectOrderMetricLookupIds,
+  collectOrderBusinessIds,
   computeRevenueMetrics,
   normalizedOrderRowStatus,
   orderCountsTowardDashboardRevenue,
@@ -46,6 +66,13 @@ import {
   rollupStockDashboardMappedItems,
 } from "@/metrics/computeInventoryMetrics.js";
 import { IS_DEV, IS_QA } from "@/config/environment";
+import {
+  isReadAdapterOrdersV1Enabled,
+  isReadAdapterReceivablesV1Enabled,
+  isReadAdapterDashboardV1Enabled,
+} from "@/config/readProjectionFlags.js";
+import { scheduleProjectionRefreshAfterOrderWrite } from "@/api/projectionRefreshApi.js";
+import { getAppBuildStamp } from "@/utils/buildStamp.js";
 import { resolveMasterCatalogPricing } from "@/catalog/masterCatalogEngine.js";
 import {
   coalesceOperatingTenantId,
@@ -78,6 +105,7 @@ import {
 import {
   fetchAdminDashboardBoundedSourceRows,
   fetchCollectionsBoundedArRows,
+  fetchAgentVisitsForLabBoundedRows,
   fetchAgentVisitsBoundedRows,
   fetchLabsCreditBoundedRows,
   fetchQualificationBoundedRows,
@@ -108,6 +136,7 @@ import {
 import { isPerfLogEnabled, perfLog, perfTime, shouldRunDashboardKpiAudit } from "@/utils/perfLog.js";
 import { fireNotificationEvent } from "@/notifications/fireNotificationEvent.js";
 import { directoryRoleFromPlatformRole } from "@/operations/operationsCenterAdminEngine.js";
+import { buildProvisioningAuditPayload } from "@/operations/userProvisioningEngine.js";
 
 export { labIdKey, normalizeLabIdKey };
 
@@ -122,6 +151,85 @@ function num(v) {
 
 function str(v) {
   return String(v ?? "").trim();
+}
+
+function boolFromValue(v) {
+  if (typeof v === "boolean") return v;
+  const s = str(v).toLowerCase();
+  return s === "true" || s === "t" || s === "1" || s === "yes" || s === "y";
+}
+
+export const LAB_LIFECYCLE_STATUS = {
+  PROSPECT: "PROSPECT",
+  ACTIVE: "ACTIVE",
+  INACTIVE: "INACTIVE",
+};
+
+const LAB_LIFECYCLE_STATUS_VALUES = new Set(Object.values(LAB_LIFECYCLE_STATUS));
+const LAB_LIFECYCLE_ALLOWED_TRANSITIONS = new Set([
+  `${LAB_LIFECYCLE_STATUS.PROSPECT}->${LAB_LIFECYCLE_STATUS.ACTIVE}`,
+  `${LAB_LIFECYCLE_STATUS.ACTIVE}->${LAB_LIFECYCLE_STATUS.INACTIVE}`,
+  `${LAB_LIFECYCLE_STATUS.INACTIVE}->${LAB_LIFECYCLE_STATUS.ACTIVE}`,
+]);
+
+export function normalizeLabLifecycleStatus(value) {
+  const status = str(value).toUpperCase();
+  return LAB_LIFECYCLE_STATUS_VALUES.has(status) ? status : "";
+}
+
+function labLifecycleTransitionKey(previousStatus, nextStatus) {
+  return `${normalizeLabLifecycleStatus(previousStatus)}->${normalizeLabLifecycleStatus(nextStatus)}`;
+}
+
+function labLifecycleTransitionRequiresReason(previousStatus, nextStatus) {
+  const transition = labLifecycleTransitionKey(previousStatus, nextStatus);
+  return (
+    transition === `${LAB_LIFECYCLE_STATUS.ACTIVE}->${LAB_LIFECYCLE_STATUS.INACTIVE}` ||
+    transition === `${LAB_LIFECYCLE_STATUS.INACTIVE}->${LAB_LIFECYCLE_STATUS.ACTIVE}`
+  );
+}
+
+function labLifecycleTransitionRequiresConfirmation(previousStatus, nextStatus) {
+  return LAB_LIFECYCLE_ALLOWED_TRANSITIONS.has(
+    labLifecycleTransitionKey(previousStatus, nextStatus)
+  );
+}
+
+export function validateLabLifecycleTransition({
+  previousStatus,
+  nextStatus,
+  confirmed = false,
+  reason = "",
+} = {}) {
+  const previous = normalizeLabLifecycleStatus(previousStatus);
+  const next = normalizeLabLifecycleStatus(nextStatus);
+  if (!previous) {
+    return { ok: false, code: "invalid_previous_status", error: "Current lab status is invalid" };
+  }
+  if (!next) {
+    return { ok: false, code: "invalid_status", error: "Invalid lab lifecycle status" };
+  }
+  if (previous === next) {
+    return { ok: false, code: "no_status_change", error: "Lab is already in that status" };
+  }
+  const transition = `${previous}->${next}`;
+  if (!LAB_LIFECYCLE_ALLOWED_TRANSITIONS.has(transition)) {
+    return { ok: false, code: "invalid_transition", error: `Transition ${transition} is not allowed` };
+  }
+  if (labLifecycleTransitionRequiresConfirmation(previous, next) && confirmed !== true) {
+    return { ok: false, code: "confirmation_required", error: "Lifecycle status confirmation is required" };
+  }
+  if (labLifecycleTransitionRequiresReason(previous, next) && !str(reason)) {
+    return { ok: false, code: "reason_required", error: "Lifecycle status reason is required" };
+  }
+  return {
+    ok: true,
+    previousStatus: previous,
+    nextStatus: next,
+    transition,
+    forceOrderingSuspended:
+      transition === `${LAB_LIFECYCLE_STATUS.ACTIVE}->${LAB_LIFECYCLE_STATUS.INACTIVE}`,
+  };
 }
 
 function cleanCollectionAgentName(agent) {
@@ -1033,6 +1141,8 @@ export async function enrichCatalogWithProductMetadata(products, tenantId) {
 const STOCK_DASHBOARD_READ_CACHE_TTL_MS = 45_000;
 /** @type {{ result: object|null, loadedAt: number }} */
 let stockDashboardReadCache = { result: null, loadedAt: 0 };
+/** @type {Promise<object>|null} */
+let stockDashboardReadInFlight = null;
 
 export function peekStockDashboardReadCache() {
   if (
@@ -1046,53 +1156,67 @@ export function peekStockDashboardReadCache() {
 
 export function invalidateStockDashboardReadResultCache() {
   stockDashboardReadCache = { result: null, loadedAt: 0 };
+  stockDashboardReadInFlight = null;
 }
 
 export async function getStockDashboard(options = {}) {
   const force = options.force === true;
   if (!force) {
+    if (stockDashboardReadInFlight) {
+      perfLog("getStockDashboard.inFlightJoin");
+      return stockDashboardReadInFlight;
+    }
     const cached = peekStockDashboardReadCache();
     if (cached) return cached;
   }
 
-  traceSupabaseRead("Inventory.getStockDashboard", { table: "v_stock_dashboard" });
-  if (!supabase) {
-    throw new Error(
-      "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
+  const run = (async () => {
+    traceSupabaseRead("Inventory.getStockDashboard", { table: "v_stock_dashboard" });
+    if (!supabase) {
+      throw new Error(
+        "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
+      );
+    }
+
+    const { data: rawRows, error } = await loadStockDashboardBoundedRows(supabase, {
+      force,
+    });
+
+    if (error) {
+      throw new Error(error.message || "Supabase stock read failed");
+    }
+
+    const inventory = sortInventoryLikeLegacy(
+      (rawRows || [])
+        .map(mapStockDashboardRow)
+        .filter((item) => item.productId)
+        .filter((item) => {
+          const scopedTenantId = str(options.tenantId ?? options.tenant_id);
+          return !scopedTenantId || str(item.tenantId) === scopedTenantId;
+        })
     );
+
+    const stats = rollupStockDashboardMappedItems(inventory);
+
+    const result = {
+      success: true,
+      data: {
+        stats,
+        inventory,
+      },
+    };
+    if (!force) {
+      stockDashboardReadCache = { result, loadedAt: Date.now() };
+    }
+    return result;
+  })();
+
+  if (!force) stockDashboardReadInFlight = run;
+  try {
+    return await run;
+  } finally {
+    if (!force) stockDashboardReadInFlight = null;
   }
-
-  const { data: rawRows, error } = await loadStockDashboardBoundedRows(supabase, {
-    force,
-  });
-
-  if (error) {
-    throw new Error(error.message || "Supabase stock read failed");
-  }
-
-  const inventory = sortInventoryLikeLegacy(
-    (rawRows || [])
-      .map(mapStockDashboardRow)
-      .filter((item) => item.productId)
-      .filter((item) => {
-        const scopedTenantId = str(options.tenantId ?? options.tenant_id);
-        return !scopedTenantId || str(item.tenantId) === scopedTenantId;
-      })
-  );
-
-  const stats = rollupStockDashboardMappedItems(inventory);
-
-  const result = {
-    success: true,
-    data: {
-      stats,
-      inventory,
-    },
-  };
-  if (!force) {
-    stockDashboardReadCache = { result, loadedAt: Date.now() };
-  }
-  return result;
 }
 
 /**
@@ -1102,6 +1226,15 @@ export async function getStockDashboard(options = {}) {
 export function mapLabsCreditRow(row) {
   const creditWarningsRaw =
     row.credit_warnings ?? row.creditWarnings ?? row.Credit_Warnings;
+  const orderingMode = str(row.ordering_mode ?? row.orderingMode) || "hq_managed";
+  const creditStatus = str(row.credit_status ?? row.creditStatus ?? row.Credit_Status);
+  const creditHoldRaw = row.credit_hold ?? row.creditHold ?? row.Credit_Hold;
+  const creditHold = boolFromValue(creditHoldRaw) || str(creditHoldRaw).toUpperCase() === "HOLD";
+  const explicitOrderingEligible = row.ordering_eligible ?? row.orderingEligible;
+  const orderingEligible =
+    explicitOrderingEligible == null || explicitOrderingEligible === ""
+      ? canLabInitiateOrder(orderingMode) && creditStatus.toUpperCase() !== "HOLD" && !creditHold
+      : boolFromValue(explicitOrderingEligible);
   let creditWarnings = [];
   if (Array.isArray(creditWarningsRaw)) {
     creditWarnings = creditWarningsRaw;
@@ -1152,11 +1285,15 @@ export function mapLabsCreditRow(row) {
     ),
     creditHold: str(row.credit_hold ?? row.creditHold ?? row.Credit_Hold),
     creditReason: str(row.credit_reason ?? row.creditReason ?? row.Credit_Reason),
-    creditStatus: str(row.credit_status ?? row.creditStatus ?? row.Credit_Status),
+    creditStatus,
     creditTerms: str(row.credit_terms ?? row.creditTerms ?? row.Credit_Terms),
     creditWarnings,
     visitCount: num(row.visit_count ?? row.visitCount ?? row.Visit_Count),
     revenue: num(row.revenue ?? row.Revenue),
+    orderingMode,
+    ordering_mode: orderingMode,
+    orderingEligible,
+    ordering_eligible: orderingEligible,
   };
 }
 
@@ -1164,14 +1301,16 @@ export function mapLabsCreditRow(row) {
  * Read-only labs / credit directory from Supabase view v_labs_credit.
  */
 const LABS_CREDIT_READ_CACHE_TTL_MS = 45_000;
-/** @type {{ result: object|null, loadedAt: number }} */
-let labsCreditReadCache = { result: null, loadedAt: 0 };
+/** @type {{ result: object|null, loadedAt: number, tenantId: string }} */
+let labsCreditReadCache = { result: null, loadedAt: 0, tenantId: "" };
 /** @type {Promise<object>|null} */
 let labsCreditReadInFlight = null;
 
-export function peekLabsCreditReadCache() {
+export function peekLabsCreditReadCache(options = {}) {
+  const tenantId = str(options.tenantId ?? options.tenant_id);
   if (
     labsCreditReadCache.result &&
+    labsCreditReadCache.tenantId === tenantId &&
     Date.now() - labsCreditReadCache.loadedAt < LABS_CREDIT_READ_CACHE_TTL_MS
   ) {
     return labsCreditReadCache.result;
@@ -1180,16 +1319,17 @@ export function peekLabsCreditReadCache() {
 }
 
 export function invalidateLabsCreditReadCache() {
-  labsCreditReadCache = { result: null, loadedAt: 0 };
+  labsCreditReadCache = { result: null, loadedAt: 0, tenantId: "" };
   labsCreditReadInFlight = null;
 }
 
 export async function getLabsCredit(options = {}) {
   const force = options.force === true;
+  const tenantId = str(options.tenantId ?? options.tenant_id);
   if (!force && labsCreditReadInFlight) {
     return labsCreditReadInFlight;
   }
-  const cached = !force ? peekLabsCreditReadCache() : null;
+  const cached = !force ? peekLabsCreditReadCache({ tenantId }) : null;
   if (cached) return cached;
 
   const run = (async () => {
@@ -1200,7 +1340,8 @@ export async function getLabsCredit(options = {}) {
       );
     }
 
-    const { data: rawRows, error } = await fetchLabsCreditBoundedRows(supabase);
+    const boundedScope = tenantId ? { tenantId } : {};
+    const { data: rawRows, error } = await fetchLabsCreditBoundedRows(supabase, boundedScope);
 
     if (error) {
       throw new Error(error.message || "Supabase labs read failed");
@@ -1213,7 +1354,7 @@ export async function getLabsCredit(options = {}) {
       data: labs,
     };
     if (!force) {
-      labsCreditReadCache = { result, loadedAt: Date.now() };
+      labsCreditReadCache = { result, loadedAt: Date.now(), tenantId };
     }
     return result;
   })();
@@ -2271,17 +2412,21 @@ const COLLECTIONS_READ_CACHE_TTL_MS = 45_000;
 let collectionsReadCache = { result: null, loadedAt: 0, key: "" };
 /** @type {Promise<object>|null} */
 let collectionsReadInFlight = null;
+/** @type {Promise<object>|null} */
+let collectionsReadForceInFlight = null;
 
 function collectionsReadCacheKey(params = {}) {
   const limit = clampLimit(params.limit, HQ_COLLECTIONS_AR_LIMIT, HQ_COLLECTIONS_AR_LIMIT);
   const daysBack =
     Number(params.daysBack) > 0 ? Number(params.daysBack) : HQ_PAYMENTS_RECENT_DAYS;
-  return `${limit}:${daysBack}`;
+  const tenantId = str(params.tenantId ?? params.tenant_id);
+  return `${tenantId || "all"}:${limit}:${daysBack}`;
 }
 
 export function invalidateCollectionsReadCache() {
   collectionsReadCache = { result: null, loadedAt: 0, key: "" };
   collectionsReadInFlight = null;
+  collectionsReadForceInFlight = null;
 }
 
 export function peekCollectionsReadCache(params = {}) {
@@ -2297,10 +2442,18 @@ export function peekCollectionsReadCache(params = {}) {
 }
 
 export async function getCollectionsRead(params = {}) {
+  if (isReadAdapterReceivablesV1Enabled() && params.force !== true) {
+    const { readLabReceivablesListV1 } = await import("@/api/projectionReadAdapters.js");
+    return readLabReceivablesListV1(params);
+  }
   return predatorTrace("Collections", "api.getCollectionsRead", async () => {
   const force = params.force === true;
   const cacheKey = collectionsReadCacheKey(params);
 
+  if (force && collectionsReadForceInFlight) {
+    perfLog("getCollectionsRead.forceInFlightJoin");
+    return collectionsReadForceInFlight;
+  }
   if (!force && collectionsReadInFlight) {
     perfLog("getCollectionsRead.inFlightJoin");
     return collectionsReadInFlight;
@@ -2338,12 +2491,14 @@ export async function getCollectionsRead(params = {}) {
     const daysBack =
       Number(params.daysBack) > 0 ? Number(params.daysBack) : HQ_PAYMENTS_RECENT_DAYS;
     const arLimit = clampLimit(params.limit, HQ_COLLECTIONS_AR_LIMIT, HQ_COLLECTIONS_AR_LIMIT);
+    const tenantId = str(params.tenantId ?? params.tenant_id);
+    const boundedScope = tenantId ? { tenantId } : {};
 
     const endParallel = perfTime("getCollectionsRead.parallel");
     const [arRes, payRes, labsRes] = await Promise.all([
-      fetchCollectionsBoundedArRows(supabase, { limit: arLimit }),
-      fetchPaymentsBoundedRows(supabase, { daysBack }),
-      fetchLabsCreditBoundedRows(supabase, { columns: HQ_V_LABS_CREDIT_COLUMNS }),
+      fetchCollectionsBoundedArRows(supabase, { limit: arLimit, ...boundedScope }),
+      fetchPaymentsBoundedRows(supabase, { daysBack, ...boundedScope }),
+      fetchLabsCreditBoundedRows(supabase, { columns: HQ_V_LABS_CREDIT_COLUMNS, ...boundedScope }),
     ]);
     endParallel({
       ar: arRes.error ? 0 : arRes.data?.length ?? 0,
@@ -2417,12 +2572,14 @@ export async function getCollectionsRead(params = {}) {
     auditCollectionDataInconsistencies(arRaw, payRaw, collections);
 
     const summary = summarizeCollectionsList(collections, todayCollections);
+    const lastPaymentByLabId = buildLastPaymentDateByLabId(payRaw);
 
     return {
       success: true,
       data: {
         summary,
         collections,
+        lastPaymentByLabId,
       },
     };
   } catch (err) {
@@ -2440,7 +2597,11 @@ export async function getCollectionsRead(params = {}) {
   };
 
   const promise = run();
-  if (!force) collectionsReadInFlight = promise;
+  if (force) {
+    collectionsReadForceInFlight = promise;
+  } else {
+    collectionsReadInFlight = promise;
+  }
   try {
     const result = await promise;
     if (!force && result?.success) {
@@ -2448,7 +2609,11 @@ export async function getCollectionsRead(params = {}) {
     }
     return result;
   } finally {
-    if (!force) collectionsReadInFlight = null;
+    if (force) {
+      if (collectionsReadForceInFlight === promise) collectionsReadForceInFlight = null;
+    } else if (collectionsReadInFlight === promise) {
+      collectionsReadInFlight = null;
+    }
   }
   });
 }
@@ -3230,6 +3395,22 @@ async function timedSupabaseQuery(label, queryFnOrPromise) {
  */
 export async function getAdminDashboardRead(options = {}) {
   const force = options.force === true;
+  const tenantId = str(options.tenantId ?? options.tenant_id);
+
+  if (isReadAdapterDashboardV1Enabled() && tenantId) {
+    const { readTenantDashboardV1 } = await import("@/api/projectionReadAdapters.js");
+    const adapterRes = await readTenantDashboardV1({ tenantId, force });
+    if (adapterRes.success && adapterRes.data) {
+      return { success: true, data: adapterRes.data, projection: true };
+    }
+    return {
+      success: false,
+      error: adapterRes.error || "dashboard_projection_read_failed",
+      data: { ...EMPTY_ADMIN_DASHBOARD },
+      projection: true,
+    };
+  }
+
   if (!force && adminDashboardReadInFlight) {
     return adminDashboardReadInFlight;
   }
@@ -3243,7 +3424,7 @@ export async function getAdminDashboardRead(options = {}) {
       "agent_visits",
       "inventory",
       "labs",
-      "order_lines",
+      "proj_order_v1",
       "payments",
     ],
   });
@@ -3254,7 +3435,13 @@ export async function getAdminDashboardRead(options = {}) {
       durationMs: Math.round(performance.now() - dashboardReadT0),
       detail: { skipped: "no_client" },
     });
-    return { success: true, data: { ...EMPTY_ADMIN_DASHBOARD } };
+    return {
+      success: false,
+      readFailed: true,
+      degraded: true,
+      error: "Supabase client not configured",
+      data: { ...EMPTY_ADMIN_DASHBOARD },
+    };
   }
 
   if (!adminDashboardServerCacheEnabled()) {
@@ -3322,9 +3509,12 @@ export async function getAdminDashboardRead(options = {}) {
     const queryErrors = [];
 
     const [boundedSource, payRes] = await Promise.all([
-      fetchAdminDashboardBoundedSourceRows(supabase, { force }),
+      fetchAdminDashboardBoundedSourceRows(supabase, { force, tenantId }),
       timedSupabaseQuery("payments", () =>
-        fetchPaymentsBoundedRows(supabase, { paymentDateEq: today })
+        fetchPaymentsBoundedRows(supabase, {
+          paymentDateEq: today,
+          ...(tenantId ? { tenantId } : {}),
+        })
       ),
     ]);
     for (const table of Object.keys(boundedSource.errors || {})) {
@@ -3365,8 +3555,17 @@ export async function getAdminDashboardRead(options = {}) {
     if (boundedSource.errors?.labs) {
       hqDebugWarn("[getAdminDashboardRead] labs:", boundedSource.errors.labs);
     }
-    if (orderIds.length && !orderLinesRaw.length) {
-      queryErrors.push("order_lines");
+    if (boundedSource.lineMetricErrors?.projection) {
+      hqDebugWarn(
+        "[getAdminDashboardRead] projection line metrics degraded:",
+        boundedSource.lineMetricErrors.projection
+      );
+    }
+    if (boundedSource.lineMetricErrors?.read_orders_list_v1) {
+      hqDebugWarn(
+        "[getAdminDashboardRead] read_orders_list_v1 fallback degraded:",
+        boundedSource.lineMetricErrors.read_orders_list_v1
+      );
     }
     if (payRes.error) {
       queryErrors.push("payments");
@@ -3507,7 +3706,17 @@ export async function getAdminDashboardRead(options = {}) {
       visitsMappedTop10Length: visits.length,
     });
 
-    const result = { success: true, data: payload };
+    const itemMetricsDegraded = boundedSource.itemMetricsDegraded === true;
+    const hasCoreQueryErrors = queryErrors.length > 0;
+    const result = {
+      success: !hasCoreQueryErrors,
+      readFailed: hasCoreQueryErrors,
+      degraded: hasCoreQueryErrors || itemMetricsDegraded,
+      itemMetricsDegraded,
+      partialErrors: boundedSource.lineMetricErrors || {},
+      queryErrors,
+      data: payload,
+    };
     const mayCache =
       adminDashboardServerCacheEnabled() &&
       !queryErrors.length &&
@@ -3555,7 +3764,13 @@ export async function getAdminDashboardRead(options = {}) {
       durationMs: Math.round(performance.now() - dashboardReadT0),
       detail: { error: err?.message },
     });
-    return { success: true, data: { ...EMPTY_ADMIN_DASHBOARD } };
+    return {
+      success: false,
+      readFailed: true,
+      degraded: true,
+      error: err?.message || String(err),
+      data: { ...EMPTY_ADMIN_DASHBOARD },
+    };
   }
   });
 
@@ -3621,6 +3836,35 @@ function mapVisitRowForAgentDashboard(row) {
 }
 
 /**
+ * Read visits for one selected lab for Lab 360. Bounded by tenant + lab_id, latest first.
+ */
+export async function getLabVisitsRead({ tenantId = "", tenant_id = "", labId = "", lab_id = "", limit = 100 } = {}) {
+  const tid = str(tenantId || tenant_id);
+  const lid = labIdKey(labId || lab_id);
+  traceSupabaseRead("Labs.getLabVisitsRead", { table: "agent_visits", labId: lid });
+  if (!supabase || !lid) {
+    return { success: false, error: "lab_id is required", data: { visits: [] } };
+  }
+
+  try {
+    const { data, error } = await fetchAgentVisitsForLabBoundedRows(supabase, {
+      tenantId: tid,
+      labId: lid,
+      limit,
+    });
+    if (error) {
+      return { success: false, error: error.message || "Failed to load lab visits", data: { visits: [] } };
+    }
+    const visits = (data || [])
+      .map(mapVisitRowForAgentDashboard)
+      .filter((row) => labIdKey(row.labId) === lid);
+    return { success: true, data: { visits }, error: null };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err), data: { visits: [] } };
+  }
+}
+
+/**
  * Agent Visit page context: assigned labs, recent visits, collections (Supabase + RLS).
  */
 export async function getAgentVisitPageContextRead(currentUser) {
@@ -3638,11 +3882,17 @@ export async function getAgentVisitPageContextRead(currentUser) {
   }
 
   const workspace = workspaceRes.data || EMPTY_AGENT_WORKSPACE;
-  const collectionsRes = await getCollectionsRead();
-  const allCollections = Array.isArray(collectionsRes?.data?.collections)
-    ? collectionsRes.data.collections
+  const scopedFromWorkspace = Array.isArray(workspace.pendingCollections)
+    ? workspace.pendingCollections
     : [];
-  const collections = filterCollectionsForUser(allCollections, currentUser);
+  let collections = scopedFromWorkspace;
+  if (!collections.length) {
+    const collectionsRes = await getCollectionsRead();
+    const allCollections = Array.isArray(collectionsRes?.data?.collections)
+      ? collectionsRes.data.collections
+      : [];
+    collections = filterCollectionsForUser(allCollections, currentUser);
+  }
 
   return {
     success: true,
@@ -3927,6 +4177,25 @@ export function invalidateAllHqReadCaches() {
   invalidateAdminDashboardReadCache();
   invalidateQualificationReviewReadCache();
   invalidateOrdersReadCache();
+  invalidateCollectionsReadCache();
+  invalidateBoundedSourceCache();
+}
+
+/**
+ * Latest payment date per lab from bounded payments already loaded by getCollectionsRead.
+ * @param {object[]} paymentRows
+ * @returns {Record<string, string>}
+ */
+export function buildLastPaymentDateByLabId(paymentRows = []) {
+  /** @type {Record<string, string>} */
+  const out = {};
+  for (const row of paymentRows || []) {
+    const key = normalizeLabIdKey(row.lab_id ?? row.labId);
+    const date = str(row.payment_date ?? row.paymentDate).slice(0, 10);
+    if (!key || !date) continue;
+    if (!out[key] || date > out[key]) out[key] = date;
+  }
+  return out;
 }
 
 export async function getQualificationReviewRead(options = {}) {
@@ -4232,6 +4501,8 @@ export async function updateQualificationPipelineWrite(payload = {}) {
 const AGENT_WORKSPACE_READ_CACHE_TTL_MS = 45_000;
 /** @type {{ result: object|null, loadedAt: number, userId: string }} */
 let agentWorkspaceReadCache = { result: null, loadedAt: 0, userId: "" };
+/** @type {Promise<object>|null} */
+let agentWorkspaceReadInFlight = null;
 
 export function peekAgentWorkspaceReadCache(userId = "") {
   const uid = String(userId || "");
@@ -4249,6 +4520,7 @@ export function invalidateAgentWorkspaceReadCache(userId = "") {
   const uid = String(userId || "");
   if (!uid || agentWorkspaceReadCache.userId === uid) {
     agentWorkspaceReadCache = { result: null, loadedAt: 0, userId: "" };
+    agentWorkspaceReadInFlight = null;
   }
 }
 
@@ -4260,11 +4532,21 @@ export function invalidateAgentWorkspaceReadCache(userId = "") {
 export async function getAgentWorkspaceRead(currentUser, options = {}) {
   const force = options.force === true;
   const userId = String(currentUser?.id || "");
+  const tenantId = str(
+    options.tenantId ?? options.tenant_id ?? currentUser?.tenantId ?? currentUser?.tenant_id
+  );
+  const boundedScope = tenantId ? { tenantId } : {};
+  const collectionsOpts = { force, ...boundedScope };
   if (!force) {
+    if (agentWorkspaceReadInFlight) {
+      perfLog("getAgentWorkspaceRead.inFlightJoin");
+      return agentWorkspaceReadInFlight;
+    }
     const cached = peekAgentWorkspaceReadCache(userId);
     if (cached) return cached;
   }
 
+  const run = (async () => {
   traceSupabaseRead("AgentDashboard.getAgentWorkspaceRead", {
     tables: ["v_labs_credit", "agent_visits", "ar_credit_control"],
   });
@@ -4273,21 +4555,25 @@ export async function getAgentWorkspaceRead(currentUser, options = {}) {
   }
 
   try {
-    const ownershipRes =
+    const [ownershipRes, collectionsRes, labsResult, av] = await Promise.all([
       currentUser?.role === "agent"
-        ? await getAgentActiveLabOwnershipRowsRead()
-        : { data: { rows: [] } };
+        ? getAgentActiveLabOwnershipRowsRead()
+        : Promise.resolve({ data: { rows: [] } }),
+      getCollectionsRead(collectionsOpts),
+      fetchLabsCreditBoundedRows(supabase, boundedScope),
+      fetchAgentVisitsBoundedRows(supabase, boundedScope),
+    ]);
+
     const ownershipRows = Array.isArray(ownershipRes?.data?.rows)
       ? ownershipRes.data.rows
       : [];
 
-    const collectionsRes = await getCollectionsRead();
     const allCollections = Array.isArray(collectionsRes?.data?.collections)
       ? collectionsRes.data.collections
       : [];
     const pendingCollections = filterCollectionsForUser(allCollections, currentUser, ownershipRows);
 
-    const { data: labsRaw, error: labsErr } = await fetchLabsCreditBoundedRows(supabase);
+    const { data: labsRaw, error: labsErr } = labsResult;
     if (labsErr) {
       hqDebugWarn("[getAgentWorkspaceRead] v_labs_credit:", labsErr.message);
     }
@@ -4298,7 +4584,6 @@ export async function getAgentWorkspaceRead(currentUser, options = {}) {
     const assignedLabs = filterLabsForUserWithOwnership(allLabs, currentUser, ownershipRows);
 
     let visitRows = [];
-    const av = await fetchAgentVisitsBoundedRows(supabase);
     if (av.error) {
       hqDebugWarn("[getAgentWorkspaceRead] agent_visits:", av.error.message);
     } else if (Array.isArray(av.data)) {
@@ -4356,6 +4641,14 @@ export async function getAgentWorkspaceRead(currentUser, options = {}) {
   } catch (err) {
     hqDebugWarn("[getAgentWorkspaceRead] failed:", err?.message || err);
     return { success: false, readFailed: true, error: err?.message || String(err), data: { ...EMPTY_AGENT_WORKSPACE } };
+  }
+  })();
+
+  if (!force) agentWorkspaceReadInFlight = run;
+  try {
+    return await run;
+  } finally {
+    if (!force) agentWorkspaceReadInFlight = null;
   }
 }
 
@@ -5817,6 +6110,533 @@ async function applyLabOrderInventoryDeduction({ savedLineItems, order_id, tenan
 }
 
 /**
+ * Read lab ordering mode for portal / admin UI.
+ */
+export async function getLabOrderingContextRead({ tenantId, labId } = {}) {
+  if (!supabase) {
+    return {
+      success: false,
+      error: "Supabase is not configured",
+      orderingMode: normalizeOrderingMode(null),
+      lifecycleStatus: LAB_LIFECYCLE_STATUS.ACTIVE,
+    };
+  }
+  const tid = str(tenantId);
+  const lid = labIdKey(labId);
+  if (!tid || !lid) {
+    return {
+      success: false,
+      error: "tenantId and labId required",
+      orderingMode: normalizeOrderingMode(null),
+      lifecycleStatus: LAB_LIFECYCLE_STATUS.ACTIVE,
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("labs")
+    .select("ordering_mode, status, lab_id, lab_name, tenant_id")
+    .eq("tenant_id", tid)
+    .eq("lab_id", lid)
+    .maybeSingle();
+
+  if (error) {
+    const msg = str(error.message).toLowerCase();
+    if (msg.includes("ordering_mode") && msg.includes("does not exist")) {
+      return {
+        success: true,
+        orderingMode: normalizeOrderingMode(null),
+        lifecycleStatus: LAB_LIFECYCLE_STATUS.ACTIVE,
+        warning: "ordering_mode not deployed",
+      };
+    }
+    return {
+      success: false,
+      error: error.message,
+      orderingMode: normalizeOrderingMode(null),
+      lifecycleStatus: LAB_LIFECYCLE_STATUS.ACTIVE,
+    };
+  }
+
+  return {
+    success: true,
+    orderingMode: normalizeOrderingMode(data?.ordering_mode),
+    lifecycleStatus: normalizeLabLifecycleStatus(data?.status) || LAB_LIFECYCLE_STATUS.ACTIVE,
+    labName: str(data?.lab_name) || null,
+    error: null,
+  };
+}
+
+/**
+ * HQ admin: update lab ordering mode (Operations Center / lab profile).
+ */
+export async function updateLabOrderingModeWrite({
+  tenantId,
+  labId,
+  orderingMode,
+  actorId = "",
+} = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+  const tid = str(tenantId);
+  const lid = labIdKey(labId);
+  const mode = normalizeOrderingMode(orderingMode);
+  if (!tid || !lid) return { success: false, error: "tenantId and labId required" };
+
+  const { data, error } = await supabase
+    .from("labs")
+    .update({
+      ordering_mode: mode,
+    })
+    .eq("tenant_id", tid)
+    .eq("lab_id", lid)
+    .select("lab_id, lab_name, ordering_mode, tenant_id")
+    .maybeSingle();
+
+  if (error) {
+    const msg = str(error.message).toLowerCase();
+    if (msg.includes("ordering_mode") && msg.includes("does not exist")) {
+      return { success: false, error: "ordering_mode column not deployed — apply migration" };
+    }
+    return { success: false, error: error.message };
+  }
+  if (!data) return { success: false, error: "Lab not found or not authorized" };
+
+  const projection = await refreshLabProfileProjectionRow({ tenantId: tid, labId: lid });
+  const projectionWarning = projection.success
+    ? ""
+    : projection.error || "Lab profile projection refresh failed";
+  if (projectionWarning) {
+    hqDebugWarn("[updateLabOrderingModeWrite] projection refresh failed:", projectionWarning);
+  }
+
+  invalidateLabsCreditReadCache();
+  hqDebugLog("[updateLabOrderingModeWrite]", { labId: lid, orderingMode: mode, actorId: str(actorId) });
+  return {
+    success: true,
+    data: {
+      ...data,
+      orderingMode: normalizeOrderingMode(data.ordering_mode),
+      projectionRefreshed: projection.success,
+      projectionWarning: projectionWarning || null,
+    },
+    error: null,
+  };
+}
+
+async function resolveCurrentActorContext() {
+  if (!supabase) return { userId: "", role: "", email: "", displayName: "" };
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const user = sessionData?.session?.user;
+    const userId = str(user?.id);
+    if (!userId) return { userId: "", role: "", email: "", displayName: "" };
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("user_id, role, email, display_name, username, tenant_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+    return {
+      userId,
+      role: str(profile?.role).toLowerCase(),
+      email: str(profile?.email ?? user?.email),
+      displayName: str(profile?.display_name ?? profile?.username ?? user?.email),
+      tenantId: str(profile?.tenant_id),
+    };
+  } catch {
+    return { userId: "", role: "", email: "", displayName: "" };
+  }
+}
+
+async function recordLabLifecycleAuditEvent({
+  tenantId,
+  labId,
+  labName = "",
+  previousStatus,
+  nextStatus,
+  previousOrderingMode,
+  nextOrderingMode,
+  actor,
+  reason,
+  notes = "",
+  originatingScreen = "",
+} = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+  const actorUserId = str(actor?.userId);
+  if (!actorUserId) return { success: false, error: "Authenticated actor is required for audit" };
+
+  const timestamp = new Date().toISOString();
+  const payload = buildProvisioningAuditPayload({
+    action: "lab_lifecycle_status_changed",
+    reason,
+    previous: {
+      status: previousStatus,
+      orderingMode: previousOrderingMode,
+      previous_status: previousStatus,
+      previous_ordering_mode: previousOrderingMode,
+    },
+    next: {
+      status: nextStatus,
+      orderingMode: nextOrderingMode,
+      new_status: nextStatus,
+      new_ordering_mode: nextOrderingMode,
+    },
+    related: {
+      tenantId,
+      tenant_id: tenantId,
+      labId,
+      lab_id: labId,
+      labName: labName || undefined,
+      lab_name: labName || undefined,
+      previous_status: previousStatus,
+      new_status: nextStatus,
+      previous_ordering_mode: previousOrderingMode,
+      new_ordering_mode: nextOrderingMode,
+      actor: {
+        userId: actorUserId,
+        user_id: actorUserId,
+        role: str(actor?.role),
+        email: str(actor?.email),
+        displayName: str(actor?.displayName),
+      },
+      actor_user_id: actorUserId,
+      timestamp,
+      notes: str(notes) || undefined,
+      originatingScreen: str(originatingScreen) || undefined,
+      originating_screen: str(originatingScreen) || undefined,
+    },
+  });
+
+  const { error } = await supabase.from("user_provisioning_events").insert([
+    {
+      hq_tenant_id: tenantId,
+      subject_user_id: actorUserId,
+      event_type: "updated",
+      actor_user_id: actorUserId,
+      payload,
+    },
+  ]);
+
+  if (error) return { success: false, error: error.message || "Failed to write audit event" };
+  return { success: true, payload };
+}
+
+async function refreshLabProfileProjectionRow({ tenantId, labId } = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+  const { data, error } = await supabase.rpc("refresh_proj_lab_profile_row_v1", {
+    p_tenant_id: tenantId,
+    p_lab_id: labId,
+  });
+  if (error) return { success: false, error: error.message || "Lab profile projection refresh failed" };
+  if (data?.success === false) {
+    return { success: false, error: data?.error || "Lab profile projection refresh failed" };
+  }
+  return { success: true, data };
+}
+
+/**
+ * HQ admin/executive: update lab lifecycle status.
+ * Lifecycle state is not a financial state; this write only touches `labs.status`
+ * and forces `ordering_mode = suspended` for ACTIVE -> INACTIVE.
+ */
+export async function updateLabLifecycleStatusWrite({
+  tenantId,
+  labId,
+  nextStatus,
+  status,
+  confirmed = false,
+  confirmation = false,
+  reason = "",
+  notes = "",
+  originatingScreen = "",
+} = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+  const tid = str(tenantId);
+  const lid = labIdKey(labId);
+  const targetStatus = normalizeLabLifecycleStatus(nextStatus ?? status);
+  const isConfirmed = confirmed === true || confirmation === true;
+  const reasonText = str(reason);
+  if (!tid || !lid) return { success: false, code: "missing_scope", error: "tenantId and labId required" };
+
+  const actor = await resolveCurrentActorContext();
+  if (!isHqOpsRole(actor.role)) {
+    return {
+      success: false,
+      code: "unauthorized",
+      error: "Only admin or executive users may change lab lifecycle status",
+    };
+  }
+
+  const { data: current, error: readError } = await supabase
+    .from("labs")
+    .select("tenant_id, lab_id, lab_name, status, ordering_mode")
+    .eq("tenant_id", tid)
+    .eq("lab_id", lid)
+    .maybeSingle();
+
+  if (readError) return { success: false, code: "read_failed", error: readError.message };
+  if (!current) {
+    return { success: false, code: "lab_not_found", error: "Lab not found or not authorized" };
+  }
+
+  const previousStatus = normalizeLabLifecycleStatus(current.status);
+  const previousOrderingMode = normalizeOrderingMode(current.ordering_mode);
+  const validation = validateLabLifecycleTransition({
+    previousStatus,
+    nextStatus: targetStatus,
+    confirmed: isConfirmed,
+    reason: reasonText,
+  });
+  if (!validation.ok) return { success: false, ...validation };
+
+  const updatePayload = {
+    status: validation.nextStatus,
+  };
+  if (validation.forceOrderingSuspended) {
+    updatePayload.ordering_mode = ORDERING_MODE.SUSPENDED;
+  }
+
+  const { data: updated, error: updateError } = await supabase
+    .from("labs")
+    .update(updatePayload)
+    .eq("tenant_id", tid)
+    .eq("lab_id", lid)
+    .select("tenant_id, lab_id, lab_name, status, ordering_mode")
+    .maybeSingle();
+
+  if (updateError) {
+    return { success: false, code: "update_failed", error: updateError.message };
+  }
+  if (!updated) {
+    return { success: false, code: "update_empty", error: "Lab lifecycle update did not persist" };
+  }
+
+  const nextOrderingMode = normalizeOrderingMode(updated.ordering_mode);
+  const audit = await recordLabLifecycleAuditEvent({
+    tenantId: tid,
+    labId: lid,
+    labName: str(updated.lab_name ?? current.lab_name),
+    previousStatus,
+    nextStatus: validation.nextStatus,
+    previousOrderingMode,
+    nextOrderingMode,
+    actor,
+    reason: reasonText,
+    notes,
+    originatingScreen,
+  });
+  if (!audit.success) {
+    return {
+      success: false,
+      code: "audit_failed",
+      error: audit.error || "Lifecycle audit event failed",
+      data: { lab: updated, auditRecorded: false },
+    };
+  }
+
+  const projection = await refreshLabProfileProjectionRow({ tenantId: tid, labId: lid });
+  if (!projection.success) {
+    return {
+      success: false,
+      code: "projection_refresh_failed",
+      error: projection.error || "Lab profile projection refresh failed",
+      data: { lab: updated, auditRecorded: true, projectionRefreshed: false },
+    };
+  }
+
+  invalidateLabsCreditReadCache();
+  hqDebugLog("[updateLabLifecycleStatusWrite]", {
+    labId: lid,
+    previousStatus,
+    nextStatus: validation.nextStatus,
+    previousOrderingMode,
+    nextOrderingMode,
+    actorId: actor.userId,
+  });
+
+  return {
+    success: true,
+    data: {
+      lab: updated,
+      labId: lid,
+      tenantId: tid,
+      previousStatus,
+      newStatus: validation.nextStatus,
+      previousOrderingMode,
+      newOrderingMode: nextOrderingMode,
+      orderingMode: nextOrderingMode,
+      auditRecorded: true,
+      projectionRefreshed: true,
+      auditPayload: audit.payload,
+      projection: projection.data,
+    },
+    error: null,
+  };
+}
+
+async function resolveCurrentActorRole(explicitRole) {
+  const fromPayload = str(explicitRole).toLowerCase();
+  if (fromPayload) return fromPayload;
+  if (!supabase) return "";
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const userId = sessionData?.session?.user?.id;
+    if (!userId) return "";
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("user_id", userId)
+      .maybeSingle();
+    return str(profile?.role).toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Client-side ordering mode gate (mirrors create_lab_order + orders_insert RLS).
+ */
+async function assertLabOrderInitiationAllowed({
+  tenantId,
+  labId,
+  actorRole = "",
+  adminOnBehalf = false,
+} = {}) {
+  if (!supabase) return { ok: true };
+  const role = await resolveCurrentActorRole(actorRole);
+  const tid = str(tenantId);
+  const lid = labIdKey(labId);
+
+  if (isHqOpsRole(role)) {
+    if (!adminOnBehalf) return { ok: true };
+    if (!tid || !lid) {
+      return { ok: false, error: "tenantId and labId required for HQ on-behalf order" };
+    }
+
+    const { data, error } = await supabase
+      .from("labs")
+      .select("ordering_mode, status, lab_id, lab_name, tenant_id")
+      .eq("tenant_id", tid)
+      .eq("lab_id", lid)
+      .maybeSingle();
+
+    if (error) {
+      hqDebugWarn("[assertLabOrderInitiationAllowed.adminOnBehalf]", error.message);
+      return { ok: false, error: error.message || "Failed to verify lab ordering eligibility" };
+    }
+    if (!data) {
+      return { ok: false, error: "Lab not found or not authorized for HQ on-behalf order" };
+    }
+
+    const mode = normalizeOrderingMode(data.ordering_mode);
+    const lifecycleStatus = normalizeLabLifecycleStatus(data.status) || LAB_LIFECYCLE_STATUS.ACTIVE;
+    if (!canAdminInitiateOrder(mode, lifecycleStatus)) {
+      return {
+        ok: false,
+        error: adminOrderingBlockedMessage(mode, lifecycleStatus),
+        orderingMode: mode,
+        lifecycleStatus,
+      };
+    }
+    return {
+      ok: true,
+      orderingMode: mode,
+      lifecycleStatus,
+      labName: str(data.lab_name),
+    };
+  }
+  if (role && role !== "lab") return { ok: true };
+
+  if (!tid || !lid) return { ok: true };
+
+  const { data, error } = await supabase
+    .from("labs")
+    .select("ordering_mode")
+    .eq("tenant_id", tid)
+    .eq("lab_id", lid)
+    .maybeSingle();
+
+  if (error) {
+    const msg = str(error.message).toLowerCase();
+    if (msg.includes("ordering_mode") && msg.includes("does not exist")) {
+      return { ok: true };
+    }
+    hqDebugWarn("[assertLabOrderInitiationAllowed]", error.message);
+    return { ok: true };
+  }
+
+  const mode = normalizeOrderingMode(data?.ordering_mode);
+  if (!canLabInitiateOrder(mode)) {
+    return { ok: false, error: labOrderingBlockedMessage(mode), orderingMode: mode };
+  }
+  return { ok: true, orderingMode: mode };
+}
+
+async function recordAdminOnBehalfOrderAuditEvent({
+  tenantId,
+  labId,
+  labName = "",
+  orderId,
+  actorRole = "",
+  actorUserId = "",
+  actorEmail = "",
+  totalAmount = 0,
+  lineCount = 0,
+} = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured" };
+  const actor = await resolveCurrentActorContext();
+  const resolvedActorUserId = str(actorUserId || actor.userId);
+  if (!resolvedActorUserId) {
+    return { success: false, error: "Authenticated actor is required for audit" };
+  }
+
+  const timestamp = new Date().toISOString();
+  const payload = buildProvisioningAuditPayload({
+    action: "admin_on_behalf_order_created",
+    reason: "HQ user created an order for a selected customer lab",
+    related: {
+      source: "admin_on_behalf",
+      tenantId,
+      tenant_id: tenantId,
+      labId,
+      lab_id: labId,
+      labName: labName || undefined,
+      lab_name: labName || undefined,
+      orderId,
+      order_id: orderId,
+      totalAmount: num(totalAmount),
+      total_amount: num(totalAmount),
+      lineCount: Number(lineCount) || 0,
+      line_count: Number(lineCount) || 0,
+      actor: {
+        userId: resolvedActorUserId,
+        user_id: resolvedActorUserId,
+        role: str(actorRole || actor.role),
+        email: str(actorEmail || actor.email),
+        displayName: str(actor.displayName),
+      },
+      actor_user_id: resolvedActorUserId,
+      actor_role: str(actorRole || actor.role),
+      actor_email: str(actorEmail || actor.email),
+      customer_lab_id: labId,
+      customer_lab_name: labName || undefined,
+      timestamp,
+    },
+  });
+
+  const { error } = await supabase.from("user_provisioning_events").insert([
+    {
+      hq_tenant_id: tenantId,
+      subject_user_id: resolvedActorUserId,
+      event_type: "created",
+      actor_user_id: resolvedActorUserId,
+      payload,
+    },
+  ]);
+
+  if (error) return { success: false, error: error.message || "Failed to write audit event" };
+  return { success: true, payload };
+}
+
+/**
  * Server-side credit eligibility for lab order placement.
  * @returns {Promise<{ ok: boolean, error?: string }>}
  */
@@ -5853,6 +6673,285 @@ async function assertLabOrderCreditEligible(tenantId, labId) {
   return { ok: true };
 }
 
+/** Shown when create_lab_order response cannot be verified in orders + lines. */
+export const LAB_CHECKOUT_CONFIRM_ERROR =
+  "Order could not be confirmed. Your cart is saved. Please retry or contact PrimeCare support.";
+
+const LAB_CHECKOUT_CONFIRM_RETRY_ATTEMPTS = 3;
+const LAB_CHECKOUT_CONFIRM_RETRY_DELAY_MS = 150;
+/** Idempotent RPC replays older than this are rejected (prevents cart-hash CRQ replaying prior-day orders). */
+export const LAB_CHECKOUT_IDEMPOTENCY_WINDOW_MS = 90_000;
+
+export function buildLabCheckoutClientRequestId(labId) {
+  const key = labIdKey(labId);
+  return `CRQ-${key || "lab"}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function evaluateCheckoutIdempotentReplay({ idempotent, savedOrder } = {}) {
+  if (!idempotent || !savedOrder) {
+    return { allowed: true, isReplay: false };
+  }
+  const createdAt = savedOrder.created_at ?? savedOrder.createdAt ?? null;
+  const createdMs = createdAt ? new Date(createdAt).getTime() : Number.NaN;
+  const ageMs = Number.isFinite(createdMs) ? Date.now() - createdMs : Number.POSITIVE_INFINITY;
+  if (ageMs > LAB_CHECKOUT_IDEMPOTENCY_WINDOW_MS) {
+    return {
+      allowed: false,
+      isReplay: true,
+      reason: "stale_idempotent_replay",
+      ageMs,
+      orderId: str(savedOrder.order_id ?? savedOrder.orderId),
+    };
+  }
+  return { allowed: true, isReplay: true, ageMs, orderId: str(savedOrder.order_id ?? savedOrder.orderId) };
+}
+
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sanitizeRpcOrderResponseForLog(rpcOrder) {
+  if (!rpcOrder) return null;
+  const body = rpcOrder.data || {};
+  const order = body.order || null;
+  return {
+    rpcSuccess: body.success !== false,
+    idempotent: Boolean(body.idempotent),
+    hasOrderRow: Boolean(order),
+    orderId: str(order?.order_id ?? order?.orderId ?? ""),
+    rpcError: rpcOrder.error?.message ?? null,
+  };
+}
+
+function logLabCheckoutPersistenceDiagnostic(detail = {}) {
+  const payload = {
+    ...detail,
+    at: new Date().toISOString(),
+    buildStamp: getAppBuildStamp(),
+  };
+  hqDebugWarn("[LabCheckout.persistence]", payload);
+  recordPredatorTiming({
+    module: "Lab Ordering",
+    step: "checkout.persistence",
+    durationMs: Number(detail.elapsedMs) || 0,
+    detail: payload,
+  });
+}
+
+/**
+ * Read-back verification: order row + at least one line must exist for lab checkout success.
+ */
+export async function confirmLabOrderPersistedRead({
+  tenantId,
+  labId,
+  orderId,
+  clientRequestId = null,
+} = {}) {
+  const diagnostic = {
+    tenantId: str(tenantId),
+    labId: labIdKey(labId),
+    orderId: str(orderId),
+    clientRequestId: str(clientRequestId) || null,
+    orderFound: false,
+    lineCount: 0,
+    reason: null,
+  };
+
+  if (!supabase) {
+    diagnostic.reason = "no_supabase";
+    return { ok: false, diagnostic };
+  }
+  if (!diagnostic.tenantId || !diagnostic.labId || !diagnostic.orderId) {
+    diagnostic.reason = "missing_scope";
+    return { ok: false, diagnostic };
+  }
+
+  const { data: orderRow, error: orderError } = await supabase
+    .from("orders")
+    .select(HQ_ORDER_LIST_COLUMNS)
+    .eq("tenant_id", diagnostic.tenantId)
+    .eq("lab_id", diagnostic.labId)
+    .eq("order_id", diagnostic.orderId)
+    .maybeSingle();
+
+  if (orderError) {
+    diagnostic.reason = "order_read_error";
+    diagnostic.error = orderError.message;
+    return { ok: false, diagnostic };
+  }
+  if (!orderRow) {
+    diagnostic.reason = "order_not_found";
+    return { ok: false, diagnostic };
+  }
+
+  diagnostic.orderFound = true;
+  const lineFetch = await fetchOrderDetailLinesForOrder(supabase, orderRow);
+  const lines = (lineFetch.lines || [])
+    .map(mapOrderLineRow)
+    .filter((line) => line.productId || line.productName);
+  diagnostic.lineCount = lines.length;
+
+  if (lineFetch.error) {
+    diagnostic.lineReadError = lineFetch.error.message;
+  }
+  if (!lines.length) {
+    diagnostic.reason = "no_lines";
+    return { ok: false, diagnostic };
+  }
+
+  const itemCount = lines.reduce((sum, line) => sum + num(line.quantity), 0);
+  return {
+    ok: true,
+    orderRow,
+    orderId: str(orderRow.order_id ?? diagnostic.orderId),
+    lines,
+    itemCount,
+    total: num(orderRow.total_amount),
+    diagnostic,
+  };
+}
+
+/**
+ * Retry-safe read-back: immediate attempt + brief retries before checkout failure.
+ */
+export async function confirmLabOrderPersistedReadWithRetry({
+  tenantId,
+  labId,
+  orderId,
+  clientRequestId = null,
+} = {}) {
+  const started = Date.now();
+  let lastResult = null;
+
+  for (let attempt = 1; attempt <= LAB_CHECKOUT_CONFIRM_RETRY_ATTEMPTS; attempt += 1) {
+    if (attempt > 1) {
+      await sleepMs(LAB_CHECKOUT_CONFIRM_RETRY_DELAY_MS * (attempt - 1));
+    }
+    lastResult = await confirmLabOrderPersistedRead({
+      tenantId,
+      labId,
+      orderId,
+      clientRequestId,
+    });
+    lastResult.diagnostic = {
+      ...(lastResult.diagnostic || {}),
+      attempt,
+      attempts: LAB_CHECKOUT_CONFIRM_RETRY_ATTEMPTS,
+      elapsedMs: Date.now() - started,
+    };
+    if (lastResult.ok) {
+      return lastResult;
+    }
+  }
+
+  return lastResult;
+}
+
+async function finalizeConfirmedLabCheckout({
+  tenant_id,
+  lab_id,
+  order_id,
+  client_request_id,
+  rpcResponse = null,
+  idempotent = false,
+  userEmail = null,
+  cartItemCount = null,
+  afterConfirmed = null,
+} = {}) {
+  const checkoutStarted = Date.now();
+  const rpcLog = sanitizeRpcOrderResponseForLog(rpcResponse);
+
+  logLabCheckoutPersistenceDiagnostic({
+    phase: "create_lab_order_response",
+    tenantId: tenant_id,
+    labId: lab_id,
+    orderId: order_id,
+    clientRequestId: client_request_id,
+    userEmail: str(userEmail) || null,
+    cartItemCount: cartItemCount != null ? Number(cartItemCount) : null,
+    rpcSuccess: rpcLog?.rpcSuccess ?? null,
+    rpcHasOrderRow: rpcLog?.hasOrderRow ?? null,
+    rpcOrderId: rpcLog?.orderId ?? null,
+    rpcError: rpcLog?.rpcError ?? null,
+    rpcIdempotent: rpcLog?.idempotent ?? null,
+  });
+
+  const confirmed = await confirmLabOrderPersistedReadWithRetry({
+    tenantId: tenant_id,
+    labId: lab_id,
+    orderId: order_id,
+    clientRequestId: client_request_id,
+  });
+
+  logLabCheckoutPersistenceDiagnostic({
+    phase: "persistence_verify",
+    tenantId: tenant_id,
+    labId: lab_id,
+    orderId: order_id,
+    clientRequestId: client_request_id,
+    userEmail: str(userEmail) || null,
+    cartItemCount: cartItemCount != null ? Number(cartItemCount) : null,
+    verified: confirmed.ok,
+    lineCount: confirmed.diagnostic?.lineCount ?? confirmed.lines?.length ?? 0,
+    itemCount: confirmed.itemCount ?? null,
+    confirmationReason: confirmed.diagnostic?.reason ?? null,
+    confirmationAttempts: confirmed.diagnostic?.attempts ?? null,
+    confirmationAttempt: confirmed.diagnostic?.attempt ?? null,
+    elapsedMs: Date.now() - checkoutStarted,
+    ...(confirmed.diagnostic || {}),
+  });
+
+  if (!confirmed.ok) {
+    return {
+      success: false,
+      error: LAB_CHECKOUT_CONFIRM_ERROR,
+      data: { diagnostic: confirmed.diagnostic, confirmed: false },
+    };
+  }
+
+  let deliverySnapshotResult = null;
+  if (typeof afterConfirmed === "function") {
+    deliverySnapshotResult = await afterConfirmed(confirmed);
+  }
+
+  logLabCheckoutPersistenceDiagnostic({
+    phase: "delivery_snapshot",
+    tenantId: tenant_id,
+    labId: lab_id,
+    orderId: confirmed.orderId,
+    clientRequestId: client_request_id,
+    deliverySnapshotSuccess: deliverySnapshotResult?.success ?? null,
+    deliverySnapshotSkipped: deliverySnapshotResult?.skipped ?? null,
+    deliverySnapshotError: deliverySnapshotResult?.error ?? null,
+    elapsedMs: Date.now() - checkoutStarted,
+  });
+
+  return {
+    success: true,
+    data: {
+      confirmed: true,
+      order: confirmed.orderRow,
+      orderId: confirmed.orderId,
+      lines: confirmed.lines,
+      itemCount: confirmed.itemCount,
+      total: confirmed.total,
+      idempotent: Boolean(idempotent),
+      diagnostic: {
+        ...(confirmed.diagnostic || {}),
+        deliverySnapshot: deliverySnapshotResult
+          ? {
+              success: Boolean(deliverySnapshotResult.success),
+              skipped: Boolean(deliverySnapshotResult.skipped),
+              error: deliverySnapshotResult.error || null,
+            }
+          : null,
+        elapsedMs: Date.now() - checkoutStarted,
+      },
+    },
+    error: null,
+  };
+}
+
 /**
  * Inserts a lab order into `orders` and line rows into `order_items`.
  * Payload mirrors LabOrderingPage: { labId, labName?, notes?, items: [{ productId, productName?, quantity, unitSellingPrice }], tenantId?, createdBy?, orderId?, orderDate?, status? }
@@ -5885,6 +6984,15 @@ export async function createOrderWrite(payload = {}) {
     const status = str(payload.status ?? "Placed");
     const notesRaw = str(payload.notes);
     const items = Array.isArray(payload.items) ? payload.items : [];
+    const orderSource = str(payload.source ?? payload.orderSource ?? payload.order_source).toLowerCase();
+    const adminOnBehalf =
+      payload.adminOnBehalf === true ||
+      payload.admin_on_behalf === true ||
+      orderSource === "admin_on_behalf";
+    const actorRole = str(payload.actorRole ?? payload.actor_role).toLowerCase();
+    const actorUserId = str(payload.actorUserId ?? payload.actor_user_id ?? payload.actorId ?? payload.actor_id);
+    const actorEmail = str(payload.actorEmail ?? payload.actor_email ?? created_by);
+    const customerLabName = str(payload.customerLabName ?? payload.customer_lab_name ?? payload.labName ?? payload.lab_name);
 
     if (!lab_id) {
       return { success: false, error: "lab_id is required", data: null };
@@ -5892,6 +7000,17 @@ export async function createOrderWrite(payload = {}) {
     if (!items.length) {
       return { success: false, error: "items are required", data: null };
     }
+
+    const initiationCheck = await assertLabOrderInitiationAllowed({
+      tenantId: tenant_id,
+      labId: lab_id,
+      actorRole,
+      adminOnBehalf,
+    });
+    if (!initiationCheck.ok) {
+      return { success: false, error: initiationCheck.error, data: null };
+    }
+    const auditLabName = customerLabName || initiationCheck.labName || "";
 
     const creditCheck = await assertLabOrderCreditEligible(tenant_id, lab_id);
     if (!creditCheck.ok) {
@@ -5940,61 +7059,159 @@ export async function createOrderWrite(payload = {}) {
       if (!rpcOrder.error && rpcOrder.data?.success !== false) {
         const rpcBody = rpcOrder.data || {};
         const savedOrder = rpcBody.order || null;
-        if (savedOrder) {
-          hqDebugLog("SUPABASE ORDER SAVED (RPC)", savedOrder);
-          await getLabRecentOrdersRead(lab_id);
+        const returnedOrderId = str(savedOrder?.order_id ?? savedOrder?.orderId ?? "");
 
-          if (str(status).toLowerCase() === "fulfilled") {
-            const itemsRes = await supabase
-              .from("order_items")
-              .select("*")
-              .eq("order_id", order_id);
-            const itemsData = Array.isArray(itemsRes.data) ? itemsRes.data : [];
-            try {
-              await applyLabOrderInventoryDeduction({
-                savedLineItems: itemsData,
-                order_id,
-                tenant_id,
-                created_by,
-              });
-            } catch (invErr) {
-              hqDebugWarn("[createOrderWrite] RPC fulfill inventory:", invErr?.message || invErr);
-            }
-            const amt = normalizedLines.reduce((s, l) => s + num(l.total_price), 0);
-            const bump = await bumpArOutstandingForFulfillment({
-              lab_id,
-              tenant_id,
-              deltaAmount: amt,
-            });
-            const flagPatch = {
-              fulfilled_at: new Date().toISOString(),
-              inventory_updated: true,
-              ar_posted: Boolean(bump.success && !bump.skipped),
-              updated_at: new Date().toISOString(),
-            };
-            await supabase
-              .from("orders")
-              .update(flagPatch)
-              .eq("order_id", order_id)
-              .select(HQ_ORDER_LIST_COLUMNS);
-            await createInvoiceForFulfilledOrderWrite({
-              tenantId: tenant_id,
-              orderId: order_id,
-              actorId: created_by,
-              createdSource: "createOrderWrite",
-            });
-          }
-
+        if (!savedOrder || !returnedOrderId) {
+          logLabCheckoutPersistenceDiagnostic({
+            phase: "rpc_missing_order_row",
+            tenantId: tenant_id,
+            labId: lab_id,
+            orderId: order_id,
+            clientRequestId: client_request_id,
+            userEmail: created_by,
+            cartItemCount: items.length,
+            rpcSuccess: true,
+            rpcHasOrderRow: false,
+            rpcError: null,
+          });
           return {
-            success: true,
+            success: false,
+            error: LAB_CHECKOUT_CONFIRM_ERROR,
             data: {
-              order: savedOrder,
-              orderId: order_id,
-              idempotent: Boolean(rpcBody.idempotent),
+              confirmed: false,
+              diagnostic: {
+                reason: "rpc_success_without_order_row",
+                orderId: order_id,
+                clientRequestId: client_request_id,
+              },
             },
-            error: null,
           };
         }
+
+        hqDebugLog("SUPABASE ORDER SAVED (RPC)", savedOrder);
+
+        const idempotentReplay = evaluateCheckoutIdempotentReplay({
+          idempotent: Boolean(rpcBody.idempotent),
+          savedOrder,
+        });
+        if (!idempotentReplay.allowed) {
+          logLabCheckoutPersistenceDiagnostic({
+            phase: "stale_idempotent_replay",
+            tenantId: tenant_id,
+            labId: lab_id,
+            orderId: returnedOrderId,
+            clientRequestId: client_request_id,
+            userEmail: created_by,
+            cartItemCount: items.length,
+            replayOrderId: idempotentReplay.orderId,
+            replayAgeMs: idempotentReplay.ageMs,
+            replayReason: idempotentReplay.reason,
+          });
+          return {
+            success: false,
+            error:
+              "This checkout matched a previous order from an earlier session. Your cart is saved — adjust quantities or retry checkout.",
+            data: {
+              confirmed: false,
+              idempotentReplayRejected: true,
+              diagnostic: {
+                reason: idempotentReplay.reason,
+                replayOrderId: idempotentReplay.orderId,
+                ageMs: idempotentReplay.ageMs,
+                clientRequestId: client_request_id,
+              },
+            },
+          };
+        }
+
+        const finalized = await finalizeConfirmedLabCheckout({
+          tenant_id,
+          lab_id,
+          order_id: returnedOrderId,
+          client_request_id,
+          rpcResponse: rpcOrder,
+          idempotent: Boolean(rpcBody.idempotent),
+          userEmail: created_by,
+          cartItemCount: items.length,
+          afterConfirmed: async () => {
+            await getLabRecentOrdersRead(lab_id);
+            const deliverySnapshotResult = await tryPersistOrderDeliverySnapshot({
+              tenant_id,
+              order_id: returnedOrderId,
+              lab_id,
+              merchandiseSubtotal: total_amount,
+              deliveryMethodIntent:
+                str(payload.deliveryMethodIntent ?? payload.delivery_method_intent) ||
+                DELIVERY_METHOD_INTENT.DELIVERY,
+            });
+
+            if (str(status).toLowerCase() === "fulfilled") {
+                const itemsRes = await supabase
+                  .from("order_items")
+                  .select("*")
+                  .eq("order_id", returnedOrderId);
+                const itemsData = Array.isArray(itemsRes.data) ? itemsRes.data : [];
+                try {
+                  await applyLabOrderInventoryDeduction({
+                    savedLineItems: itemsData,
+                    order_id: returnedOrderId,
+                    tenant_id,
+                    created_by,
+                  });
+                } catch (invErr) {
+                  hqDebugWarn("[createOrderWrite] RPC fulfill inventory:", invErr?.message || invErr);
+                }
+                const amt = normalizedLines.reduce((s, l) => s + num(l.total_price), 0);
+                const bump = await bumpArOutstandingForFulfillment({
+                  lab_id,
+                  tenant_id,
+                  deltaAmount: amt,
+                });
+                const flagPatch = {
+                  fulfilled_at: new Date().toISOString(),
+                  inventory_updated: true,
+                  ar_posted: Boolean(bump.success && !bump.skipped),
+                  updated_at: new Date().toISOString(),
+                };
+                await supabase
+                  .from("orders")
+                  .update(flagPatch)
+                  .eq("order_id", returnedOrderId)
+                  .select(HQ_ORDER_LIST_COLUMNS);
+                await createInvoiceForFulfilledOrderWrite({
+                  tenantId: tenant_id,
+                  orderId: returnedOrderId,
+                  actorId: created_by,
+                  createdSource: "createOrderWrite",
+                });
+                await tryCreateShipmentAfterFulfill({
+                  orderRow: savedOrder,
+                  orderId: returnedOrderId,
+                  tenantId: tenant_id,
+                  actorId: created_by,
+                  createdSource: "createOrderWrite.rpc",
+                });
+            }
+            return deliverySnapshotResult;
+          },
+        });
+        if (finalized.success && adminOnBehalf) {
+          const audit = await recordAdminOnBehalfOrderAuditEvent({
+            tenantId: tenant_id,
+            labId: lab_id,
+            labName: auditLabName,
+            orderId: returnedOrderId,
+            actorRole,
+            actorUserId,
+            actorEmail,
+            totalAmount: total_amount,
+            lineCount: normalizedLines.length,
+          });
+          if (!audit.success) {
+            hqDebugWarn("[createOrderWrite] admin on-behalf audit failed:", audit.error);
+          }
+        }
+        return finalized;
       }
 
       if (rpcOrder.error && !isMissingSupabaseRpcError(rpcOrder.error, "create_lab_order")) {
@@ -6068,11 +7285,37 @@ export async function createOrderWrite(payload = {}) {
       return {
         success: false,
         error: itemsError.message || "Order items insert failed",
-        data: { order: savedOrder, items: [] },
+        data: { order: savedOrder, items: [], confirmed: false },
       };
     }
 
     hqDebugLog("SUPABASE ORDER ITEMS SAVED", itemsData);
+
+    const legacyConfirmed = await finalizeConfirmedLabCheckout({
+      tenant_id,
+      lab_id,
+      order_id,
+      client_request_id,
+      rpcResponse: null,
+      idempotent: false,
+      userEmail: created_by,
+      cartItemCount: items.length,
+      afterConfirmed: async () => {
+        await getLabRecentOrdersRead(lab_id);
+        return tryPersistOrderDeliverySnapshot({
+          tenant_id,
+          order_id,
+          lab_id,
+          merchandiseSubtotal: total_amount,
+          deliveryMethodIntent:
+            str(payload.deliveryMethodIntent ?? payload.delivery_method_intent) ||
+            DELIVERY_METHOD_INTENT.DELIVERY,
+        });
+      },
+    });
+    if (!legacyConfirmed.success) {
+      return legacyConfirmed;
+    }
 
     if (str(status).toLowerCase() === "fulfilled") {
       hqDebugLog("ORDER STATUS BUSINESS RULE", {
@@ -6140,6 +7383,13 @@ export async function createOrderWrite(payload = {}) {
           skipped: Boolean(invoiceRes.skipped),
         });
       }
+      await tryCreateShipmentAfterFulfill({
+        orderRow: savedOrder,
+        orderId: order_id,
+        tenantId: tenant_id,
+        actorId: created_by,
+        createdSource: "createOrderWrite.legacy",
+      });
     }
 
     const notifyBase = {
@@ -6158,6 +7408,10 @@ export async function createOrderWrite(payload = {}) {
         payload: {
           orderId: order_id,
           labId: lab_id,
+          source: adminOnBehalf ? "admin_on_behalf" : orderSource || "lab_ordering",
+          actorRole: actorRole || undefined,
+          actorUserId: actorUserId || undefined,
+          customerLabId: adminOnBehalf ? lab_id : undefined,
           totalAmount: total_amount,
           status,
           lineCount: normalizedLines.length,
@@ -6183,12 +7437,34 @@ export async function createOrderWrite(payload = {}) {
       );
     }
 
+    scheduleProjectionRefreshAfterOrderWrite({
+      tenantId: tenant_id,
+      orderId: order_id,
+      labId: lab_id,
+    });
+
+    if (adminOnBehalf) {
+      const audit = await recordAdminOnBehalfOrderAuditEvent({
+        tenantId: tenant_id,
+        labId: lab_id,
+        labName: auditLabName,
+        orderId: order_id,
+        actorRole,
+        actorUserId,
+        actorEmail,
+        totalAmount: total_amount,
+        lineCount: normalizedLines.length,
+      });
+      if (!audit.success) {
+        hqDebugWarn("[createOrderWrite] admin on-behalf audit failed:", audit.error);
+      }
+    }
+
     return {
       success: true,
       data: {
-        order: savedOrder,
+        ...legacyConfirmed.data,
         items: itemsData,
-        orderId: order_id,
       },
       error: null,
     };
@@ -6219,6 +7495,22 @@ export function mapOrderRow(row, labNameFallback = "", rowIndex = 0) {
   const createdAt = str(row.created_at ?? row.createdAt ?? "");
   const createdBy = str(row.created_by ?? row.createdBy ?? "");
 
+  const orderTotal = num(
+    row.total_amount ??
+      row.totalAmount ??
+      row.order_total ??
+      row.orderTotal ??
+      row.total ??
+      row.amount ??
+      row.grand_total ??
+      0
+  );
+  const delivery = mapOrderDeliveryFields(row) || {};
+  const merchandiseSubtotal =
+    delivery.merchandiseSubtotal > 0 ? delivery.merchandiseSubtotal : orderTotal;
+  const deliveryChargeAmount = num(delivery.deliveryChargeAmount);
+  const estimatedOrderTotal = Math.round((merchandiseSubtotal + deliveryChargeAmount) * 100) / 100;
+
   return {
     orderId,
     orderDate,
@@ -6232,16 +7524,14 @@ export function mapOrderRow(row, labNameFallback = "", rowIndex = 0) {
     orderStatus: str(
       row.status ?? row.order_status ?? row.orderStatus ?? row.state ?? "Placed"
     ),
-    orderTotal: num(
-      row.total_amount ??
-        row.totalAmount ??
-        row.order_total ??
-        row.orderTotal ??
-        row.total ??
-        row.amount ??
-        row.grand_total ??
-        0
-    ),
+    orderTotal,
+    merchandiseSubtotal,
+    deliveryChargeAmount,
+    deliveryChargeReason: delivery.deliveryChargeReason,
+    deliveryMethodIntent: delivery.deliveryMethodIntent,
+    deliveryChargeStatus: delivery.deliveryChargeStatus,
+    estimatedOrderTotal,
+    hasDeliveryEstimate: deliveryChargeAmount > 0,
     createdAt,
     createdBy,
     updatedAt: str(row.updated_at ?? row.updatedAt ?? ""),
@@ -6492,6 +7782,8 @@ const ORDERS_READ_CACHE_TTL_MS = 45_000;
 let ordersReadCache = { result: null, loadedAt: 0, key: "" };
 /** @type {Promise<object>|null} */
 let ordersReadInFlight = null;
+/** @type {string} */
+let ordersReadInFlightKey = "";
 /** @type {{ map: Map<string, string>|null, loadedAt: number, inFlight: Promise<Map<string, string>>|null }} */
 let labsNameMapCache = { map: null, loadedAt: 0, inFlight: null };
 
@@ -6500,12 +7792,15 @@ function ordersReadCacheKey(params = {}) {
   const offset = Math.max(0, Number(params.offset) || 0);
   const daysBack =
     Number(params.daysBack) > 0 ? Number(params.daysBack) : HQ_DASHBOARD_RECENT_DAYS;
-  return `${limit}:${offset}:${daysBack}`;
+  const skipLineCounts = params.skipLineCounts === true ? "skipLines" : "withLines";
+  const tenantId = str(params.tenantId ?? params.tenant_id);
+  return `${tenantId || "all"}:${limit}:${offset}:${daysBack}:${skipLineCounts}`;
 }
 
 export function invalidateOrdersReadCache() {
   ordersReadCache = { result: null, loadedAt: 0, key: "" };
   ordersReadInFlight = null;
+  ordersReadInFlightKey = "";
 }
 
 export function peekOrdersReadCache(params = {}) {
@@ -6520,11 +7815,28 @@ export function peekOrdersReadCache(params = {}) {
   return null;
 }
 
+/**
+ * Fill itemCount on list rows without re-querying orders (line fan-out only).
+ * @param {object[]} orders
+ */
+export async function enrichOrdersListWithItemCounts(orders) {
+  if (!supabase || !Array.isArray(orders) || !orders.length) return orders;
+  const ids = orders.map((o) => str(o.orderId)).filter(Boolean);
+  if (!ids.length) return orders;
+  const lineCounts = await fetchOrderUnitCountsForOrders(supabase, ids, orders);
+  return orders.map((o) => {
+    const businessId = str(o.orderId);
+    const itemCount =
+      lineCounts.get(businessId) ?? (o.id != null ? lineCounts.get(str(o.id)) : 0) ?? o.itemCount ?? 0;
+    return itemCount === (o.itemCount ?? 0) ? o : { ...o, itemCount };
+  });
+}
+
 export async function getOrdersRead(params = {}) {
   const force = params.force === true;
   const cacheKey = ordersReadCacheKey(params);
 
-  if (!force && ordersReadInFlight) {
+  if (!force && ordersReadInFlight && ordersReadInFlightKey === cacheKey) {
     perfLog("getOrdersRead.inFlightJoin");
     return ordersReadInFlight;
   }
@@ -6536,6 +7848,32 @@ export async function getOrdersRead(params = {}) {
   ) {
     perfLog("getOrdersRead.cacheHit", { ageMs: Date.now() - ordersReadCache.loadedAt });
     return ordersReadCache.result;
+  }
+
+  // Sprint 6A — projection adapter (flag VITE_READ_ADAPTER_ORDERS_V1) participates
+  // in the same in-flight/cache path as the transactional read so duplicate callers
+  // (sidebar summary, OrdersPage, Operations Center) coalesce to one RPC per TTL.
+  if (isReadAdapterOrdersV1Enabled()) {
+    const runProjection = async () => {
+      const { readOrdersListV1 } = await import("@/api/projectionReadAdapters.js");
+      return readOrdersListV1(params);
+    };
+    if (!force) {
+      ordersReadInFlightKey = cacheKey;
+      ordersReadInFlight = runProjection();
+    }
+    try {
+      const result = await (force ? runProjection() : ordersReadInFlight);
+      if (!force && result?.success !== false) {
+        ordersReadCache = { result, loadedAt: Date.now(), key: cacheKey };
+      }
+      return result;
+    } finally {
+      if (!force && ordersReadInFlightKey === cacheKey) {
+        ordersReadInFlight = null;
+        ordersReadInFlightKey = "";
+      }
+    }
   }
 
   const run = async () => {
@@ -6558,21 +7896,24 @@ export async function getOrdersRead(params = {}) {
     const recentFrom = recentDateYmd(
       Number(params.daysBack) > 0 ? Number(params.daysBack) : HQ_DASHBOARD_RECENT_DAYS
     );
+    const tenantId = str(params.tenantId ?? params.tenant_id);
 
     let rawList = [];
-    const primary = await supabase
+    let primaryQuery = supabase
       .from("orders")
       .select(HQ_ORDER_LIST_COLUMNS)
       .gte("order_date", recentFrom)
-      .order("order_date", { ascending: false })
-      .range(offset, offset + limit - 1);
+      .order("order_date", { ascending: false });
+    if (tenantId) primaryQuery = primaryQuery.eq("tenant_id", tenantId);
+    const primary = await primaryQuery.range(offset, offset + limit - 1);
 
     if (primary.error) {
-      const fallback = await supabase
+      let fallbackQuery = supabase
         .from("orders")
         .select(HQ_ORDER_LIST_COLUMNS)
-        .order("created_at", { ascending: false })
-        .range(offset, offset + limit - 1);
+        .order("created_at", { ascending: false });
+      if (tenantId) fallbackQuery = fallbackQuery.eq("tenant_id", tenantId);
+      const fallback = await fallbackQuery.range(offset, offset + limit - 1);
       if (fallback.error) {
         const message = fallback.error.message || String(fallback.error);
         hqDebugWarn("[getOrdersRead] Supabase error:", message);
@@ -6583,24 +7924,28 @@ export async function getOrdersRead(params = {}) {
       rawList = Array.isArray(primary.data) ? primary.data : [];
     }
 
-    let labMap = new Map();
-    try {
-      labMap = await fetchLabsNameMap();
-    } catch {
-      labMap = new Map();
+    const skipLineCounts = params.skipLineCounts === true;
+    const labMapResult = await fetchLabsNameMap().catch(() => new Map());
+    const labMap = labMapResult instanceof Map ? labMapResult : new Map();
+    let lineCounts = new Map();
+    if (!skipLineCounts) {
+      lineCounts = await fetchOrderUnitCountsForOrders(
+        supabase,
+        collectOrderBusinessIds(rawList),
+        rawList
+      );
     }
-
-    const lineCounts = await fetchOrderLineCounts(collectOrderRowIds(rawList));
 
     const orders = rawList.map((r, idx) => {
       const labId = str(r.lab_id ?? r.labId ?? r.lab_uuid ?? r.labUUID ?? "");
       const mapped = mapOrderRow(r, labMap.get(labId) || "", idx);
       const businessId = str(r.order_id ?? r.orderId ?? mapped.orderId);
       const uuidId = r.id != null ? str(r.id) : "";
-      const itemCount =
-        lineCounts.get(businessId) ??
-        (uuidId ? lineCounts.get(uuidId) : 0) ??
-        0;
+      const itemCount = skipLineCounts
+        ? 0
+        : lineCounts.get(businessId) ??
+          (uuidId ? lineCounts.get(uuidId) : 0) ??
+          0;
       return { ...mapped, itemCount };
     });
 
@@ -6626,7 +7971,10 @@ export async function getOrdersRead(params = {}) {
   }
   };
 
-  if (!force) ordersReadInFlight = run();
+  if (!force) {
+    ordersReadInFlightKey = cacheKey;
+    ordersReadInFlight = run();
+  }
   try {
     const result = await (force ? run() : ordersReadInFlight);
     if (!force && result?.success !== false) {
@@ -6634,7 +7982,73 @@ export async function getOrdersRead(params = {}) {
     }
     return result;
   } finally {
-    if (!force) ordersReadInFlight = null;
+    if (!force && ordersReadInFlightKey === cacheKey) {
+      ordersReadInFlight = null;
+      ordersReadInFlightKey = "";
+    }
+  }
+}
+
+/**
+ * Lab-scoped order + lines read for tracking drawer.
+ * `orderId` may match `orders.order_id` or `orders.id` (uuid).
+ * Never throws.
+ */
+export async function getLabOrderDetailsRead({ orderId, labId, tenantId } = {}) {
+  traceSupabaseRead("LabOrdering.getLabOrderDetailsRead", {
+    tables: ["orders", "order_lines", "order_items"],
+    orderId,
+    labId,
+  });
+  const empty = { success: true, data: { order: null, lines: [] } };
+  if (!supabase) return empty;
+
+  const oid = str(orderId);
+  const lid = str(labId);
+  const tid = str(tenantId);
+  if (!oid) return empty;
+
+  try {
+    async function queryOrderRow(matchKey, matchValue) {
+      let query = supabase.from("orders").select(HQ_ORDER_LIST_COLUMNS).eq(matchKey, matchValue);
+      if (lid) query = query.eq("lab_id", lid);
+      if (tid) query = query.eq("tenant_id", tid);
+      const { data, error } = await query.limit(1);
+      if (error) {
+        hqDebugWarn(`[getLabOrderDetailsRead] orders by ${matchKey}:`, error.message);
+        return null;
+      }
+      return Array.isArray(data) && data[0] ? data[0] : null;
+    }
+
+    let orderRow = await queryOrderRow("order_id", oid);
+    if (!orderRow) {
+      orderRow = await queryOrderRow("id", oid);
+    }
+
+    if (!orderRow) return empty;
+
+    const rowLab = labIdKey(orderRow.lab_id ?? orderRow.labId);
+    if (lid && rowLab && rowLab !== labIdKey(lid)) {
+      return empty;
+    }
+
+    const labMap = await fetchLabsNameMap();
+    const labIdResolved = str(orderRow.lab_id ?? orderRow.labId);
+    const order = mapOrderRow(orderRow, labMap.get(labIdResolved) || "");
+
+    const lineFetch = await fetchOrderDetailLinesForOrder(supabase, orderRow);
+    if (lineFetch.error) {
+      hqDebugWarn("[getLabOrderDetailsRead] order lines:", lineFetch.error.message);
+    }
+    const lines = (lineFetch.lines || [])
+      .map(mapOrderLineRow)
+      .filter((l) => l.productId || l.productName);
+
+    return { success: true, data: { order, lines }, error: null };
+  } catch (err) {
+    hqDebugWarn("[getLabOrderDetailsRead] failed:", err?.message || err);
+    return empty;
   }
 }
 
@@ -6821,6 +8235,67 @@ async function bumpArOutstandingForFulfillment({ lab_id, tenant_id, deltaAmount 
     .eq("lab_id", sid);
   if (!upd.error) return { success: true, skipped: false };
   return { success: false, error: upd.error.message, skipped: true };
+}
+
+async function tryPersistOrderDeliverySnapshot({
+  tenant_id,
+  order_id,
+  lab_id,
+  merchandiseSubtotal,
+  deliveryMethodIntent = DELIVERY_METHOD_INTENT.DELIVERY,
+}) {
+  try {
+    const res = await persistOrderDeliverySnapshotWrite({
+      tenantId: tenant_id,
+      orderId: order_id,
+      labId: lab_id,
+      merchandiseSubtotal,
+      deliveryMethodIntent,
+    });
+    if (!res.success && !res.skipped) {
+      hqDebugWarn("[createOrderWrite] delivery snapshot:", res.error);
+    }
+    return res;
+  } catch (err) {
+    hqDebugWarn("[createOrderWrite] delivery snapshot threw:", err?.message || err);
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * Operational shipment row after fulfill — idempotent, non-blocking, no finance effects.
+ */
+async function tryCreateShipmentAfterFulfill({
+  orderRow = {},
+  orderId,
+  tenantId,
+  actorId,
+  createdSource = "tryCreateShipmentAfterFulfill",
+} = {}) {
+  const deliveryRes = await getOrderDeliverySnapshotRead({
+    tenantId: str(tenantId ?? orderRow.tenant_id ?? orderRow.tenantId),
+    orderId: str(orderId ?? orderRow.order_id ?? orderRow.orderId),
+  });
+  const delivery = deliveryRes.delivery || {};
+  const res = await createShipmentForFulfilledOrderWrite({
+    tenantId: str(tenantId ?? orderRow.tenant_id ?? orderRow.tenantId),
+    orderId: str(orderId ?? orderRow.order_id ?? orderRow.orderId),
+    labId: str(orderRow.lab_id ?? orderRow.labId),
+    orderValue: Number(orderRow.total_amount ?? orderRow.totalAmount ?? orderRow.orderTotal ?? 0),
+    deliveryChargeAmount: Number(delivery.deliveryChargeAmount ?? 0),
+    deliveryChargeReason: str(delivery.deliveryChargeReason),
+    actorId: str(actorId),
+    createdSource,
+  });
+  if (!res.success && !res.skipped) {
+    hqDebugWarn(`[${createdSource}] Shipment creation after fulfill failed:`, res.error);
+  } else if (res.data?.shipmentId) {
+    hqDebugLog("SHIPMENT LINKED TO FULFILLED ORDER", {
+      orderId: str(orderId ?? orderRow.order_id ?? orderRow.orderId),
+      shipmentId: res.data.shipmentId,
+      skipped: Boolean(res.skipped),
+    });
+  }
 }
 
 /**
@@ -7174,7 +8649,20 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
           skipped: Boolean(invoiceRes.skipped),
         });
       }
+      await tryCreateShipmentAfterFulfill({
+        orderRow,
+        orderId: businessOrderId,
+        tenantId: invoiceTenantId,
+        actorId: str(payload.actorId ?? payload.actor_id ?? payload.updatedBy ?? ""),
+        createdSource: "updateOrderStatusWrite",
+      });
     }
+
+    scheduleProjectionRefreshAfterOrderWrite({
+      tenantId: str(orderRow?.tenant_id ?? orderRow?.tenantId ?? saved?.tenant_id ?? ""),
+      orderId: businessOrderId,
+      labId: str(orderRow?.lab_id ?? orderRow?.labId ?? ""),
+    });
 
     return {
       success: true,
@@ -7824,14 +9312,16 @@ export async function updateDistributorAgentAssignmentWrite(payload = {}) {
 
 export async function getOperationsLabAssignmentsRead(options = {}) {
   const opsTenantId = str(options.tenantId ?? options.tenant_id);
-  const res = await getLabsCredit();
+  const [res, tenantsRes] = await Promise.all([
+    getLabsCredit(),
+    getOperationsDistributorsRead(),
+  ]);
   if (!res?.success) {
     return { success: false, error: res?.error || "Failed to load labs", data: { labs: [] } };
   }
 
   let labs = Array.isArray(res.data) ? res.data : [];
 
-  const tenantsRes = await getOperationsDistributorsRead();
   const tenantNameById = new Map();
   if (tenantsRes?.success) {
     for (const t of tenantsRes.data?.distributors || []) {

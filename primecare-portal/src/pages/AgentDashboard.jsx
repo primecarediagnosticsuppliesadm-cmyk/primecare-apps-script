@@ -1,7 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
-import { getAgentWorkspaceRead, peekAgentWorkspaceReadCache } from "@/api/primecareSupabaseApi";
+import { peekAgentWorkspaceReadCache } from "@/api/primecareSupabaseApi";
+import {
+  readAgentWorkspaceBroker,
+  readLabOwnershipBundleBroker,
+  readNotificationEventsBroker,
+} from "@/api/sharedReadBroker.js";
 import { completeAgentTask } from "@/api/primecareApi";
 import { logAppsScriptFallbackUsed } from "@/utils/migrationTrace.js";
 import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
@@ -11,7 +16,6 @@ import PageSkeleton from "@/components/ux/PageSkeleton";
 import { usePortalToast, DataFetchError, PageHeader } from "@/components/ux";
 import AgentLabSnapshotDrawer from "@/components/agent/AgentLabSnapshotDrawer.jsx";
 import AgentMyOwnershipSection from "@/components/agent/AgentMyOwnershipSection.jsx";
-import { loadLabOwnershipMetricsBundle } from "@/operations/operationsCenterAdminData.js";
 import { buildAgentOwnershipSummary } from "@/operations/labOwnershipEngine.js";
 import {
   TodaysMissionCard,
@@ -39,7 +43,6 @@ import {
 import { applyOperationalTaskAction } from "@/operations/operationalTaskStateStore.js";
 import { buildAgentOperationalTaskModel } from "@/operations/operationalTaskModel.js";
 import { emitTaskLedgerEvent, flushPendingOperationalEvents } from "@/operations/operationalEventBridge.js";
-import { getNotificationEventsRead } from "@/api/notificationApi.js";
 import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
 
 const EMPTY_WORKSPACE = {
@@ -161,9 +164,9 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
 
         await traceAgentDailyWorkspaceLoad(async () => {
           const [apiRes, ownershipBundle] = await Promise.all([
-            getAgentWorkspaceRead(currentUser, { force: showRefreshState }),
+            readAgentWorkspaceBroker(currentUser, { force: showRefreshState }),
             tenantId
-              ? loadLabOwnershipMetricsBundle(tenantId).catch(() => null)
+              ? readLabOwnershipBundleBroker(tenantId, { currentUser }).catch(() => null)
               : Promise.resolve(null),
           ]);
           if (!apiRes?.success) {
@@ -173,7 +176,7 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
           const model = buildAgentDailyWorkspaceModel(normalized);
           const nextOwnership = buildAgentOwnershipSummary({
             agentId: currentUser?.agentId || currentUser?.id,
-            enrichedLabs: ownershipBundle?.ownershipMetrics?.enrichedLabs || [],
+            enrichedLabs: ownershipBundle?.data?.ownershipMetrics?.enrichedLabs || [],
             pendingCollections: normalized.pendingCollections,
           });
           setWorkspace(normalized);
@@ -209,9 +212,10 @@ export default function AgentDashboard({ currentUser, setActivePage }) {
     (async () => {
       setActivityLoading(true);
       try {
-        const res = await getNotificationEventsRead({
+        const res = await readNotificationEventsBroker({
           tenantId,
           limit: 12,
+          currentUser,
         });
         if (!cancelled && res?.success) {
           setActivityRows(Array.isArray(res.data) ? res.data : []);

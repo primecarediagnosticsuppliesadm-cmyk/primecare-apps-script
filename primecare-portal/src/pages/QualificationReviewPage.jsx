@@ -1149,20 +1149,34 @@ export default function QualificationReviewPage({ currentUser, setActivePage = n
     <div className="space-y-3 pb-6">
       <PageHeader
         title="Qualification Review"
-        subtitle="Read-only portfolio view across distributors. Manage qualifications in Distributor OS → Labs → Qualification."
+        subtitle="Write path for pipeline stages — analytics live in Commercial → Pipeline. Deep-link only (not in sidebar)."
         icon={ClipboardCheck}
         actions={
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-10 rounded-lg"
-            onClick={() => void loadRows()}
-            disabled={loading}
-          >
-            <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
-            Refresh
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {setActivePage ? (
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                className="h-10 rounded-lg"
+                onClick={() => setActivePage("commercialCrm")}
+              >
+                <ExternalLink className="mr-2 h-4 w-4" />
+                Open Commercial
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-10 rounded-lg"
+              onClick={() => void loadRows()}
+              disabled={loading}
+            >
+              <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
+              Refresh
+            </Button>
+          </div>
         }
       />
 

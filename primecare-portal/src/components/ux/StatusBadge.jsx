@@ -17,10 +17,12 @@ import {
 export default function StatusBadge({
   variant = "neutral",
   children,
+  label,
   className,
   compact = false,
 }) {
   const tone = normalizeSemanticVariant(variant);
+  const content = children ?? label;
 
   return (
     <span
@@ -33,7 +35,7 @@ export default function StatusBadge({
         className
       )}
     >
-      {children}
+      {content}
     </span>
   );
 }

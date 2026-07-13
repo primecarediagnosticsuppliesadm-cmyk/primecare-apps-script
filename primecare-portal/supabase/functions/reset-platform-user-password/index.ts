@@ -100,6 +100,9 @@ Deno.serve(async (req) => {
   if (!hqTenantId) {
     return jsonResponse({ success: false, error: "Tenant is required" }, 400);
   }
+  if (str(actorProfile.tenant_id) !== hqTenantId && callerRole !== "executive") {
+    return jsonResponse({ success: false, error: "Cross-tenant password reset is not allowed" }, 403);
+  }
   if (!subjectUserId && !email) {
     return jsonResponse({ success: false, error: "Subject user id or email is required" }, 400);
   }

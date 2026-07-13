@@ -13,6 +13,8 @@ import OpenOrdersTable from "@/components/collections/OpenOrdersTable.jsx";
 import PaymentCollectionContext from "@/components/collections/PaymentCollectionContext.jsx";
 import CollectionActivityTimeline from "@/components/collections/CollectionActivityTimeline.jsx";
 import CollectionActivitySummary from "@/components/collections/CollectionActivitySummary.jsx";
+import ActionErrorSummary from "@/components/ux/ActionErrorSummary.jsx";
+import { getCollectionSaveLoadingLabel } from "@/collections/collectionsPaymentUi.js";
 
 const TABS = [
   { id: "details", label: "Details" },
@@ -61,9 +63,18 @@ export default function LabCollectionPanel({
   focusSection = "details",
   paymentOrderId = "",
   onPaymentOrderIdChange,
+  paymentMutationError = null,
+  onDismissPaymentMutationError,
 }) {
   const [activeTab, setActiveTab] = useState(() => normalizeTab(focusSection));
   const [selectedOrderIds, setSelectedOrderIds] = useState([]);
+
+  const saveLoadingLabel = getCollectionSaveLoadingLabel({
+    amountCollected,
+    evidenceUploading,
+    saving,
+  });
+  const saveBusy = saving || evidenceUploading;
 
   useEffect(() => {
     setActiveTab(normalizeTab(focusSection));
@@ -78,11 +89,17 @@ export default function LabCollectionPanel({
   const saveButtons = useMemo(
     () => (
       <div className="flex flex-col gap-2 sm:flex-row">
-        <Button type="button" className="h-11 flex-1 rounded-lg" onClick={onSave} disabled={saving}>
-          {saving ? (
+        <Button
+          type="button"
+          className="h-11 flex-1 rounded-lg"
+          onClick={onSave}
+          disabled={saveBusy}
+          aria-busy={saveBusy}
+        >
+          {saveBusy ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Saving…
+              {saveLoadingLabel}
             </>
           ) : (
             <>
@@ -116,7 +133,7 @@ export default function LabCollectionPanel({
         ) : null}
       </div>
     ),
-    [completingTask, onCompleteTask, onSave, pendingTaskContext?.taskId, saving]
+    [completingTask, onCompleteTask, onSave, pendingTaskContext?.taskId, saveBusy, saveLoadingLabel]
   );
 
   if (detailsLoading) {
@@ -213,6 +230,15 @@ export default function LabCollectionPanel({
             onToggleOrder={toggleOrder}
           />
           <section className="space-y-3 rounded-lg border border-border bg-card p-3">
+            {paymentMutationError ? (
+              <ActionErrorSummary
+                title={paymentMutationError.title}
+                message={paymentMutationError.message}
+                fieldErrors={paymentMutationError.fieldErrors}
+                technicalReference={paymentMutationError.rawErrorForLogging}
+                onDismiss={onDismissPaymentMutationError}
+              />
+            ) : null}
             <div className="space-y-2">
               <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
                 Amount collected
@@ -268,6 +294,15 @@ export default function LabCollectionPanel({
       {activeTab === "followup" && !readOnly ? (
         <section className="space-y-3 rounded-lg border border-border bg-card p-3">
           <h3 className="text-xs font-semibold text-slate-700">Schedule follow-up</h3>
+          {paymentMutationError ? (
+            <ActionErrorSummary
+              title={paymentMutationError.title}
+              message={paymentMutationError.message}
+              fieldErrors={paymentMutationError.fieldErrors}
+              technicalReference={paymentMutationError.rawErrorForLogging}
+              onDismiss={onDismissPaymentMutationError}
+            />
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">

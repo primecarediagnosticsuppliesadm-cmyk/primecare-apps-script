@@ -1,0 +1,533 @@
+{
+  "generated_at": "2026-07-08T20:19:23.480Z",
+  "track_a_sql_count": 53,
+  "track_b_migrations_count": 34,
+  "duplicate_pairs": 7,
+  "manifest_only_count": 46,
+  "files": {
+    "track_a": [
+      {
+        "path": "supabase/sql/ar_reconcile_from_payments.sql",
+        "sha256_16": "fa942a09b4194816",
+        "size_bytes": 2966
+      },
+      {
+        "path": "supabase/sql/collections_data_hygiene_diagnostics.sql",
+        "sha256_16": "50b28ad0284f1927",
+        "size_bytes": 7151
+      },
+      {
+        "path": "supabase/sql/collections_notes_migration.sql",
+        "sha256_16": "723487eb194a855e",
+        "size_bytes": 1897
+      },
+      {
+        "path": "supabase/sql/commission_ledger_migration.sql",
+        "sha256_16": "4f11796952917b24",
+        "size_bytes": 7459
+      },
+      {
+        "path": "supabase/sql/create_lab_with_ar_credit_rpc.sql",
+        "sha256_16": "0554600b9ed81f66",
+        "size_bytes": 4782
+      },
+      {
+        "path": "supabase/sql/distributor_billing_migration.sql",
+        "sha256_16": "b9bfe2921579707f",
+        "size_bytes": 4986
+      },
+      {
+        "path": "supabase/sql/distributor_billing_payment_types_b4.sql",
+        "sha256_16": "d7e718ec49a9cc9c",
+        "size_bytes": 516
+      },
+      {
+        "path": "supabase/sql/durable_distributor_tenants_migration.sql",
+        "sha256_16": "42508b1b57f88415",
+        "size_bytes": 1328
+      },
+      {
+        "path": "supabase/sql/executive_distributor_catalog_inventory_rls.sql",
+        "sha256_16": "a02157de5413108c",
+        "size_bytes": 8862
+      },
+      {
+        "path": "supabase/sql/executive_distributor_lab_create_migration.sql",
+        "sha256_16": "bdd3b711c5e9a72d",
+        "size_bytes": 4431
+      },
+      {
+        "path": "supabase/sql/executive_distributor_ops_rls_migration.sql",
+        "sha256_16": "bbdfad0b4baaa8c8",
+        "size_bytes": 16371
+      },
+      {
+        "path": "supabase/sql/hq_orders_date_index_migration.sql",
+        "sha256_16": "9fb5135631cce05f",
+        "size_bytes": 269
+      },
+      {
+        "path": "supabase/sql/hq_profiles_rls_tenant_scope_migration.sql",
+        "sha256_16": "2a9f6dfb9cba5f1b",
+        "size_bytes": 2142
+      },
+      {
+        "path": "supabase/sql/inventory_ledger_migration.sql",
+        "sha256_16": "c8485d435eee9577",
+        "size_bytes": 2894
+      },
+      {
+        "path": "supabase/sql/invoice_system_phase1_migration.sql",
+        "sha256_16": "578a2d94c863a6d9",
+        "size_bytes": 16362
+      },
+      {
+        "path": "supabase/sql/invoice_system_phase2_migration.sql",
+        "sha256_16": "b67c2a7af47219c7",
+        "size_bytes": 10518
+      },
+      {
+        "path": "supabase/sql/invoice_system_phase3_migration.sql",
+        "sha256_16": "0bdfd44f12cdc2c4",
+        "size_bytes": 1306
+      },
+      {
+        "path": "supabase/sql/invoice_system_phase5_migration.sql",
+        "sha256_16": "e16a251ba2f23279",
+        "size_bytes": 12869
+      },
+      {
+        "path": "supabase/sql/lab_catalog_view_tenant_join_migration.sql",
+        "sha256_16": "ec19eae857a7e66d",
+        "size_bytes": 1522
+      },
+      {
+        "path": "supabase/sql/lab_contracts_migration.sql",
+        "sha256_16": "71268a50ff30555a",
+        "size_bytes": 5560
+      },
+      {
+        "path": "supabase/sql/lab_id_normalization_migration.sql",
+        "sha256_16": "c27b72f43f3e58d4",
+        "size_bytes": 6340
+      },
+      {
+        "path": "supabase/sql/lab_qualifications_migration.sql",
+        "sha256_16": "612c12966fbef4ab",
+        "size_bytes": 7588
+      },
+      {
+        "path": "supabase/sql/lab_qualifications_pipeline_migration.sql",
+        "sha256_16": "6bbc154c100dd725",
+        "size_bytes": 3014
+      },
+      {
+        "path": "supabase/sql/notifications_foundation_migration.sql",
+        "sha256_16": "dd246a6cd8767521",
+        "size_bytes": 12011
+      },
+      {
+        "path": "supabase/sql/operational_evidence_storage_migration.sql",
+        "sha256_16": "9033d7f9b6d25cce",
+        "size_bytes": 8981
+      },
+      {
+        "path": "supabase/sql/operations_center_agent_distributor_assignments_migration.sql",
+        "sha256_16": "5d972fe6db5c6652",
+        "size_bytes": 2011
+      },
+      {
+        "path": "supabase/sql/operations_center_profiles_email_migration.sql",
+        "sha256_16": "dd98ef190ba498d8",
+        "size_bytes": 1527
+      },
+      {
+        "path": "supabase/sql/operations_center_profiles_identity_migration.sql",
+        "sha256_16": "c804aca11214f7f5",
+        "size_bytes": 1660
+      },
+      {
+        "path": "supabase/sql/operations_center_profiles_username_migration.sql",
+        "sha256_16": "efdd3d4bc56452ab",
+        "size_bytes": 1521
+      },
+      {
+        "path": "supabase/sql/operations_center_user_directory_backfill.sql",
+        "sha256_16": "cc203fd2bc607178",
+        "size_bytes": 2925
+      },
+      {
+        "path": "supabase/sql/operations_center_users_rls_migration.sql",
+        "sha256_16": "c5ef150427c97fdc",
+        "size_bytes": 691
+      },
+      {
+        "path": "supabase/sql/order_cross_module_sync_migration.sql",
+        "sha256_16": "8d573e3771a91b99",
+        "size_bytes": 1163
+      },
+      {
+        "path": "supabase/sql/order_status_update_migration.sql",
+        "sha256_16": "68ee982a3793aae9",
+        "size_bytes": 954
+      },
+      {
+        "path": "supabase/sql/order_write_migration.sql",
+        "sha256_16": "a76a6e0d158d6e84",
+        "size_bytes": 3096
+      },
+      {
+        "path": "supabase/sql/payment_write_migration.sql",
+        "sha256_16": "f549638b1679f0dc",
+        "size_bytes": 2650
+      },
+      {
+        "path": "supabase/sql/pilot_hardening_agent_ownership_rls_migration.sql",
+        "sha256_16": "fcfe40b1c03b28b1",
+        "size_bytes": 694
+      },
+      {
+        "path": "supabase/sql/pilot_hardening_validation_queries.sql",
+        "sha256_16": "981c5c81cee947cd",
+        "size_bytes": 2926
+      },
+      {
+        "path": "supabase/sql/production_auth_rls_pilot_migration.sql",
+        "sha256_16": "eb3b14ca37c59857",
+        "size_bytes": 29847
+      },
+      {
+        "path": "supabase/sql/production_invoice_pdf_service_role_grants.sql",
+        "sha256_16": "b5e24ab0adf57dbd",
+        "size_bytes": 1068
+      },
+      {
+        "path": "supabase/sql/production_orders_fulfill_rls_patch.sql",
+        "sha256_16": "b0d73116f56b44bf",
+        "size_bytes": 3821
+      },
+      {
+        "path": "supabase/sql/production_rls_parity_lab_ar_insert_patch.sql",
+        "sha256_16": "85cb06d81fdc4fbe",
+        "size_bytes": 5105
+      },
+      {
+        "path": "supabase/sql/production_rls_parity_verification.sql",
+        "sha256_16": "2c4f68f341e69440",
+        "size_bytes": 2713
+      },
+      {
+        "path": "supabase/sql/production_schema_parity_migration.sql",
+        "sha256_16": "82ec5fa93296e606",
+        "size_bytes": 4852
+      },
+      {
+        "path": "supabase/sql/purchase_orders_migration.sql",
+        "sha256_16": "75b4ea9efbf9447b",
+        "size_bytes": 4068
+      },
+      {
+        "path": "supabase/sql/qa_role_seed_and_rls_validation.sql",
+        "sha256_16": "2819f0161c36dfd5",
+        "size_bytes": 21918
+      },
+      {
+        "path": "supabase/sql/sprint1_ar_reconcile_service_role_fix.sql",
+        "sha256_16": "36c4a783edf3d0fc",
+        "size_bytes": 2910
+      },
+      {
+        "path": "supabase/sql/sprint2_domain_projections_phase1_migration.sql",
+        "sha256_16": "02ae53671e3988ed",
+        "size_bytes": 23908
+      },
+      {
+        "path": "supabase/sql/user_provisioning_password_reset_event_migration.sql",
+        "sha256_16": "752482d740addd9c",
+        "size_bytes": 675
+      },
+      {
+        "path": "supabase/sql/user_provisioning_phase3a_roles_migration.sql",
+        "sha256_16": "4dc4351b5c58edbc",
+        "size_bytes": 938
+      },
+      {
+        "path": "supabase/sql/user_provisioning_phase3b_migration.sql",
+        "sha256_16": "411045d298f026db",
+        "size_bytes": 2487
+      },
+      {
+        "path": "supabase/sql/user_provisioning_phase3c_lab_ownership_migration.sql",
+        "sha256_16": "6897c0a178a72a19",
+        "size_bytes": 6383
+      },
+      {
+        "path": "supabase/sql/user_provisioning_v1_migration.sql",
+        "sha256_16": "cf1bc4c6cc9a80df",
+        "size_bytes": 7863
+      },
+      {
+        "path": "supabase/sql/v_labs_credit_security_invoker_migration.sql",
+        "sha256_16": "089edbe00862bc95",
+        "size_bytes": 1478
+      }
+    ],
+    "track_b": [
+      {
+        "path": "supabase/migrations/20260624120000_hq_profiles_rls_tenant_scope.sql",
+        "sha256_16": "2a9f6dfb9cba5f1b",
+        "size_bytes": 2142
+      },
+      {
+        "path": "supabase/migrations/20260624120001_hq_orders_date_index.sql",
+        "sha256_16": "9fb5135631cce05f",
+        "size_bytes": 269
+      },
+      {
+        "path": "supabase/migrations/20260624120002_invoice_system_phase1.sql",
+        "sha256_16": "578a2d94c863a6d9",
+        "size_bytes": 16362
+      },
+      {
+        "path": "supabase/migrations/20260624120003_invoice_system_phase2.sql",
+        "sha256_16": "b67c2a7af47219c7",
+        "size_bytes": 10518
+      },
+      {
+        "path": "supabase/migrations/20260624120004_invoice_system_phase3.sql",
+        "sha256_16": "373ef77ab12b1061",
+        "size_bytes": 710
+      },
+      {
+        "path": "supabase/migrations/20260624120005_invoice_system_phase5.sql",
+        "sha256_16": "e16a251ba2f23279",
+        "size_bytes": 12869
+      },
+      {
+        "path": "supabase/migrations/20260624130000_sprint1_ar_reconcile_rpc.sql",
+        "sha256_16": "c29ca3837c03d605",
+        "size_bytes": 3286
+      },
+      {
+        "path": "supabase/migrations/20260624130001_sprint1_transaction_integrity_rpcs.sql",
+        "sha256_16": "6e25fdca89bace5c",
+        "size_bytes": 12203
+      },
+      {
+        "path": "supabase/migrations/20260624130002_sprint1_founder_snapshot_rpc.sql",
+        "sha256_16": "d727eb80487a9acd",
+        "size_bytes": 3418
+      },
+      {
+        "path": "supabase/migrations/20260624130003_sprint1_transaction_rpc_uuid_cast_fix.sql",
+        "sha256_16": "110ec5fed7640ca9",
+        "size_bytes": 10314
+      },
+      {
+        "path": "supabase/migrations/20260628120000_logistics_phase1a_shipments.sql",
+        "sha256_16": "ef62a45df6ae18fc",
+        "size_bytes": 4834
+      },
+      {
+        "path": "supabase/migrations/20260630120000_logistics_phase2_couriers.sql",
+        "sha256_16": "63070e9b2426a224",
+        "size_bytes": 2574
+      },
+      {
+        "path": "supabase/migrations/20260701120000_logistics_phase3a_delivery_charges.sql",
+        "sha256_16": "8e8ec6d1ac3ac3c8",
+        "size_bytes": 3231
+      },
+      {
+        "path": "supabase/migrations/20260702120000_persist_order_delivery_snapshot_rpc.sql",
+        "sha256_16": "f381d0d2e16c8b45",
+        "size_bytes": 4516
+      },
+      {
+        "path": "supabase/migrations/20260702160000_sprint2_phase2_dashboard_executive_metrics.sql",
+        "sha256_16": "9b286c53aa99b9a5",
+        "size_bytes": 40383
+      },
+      {
+        "path": "supabase/migrations/20260702160100_fix_dashboard_visits_count.sql",
+        "sha256_16": "3a1da9ac43adc060",
+        "size_bytes": 4053
+      },
+      {
+        "path": "supabase/migrations/20260702170000_sprint3a_production_safety_hardening.sql",
+        "sha256_16": "13ce05f322e472e6",
+        "size_bytes": 33426
+      },
+      {
+        "path": "supabase/migrations/20260703120000_lab_ordering_governance.sql",
+        "sha256_16": "cab26efc654921a3",
+        "size_bytes": 8591
+      },
+      {
+        "path": "supabase/migrations/20260703120001_delivery_policy_foundation.sql",
+        "sha256_16": "9c0e220cd0f415ac",
+        "size_bytes": 1863
+      },
+      {
+        "path": "supabase/migrations/20260704120000_logistics_phase4_route_planning.sql",
+        "sha256_16": "5167a338181e66ba",
+        "size_bytes": 6261
+      },
+      {
+        "path": "supabase/migrations/20260705120000_sprint2_domain_projections_phase1.sql",
+        "sha256_16": "02ae53671e3988ed",
+        "size_bytes": 23908
+      },
+      {
+        "path": "supabase/migrations/20260705120001_fix_proj_receivable_refresh.sql",
+        "sha256_16": "6aba3ceaf263a246",
+        "size_bytes": 7713
+      },
+      {
+        "path": "supabase/migrations/20260705120002_fix_read_receivables_timeout.sql",
+        "sha256_16": "799d0f0d0bfd4d5b",
+        "size_bytes": 2822
+      },
+      {
+        "path": "supabase/migrations/20260705120003_sprint5a_founder_snapshot_projection.sql",
+        "sha256_16": "78b00fe44456dffd",
+        "size_bytes": 1731
+      },
+      {
+        "path": "supabase/migrations/20260705120004_sprint5a_receivables_tenant_scope.sql",
+        "sha256_16": "44f8f47e2b22b205",
+        "size_bytes": 3096
+      },
+      {
+        "path": "supabase/migrations/20260705130000_sprint8a_labs_profile_projection.sql",
+        "sha256_16": "f00f9a0bb4011e6c",
+        "size_bytes": 23939
+      },
+      {
+        "path": "supabase/migrations/20260705131000_sprint8a_labs_projection_perf_fix.sql",
+        "sha256_16": "a6f438cd89a46fc2",
+        "size_bytes": 3908
+      },
+      {
+        "path": "supabase/migrations/20260705132000_sprint8a_labs_adapter_rls_perf.sql",
+        "sha256_16": "f4ce2695b17cea07",
+        "size_bytes": 3718
+      },
+      {
+        "path": "supabase/migrations/20260705133000_sprint8a_labs_adapter_admin_perf.sql",
+        "sha256_16": "8b676276de4f5828",
+        "size_bytes": 4332
+      },
+      {
+        "path": "supabase/migrations/20260706120000_compensation_payroll_foundation.sql",
+        "sha256_16": "750d1be0e2c0f4a1",
+        "size_bytes": 33108
+      },
+      {
+        "path": "supabase/migrations/20260706130000_payroll_domain_completion.sql",
+        "sha256_16": "570876c6d151cd27",
+        "size_bytes": 9710
+      },
+      {
+        "path": "supabase/migrations/20260706131000_payroll_domain_rls_hardening.sql",
+        "sha256_16": "d2ec67797081ee98",
+        "size_bytes": 19501
+      },
+      {
+        "path": "supabase/migrations/20260707140000_enterprise_compensation_phase_7_1.sql",
+        "sha256_16": "468ab580edd80e2a",
+        "size_bytes": 4599
+      },
+      {
+        "path": "supabase/migrations/20260707140100_payroll_run_lines_employee_identity.sql",
+        "sha256_16": "c6c777d864aca064",
+        "size_bytes": 771
+      }
+    ]
+  },
+  "duplicate_candidates": [
+    {
+      "trackA": "supabase/sql/hq_orders_date_index_migration.sql",
+      "trackB": "supabase/migrations/20260624120001_hq_orders_date_index.sql",
+      "norm": "hq_orders_date_index.sql"
+    },
+    {
+      "trackA": "supabase/sql/hq_profiles_rls_tenant_scope_migration.sql",
+      "trackB": "supabase/migrations/20260624120000_hq_profiles_rls_tenant_scope.sql",
+      "norm": "hq_profiles_rls_tenant_scope.sql"
+    },
+    {
+      "trackA": "supabase/sql/invoice_system_phase1_migration.sql",
+      "trackB": "supabase/migrations/20260624120002_invoice_system_phase1.sql",
+      "norm": "invoice_system_phase1.sql"
+    },
+    {
+      "trackA": "supabase/sql/invoice_system_phase2_migration.sql",
+      "trackB": "supabase/migrations/20260624120003_invoice_system_phase2.sql",
+      "norm": "invoice_system_phase2.sql"
+    },
+    {
+      "trackA": "supabase/sql/invoice_system_phase3_migration.sql",
+      "trackB": "supabase/migrations/20260624120004_invoice_system_phase3.sql",
+      "norm": "invoice_system_phase3.sql"
+    },
+    {
+      "trackA": "supabase/sql/invoice_system_phase5_migration.sql",
+      "trackB": "supabase/migrations/20260624120005_invoice_system_phase5.sql",
+      "norm": "invoice_system_phase5.sql"
+    },
+    {
+      "trackA": "supabase/sql/sprint2_domain_projections_phase1_migration.sql",
+      "trackB": "supabase/migrations/20260705120000_sprint2_domain_projections_phase1.sql",
+      "norm": "sprint2_domain_projections_phase1.sql"
+    }
+  ],
+  "manifest_only_paths": [
+    "supabase/sql/ar_reconcile_from_payments.sql",
+    "supabase/sql/collections_data_hygiene_diagnostics.sql",
+    "supabase/sql/collections_notes_migration.sql",
+    "supabase/sql/commission_ledger_migration.sql",
+    "supabase/sql/create_lab_with_ar_credit_rpc.sql",
+    "supabase/sql/distributor_billing_migration.sql",
+    "supabase/sql/distributor_billing_payment_types_b4.sql",
+    "supabase/sql/durable_distributor_tenants_migration.sql",
+    "supabase/sql/executive_distributor_catalog_inventory_rls.sql",
+    "supabase/sql/executive_distributor_lab_create_migration.sql",
+    "supabase/sql/executive_distributor_ops_rls_migration.sql",
+    "supabase/sql/inventory_ledger_migration.sql",
+    "supabase/sql/lab_catalog_view_tenant_join_migration.sql",
+    "supabase/sql/lab_contracts_migration.sql",
+    "supabase/sql/lab_id_normalization_migration.sql",
+    "supabase/sql/lab_qualifications_migration.sql",
+    "supabase/sql/lab_qualifications_pipeline_migration.sql",
+    "supabase/sql/notifications_foundation_migration.sql",
+    "supabase/sql/operational_evidence_storage_migration.sql",
+    "supabase/sql/operations_center_agent_distributor_assignments_migration.sql",
+    "supabase/sql/operations_center_profiles_email_migration.sql",
+    "supabase/sql/operations_center_profiles_identity_migration.sql",
+    "supabase/sql/operations_center_profiles_username_migration.sql",
+    "supabase/sql/operations_center_user_directory_backfill.sql",
+    "supabase/sql/operations_center_users_rls_migration.sql",
+    "supabase/sql/order_cross_module_sync_migration.sql",
+    "supabase/sql/order_status_update_migration.sql",
+    "supabase/sql/order_write_migration.sql",
+    "supabase/sql/payment_write_migration.sql",
+    "supabase/sql/pilot_hardening_agent_ownership_rls_migration.sql",
+    "supabase/sql/pilot_hardening_validation_queries.sql",
+    "supabase/sql/production_auth_rls_pilot_migration.sql",
+    "supabase/sql/production_invoice_pdf_service_role_grants.sql",
+    "supabase/sql/production_orders_fulfill_rls_patch.sql",
+    "supabase/sql/production_rls_parity_lab_ar_insert_patch.sql",
+    "supabase/sql/production_rls_parity_verification.sql",
+    "supabase/sql/production_schema_parity_migration.sql",
+    "supabase/sql/purchase_orders_migration.sql",
+    "supabase/sql/qa_role_seed_and_rls_validation.sql",
+    "supabase/sql/sprint1_ar_reconcile_service_role_fix.sql",
+    "supabase/sql/user_provisioning_password_reset_event_migration.sql",
+    "supabase/sql/user_provisioning_phase3a_roles_migration.sql",
+    "supabase/sql/user_provisioning_phase3b_migration.sql",
+    "supabase/sql/user_provisioning_phase3c_lab_ownership_migration.sql",
+    "supabase/sql/user_provisioning_v1_migration.sql",
+    "supabase/sql/v_labs_credit_security_invoker_migration.sql"
+  ]
+}

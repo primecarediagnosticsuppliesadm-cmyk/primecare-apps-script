@@ -1,0 +1,115 @@
+{
+  "version": "1.0.0",
+  "description": "PrimeCare browser regression manifest — Phase 2 certification framework",
+  "automationReady": false,
+  "defaultQaUrl": "https://primecare-portal.vercel.app",
+  "accounts": {
+    "admin": { "email": "qa.admin@primecare.test", "password": "1234" },
+    "executive": { "email": "qa.executive@primecare.test", "password": "1234" },
+    "lab": { "email": "qa.lab@primecare.test", "password": "1234" },
+    "agent": { "email": "qa.agent@primecare.test", "password": "1234" }
+  },
+  "tenantId": "f168b98f-47a6-42c3-b788-24c00436fac2",
+  "goldenLabId": "QA_LAB_001",
+  "suites": [
+    {
+      "id": "t0-smoke",
+      "name": "T0 — Login smoke",
+      "tier": "T0",
+      "roles": ["admin", "lab", "executive"],
+      "paths": ["/dashboard", "/lab-orders", "/orders"],
+      "steps": ["BGP-A01", "BGP-L01", "BGP-E01"],
+      "prereqScripts": ["verify-hq-rls-reads.mjs"],
+      "perfSurfaces": ["admin-dashboard", "lab-catalog"],
+      "estimatedMinutes": 5
+    },
+    {
+      "id": "o2c-golden",
+      "name": "T1 — Order-to-Cash golden path",
+      "tier": "T1",
+      "roles": ["lab", "admin", "executive"],
+      "paths": [
+        "/lab-orders",
+        "/orders",
+        "/logistics-delivery",
+        "/collections",
+        "/lab-invoices",
+        "/executive-financial-intelligence"
+      ],
+      "steps": [
+        "BGP-L01", "BGP-L02", "BGP-L03", "BGP-L04", "BGP-L05", "BGP-L06",
+        "BGP-A01", "BGP-A02", "BGP-A03", "BGP-A04", "BGP-A05",
+        "BGP-A07", "BGP-A08", "BGP-A09",
+        "BGP-A10", "BGP-A11", "BGP-A12",
+        "BGP-L09", "BGP-E03"
+      ],
+      "prereqScripts": [
+        "verify-lab-ordering-flow.mjs",
+        "verify-lab-orders-sync-stabilization.mjs",
+        "verify-orders-admin-flow.mjs",
+        "verify-logistics-dispatch-flow.mjs",
+        "verify-delivery-charge-policy.mjs",
+        "verify-financial-reconciliation.mjs",
+        "verify-payment-allocation-flow.mjs",
+        "verify-primecare-production-golden-path.mjs",
+        "verify-hq-rls-reads.mjs",
+        "verify-executive-financial-intelligence.mjs"
+      ],
+      "perfSurfaces": [
+        "orders-list",
+        "collections",
+        "admin-dashboard",
+        "ops-center",
+        "lab-catalog",
+        "logistics-dashboard",
+        "efi"
+      ],
+      "estimatedMinutes": 60
+    },
+    {
+      "id": "lab-ordering",
+      "name": "T2 — Lab ordering module",
+      "tier": "T2",
+      "roles": ["lab", "admin"],
+      "paths": ["/lab-orders", "/orders"],
+      "steps": ["BGP-L01", "BGP-L03", "BGP-L04", "BGP-L05", "BGP-L07", "BGP-A02", "BGP-A03"],
+      "prereqScripts": [
+        "verify-lab-ordering-flow.mjs",
+        "verify-lab-orders-sync-stabilization.mjs",
+        "verify-hq-rls-reads.mjs"
+      ],
+      "perfSurfaces": ["lab-catalog", "orders-list"],
+      "estimatedMinutes": 20
+    },
+    {
+      "id": "logistics",
+      "name": "T2 — Logistics module",
+      "tier": "T2",
+      "roles": ["admin"],
+      "paths": ["/logistics-delivery", "/orders"],
+      "steps": ["BGP-A05", "BGP-A07", "BGP-A08", "BGP-A09"],
+      "prereqScripts": [
+        "verify-logistics-dispatch-flow.mjs",
+        "verify-delivery-charge-policy.mjs"
+      ],
+      "perfSurfaces": ["logistics-dashboard"],
+      "estimatedMinutes": 15
+    },
+    {
+      "id": "finance",
+      "name": "T2 — Finance module",
+      "tier": "T2",
+      "roles": ["admin", "lab", "executive"],
+      "paths": ["/collections", "/lab-invoices", "/executive-financial-intelligence"],
+      "steps": ["BGP-A10", "BGP-A11", "BGP-A12", "BGP-L09", "BGP-E03"],
+      "prereqScripts": [
+        "verify-financial-reconciliation.mjs",
+        "verify-payment-allocation-flow.mjs",
+        "verify-partial-payment-sync.mjs",
+        "verify-executive-financial-intelligence.mjs"
+      ],
+      "perfSurfaces": ["collections", "efi"],
+      "estimatedMinutes": 20
+    }
+  ]
+}

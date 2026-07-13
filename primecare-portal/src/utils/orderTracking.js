@@ -1,8 +1,13 @@
 import { getOrderDetails } from "@/api/primecareApi";
-import { getOrderDetailsRead } from "@/api/primecareSupabaseApi.js";
+import {
+  getLabOrderDetailsRead,
+  getOrderDetailsRead,
+} from "@/api/primecareSupabaseApi.js";
+import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
 import { recordPredatorTiming } from "@/predator/predatorTiming.js";
 import { labIdKey } from "@/utils/labId.js";
 import { orderStatusToVariant } from "@/utils/statusTokens.js";
+import { resolveOrderAmountBreakdown } from "@/logistics/deliveryChargeEngine.js";
 
 export const TRACKING_STEPS = [
   { key: "placed", label: "Order Placed" },
@@ -199,6 +204,7 @@ export function mapOrderDetailsPayload(payload) {
   const orderTotal = Number(
     order.orderTotal ?? order.total_amount ?? order.totalAmount ?? order.order_total ?? 0
   );
+  const amountBreakdown = resolveOrderAmountBreakdown(order);
 
   const cancelledAt = str(order.cancelled_at ?? order.cancelledAt);
   const statusNotes = str(order.status_notes ?? order.statusNotes);
@@ -242,6 +248,13 @@ export function mapOrderDetailsPayload(payload) {
     invoiceStatus,
     paymentLabel,
     orderTotal,
+    merchandiseSubtotal: amountBreakdown.merchandiseSubtotal,
+    deliveryChargeAmount: amountBreakdown.deliveryChargeAmount,
+    estimatedOrderTotal: amountBreakdown.estimatedTotal,
+    hasDeliveryEstimate: amountBreakdown.hasDeliveryEstimate,
+    deliveryChargeReason: amountBreakdown.deliveryChargeReason,
+    deliveryMethodIntent: amountBreakdown.deliveryMethodIntent,
+    deliveryChargeStatus: amountBreakdown.deliveryChargeStatus,
     itemCount,
     productCount,
     productUnitLabel: formatProductUnitLabel(productCount, itemCount),
@@ -274,6 +287,59 @@ export function orderStatusChipVariant(rawStatus) {
   return orderStatusToVariant(rawStatus);
 }
 
+/**
+ * Build drawer-ready tracking details from a confirmed checkout DB payload.
+ */
+export function buildConfirmedCheckoutTrackingDetails({ orderRow, lines = [], labName = "" } = {}) {
+  if (!orderRow) return null;
+  const order =
+    orderRow.orderId || orderRow.order_id
+      ? orderRow
+      : {
+          orderId: orderRow.order_id ?? orderRow.orderId,
+          order_id: orderRow.order_id ?? orderRow.orderId,
+          id: orderRow.id,
+          orderStatus: orderRow.status ?? orderRow.orderStatus,
+          status: orderRow.status ?? orderRow.orderStatus,
+          orderDate: orderRow.order_date ?? orderRow.orderDate,
+          order_date: orderRow.order_date ?? orderRow.orderDate,
+          createdAt: orderRow.created_at ?? orderRow.createdAt,
+          created_at: orderRow.created_at ?? orderRow.createdAt,
+          labId: orderRow.lab_id ?? orderRow.labId,
+          lab_id: orderRow.lab_id ?? orderRow.labId,
+          labName,
+          orderTotal: orderRow.total_amount ?? orderRow.totalAmount,
+          total_amount: orderRow.total_amount ?? orderRow.totalAmount,
+          paymentStatus: orderRow.payment_status ?? orderRow.paymentStatus,
+          invoiceStatus: orderRow.invoice_status ?? orderRow.invoiceStatus,
+          invoiceId: orderRow.invoice_id ?? orderRow.invoiceId,
+          notes: orderRow.notes,
+          createdBy: orderRow.created_by ?? orderRow.createdBy,
+        };
+
+  const normalizedLines = (Array.isArray(lines) ? lines : []).map((line) => ({
+    productId: line.productId ?? line.product_id,
+    productName: line.productName ?? line.product_name,
+    quantity: line.quantity,
+    unitSellingPrice: line.unitSellingPrice ?? line.unit_selling_price ?? line.unit_price,
+    unitPrice: line.unitPrice ?? line.unit_price,
+    netLineTotal: line.netLineTotal ?? line.net_line_total ?? line.total_price,
+    total_price: line.total_price ?? line.netLineTotal,
+  }));
+
+  return mapOrderDetailsPayload({ order, lines: normalizedLines });
+}
+
+function trackingOrderIdMatches(requestedId, details) {
+  const oid = str(requestedId);
+  if (!oid || !details) return false;
+  return orderIdMatchesCandidate(oid, {
+    orderId: details.orderId,
+    order_id: details.orderId,
+    id: details.orderUUID ?? details.id,
+  });
+}
+
 export function resolveDrawerDetails(orderOrPayload) {
   if (!orderOrPayload) return null;
   if (orderOrPayload.orderId && Array.isArray(orderOrPayload.lines)) {
@@ -282,27 +348,132 @@ export function resolveDrawerDetails(orderOrPayload) {
   return mapOrderDetailsPayload(orderOrPayload);
 }
 
+function normalizeFetchScopedOptions(labKeyOrOptions) {
+  if (typeof labKeyOrOptions === "string") {
+    return { labKey: labKeyOrOptions };
+  }
+  return labKeyOrOptions && typeof labKeyOrOptions === "object" ? labKeyOrOptions : {};
+}
+
+function orderIdMatchesCandidate(orderId, candidate) {
+  const oid = str(orderId);
+  if (!oid || !candidate) return false;
+  const keys = [
+    candidate.orderId,
+    candidate.order_id,
+    candidate.id,
+    candidate.orderUUID,
+  ]
+    .map((v) => str(v))
+    .filter(Boolean);
+  return keys.some((key) => key === oid);
+}
+
+/**
+ * Resolve a lab order from in-memory lists (recent orders, checkout handoff).
+ */
+export function findLocalOrderForTracking(orderId, sources = []) {
+  const oid = str(orderId);
+  if (!oid) return null;
+  for (const source of sources) {
+    const list = Array.isArray(source) ? source : source ? [source] : [];
+    for (const row of list) {
+      if (orderIdMatchesCandidate(oid, row)) return row;
+    }
+  }
+  return null;
+}
+
+/**
+ * Build drawer-ready details from a list-row / checkout snapshot (lines optional).
+ */
+export function mapLocalOrderRowToTrackingDetails(orderRow, lines = []) {
+  if (!orderRow) return null;
+  if (orderRow.orderId && Array.isArray(orderRow.lines)) return orderRow;
+  return mapOrderDetailsPayload({
+    order: {
+      orderId: orderRow.orderId ?? orderRow.order_id,
+      order_id: orderRow.orderId ?? orderRow.order_id,
+      id: orderRow.id,
+      orderStatus: orderRow.orderStatus ?? orderRow.status,
+      status: orderRow.orderStatus ?? orderRow.status,
+      orderDate: orderRow.orderDate ?? orderRow.order_date,
+      order_date: orderRow.orderDate ?? orderRow.order_date,
+      createdAt: orderRow.createdAt ?? orderRow.created_at,
+      created_at: orderRow.createdAt ?? orderRow.created_at,
+      updatedAt: orderRow.updatedAt ?? orderRow.updated_at,
+      updated_at: orderRow.updatedAt ?? orderRow.updated_at,
+      labId: orderRow.labId ?? orderRow.lab_id,
+      lab_id: orderRow.labId ?? orderRow.lab_id,
+      labName: orderRow.labName ?? orderRow.lab_name,
+      orderTotal: orderRow.orderTotal ?? orderRow.total_amount ?? orderRow.totalAmount,
+      total_amount: orderRow.orderTotal ?? orderRow.total_amount ?? orderRow.totalAmount,
+      merchandiseSubtotal: orderRow.merchandiseSubtotal ?? orderRow.merchandise_subtotal,
+      merchandise_subtotal: orderRow.merchandiseSubtotal ?? orderRow.merchandise_subtotal,
+      deliveryChargeAmount: orderRow.deliveryChargeAmount ?? orderRow.delivery_charge_amount,
+      delivery_charge_amount: orderRow.deliveryChargeAmount ?? orderRow.delivery_charge_amount,
+      deliveryChargeReason: orderRow.deliveryChargeReason ?? orderRow.delivery_charge_reason,
+      delivery_charge_reason: orderRow.deliveryChargeReason ?? orderRow.delivery_charge_reason,
+      deliveryMethodIntent: orderRow.deliveryMethodIntent ?? orderRow.delivery_method_intent,
+      delivery_method_intent: orderRow.deliveryMethodIntent ?? orderRow.delivery_method_intent,
+      deliveryChargeStatus: orderRow.deliveryChargeStatus ?? orderRow.delivery_charge_status,
+      delivery_charge_status: orderRow.deliveryChargeStatus ?? orderRow.delivery_charge_status,
+      paymentStatus: orderRow.paymentStatus ?? orderRow.payment_status,
+      invoiceStatus: orderRow.invoiceStatus ?? orderRow.invoice_status,
+      invoiceId: orderRow.invoiceId ?? orderRow.invoice_id,
+      notes: orderRow.notes,
+      createdBy: orderRow.createdBy ?? orderRow.created_by,
+    },
+    lines,
+  });
+}
+
 /**
  * Lab-scoped order details for tracking drawer (Supabase first, Apps Script fallback).
  */
-export async function fetchScopedOrderDetails(orderId, labKey) {
-  if (!orderId) throw new Error("Order ID is missing.");
+export async function fetchScopedOrderDetails(orderId, labKeyOrOptions = {}) {
+  const oid = str(orderId);
+  if (!oid) throw new Error("Order ID is missing.");
+
+  const options = normalizeFetchScopedOptions(labKeyOrOptions);
+  const labKey = labIdKey(options.labKey ?? options.labId);
+  const labId = str(options.labId);
+  const tenantId = str(options.tenantId ?? options.tenant_id);
 
   let payload = null;
-  const supRes = await getOrderDetailsRead(orderId);
-  if (supRes?.data?.order) {
-    payload = supRes.data;
-  } else {
-    const fallback = await getOrderDetails(orderId);
-    const result = fallback?.data || fallback || null;
-    if (result?.order) payload = result;
+
+  if (labId || labKey) {
+    const labRes = await getLabOrderDetailsRead({
+      orderId: oid,
+      labId: labId || labKey,
+      tenantId,
+    });
+    if (labRes?.data?.order) payload = labRes.data;
   }
 
   if (!payload?.order) {
-    throw new Error("Unable to load order details right now.");
+    const supRes = await getOrderDetailsRead(oid);
+    if (supRes?.data?.order) payload = supRes.data;
+  }
+
+  if (!payload?.order && ALLOW_LEGACY_APPS_SCRIPT) {
+    try {
+      const fallback = await getOrderDetails(oid);
+      const result = fallback?.data || fallback || null;
+      if (result?.order) payload = result;
+    } catch {
+      // Supabase-only orders are not in Apps Script; ignore legacy lookup errors.
+    }
+  }
+
+  if (!payload?.order) {
+    throw new Error(`Order not found: ${oid}`);
   }
 
   const mapped = mapOrderDetailsPayload(payload);
+  if (!trackingOrderIdMatches(oid, mapped)) {
+    throw new Error(`Order not found: ${oid}`);
+  }
   const orderLabKey = labIdKey(mapped.labId);
   if (labKey && orderLabKey && orderLabKey !== labKey) {
     throw new Error("This order is not available for your lab.");

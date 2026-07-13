@@ -46,6 +46,10 @@ export function normalizePageKey(page) {
     case "qualification-analytics":
     case "qualifications":
       return "qualificationReview";
+    case "commercial":
+    case "commercial-crm":
+    case "commercialCrm":
+      return "commercialCrm";
     case "predator-debug":
     case "predatorDebug":
       return "predatorDebug";
@@ -58,7 +62,11 @@ export function normalizePageKey(page) {
     case "founder-navigation":
     case "founderNavigation":
     case "founder-journey":
-      return "founderNavigation";
+      return "founderOperatingSystem";
+    case "founder-operating-system":
+    case "founderOperatingSystem":
+    case "founder-os":
+      return "founderOperatingSystem";
     case "founder-strategy":
     case "founderStrategy":
       return "founderStrategy";
@@ -66,6 +74,9 @@ export function normalizePageKey(page) {
     case "founderFinancialIntelligence":
     case "financial-intelligence":
       return "founderFinancialIntelligence";
+    case "executive-financial-intelligence":
+    case "executiveFinancialIntelligence":
+      return "executiveFinancialIntelligence";
     case "revenue-funnel":
     case "revenueFunnel":
       return "revenueFunnel";
@@ -75,6 +86,13 @@ export function normalizePageKey(page) {
     case "qa-command-center":
     case "qaCommandCenter":
       return "qaCommandCenter";
+    case "projection-ops-center":
+    case "projectionOpsCenter":
+      return "projectionOpsCenter";
+    case "production-readiness":
+    case "architecture-readiness":
+    case "productionReadiness":
+      return "productionReadiness";
     case "tenant-management":
     case "tenantManagement":
       return "tenantManagement";
@@ -89,6 +107,11 @@ export function normalizePageKey(page) {
     case "commission-management":
     case "commissionEngine":
       return "commissionEngine";
+    case "compensation-payroll":
+    case "executive-compensation":
+    case "payroll":
+    case "compensationPayroll":
+      return "compensationPayroll";
     case "lab-contracts":
     case "contract-management":
     case "labContractEngine":
@@ -97,6 +120,9 @@ export function normalizePageKey(page) {
     case "lab-ordering":
     case "ordering":
       return "labOrders";
+    case "admin-on-behalf-order":
+    case "adminOnBehalfOrder":
+      return "adminOnBehalfOrder";
     case "credit-risk":
       return "risk";
     case "payments":
@@ -107,6 +133,9 @@ export function normalizePageKey(page) {
     case "lab-invoices":
     case "invoices":
       return "labInvoices";
+    case "logistics-delivery":
+    case "logisticsDelivery":
+      return "logisticsDelivery";
     default:
       return page;
   }

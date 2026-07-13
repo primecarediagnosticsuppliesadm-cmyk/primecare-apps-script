@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 /**
- * Verify AR reconciliation: run reconcile RPC then collection inconsistency audit.
+ * Verify AR reconciliation state (read-only).
+ *
+ * This verifier must never call reconcile/repair RPCs. Use
+ * `repair-ar-reconcile.mjs --apply` for the mutation-capable path.
  */
 import { spawnSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
@@ -16,12 +19,7 @@ function run(cmd, args) {
   return res.status ?? 1;
 }
 
-const reconcileStatus = run("node", ["scripts/run-ar-reconcile.mjs"]);
-if (reconcileStatus === 2) {
-  console.warn("SKIP reconcile — RPC not deployed; running inconsistency audit only");
-} else if (reconcileStatus !== 0) {
-  process.exit(reconcileStatus);
-}
+console.log("VERIFY-ONLY: AR reconcile mutation skipped. Use repair-ar-reconcile.mjs --apply for repairs.");
 
 const auditStatus = run("node", ["scripts/verify-collection-inconsistencies.mjs"]);
 process.exit(auditStatus);

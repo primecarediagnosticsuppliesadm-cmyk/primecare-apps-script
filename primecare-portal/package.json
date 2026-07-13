@@ -5,9 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check:tenant-view && vite build",
+    "build": "npm run check:tenant-view && node scripts/verify-runtime-import-safety.mjs && vite build",
     "check:tenant-view": "node scripts/check-tenant-view-imports.mjs",
+    "enforce:pre-commit": "node scripts/enforcement/run-architecture-enforcement.mjs --profile pre-commit",
+    "enforce:pr": "node scripts/enforcement/run-architecture-enforcement.mjs --profile pr --all",
+    "enforce:full": "ENFORCEMENT_MODE=full node scripts/enforcement/run-architecture-enforcement.mjs --profile nightly --all",
+    "enforce:health": "node scripts/enforcement/generate-health-dashboard.mjs",
+    "enforce:validator": "node scripts/enforcement/run-architecture-enforcement.mjs --validator",
     "lint": "eslint .",
+    "lint:runtime": "eslint -c eslint.runtime-safety.config.js src/pages src/components",
     "preview": "vite preview",
     "supabase:functions:serve": "supabase functions serve provision-platform-user reset-platform-user-password --env-file .env.functions.local",
     "supabase:functions:deploy:qa": "supabase functions deploy provision-platform-user reset-platform-user-password generate-invoice-pdf --project-ref zipuzmfkwwucbchlphcj"

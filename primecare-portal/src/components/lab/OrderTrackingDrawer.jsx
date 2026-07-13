@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ux";
 import { paymentStatusToVariant } from "@/utils/statusTokens";
 import { cn } from "@/lib/utils";
+import { OrderAmountLabBreakdown } from "@/components/orders/OrderDeliveryAmountDisplay.jsx";
 import {
   buildTrackingSteps,
   isCancelledStatus,
@@ -56,6 +57,7 @@ function StepIcon({ state, stepKey }) {
  * @param {() => void} props.onClose
  * @param {object | null} props.order
  * @param {boolean} [props.loading]
+ * @param {boolean} [props.confirming]
  * @param {string} [props.error]
  * @param {(action: string, details: object | null) => void} [props.onAction]
  * @param {boolean} [props.repeatLoading]
@@ -66,6 +68,7 @@ export default function OrderTrackingDrawer({
   onClose,
   order,
   loading = false,
+  confirming = false,
   error = "",
   onAction,
   repeatLoading = false,
@@ -143,7 +146,12 @@ export default function OrderTrackingDrawer({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3">
-          {loading ? (
+          {confirming ? (
+            <div className="flex items-center justify-center py-16 text-sm text-slate-600">
+              <Loader2 className="mr-2 h-5 w-5 animate-spin text-blue-600" />
+              Confirming your order…
+            </div>
+          ) : loading ? (
             <div className="flex items-center justify-center py-16 text-sm text-slate-500">
               <Loader2 className="mr-2 h-5 w-5 animate-spin" />
               Loading order details…
@@ -172,10 +180,8 @@ export default function OrderTrackingDrawer({
                     </div>
                   </div>
                   <div className="text-right text-xs text-slate-600">
-                    <p className="font-semibold tabular-nums text-slate-900">
-                      ₹{Number(details.orderTotal || 0).toLocaleString("en-IN")}
-                    </p>
-                    <p>{details.productUnitLabel || `${details.itemCount} items`}</p>
+                    <OrderAmountLabBreakdown order={details} compact />
+                    <p className="mt-1">{details.productUnitLabel || `${details.itemCount} items`}</p>
                   </div>
                 </div>
                 <dl className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-600">

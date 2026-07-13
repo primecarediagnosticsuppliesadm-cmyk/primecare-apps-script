@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "updated": "2026-06-28",
+  "adrs": [
+    {
+      "id": "ADR-001",
+      "title": "HQ Read Model v1 — Domain Projections",
+      "status": "Accepted",
+      "path": "docs/Architecture/ADR-001-HQ-Read-Model-v1.md",
+      "triggers": ["projection", "read_adapter", "hq_read_model"]
+    }
+  ],
+  "triggers_requiring_adr": [
+    "new_projection_class",
+    "sot_change",
+    "new_auth_model",
+    "performance_regression_over_20pct",
+    "cross_domain_write_path"
+  ]
+}

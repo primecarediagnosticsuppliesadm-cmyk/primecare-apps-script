@@ -14,8 +14,12 @@ export { default as DataFreshnessLabel } from "./DataFreshnessLabel";
 export { default as RouteTransitionOverlay } from "./RouteTransitionOverlay";
 export { default as PortalAccessCard, PortalLoadingScreen, PortalAccessAction } from "./PortalAccessCard";
 export { default as PageHeader } from "./PageHeader";
+export { default as ActionErrorSummary } from "./ActionErrorSummary";
 export { default as DataFetchError } from "./DataFetchError";
+export { default as ReadHealthBanner } from "./ReadHealthBanner";
 export { default as EnterpriseDataTable } from "./EnterpriseDataTable";
+export { default as RoleChip } from "./RoleChip";
+export { default as EnterpriseMetricStrip } from "./EnterpriseMetricStrip";
 
 export {
   qualificationBandToVariant,
@@ -41,5 +45,7 @@ export {
   TOAST_DURATION_MS,
   SEMANTIC_VARIANTS,
 } from "@/styles/designTokens";
+
+export { enterpriseLayout, enterprisePageClass, enterpriseSectionClass } from "@/styles/enterpriseLayout.js";
 
 export { usePortalToast, PortalToastProvider } from "@/context/PortalToastContext";

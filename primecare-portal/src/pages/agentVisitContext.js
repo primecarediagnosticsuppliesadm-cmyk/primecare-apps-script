@@ -8,6 +8,11 @@ export function writeAgentWorkspaceReturnPath(path = "dashboard") {
   sessionStorage.setItem(AGENT_WORKSPACE_RETURN_KEY, String(path || "dashboard"));
 }
 
+export function peekAgentWorkspaceReturnPath() {
+  if (typeof window === "undefined") return "";
+  return sessionStorage.getItem(AGENT_WORKSPACE_RETURN_KEY) || "";
+}
+
 export function consumeAgentWorkspaceReturnPath() {
   if (typeof window === "undefined") return "";
   const value = sessionStorage.getItem(AGENT_WORKSPACE_RETURN_KEY) || "";
@@ -76,7 +81,7 @@ export function writeAgentVisitContext(params = {}) {
  * @param {Object} item
  */
 export function startVisitFromWorkspaceItem(item, overrides = {}) {
-  writeAgentWorkspaceReturnPath("dashboard");
+  writeAgentWorkspaceReturnPath(overrides.returnPath || "dashboard");
   writeAgentVisitContext({
     labId: item.labId,
     labName: item.labName,

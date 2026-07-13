@@ -35,6 +35,27 @@ export function navigateToOrders(setActivePage, { labId = "", orderId = "" } = {
   });
 }
 
+export function navigateToAdminOnBehalfOrder(
+  setActivePage,
+  {
+    selectedLabId = "",
+    selectedTenantId = "",
+    selectedLabName = "",
+    selectedLifecycleStatus = "",
+    selectedOrderingMode = "",
+  } = {}
+) {
+  hqNavigate(setActivePage, {
+    page: "adminOnBehalfOrder",
+    adminOnBehalf: true,
+    selectedLabId: str(selectedLabId),
+    selectedTenantId: str(selectedTenantId),
+    selectedLabName: str(selectedLabName),
+    selectedLifecycleStatus: str(selectedLifecycleStatus).toUpperCase(),
+    selectedOrderingMode: str(selectedOrderingMode),
+  });
+}
+
 /** Role-aware collections destination (never returns a page the role cannot access). */
 export function resolveCollectionsPageForRole(role) {
   const r = str(role).toLowerCase();
@@ -136,6 +157,19 @@ export function navigateToOperationsCenter(
     openAssignDrawer: Boolean(openAssignDrawer),
     labId: str(labId),
     tab: str(tab),
+  });
+}
+
+export function navigateToLogisticsDelivery(
+  setActivePage,
+  { orderId = "", shipmentId = "", statusFilter = "", search = "" } = {}
+) {
+  hqNavigate(setActivePage, {
+    page: "logisticsDelivery",
+    orderId: str(orderId),
+    shipmentId: str(shipmentId),
+    statusFilter: str(statusFilter),
+    search: str(search),
   });
 }
 
