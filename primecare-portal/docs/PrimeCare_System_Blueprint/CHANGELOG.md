@@ -4,6 +4,20 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-08-16 — Agent Visit runtime: displayResponseLabel import
+
+### Change
+
+- QA blocker: `ReferenceError: displayResponseLabel is not defined` after Products & Purchasing Continue / Proof & Save. Helper already existed in `src/utils/agentVisitDisplay.js`; `AgentVisitPage.jsx` used it without importing. Same gap for `enrichVisitForDisplay`.
+- Verification: `verify-agent-visit-product-intelligence.mjs` now fails if those imports are missing or if unbound helper calls appear in the wizard files.
+
+### Verification
+
+- `node scripts/verify-agent-visit-product-intelligence.mjs`
+- `npm run build`
+
+---
+
 ## 2026-08-15 — Lab product intelligence (Agent Visit market discovery)
 
 ### Change

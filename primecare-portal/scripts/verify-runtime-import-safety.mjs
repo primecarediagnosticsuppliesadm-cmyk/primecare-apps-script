@@ -36,6 +36,18 @@ const SYMBOL_CHECKS = [
       /import\s*\{[^}]*\bmergeReadHealth\b[^}]*\}\s*from\s*["']@\/observability\/readHealth(?:\.js)?["']/,
     usageRe: /\bmergeReadHealth\s*\(/,
   },
+  {
+    symbol: "displayResponseLabel",
+    importRe:
+      /import\s*\{[^}]*\bdisplayResponseLabel\b[^}]*\}\s*from\s*["']@\/utils\/agentVisitDisplay(?:\.js)?["']/,
+    usageRe: /\bdisplayResponseLabel\s*\(/,
+  },
+  {
+    symbol: "enrichVisitForDisplay",
+    importRe:
+      /import\s*\{[^}]*\benrichVisitForDisplay\b[^}]*\}\s*from\s*["']@\/utils\/agentVisitDisplay(?:\.js)?["']/,
+    usageRe: /\benrichVisitForDisplay\s*\(/,
+  },
 ];
 
 const SHELL_FORBIDDEN = [

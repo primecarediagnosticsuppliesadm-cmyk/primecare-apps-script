@@ -131,6 +131,10 @@ import {
   getPipelineStageLabel,
   mapPipelineFieldsFromRow,
 } from "@/utils/qualificationPipeline";
+import {
+  displayResponseLabel,
+  enrichVisitForDisplay,
+} from "@/utils/agentVisitDisplay.js";
 
 function AgentVisitLoading() {
   return (

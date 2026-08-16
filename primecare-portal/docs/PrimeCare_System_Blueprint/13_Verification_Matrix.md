@@ -59,7 +59,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-collections-workspace-separation.mjs | Sprint 1C persona workspace shells, primary-question framing | Collections UX |
 | verify-collections-certification-closure.mjs | COL-CERT-011/003/004 discoverability, context, continuity | Collections UX |
 | verify-agent-collections-ownership-filter.mjs | Ownership scoping | Agent collections |
-| verify-agent-visit-product-intelligence.mjs | Visit Products & Purchasing step; child table; follow-up persistence; no CRM | Agent visits |
+| verify-agent-visit-product-intelligence.mjs | Visit Products & Purchasing step; child table; follow-up persistence; no CRM; wizard runtime import safety (`displayResponseLabel` / unbound callees) | Agent visits |
 | verify-agent-rc1-closure.mjs | Agent visit save wiring + mobile shell | Agent visits |
 | verify-create-lab-ar-rls.mjs | Lab+AR insert RLS | Add lab |
 
