@@ -2,7 +2,7 @@
 export const AGENT_VISIT_STEP_SUBTITLES = {
   basics: "Select your lab and visit date",
   outcome: "Capture visit outcome",
-  stock: "Record stock feedback",
+  products: "What does this lab already buy?",
   followup: "Plan the next follow-up",
   qualification: "Help PrimeCare understand this lab better",
   review: "Attach proof and review before submitting",
@@ -27,7 +27,7 @@ export function getWizardMotivationMessage(stepIndex, total, labSelected, canSav
   if (stepIndex >= total - 2) return "Almost ready to save";
   if (stepIndex >= Math.floor(total / 2)) return "Halfway done";
   if (stepIndex === 1) return "Good start — capture the outcome";
-  if (stepIndex === 2) return "Good start — quick stock check";
+  if (stepIndex === 2) return "Good start — capture what they buy";
   return "Good start";
 }
 

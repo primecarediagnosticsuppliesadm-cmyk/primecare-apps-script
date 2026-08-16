@@ -254,7 +254,20 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 | **Module** | Agent Visits |
 | **PK** | `id` (uuid) |
 | **Business key** | `visit_id` (text — no unique DB constraint) |
+| **Follow-up** | `next_follow_up_date`, `next_follow_up_type`, `next_action`, `follow_up_required` |
 | **RLS** | Yes — agent work + lab visibility |
+
+---
+
+## lab_product_intelligence
+
+| Attribute | Value |
+|-----------|-------|
+| **Purpose** | Incumbent purchasing mix (N product lines per lab) |
+| **Module** | Agent Visits — Products & Purchasing step |
+| **PK** | `id` (uuid) |
+| **Cardinality** | labs 1 : N product lines |
+| **RLS** | Yes — lab visibility; agent write when lab visible |
 
 ---
 

@@ -318,7 +318,23 @@ Major tables and objects in PrimeCare QA/Prod Supabase (`public` schema).
 | **Owner module** | Agent Visits |
 | **PK** | `id` (uuid) |
 | **Business key** | `visit_id` (text — **no unique constraint in schema**) |
+| **Optional** | `next_follow_up_date`, `next_follow_up_type`, `next_action`, `follow_up_required`, `notes` |
 | **RLS** | Yes — agent work + lab visibility |
+
+### `lab_product_intelligence`
+| Attribute | Value |
+|-----------|-------|
+| **Purpose** | Incumbent product mix per lab (market discovery). One lab, many product lines (e.g. BD EDTA + other-brand SST + gloves). |
+| **Owner module** | Agent Visits (Qualify stays lab-level) |
+| **PK** | `id` (uuid) |
+| **Business key** | None unique — multiple rows per `(tenant_id, lab_id)` |
+| **Required** | `tenant_id`, `lab_id` |
+| **Quick-capture** | `product_category`, `brand`, `monthly_quantity`, `current_supplier`, `primary_pain_point` |
+| **Optional** | `sku_spec`, `pack_size`, `current_purchase_price`, `purchase_frequency`, `willingness_to_switch`, `alternative_brand_ok`, sample fields, `source_visit_id` |
+| **Indexes** | `(tenant_id, lab_id)`, `(tenant_id, source_visit_id)` |
+| **RLS** | Yes — same lab visibility as visits; agent insert/update/delete when lab visible; ops write |
+| **Relationships** | Logical child of `labs`; optional `source_visit_id` → `agent_visits.visit_id` (no FK — visit_id is not unique) |
+| **Not** | PrimeCare warehouse stock, `products` catalog, `lab_qualifications` 1:1 profile |
 
 ---
 
@@ -378,6 +394,7 @@ Major tables and objects in PrimeCare QA/Prod Supabase (`public` schema).
 
 | Migration | Summary |
 |-----------|---------|
+| `20260815120000` | `lab_product_intelligence` + visit follow-up columns |
 | `20260624120000` | HQ profiles RLS tenant scope |
 | `20260624120001` | Orders/payments date indexes |
 | `20260624120002`–`005` | Invoice system phases 1, 2, 3, 5 |
