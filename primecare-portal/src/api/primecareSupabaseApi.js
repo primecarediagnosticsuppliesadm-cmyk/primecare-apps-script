@@ -4793,7 +4793,7 @@ export async function createAgentVisitWrite(payload = {}) {
           tenantId: visitTenantId,
           targetLabId: insertRow.lab_id,
           targetRole: "admin",
-          actorUserId: insertRow.agent_id || null,
+          actorUserId: payload.userId || payload.user_id || null,
           severity: "info",
           payload: {
             visitId: insertRow.visit_id,

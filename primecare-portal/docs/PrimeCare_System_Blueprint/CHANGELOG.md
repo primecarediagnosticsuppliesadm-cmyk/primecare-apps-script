@@ -4,6 +4,22 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-08-16 — Agent Visit production console: Apps Script 500 + notification 400
+
+### Change
+
+- Production visit save already succeeded; console noise came from (1) `logClientError` → `POST /api/primecare` when `PRIMECARE_APPS_SCRIPT_URL` is intentionally unset, (2) `notification_events.actor_user_id uuid` receiving `agent_id` text.
+- Client logging now records to Predator and no-ops Apps Script when `ALLOW_LEGACY_APPS_SCRIPT` is false. Proxy returns 200 skip for `logClientError` instead of 500.
+- Durable grants: `20260816120000_agent_visit_authenticated_grants.sql` (authenticated only; no anon writes).
+
+### Verification
+
+- `node scripts/verify-agent-visit-product-intelligence.mjs`
+- `node scripts/verify-runtime-import-safety.mjs`
+- `npm run build`
+
+---
+
 ## 2026-08-16 — Agent Visit runtime: displayResponseLabel import
 
 ### Change
