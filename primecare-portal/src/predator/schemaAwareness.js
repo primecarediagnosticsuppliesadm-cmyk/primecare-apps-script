@@ -130,7 +130,11 @@ export const PREDATOR_KNOWN_TABLE_COLUMNS = {
     "event_id",
     "channel",
     "status",
+    "provider_message_id",
+    "provider_error",
     "attempted_at",
+    "delivered_at",
+    "created_at",
   ],
   distributor_billing_payments: [
     "id",

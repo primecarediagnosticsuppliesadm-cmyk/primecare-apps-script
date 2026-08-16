@@ -382,6 +382,8 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 
 **Schema note (2026-08-16):** Production may still carry the GAP-006 stub (`id`, `title`, `message`, `payload`). Foundation contract requires `event_id`, `source_module`, `source_id`, `actor_user_id`, `target_*`, `payload_json`. Apply `20260816140000_notification_events_foundation_parity.sql`. Client falls back to stub insert on `PGRST204` without affecting Agent Visit writes.
 
+**Delivery log (2026-08-16):** LIVE QA `notification_delivery_log` columns are `delivery_id`, `event_id` (FK CASCADE), `tenant_id`, `channel`, `status`, `provider_message_id`, `provider_error`, `attempted_at`, `delivered_at`, `created_at`. Status check allows `placeholder_not_sent` | `logged_in_app` only. SELECT RLS uses `notification_event_visible_to_current_user` (apply `20260816145000` before `20260816150000`). Inserts are fire-and-forget after `notification_events`.
+
 ---
 
 ## compensation / payroll tables (Phase 3A foundation)
