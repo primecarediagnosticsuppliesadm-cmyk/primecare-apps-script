@@ -332,6 +332,19 @@ Critical fields across PrimeCare. For full column lists see [01_schema_catalog.m
 - **Type:** text
 - **Note:** No DB unique constraint — app should avoid duplicates
 
+### `agent_visits.next_follow_up_type`
+- **Type:** text
+- **Meaning:** Call / Visit / Send Pricing / Demo / Collection
+- **Note:** Must persist with `next_follow_up_date` and `next_action` — not notes-only
+
+### `lab_product_intelligence.product_category`
+- **Type:** text
+- **Meaning:** Incumbent category (EDTA, SST, gloves, containers, other)
+
+### `lab_product_intelligence.primary_pain_point`
+- **Type:** text
+- **Values:** price, quality, availability, delivery, credit, service, other
+
 ---
 
 ## Notification

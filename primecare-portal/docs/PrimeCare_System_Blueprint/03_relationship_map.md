@@ -64,6 +64,14 @@ tenants (id)
 | **Cardinality** | 1:N visits |
 | **Query pattern** | Agent dashboard bounded by `agent_id` + lab visibility |
 
+### labs → lab_product_intelligence
+| Attribute | Detail |
+|-----------|--------|
+| **Join** | `(tenant_id, lab_id)` |
+| **Cardinality** | 1:N incumbent product lines |
+| **Business rule** | Market discovery SoT. Do **not** store mix on `lab_qualifications` or visit notes. Optional `source_visit_id` for the visit that last captured the row. |
+| **Query pattern** | `getLabProductIntelligenceRead({ tenantId, labId })` |
+
 ---
 
 ## Order domain

@@ -4,6 +4,39 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-08-16 — Agent Visit runtime: displayResponseLabel import
+
+### Change
+
+- QA blocker: `ReferenceError: displayResponseLabel is not defined` after Products & Purchasing Continue / Proof & Save. Helper already existed in `src/utils/agentVisitDisplay.js`; `AgentVisitPage.jsx` used it without importing. Same gap for `enrichVisitForDisplay`.
+- Verification: `verify-agent-visit-product-intelligence.mjs` now fails if those imports are missing or if unbound helper calls appear in the wizard files.
+
+### Verification
+
+- `node scripts/verify-agent-visit-product-intelligence.mjs`
+- `npm run build`
+
+---
+
+## 2026-08-15 — Lab product intelligence (Agent Visit market discovery)
+
+### Change
+
+- Founder-approved Year-1 **small extension** of Agent Visit + Qualification. **No CRM, no new HQ module.**
+- New child table `lab_product_intelligence`: many incumbent product lines per lab (category, brand, qty, supplier, pain; optional SKU/price/frequency/switch/sample).
+- Agent Visit wizard step 3 renamed **Products & Purchasing** (replaces unused Stock Feedback UI). Stock fields `stockAvailable` / `needsNewStock` were never persisted and were not consumed by certified Orders/Inventory/Collections workflows.
+- Visit follow-up persistence: `agent_visits.next_follow_up_type`, `agent_visits.next_action` (audit fix).
+- Qualification remains **1:1 lab-level** (`lab_qualifications`). Product mix does **not** live there.
+- Generic visit `samplesGiven` count is **not** the sample model; sample requested/issued is optional on a product line.
+
+### Verification
+
+- `node scripts/verify-agent-visit-product-intelligence.mjs`
+- `node scripts/verify-agent-rc1-closure.mjs`
+- `npm run build`
+
+---
+
 ## 2026-07-12 — v1.0 Production Deployment pack (docs)
 
 ### Change

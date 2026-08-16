@@ -36,6 +36,11 @@ import {
   logSupabaseFeatureSource,
 } from "@/utils/migrationTrace.js";
 import { labIdKey, normalizeLabIdKey } from "@/utils/labId.js";
+import {
+  isProductLineCaptured,
+  mapProductIntelligenceFromRow,
+  mapProductLineToWriteRow,
+} from "@/visits/labProductIntelligenceModel.js";
 import { ALL_ROLE_SLUGS, isDistributorScopedRole, validateActorRoleAssignment } from "@/config/rolePermissionMatrix.js";
 import { computeQualificationScore } from "@/utils/computeQualificationScore.js";
 import {
@@ -107,6 +112,7 @@ import {
   fetchCollectionsBoundedArRows,
   fetchAgentVisitsForLabBoundedRows,
   fetchAgentVisitsBoundedRows,
+  fetchLabProductIntelligenceForLabBoundedRows,
   fetchLabsCreditBoundedRows,
   fetchQualificationBoundedRows,
   fetchInventoryBoundedRows,
@@ -4690,6 +4696,10 @@ export function buildAgentVisitInsertRow(payload = {}) {
   const next_follow_up_date = str(
     payload.nextFollowUpDate ?? payload.next_follow_up_date ?? ""
   ).slice(0, 10);
+  const next_follow_up_type = str(
+    payload.nextFollowUpType ?? payload.next_follow_up_type ?? ""
+  );
+  const next_action = str(payload.nextAction ?? payload.next_action ?? "");
   const labResponse = str(payload.labResponse ?? payload.lab_response);
   const sold_value = num(payload.soldValue ?? payload.sold_value ?? 0);
   const lab_name = str(payload.labName ?? payload.lab_name) || null;
@@ -4727,6 +4737,8 @@ export function buildAgentVisitInsertRow(payload = {}) {
     notes,
     follow_up_required,
     next_follow_up_date: next_follow_up_date || null,
+    next_follow_up_type: next_follow_up_type || null,
+    next_action: next_action || null,
     lab_response: labResponse || null,
     sold_value: sold_value > 0 ? sold_value : null,
     lab_name,
@@ -4798,6 +4810,136 @@ export async function createAgentVisitWrite(payload = {}) {
   } catch (err) {
     hqDebugWarn("[createAgentVisitWrite] failed:", err?.message || err);
     return { success: false, error: err?.message || String(err), data: null };
+  }
+}
+
+export async function getLabProductIntelligenceRead({
+  tenantId = "",
+  tenant_id = "",
+  labId = "",
+  lab_id = "",
+} = {}) {
+  const tid = str(tenantId || tenant_id);
+  const lid = labIdKey(labId || lab_id);
+  traceSupabaseRead("Visits.getLabProductIntelligenceRead", {
+    table: "lab_product_intelligence",
+    labId: lid,
+  });
+  if (!supabase || !lid) {
+    return { success: false, error: "lab_id is required", data: [] };
+  }
+
+  try {
+    const { data, error } = await fetchLabProductIntelligenceForLabBoundedRows(supabase, {
+      tenantId: tid,
+      labId: lid,
+    });
+    if (error) {
+      return {
+        success: false,
+        error: error.message || "Failed to load product intelligence",
+        data: [],
+      };
+    }
+    return {
+      success: true,
+      data: (data || []).map(mapProductIntelligenceFromRow),
+      error: null,
+    };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err), data: [] };
+  }
+}
+
+export async function upsertLabProductIntelligenceWrite({
+  tenantId = "",
+  tenant_id = "",
+  labId = "",
+  lab_id = "",
+  visitId = "",
+  agentId = "",
+  lines = [],
+} = {}) {
+  traceSupabaseRead("Visits.upsertLabProductIntelligenceWrite", {
+    table: "lab_product_intelligence",
+  });
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: [] };
+  }
+
+  const tid = str(tenantId || tenant_id);
+  const lid = labIdKey(labId || lab_id);
+  if (!tid || !lid) {
+    return { success: false, error: "tenant_id and lab_id are required", data: [] };
+  }
+
+  const captured = (lines || []).filter(isProductLineCaptured);
+  const keepIds = new Set(captured.map((line) => str(line.id)).filter(Boolean));
+
+  try {
+    const existingRes = await fetchLabProductIntelligenceForLabBoundedRows(supabase, {
+      tenantId: tid,
+      labId: lid,
+    });
+    if (existingRes.error) {
+      return {
+        success: false,
+        error: existingRes.error.message || "Failed to load existing product mix",
+        data: [],
+      };
+    }
+    const staleIds = (existingRes.data || [])
+      .map((row) => str(row.id))
+      .filter((id) => id && !keepIds.has(id));
+
+    if (staleIds.length) {
+      const { error: delError } = await supabase
+        .from("lab_product_intelligence")
+        .delete()
+        .eq("tenant_id", tid)
+        .eq("lab_id", lid)
+        .in("id", staleIds);
+      if (delError) {
+        return { success: false, error: delError.message || "Failed to remove product lines", data: [] };
+      }
+    }
+
+    if (!captured.length) {
+      return { success: true, data: [], error: null };
+    }
+
+    const rows = captured.map((line) =>
+      mapProductLineToWriteRow(line, {
+        tenantId: tid,
+        labId: lid,
+        visitId,
+        agentId,
+      })
+    );
+    const updates = rows.filter((row) => row.id);
+    const inserts = rows.filter((row) => !row.id);
+    const saved = [];
+
+    if (updates.length) {
+      const { data, error } = await supabase
+        .from("lab_product_intelligence")
+        .upsert(updates, { onConflict: "id" })
+        .select();
+      if (error) {
+        return { success: false, error: error.message || "Failed to update product mix", data: [] };
+      }
+      saved.push(...(data || []));
+    }
+    if (inserts.length) {
+      const { data, error } = await supabase.from("lab_product_intelligence").insert(inserts).select();
+      if (error) {
+        return { success: false, error: error.message || "Failed to save product mix", data: [] };
+      }
+      saved.push(...(data || []));
+    }
+    return { success: true, data: saved, error: null };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err), data: [] };
   }
 }
 

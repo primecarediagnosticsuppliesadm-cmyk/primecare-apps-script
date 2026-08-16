@@ -1,4 +1,4 @@
-const DRAFT_VERSION = 1;
+const DRAFT_VERSION = 2;
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -38,6 +38,7 @@ function isDraftLabAllowed(draft, visibleLabs) {
  * @param {object} params.form
  * @param {object} params.qualificationForm
  * @param {boolean} params.qualificationEditing
+ * @param {object[]} [params.productLines]
  */
 export function saveAgentVisitDraft({
   user,
@@ -45,6 +46,7 @@ export function saveAgentVisitDraft({
   form,
   qualificationForm,
   qualificationEditing,
+  productLines,
 }) {
   if (typeof window === "undefined") return;
   try {
@@ -55,6 +57,7 @@ export function saveAgentVisitDraft({
       form,
       qualificationForm,
       qualificationEditing: Boolean(qualificationEditing),
+      productLines: Array.isArray(productLines) ? productLines : [],
     };
     window.localStorage.setItem(buildAgentVisitDraftKey(user), JSON.stringify(payload));
   } catch {

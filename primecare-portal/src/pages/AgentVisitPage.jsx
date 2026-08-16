@@ -36,7 +36,7 @@ import {
   PhoneCall,
   IndianRupee,
   Clock3,
-  Package,
+  ShoppingBag,
   Loader2,
   ChevronLeft,
   ChevronRight,
@@ -87,12 +87,19 @@ import EvidenceUploadField, {
 } from "@/components/evidence/EvidenceUploadField.jsx";
 import VisitEvidenceChips from "@/components/evidence/VisitEvidenceChips.jsx";
 import { uploadOperationalEvidence, listOperationalEvidence } from "@/api/operationalEvidenceApi.js";
-import { enrichVisitForDisplay, displayResponseLabel } from "@/utils/agentVisitDisplay.js";
+import VisitProductIntelligenceStep from "@/components/agent/VisitProductIntelligenceStep.jsx";
+import {
+  countCapturedProductLines,
+  createEmptyProductLine,
+  productLineSummary,
+} from "@/visits/labProductIntelligenceModel.js";
 
 import { saveAgentVisit } from "@/api/primecareApi";
 import {
   createAgentVisitWrite,
   upsertLabQualificationWrite,
+  getLabProductIntelligenceRead,
+  upsertLabProductIntelligenceWrite,
 } from "@/api/primecareSupabaseApi";
 import {
   readAgentVisitContextBroker,
@@ -124,6 +131,10 @@ import {
   getPipelineStageLabel,
   mapPipelineFieldsFromRow,
 } from "@/utils/qualificationPipeline";
+import {
+  displayResponseLabel,
+  enrichVisitForDisplay,
+} from "@/utils/agentVisitDisplay.js";
 
 function AgentVisitLoading() {
   return (
@@ -506,7 +517,7 @@ const WIZARD_STEP_COUNT = 6;
 export const AGENT_VISIT_SECTION_STEPS = [
   { key: "basics", title: "Select Lab", shortTitle: "Lab", icon: Users },
   { key: "outcome", title: "Visit Outcome", shortTitle: "Outcome", icon: MapPin },
-  { key: "stock", title: "Stock Feedback", shortTitle: "Stock", icon: Package },
+  { key: "products", title: "Products & Purchasing", shortTitle: "Products", icon: ShoppingBag },
   { key: "followup", title: "Follow-up", shortTitle: "Follow-up", icon: CalendarDays },
   { key: "qualification", title: "Qualification", shortTitle: "Qualify", icon: ClipboardCheck },
   { key: "review", title: "Proof & Save", shortTitle: "Proof & Save", icon: CheckCircle2 },
@@ -914,9 +925,15 @@ function VisitSaveSuccessPanel({
           </p>
           <p className="mt-0.5 text-xs text-emerald-700">
             {savedVisit.visitDate} · {savedVisit.visitType} · {displayResponseLabel(savedVisit.labResponse)}
+            {savedVisit.productCount ? ` · ${savedVisit.productCount} products` : ""}
           </p>
         </div>
       </div>
+      {savedVisit.productSaveWarning ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          {savedVisit.productSaveWarning}
+        </p>
+      ) : null}
       {evidenceSummary ? (
         <p className="rounded-lg border border-emerald-200/80 bg-white/70 px-3 py-2 text-xs text-slate-700">
           {evidenceSummary}
@@ -958,6 +975,8 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
   const [qualificationLoading, setQualificationLoading] = useState(false);
   const [qualificationSaving, setQualificationSaving] = useState(false);
   const [qualificationLastUpdated, setQualificationLastUpdated] = useState("");
+  const [productLines, setProductLines] = useState(() => [createEmptyProductLine()]);
+  const [productLinesLoading, setProductLinesLoading] = useState(false);
   const [draftBannerVisible, setDraftBannerVisible] = useState(false);
   const [visitProofFile, setVisitProofFile] = useState(null);
   const [collectionProofFile, setCollectionProofFile] = useState(null);
@@ -983,6 +1002,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
   const wizardStartedAtRef = useRef(Date.now());
   const stepEnteredAtRef = useRef(Date.now());
   const prevStepIndexRef = useRef(0);
+  const skipNextProductLoadRef = useRef(false);
   const currentStepIndexRef = useRef(0);
   const wizardStepAnchorRef = useRef(null);
 
@@ -1006,12 +1026,9 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
     labName: "",
     area: currentUser?.assignedArea || "",
     visitType: "Follow-up",
-    samplesGiven: "",
     demoGiven: "No",
     labResponse: "Warm",
     soldValue: "",
-    stockAvailable: "Yes",
-    needsNewStock: "No",
     nextAction: "",
     nextFollowUpDate: "",
     nextFollowUpType: "Call",
@@ -1177,6 +1194,10 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
     if (typeof draft.qualificationEditing === "boolean") {
       setQualificationEditing(draft.qualificationEditing);
     }
+    if (Array.isArray(draft.productLines) && draft.productLines.length) {
+      skipNextProductLoadRef.current = true;
+      setProductLines(draft.productLines);
+    }
     const stepIdx = Math.min(
       Math.max(0, Number(draft.currentStepIndex) || 0),
       AGENT_VISIT_SECTION_STEPS.length - 1
@@ -1201,6 +1222,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
       form,
       qualificationForm,
       qualificationEditing,
+      productLines,
     });
   }, [
     loading,
@@ -1209,6 +1231,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
     form,
     qualificationForm,
     qualificationEditing,
+    productLines,
     currentUser,
     savePhase,
   ]);
@@ -1558,6 +1581,45 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
     };
   }, [form.labId, currentUser, showToast]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProductMix() {
+      const labId = labIdKey(form.labId);
+      if (!labId) {
+        setProductLines([createEmptyProductLine()]);
+        return;
+      }
+      if (skipNextProductLoadRef.current) {
+        skipNextProductLoadRef.current = false;
+        return;
+      }
+      try {
+        setProductLinesLoading(true);
+        const res = await getLabProductIntelligenceRead({
+          tenantId: currentUser?.tenantId || currentUser?.tenant_id || "",
+          labId,
+        });
+        if (cancelled) return;
+        if (!res?.success) {
+          setProductLines([createEmptyProductLine()]);
+          return;
+        }
+        const rows = Array.isArray(res.data) ? res.data : [];
+        setProductLines(rows.length ? rows : [createEmptyProductLine()]);
+      } catch {
+        if (!cancelled) setProductLines([createEmptyProductLine()]);
+      } finally {
+        if (!cancelled) setProductLinesLoading(false);
+      }
+    }
+
+    loadProductMix();
+    return () => {
+      cancelled = true;
+    };
+  }, [form.labId, currentUser]);
+
   const selectedLabVisits = useMemo(() => {
     return visibleVisits
       .filter((visit) => String(visit.labId) === String(form.labId))
@@ -1856,12 +1918,9 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
       labName: "",
       area: currentUser?.assignedArea || "",
       visitType: "Follow-up",
-      samplesGiven: "",
       demoGiven: "No",
       labResponse: "Warm",
       soldValue: "",
-      stockAvailable: "Yes",
-      needsNewStock: "No",
       nextAction: "",
       nextFollowUpDate: "",
       nextFollowUpType: "Call",
@@ -1869,6 +1928,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
     }));
     setCurrentStepIndex(0);
     setQualificationEditing(false);
+    setProductLines([createEmptyProductLine()]);
     clearAgentVisitDraft(currentUser);
     setDraftBannerVisible(false);
     wizardStartedAtRef.current = Date.now();
@@ -1933,12 +1993,9 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
         labName: normalizedLabName,
         area: form.area,
         visitType: form.visitType,
-        samplesGiven: Number(form.samplesGiven || 0),
         demoGiven: form.demoGiven,
         labResponse: form.labResponse,
         soldValue: Number(form.soldValue || 0),
-        stockAvailable: form.stockAvailable,
-        needsNewStock: form.needsNewStock,
         nextAction: form.nextAction,
         nextFollowUpDate: form.nextFollowUpDate,
         nextFollowUpType: form.nextFollowUpType,
@@ -1963,6 +2020,8 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
           area: form.area,
           notes: form.notes,
           nextFollowUpDate: form.nextFollowUpDate,
+          nextFollowUpType: form.nextFollowUpType,
+          nextAction: form.nextAction,
           labResponse: form.labResponse,
           soldValue: form.soldValue,
         });
@@ -1991,6 +2050,21 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
       if (!res.success) throw new Error(res.error || "Failed to save visit");
 
       const savedVisitId = res.data?.visitId || "";
+      let productSaveWarning = "";
+      if (supabase) {
+        const productRes = await upsertLabProductIntelligenceWrite({
+          tenantId: currentUser?.tenantId || currentUser?.tenant_id,
+          labId: normalizedLabId,
+          visitId: savedVisitId,
+          agentId: currentUser?.agentId || currentUser?.agent_id || "",
+          lines: productLines,
+        });
+        if (!productRes?.success) {
+          productSaveWarning =
+            productRes?.error ||
+            "Visit saved, but product mix did not save. Re-open this lab and capture products again.";
+        }
+      }
       const hadProof = Boolean(visitProofFile || collectionProofFile);
       const returnPath = consumeAgentWorkspaceReturnPath();
       const fromWorkspace = returnPath === "dashboard" || returnPath === "collections";
@@ -2050,6 +2124,8 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
         visitDate: form.visitDate,
         visitType: form.visitType,
         labResponse: form.labResponse,
+        productCount: countCapturedProductLines(productLines),
+        productSaveWarning,
         evidenceSummary,
       });
       setSavePhase("success");
@@ -2361,17 +2437,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
-                <FieldLabel helper="How many samples were given?">Samples given</FieldLabel>
-                <Input
-                  value={form.samplesGiven}
-                  onChange={(e) => setForm({ ...form, samplesGiven: e.target.value })}
-                  placeholder="e.g. 2"
-                  className="h-11 rounded-lg text-sm"
-                />
-              </div>
-
-              <div>
-                <FieldLabel helper="Did you demo the product?">Demo given</FieldLabel>
+                <FieldLabel helper="Did you demo PrimeCare products?">Demo given</FieldLabel>
                 <Select value={form.demoGiven} onValueChange={(value) => setForm({ ...form, demoGiven: value })}>
                   <SelectTrigger className="h-11 rounded-lg text-sm">
                     <SelectValue placeholder="Demo given?" />
@@ -2396,58 +2462,25 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
                 />
               </div>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Product samples belong on the next step, against a specific product line — not a generic count.
+            </p>
           </section>
           ) : null}
 
           {currentStepIndex === 2 ? (
           <section className={STEP_PANEL_CLASS}>
             <SectionTitle
-              icon={Package}
+              icon={ShoppingBag}
               title={currentStep.title}
-              subtitle="Quick stock check at the lab"
+              subtitle="What is this lab already buying?"
               accent
             />
-
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div className="md:max-w-xl">
-                <FieldLabel helper="Was stock on hand?">Was stock available?</FieldLabel>
-                <Select
-                  value={form.stockAvailable}
-                  onValueChange={(value) => setForm({ ...form, stockAvailable: value })}
-                >
-                  <SelectTrigger className="h-12 rounded-xl text-base">
-                    <SelectValue placeholder="Stock available?" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Yes">Yes - Fully Available</SelectItem>
-                    <SelectItem value="No">No - Not Available</SelectItem>
-                    <SelectItem value="Partial">Partial Availability</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="md:max-w-xl">
-                <FieldLabel helper="Replenishment request">Do they need fresh stock?</FieldLabel>
-                <Select
-                  value={form.needsNewStock}
-                  onValueChange={(value) => setForm({ ...form, needsNewStock: value })}
-                >
-                  <SelectTrigger className="h-12 rounded-xl text-base">
-                    <SelectValue placeholder="Needs new stock?" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Yes">Yes</SelectItem>
-                    <SelectItem value="No">No</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {(form.stockAvailable === "No" || form.stockAvailable === "Partial") ? (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                Stock was not fully available. Mention the stock recovery plan clearly in <strong>Next Action</strong>.
-              </div>
-            ) : null}
+            <VisitProductIntelligenceStep
+              lines={productLines}
+              onChange={setProductLines}
+              loading={productLinesLoading}
+            />
           </section>
           ) : null}
 
@@ -2999,14 +3032,23 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
                   </p>
                   <p className="mt-1 text-xs">
                     Sold ₹{Number(form.soldValue || 0).toLocaleString("en-IN")}
-                    {form.samplesGiven ? ` · Samples: ${form.samplesGiven}` : ""}
                   </p>
                 </ReviewSummaryCard>
 
-                <ReviewSummaryCard title="Stock feedback" icon={Package} onEdit={() => handleWizardGoToStep(2)}>
-                  <p>
-                    Stock: {form.stockAvailable || "—"} · Needs new stock: {form.needsNewStock || "—"}
-                  </p>
+                <ReviewSummaryCard title="Products captured" icon={ShoppingBag} onEdit={() => handleWizardGoToStep(2)}>
+                  {countCapturedProductLines(productLines) === 0 ? (
+                    <p className="text-muted-foreground">None yet (optional)</p>
+                  ) : (
+                    <div>
+                      <p className="font-medium">
+                        {countCapturedProductLines(productLines)} product
+                        {countCapturedProductLines(productLines) === 1 ? "" : "s"}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {productLines.filter((line) => line.productCategory || line.brand).slice(0, 3).map(productLineSummary).join("; ")}
+                      </p>
+                    </div>
+                  )}
                 </ReviewSummaryCard>
 
                 <ReviewSummaryCard

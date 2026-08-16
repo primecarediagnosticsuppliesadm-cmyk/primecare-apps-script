@@ -19,7 +19,9 @@ Years 1–3 commercial workspace for PrimeCare’s Diagnostics Distribution Oper
 | Collections / Orders | Existing O2C pages | Deep-links only — **no mutation** |
 | Ops Command Center | Action queue | Exception work items |
 
-**Not found (do not invent without approval):** leads table, quotes/quotations table, meetings calendar object, samples shipment object, Salesforce Activities clone.
+**Not found (do not invent without approval):** leads table, quotes/quotations table, meetings calendar object, Salesforce Activities clone.
+
+**Sample capture (Year-1):** optional fields on `lab_product_intelligence` (requested/issued SKU/qty/date) — **not** a samples shipment object or kit catalog. Pipeline `sample_sent` remains lab-level qualification stage only.
 
 ### Canonical commercial pipeline (UI mapping → existing SoT)
 
