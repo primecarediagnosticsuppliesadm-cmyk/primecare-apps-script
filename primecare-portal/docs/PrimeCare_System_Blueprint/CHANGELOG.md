@@ -4,6 +4,58 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-08-16 — notification_delivery_log insert payload (no recipient)
+
+### Change
+
+- Production PGRST204: `Could not find the 'recipient' column of 'notification_delivery_log'`.
+- Cause: deployed `createNotificationEvent` still built delivery rows with legacy `recipient` / `provider_response` / `error_message` (main). LIVE QA table has none of those columns.
+- Fix (app only): insert via `buildNotificationDeliveryLogInsertRows` allowlisted to QA-canonical keys only. No schema change.
+
+### Verification
+
+- `node scripts/verify-agent-visit-product-intelligence.mjs` (`notify.delivery.insert_allowlist`)
+- `node scripts/verify-runtime-import-safety.mjs`
+- `npm run build`
+
+---
+
+## 2026-08-16 — notification_event_visible_to_current_user prerequisite parity
+
+### Change
+
+- Production failed `20260816150000_notification_delivery_log_parity.sql` with `42883`: function `notification_event_visible_to_current_user(uuid, text, uuid, text)` does not exist.
+- LIVE QA has the helper (SQL STABLE SECURITY DEFINER, `search_path=public`, EXECUTE to PUBLIC); Production does not.
+- Root cause: helper lived only in manual `supabase/sql/notifications_foundation_migration.sql` (applied on QA); `20260816140000` added event columns only.
+- Prerequisite migration: `20260816145000_notification_event_visibility_helper_parity.sql` (before delivery-log parity; 150000 left unchanged to avoid QA checksum rewrite).
+- Production deps already present: `tenant_id_matches`, `is_admin_or_executive`, `current_user_role`, `lab_record_is_visible_to_current_user`, `current_profile_lab_id`.
+
+### Verification
+
+- `node scripts/verify-agent-visit-product-intelligence.mjs`
+- `node scripts/verify-runtime-import-safety.mjs`
+- `npm run build`
+
+---
+
+## 2026-08-16 — notification_delivery_log QA→Production parity
+
+### Change
+
+- Production returns `POST /rest/v1/notification_delivery_log` **404** because `to_regclass('public.notification_delivery_log')` is NULL.
+- LIVE QA table exists with columns: `delivery_id`, `event_id`, `tenant_id`, `channel`, `status`, `provider_message_id`, `provider_error`, `attempted_at`, `delivered_at`, `created_at` (not the older `recipient`/`provider_response`/`error_message` shape in `notifications_foundation_migration.sql`).
+- Root cause: foundation SQL lived under `supabase/sql/` and was applied manually on QA; never shipped as a Production-bound versioned migration.
+- Migration: `20260816150000_notification_delivery_log_parity.sql` (QA-canonical). Prerequisite: `20260816145000_notification_event_visibility_helper_parity.sql`.
+- App insert aligned to QA columns; still fire-and-forget (visit SoT unchanged).
+
+### Verification
+
+- `node scripts/verify-agent-visit-product-intelligence.mjs`
+- `node scripts/verify-runtime-import-safety.mjs`
+- `npm run build`
+
+---
+
 ## 2026-08-16 — notification_events Production schema parity (Agent Visit 400)
 
 ### Change

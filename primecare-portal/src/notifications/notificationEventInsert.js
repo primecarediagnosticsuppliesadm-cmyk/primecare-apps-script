@@ -168,3 +168,75 @@ export function isUnknownNotificationColumnError(error) {
     /column .*notification_events\..* does not exist/i.test(msg)
   );
 }
+
+/** LIVE QA-canonical delivery log columns (2026-08-16 OpenAPI probe). */
+export const NOTIFICATION_DELIVERY_LOG_COLUMNS = [
+  "delivery_id",
+  "event_id",
+  "tenant_id",
+  "channel",
+  "status",
+  "provider_message_id",
+  "provider_error",
+  "attempted_at",
+  "delivered_at",
+  "created_at",
+];
+
+/**
+ * Columns the app may send on INSERT (DB defaults cover delivery_id / created_at).
+ * Intentionally excludes legacy-only fields: recipient, provider_response, error_message.
+ */
+export const NOTIFICATION_DELIVERY_LOG_INSERT_COLUMNS = [
+  "event_id",
+  "tenant_id",
+  "channel",
+  "status",
+  "provider_message_id",
+  "provider_error",
+  "attempted_at",
+  "delivered_at",
+];
+
+const DELIVERY_LOG_INSERT_KEY_SET = new Set(NOTIFICATION_DELIVERY_LOG_INSERT_COLUMNS);
+
+/**
+ * Build INSERT rows for notification_delivery_log matching LIVE QA schema.
+ * Fire-and-forget side effect only — never part of visit transaction.
+ * Output keys are allowlisted — never emit recipient / provider_response / error_message.
+ *
+ * @param {{ tenantId: string, eventId: string, channels?: string[], nowIso?: string }} args
+ */
+export function buildNotificationDeliveryLogInsertRows(args = {}) {
+  const tenantId = str(args.tenantId);
+  const eventId = str(args.eventId);
+  const nowIso = str(args.nowIso) || new Date().toISOString();
+  const channels = Array.isArray(args.channels) && args.channels.length
+    ? args.channels
+    : ["in_app", "email_placeholder", "whatsapp_placeholder", "sms_placeholder"];
+
+  if (!tenantId || !eventId) {
+    return { ok: false, error: "tenantId and eventId are required", rows: [] };
+  }
+
+  const rows = channels.map((channel) => {
+    const ch = str(channel);
+    const inApp = ch === "in_app";
+    const row = {
+      tenant_id: tenantId,
+      event_id: eventId,
+      channel: ch,
+      status: inApp ? "logged_in_app" : "placeholder_not_sent",
+      attempted_at: nowIso,
+      delivered_at: inApp ? nowIso : null,
+      provider_message_id: null,
+      provider_error: null,
+    };
+    // Hard allowlist — drops any accidental legacy keys if this object is extended later.
+    return Object.fromEntries(
+      Object.entries(row).filter(([key]) => DELIVERY_LOG_INSERT_KEY_SET.has(key))
+    );
+  });
+
+  return { ok: true, error: null, rows };
+}

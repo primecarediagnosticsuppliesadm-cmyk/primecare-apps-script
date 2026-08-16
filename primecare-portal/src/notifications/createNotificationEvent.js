@@ -1,8 +1,8 @@
 import { supabase } from "@/api/supabaseClient.js";
 import { hqDebugWarn } from "@/utils/hqDebugLog.js";
-import { NOTIFICATION_CHANNELS } from "@/notifications/notificationConstants.js";
 import {
   buildNotificationEventInsertRows,
+  buildNotificationDeliveryLogInsertRows,
   isUnknownNotificationColumnError,
 } from "@/notifications/notificationEventInsert.js";
 
@@ -82,41 +82,19 @@ export async function createNotificationEvent(event = {}) {
     }
 
     const now = new Date().toISOString();
-    const deliveryBase = NOTIFICATION_CHANNELS.map((channel) => ({
-      tenant_id: built.tenantId,
-      event_id: eventId,
-      channel,
-      recipient:
-        channel === "in_app"
-          ? built.foundation.target_user_id ||
-            built.foundation.target_role ||
-            built.foundation.target_lab_id ||
-            "tenant"
-          : "placeholder",
-      status: channel === "in_app" ? "logged_in_app" : "placeholder_not_sent",
-      attempted_at: now,
-      delivered_at: channel === "in_app" ? now : null,
-    }));
-
-    let logErr = null;
-    const attempts = [
-      deliveryBase.map((r) => ({
-        ...r,
-        provider_response: { foundation: true, liveSend: false },
-        error_message: null,
-      })),
-      deliveryBase.map((r) => ({
-        ...r,
-        provider_response: { foundation: true, liveSend: false },
-      })),
-      deliveryBase,
-    ];
-    for (const rows of attempts) {
-      const res = await supabase.from("notification_delivery_log").insert(rows);
-      logErr = res.error;
-      if (!logErr) break;
-      if (!/schema cache|column|does not exist|PGRST/i.test(logErr.message)) break;
+    const delivery = buildNotificationDeliveryLogInsertRows({
+      tenantId: built.tenantId,
+      eventId,
+      nowIso: now,
+    });
+    if (!delivery.ok) {
+      hqDebugWarn("[createNotificationEvent] delivery log build:", delivery.error);
+      return { success: true, data: inserted, error: null };
     }
+
+    const { error: logErr } = await supabase
+      .from("notification_delivery_log")
+      .insert(delivery.rows);
 
     if (logErr) {
       hqDebugWarn("[createNotificationEvent] delivery log insert:", logErr.message);

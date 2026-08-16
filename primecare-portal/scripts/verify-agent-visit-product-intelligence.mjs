@@ -142,6 +142,55 @@ assert(
   "createNotificationEvent caches legacy shape after PGRST204"
 );
 assert(
+  /buildNotificationDeliveryLogInsertRows/.test(notifySrc) &&
+    /buildNotificationDeliveryLogInsertRows/.test(notifyInsertSrc),
+  "runtime.notify.delivery_builder",
+  "delivery log insert uses QA-canonical builder"
+);
+const visibilityHelperMig = read(
+  "supabase/migrations/20260816145000_notification_event_visibility_helper_parity.sql"
+);
+assert(
+  /CREATE OR REPLACE FUNCTION public\.notification_event_visible_to_current_user\(/.test(
+    visibilityHelperMig
+  ) &&
+    /STABLE/.test(visibilityHelperMig) &&
+    /SECURITY DEFINER/.test(visibilityHelperMig) &&
+    /SET search_path = public/.test(visibilityHelperMig) &&
+    /tenant_id_matches\(p_tenant_id\)/.test(visibilityHelperMig) &&
+    /lab_record_is_visible_to_current_user\(p_tenant_id, p_target_lab_id\)/.test(
+      visibilityHelperMig
+    ) &&
+    /GRANT EXECUTE ON FUNCTION public\.notification_event_visible_to_current_user\(uuid, text, uuid, text\) TO authenticated/.test(
+      visibilityHelperMig
+    ),
+  "db.notify.visibility_helper_parity",
+  "prerequisite QA-canonical notification_event_visible_to_current_user migration before delivery log"
+);
+const deliveryMig = read(
+  "supabase/migrations/20260816150000_notification_delivery_log_parity.sql"
+);
+assert(
+  /CREATE TABLE IF NOT EXISTS public.notification_delivery_log/.test(deliveryMig) &&
+    /provider_message_id/.test(deliveryMig) &&
+    /provider_error/.test(deliveryMig) &&
+    /created_at/.test(deliveryMig) &&
+    !/recipient text/.test(deliveryMig) &&
+    !/provider_response/.test(deliveryMig) &&
+    /REVOKE ALL ON TABLE public.notification_delivery_log FROM anon/.test(deliveryMig) &&
+    /GRANT SELECT, INSERT ON TABLE public.notification_delivery_log TO authenticated/.test(
+      deliveryMig
+    ) &&
+    /notification_event_visible_to_current_user\(/.test(deliveryMig),
+  "db.delivery_log.parity_migration",
+  "versioned QA-canonical notification_delivery_log migration"
+);
+assert(
+  "20260816145000" < "20260816150000",
+  "db.notify.migration_order",
+  "visibility helper migration timestamp precedes delivery_log parity"
+);
+assert(
   /buildAgentVisitLoggedNotificationEvent/.test(apiSrc) &&
     !/actorUserId: insertRow\.agent_id/.test(apiSrc),
   "runtime.visit.notify.actor",
@@ -169,7 +218,10 @@ const {
   asUuidOrNull,
   buildAgentVisitLoggedNotificationEvent,
   buildNotificationEventInsertRows,
+  buildNotificationDeliveryLogInsertRows,
   isUnknownNotificationColumnError,
+  NOTIFICATION_DELIVERY_LOG_COLUMNS,
+  NOTIFICATION_DELIVERY_LOG_INSERT_COLUMNS,
 } = await import("../src/notifications/notificationEventInsert.js");
 
 const visitNotify = buildAgentVisitLoggedNotificationEvent({
@@ -214,6 +266,56 @@ assert(
   }),
   "notify.contract.pgrst204",
   "detects Production PostgREST unknown-column 400"
+);
+
+const deliveryBuilt = buildNotificationDeliveryLogInsertRows({
+  tenantId: "f168b98f-47a6-42c3-b788-24c00436fac2",
+  eventId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+  nowIso: "2026-08-16T12:00:00.000Z",
+});
+assert(deliveryBuilt.ok && deliveryBuilt.rows.length === 4, "notify.delivery.count", "4 channel rows");
+const sample = deliveryBuilt.rows[0];
+assert(
+  sample.channel === "in_app" &&
+    sample.status === "logged_in_app" &&
+    sample.provider_message_id === null &&
+    !("recipient" in sample) &&
+    !("provider_response" in sample) &&
+    !("error_message" in sample),
+  "notify.delivery.qa_columns",
+  "delivery rows match LIVE QA columns only"
+);
+const insertKeys = Object.keys(sample).sort();
+const allowedInsertKeys = [...NOTIFICATION_DELIVERY_LOG_INSERT_COLUMNS].sort();
+assert(
+  insertKeys.length === allowedInsertKeys.length &&
+    insertKeys.every((k, i) => k === allowedInsertKeys[i]) &&
+    deliveryBuilt.rows.every((row) =>
+      Object.keys(row).every((k) => NOTIFICATION_DELIVERY_LOG_INSERT_COLUMNS.includes(k))
+    ),
+  "notify.delivery.insert_allowlist",
+  "generated delivery-log insert payload contains only canonical insert columns"
+);
+assert(
+  !/recipient\s*:/.test(notifySrc) &&
+    !/provider_response\s*:/.test(notifySrc) &&
+    !/error_message\s*:/.test(notifySrc) &&
+    /buildNotificationDeliveryLogInsertRows/.test(notifySrc),
+  "notify.delivery.no_legacy_insert_fields",
+  "createNotificationEvent must not send recipient/provider_response/error_message"
+);
+assert(
+  NOTIFICATION_DELIVERY_LOG_COLUMNS.includes("provider_message_id") &&
+    NOTIFICATION_DELIVERY_LOG_COLUMNS.includes("created_at") &&
+    !NOTIFICATION_DELIVERY_LOG_COLUMNS.includes("recipient") &&
+    !NOTIFICATION_DELIVERY_LOG_INSERT_COLUMNS.includes("recipient"),
+  "notify.delivery.column_manifest",
+  "canonical column manifest matches QA OpenAPI"
+);
+assert(
+  !/from\("notification_delivery_log"\)/.test(visitPage),
+  "notify.delivery.not_in_visit_tx",
+  "AgentVisitPage does not write delivery_log (side effect only via createAgentVisitWrite)"
 );
 
 /** Catch missing imports that Vite/build will not fail on (runtime ReferenceError). */
