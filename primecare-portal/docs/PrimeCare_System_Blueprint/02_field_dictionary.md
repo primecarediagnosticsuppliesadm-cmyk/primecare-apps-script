@@ -350,8 +350,10 @@ Critical fields across PrimeCare. For full column lists see [01_schema_catalog.m
 ## Notification
 
 ### `notification_events.event_type`
-- **Examples:** `order_created`, `order_fulfilled`, `payment_received`
-- **Written by:** `fireNotificationEvent` from order/payment modules
+- **Examples:** `order_created`, `order_fulfilled`, `payment_received`, `agent_visit_logged`
+- **Written by:** `fireNotificationEvent` from order/payment/visit modules
+- **Contract:** `buildNotificationEventInsertRows` — foundation columns on QA; legacy stub (`title`/`message`/`payload`) fallback on Production until `20260816140000` applied
+- **UUID rule:** `actor_user_id` must be auth UUID or null — never `AGT-*`
 
 ---
 
