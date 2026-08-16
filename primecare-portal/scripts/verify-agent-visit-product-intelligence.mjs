@@ -107,7 +107,11 @@ assert(/products: "What does this lab already buy\?"/.test(wizardUx), "ux.subtit
 const debugLogger = read("src/utils/debugLogger.js");
 const proxySrc = read("api/primecare.js");
 const notifySrc = read("src/notifications/createNotificationEvent.js");
+const notifyInsertSrc = read("src/notifications/notificationEventInsert.js");
 const grantsMig = read("supabase/migrations/20260816120000_agent_visit_authenticated_grants.sql");
+const notifyParityMig = read(
+  "supabase/migrations/20260816140000_notification_events_foundation_parity.sql"
+);
 
 assert(
   /if \(!ALLOW_LEGACY_APPS_SCRIPT\)/.test(debugLogger) &&
@@ -124,14 +128,24 @@ assert(
   "/api/primecare does not 500 for logClientError when Apps Script URL is unset"
 );
 assert(
-  /asUuidOrNull/.test(notifySrc) && /actor_user_id: asUuidOrNull/.test(notifySrc),
+  /asUuidOrNull/.test(notifyInsertSrc) &&
+    /actor_user_id: actorUserId/.test(notifyInsertSrc) &&
+    /buildAgentVisitLoggedNotificationEvent/.test(notifyInsertSrc),
   "runtime.notify.uuid",
-  "notification actor_user_id rejects non-UUID agent ids (avoids 400)"
+  "notification builder nulls non-UUID actor ids (avoids 400)"
 );
 assert(
-  !/actorUserId: insertRow\.agent_id/.test(apiSrc),
+  /isUnknownNotificationColumnError/.test(notifySrc) &&
+    /notificationEventsWriteShape/.test(notifySrc) &&
+    /using legacy stub shape/.test(notifySrc),
+  "runtime.notify.legacy_fallback",
+  "createNotificationEvent caches legacy shape after PGRST204"
+);
+assert(
+  /buildAgentVisitLoggedNotificationEvent/.test(apiSrc) &&
+    !/actorUserId: insertRow\.agent_id/.test(apiSrc),
   "runtime.visit.notify.actor",
-  "createAgentVisitWrite does not pass agent_id as notification UUID"
+  "createAgentVisitWrite uses shared visit notification builder; no agent_id UUID"
 );
 assert(
   /GRANT SELECT, INSERT, UPDATE ON TABLE public.agent_visits TO authenticated/.test(grantsMig) &&
@@ -141,6 +155,65 @@ assert(
     /REVOKE ALL ON TABLE public.agent_visits FROM anon/.test(grantsMig),
   "db.grants.authenticated",
   "durable authenticated grants; anon writes not granted"
+);
+assert(
+  /ADD COLUMN IF NOT EXISTS event_id uuid/.test(notifyParityMig) &&
+    /ADD COLUMN IF NOT EXISTS source_module text/.test(notifyParityMig) &&
+    /ADD COLUMN IF NOT EXISTS payload_json jsonb/.test(notifyParityMig) &&
+    /REVOKE ALL ON TABLE public.notification_events FROM anon/.test(notifyParityMig),
+  "db.notify.parity_migration",
+  "versioned foundation parity migration for legacy notification_events"
+);
+
+const {
+  asUuidOrNull,
+  buildAgentVisitLoggedNotificationEvent,
+  buildNotificationEventInsertRows,
+  isUnknownNotificationColumnError,
+} = await import("../src/notifications/notificationEventInsert.js");
+
+const visitNotify = buildAgentVisitLoggedNotificationEvent({
+  tenantId: "f168b98f-47a6-42c3-b788-24c00436fac2",
+  visitId: "VIS-CONTRACT-1",
+  labId: "QA_LAB_001",
+  visitType: "Follow-up",
+  visitDate: "2026-08-16",
+  userId: "AGT-001",
+});
+const builtVisit = buildNotificationEventInsertRows(visitNotify);
+assert(builtVisit.ok, "notify.contract.build", "agent visit notification builds");
+assert(
+  builtVisit.foundation.event_type === "agent_visit_logged" &&
+    builtVisit.foundation.source_module === "agent_visits" &&
+    builtVisit.foundation.actor_user_id === null &&
+    builtVisit.foundation.payload_json.visitId === "VIS-CONTRACT-1",
+  "notify.contract.foundation",
+  "foundation row: known event_type, no AGT-* in actor_user_id"
+);
+assert(
+  builtVisit.legacy.title &&
+    builtVisit.legacy.message &&
+    builtVisit.legacy.payload?.visitId === "VIS-CONTRACT-1" &&
+    !("actor_user_id" in builtVisit.legacy) &&
+    !("source_module" in builtVisit.legacy) &&
+    !("payload_json" in builtVisit.legacy),
+  "notify.contract.legacy",
+  "legacy stub row uses only GAP-006 columns"
+);
+assert(asUuidOrNull("AGT-001") === null, "notify.contract.agt_null", "AGT-* rejected as uuid");
+assert(
+  asUuidOrNull("bf8573d0-ac9d-4816-830d-f156bb857d17") ===
+    "bf8573d0-ac9d-4816-830d-f156bb857d17",
+  "notify.contract.uuid_ok",
+  "auth uid accepted as actor"
+);
+assert(
+  isUnknownNotificationColumnError({
+    code: "PGRST204",
+    message: "Could not find the 'actor_user_id' column of 'notification_events' in the schema cache",
+  }),
+  "notify.contract.pgrst204",
+  "detects Production PostgREST unknown-column 400"
 );
 
 /** Catch missing imports that Vite/build will not fail on (runtime ReferenceError). */

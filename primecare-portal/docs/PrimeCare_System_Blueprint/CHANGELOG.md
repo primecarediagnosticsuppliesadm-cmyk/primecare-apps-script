@@ -4,6 +4,23 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-08-16 — notification_events Production schema parity (Agent Visit 400)
+
+### Change
+
+- Production `notification_events` is still the GAP-006 stub (`id`, `title`, `message`, `payload`) while QA/app use foundation columns (`event_id`, `source_module`, `payload_json`, `actor_user_id`, …).
+- Exact Production PostgREST body: `PGRST204` / `Could not find the 'actor_user_id' column of 'notification_events' in the schema cache`.
+- Client: shared `buildNotificationEventInsertRows` + legacy stub fallback (cached after first PGRST204). Visit transaction unchanged.
+- Migration: `20260816140000_notification_events_foundation_parity.sql` adds foundation columns without dropping legacy stub columns; no anon writes.
+
+### Verification
+
+- `node scripts/verify-agent-visit-product-intelligence.mjs` (notification contract asserts)
+- `node scripts/verify-runtime-import-safety.mjs`
+- `npm run build`
+
+---
+
 ## 2026-08-16 — Agent Visit production console: Apps Script 500 + notification 400
 
 ### Change
