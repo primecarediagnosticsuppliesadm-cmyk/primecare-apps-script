@@ -380,6 +380,8 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 | notification_preferences | User prefs | Yes |
 | notification_delivery_log | Delivery audit | Yes |
 
+**Schema note (2026-08-16):** Production may still carry the GAP-006 stub (`id`, `title`, `message`, `payload`). Foundation contract requires `event_id`, `source_module`, `source_id`, `actor_user_id`, `target_*`, `payload_json`. Apply `20260816140000_notification_events_foundation_parity.sql`. Client falls back to stub insert on `PGRST204` without affecting Agent Visit writes.
+
 ---
 
 ## compensation / payroll tables (Phase 3A foundation)

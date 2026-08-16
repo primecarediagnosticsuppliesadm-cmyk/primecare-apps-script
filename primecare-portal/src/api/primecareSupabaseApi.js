@@ -141,6 +141,7 @@ import {
 } from "@/predator/schemaAwareness.js";
 import { isPerfLogEnabled, perfLog, perfTime, shouldRunDashboardKpiAudit } from "@/utils/perfLog.js";
 import { fireNotificationEvent } from "@/notifications/fireNotificationEvent.js";
+import { buildAgentVisitLoggedNotificationEvent } from "@/notifications/notificationEventInsert.js";
 import { directoryRoleFromPlatformRole } from "@/operations/operationsCenterAdminEngine.js";
 import { buildProvisioningAuditPayload } from "@/operations/userProvisioningEngine.js";
 
@@ -4786,22 +4787,14 @@ export async function createAgentVisitWrite(payload = {}) {
     const visitTenantId = str(insertRow.tenant_id ?? payload.tenantId ?? payload.tenant_id);
     if (visitTenantId) {
       fireNotificationEvent(
-        {
-          eventType: "agent_visit_logged",
-          sourceModule: "agent_visits",
-          sourceId: insertRow.visit_id,
+        buildAgentVisitLoggedNotificationEvent({
           tenantId: visitTenantId,
-          targetLabId: insertRow.lab_id,
-          targetRole: "admin",
-          actorUserId: payload.userId || payload.user_id || null,
-          severity: "info",
-          payload: {
-            visitId: insertRow.visit_id,
-            labId: insertRow.lab_id,
-            visitType: insertRow.visit_type,
-            visitDate: insertRow.visit_date,
-          },
-        },
+          visitId: insertRow.visit_id,
+          labId: insertRow.lab_id,
+          visitType: insertRow.visit_type,
+          visitDate: insertRow.visit_date,
+          userId: payload.userId || payload.user_id || null,
+        }),
         "createAgentVisitWrite"
       );
     }
