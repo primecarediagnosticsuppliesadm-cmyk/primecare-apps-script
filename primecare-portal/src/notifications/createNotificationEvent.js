@@ -10,6 +10,15 @@ function str(v) {
   return String(v ?? "").trim();
 }
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function asUuidOrNull(v) {
+  const s = str(v);
+  if (!s) return null;
+  return UUID_RE.test(s) ? s : null;
+}
+
 function normalizeTenantId(tenantId) {
   const s = str(tenantId);
   return s || null;
@@ -64,9 +73,9 @@ export async function createNotificationEvent(event = {}) {
     event_type: eventType,
     source_module: str(event.sourceModule ?? event.source_module) || "system",
     source_id: str(event.sourceId ?? event.source_id) || null,
-    actor_user_id: str(event.actorUserId ?? event.actor_user_id) || null,
+    actor_user_id: asUuidOrNull(event.actorUserId ?? event.actor_user_id),
     target_role: str(event.targetRole ?? event.target_role) || null,
-    target_user_id: str(event.targetUserId ?? event.target_user_id) || null,
+    target_user_id: asUuidOrNull(event.targetUserId ?? event.target_user_id),
     target_lab_id: str(event.targetLabId ?? event.target_lab_id) || null,
     payload_json: event.payload ?? event.payload_json ?? {},
     severity,

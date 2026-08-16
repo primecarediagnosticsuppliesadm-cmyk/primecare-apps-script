@@ -2024,6 +2024,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
           nextAction: form.nextAction,
           labResponse: form.labResponse,
           soldValue: form.soldValue,
+          userId: currentUser?.id || "",
         });
 
         if (sbRes?.success && sbRes.data) {
