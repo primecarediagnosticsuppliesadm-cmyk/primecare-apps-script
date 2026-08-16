@@ -1,18 +1,34 @@
+function requestAction(req) {
+  if (req.method === "GET") return String(req.query?.action || "").trim();
+  const body = req.body && typeof req.body === "object" ? req.body : {};
+  return String(body.action || "").trim();
+}
+
 export default async function handler(req, res) {
   try {
     const APPS_SCRIPT_URL = process.env.PRIMECARE_APPS_SCRIPT_URL;
+    const action = requestAction(req);
 
     console.log("PrimeCare proxy hit:", {
       method: req.method,
       query: req.query,
+      action,
       hasAppsScriptUrl: !!APPS_SCRIPT_URL,
     });
 
     if (!APPS_SCRIPT_URL) {
-      console.error("Missing PRIMECARE_APPS_SCRIPT_URL");
-      return res.status(500).json({
+      // Production is Supabase-first. Client debug logging must not 500
+      // merely because legacy Apps Script is intentionally unset.
+      if (action === "logClientError") {
+        return res.status(200).json({
+          success: true,
+          skipped: true,
+          reason: "legacy_apps_script_disabled",
+        });
+      }
+      return res.status(410).json({
         success: false,
-        error: "Missing PRIMECARE_APPS_SCRIPT_URL environment variable",
+        error: "Legacy Apps Script is disabled in this environment",
       });
     }
 

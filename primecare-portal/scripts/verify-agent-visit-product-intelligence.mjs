@@ -104,6 +104,45 @@ const row = mapProductLineToWriteRow(captured, { tenantId: "t", labId: "L1", vis
 assert(row.product_category === "edta" && row.source_visit_id === "VIS-1", "model.write", "write row maps visit");
 assert(/products: "What does this lab already buy\?"/.test(wizardUx), "ux.subtitle", "products step copy");
 
+const debugLogger = read("src/utils/debugLogger.js");
+const proxySrc = read("api/primecare.js");
+const notifySrc = read("src/notifications/createNotificationEvent.js");
+const grantsMig = read("supabase/migrations/20260816120000_agent_visit_authenticated_grants.sql");
+
+assert(
+  /if \(!ALLOW_LEGACY_APPS_SCRIPT\)/.test(debugLogger) &&
+    /legacy_apps_script_disabled/.test(debugLogger) &&
+    /predatorStore\.recordError/.test(debugLogger),
+  "runtime.logClientError.noop",
+  "logClientError no-ops Apps Script when legacy is disabled; records predator error"
+);
+assert(
+  /action === "logClientError"/.test(proxySrc) &&
+    /legacy_apps_script_disabled/.test(proxySrc) &&
+    !/Missing PRIMECARE_APPS_SCRIPT_URL environment variable/.test(proxySrc),
+  "runtime.proxy.no_500_logging",
+  "/api/primecare does not 500 for logClientError when Apps Script URL is unset"
+);
+assert(
+  /asUuidOrNull/.test(notifySrc) && /actor_user_id: asUuidOrNull/.test(notifySrc),
+  "runtime.notify.uuid",
+  "notification actor_user_id rejects non-UUID agent ids (avoids 400)"
+);
+assert(
+  !/actorUserId: insertRow\.agent_id/.test(apiSrc),
+  "runtime.visit.notify.actor",
+  "createAgentVisitWrite does not pass agent_id as notification UUID"
+);
+assert(
+  /GRANT SELECT, INSERT, UPDATE ON TABLE public.agent_visits TO authenticated/.test(grantsMig) &&
+    /GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.lab_product_intelligence TO authenticated/.test(
+      grantsMig
+    ) &&
+    /REVOKE ALL ON TABLE public.agent_visits FROM anon/.test(grantsMig),
+  "db.grants.authenticated",
+  "durable authenticated grants; anon writes not granted"
+);
+
 /** Catch missing imports that Vite/build will not fail on (runtime ReferenceError). */
 function stripComments(src) {
   return src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/.*$/gm, " ");
