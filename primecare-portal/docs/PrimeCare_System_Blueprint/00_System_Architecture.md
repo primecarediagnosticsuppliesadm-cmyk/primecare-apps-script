@@ -58,7 +58,7 @@ Baseline schema dump: `primecare_public_schema.sql` (repo root).
 | **Procurement** | `createPurchaseOrderWrite`, `receivePurchaseOrderWrite` | PurchaseOrdersPage | purchase_orders, items |
 | **Labs** | `createLabWrite`, `getLabsCredit` | LabsPage | labs, ar_credit_control |
 | **Operations** | `userProvisioningApi`, `labOwnershipApi` | OperationsCenterAdmin | profiles, lab_ownership |
-| **Agent** | collections, visits APIs | AgentDashboard, Visits | agent_visits, ownership |
+| **Agent** | collections, visits APIs | AgentDashboard, Visits | agent_visits, lab_product_intelligence, ownership |
 | **Executive** | `founderSnapshotApi`, EFI engines | ExecutiveControlTower, EFI pages | read aggregates |
 | **Lab portal** | `getLabCatalogRead`, `getLabOrderDetailsRead` | LabOrderingPage | orders (scoped) |
 | **Compensation / Payroll** | planned compensation APIs | planned Executive Compensation / Payroll screens | planned payroll, run line, adjustment, approval, audit tables |

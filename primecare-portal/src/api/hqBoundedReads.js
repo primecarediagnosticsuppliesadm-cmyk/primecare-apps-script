@@ -28,6 +28,8 @@ import {
   HQ_PURCHASE_ORDER_LIST_COLUMNS,
   HQ_QUALIFICATION_COLUMNS,
   HQ_QUALIFICATION_LIMIT,
+  HQ_LAB_PRODUCT_INTELLIGENCE_COLUMNS,
+  HQ_LAB_PRODUCT_INTELLIGENCE_LIMIT,
   HQ_READ_CACHE_TTL_MS,
   HQ_REORDER_CANDIDATE_COLUMNS,
   HQ_REORDER_CANDIDATES_LIMIT,
@@ -400,6 +402,30 @@ export async function fetchAgentVisitsForLabBoundedRows(client, options = {}) {
       .eq("lab_id", labId)
       .order("visit_date", { ascending: false })
       .order("created_at", { ascending: false }),
+    tenantId
+  ).limit(limit);
+}
+
+export async function fetchLabProductIntelligenceForLabBoundedRows(client, options = {}) {
+  if (!client) {
+    return { data: [], error: { message: "Supabase client not configured" } };
+  }
+  const labId = str(options.labId ?? options.lab_id);
+  if (!labId) {
+    return { data: [], error: { message: "lab_id is required" } };
+  }
+  const limit = clampLimit(
+    options.limit,
+    HQ_LAB_PRODUCT_INTELLIGENCE_LIMIT,
+    HQ_LAB_PRODUCT_INTELLIGENCE_LIMIT
+  );
+  const tenantId = resolveBoundedTenantId(options);
+  return scopeTenant(
+    client
+      .from("lab_product_intelligence")
+      .select(HQ_LAB_PRODUCT_INTELLIGENCE_COLUMNS)
+      .eq("lab_id", labId)
+      .order("updated_at", { ascending: false }),
     tenantId
   ).limit(limit);
 }

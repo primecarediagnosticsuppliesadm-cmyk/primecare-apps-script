@@ -16,6 +16,8 @@ export const AGENT_VISITS_INSERT_COLUMNS = [
   "notes",
   "follow_up_required",
   "next_follow_up_date",
+  "next_follow_up_type",
+  "next_action",
 ];
 
 /**
@@ -77,6 +79,16 @@ export const PREDATOR_KNOWN_TABLE_COLUMNS = {
     "pipeline_stage",
     "pipeline_stage_updated_at",
     "next_follow_up_date",
+  ],
+  lab_product_intelligence: [
+    "id",
+    "tenant_id",
+    "lab_id",
+    "product_category",
+    "brand",
+    "source_visit_id",
+    "created_at",
+    "updated_at",
   ],
   order_lines: ["order_id", "tenant_id", "net_line_total", "quantity"],
   payments: ["payment_id", "lab_id", "tenant_id", "amount_received", "payment_date"],

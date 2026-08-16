@@ -98,6 +98,11 @@ export const HQ_INVENTORY_HEALTH_COLUMNS = HQ_INVENTORY_COLUMNS;
 export const HQ_INVENTORY_LEDGER_COLUMNS =
   "id,created_at,tenant_id,product_id,product_name,movement_type,quantity,order_id,reference_type,reference_id,created_by,stock_before,stock_after,notes";
 
+export const HQ_LAB_PRODUCT_INTELLIGENCE_LIMIT = 200;
+
+export const HQ_LAB_PRODUCT_INTELLIGENCE_COLUMNS =
+  "id,tenant_id,lab_id,source_visit_id,product_category,brand,monthly_quantity,current_supplier,primary_pain_point,sku_spec,pack_size,current_purchase_price,purchase_frequency,willingness_to_switch,alternative_brand_ok,sample_requested,sample_sku,sample_quantity,sample_issued_at,agent_id,notes,created_at,updated_at";
+
 export const HQ_QUALIFICATION_COLUMNS =
   "id,tenant_id,lab_id,lab_size,monthly_consumables_estimate,current_supplier,payment_terms,decision_maker,reagent_rental_potential,lab_os_fit,next_follow_up_date,founder_review_status,qualification_score,qualification_band,agent_id,agent_name,updated_by,notes,created_at,updated_at,pipeline_stage,pipeline_stage_updated_at,pipeline_stage_updated_by,pipeline_lost_reason,pipeline_next_action,pipeline_expected_value,pipeline_probability,pipeline_notes";
 
@@ -126,7 +131,7 @@ export const HQ_PURCHASE_ORDER_ITEM_COLUMNS =
   "po_id,product_id,product_name,quantity,received_qty,unit_cost,total_cost,tenant_id,created_at,updated_at";
 
 export const HQ_AGENT_VISIT_COLUMNS =
-  "id,lab_id,agent_id,agent_name,visit_date,created_at,notes,visit_type,tenant_id,visit_id";
+  "id,lab_id,agent_id,agent_name,visit_date,created_at,notes,visit_type,tenant_id,visit_id,follow_up_required,next_follow_up_date,next_follow_up_type,next_action";
 
 export function clampLimit(value, fallback, max) {
   const n = Number(value);
