@@ -5,6 +5,7 @@ import {
   buildNotificationDeliveryLogInsertRows,
   isUnknownNotificationColumnError,
 } from "@/notifications/notificationEventInsert.js";
+import { insertNotificationDeliveryLogRows } from "@/notifications/notificationDeliveryLogWrite.js";
 
 /** @type {null | "foundation" | "legacy"} */
 let notificationEventsWriteShape = null;
@@ -92,9 +93,8 @@ export async function createNotificationEvent(event = {}) {
       return { success: true, data: inserted, error: null };
     }
 
-    const { error: logErr } = await supabase
-      .from("notification_delivery_log")
-      .insert(delivery.rows);
+    // Canonical client only — never raw fetch/REST (gateway requires apikey header).
+    const { error: logErr } = await insertNotificationDeliveryLogRows(delivery.rows);
 
     if (logErr) {
       hqDebugWarn("[createNotificationEvent] delivery log insert:", logErr.message);
