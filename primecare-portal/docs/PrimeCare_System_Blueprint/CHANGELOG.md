@@ -4,6 +4,22 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-08-16 — notification_delivery_log browser auth (apikey) contract
+
+### Change
+
+- Production 403 body `No API key found in request` is a Kong gateway rejection (missing `apikey`), not RLS/grants.
+- Audited all `notification_delivery_log` browser paths: write is only via `createNotificationEvent` → canonical `supabase` client; read via `notificationApi` / predator probes — also canonical client. No raw `fetch`/`axios`/`rest/v1` construction in `src/`.
+- Hardened sole write helper `notificationDeliveryLogWrite.js` + verify header contract (apikey + Authorization present; values not logged). No DB/RLS/grant changes.
+
+### Verification
+
+- `node scripts/verify-agent-visit-product-intelligence.mjs` (`notify.delivery.header_contract`, `runtime.notify.delivery_canonical_client`)
+- `node scripts/verify-runtime-import-safety.mjs`
+- `npm run build`
+
+---
+
 ## 2026-08-16 — notification_delivery_log insert payload (no recipient)
 
 ### Change

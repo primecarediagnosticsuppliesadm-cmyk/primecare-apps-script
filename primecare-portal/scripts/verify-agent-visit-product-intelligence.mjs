@@ -108,6 +108,7 @@ const debugLogger = read("src/utils/debugLogger.js");
 const proxySrc = read("api/primecare.js");
 const notifySrc = read("src/notifications/createNotificationEvent.js");
 const notifyInsertSrc = read("src/notifications/notificationEventInsert.js");
+const notificationApiSrc = read("src/api/notificationApi.js");
 const grantsMig = read("supabase/migrations/20260816120000_agent_visit_authenticated_grants.sql");
 const notifyParityMig = read(
   "supabase/migrations/20260816140000_notification_events_foundation_parity.sql"
@@ -143,9 +144,30 @@ assert(
 );
 assert(
   /buildNotificationDeliveryLogInsertRows/.test(notifySrc) &&
-    /buildNotificationDeliveryLogInsertRows/.test(notifyInsertSrc),
+    /buildNotificationDeliveryLogInsertRows/.test(notifyInsertSrc) &&
+    /insertNotificationDeliveryLogRows/.test(notifySrc),
   "runtime.notify.delivery_builder",
-  "delivery log insert uses QA-canonical builder"
+  "delivery log insert uses QA-canonical builder via canonical client helper"
+);
+const deliveryWriteSrc = read("src/notifications/notificationDeliveryLogWrite.js");
+assert(
+  /from\("notification_delivery_log"\)\.insert\(rows\)/.test(deliveryWriteSrc) &&
+    /from "@\/api\/supabaseClient\.js"/.test(deliveryWriteSrc) &&
+    !/\bfetch\s*\(/.test(deliveryWriteSrc) &&
+    !/\baxios\b/.test(deliveryWriteSrc) &&
+    !/rest\/v1\/notification_delivery_log/.test(deliveryWriteSrc),
+  "runtime.notify.delivery_canonical_client",
+  "delivery-log writes must use supabaseClient only (no raw fetch/REST)"
+);
+assert(
+  !/\bfetch\s*\(/.test(notifySrc) &&
+    !/\baxios\b/.test(notifySrc) &&
+    !/rest\/v1\/notification_delivery_log/.test(notifySrc) &&
+    !/\bfetch\s*\(/.test(notificationApiSrc) &&
+    /from\("notification_delivery_log"\)/.test(notificationApiSrc) &&
+    /from "@\/api\/supabaseClient\.js"/.test(notificationApiSrc),
+  "runtime.notify.delivery_no_raw_http",
+  "notification delivery browser calls must not bypass canonical Supabase client"
 );
 const visibilityHelperMig = read(
   "supabase/migrations/20260816145000_notification_event_visibility_helper_parity.sql"
@@ -317,6 +339,53 @@ assert(
   "notify.delivery.not_in_visit_tx",
   "AgentVisitPage does not write delivery_log (side effect only via createAgentVisitWrite)"
 );
+
+// Header contract: @supabase/supabase-js insert always sends apikey + Authorization (no secret values logged).
+{
+  const { createClient } = await import("@supabase/supabase-js");
+  const headerCalls = [];
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init = {}) => {
+    const headers = new Headers(init.headers || {});
+    headerCalls.push({
+      path: String(input).replace(/^https?:\/\/[^/]+/, ""),
+      hasApikey: headers.has("apikey") && String(headers.get("apikey") || "").length > 0,
+      hasAuthorization:
+        headers.has("authorization") &&
+        String(headers.get("authorization") || "")
+          .toLowerCase()
+          .startsWith("bearer "),
+    });
+    return new Response(JSON.stringify([]), {
+      status: 201,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  try {
+    const client = createClient("https://example.supabase.co", "test-anon-key-not-a-secret", {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    await client.from("notification_delivery_log").insert([
+      {
+        tenant_id: "f168b98f-47a6-42c3-b788-24c00436fac2",
+        event_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        channel: "in_app",
+        status: "logged_in_app",
+      },
+    ]);
+  } finally {
+    globalThis.fetch = prevFetch;
+  }
+  const deliveryHeaderCalls = headerCalls.filter((c) =>
+    c.path.includes("notification_delivery_log")
+  );
+  assert(
+    deliveryHeaderCalls.length > 0 &&
+      deliveryHeaderCalls.every((c) => c.hasApikey && c.hasAuthorization),
+    "notify.delivery.header_contract",
+    "canonical supabase insert sends apikey + Authorization Bearer (values not logged)"
+  );
+}
 
 /** Catch missing imports that Vite/build will not fail on (runtime ReferenceError). */
 function stripComments(src) {
