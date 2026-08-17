@@ -60,6 +60,15 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-collections-certification-closure.mjs | COL-CERT-011/003/004 discoverability, context, continuity | Collections UX |
 | verify-agent-collections-ownership-filter.mjs | Ownership scoping | Agent collections |
 | verify-agent-visit-product-intelligence.mjs | Visit Products & Purchasing; follow-up; runtime import safety; notification_events + visibility helper + notification_delivery_log QA contracts; authenticated grants | Agent visits / notifications |
+| verify-notification-contract.mjs | Notification payload allowlist, no legacy delivery columns, canonical client, no RETURNING SELECT RLS trap, fire-and-forget | Notifications |
+| verify-db-foundation.mjs | Versioned migrations + critical tables/functions/grants for V1 release | Pre-release schema |
+| assert-supabase-environment.mjs / db-safe-dry-run.mjs | Linked project identity + safe dry-run wrappers | QA/Prod ops |
+| certify-release.mjs (`npm run certify:release`) | Orchestrates build, runtime, foundation, notification, legacy, git, golden/predator/perf | Release gate |
+| verify-git-release-safety.mjs | MERGE_HEAD, conflicts, dirty tree, critical untracked migrations | Pre-promote |
+| verify-legacy-dependency-gate.mjs | Critical paths do not require Apps Script URL when legacy disabled | Production console |
+| verify-qa-prod-parity.mjs | Shared versioned artifacts for QA and Production convergence | Parity |
+| verify-manual-sql-drift.mjs | Manual `supabase/sql` vs versioned migrations for critical objects | Drift |
+| verify-deploy-commit.mjs | Local HEAD vs origin/qa\|main; build stamp wiring | Deploy identity |
 | verify-agent-rc1-closure.mjs | Agent visit save wiring + mobile shell | Agent visits |
 | verify-create-lab-ar-rls.mjs | Lab+AR insert RLS | Add lab |
 

@@ -56,12 +56,15 @@ Update after each certification run.
 
 Additional gates:
 - `verify-scripts-readonly.mjs`
+- `npm run certify:release` (or `certify:release:quick` during iteration)
+- `npm run db:qa:check` / `npm run db:prod:check` before any Supabase CLI work
 - `verify-primecare-production-golden-path.mjs`
 - `verify-production-monitoring.mjs`
 - `scripts/run-browser-certification.mjs` — prereq gate + browser checklist
+- `docs/operations/Release_Hardening_Runbook.md` STOP conditions respected
 - `docs/Certification_Framework/06_Release_Scorecard.md` filled (copy to `docs/QA/`)
 - `docs/QA/Release_Certification.md` sign-off
-- Migrations applied to target Supabase in documented order
+- Migrations applied to target Supabase in documented order after dry-run
 
 ---
 

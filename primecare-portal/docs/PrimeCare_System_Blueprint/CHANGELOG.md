@@ -4,6 +4,22 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-08-16 — Release hardening / environment parity mitigation
+
+### Change
+
+- Added release-certification hardening layer: Supabase env identity guards, safe dry-run wrappers, DB foundation / manual-SQL drift / notification contract / legacy Apps Script / git safety / QA–Prod artifact parity verifiers, and `npm run certify:release` orchestrator.
+- Runbook: `docs/operations/Release_Hardening_Runbook.md`.
+- No business workflow changes. No DB migrations applied by this sprint.
+
+### Verification
+
+- `npm run certify:release:quick`
+- `npm run build`
+- Existing module verifies invoked by orchestrator
+
+---
+
 ## 2026-08-16 — notification_events agent INSERT 42501 (RETURNING / SELECT RLS)
 
 ### Change
