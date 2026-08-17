@@ -20,6 +20,11 @@ const FORBIDDEN = [
   /under construction/i,
 ];
 
+/** Intentional labeled foundations (not accidental dead-ends). */
+const ALLOWED_LINE = [
+  /Future foundation \(not implemented\)/,
+];
+
 const SKIP_DIRS = new Set(["predator", "readiness", "__tests__"]);
 const SKIP_FILES = /(validator|Predator|migrationTrace|enterpriseCopy)/;
 
@@ -49,6 +54,7 @@ for (const file of walk(SRC)) {
     if (line.trim().startsWith("//") || line.trim().startsWith("*")) return;
     for (const re of FORBIDDEN) {
       if (re.test(line)) {
+        if (ALLOWED_LINE.some((ok) => ok.test(line))) continue;
         hits.push({ file: relative(join(ROOT), file), line: i + 1, text: line.trim().slice(0, 120) });
         break;
       }

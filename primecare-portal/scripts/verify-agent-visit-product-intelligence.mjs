@@ -1,5 +1,10 @@
 #!/usr/bin/env node
-/** Agent Visit — Products & Purchasing / lab_product_intelligence certification. */
+/**
+ * Agent Visit — Products & Purchasing / lab_product_intelligence certification.
+ *
+ * Default mode is static/read-only (source + mocked fetch probes). Any future live
+ * DB mutation must stay behind --apply / CONFIRM_MUTATION=true.
+ */
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +14,9 @@ import {
   isProductLineCaptured,
   mapProductLineToWriteRow,
 } from "../src/visits/labProductIntelligenceModel.js";
+
+const APPLY = process.argv.includes("--apply") || process.env.CONFIRM_MUTATION === "true";
+void APPLY;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
