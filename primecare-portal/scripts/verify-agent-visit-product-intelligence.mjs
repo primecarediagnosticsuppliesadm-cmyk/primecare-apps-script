@@ -143,6 +143,14 @@ assert(
   "createNotificationEvent caches legacy shape after PGRST204"
 );
 assert(
+  /Client-generated event_id/.test(notifySrc) &&
+    /\.insert\(\[foundationRow\]\)/.test(notifySrc) &&
+    !/\.insert\(\[built\.foundation\]\)\s*\n\s*\.select\(\)/.test(notifySrc) &&
+    !/\.insert\(\[foundationRow\]\)\s*\.select\(/.test(notifySrc),
+  "runtime.notify.insert_no_returning",
+  "foundation notification insert omits RETURNING to avoid agent SELECT RLS false-negative"
+);
+assert(
   /buildNotificationDeliveryLogInsertRows/.test(notifySrc) &&
     /buildNotificationDeliveryLogInsertRows/.test(notifyInsertSrc) &&
     /insertNotificationDeliveryLogRows/.test(notifySrc),

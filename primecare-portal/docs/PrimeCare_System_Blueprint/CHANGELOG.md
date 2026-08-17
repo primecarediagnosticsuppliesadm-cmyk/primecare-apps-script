@@ -4,6 +4,22 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-08-16 — notification_events agent INSERT 42501 (RETURNING / SELECT RLS)
+
+### Change
+
+- QA agent POST `notification_events` returned `42501` / RLS even when `tenant_id_matches` + `current_user_role()='agent'` were true.
+- Root cause: INSERT policy passed; PostgREST `.insert().select()` RETURNING failed SELECT RLS because visit events use `target_role=admin` and `notification_event_visible_to_current_user` is false for agents.
+- Fix (app only): insert without RETURNING; client-generate `event_id` for delivery_log linkage. No RLS/policy/tenant payload changes. No Agent Visit changes.
+
+### Verification
+
+- `node scripts/verify-agent-visit-product-intelligence.mjs`
+- `node scripts/verify-runtime-import-safety.mjs`
+- `npm run build`
+
+---
+
 ## 2026-08-16 — notification_delivery_log browser auth (apikey) contract
 
 ### Change

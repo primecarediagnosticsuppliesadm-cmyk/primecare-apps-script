@@ -10,6 +10,18 @@ import { insertNotificationDeliveryLogRows } from "@/notifications/notificationD
 /** @type {null | "foundation" | "legacy"} */
 let notificationEventsWriteShape = null;
 
+function newNotificationEventId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  // Narrow fallback for rare non-crypto runtimes in tests.
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 /**
  * Internal notification event log only — records in_app + placeholder delivery rows.
  * Never calls external WhatsApp/SMS/email providers.
@@ -19,6 +31,11 @@ let notificationEventsWriteShape = null;
  * After the first PGRST204, subsequent writes use the legacy stub shape only so the
  * console does not keep logging foundation-column 400s. Apply
  * 20260816140000_notification_events_foundation_parity.sql for durable parity.
+ *
+ * Inserts intentionally omit `.select()` / RETURNING. Agent-authored events often use
+ * target_role=admin; QA SELECT RLS (notification_event_visible_to_current_user) hides
+ * those rows from agents, and PostgREST surfaces that as INSERT 42501 when RETURNING.
+ * Client-generated event_id keeps delivery_log linkage without a returning read.
  *
  * @param {Object} event
  * @returns {Promise<{ success: boolean, data: object|null, error: string|null }>}
@@ -37,15 +54,13 @@ export async function createNotificationEvent(event = {}) {
     let inserted = null;
 
     if (notificationEventsWriteShape !== "legacy") {
-      const res = await supabase
-        .from("notification_events")
-        .insert([built.foundation])
-        .select()
-        .single();
+      const eventId = newNotificationEventId();
+      const foundationRow = { ...built.foundation, event_id: eventId };
+      const res = await supabase.from("notification_events").insert([foundationRow]);
 
       if (!res.error) {
         notificationEventsWriteShape = "foundation";
-        inserted = res.data;
+        inserted = foundationRow;
       } else if (isUnknownNotificationColumnError(res.error)) {
         hqDebugWarn(
           "[createNotificationEvent] foundation columns missing; using legacy stub shape:",
@@ -58,15 +73,19 @@ export async function createNotificationEvent(event = {}) {
     }
 
     if (!inserted && notificationEventsWriteShape === "legacy") {
-      const res = await supabase
-        .from("notification_events")
-        .insert([built.legacy])
-        .select()
-        .single();
+      const legacyId = newNotificationEventId();
+      const legacyRow = { ...built.legacy, id: legacyId };
+      const res = await supabase.from("notification_events").insert([legacyRow]);
       if (res.error) {
-        return { success: false, data: null, error: res.error.message };
+        // Retry without client id if stub PK differs.
+        const retry = await supabase.from("notification_events").insert([built.legacy]);
+        if (retry.error) {
+          return { success: false, data: null, error: retry.error.message };
+        }
+        inserted = built.legacy;
+      } else {
+        inserted = legacyRow;
       }
-      inserted = res.data;
     }
 
     if (!inserted) {
