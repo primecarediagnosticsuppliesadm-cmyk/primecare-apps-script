@@ -375,7 +375,7 @@ function ReviewSummaryCard({
 
 function RecentVisitTimelineCard({ visit, currentUser, allEvidence = [] }) {
   const sold = Number(visit.soldValue || 0);
-  const relativeTime = formatRelativeVisitTime(visit.date || visit.visitDate);
+  const relativeTime = formatRelativeVisitTime(visit.visitDate || visit.date);
   const nextPreview = visit.nextAction
     ? visit.nextAction
     : visit.nextFollowUpDate
