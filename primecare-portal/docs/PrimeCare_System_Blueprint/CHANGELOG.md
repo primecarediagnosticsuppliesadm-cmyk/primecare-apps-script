@@ -4,6 +4,27 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-08-18 — Agent Portal Recent Visits relative label used elapsed hours, not visit_date calendar day
+
+### Change
+
+- Displayed `Visit date · YYYY-MM-DD` already used canonical `agent_visits.visit_date`.
+- Relative TODAY/YESTERDAY used the same field but compared elapsed milliseconds from local noon (`YYYY-MM-DDT12:00:00`), so a yesterday visit still showed TODAY until 24 hours after that noon.
+- Fix: calendar-day comparison of visit/business YYYY-MM-DD vs local today. No schema, RLS, or visit write changes.
+
+### Verification
+
+- `node scripts/verify-agent-visit-relative-date.mjs`
+- `node scripts/verify-agent-visit-product-intelligence.mjs`
+- `npm run build`
+
+### Follow-up (non-blocking — not in this fix)
+
+- `AgentLabSnapshotDrawer.formatWhen` still parses date-only values via `new Date(YYYY-MM-DD)`, which can shift the calendar day in negative-offset timezones.
+- `AgentDailyWorkspaceSections.formatActivityWhen` still uses elapsed-time `new Date(iso)` for visit dates; date-only values can mis-bucket.
+
+---
+
 ## 2026-08-16 — Release hardening / environment parity mitigation
 
 ### Change

@@ -60,6 +60,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-collections-certification-closure.mjs | COL-CERT-011/003/004 discoverability, context, continuity | Collections UX |
 | verify-agent-collections-ownership-filter.mjs | Ownership scoping | Agent collections |
 | verify-agent-visit-product-intelligence.mjs | Visit Products & Purchasing; follow-up; runtime import safety; notification_events + visibility helper + notification_delivery_log QA contracts; authenticated grants | Agent visits / notifications |
+| verify-agent-visit-relative-date.mjs | Recent Visits TODAY/YESTERDAY uses `visit_date` calendar days; date-only TZ safety; ignores created_at/updated_at | Agent visits |
 | verify-notification-contract.mjs | Notification payload allowlist, no legacy delivery columns, canonical client, no RETURNING SELECT RLS trap, fire-and-forget | Notifications |
 | verify-db-foundation.mjs | Versioned migrations + critical tables/functions/grants for V1 release | Pre-release schema |
 | assert-supabase-environment.mjs / db-safe-dry-run.mjs | Linked project identity + safe dry-run wrappers | QA/Prod ops |
