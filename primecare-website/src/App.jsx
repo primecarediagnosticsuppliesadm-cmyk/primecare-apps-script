@@ -37,15 +37,15 @@ const CATEGORIES = [
 const WHY = [
   {
     title: "Reliable Supply",
-    description: "Dependable fulfilment for the consumables your lab uses every day.",
+    description: "Steady fulfilment for the consumables your lab uses every day.",
   },
   {
     title: "Competitive Pricing",
     description: "Clear, business-focused quotes without unnecessary complexity.",
   },
   {
-    title: "Responsive Support",
-    description: "Quick replies when availability, delivery, or reorders matter.",
+    title: "Helpful Support",
+    description: "Reach us by WhatsApp for availability, delivery, or reorder questions.",
   },
   {
     title: "Convenient Reordering",
@@ -170,23 +170,16 @@ export default function App() {
               <h1>Reliable Laboratory Supplies. Delivered When You Need Them.</h1>
               <p className="hero-lead">
                 PrimeCare Diagnostics supplies laboratory consumables and diagnostic supplies to
-                diagnostic laboratories — with responsive support for Hyderabad / Telangana labs.
+                diagnostic laboratories across Hyderabad / Telangana.
               </p>
               <div className="cta-row">
                 {whatsappHref ? (
                   <a className="btn btn-primary" href={whatsappHref} target="_blank" rel="noopener noreferrer">
                     WhatsApp Us
                   </a>
-                ) : (
-                  <a className="btn btn-primary" href="#enquiry">
-                    WhatsApp Us
-                  </a>
-                )}
+                ) : null}
                 <a className="btn btn-secondary" href="#enquiry">
                   Request a Quote
-                </a>
-                <a className="btn btn-ghost" href={PUBLIC_SITE.portalUrl} rel="noopener noreferrer">
-                  Existing Customer? Login
                 </a>
               </div>
             </div>
@@ -194,8 +187,8 @@ export default function App() {
               <div>
                 <h2>Supplies for diagnostic laboratories</h2>
                 <p>
-                  From blood collection essentials to everyday consumables — request availability
-                  and pricing in minutes.
+                  From blood collection essentials to everyday consumables — contact us for product
+                  availability and pricing.
                 </p>
               </div>
               <div className="hero-stats">
@@ -278,12 +271,6 @@ export default function App() {
                 Share a few details and continue on WhatsApp. No account creation required for
                 first-time enquiries.
               </p>
-              {!PUBLIC_SITE.hasWhatsApp ? (
-                <p className="notice" role="status">
-                  WhatsApp number is not configured yet. Set{" "}
-                  <code>VITE_PUBLIC_WHATSAPP_E164</code> before public launch.
-                </p>
-              ) : null}
             </div>
             <form
               className="enquiry-form"
@@ -340,9 +327,15 @@ export default function App() {
                 Submitting opens WhatsApp with your enquiry details. Nothing is stored on this
                 website.
               </p>
-              <button className="btn btn-primary" type="submit" disabled={!PUBLIC_SITE.hasWhatsApp}>
-                Continue on WhatsApp
-              </button>
+              {PUBLIC_SITE.hasWhatsApp ? (
+                <button className="btn btn-primary" type="submit">
+                  Continue on WhatsApp
+                </button>
+              ) : (
+                <a className="btn btn-secondary" href="#contact">
+                  View contact options
+                </a>
+              )}
             </form>
           </div>
         </section>
@@ -354,28 +347,24 @@ export default function App() {
               <p>Reach PrimeCare Diagnostics for laboratory supply enquiries.</p>
             </div>
             <div className="contact-grid">
-              <article className="contact-card">
-                <h3>WhatsApp / Phone</h3>
-                {PUBLIC_SITE.hasWhatsApp ? (
+              {PUBLIC_SITE.hasWhatsApp ? (
+                <article className="contact-card">
+                  <h3>WhatsApp / Phone</h3>
                   <p>
                     <a href={whatsappHref} target="_blank" rel="noopener noreferrer">
-                      +{PUBLIC_SITE.whatsappE164}
+                      {PUBLIC_SITE.whatsappDisplay}
                     </a>
                   </p>
-                ) : (
-                  <p>WhatsApp number pending configuration.</p>
-                )}
-              </article>
-              <article className="contact-card">
-                <h3>Email</h3>
-                {PUBLIC_SITE.hasEmail ? (
+                </article>
+              ) : null}
+              {PUBLIC_SITE.hasEmail ? (
+                <article className="contact-card">
+                  <h3>Email</h3>
                   <p>
                     <a href={`mailto:${PUBLIC_SITE.contactEmail}`}>{PUBLIC_SITE.contactEmail}</a>
                   </p>
-                ) : (
-                  <p>Business email pending configuration.</p>
-                )}
-              </article>
+                </article>
+              ) : null}
               <article className="contact-card">
                 <h3>Service area</h3>
                 <p>

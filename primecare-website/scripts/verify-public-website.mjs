@@ -66,11 +66,20 @@ assert(/WhatsApp Us/.test(app), "cta.whatsapp", "primary WhatsApp CTA present");
 assert(/Request a Quote/.test(app), "cta.quote", "quote CTA present");
 assert(/wa\.me/.test(contact), "wa.builder", "WhatsApp wa.me builder present");
 assert(/VITE_PUBLIC_WHATSAPP_E164/.test(contact), "wa.env", "WhatsApp number comes from env");
+assert(/formatPublicPhoneDisplay/.test(contact), "wa.display_helper", "human-readable phone formatter present");
 assert(!/98765|99999|00000/.test(contact), "wa.no_fake", "no invented placeholder phone hardcoded as live");
+assert(!/919502620383/.test(app + contact), "wa.no_hardcode", "Founder WhatsApp digits not hardcoded in source");
 assert(/Blood Collection/.test(app) && /Reagents/.test(app), "products.categories", "required category cards present");
 assert(/Hyderabad \/ Telangana/.test(app + contact), "geo.hyderabad", "service area stated");
-assert(!/#1 supplier|lowest pricing|AI-powered/.test(app), "copy.no_hype", "no unverifiable hype claims");
+assert(
+  !/#1 supplier|lowest pricing|AI-powered|in minutes|guaranteed|fastest|nationwide|industry-leading/i.test(app),
+  "copy.no_hype",
+  "no unverifiable hype or response-time claims"
+);
+assert(!/Existing Customer\? Login/.test(app), "hero.no_tertiary_login", "hero tertiary login link removed");
+assert(!/pending configuration|not configured yet|VITE_PUBLIC_WHATSAPP_E164 before/i.test(app), "ui.no_config_leak", "customer UI does not expose config status");
 assert(/Already a PrimeCare customer/.test(app), "customers.section", "existing customer section present");
+assert(/contact us for product[\s\S]*availability and pricing/i.test(app), "hero.panel_copy", "hero panel uses non-time-bound copy");
 
 const portalTouched = [
   "primecare-portal/src/App.jsx",
