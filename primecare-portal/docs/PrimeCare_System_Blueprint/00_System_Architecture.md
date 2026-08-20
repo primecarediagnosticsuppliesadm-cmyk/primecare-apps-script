@@ -7,6 +7,16 @@ PrimeCare is a multi-tenant distributor ERP: labs order products, HQ fulfills, i
 ## Repository layout
 
 ```
+primecare-apps-script/
+├── primecare-portal/     # Authenticated multi-tenant ERP (app.primecarediagnostics.in)
+├── primecare-website/    # Public marketing site only (www.primecarediagnostics.in)
+├── supabase/             # (inside primecare-portal) migrations + SQL
+└── docs/                 # Cross-cutting docs
+```
+
+`primecare-website/` is **not** part of portal auth, RLS, or ERP workflows. Host as a separate Vercel project.
+
+```
 primecare-portal/
 ├── src/
 │   ├── api/           # Supabase + legacy Apps Script bridge
