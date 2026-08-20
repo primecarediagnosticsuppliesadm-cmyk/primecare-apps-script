@@ -8,12 +8,30 @@ const e164 = String(import.meta.env.VITE_PUBLIC_WHATSAPP_E164 || "")
 
 const email = String(import.meta.env.VITE_PUBLIC_CONTACT_EMAIL || "").trim();
 
+/**
+ * Human-readable display for an E.164 WhatsApp/phone number.
+ * Example: 91XXXXXXXXXX → +91 XXXXX XXXXX
+ * @param {string} digits
+ */
+export function formatPublicPhoneDisplay(digits) {
+  const d = String(digits || "").replace(/\D/g, "");
+  if (d.length === 12 && d.startsWith("91")) {
+    return `+91 ${d.slice(2, 7)} ${d.slice(7)}`;
+  }
+  if (d.length === 10) {
+    return `+91 ${d.slice(0, 5)} ${d.slice(5)}`;
+  }
+  if (!d) return "";
+  return `+${d}`;
+}
+
 export const PUBLIC_SITE = Object.freeze({
   companyName: "PrimeCare Diagnostics",
   websiteUrl: "https://www.primecarediagnostics.in",
   portalUrl: "https://app.primecarediagnostics.in",
   serviceArea: "Hyderabad / Telangana",
   whatsappE164: e164,
+  whatsappDisplay: formatPublicPhoneDisplay(e164),
   contactEmail: email,
   hasWhatsApp: e164.length >= 10,
   hasEmail: Boolean(email && email.includes("@")),
