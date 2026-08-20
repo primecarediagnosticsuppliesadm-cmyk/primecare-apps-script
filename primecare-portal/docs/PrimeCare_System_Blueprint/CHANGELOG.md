@@ -4,6 +4,25 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-08-20 — Public marketing website V1 (isolated package)
+
+### Change
+
+- Added `primecare-website/` — standalone Vite marketing site for `www.primecarediagnostics.in`.
+- Completely separate from authenticated portal (`primecare-portal/`). No portal routes, auth, Supabase, RLS, or ERP modules changed.
+- Enquiry V1 uses WhatsApp `wa.me` only (no new DB tables). Contact numbers/emails are env-configured, not invented.
+
+### Verification
+
+- `cd primecare-website && npm run verify`
+- Portal build remains independent (`cd primecare-portal && npm run build`)
+
+### Deployment
+
+- See `primecare-website/docs/DEPLOYMENT.md`. DNS cutover requires Founder approval.
+
+---
+
 ## 2026-08-16 — Release hardening / environment parity mitigation
 
 ### Change
