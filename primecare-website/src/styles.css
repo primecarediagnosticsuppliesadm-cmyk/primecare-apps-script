@@ -250,6 +250,11 @@ img {
   line-height: 1.5;
 }
 
+.field-optional {
+  font-weight: 500;
+  color: var(--pc-muted);
+}
+
 .cta-row {
   display: flex;
   flex-wrap: wrap;
