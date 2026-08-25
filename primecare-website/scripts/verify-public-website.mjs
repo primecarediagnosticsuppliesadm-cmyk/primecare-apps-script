@@ -69,17 +69,58 @@ assert(/VITE_PUBLIC_WHATSAPP_E164/.test(contact), "wa.env", "WhatsApp number com
 assert(/formatPublicPhoneDisplay/.test(contact), "wa.display_helper", "human-readable phone formatter present");
 assert(!/98765|99999|00000/.test(contact), "wa.no_fake", "no invented placeholder phone hardcoded as live");
 assert(!/919502620383/.test(app + contact), "wa.no_hardcode", "Founder WhatsApp digits not hardcoded in source");
-assert(/Blood Collection/.test(app) && /Reagents/.test(app), "products.categories", "required category cards present");
-assert(/Hyderabad \/ Telangana/.test(app + contact), "geo.hyderabad", "service area stated");
+assert(/Laboratory Consumables/.test(app) && /Diagnostic Supplies/.test(app), "products.categories", "required category cards present");
+assert(/Hyderabad/.test(app + contact), "geo.hyderabad", "service area stated");
 assert(
-  !/#1 supplier|lowest pricing|AI-powered|in minutes|guaranteed|fastest|nationwide|industry-leading/i.test(app),
+  !/#1 supplier|lowest pricing|lowest price|AI-powered|in minutes|guaranteed|fastest|nationwide|industry-leading|available now|in stock|delivery in minutes/i.test(
+    app
+  ),
   "copy.no_hype",
-  "no unverifiable hype or response-time claims"
+  "no unverifiable stock, price, or response-time claims"
 );
 assert(!/Existing Customer\? Login/.test(app), "hero.no_tertiary_login", "hero tertiary login link removed");
-assert(!/pending configuration|not configured yet|VITE_PUBLIC_WHATSAPP_E164 before/i.test(app), "ui.no_config_leak", "customer UI does not expose config status");
+assert(
+  !/pending configuration|not configured yet|VITE_PUBLIC_WHATSAPP_E164 before|Business email pending/i.test(app),
+  "ui.no_config_leak",
+  "customer UI does not expose config status"
+);
 assert(/Already a PrimeCare customer/.test(app), "customers.section", "existing customer section present");
-assert(/contact us for product[\s\S]*availability and pricing/i.test(app), "hero.panel_copy", "hero panel uses non-time-bound copy");
+assert(
+  /Diagnostic &amp; Laboratory Supply Solutions — Hyderabad|Diagnostic & Laboratory Supply Solutions — Hyderabad/.test(app),
+  "hero.headline",
+  "Sep 1 hero headline present"
+);
+assert(/id="about"/.test(app) && /About PrimeCare/.test(app), "about.section", "About PrimeCare section present");
+assert(
+  /supplier confirmation and applicable regulatory requirements/.test(app),
+  "products.disclaimer",
+  "product availability disclaimer present"
+);
+assert(
+  /productsBrands/.test(app) && /monthlyRequirement/.test(app) && /procurementChallenge/.test(app),
+  "enquiry.fields",
+  "discovery enquiry fields present"
+);
+assert(
+  /laboratory procurement requirements/.test(contact) && /Products \/ Brands:/.test(contact),
+  "enquiry.whatsapp_format",
+  "WhatsApp enquiry message format present"
+);
+assert(
+  /Technology-enabled ordering and account access/.test(app),
+  "customers.labos_secondary",
+  "customer portal pitch stays secondary and subtle"
+);
+assert(
+  /PrimeCare Diagnostics · Hyderabad, Telangana/.test(app),
+  "footer.identity",
+  "footer trade identity line present without invented GST"
+);
+assert(
+  !/People Operations|Financial Intelligence|Credit & Risk|Payroll|Executive Intelligence|GSTIN|GST\b/.test(app),
+  "copy.no_internal_modules",
+  "no internal ERP module names or invented GST"
+);
 
 const portalTouched = [
   "primecare-portal/src/App.jsx",

@@ -6,6 +6,7 @@ import {
 } from "./config/publicContact.js";
 
 const NAV = [
+  { href: "#about", label: "About" },
   { href: "#products", label: "Products" },
   { href: "#why", label: "Why PrimeCare" },
   { href: "#contact", label: "Contact" },
@@ -13,62 +14,62 @@ const NAV = [
 
 const CATEGORIES = [
   {
-    title: "Blood Collection",
-    description: "Tubes, needles, and related collection essentials for routine draws.",
-  },
-  {
     title: "Laboratory Consumables",
-    description: "Day-to-day consumables that keep diagnostic workflows moving.",
+    description: "Everyday consumables used in diagnostic laboratory workflows.",
   },
   {
-    title: "Reagents",
-    description: "Core reagents for common laboratory testing needs.",
+    title: "Blood Collection & Sample Collection",
+    description: "Collection materials commonly used for routine blood and sample work.",
   },
   {
-    title: "Sample Collection",
-    description: "Materials that support reliable sample collection and handling.",
+    title: "General Laboratory Supplies",
+    description: "Practical supplies laboratories reorder to support day-to-day operations.",
   },
   {
-    title: "General Lab Supplies",
-    description: "Practical supplies labs reorder regularly for operations.",
+    title: "Diagnostic Supplies",
+    description: "Supply categories aligned to diagnostic laboratory procurement needs.",
+  },
+  {
+    title: "IVD / Reagent Supply",
+    description: "IVD and reagent supply support as applicable, subject to supplier and regulatory confirmation.",
   },
 ];
 
 const WHY = [
   {
-    title: "Reliable Supply",
-    description: "Steady fulfilment for the consumables your lab uses every day.",
+    title: "Responsive Local Support",
+    description: "Direct communication with a Hyderabad-focused team for procurement questions.",
   },
   {
-    title: "Competitive Pricing",
-    description: "Clear, business-focused quotes without unnecessary complexity.",
+    title: "Transparent Procurement",
+    description: "Clear discussion of requirements, options, and next steps before you commit.",
   },
   {
-    title: "Helpful Support",
-    description: "Reach us by WhatsApp for availability, delivery, or reorder questions.",
+    title: "Requirement-Based Sourcing",
+    description: "We start from the products and brands your laboratory actually uses.",
   },
   {
     title: "Convenient Reordering",
-    description: "Existing customers can reorder through the PrimeCare portal.",
+    description: "Existing customers can access technology-enabled ordering and account tools.",
   },
   {
-    title: "Local Hyderabad Support",
-    description: "Serving diagnostic laboratories across Hyderabad / Telangana.",
+    title: "Hyderabad / Telangana Focus",
+    description: "Built around diagnostic laboratories operating in Hyderabad and Telangana.",
   },
 ];
 
 const STEPS = [
   {
-    title: "Share your requirement",
-    description: "Tell us the lab, location, and products you need.",
+    title: "Share your requirements",
+    description: "Tell us the lab, area, products or brands, and where procurement can improve.",
   },
   {
-    title: "Receive availability / quote",
-    description: "We confirm what can be supplied and share pricing.",
+    title: "Discuss options",
+    description: "We review your requirements and discuss availability and pricing with you.",
   },
   {
-    title: "Confirm and receive supplies",
-    description: "Approve the quote and receive your laboratory supplies.",
+    title: "Continue the relationship",
+    description: "If the fit is right, we support ongoing supply and reordering needs.",
   },
 ];
 
@@ -80,7 +81,7 @@ function Brand({ compact = false }) {
       </span>
       <span className="brand-text">
         <span className="brand-name">PrimeCare Diagnostics</span>
-        {!compact ? <span className="brand-tag">Laboratory supplies</span> : null}
+        {!compact ? <span className="brand-tag">Laboratory supply & procurement</span> : null}
       </span>
     </a>
   );
@@ -92,11 +93,16 @@ export default function App() {
     labName: "",
     contactPerson: "",
     location: "",
-    requirement: "",
+    productsBrands: "",
+    monthlyRequirement: "",
+    procurementChallenge: "",
   });
 
   const whatsappHref = useMemo(
-    () => buildWhatsAppHref("Hello PrimeCare Diagnostics, I would like a quote for laboratory supplies."),
+    () =>
+      buildWhatsAppHref(
+        "Hello PrimeCare Diagnostics, I would like to discuss my laboratory procurement requirements."
+      ),
     []
   );
 
@@ -167,10 +173,15 @@ export default function App() {
           <div className="container hero-grid">
             <div className="hero-copy">
               <p className="hero-kicker">PrimeCare Diagnostics</p>
-              <h1>Reliable Laboratory Supplies. Delivered When You Need Them.</h1>
+              <h1>Diagnostic &amp; Laboratory Supply Solutions — Hyderabad</h1>
               <p className="hero-lead">
-                PrimeCare Diagnostics supplies laboratory consumables and diagnostic supplies to
-                diagnostic laboratories across Hyderabad / Telangana.
+                PrimeCare Diagnostics works with diagnostic laboratories to understand their
+                procurement requirements and provide responsive, transparent sourcing support for
+                laboratory consumables and diagnostic supplies.
+              </p>
+              <p className="hero-support">
+                Tell us what products and brands you currently purchase and where your procurement
+                process can improve.
               </p>
               <div className="cta-row">
                 {whatsappHref ? (
@@ -185,10 +196,10 @@ export default function App() {
             </div>
             <aside className="hero-panel" aria-label="How we help labs">
               <div>
-                <h2>Supplies for diagnostic laboratories</h2>
+                <h2>Procurement support for diagnostic labs</h2>
                 <p>
-                  From blood collection essentials to everyday consumables — contact us for product
-                  availability and pricing.
+                  Share your recurring requirements. We help you clarify what you need and discuss
+                  sourcing options with transparency.
                 </p>
               </div>
               <div className="hero-stats">
@@ -209,11 +220,30 @@ export default function App() {
           </div>
         </section>
 
+        <section className="section" id="about">
+          <div className="container about-block">
+            <div className="section-head">
+              <h2>About PrimeCare</h2>
+            </div>
+            <div className="about-copy">
+              <p>
+                PrimeCare Diagnostics is a Hyderabad-based laboratory supply and procurement company
+                focused on making laboratory purchasing simpler, more responsive, and more
+                transparent.
+              </p>
+              <p>
+                We work directly with diagnostic laboratories to understand their recurring
+                requirements and build supply relationships around the products they actually use.
+              </p>
+            </div>
+          </div>
+        </section>
+
         <section className="section section-alt" id="products">
           <div className="container">
             <div className="section-head">
-              <h2>What we supply</h2>
-              <p>Category-level laboratory supply support for diagnostic operations.</p>
+              <h2>Supply categories</h2>
+              <p>Broad laboratory supply categories we discuss with diagnostic laboratories.</p>
             </div>
             <div className="category-grid">
               {CATEGORIES.map((item) => (
@@ -223,6 +253,10 @@ export default function App() {
                 </article>
               ))}
             </div>
+            <p className="section-note">
+              Product availability, brand availability, and regulated product supply are subject to
+              supplier confirmation and applicable regulatory requirements.
+            </p>
           </div>
         </section>
 
@@ -230,7 +264,7 @@ export default function App() {
           <div className="container">
             <div className="section-head">
               <h2>Why PrimeCare</h2>
-              <p>Practical reasons labs choose a reliable local supplies partner.</p>
+              <p>Service principles that guide how we work with laboratory partners.</p>
             </div>
             <div className="why-grid">
               {WHY.map((item) => (
@@ -247,7 +281,7 @@ export default function App() {
           <div className="container">
             <div className="section-head">
               <h2>How it works</h2>
-              <p>A simple enquiry-to-supply process for laboratory purchasing teams.</p>
+              <p>A simple discovery conversation for laboratory purchasing teams.</p>
             </div>
             <div className="steps">
               {STEPS.map((step, index) => (
@@ -303,24 +337,44 @@ export default function App() {
                 />
               </div>
               <div className="field">
-                <label htmlFor="location">Location</label>
+                <label htmlFor="location">Area / Location</label>
                 <input
                   id="location"
                   name="location"
                   autoComplete="address-level2"
                   value={form.location}
                   onChange={updateField("location")}
-                  placeholder="City / area"
+                  placeholder="e.g. Banjara Hills, Hyderabad"
                 />
               </div>
               <div className="field">
-                <label htmlFor="requirement">Product requirement</label>
+                <label htmlFor="productsBrands">Products / brands required</label>
                 <textarea
-                  id="requirement"
-                  name="requirement"
-                  value={form.requirement}
-                  onChange={updateField("requirement")}
-                  placeholder="List products or categories you need"
+                  id="productsBrands"
+                  name="productsBrands"
+                  value={form.productsBrands}
+                  onChange={updateField("productsBrands")}
+                  placeholder="List products or brands you currently purchase"
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="monthlyRequirement">Approximate monthly requirement</label>
+                <input
+                  id="monthlyRequirement"
+                  name="monthlyRequirement"
+                  value={form.monthlyRequirement}
+                  onChange={updateField("monthlyRequirement")}
+                  placeholder="e.g. approximate volume or spend range"
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="procurementChallenge">Main procurement challenge</label>
+                <textarea
+                  id="procurementChallenge"
+                  name="procurementChallenge"
+                  value={form.procurementChallenge}
+                  onChange={updateField("procurementChallenge")}
+                  placeholder="e.g. lead times, pricing clarity, reorder friction"
                 />
               </div>
               <p className="form-note">
@@ -344,7 +398,7 @@ export default function App() {
           <div className="container">
             <div className="section-head">
               <h2>Contact</h2>
-              <p>Reach PrimeCare Diagnostics for laboratory supply enquiries.</p>
+              <p>Reach PrimeCare Diagnostics for laboratory supply and procurement enquiries.</p>
             </div>
             <div className="contact-grid">
               {PUBLIC_SITE.hasWhatsApp ? (
@@ -382,10 +436,10 @@ export default function App() {
             <div className="customer-band">
               <div>
                 <h2>Already a PrimeCare customer?</h2>
-                <p>Sign in to the PrimeCare portal for ordering and account activity.</p>
+                <p>Technology-enabled ordering and account access for PrimeCare customers.</p>
               </div>
               <a className="btn btn-primary" href={PUBLIC_SITE.portalUrl} rel="noopener noreferrer">
-                Login to PrimeCare Portal
+                Existing Customer Login
               </a>
             </div>
           </div>
@@ -397,6 +451,8 @@ export default function App() {
           <div>
             <Brand compact />
             <p className="footer-meta">
+              PrimeCare Diagnostics · Hyderabad, Telangana
+              <br />
               © {new Date().getFullYear()} PrimeCare Diagnostics. All rights reserved.
             </p>
           </div>

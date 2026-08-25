@@ -71,7 +71,6 @@ After DNS is live:
 
 ## Information still needed from Founder
 
-1. Official WhatsApp Business number (E.164)
-2. Official public business email (if any)
-3. Whether legal entity / GST line should appear in the footer
-4. Approval to create the separate Vercel project and attach `www`
+1. Official public business email (if any) — WhatsApp is already env-configured in Production
+2. Verified legal entity name + GSTIN if a footer compliance line is required
+3. Approval to promote `fix/website-sep1-credibility` after Vercel QA review
