@@ -29,7 +29,7 @@ export const PUBLIC_SITE = Object.freeze({
   companyName: "PrimeCare Diagnostics",
   websiteUrl: "https://www.primecarediagnostics.in",
   portalUrl: "https://app.primecarediagnostics.in",
-  serviceArea: "Hyderabad / Telangana",
+  serviceArea: "Hyderabad, Telangana",
   whatsappE164: e164,
   whatsappDisplay: formatPublicPhoneDisplay(e164),
   contactEmail: email,
@@ -37,27 +37,41 @@ export const PUBLIC_SITE = Object.freeze({
   hasEmail: Boolean(email && email.includes("@")),
 });
 
+const DEFAULT_WHATSAPP_INTRO =
+  "Hello PrimeCare Diagnostics, I would like to discuss my laboratory procurement requirements.";
+
 /**
  * @param {string} [message]
  */
 export function buildWhatsAppHref(message) {
   if (!PUBLIC_SITE.hasWhatsApp) return null;
-  const text = String(message || "Hello PrimeCare Diagnostics, I would like a quote for laboratory supplies.").trim();
+  const text = String(message || DEFAULT_WHATSAPP_INTRO).trim();
   return `https://wa.me/${PUBLIC_SITE.whatsappE164}?text=${encodeURIComponent(text)}`;
 }
 
 /**
- * @param {{ labName?: string, contactPerson?: string, location?: string, requirement?: string }} fields
+ * @param {{
+ *   labName?: string,
+ *   contactPerson?: string,
+ *   location?: string,
+ *   productsBrands?: string,
+ *   monthlyRequirement?: string,
+ *   procurementChallenge?: string,
+ * }} fields
  */
 export function buildEnquiryMessage(fields = {}) {
-  const lines = ["Hello PrimeCare Diagnostics, I would like a quote for laboratory supplies."];
+  const lines = [DEFAULT_WHATSAPP_INTRO];
   const labName = String(fields.labName || "").trim();
   const contactPerson = String(fields.contactPerson || "").trim();
   const location = String(fields.location || "").trim();
-  const requirement = String(fields.requirement || "").trim();
-  if (labName) lines.push(`Lab name: ${labName}`);
-  if (contactPerson) lines.push(`Contact person: ${contactPerson}`);
-  if (location) lines.push(`Location: ${location}`);
-  if (requirement) lines.push(`Requirement: ${requirement}`);
+  const productsBrands = String(fields.productsBrands || "").trim();
+  const monthlyRequirement = String(fields.monthlyRequirement || "").trim();
+  const procurementChallenge = String(fields.procurementChallenge || "").trim();
+  if (labName) lines.push(`Lab: ${labName}`);
+  if (contactPerson) lines.push(`Contact: ${contactPerson}`);
+  if (location) lines.push(`Area: ${location}`);
+  if (productsBrands) lines.push(`Products / Brands: ${productsBrands}`);
+  if (monthlyRequirement) lines.push(`Approx. Monthly Requirement: ${monthlyRequirement}`);
+  if (procurementChallenge) lines.push(`Procurement Challenge: ${procurementChallenge}`);
   return lines.join("\n");
 }

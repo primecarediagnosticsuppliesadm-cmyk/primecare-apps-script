@@ -220,6 +220,36 @@ img {
   max-width: 34rem;
 }
 
+.hero-support {
+  margin: 0.85rem 0 0;
+  font-size: 1rem;
+  color: var(--pc-ink);
+  max-width: 34rem;
+  font-weight: 500;
+}
+
+.about-block {
+  max-width: 46rem;
+}
+
+.about-copy p {
+  margin: 0 0 0.9rem;
+  color: var(--pc-muted);
+  font-size: 1.05rem;
+}
+
+.about-copy p:last-child {
+  margin-bottom: 0;
+}
+
+.section-note {
+  margin: 1.35rem 0 0;
+  max-width: 46rem;
+  font-size: 0.92rem;
+  color: var(--pc-muted);
+  line-height: 1.5;
+}
+
 .cta-row {
   display: flex;
   flex-wrap: wrap;

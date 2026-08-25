@@ -4,6 +4,21 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-08-24 — Public website Sep 1 credibility / compliance pass
+
+### Change
+
+- Updated `primecare-website/` copy for Hyderabad field launch: procurement-focused hero, About section, safe category wording, discovery enquiry fields, softened Why/How language.
+- No portal runtime, Supabase, schema, RLS, or DNS changes.
+- Footer shows trade identity `PrimeCare Diagnostics · Hyderabad, Telangana` only. GSTIN / registration deferred until Founder provides verified details.
+
+### Verification
+
+- `cd primecare-website && npm run verify`
+- `cd primecare-website && npm run build`
+
+---
+
 ## 2026-08-20 — Public marketing website V1 (isolated package)
 
 ### Change
