@@ -70,6 +70,11 @@ assert(/formatPublicPhoneDisplay/.test(contact), "wa.display_helper", "human-rea
 assert(!/98765|99999|00000/.test(contact), "wa.no_fake", "no invented placeholder phone hardcoded as live");
 assert(!/919502620383/.test(app + contact), "wa.no_hardcode", "Founder WhatsApp digits not hardcoded in source");
 assert(/Laboratory Consumables/.test(app) && /Diagnostic Supplies/.test(app), "products.categories", "required category cards present");
+assert(
+  /IVD \/ Reagent Requirements/.test(app) && !/IVD \/ Reagent Supply/.test(app),
+  "products.ivd_requirements",
+  "IVD category uses Requirements wording"
+);
 assert(/Hyderabad/.test(app + contact), "geo.hyderabad", "service area stated");
 assert(
   !/#1 supplier|lowest pricing|lowest price|AI-powered|in minutes|guaranteed|fastest|nationwide|industry-leading|available now|in stock|delivery in minutes/i.test(
@@ -97,14 +102,47 @@ assert(
   "product availability disclaimer present"
 );
 assert(
+  /Confirm &amp; coordinate supply|Confirm & coordinate supply/.test(app) &&
+    /confirm the agreed products, pricing and next steps/.test(app),
+  "how.step3",
+  "How it works step 3 uses Confirm & coordinate supply"
+);
+assert(
+  /Discuss Your Requirements/.test(app) && !/<h2>Request a quote<\/h2>/.test(app),
+  "enquiry.heading",
+  "enquiry section heading is Discuss Your Requirements"
+);
+assert(
   /productsBrands/.test(app) && /monthlyRequirement/.test(app) && /procurementChallenge/.test(app),
   "enquiry.fields",
   "discovery enquiry fields present"
 );
 assert(
+  /id="labName"[\s\S]*?\brequired\b/.test(app) &&
+    /id="contactPerson"[\s\S]*?\brequired\b/.test(app) &&
+    /id="location"[\s\S]*?\brequired\b/.test(app) &&
+    /id="productsBrands"[\s\S]*?\brequired\b/.test(app),
+  "enquiry.required_fields",
+  "lab, contact, area, and products/brands are required"
+);
+assert(
+  /monthlyRequirement[\s\S]*?\(optional\)/.test(app) &&
+    /procurementChallenge[\s\S]*?\(optional\)/.test(app) &&
+    !/id="monthlyRequirement"[\s\S]*?\brequired\b/.test(app) &&
+    !/id="procurementChallenge"[\s\S]*?\brequired\b/.test(app),
+  "enquiry.optional_fields",
+  "monthly requirement and procurement challenge are optional"
+);
+assert(
   /laboratory procurement requirements/.test(contact) && /Products \/ Brands:/.test(contact),
   "enquiry.whatsapp_format",
   "WhatsApp enquiry message format present"
+);
+assert(
+  /if \(monthlyRequirement\) lines\.push/.test(contact) &&
+    /if \(procurementChallenge\) lines\.push/.test(contact),
+  "enquiry.omit_empty_optional",
+  "empty optional WhatsApp fields are omitted"
 );
 assert(
   /Technology-enabled ordering and account access/.test(app),

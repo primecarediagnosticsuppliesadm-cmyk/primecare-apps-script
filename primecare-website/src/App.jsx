@@ -30,8 +30,9 @@ const CATEGORIES = [
     description: "Supply categories aligned to diagnostic laboratory procurement needs.",
   },
   {
-    title: "IVD / Reagent Supply",
-    description: "IVD and reagent supply support as applicable, subject to supplier and regulatory confirmation.",
+    title: "IVD / Reagent Requirements",
+    description:
+      "Discuss your IVD and reagent requirements with us. Supply is subject to applicable regulatory requirements and supplier confirmation.",
   },
 ];
 
@@ -68,8 +69,8 @@ const STEPS = [
     description: "We review your requirements and discuss availability and pricing with you.",
   },
   {
-    title: "Continue the relationship",
-    description: "If the fit is right, we support ongoing supply and reordering needs.",
+    title: "Confirm & coordinate supply",
+    description: "If the requirement is a fit, we confirm the agreed products, pricing and next steps.",
   },
 ];
 
@@ -300,10 +301,11 @@ export default function App() {
         <section className="section" id="enquiry">
           <div className="container enquiry">
             <div className="section-head">
-              <h2>Request a quote</h2>
+              <h2>Discuss Your Requirements</h2>
               <p>
-                Share a few details and continue on WhatsApp. No account creation required for
-                first-time enquiries.
+                Share your laboratory procurement requirements and continue on WhatsApp. We will
+                review what you need and follow up to discuss options — no account creation required
+                for first-time enquiries.
               </p>
             </div>
             <form
@@ -320,6 +322,7 @@ export default function App() {
                   id="labName"
                   name="labName"
                   autoComplete="organization"
+                  required
                   value={form.labName}
                   onChange={updateField("labName")}
                   placeholder="e.g. City Diagnostics"
@@ -331,6 +334,7 @@ export default function App() {
                   id="contactPerson"
                   name="contactPerson"
                   autoComplete="name"
+                  required
                   value={form.contactPerson}
                   onChange={updateField("contactPerson")}
                   placeholder="Your name"
@@ -342,6 +346,7 @@ export default function App() {
                   id="location"
                   name="location"
                   autoComplete="address-level2"
+                  required
                   value={form.location}
                   onChange={updateField("location")}
                   placeholder="e.g. Banjara Hills, Hyderabad"
@@ -352,13 +357,16 @@ export default function App() {
                 <textarea
                   id="productsBrands"
                   name="productsBrands"
+                  required
                   value={form.productsBrands}
                   onChange={updateField("productsBrands")}
                   placeholder="List products or brands you currently purchase"
                 />
               </div>
               <div className="field">
-                <label htmlFor="monthlyRequirement">Approximate monthly requirement</label>
+                <label htmlFor="monthlyRequirement">
+                  Approximate monthly requirement <span className="field-optional">(optional)</span>
+                </label>
                 <input
                   id="monthlyRequirement"
                   name="monthlyRequirement"
@@ -368,7 +376,9 @@ export default function App() {
                 />
               </div>
               <div className="field">
-                <label htmlFor="procurementChallenge">Main procurement challenge</label>
+                <label htmlFor="procurementChallenge">
+                  Main procurement challenge <span className="field-optional">(optional)</span>
+                </label>
                 <textarea
                   id="procurementChallenge"
                   name="procurementChallenge"
