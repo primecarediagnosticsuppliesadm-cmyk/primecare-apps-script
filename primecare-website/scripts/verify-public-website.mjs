@@ -43,13 +43,15 @@ function walkJs(dir, out = []) {
 
 const app = read("src/App.jsx");
 const contact = read("src/config/publicContact.js");
+const connect = read("src/ConnectPage.jsx");
+const main = read("src/main.jsx");
 const html = read("index.html");
 const pkg = JSON.parse(read("package.json"));
 
 assert(pkg.name === "primecare-website", "pkg.name", "isolated package name");
 assert(!existsSync(resolve(root, "supabase")), "iso.no_supabase", "website package has no supabase folder");
 assert(
-  !/from ["']@supabase|createClient|AuthContext|PortalLayout|Predator/.test(app + contact),
+  !/from ["']@supabase|createClient|AuthContext|PortalLayout|Predator/.test(app + contact + connect + main),
   "iso.no_portal_imports",
   "public app does not import portal auth/supabase/predator"
 );
@@ -78,7 +80,7 @@ assert(
 assert(/Hyderabad/.test(app + contact), "geo.hyderabad", "service area stated");
 assert(
   !/#1 supplier|lowest pricing|lowest price|AI-powered|in minutes|guaranteed|fastest|nationwide|industry-leading|available now|in stock|delivery in minutes/i.test(
-    app
+    app + connect
   ),
   "copy.no_hype",
   "no unverifiable stock, price, or response-time claims"
@@ -172,6 +174,16 @@ const portalTouched = [
   });
   return !(run.stdout || "").trim();
 });
+assert(/ConnectPage/.test(main) && /\/connect/.test(main), "connect.route", "SPA renders ConnectPage at /connect");
+assert(/PrimeCare Diagnostics \| Connect/.test(connect), "connect.title", "connect page title set");
+assert(/WhatsApp PrimeCare/.test(connect) && /Call PrimeCare/.test(connect), "connect.ctas", "WhatsApp and Call CTAs present");
+assert(/href="\/#enquiry"/.test(connect) && /Request a Quote/.test(connect), "connect.quote_reuse", "quote CTA reuses homepage enquiry form");
+assert(/href="\/"/.test(connect) && /Visit Website/.test(connect), "connect.home_link", "visit website returns to homepage");
+assert(/buildTelHref/.test(contact) && /tel:\+/.test(contact), "connect.tel_builder", "Call uses tel: from the same WhatsApp env number");
+assert(/buildTelHref/.test(connect) && /buildWhatsAppHref/.test(connect), "connect.reuse_contact", "connect page reuses public contact helpers");
+assert(!/gtag|analytics|plausible|umami|GTM-/.test(connect + main), "connect.no_new_analytics", "no new analytics infrastructure");
+assert(!/98765|99999|00000|919502620383/.test(connect), "connect.no_hardcode", "connect page does not hardcode phone numbers");
+
 assert(portalTouched, "iso.portal_untouched", "core portal runtime files not modified in this working tree vs HEAD");
 
 const build = spawnSync("npm", ["run", "build"], { cwd: root, encoding: "utf8" });

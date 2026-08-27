@@ -50,6 +50,14 @@ export function buildWhatsAppHref(message) {
 }
 
 /**
+ * Same production number as WhatsApp — used for tel: call links.
+ */
+export function buildTelHref() {
+  if (!PUBLIC_SITE.hasWhatsApp) return null;
+  return `tel:+${PUBLIC_SITE.whatsappE164}`;
+}
+
+/**
  * @param {{
  *   labName?: string,
  *   contactPerson?: string,
