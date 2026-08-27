@@ -8,6 +8,28 @@ import {
 const CONNECT_WHATSAPP_INTRO =
   "Hello PrimeCare Diagnostics, I would like to discuss my laboratory procurement requirements.";
 
+const HELP_ITEMS = [
+  {
+    title: "Laboratory Consumables",
+    description: "Routine laboratory and sample-collection supplies.",
+  },
+  {
+    title: "Reagents & Diagnostic Supplies",
+    description:
+      "Laboratory reagents, kits and related diagnostic requirements, subject to product availability and applicable regulatory requirements.",
+  },
+  {
+    title: "Managed Procurement",
+    description:
+      "Help laboratories consolidate recurring requirements and simplify sourcing and supply coordination.",
+  },
+  {
+    title: "Lab Operations Technology",
+    description:
+      "PrimeCare's technology platform supports structured laboratory operational workflows.",
+  },
+];
+
 export default function ConnectPage() {
   const whatsappHref = useMemo(() => buildWhatsAppHref(CONNECT_WHATSAPP_INTRO), []);
   const telHref = useMemo(() => buildTelHref(), []);
@@ -39,9 +61,39 @@ export default function ConnectPage() {
       <main id="connect-main" className="connect-main">
         <div className="container connect-copy">
           <p className="hero-kicker">Prime Care Diagnostics</p>
-          <h1>Laboratory Supplies &amp; Procurement — Hyderabad</h1>
-          <p className="hero-lead">How can we help your lab?</p>
-          <p className="connect-categories">Consumables • Reagents • Laboratory Supplies</p>
+          <h1>Laboratory Supplies, Procurement &amp; Operations</h1>
+          <p className="hero-lead">
+            Supporting diagnostic laboratories with reliable procurement and smarter day-to-day
+            operations.
+          </p>
+
+          <section className="connect-block" aria-labelledby="connect-help-heading">
+            <h2 id="connect-help-heading" className="connect-kicker">
+              What we help with
+            </h2>
+            <div className="connect-help">
+              {HELP_ITEMS.map((item) => (
+                <article className="category-card" key={item.title}>
+                  <h3>{item.title}</h3>
+                  <p>{item.description}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="connect-os" aria-labelledby="connect-os-heading">
+            <h2 id="connect-os-heading" className="connect-kicker">
+              PrimeCare OS
+            </h2>
+            <p className="connect-os-lead">Technology built around laboratory operations.</p>
+            <p>
+              PrimeCare OS is designed to support structured workflows across areas such as orders,
+              inventory, purchasing, collections and operational visibility.
+            </p>
+            <a className="btn btn-secondary" href="/#enquiry">
+              Talk to Us
+            </a>
+          </section>
 
           <div className="connect-actions">
             {whatsappHref ? (

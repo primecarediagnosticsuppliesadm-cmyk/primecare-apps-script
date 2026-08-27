@@ -4,6 +4,21 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-08-27 — Public /connect visiting-card content (no URL change)
+
+### Change
+
+- Enhanced `primecare-website` `/connect` as a compact mobile digital business card: who PrimeCare is, what we help labs procure, a conservative PrimeCare OS mention, then existing WhatsApp / Call / Quote / Website actions.
+- No new public OS product page. “Talk to Us” reuses homepage `#enquiry`.
+- Homepage copy unchanged. Small SPA hash-scroll fix so `/#enquiry` lands on the enquiry form after React paint.
+- No portal, Supabase, schema, RLS, DNS, QR URL, or contact env changes.
+
+### Verification
+
+- `cd primecare-website && npm run verify`
+
+---
+
 ## 2026-08-24 — Public website Sep 1 credibility / compliance pass
 
 ### Change

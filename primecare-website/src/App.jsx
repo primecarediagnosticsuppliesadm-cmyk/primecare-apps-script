@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   PUBLIC_SITE,
   buildEnquiryMessage,
@@ -121,6 +121,20 @@ export default function App() {
   function closeMenu() {
     setMenuOpen(false);
   }
+
+  useEffect(() => {
+    const id = decodeURIComponent(String(window.location.hash || "").replace(/^#/, ""));
+    if (!id) return;
+
+    const scrollToHash = () => {
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: "auto", block: "start" });
+    };
+
+    scrollToHash();
+    const frame = window.requestAnimationFrame(scrollToHash);
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   return (
     <div className="site-shell" id="top">

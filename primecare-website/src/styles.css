@@ -554,6 +554,10 @@ img {
   font-size: 0.9rem;
 }
 
+#enquiry {
+  scroll-margin-top: 5.25rem;
+}
+
 .connect-page {
   display: flex;
   flex-direction: column;
@@ -561,7 +565,7 @@ img {
 
 .connect-main {
   flex: 1;
-  padding: 2.5rem 0 3rem;
+  padding: 1.5rem 0 2.25rem;
 }
 
 .connect-copy {
@@ -571,22 +575,80 @@ img {
 .connect-copy h1 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(1.85rem, 6vw, 2.55rem);
+  font-size: clamp(1.55rem, 6.2vw, 2.15rem);
   line-height: 1.12;
   letter-spacing: -0.03em;
 }
 
-.connect-categories {
-  margin: 0.85rem 0 0;
+.connect-copy .hero-lead {
+  margin-top: 0.7rem;
+  font-size: 1rem;
+}
+
+.connect-kicker {
+  display: inline-flex;
+  margin: 0 0 0.7rem;
+  color: var(--pc-brand-deep);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.connect-block {
+  margin-top: 1.45rem;
+}
+
+.connect-help {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.connect-help .category-card {
+  padding: 0.85rem 0.95rem;
+}
+
+.connect-help .category-card h3 {
+  font-size: 1rem;
+}
+
+.connect-help .category-card p {
+  margin-top: 0.3rem;
   font-size: 0.92rem;
-  font-weight: 600;
+  line-height: 1.4;
+}
+
+.connect-os {
+  margin-top: 1.45rem;
+  padding: 1rem 1.05rem 1.1rem;
+  background: var(--pc-surface);
+  border: 1px solid var(--pc-line);
+  border-radius: 1.1rem;
+}
+
+.connect-os p {
+  margin: 0;
   color: var(--pc-muted);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.connect-os p.connect-os-lead {
+  margin-bottom: 0.4rem;
+  color: var(--pc-ink);
+  font-weight: 600;
+}
+
+.connect-os .btn {
+  width: 100%;
+  min-height: 3.15rem;
+  margin-top: 0.9rem;
 }
 
 .connect-actions {
   display: grid;
-  gap: 0.75rem;
-  margin-top: 1.6rem;
+  gap: 0.7rem;
+  margin-top: 1.45rem;
 }
 
 .connect-actions .btn {

@@ -157,7 +157,9 @@ assert(
   "footer trade identity line present without invented GST"
 );
 assert(
-  !/People Operations|Financial Intelligence|Credit & Risk|Payroll|Executive Intelligence|GSTIN|GST\b/.test(app),
+  !/People Operations|Financial Intelligence|Credit & Risk|Payroll|Executive Intelligence|GSTIN|GST\b|Predator|QA Command Center/.test(
+    app + connect
+  ),
   "copy.no_internal_modules",
   "no internal ERP module names or invented GST"
 );
@@ -177,6 +179,22 @@ const portalTouched = [
 assert(/ConnectPage/.test(main) && /\/connect/.test(main), "connect.route", "SPA renders ConnectPage at /connect");
 assert(/PrimeCare Diagnostics \| Connect/.test(connect), "connect.title", "connect page title set");
 assert(/WhatsApp PrimeCare/.test(connect) && /Call PrimeCare/.test(connect), "connect.ctas", "WhatsApp and Call CTAs present");
+assert(
+  /Laboratory Supplies, Procurement &amp; Operations|Laboratory Supplies, Procurement & Operations/.test(connect),
+  "connect.positioning",
+  "connect hero uses supplies, procurement, and operations positioning"
+);
+assert(/What we help with/.test(connect) && /Managed Procurement/.test(connect), "connect.help", "connect help cards present");
+assert(
+  /PrimeCare OS/.test(connect) && /Talk to Us/.test(connect) && /href="\/#enquiry"/.test(connect),
+  "connect.os_talk",
+  "PrimeCare OS routes Talk to Us to homepage enquiry"
+);
+assert(
+  /location\.hash/.test(app) && /scrollIntoView/.test(app) && /id="enquiry"/.test(app),
+  "enquiry.hash_scroll",
+  "homepage honors /#enquiry after SPA paint"
+);
 assert(/href="\/#enquiry"/.test(connect) && /Request a Quote/.test(connect), "connect.quote_reuse", "quote CTA reuses homepage enquiry form");
 assert(/href="\/"/.test(connect) && /Visit Website/.test(connect), "connect.home_link", "visit website returns to homepage");
 assert(/buildTelHref/.test(contact) && /tel:\+/.test(contact), "connect.tel_builder", "Call uses tel: from the same WhatsApp env number");
