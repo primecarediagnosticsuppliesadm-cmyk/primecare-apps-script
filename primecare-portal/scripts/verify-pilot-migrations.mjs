@@ -93,6 +93,14 @@ export const PILOT_MIGRATION_MANIFEST = [
     tier: "P2 — Invoice payment allocation (Phase 5)",
     files: ["invoice_system_phase5_migration.sql"],
   },
+  {
+    tier: "P2 — Agent Resources V1",
+    files: [
+      "agent_resources_v1_migration.sql",
+      "agent_resources_v1_privilege_lockdown.sql",
+      "agent_resources_v1_visibility_fix.sql",
+    ],
+  },
 ];
 
 function main() {

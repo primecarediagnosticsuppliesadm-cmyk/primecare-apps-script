@@ -53,10 +53,13 @@ Apply in Supabase SQL Editor. Verify after each tier with scripts in §4.
 | 26 | P2 Invoice | `invoice_system_phase2_migration.sql` | **ACTIVE MIGRATION** |
 | 27 | P2 Invoice | `invoice_system_phase3_migration.sql` | **ACTIVE MIGRATION** |
 | 28 | P2 Invoice | `invoice_system_phase5_migration.sql` | **ACTIVE MIGRATION** |
+| 29 | P2 Agent Resources | `agent_resources_v1_migration.sql` | **ACTIVE MIGRATION** — private bucket `agent-resources`; do **not** apply to Production from AR-1A without founder cert |
+| 30 | P2 Agent Resources | `agent_resources_v1_privilege_lockdown.sql` | **ACTIVE MIGRATION** — revoke Supabase default ALL on authenticated; re-grant intended privileges. Apply after step 29. **Do not apply to Production from AR-1A.** |
+| 31 | P2 Agent Resources | `agent_resources_v1_visibility_fix.sql` | **ACTIVE MIGRATION** — agent visibility uses `current_profile().user_id` (composite `IS NOT NULL` is false when lab_id is null). Apply after step 30. **Do not apply to Production from AR-1A.** |
 
 **Apply note:** `purchase_orders_migration.sql` installs temporary `temp_anon_*` policies on PO tables; `production_auth_rls_pilot_migration.sql` (step 2) drops them and applies tenant-scoped authenticated RLS. Do not skip step 1 on greenfield databases.
 
-**Machine verification:** `node scripts/verify-pilot-migrations.mjs` — expects 28/28 on disk.
+**Machine verification:** `node scripts/verify-pilot-migrations.mjs` — expects 31/31 on disk.
 
 ---
 
@@ -70,6 +73,9 @@ Apply in Supabase SQL Editor. Verify after each tier with scripts in §4.
 | `20260624120003_invoice_system_phase2.sql` | `invoice_system_phase2_migration.sql` | **ACTIVE MIGRATION** (CLI) |
 | `20260624120004_invoice_system_phase3.sql` | `invoice_system_phase3_migration.sql` | **ACTIVE MIGRATION** (CLI) |
 | `20260624120005_invoice_system_phase5.sql` | `invoice_system_phase5_migration.sql` | **ACTIVE MIGRATION** (CLI) |
+| `20260831200000_agent_resources_v1.sql` | `agent_resources_v1_migration.sql` | **ACTIVE MIGRATION** (CLI) — Agent Resources V1; **do not apply to Production from AR-1A** |
+| `20260831201000_agent_resources_v1_privilege_lockdown.sql` | `agent_resources_v1_privilege_lockdown.sql` | **ACTIVE MIGRATION** (CLI) — privilege lockdown after default ALL; **do not apply to Production from AR-1A** |
+| `20260831202000_agent_resources_v1_visibility_fix.sql` | `agent_resources_v1_visibility_fix.sql` | **ACTIVE MIGRATION** (CLI) — agent composite-null visibility fix; **do not apply to Production from AR-1A** |
 
 **Note:** Track B does **not** include the full 27-file manifest. Production using Track B alone is **incomplete** — use Track A for full HQ pilot.
 
@@ -104,7 +110,7 @@ Apply in Supabase SQL Editor. Verify after each tier with scripts in §4.
 Run from `primecare-portal/` after SQL apply (QA or Production):
 
 ```bash
-node scripts/verify-pilot-migrations.mjs          # disk manifest 28/28
+node scripts/verify-pilot-migrations.mjs          # disk manifest 31/31
 node scripts/verify-hq-rls-reads.mjs              # 4-role RLS reads
 node scripts/verify-pilot-hardening-sql.mjs         # PH-10 temp_anon=0 (needs linked CLI)
 node scripts/verify-primecare-production-golden-path.mjs

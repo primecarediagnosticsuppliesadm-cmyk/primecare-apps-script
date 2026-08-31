@@ -50,6 +50,7 @@ Read Blueprint → Inspect code/migrations → Compare doc vs implementation
 | 22 | [22_Platform_Consolidation.md](./22_Platform_Consolidation.md) | Navigation consolidation, KPI/report ownership, Architecture Readiness |
 | 23 | [23_Founder_Operating_System.md](./23_Founder_Operating_System.md) | Founder OS decision cockpit (compose-only) |
 | 24 | [24_Collections_Credit_Risk.md](./24_Collections_Credit_Risk.md) | Collections / Credit & Risk payment UX, action feedback |
+| 25 | [25_Agent_Resources.md](./25_Agent_Resources.md) | Agent Resources V1 — field library SoT (not evidence, invoices, or Employee Documents) |
 | — | [CHANGELOG.md](./CHANGELOG.md) | Gaps, conflicts, structural changes |
 
 ### Templates

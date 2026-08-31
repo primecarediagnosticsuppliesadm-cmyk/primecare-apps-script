@@ -18,7 +18,7 @@ export const HQ_ADMIN_MENU_SECTIONS = [
   {
     id: "operations",
     label: "OPERATIONS",
-    keys: ["labs", "orders", "logisticsDelivery", "risk"],
+    keys: ["labs", "orders", "logisticsDelivery", "risk", "agentResources"],
   },
   {
     id: "inventory",
@@ -50,7 +50,7 @@ export const HQ_EXECUTIVE_MENU_SECTIONS = [
   {
     id: "operations",
     label: "OPERATIONS",
-    keys: ["operationsCenter", "orders", "logisticsDelivery", "risk"],
+    keys: ["operationsCenter", "orders", "logisticsDelivery", "risk", "agentResources"],
   },
   {
     id: "inventory",
@@ -96,6 +96,7 @@ const EXECUTIVE_HQ_MENU_KEYS = new Set([
   "predatorDebug",
   "qaCommandCenter",
   "projectionOpsCenter",
+  "agentResources",
 ]);
 
 const ADMIN_HQ_MENU_KEYS = new Set([
@@ -116,10 +117,11 @@ const ADMIN_HQ_MENU_KEYS = new Set([
   "productionReadiness",
   "notifications",
   "predatorDebug",
+  "agentResources",
 ]);
 
 /** Agent sidebar: execution workflow only (Activity Center merged into Dashboard). */
-const AGENT_MENU_ORDER = ["dashboard", "collections", "visits", "labs"];
+const AGENT_MENU_ORDER = ["dashboard", "visits", "agentResources", "labs", "collections"];
 
 /** Lab sidebar: ordering, account — Activity Center hidden for pilot speed. */
 const LAB_MENU_ORDER = ["labOrders", "labInvoices", "labAccount"];
@@ -165,6 +167,7 @@ export const MENU_ITEMS = [
   { key: "compensationPayroll", label: ENTERPRISE_PAGE_LABELS.compensationPayroll, icon: "Wallet" },
   { key: "labContractEngine", label: ENTERPRISE_PAGE_LABELS.labContractEngine, icon: "FileText" },
   { key: "operationsCenter", label: ENTERPRISE_PAGE_LABELS.operationsCenter, icon: "Radio" },
+  { key: "agentResources", label: "Agent Resources", icon: "BookOpen" },
   { key: "accessAudit", label: ENTERPRISE_PAGE_LABELS.accessAudit, icon: "Shield" },
 
   // Field Ops
@@ -237,6 +240,7 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "purchase",
   "projectionOpsCenter",
   "productionReadiness",
+  "agentResources",
 ]);
 
 /**
@@ -343,9 +347,9 @@ export function getMenuForRole(role) {
   }
 
   if (normalizedRole === ROLES.AGENT) {
-    return [...items].sort(
-      (a, b) => AGENT_MENU_ORDER.indexOf(a.key) - AGENT_MENU_ORDER.indexOf(b.key)
-    );
+    return [...items]
+      .sort((a, b) => AGENT_MENU_ORDER.indexOf(a.key) - AGENT_MENU_ORDER.indexOf(b.key))
+      .map((item) => (item.key === "agentResources" ? { ...item, label: "Resources" } : item));
   }
 
   if (normalizedRole === ROLES.DISTRIBUTOR_MANAGER) {

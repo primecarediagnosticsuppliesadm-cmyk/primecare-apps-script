@@ -74,6 +74,17 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-agent-rc1-closure.mjs | Agent visit save wiring + mobile shell | Agent visits |
 | verify-create-lab-ar-rls.mjs | Lab+AR insert RLS | Add lab |
 
+### Agent Resources
+
+| Script | Checks | When |
+|--------|--------|------|
+| verify-agent-resources-schema.mjs | Four tables, constraints, indexes, FKs, publish RPC, no O2C/evidence/invoice mutation. `--remote` live QA schema/grants (not Production). | AR-1A+ |
+| verify-agent-resources-rls.mjs | Publisher/agent/lab/hr policies, ack rules, publish lifecycle protection. `--remote` live role matrix. | AR-1A+ |
+| verify-agent-resources-storage.mjs | Private `agent-resources` bucket, MIME/size, storage policies, no evidence/invoice bucket reuse. `--remote` live storage. | AR-1A+ |
+| verify-agent-resources-publisher.mjs | Admin/Executive publisher page, APIs, RPC-only publish, no Lab/HR menu, no public URLs, no SELECT * | AR-1B+ |
+| verify-agent-resources-agent-access.mjs | Agent Resources menu/page, named/all visibility, no publisher controls, Lab/HR denied. `--remote` live QA. | AR-1C+ |
+| verify-agent-resources-acknowledgement.mjs | Explicit Mark as Read, idempotent duplicate, V2 resets unread. `--remote` live QA. | AR-1C+ |
+
 ### Operations
 
 | Script | Checks | When |

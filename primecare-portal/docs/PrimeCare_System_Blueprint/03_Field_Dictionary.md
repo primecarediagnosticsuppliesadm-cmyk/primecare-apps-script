@@ -318,6 +318,22 @@ HQ_ORDER_LIST_COLUMNS =
 
 ---
 
+## Agent Resources identity and versions
+
+| Field | Meaning |
+|-------|---------|
+| `agent_resources.id` | Logical document UUID (not user-visible) |
+| `agent_resource_versions.version_number` | Integer ≥ 1; unique per resource |
+| `current_published_version_id` | Pointer to the single published version; **RPC-only** |
+| `audience_type` | `all_agents` or `named_agents` |
+| `agent_resource_audiences.profile_user_id` | `profiles.user_id` = `auth.uid()` |
+| `agent_resource_versions.storage_path` | `{tenant_id}/{resource_id}/{version_id}/{random}` — never original filename |
+| `agent_resource_acknowledgements` | Unique `(tenant_id, version_id, profile_user_id)` |
+
+See [25_Agent_Resources.md](./25_Agent_Resources.md).
+
+---
+
 ## Anti-patterns
 
 | Don't | Do instead |
@@ -326,3 +342,6 @@ HQ_ORDER_LIST_COLUMNS =
 | Add delivery to total_amount (3A) | `delivery_charge_amount` |
 | Use payments.invoice_id | allocations junction |
 | Raw lab_id compare | `labIdKey()` |
+| Store field playbooks in `operational-evidence` or `invoice-pdfs` | `agent-resources` + `agent_resources` |
+| Key Agent Resource audience on `agent_id` | `profiles.user_id` / `auth.uid()` |
+| Treat notification read as document acknowledgement | `agent_resource_acknowledgements` |

@@ -77,6 +77,13 @@ export const HQ_PAGE_HELP = {
     actions: ["Filter by action type", "Open event detail", "Export mentally via screenshots if needed"],
     related: ["operationsCenter", "notifications"],
   },
+  agentResources: {
+    title: "Agent Resources",
+    what: "HQ library of approved field guides. Admin and Executive publish versions; agents open the current published file and mark it as read.",
+    doHere: "Create a draft, set audience, then publish. Archive when a guide is retired.",
+    actions: ["Create resource", "Upload draft", "Publish", "Archive", "Open version history"],
+    related: ["operationsCenter"],
+  },
   qualificationReview: {
     title: "Qualification Analytics",
     what: "Lab qualification pipeline metrics and review queue.",
