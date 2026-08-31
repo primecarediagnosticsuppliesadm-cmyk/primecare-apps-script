@@ -246,6 +246,62 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 
 ---
 
+## agent_resources
+
+| Attribute | Value |
+|-----------|-------|
+| **Purpose** | Logical field document (playbook / SOP / guide) |
+| **Module** | Agent Resources — [25_Agent_Resources.md](./25_Agent_Resources.md) |
+| **PK** | `id` (uuid) |
+| **Required** | `tenant_id`, `title`, `category`, `audience_type`, `required_reading` |
+| **Optional** | `description`, `current_published_version_id`, `archived_at` |
+| **Categories** | `start_here`, `products_services`, `field_sales`, `lab_os`, `sops`, `policies`, `training`, `other` |
+| **Audience** | `all_agents`, `named_agents` |
+| **Relationships** | 1:N versions, audiences, acknowledgements; current published → one version of **this** resource |
+| **RLS** | Yes — admin/executive tenant; agent current published + audience only |
+| **Storage** | Private bucket `agent-resources` (not `operational-evidence`, not `invoice-pdfs`) |
+| **Read** | executive, admin (all tenant); agent (authorized published only) |
+| **Write** | executive, admin; publish via RPC only |
+
+---
+
+## agent_resource_versions
+
+| Attribute | Value |
+|-----------|-------|
+| **Purpose** | One file version of a logical resource |
+| **PK** | `id` (uuid) |
+| **Business key** | `(resource_id, version_number)` unique; `version_number` integer ≥ 1 |
+| **Status** | `draft`, `published`, `archived` — **at most one published per resource** |
+| **Storage path** | `{tenant_id}/{resource_id}/{version_id}/{random_object_key}` |
+| **MIME** | `application/pdf`, `image/jpeg`, `image/png`; `file_size` 1–10485760 |
+| **RLS** | Publisher: all tenant versions. Agent: **current published only** |
+
+---
+
+## agent_resource_audiences
+
+| Attribute | Value |
+|-----------|-------|
+| **Purpose** | Named-agent access list |
+| **PK** | `id` (uuid) |
+| **Unique** | `(resource_id, profile_user_id)` |
+| **Identity** | `profile_user_id` → `profiles.user_id` (`auth.uid()`) — **not** `agent_id` |
+| **RLS** | Publisher manage; agent may SELECT own row |
+
+---
+
+## agent_resource_acknowledgements
+
+| Attribute | Value |
+|-----------|-------|
+| **Purpose** | Durable “read this version” receipt |
+| **Unique** | `(tenant_id, version_id, profile_user_id)` |
+| **RLS** | Agent INSERT self if currently authorized published; SELECT own. Publisher SELECT tenant. No UPDATE/DELETE |
+| **Not SoT** | `notification_events.status`, localStorage |
+
+---
+
 ## agent_visits
 
 | Attribute | Value |
@@ -418,7 +474,8 @@ Phase 3C allows payroll statuses `draft`, `previewed`, `submitted`, `approved`, 
 |-------|---------|-----|
 | user_provisioning_events | Provisioning audit | Yes |
 | lab_assignment_history | Agent transfer history | Yes |
-| operational_evidence | Evidence metadata | Yes |
+| operational_evidence | Evidence metadata (visit/collection photos) — **not** Agent Resources | Yes |
+| agent_resources (+ versions, audiences, acknowledgements) | Field library metadata; binaries in bucket `agent-resources` | Yes |
 | event_log | Generic events | Yes — **no policies** (gap) |
 | commission_entries | Existing commission ledger (not payroll SoT after Phase 1 compensation Blueprint) | Yes |
 | compensation_audit_events | HQ compensation/payroll audit foundation | Yes |
@@ -462,5 +519,6 @@ Phase 3C allows payroll statuses `draft`, `previewed`, `submitted`, `approved`, 
 | 20260703120000 | Lab ordering governance (`ordering_mode`) |
 | 20260703120001 | Delivery policy foundation (`policy_type` + flags) |
 | 20260704120000 | Logistics Phase 4 route planning |
+| 20260831200000 | Agent Resources V1 foundation (`agent_resources_*`, bucket `agent-resources`, publish RPC) |
 
-Full manual SQL: `supabase/sql/` (52 files).
+Full manual SQL: `supabase/sql/` (includes `agent_resources_v1_migration.sql` mirror).

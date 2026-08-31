@@ -126,6 +126,7 @@ export const PERMISSION_BY_KEY = {
   qaCommandCenter: [ROLES.EXECUTIVE],
   projectionOpsCenter: [ROLES.EXECUTIVE],
   productionReadiness: [ROLES.EXECUTIVE, ROLES.ADMIN],
+  agentResources: [ROLES.EXECUTIVE, ROLES.ADMIN, ROLES.AGENT],
 };
 
 /** Sidebar allowlist for distributor-scoped roles (HQ executive/admin use menuConfig HQ sets). */
@@ -187,6 +188,7 @@ export const UNAUTHORIZED_MENU_PAGES_BY_ROLE = {
     "insights",
     "reorder",
     "distributorOs",
+    "agentResources",
   ],
   [ROLES.DISTRIBUTOR_MANAGER]: [
     "predatorDebug",
@@ -215,6 +217,7 @@ export const UNAUTHORIZED_MENU_PAGES_BY_ROLE = {
     "performance",
     "insights",
     "reorder",
+    "agentResources",
   ],
   [ROLES.DISTRIBUTOR_ADMIN]: [
     "predatorDebug",
@@ -245,6 +248,7 @@ export const UNAUTHORIZED_MENU_PAGES_BY_ROLE = {
     "performance",
     "insights",
     "reorder",
+    "agentResources",
   ],
 };
 
@@ -254,7 +258,7 @@ export const REQUIRED_MENU_PAGES_BY_ROLE = {
   [ROLES.DISTRIBUTOR_MANAGER]: ["dashboard", "visits", "operationsCenter"],
   [ROLES.DISTRIBUTOR_ADMIN]: ["distributorOs", "operationsCenter"],
   [ROLES.LAB]: ["labOrders", "labAccount", "labInvoices"],
-  [ROLES.AGENT]: ["dashboard", "collections", "visits"],
+  [ROLES.AGENT]: ["dashboard", "collections", "visits", "agentResources"],
 };
 
 /**

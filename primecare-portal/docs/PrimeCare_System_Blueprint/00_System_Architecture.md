@@ -54,6 +54,7 @@ Baseline schema dump: `primecare_public_schema.sql` (repo root).
 | Identity | `profiles` + Supabase Auth | Legacy `users` (backfill only) |
 | Page permissions | `rolePermissionMatrix.js` | Hardcoded role checks in pages |
 | Compensation / payroll | HQ payroll domain tables derived from `payments` cash collected | Existing distributor/revenue commission analytics |
+| Agent Resources (field library) | `agent_resources` + `agent_resource_versions` + bucket `agent-resources` | `operational_evidence`, `invoice-pdfs`, Employee 360 Documents, WhatsApp |
 
 ---
 
@@ -69,6 +70,7 @@ Baseline schema dump: `primecare_public_schema.sql` (repo root).
 | **Labs** | `createLabWrite`, `getLabsCredit` | LabsPage | labs, ar_credit_control |
 | **Operations** | `userProvisioningApi`, `labOwnershipApi` | OperationsCenterAdmin | profiles, lab_ownership |
 | **Agent** | collections, visits APIs | AgentDashboard, Visits | agent_visits, lab_product_intelligence, ownership |
+| **Agent Resources (field library)** | `agentResourceSupabaseApi` (publisher AR-1B + agent AR-1C) | `AgentResourcesPublisherPage` (Admin/Exec) · `AgentResourcesPage` (Agent) | `agent_resources`, versions, audiences, acknowledgements |
 | **Executive** | `founderSnapshotApi`, EFI engines | ExecutiveControlTower, EFI pages | read aggregates |
 | **Lab portal** | `getLabCatalogRead`, `getLabOrderDetailsRead` | LabOrderingPage | orders (scoped) |
 | **Compensation / Payroll** | planned compensation APIs | planned Executive Compensation / Payroll screens | planned payroll, run line, adjustment, approval, audit tables |

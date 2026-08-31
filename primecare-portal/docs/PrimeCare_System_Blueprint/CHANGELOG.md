@@ -69,6 +69,76 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 ### Verification
 
 - `node scripts/verify-operations-user-directory-integrity.mjs`
+=======
+## 2026-08-31 — Agent Resources AR-1C agent consumption + acknowledgement
+
+### Change
+
+- Agent sidebar **Resources** (`agentResources`) → `AgentResourcesPage`. Same permission key as publisher; Admin/Executive still get `AgentResourcesPublisherPage`.
+- Agent bounded list + reuse signed URL (300s). Explicit Mark as Read. Duplicate ack is idempotent. V2 is unread even if V1 was acknowledged.
+- No schema/RLS/RPC change. Lab/HR still denied. No notifications, WhatsApp, or LMS.
+
+### Verification
+
+- `node scripts/verify-agent-resources-agent-access.mjs --remote`
+- `node scripts/verify-agent-resources-acknowledgement.mjs --remote`
+- AR-1A/AR-1B `--remote` regression
+
+---
+
+## 2026-08-31 — Agent Resources AR-1B publisher workflow
+
+### Change
+
+- Admin/Executive publisher API + page (`agentResources`). Create/upload draft, new version, metadata, named/all audience, publish RPC, archive, signed open (300s).
+- No agent consumer UI. No HR Documents. No schema/RLS/RPC redesign (AR-1A migrations unchanged).
+- Audience switch: named rows inserted before flipping to `named_agents`; leftover named rows deleted after flipping to `all_agents`.
+
+### Verification
+
+- `node scripts/verify-agent-resources-publisher.mjs`
+- AR-1A `--remote` schema/RLS/storage regression
+- Manual UAT in `25_Agent_Resources.md`
+
+---
+
+## 2026-08-31 — Agent Resources AR-1A live QA privilege lockdown + visibility fix
+
+### Gap found
+
+- After applying `20260831200000` on QA, `authenticated` had table privilege `arwdDxtm` (ALL) on all four Agent Resources tables, and `anon` had EXECUTE on `publish_agent_resource_version`. Cause: Supabase default privileges, not an explicit GRANT in the migration. RLS still denied most DML, but publishers could theoretically UPDATE `current_published_version_id` because a row UPDATE policy exists.
+- Live agent SELECT of current published versions returned zero rows. Cause: `current_profile() IS NOT NULL` on a composite is false in PostgreSQL when any profile column (e.g. `lab_id`) is null.
+
+### Change
+
+- `REVOKE ALL … FROM authenticated` then re-GRANT intended privileges (`20260831201000`).
+- Visibility helper uses `(current_profile()).user_id IS NOT NULL` (`20260831202000`).
+- Live `--remote` tests in `verify-agent-resources-*.mjs`. Manifest 31/31.
+
+### Verification
+
+- `node scripts/verify-agent-resources-schema.mjs --remote`
+- `node scripts/verify-agent-resources-storage.mjs --remote`
+- `node scripts/verify-agent-resources-rls.mjs --remote`
+
+---
+
+## 2026-08-31 — Agent Resources V1 AR-1A foundation (docs + schema)
+
+### Change
+
+- Added `25_Agent_Resources.md` as product SoT for the field resource library.
+- Schema: `agent_resources`, `agent_resource_versions`, `agent_resource_audiences`, `agent_resource_acknowledgements`; private bucket `agent-resources`; RLS; `publish_agent_resource_version` RPC.
+- Explicitly **not** operational evidence, invoice PDFs, Employee 360 Documents, or LMS.
+- `PEOPLE_OPS_HR_MODULE_ENABLED` remains `false`. No UI / menu in AR-1A.
+
+### Verification
+
+- `node scripts/verify-agent-resources-schema.mjs`
+- `node scripts/verify-agent-resources-rls.mjs`
+- `node scripts/verify-agent-resources-storage.mjs`
+- Regression: invoice phase3 static, employee360 workspace, evidence SQL unchanged
+>>>>>>> 20b7773 (feat: add agent resources publishing and agent consumption)
 
 ---
 

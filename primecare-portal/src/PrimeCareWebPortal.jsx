@@ -48,6 +48,8 @@ const ProductionReadinessDashboardPage = lazy(() => import("./pages/ProductionRe
 const PilotReadinessPage = lazy(() => import("./pages/PilotReadinessPage"));
 const RevenueFunnelPage = lazy(() => import("./pages/RevenueFunnelPage"));
 const ExecutiveCompensationCenterPage = lazy(() => import("./pages/ExecutiveCompensationCenterPage"));
+const AgentResourcesPublisherPage = lazy(() => import("./pages/AgentResourcesPublisherPage"));
+const AgentResourcesPage = lazy(() => import("./pages/AgentResourcesPage"));
 
 function pageLabel(pageKey) {
   const key = normalizePageKey(pageKey);
@@ -158,6 +160,10 @@ export default function PrimeCareWebPortal({
             setActivePage={setActivePage}
           />
         );
+
+      case "agentResources":
+      case "agent-resources":
+        return <AgentResourcesPage currentUser={currentUser} />;
 
       case "notifications":
       case "notification-center":
@@ -311,6 +317,10 @@ export default function PrimeCareWebPortal({
       case "accessAudit":
       case "access-audit":
         return <AccessAuditPage currentUser={currentUser} />;
+
+      case "agentResources":
+      case "agent-resources":
+        return <AgentResourcesPublisherPage currentUser={currentUser} />;
 
       case "productionReadiness":
       case "production-readiness":
@@ -491,6 +501,10 @@ export default function PrimeCareWebPortal({
       case "accessAudit":
       case "access-audit":
         return <AccessAuditPage currentUser={currentUser} />;
+
+      case "agentResources":
+      case "agent-resources":
+        return <AgentResourcesPublisherPage currentUser={currentUser} />;
 
       case "labs":
         return (

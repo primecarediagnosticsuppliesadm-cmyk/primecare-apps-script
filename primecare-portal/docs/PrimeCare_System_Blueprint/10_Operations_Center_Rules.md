@@ -50,6 +50,12 @@ HQ user provisioning, lab ownership, agent assignment, audit, freeze.
 
 ---
 
+## Agent Resources (not an Operations Center submodule)
+
+Field playbooks live in [25_Agent_Resources.md](./25_Agent_Resources.md). Publishers are **admin and executive** (same HQ ops roles). Agents consume via sidebar **Resources**. The product is **not** Employee Documents, not visit evidence, and is **not** implemented as an Ops Center nested module.
+
+---
+
 ## Probe / QA users
 
 - Pattern: `qa.*@primecare.test`

@@ -76,6 +76,10 @@ Hard constraints. Violations require explicit approval + blueprint amendment + v
 | P9 | Admin on-behalf ordering must reuse `LabOrderingPage`/cart flow, must not impersonate lab users, and must preserve existing pricing, catalog, credit, inventory, finance, delivery, AR, shipment, and commission behavior |
 | P10 | HR is an HQ payroll support role only; HR cannot approve payouts, approve commission changes, lock payroll, export payroll, or mutate finance records |
 | P11 | Distributor OS has no payroll ownership, payout approval, payout authorization, or accounting role |
+| P12 | Agent Resources must use bucket `agent-resources` only — never `operational-evidence` or `invoice-pdfs` |
+| P13 | Agent Resource acknowledgements are `agent_resource_acknowledgements` only — never notification read state or localStorage |
+| P14 | Agent Resources is not Employee 360 Documents; do not enable `PEOPLE_OPS_HR_MODULE_ENABLED` for this product |
+| P15 | Files in Agent Resources must not be public; storage SELECT requires authorized metadata |
 
 ---
 

@@ -28,6 +28,7 @@ import {
   Truck,
   Database,
   ShieldCheck,
+  BookOpen,
 } from "lucide-react";
 
 const ICONS = {
@@ -46,6 +47,7 @@ const ICONS = {
   compensationPayroll: Wallet,
   labContractEngine: FileText,
   operationsCenter: Radio,
+  agentResources: BookOpen,
   accessAudit: Shield,
   visits: ClipboardList,
   collections: Wallet,

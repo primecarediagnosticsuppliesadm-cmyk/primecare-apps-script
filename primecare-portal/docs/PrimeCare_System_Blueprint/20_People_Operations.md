@@ -54,6 +54,8 @@ People Operations
 
 Talent, ATS, Recruitment, Onboarding, Offboarding, Leave, Benefits, Performance reviews, Documents, Manager hierarchy, Department hierarchy, Org charts, Bank files, GL, Accounting, Time tracking.
 
+**Agent Resources is not People Operations.** Field playbooks / SOPs / training PDFs are owned by [25_Agent_Resources.md](./25_Agent_Resources.md). They must **not** be implemented as Employee 360 Documents, Assets, or Leave. Do **not** set `PEOPLE_OPS_HR_MODULE_ENABLED = true` for Agent Resources. Employee KYC (Aadhaar, PAN, agreements) remains out of Year-1 scope.
+
 ---
 
 ## Screen hierarchy
@@ -398,7 +400,7 @@ The workspace screen is **deep-link only** (`navHidden: true` in `peopleOpsNavig
 | **History** | Business milestones + operational activity (single chronological list) | Always |
 | **Documents / Assets / Leave** | HR lifecycle modules | Hidden until `PEOPLE_OPS_HR_MODULE_ENABLED = true` |
 
-Never expose unfinished HR modules or fake-data tabs.
+Never expose unfinished HR modules or fake-data tabs. Agent Resources (field library) is a **separate product** ([25_Agent_Resources.md](./25_Agent_Resources.md)) and must not appear as an Employee 360 Documents tab.
 
 ### C. Today-tab page budget
 
