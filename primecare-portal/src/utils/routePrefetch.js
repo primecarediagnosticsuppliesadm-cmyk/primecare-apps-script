@@ -50,6 +50,7 @@ export const PAGE_LOADERS = {
   labOrders: () => import("@/pages/LabOrderingPage.jsx"),
   labInvoices: () => import("@/pages/LabInvoiceCenterPage.jsx"),
   labAccount: () => import("@/pages/LabOrderingPage.jsx"),
+  agentResources: () => import("@/pages/AgentResourcesPublisherPage.jsx"),
 };
 
 function resolvePageLoader(role, pageKey) {
@@ -59,6 +60,10 @@ function resolvePageLoader(role, pageKey) {
     if (r === ROLES.EXECUTIVE) return () => import("@/pages/ExecutiveControlTower.jsx");
     if (r === ROLES.AGENT) return () => import("@/pages/AgentDashboard.jsx");
     return () => import("@/pages/AdminDashboard.jsx");
+  }
+  if (key === "agentResources") {
+    if (r === ROLES.AGENT) return () => import("@/pages/AgentResourcesPage.jsx");
+    return () => import("@/pages/AgentResourcesPublisherPage.jsx");
   }
   return PAGE_LOADERS[key];
 }

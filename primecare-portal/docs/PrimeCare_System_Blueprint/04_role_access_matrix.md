@@ -13,9 +13,9 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 
 | Dimension | Access |
 |-----------|--------|
-| **Visible modules** | Full founder suite, EFI, orders, logistics, risk, inventory, catalog, purchase, ops center, access audit, qualification, commission, contracts, tenant/distributor mgmt (some hidden in pilot sidebar) |
+| **Visible modules** | Full founder suite, EFI, orders, logistics, risk, inventory, catalog, purchase, ops center, access audit, qualification, commission, contracts, tenant/distributor mgmt (some hidden in pilot sidebar), **Agent Resources publisher** |
 | **Read** | Cross-tenant profiles; tenant ops data; all pilot tables via RLS |
-| **Write** | All roles provisionable; structural ops; fulfill; create orders on behalf of eligible active labs; payments; logistics; catalog; lab lifecycle status transitions with confirmation and reason; compensation/payroll approval, lock, payout authorization, and export when implemented |
+| **Write** | All roles provisionable; structural ops; fulfill; create orders on behalf of eligible active labs; payments; logistics; catalog; lab lifecycle status transitions with confirmation and reason; compensation/payroll approval, lock, payout authorization, and export when implemented; **Agent Resources publish** |
 | **Blocked** | — |
 | **Freeze** | Structural writes blocked; payments/collections allowed |
 
@@ -28,7 +28,7 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 | **Visible modules** | Compensation / Payroll foundation placeholder only until payroll screens are explicitly implemented |
 | **Read** | Payroll periods, plan assignments, payroll previews, own-tenant compensation records needed for payroll support |
 | **Write** | Generate preview and submit payroll runs; create adjustment requests. Cannot approve, lock, export, mark paid, or reopen locked payroll. |
-| **Blocked** | Cannot approve payouts, approve commission changes, lock payroll runs, authorize exports, mutate finance records, or create accounting entries |
+| **Blocked** | Cannot approve payouts, approve commission changes, lock payroll runs, authorize exports, mutate finance records, or create accounting entries. **No Agent Resources access in V1.** |
 | **Freeze** | Payroll preview support only; no payout authorization |
 
 `hr` must be implemented as an HQ role with explicit RLS. It is not a distributor role and does not grant Distributor OS payroll ownership.
@@ -39,9 +39,9 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 
 | Dimension | Access |
 |-----------|--------|
-| **Visible modules** | dashboard, labs, orders, logistics, risk, catalog, inventory, purchase, ops center, access audit, qualification |
+| **Visible modules** | dashboard, labs, orders, logistics, risk, catalog, inventory, purchase, ops center, access audit, qualification, **Agent Resources publisher** |
 | **Read** | Tenant-scoped all ops tables |
-| **Write** | Fulfill/cancel orders; **create orders on behalf of eligible active labs**; set `labs.ordering_mode`; lab lifecycle status transitions with confirmation and reason; payments; inventory; catalog; provision users (**not executive role**); logistics; lab ownership |
+| **Write** | Fulfill/cancel orders; **create orders on behalf of eligible active labs**; set `labs.ordering_mode`; lab lifecycle status transitions with confirmation and reason; payments; inventory; catalog; provision users (**not executive role**); logistics; lab ownership; **Agent Resources publish (same as executive)** |
 | **Blocked** | Founder-only pages; cannot assign executive role; compensation/payroll approval, lock, payout authorization, and export |
 | **Freeze** | Order status mutations blocked; record payment allowed |
 
@@ -51,10 +51,10 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 
 | Dimension | Access |
 |-----------|--------|
-| **Visible modules** | dashboard, collections, visits, labs |
-| **Read** | Assigned/visible labs; orders via lab visibility; own visits; own locked/exported compensation history when payroll self-view is implemented |
-| **Write** | Collections (payments); visits; shipment updates when assigned |
-| **Blocked** | HQ orders fulfill; catalog; logistics board; provisioning; compensation/payroll edits |
+| **Visible modules** | dashboard, visits, **Resources**, labs, collections |
+| **Read** | Assigned/visible labs; orders via lab visibility; own visits; own locked/exported compensation history when payroll self-view is implemented; **Agent Resources: current published versions authorized by audience** |
+| **Write** | Collections (payments); visits; shipment updates when assigned; **Agent Resources acknowledgements (self only)** |
+| **Blocked** | HQ orders fulfill; catalog; logistics board; provisioning; compensation/payroll edits; Agent Resources upload/publish/archive; drafts/archived versions |
 | **Freeze** | Collections/payments typically allowed (daily ops) |
 
 ---
@@ -66,7 +66,7 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 | **Visible modules** | labOrders, labInvoices, labAccount only |
 | **Read** | Own lab orders, invoices, AR, catalog, own `labs.ordering_mode` |
 | **Write** | Place orders when `ordering_mode` ∈ {`hybrid`, `self_service`} + credit eligible; delivery snapshot via `persist_order_delivery_snapshot` RPC only |
-| **Blocked** | Order initiation when `ordering_mode` ∈ {`hq_managed`, `suspended`}; direct `UPDATE` on `orders`; HQ logistics, ops center, fulfill, other labs' data |
+| **Blocked** | Order initiation when `ordering_mode` ∈ {`hq_managed`, `suspended`}; direct `UPDATE` on `orders`; HQ logistics, ops center, fulfill, other labs' data; **Agent Resources (no metadata, no storage)** |
 | **Freeze** | Lab ordering allowed per `ordering_mode` unless credit hold |
 
 ### Lab ordering permissions by `ordering_mode`
@@ -152,6 +152,7 @@ Full map: `PERMISSION_BY_KEY` in `rolePermissionMatrix.js`.
 | Procurement (optional) | **Blocked** if flag set |
 | Record payment | **Allowed** |
 | Invoice download | **Allowed** |
+| Agent Resources publish | **Allowed** (not O2C/inventory structural) |
 | Review order details | **Allowed** |
 | Credit & Risk drawer | **Allowed** |
 
@@ -169,6 +170,8 @@ Verified: `verify-hq-freeze-policy.mjs`
 | order_shipments | — | assigned | tenant ops | — | tenant ops |
 | compensation/payroll tables | — | own locked/exported/paid lines only | view only | preview/submit/support only; no approval/lock/export/pay/reopen | full compensation workflow |
 | profiles | self | self | tenant | payroll-scoped agent profile reads | cross-tenant read patterns |
+| agent_resources / versions | — | current published + audience | tenant (publish) | — | tenant (publish) |
+| agent_resource_acknowledgements | — | INSERT/SELECT own | tenant SELECT | — | tenant SELECT |
 
 **Never weaken RLS without approval** — run `verify-hq-rls-reads.mjs`.
 

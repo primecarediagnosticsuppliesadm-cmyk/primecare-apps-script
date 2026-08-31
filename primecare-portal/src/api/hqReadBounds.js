@@ -133,6 +133,29 @@ export const HQ_PURCHASE_ORDER_ITEM_COLUMNS =
 export const HQ_AGENT_VISIT_COLUMNS =
   "id,lab_id,agent_id,agent_name,visit_date,created_at,notes,visit_type,tenant_id,visit_id,follow_up_required,next_follow_up_date,next_follow_up_type,next_action";
 
+/** Agent Resources publisher list (AR-1B). storage_path is selected only for signed-URL open. */
+export const HQ_AGENT_RESOURCE_LIST_LIMIT = 200;
+export const HQ_AGENT_RESOURCE_LIST_COLUMNS =
+  "id,tenant_id,title,description,category,required_reading,audience_type,current_published_version_id,created_at,updated_at,archived_at";
+export const HQ_AGENT_RESOURCE_DETAIL_COLUMNS = HQ_AGENT_RESOURCE_LIST_COLUMNS;
+export const HQ_AGENT_RESOURCE_VERSION_COLUMNS =
+  "id,resource_id,tenant_id,version_number,original_filename,mime_type,file_size,status,created_at,published_by,published_at,archived_at";
+export const HQ_AGENT_RESOURCE_VERSION_OPEN_COLUMNS =
+  "id,tenant_id,original_filename,storage_path";
+export const HQ_AGENT_RESOURCE_AUDIENCE_COLUMNS =
+  "id,resource_id,tenant_id,profile_user_id,created_at";
+export const HQ_AGENT_RESOURCE_ACK_COLUMNS =
+  "id,tenant_id,resource_id,version_id,profile_user_id,acknowledged_at";
+export const HQ_AGENT_RESOURCE_AGENT_IDENTITY_COLUMNS =
+  "user_id,display_name,agent_name,username,role,active";
+export const HQ_AGENT_RESOURCE_SIGNED_URL_TTL_SEC = 300;
+export const HQ_AGENT_RESOURCE_MAX_FILE_BYTES = 10485760;
+export const HQ_AGENT_RESOURCE_AGENT_LIST_COLUMNS =
+  "id,title,description,category,required_reading,current_published_version_id";
+export const HQ_AGENT_RESOURCE_AGENT_VERSION_COLUMNS =
+  "id,resource_id,version_number,mime_type,published_at,status";
+export const HQ_AGENT_RESOURCE_AGENT_ACK_COLUMNS = "version_id,acknowledged_at";
+
 export function clampLimit(value, fallback, max) {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return fallback;

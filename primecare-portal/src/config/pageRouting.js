@@ -136,6 +136,10 @@ export function normalizePageKey(page) {
     case "logistics-delivery":
     case "logisticsDelivery":
       return "logisticsDelivery";
+    case "agent-resources":
+    case "resources":
+    case "agentResources":
+      return "agentResources";
     default:
       return page;
   }

@@ -4,6 +4,126 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-08-31 — Agent Resources AR-1C agent consumption + acknowledgement
+
+### Change
+
+- Agent sidebar **Resources** (`agentResources`) → `AgentResourcesPage`. Same permission key as publisher; Admin/Executive still get `AgentResourcesPublisherPage`.
+- Agent bounded list + reuse signed URL (300s). Explicit Mark as Read. Duplicate ack is idempotent. V2 is unread even if V1 was acknowledged.
+- No schema/RLS/RPC change. Lab/HR still denied. No notifications, WhatsApp, or LMS.
+
+### Verification
+
+- `node scripts/verify-agent-resources-agent-access.mjs --remote`
+- `node scripts/verify-agent-resources-acknowledgement.mjs --remote`
+- AR-1A/AR-1B `--remote` regression
+
+---
+
+## 2026-08-31 — Agent Resources AR-1B publisher workflow
+
+### Change
+
+- Admin/Executive publisher API + page (`agentResources`). Create/upload draft, new version, metadata, named/all audience, publish RPC, archive, signed open (300s).
+- No agent consumer UI. No HR Documents. No schema/RLS/RPC redesign (AR-1A migrations unchanged).
+- Audience switch: named rows inserted before flipping to `named_agents`; leftover named rows deleted after flipping to `all_agents`.
+
+### Verification
+
+- `node scripts/verify-agent-resources-publisher.mjs`
+- AR-1A `--remote` schema/RLS/storage regression
+- Manual UAT in `25_Agent_Resources.md`
+
+---
+
+## 2026-08-31 — Agent Resources AR-1A live QA privilege lockdown + visibility fix
+
+### Gap found
+
+- After applying `20260831200000` on QA, `authenticated` had table privilege `arwdDxtm` (ALL) on all four Agent Resources tables, and `anon` had EXECUTE on `publish_agent_resource_version`. Cause: Supabase default privileges, not an explicit GRANT in the migration. RLS still denied most DML, but publishers could theoretically UPDATE `current_published_version_id` because a row UPDATE policy exists.
+- Live agent SELECT of current published versions returned zero rows. Cause: `current_profile() IS NOT NULL` on a composite is false in PostgreSQL when any profile column (e.g. `lab_id`) is null.
+
+### Change
+
+- `REVOKE ALL … FROM authenticated` then re-GRANT intended privileges (`20260831201000`).
+- Visibility helper uses `(current_profile()).user_id IS NOT NULL` (`20260831202000`).
+- Live `--remote` tests in `verify-agent-resources-*.mjs`. Manifest 31/31.
+
+### Verification
+
+- `node scripts/verify-agent-resources-schema.mjs --remote`
+- `node scripts/verify-agent-resources-storage.mjs --remote`
+- `node scripts/verify-agent-resources-rls.mjs --remote`
+
+---
+
+## 2026-08-31 — Agent Resources V1 AR-1A foundation (docs + schema)
+
+### Change
+
+- Added `25_Agent_Resources.md` as product SoT for the field resource library.
+- Schema: `agent_resources`, `agent_resource_versions`, `agent_resource_audiences`, `agent_resource_acknowledgements`; private bucket `agent-resources`; RLS; `publish_agent_resource_version` RPC.
+- Explicitly **not** operational evidence, invoice PDFs, Employee 360 Documents, or LMS.
+- `PEOPLE_OPS_HR_MODULE_ENABLED` remains `false`. No UI / menu in AR-1A.
+
+### Verification
+
+- `node scripts/verify-agent-resources-schema.mjs`
+- `node scripts/verify-agent-resources-rls.mjs`
+- `node scripts/verify-agent-resources-storage.mjs`
+- Regression: invoice phase3 static, employee360 workspace, evidence SQL unchanged
+
+---
+
+## 2026-08-27 — Public /connect visiting-card content (no URL change)
+
+### Change
+
+- Enhanced `primecare-website` `/connect` as a compact mobile digital business card: who PrimeCare is, what we help labs procure, a conservative PrimeCare OS mention, then existing WhatsApp / Call / Quote / Website actions.
+- No new public OS product page. “Talk to Us” reuses homepage `#enquiry`.
+- Homepage copy unchanged. Small SPA hash-scroll fix so `/#enquiry` lands on the enquiry form after React paint.
+- No portal, Supabase, schema, RLS, DNS, QR URL, or contact env changes.
+
+### Verification
+
+- `cd primecare-website && npm run verify`
+
+---
+
+## 2026-08-24 — Public website Sep 1 credibility / compliance pass
+
+### Change
+
+- Updated `primecare-website/` copy for Hyderabad field launch: procurement-focused hero, About section, safe category wording, discovery enquiry fields, softened Why/How language.
+- No portal runtime, Supabase, schema, RLS, or DNS changes.
+- Footer shows trade identity `PrimeCare Diagnostics · Hyderabad, Telangana` only. GSTIN / registration deferred until Founder provides verified details.
+
+### Verification
+
+- `cd primecare-website && npm run verify`
+- `cd primecare-website && npm run build`
+
+---
+
+## 2026-08-20 — Public marketing website V1 (isolated package)
+
+### Change
+
+- Added `primecare-website/` — standalone Vite marketing site for `www.primecarediagnostics.in`.
+- Completely separate from authenticated portal (`primecare-portal/`). No portal routes, auth, Supabase, RLS, or ERP modules changed.
+- Enquiry V1 uses WhatsApp `wa.me` only (no new DB tables). Contact numbers/emails are env-configured, not invented.
+
+### Verification
+
+- `cd primecare-website && npm run verify`
+- Portal build remains independent (`cd primecare-portal && npm run build`)
+
+### Deployment
+
+- See `primecare-website/docs/DEPLOYMENT.md`. DNS cutover requires Founder approval.
+
+---
+
 ## 2026-08-18 — Agent Portal Recent Visits relative label used elapsed hours, not visit_date calendar day
 
 ### Change

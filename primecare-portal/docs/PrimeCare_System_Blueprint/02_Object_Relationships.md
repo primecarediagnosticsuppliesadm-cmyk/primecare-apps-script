@@ -21,6 +21,10 @@ tenants
   │     └── agent_visits
   ├── inventory ── inventory_ledger
   ├── purchase_orders ── purchase_order_items
+  └── agent_resources
+        ├── agent_resource_versions
+        ├── agent_resource_audiences
+        └── agent_resource_acknowledgements
   └── tenant_delivery_policy
   └── logistics_warehouses
         └── delivery_routes
@@ -73,6 +77,13 @@ logistics_warehouses
 | payroll_runs | payroll_run_lines | payroll_run_id | 1:N | Agent-level payable lines |
 | inventory | inventory_ledger | tenant_id + product_id | 1:N | Ledger = audit |
 | purchase_orders | purchase_order_items | po_id | 1:N | Receive → stock |
+| tenants | agent_resources | tenant_id | 1:N | Field library |
+| agent_resources | agent_resource_versions | resource_id + tenant_id | 1:N | At most one `published` |
+| agent_resources | agent_resource_audiences | resource_id + tenant_id | 1:N | Named agents only |
+| agent_resources | agent_resource_acknowledgements | resource_id + tenant_id | 1:N | Ack per version |
+| agent_resource_versions | agent_resource_acknowledgements | version_id + resource_id + tenant_id | 1:N | Historical acks stay on old versions |
+| profiles | agent_resource_audiences | profile_user_id = user_id | 1:N | Canonical audience identity |
+| profiles | agent_resource_acknowledgements | profile_user_id = user_id | 1:N | Self-ack only |
 
 ---
 

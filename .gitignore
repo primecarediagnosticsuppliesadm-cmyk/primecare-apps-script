@@ -4,4 +4,10 @@ node_modules/
 
 primecare-portal/node_modules/
 primecare-portal/dist/
-.env*
+primecare-website/node_modules/
+primecare-website/dist/
+.env
+.env.local
+.env.*.local
+!.env.example
+!primecare-website/.env.example
