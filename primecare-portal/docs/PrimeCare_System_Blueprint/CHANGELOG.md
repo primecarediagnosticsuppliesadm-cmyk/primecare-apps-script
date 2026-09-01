@@ -4,6 +4,22 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-01 — User Directory Last Login mapping
+
+### Gap found
+
+- `getOperationsPlatformUsersRead` already selects `profiles.last_login_at`. `mapProfilesPlatformUserRow` dropped the column, so `mapPlatformUserRow` / `formatLastLogin` always treated Last Login as `Never`.
+
+### Change
+
+- Pass `last_login_at` through `mapProfilesPlatformUserRow`. No schema, RLS, RPC, Auth, Access Audit, or Agent Resources change.
+
+### Verification
+
+- `node scripts/verify-operations-user-directory-integrity.mjs`
+
+---
+
 ## 2026-08-27 — Public /connect visiting-card content (no URL change)
 
 ### Change

@@ -56,7 +56,16 @@ async function loadModules(server) {
   const certificationUi = await server.ssrLoadModule(
     "/src/operations/operationsCenterCertificationUi.js"
   );
-  return { classification, userEngine, integrityEngine, opsEngine, adminData, certificationUi };
+  const supabaseApi = await server.ssrLoadModule("/src/api/primecareSupabaseApi.js");
+  return {
+    classification,
+    userEngine,
+    integrityEngine,
+    opsEngine,
+    adminData,
+    certificationUi,
+    supabaseApi,
+  };
 }
 
 function staticUiChecks() {
@@ -78,11 +87,27 @@ function staticUiChecks() {
   assert(/Production Users/.test(panel), "production users KPI");
   assert(/Not assigned/.test(panel), "not assigned badge");
   assert(/Never/.test(panel) || /formatLastLogin/.test(panel), "last login never state");
+  const mapper = readFileSync(resolve(root, "src/api/primecareSupabaseApi.js"), "utf8");
+  assert(
+    /PROFILES_IDENTITY_SELECT[\s\S]*last_login_at/.test(mapper),
+    "directory select includes last_login_at"
+  );
+  assert(
+    /last_login_at:\s*row\.last_login_at/.test(mapper),
+    "mapProfilesPlatformUserRow passes last_login_at"
+  );
   assert(/Probe/.test(panel), "probe badge");
   pass("UDI-10", "User Directory UI wiring");
 }
 
-async function staticEngineChecks({ classification, userEngine, integrityEngine, certificationUi }) {
+async function staticEngineChecks({
+  classification,
+  userEngine,
+  integrityEngine,
+  certificationUi,
+  supabaseApi,
+  opsEngine,
+}) {
   const { USER_DIRECTORY_CLASS, classifyDirectoryUser } = classification;
   const {
     computeProvisioningKpis,
@@ -91,6 +116,8 @@ async function staticEngineChecks({ classification, userEngine, integrityEngine,
     resolveDirectoryRowActions,
     formatLastLogin,
   } = userEngine;
+  const { mapProfilesPlatformUserRow } = supabaseApi;
+  const { mapPlatformUserRow } = opsEngine;
   const { computeUserDirectoryIntegrityWarnings } = integrityEngine;
 
   assert(
@@ -131,6 +158,42 @@ async function staticEngineChecks({ classification, userEngine, integrityEngine,
   assert(probeActions.review && probeActions.probeRestricted && !probeActions.deactivate, "probe review only");
 
   assert(formatLastLogin(null) === "Never", "null last login is Never");
+
+  const populatedAt = "2026-09-01T11:50:45.321Z";
+  const mappedPopulated = mapProfilesPlatformUserRow({
+    user_id: "user-vishwak",
+    role: "agent",
+    email: "vishwak@primecarediagnostics.in",
+    last_login_at: populatedAt,
+    created_at: "2026-09-01T11:00:31.089Z",
+    active: true,
+  });
+  assert(mappedPopulated.last_login_at === populatedAt, "profile mapper keeps last_login_at");
+  const platformPopulated = mapPlatformUserRow(mappedPopulated);
+  assert(platformPopulated.lastLoginAt === populatedAt, "mapPlatformUserRow receives last_login_at");
+  const [dirPopulated] = enrichDirectoryUsers([platformPopulated], {
+    labAssignments: [],
+    distributorAssignments: [],
+  });
+  assert(dirPopulated.lastLogin !== "Never", "populated last login is not Never");
+  assert(dirPopulated.lastLoginAt === populatedAt, "directory lastLoginAt matches profile");
+
+  const mappedEmpty = mapProfilesPlatformUserRow({
+    user_id: "user-never",
+    role: "agent",
+    email: "never@example.com",
+    last_login_at: null,
+    active: true,
+  });
+  assert(mappedEmpty.last_login_at === null, "profile mapper keeps null last_login_at");
+  const platformEmpty = mapPlatformUserRow(mappedEmpty);
+  assert(platformEmpty.lastLoginAt === null, "mapPlatformUserRow keeps null last_login_at");
+  const [dirEmpty] = enrichDirectoryUsers([platformEmpty], {
+    labAssignments: [],
+    distributorAssignments: [],
+  });
+  assert(dirEmpty.lastLogin === "Never", "null last login still renders Never");
+  pass("UDI-12", "Last Login last_login_at mapping");
 
   const users = [
     { userId: "1", email: "user@invalid.example.com", role: "agent", active: true },

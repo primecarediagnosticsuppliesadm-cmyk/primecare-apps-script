@@ -8832,7 +8832,7 @@ function mapUsersTableAgentRow(row) {
   };
 }
 
-function mapProfilesPlatformUserRow(row, directory = null) {
+export function mapProfilesPlatformUserRow(row, directory = null) {
   const role = str(row.role).toLowerCase();
   const profileEmail = str(row.email);
   return {
@@ -8846,6 +8846,7 @@ function mapProfilesPlatformUserRow(row, directory = null) {
     role,
     active: row.active !== false,
     created_at: row.created_at,
+    last_login_at: row.last_login_at ?? null,
     tenant_id: str(row.tenant_id),
     agent_id: str(row.agent_id),
     lab_id: str(row.lab_id),
