@@ -66,6 +66,18 @@ Additional gates:
 - `docs/QA/Release_Certification.md` sign-off
 - Migrations applied to target Supabase in documented order after dry-run
 
+### Production identity STOP gate (before UAT / smoke)
+
+A tester must prove all of the following on the **same** browser tab. If **A, B, C, or D** fails: **STOP VERIFICATION**. Do not debug mappers, React state, formatters, races, or Date parsing until identity is corrected.
+
+| # | Proof |
+|---|---|
+| **A** | Address bar is `https://app.primecarediagnostics.in` — **not** an old `*.vercel.app` deployment |
+| **B** | Visible environment is Production (Operations Center build identity line) |
+| **C** | Visible SHA matches the certified/deployed git SHA (`window.__PRIMECARE_BUILD__.commit` or the Ops Center line) |
+| **D** | Network host is `alxhrnotnvwpblsiadxj.supabase.co` |
+| **E** | The visible business outcome for this release works (example: a profile with populated `last_login_at` must not show Last Login `Never`) |
+
 ---
 
 ## AI Architect completion checklist

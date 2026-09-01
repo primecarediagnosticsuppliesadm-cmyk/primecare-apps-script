@@ -42,9 +42,10 @@ npm run db:prod:check
 11. **PROD dry-run** — `npm run db:prod:dry-run` (requires `PRIMECARE_CONFIRM_PROD=YES`)
 12. **Schema/RLS/grant parity** — `npm run verify:db-foundation` (+ `--live` when linked)
 13. **Merge exact tested `qa` → `main`** — no cherry-pick drift.
-14. **Production Vercel Ready** — confirm `VITE_APP_COMMIT_HASH` matches `origin/main`.
-15. **Production smoke** — Agent Visit + notification side effects.
-16. **RELEASE GREEN**
+14. **Production Vercel Ready** — confirm Operations Center build identity / `window.__PRIMECARE_BUILD__.commit` matches `origin/main`.
+15. **Production identity STOP gate** — canonical URL, Production env, SHA, Supabase project `alxhrnotnvwpblsiadxj` (see Blueprint `14_Release_Gates.md`).
+16. **Production smoke** — Agent Visit + notification side effects + the release’s visible business outcome.
+17. **RELEASE GREEN**
 
 ---
 
@@ -60,6 +61,7 @@ Stop the release if any of the following are true:
 - Dirty tracked files at promote time
 - Critical untracked migrations under `supabase/migrations/`
 - Browser commit hash does not match expected `origin/qa` or `origin/main`
+- Production UAT is running on a `*.vercel.app` URL instead of `https://app.primecarediagnostics.in`
 - QA browser UAT incomplete
 
 ---
@@ -102,4 +104,16 @@ Automated gates do **not** replace:
 - Visual confirmation of success screens
 - Network tab confirmation that notification POSTs are 2xx (or intentional fire-and-forget warnings only)
 - Production backup verification before migrate
-- Confirming QA/Prod browser `VITE_APP_COMMIT_HASH` matches the expected git tip
+- Confirming QA/Prod browser `VITE_APP_COMMIT_HASH` matches the expected git tip (`window.__PRIMECARE_BUILD__` or Operations Center identity line)
+- Production smoke uses `https://app.primecarediagnostics.in` only
+
+---
+
+## Debugging decision tree (wrong-build class)
+
+1. Verify canonical URL + build SHA. If incorrect: **STOP**.
+2. Verify raw Network/API response.
+3. Verify mapper/view-model transformation.
+4. Verify React/component state.
+5. Verify rendered formatter/output.
+6. Only then investigate race conditions, browser parsing, duplicate loads, timing, or runtime-specific behavior.

@@ -13,3 +13,18 @@ export function getAppBuildStamp() {
     viteProd: Boolean(import.meta.env.PROD),
   };
 }
+
+/**
+ * Public, non-secret build identity for DevTools. No keys, tokens, or URLs.
+ */
+export function exposePrimeCareBuildIdentity(target = typeof window !== "undefined" ? window : null) {
+  const stamp = getAppBuildStamp();
+  if (!target) return stamp;
+  target.__PRIMECARE_BUILD__ = {
+    env: stamp.env,
+    commit: stamp.commit,
+    branch: stamp.branch,
+    buildStamp: stamp.stamp,
+  };
+  return stamp;
+}

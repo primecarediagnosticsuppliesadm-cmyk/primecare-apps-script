@@ -4,6 +4,23 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-01 — Production verification hardening (build identity + directory contract)
+
+### Gap found
+
+- User Directory Last Login debugging mixed a correct Production REST payload with a stale frontend tab (`*.vercel.app`). Build SHA already existed at Vite compile time (`VITE_APP_COMMIT_HASH`) but was not visible on Operations Center Daily view. QA Diagnostics (which shows SHA) is disabled in Production.
+
+### Change
+
+- Display existing `getAppBuildStamp()` on Operations Center (Daily and Advanced). Expose `window.__PRIMECARE_BUILD__` (env/commit/branch/buildStamp only). Extend UDI-12 with the live Production timestamp fixture and a single identity-field survival contract. Document the Production URL/SHA/Supabase identity STOP gate. No schema, RLS, RPC, Auth, freeze, Vercel, or Agent Resources change.
+
+### Verification
+
+- `node scripts/verify-operations-user-directory-integrity.mjs`
+- `node scripts/verify-deploy-commit.mjs`
+
+---
+
 ## 2026-09-01 — User Directory Last Login timestamp parse
 
 ### Gap found

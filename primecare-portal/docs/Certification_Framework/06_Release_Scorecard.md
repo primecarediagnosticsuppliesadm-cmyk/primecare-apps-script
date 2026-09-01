@@ -11,6 +11,9 @@
 | **Release** | Year-1 O2C / RC name |
 | **Branch** | |
 | **Commit** | |
+| **Canonical URL** | Production: `https://app.primecarediagnostics.in` (not `*.vercel.app`) |
+| **Browser SHA** | Must match Commit (`window.__PRIMECARE_BUILD__.commit`) |
+| **Supabase** | Production: `alxhrnotnvwpblsiadxj` |
 | **Environment** | QA / Staging / Production |
 | **Certifier** | |
 | **Date** | |
@@ -36,6 +39,7 @@ _(2–3 sentences: overall readiness, blocker count, GO/NO-GO)_
 | 7 | Security / RLS | | | ☐ PASS ☐ FAIL | `verify-hq-rls-reads` |
 | 8 | Regression bundle | | | ☐ PASS ☐ FAIL | build + 8 scripts |
 | 9 | Browser golden path | | | ☐ PASS ☐ FAIL | BGP-* steps |
+| 10 | Production identity STOP gate | | | ☐ PASS ☐ FAIL | Canonical URL + SHA + `alxhrnotnvwpblsiadxj` |
 
 ---
 

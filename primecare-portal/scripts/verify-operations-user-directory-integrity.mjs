@@ -78,7 +78,15 @@ function staticUiChecks() {
   assert(/buildOperationsAttentionItems/.test(panel), "attention strip items");
   assert(/buildOperationsReadinessFooterState/.test(panel), "readiness footer state");
   assert(!/OperationsCertificationFooter/.test(panel), "certification footer removed");
-  assert(!/VITE_OPS_BUILD_SHA/.test(readFileSync(resolve(root, "vite.config.js"), "utf8")), "no build sha in vite config");
+  assert(!/VITE_OPS_BUILD_SHA/.test(readFileSync(resolve(root, "vite.config.js"), "utf8")), "does not invent VITE_OPS_BUILD_SHA");
+  assert(/VITE_APP_COMMIT_HASH/.test(readFileSync(resolve(root, "vite.config.js"), "utf8")), "reuses VITE_APP_COMMIT_HASH");
+  assert(/aria-label="Build identity"/.test(panel), "build identity visible outside Daily/Advanced gate");
+  assert(/\{user\.lastLogin\}/.test(panel), "directory table renders user.lastLogin");
+  const mainSrc = readFileSync(resolve(root, "src/main.jsx"), "utf8");
+  assert(/exposePrimeCareBuildIdentity/.test(mainSrc), "boot exposes window.__PRIMECARE_BUILD__");
+  const stampSrc = readFileSync(resolve(root, "src/utils/buildStamp.js"), "utf8");
+  assert(/__PRIMECARE_BUILD__/.test(stampSrc), "DevTools handle writes public stamp only");
+  assert(!/SERVICE_ROLE|anon key|ANON_KEY|access_token/i.test(stampSrc), "DevTools handle has no secrets");
   assert(/Agent Workload Health/.test(readFileSync(resolve(root, "src/components/operations/LabOwnershipPanel.jsx"), "utf8")), "agent workload health table");
   assert(/summarizeAgentWorkloadRow/.test(readFileSync(resolve(root, "src/components/operations/LabOwnershipPanel.jsx"), "utf8")), "agent workload row summary");
   assert(/IntegrityWarningsBanner/.test(panel), "actionable integrity warnings");
@@ -235,6 +243,54 @@ async function staticEngineChecks({
   });
   assert(dirProdShape.lastLoginAt === prodMicroOffset, "directory keeps PostgREST microsecond last_login_at");
   assert(dirProdShape.lastLogin !== "Never", "populated PostgREST timestamp never renders Never");
+
+  const prodLiveShape = "2026-09-01T13:02:39.168204+00:00";
+  const mappedLive = mapProfilesPlatformUserRow({
+    user_id: "user-vishwak-live",
+    role: "agent",
+    email: "vishwak@primecarediagnostics.in",
+    last_login_at: prodLiveShape,
+    created_at: "2026-09-01T11:00:31.089Z",
+    active: true,
+  });
+  assert(mappedLive.last_login_at === prodLiveShape, "live fixture last_login_at survives mapProfilesPlatformUserRow");
+  const platformLive = mapPlatformUserRow(mappedLive);
+  assert(platformLive.lastLoginAt === prodLiveShape, "live fixture lastLoginAt survives mapPlatformUserRow");
+  const [dirLive] = enrichDirectoryUsers([platformLive], {
+    labAssignments: [],
+    distributorAssignments: [],
+  });
+  assert(dirLive.lastLoginAt === prodLiveShape, "live fixture lastLoginAt survives enrichDirectoryUsers");
+  assert(dirLive.lastLogin !== "Never", "live production timestamp must not format as Never");
+
+  const identityRaw = {
+    user_id: "user-identity-contract",
+    role: "agent",
+    email: "identity@primecarediagnostics.in",
+    phone: "9999999999",
+    username: "identity.user",
+    display_name: "Identity User",
+    territory: "Guntur",
+    created_at: "2026-09-01T10:00:00.000Z",
+    last_login_at: prodLiveShape,
+    active: true,
+  };
+  const mappedIdentity = mapProfilesPlatformUserRow(identityRaw);
+  assert(mappedIdentity.profile_email === identityRaw.email, "identity email survives profile mapper");
+  assert(mappedIdentity.phone === identityRaw.phone, "identity phone survives profile mapper");
+  assert(mappedIdentity.username === identityRaw.username, "identity username survives profile mapper");
+  assert(mappedIdentity.display_name === identityRaw.display_name, "identity display_name survives profile mapper");
+  assert(mappedIdentity.territory === identityRaw.territory, "identity territory survives profile mapper");
+  assert(mappedIdentity.created_at === identityRaw.created_at, "identity created_at survives profile mapper");
+  assert(mappedIdentity.last_login_at === identityRaw.last_login_at, "identity last_login_at survives profile mapper");
+  const platformIdentity = mapPlatformUserRow(mappedIdentity);
+  assert(platformIdentity.email === identityRaw.email, "identity email survives platform mapper");
+  assert(platformIdentity.phone === identityRaw.phone, "identity phone survives platform mapper");
+  assert(platformIdentity.username === identityRaw.username, "identity username survives platform mapper");
+  assert(platformIdentity.displayName === identityRaw.display_name, "identity displayName survives platform mapper");
+  assert(platformIdentity.territory === identityRaw.territory, "identity territory survives platform mapper");
+  assert(platformIdentity.createdAt === identityRaw.created_at, "identity createdAt survives platform mapper");
+  assert(platformIdentity.lastLoginAt === identityRaw.last_login_at, "identity lastLoginAt survives platform mapper");
   pass("UDI-12", "Last Login last_login_at mapping");
 
   const users = [
@@ -259,7 +315,8 @@ async function staticEngineChecks({
   });
   assert(Array.isArray(integrity.warnings), "integrity warnings array");
 
-  const { buildOperationsAttentionItems } = certificationUi;
+  const { buildOperationsAttentionItems, buildOperationsReadinessFooterState, formatOperationsBuildIdentity } =
+    certificationUi;
   const attention = buildOperationsAttentionItems({
     labAssignments: [
       { labId: "L1", creditStatus: "HOLD", outstanding: 100, daysOverdue: 0 },
@@ -272,6 +329,10 @@ async function staticEngineChecks({
   assert(attention.some((a) => a.id === "credit_hold"), "attention credit hold");
   assert(attention.some((a) => a.id === "unassigned_labs"), "attention unassigned");
   assert(!attention.some((a) => a.count === 0), "zero-count attention hidden");
+  const identity = formatOperationsBuildIdentity();
+  assert(typeof identity === "string" && identity.includes(" · "), "build identity formatter uses env · commit · branch");
+  const footerState = buildOperationsReadinessFooterState({});
+  assert(str(footerState.buildMetadata) === identity, "readiness footer exposes build identity");
 
   pass("UDI-11", "Classification, KPI, filter, and integrity engine");
 }

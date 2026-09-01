@@ -65,6 +65,8 @@ HQ user provisioning, lab ownership, agent assignment, audit, freeze.
 
 **Allows:** record payment, invoice download, review orders, credit & risk drawer, daily collections.
 
+HQ Admin/Executive Operations Center may show a compact build identity (`Production · <sha> · <branch>`) from existing Vite `getAppBuildStamp()` values. It is not a user-facing product surface.
+
 See [04_Role_Access_Matrix.md](./04_Role_Access_Matrix.md).
 
 ---

@@ -72,6 +72,10 @@ if (expectRef) {
 }
 
 console.log(
-  "\nBrowser check: open app diagnostics / build stamp and compare commit to ORIGIN_QA or ORIGIN_MAIN.\n"
+  "\nBrowser check: open https://app.primecarediagnostics.in (Production) or the QA host."
 );
+console.log(
+  "Compare Operations Center build identity (Daily view) or window.__PRIMECARE_BUILD__.commit to ORIGIN_QA / ORIGIN_MAIN."
+);
+console.log("Do not UAT Production on an old *.vercel.app URL.\n");
 process.exit(failures ? 1 : 0);

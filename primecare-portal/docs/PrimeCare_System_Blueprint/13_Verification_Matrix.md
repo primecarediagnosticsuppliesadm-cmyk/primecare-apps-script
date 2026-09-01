@@ -70,7 +70,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-legacy-dependency-gate.mjs | Critical paths do not require Apps Script URL when legacy disabled | Production console |
 | verify-qa-prod-parity.mjs | Shared versioned artifacts for QA and Production convergence | Parity |
 | verify-manual-sql-drift.mjs | Manual `supabase/sql` vs versioned migrations for critical objects | Drift |
-| verify-deploy-commit.mjs | Local HEAD vs origin/qa\|main; build stamp wiring | Deploy identity |
+| verify-deploy-commit.mjs | Local HEAD vs origin/qa\|main; build stamp wiring; browser SHA vs canonical Production URL | Deploy identity |
 | verify-agent-rc1-closure.mjs | Agent visit save wiring + mobile shell | Agent visits |
 | verify-create-lab-ar-rls.mjs | Lab+AR insert RLS | Add lab |
 
@@ -79,7 +79,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | Script | Checks | When |
 |--------|--------|------|
 | verify-operations-center-admin-flow.mjs | Provisioning, freeze | Ops center |
-| verify-operations-user-directory-integrity.mjs | Probe classification; Last Login `last_login_at` mapping + microsecond Date parse | User directory |
+| verify-operations-user-directory-integrity.mjs | Probe classification; Last Login mapping + production-shape timestamp contract; Operations Center build identity (existing `VITE_APP_COMMIT_HASH`) | User directory / release identity |
 | verify-provisioning-role-guard.mjs | No admin→executive | Provisioning |
 | verify-hq-rls-reads.mjs | Cross-role reads | **Any RLS change** |
 | verify-hq-freeze-policy.mjs | Freeze wiring | Freeze policy |

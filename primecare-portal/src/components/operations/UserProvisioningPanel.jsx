@@ -2303,6 +2303,12 @@ export default function UserProvisioningPanel({
         ) : null}
       </div>
 
+      {readinessFooter.buildMetadata ? (
+        <p className="mb-3 text-[10px] text-slate-400" aria-label="Build identity">
+          {readinessFooter.buildMetadata}
+        </p>
+      ) : null}
+
       {dailyView ? (
         <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
           <OperationsKpiCard

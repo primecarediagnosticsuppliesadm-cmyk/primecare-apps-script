@@ -6,6 +6,7 @@
 import { APP_ENV, IS_PROD, IS_QA } from "@/config/environment.js";
 import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
 import { countUsersAwaitingProvisioning } from "@/operations/userProvisioningEngine.js";
+import { getAppBuildStamp } from "@/utils/buildStamp.js";
 
 function num(v) {
   const n = Number(v);
@@ -18,6 +19,17 @@ export function getOperationsEnvironmentLabel() {
   const env = String(APP_ENV || "").trim();
   if (env) return env.toUpperCase();
   return "Development";
+}
+
+/** Compact HQ build identity: `Production · cc77e473ed88 · main`. */
+export function formatOperationsBuildIdentity(stamp = getAppBuildStamp()) {
+  const env = getOperationsEnvironmentLabel();
+  const commit = String(stamp?.commit || "").trim();
+  const branch = String(stamp?.branch || "").trim();
+  const parts = [env];
+  if (commit) parts.push(commit);
+  if (branch && branch !== "unknown") parts.push(branch);
+  return parts.join(" · ");
 }
 
 export function formatLastRefreshLabel(loadedAt) {
@@ -104,7 +116,7 @@ export function buildOperationsHealthItems({
 }
 
 /**
- * Live operational readiness — no build SHA or script pass counts.
+ * Live operational readiness. Build identity is display-only (existing Vite stamp).
  * @param {{ directoryIntegrity?: object, kpis?: object, ownershipMetrics?: object, loadedAt?: number|null }} input
  */
 export function buildOperationsReadinessFooterState({
@@ -139,8 +151,7 @@ export function buildOperationsReadinessFooterState({
     overallLabel:
       warnCount === 0 || onlyProbeWarns ? "Ready for HQ UAT" : "Review Recommended",
     ready: warnCount === 0 || onlyProbeWarns,
-    /** Reserved for future build metadata — not displayed until populated. */
-    buildMetadata: null,
+    buildMetadata: formatOperationsBuildIdentity(),
   };
 }
 
