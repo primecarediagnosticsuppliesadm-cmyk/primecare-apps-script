@@ -161,7 +161,9 @@ export default function UserDetailDrawer({
     [userAuditEvents]
   );
 
-  const lastLoginLabel = formatLastLogin(user?.lastLoginAt ?? user?.lastLogin);
+  const lastLoginLabel = user?.lastLoginAt
+    ? formatLastLogin(user.lastLoginAt)
+    : str(user?.lastLogin) || "Never";
 
   if (!user) return null;
 

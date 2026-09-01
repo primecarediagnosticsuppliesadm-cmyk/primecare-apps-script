@@ -4,6 +4,22 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-01 — User Directory Last Login timestamp parse
+
+### Gap found
+
+- `profiles.last_login_at` reaches `formatLastLogin`, but PostgREST microsecond ISO strings (`…45.321813+00:00`) make `new Date(value)` invalid in WebKit, so Last Login renders `Never` for every user.
+
+### Change
+
+- Truncate fractional seconds to 3 digits before `Date` parse. Operator profile drawer formats `lastLoginAt` once (does not re-parse the display label). No schema, RLS, RPC, Auth, Access Audit, or Agent Resources change.
+
+### Verification
+
+- `node scripts/verify-operations-user-directory-integrity.mjs`
+
+---
+
 ## 2026-09-01 — User Directory Last Login mapping
 
 ### Gap found

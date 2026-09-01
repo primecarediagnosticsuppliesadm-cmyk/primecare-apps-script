@@ -501,9 +501,19 @@ export function validateProvisioningEventPayload(eventType, payload = {}) {
   return { valid: issues.length === 0, issues, eventType: type };
 }
 
+/**
+ * Truncate ISO fractional seconds to 3 digits so Date.parse works in WebKit.
+ * PostgREST timestamptz values often look like 2026-09-01T11:50:45.321813+00:00.
+ */
+export function normalizeLastLoginTimestamp(value) {
+  if (value == null || value === "") return value;
+  if (value instanceof Date) return value;
+  return String(value).replace(/(\.\d{3})\d+(?=[Zz+-])/, "$1");
+}
+
 export function formatLastLogin(value) {
   if (!value) return "Never";
-  const d = new Date(value);
+  const d = new Date(normalizeLastLoginTimestamp(value));
   if (!Number.isFinite(d.getTime())) return "Never";
 
   const now = new Date();

@@ -87,6 +87,12 @@ function staticUiChecks() {
   assert(/Production Users/.test(panel), "production users KPI");
   assert(/Not assigned/.test(panel), "not assigned badge");
   assert(/Never/.test(panel) || /formatLastLogin/.test(panel), "last login never state");
+  const engineSrc = readFileSync(resolve(root, "src/operations/userProvisioningEngine.js"), "utf8");
+  assert(/normalizeLastLoginTimestamp/.test(engineSrc), "last login timestamp normalizer");
+  assert(engineSrc.includes("(?=[Zz+-])"), "truncates >3 fractional second digits before timezone");
+  const drawer = readFileSync(resolve(root, "src/components/operations/UserDetailDrawer.jsx"), "utf8");
+  assert(/formatLastLogin\(user\.lastLoginAt\)/.test(drawer), "drawer formats raw lastLoginAt once");
+  assert(!/formatLastLogin\(user\?\.lastLoginAt \?\? user\?\.lastLogin\)/.test(drawer), "drawer does not reformat lastLogin label");
   const mapper = readFileSync(resolve(root, "src/api/primecareSupabaseApi.js"), "utf8");
   assert(
     /PROFILES_IDENTITY_SELECT[\s\S]*last_login_at/.test(mapper),
@@ -115,6 +121,7 @@ async function staticEngineChecks({
     filterDirectoryUsers,
     resolveDirectoryRowActions,
     formatLastLogin,
+    normalizeLastLoginTimestamp,
   } = userEngine;
   const { mapProfilesPlatformUserRow } = supabaseApi;
   const { mapPlatformUserRow } = opsEngine;
@@ -158,6 +165,26 @@ async function staticEngineChecks({
   assert(probeActions.review && probeActions.probeRestricted && !probeActions.deactivate, "probe review only");
 
   assert(formatLastLogin(null) === "Never", "null last login is Never");
+  assert(formatLastLogin("not-a-date") === "Never", "invalid non-date last login is Never");
+
+  const prodMicroOffset = "2026-09-01T11:50:45.321813+00:00";
+  const prodMicroZ = "2026-09-01T11:50:45.321813Z";
+  const prodMilliOffset = "2026-09-01T11:50:45.321+00:00";
+  assert(
+    normalizeLastLoginTimestamp(prodMicroOffset) === prodMilliOffset,
+    "microsecond +00:00 truncates to 3 fractional digits"
+  );
+  assert(
+    normalizeLastLoginTimestamp(prodMicroZ) === "2026-09-01T11:50:45.321Z",
+    "microsecond Z truncates to 3 fractional digits"
+  );
+  assert(
+    normalizeLastLoginTimestamp(prodMilliOffset) === prodMilliOffset,
+    "millisecond +00:00 timestamp remains unchanged"
+  );
+  assert(formatLastLogin(prodMicroOffset) !== "Never", "microsecond +00:00 parses");
+  assert(formatLastLogin(prodMicroZ) !== "Never", "microsecond Z parses");
+  assert(formatLastLogin(prodMilliOffset) !== "Never", "millisecond +00:00 parses");
 
   const populatedAt = "2026-09-01T11:50:45.321Z";
   const mappedPopulated = mapProfilesPlatformUserRow({
@@ -193,6 +220,21 @@ async function staticEngineChecks({
     distributorAssignments: [],
   });
   assert(dirEmpty.lastLogin === "Never", "null last login still renders Never");
+
+  const mappedProdShape = mapProfilesPlatformUserRow({
+    user_id: "user-vishwak-prod",
+    role: "agent",
+    email: "vishwak@primecarediagnostics.in",
+    last_login_at: prodMicroOffset,
+    created_at: "2026-09-01T11:00:31.089Z",
+    active: true,
+  });
+  const [dirProdShape] = enrichDirectoryUsers([mapPlatformUserRow(mappedProdShape)], {
+    labAssignments: [],
+    distributorAssignments: [],
+  });
+  assert(dirProdShape.lastLoginAt === prodMicroOffset, "directory keeps PostgREST microsecond last_login_at");
+  assert(dirProdShape.lastLogin !== "Never", "populated PostgREST timestamp never renders Never");
   pass("UDI-12", "Last Login last_login_at mapping");
 
   const users = [
