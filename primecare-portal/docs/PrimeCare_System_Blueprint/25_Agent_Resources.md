@@ -202,6 +202,16 @@ If metadata insert succeeds and storage upload fails, the row stays **draft** (n
 
 One page: `AgentResourcesPublisherPage`. List + detail. Actions: New Resource, Open, New Version, Manage, Publish, Archive. No agent Mark as Read. No KPI grid. No search infrastructure (optional title filter only).
 
+### Nested views and Back navigation
+
+Manage and New Resource are **internal views** on the same page key (`agentResources` / `/agent-resources`). They do not change the portal page, Labs routing, or `setActivePage`.
+
+- In-page control: **← Back to Agent Resources** returns to the publisher list.
+- Opening Manage or New Resource pushes a same-path `history.pushState` so browser Back returns to the list while `activePage` stays `agentResources`.
+- A further browser Back from the list uses the existing portal popstate handler (the previous portal page, which may be Labs only if that is where the user came from).
+
+Do not hardcode Labs (or any other module) as the Manage/create back target.
+
 Archive sets `archived_at`. No Restore in V1. Versions and acknowledgements are retained.
 
 Read status on the list (`n / d read`) only for **required reading** + current published version. Denominator = named active agents, or all active tenant agents. Roster in detail is the SoT if the aggregate is unavailable.
@@ -301,6 +311,10 @@ Run on QA only. Do not use Production.
 
 21. Open the same publisher page.
 22. View resources.
+22a. Manage a resource.
+22b. **Back to Agent Resources** returns to the publisher list (not Labs).
+22c. Browser Back from Manage also returns to the publisher list.
+22d. Labs still opens when selected from the sidebar.
 23. Create a draft.
 24. Publish.
 25. Archive.
