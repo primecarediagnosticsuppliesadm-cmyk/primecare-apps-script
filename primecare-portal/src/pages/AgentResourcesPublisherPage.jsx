@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { BookOpen, Plus } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, BookOpen, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   ActionErrorSummary,
@@ -139,6 +139,67 @@ export default function AgentResourcesPublisherPage({ currentUser = null }) {
   useEffect(() => {
     void loadList();
   }, [loadList]);
+
+  const nestedHistoryRef = useRef(false);
+  const skipNestedPopRef = useRef(false);
+
+  const returnToPublisherList = useCallback(
+    ({ fromPopState = false } = {}) => {
+      setView("list");
+      setDetail(null);
+      setError("");
+      setManageOpen(false);
+      setPublishTarget(null);
+      setArchiveTarget(false);
+      setNewVersionFile(null);
+      void loadList();
+      if (!fromPopState && nestedHistoryRef.current) {
+        nestedHistoryRef.current = false;
+        skipNestedPopRef.current = true;
+        window.history.back();
+        return;
+      }
+      nestedHistoryRef.current = false;
+    },
+    [loadList]
+  );
+
+  const pushNestedHistory = useCallback((subview) => {
+    if (typeof window === "undefined" || nestedHistoryRef.current) return;
+    window.history.pushState(
+      {
+        ...(window.history.state || {}),
+        primecarePage: "agentResources",
+        agentResourcesView: subview,
+      },
+      "",
+      `${window.location.pathname}${window.location.search}`
+    );
+    nestedHistoryRef.current = true;
+  }, []);
+
+  const openManage = useCallback(
+    (resourceId) => {
+      setView("detail");
+      void loadDetail(resourceId);
+      pushNestedHistory("detail");
+    },
+    [loadDetail, pushNestedHistory]
+  );
+
+  useEffect(() => {
+    function onPopState() {
+      if (skipNestedPopRef.current) {
+        skipNestedPopRef.current = false;
+        return;
+      }
+      if (!nestedHistoryRef.current) return;
+      nestedHistoryRef.current = false;
+      returnToPublisherList({ fromPopState: true });
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [returnToPublisherList]);
 
   const filteredRows = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -290,6 +351,7 @@ export default function AgentResourcesPublisherPage({ currentUser = null }) {
       namedIds: [],
       file: null,
     });
+    pushNestedHistory("create");
   }
 
   const resource = detail?.resource;
@@ -313,14 +375,11 @@ export default function AgentResourcesPublisherPage({ currentUser = null }) {
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => {
-                setView("list");
-                setDetail(null);
-                setError("");
-                void loadList();
-              }}
+              aria-label="Back to Agent Resources"
+              onClick={() => returnToPublisherList()}
             >
-              Back to list
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Back to Agent Resources
             </Button>
           )
         }
@@ -372,10 +431,7 @@ export default function AgentResourcesPublisherPage({ currentUser = null }) {
                         <button
                           type="button"
                           className="text-left font-medium text-foreground hover:underline"
-                          onClick={() => {
-                            setView("detail");
-                            void loadDetail(row.id);
-                          }}
+                          onClick={() => openManage(row.id)}
                         >
                           {row.title}
                         </button>
@@ -406,10 +462,7 @@ export default function AgentResourcesPublisherPage({ currentUser = null }) {
                             type="button"
                             size="xs"
                             variant="outline"
-                            onClick={() => {
-                              setView("detail");
-                              void loadDetail(row.id);
-                            }}
+                            onClick={() => openManage(row.id)}
                           >
                             Manage
                           </Button>

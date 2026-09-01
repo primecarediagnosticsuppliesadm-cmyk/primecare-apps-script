@@ -69,6 +69,26 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 ### Verification
 
 - `node scripts/verify-operations-user-directory-integrity.mjs`
+
+---
+
+## 2026-08-31 — Agent Resources publisher nested Back navigation
+
+### Gap found
+
+- Manage / New Resource were React `view` state only. They did not push a history entry. Browser Back (and iOS swipe-back) popped the previous portal page. For Admin that is often Labs, which sits next to Agent Resources in OPERATIONS.
+
+### Change
+
+- Publisher nested views stay on `agentResources`. In-page **← Back to Agent Resources** returns to the list. Manage/create push same-path history so browser Back also returns to the list. No Labs hardcode. No schema/RLS/RPC/ack change.
+
+### Verification
+
+- `node scripts/verify-agent-resources-publisher.mjs`
+- Manual: list → Manage → Back → list; Labs still opens from the sidebar
+
+---
+
 ## 2026-08-31 — Agent Resources AR-1C agent consumption + acknowledgement
 
 ### Change
