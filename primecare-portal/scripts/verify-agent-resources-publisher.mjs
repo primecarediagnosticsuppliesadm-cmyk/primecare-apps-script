@@ -92,6 +92,10 @@ assert(/PEOPLE_OPS_HR_MODULE_ENABLED = false/.test(hr), "hr.gate", "People Ops H
 assert(!/Mark as Read/.test(page), "ui.no_consumer", "publisher page has no Mark as Read");
 assert(/Confirm publish/.test(page), "ui.publish_confirm", "publish confirmation");
 assert(/Confirm archive/.test(page), "ui.archive_confirm", "archive confirmation");
+assert(/Back to Agent Resources/.test(page), "ui.back_label", "nested views return to Agent Resources list");
+assert(/history\.pushState/.test(page), "ui.nested_history", "Manage/create push a history entry so browser Back stays on Agent Resources");
+assert(/addEventListener\(["']popstate["']/.test(page), "ui.popstate", "publisher listens for browser Back on nested views");
+assert(!/setActivePage\(["']labs["']\)/.test(page) && !/navigateToPage\(["']labs["']\)/.test(page), "ui.no_labs_hardcode", "does not hardcode Labs as the Manage back target");
 assert(!/window\.open\(.*storage_path/.test(page), "ui.no_raw_path", "does not open raw storage path");
 
 assert(!/agentResourceSupabaseApi/.test(visits), "regression.visits", "visits page not wired to publisher API");
