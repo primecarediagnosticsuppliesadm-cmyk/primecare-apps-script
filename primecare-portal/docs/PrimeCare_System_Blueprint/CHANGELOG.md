@@ -4,6 +4,18 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-01 — Agent Resources live HR actor uses env password
+
+### Change
+
+- Live `--remote` Agent Resources suites authenticate `qa.hr@primecare.test` with `QA_HR_PASSWORD` (environment / `.env.local` only). The secret is not committed. No product, RLS, storage, or RPC change.
+
+### Verification
+
+- `node scripts/verify-agent-resources-rls.mjs --remote` (and the other five Agent Resources `--remote` suites)
+
+---
+
 ## 2026-08-31 — Agent Resources publisher nested Back navigation
 
 ### Gap found

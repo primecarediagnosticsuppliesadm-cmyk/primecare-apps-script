@@ -85,6 +85,8 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-agent-resources-agent-access.mjs | Agent Resources menu/page, named/all visibility, no publisher controls, Lab/HR denied. `--remote` live QA. | AR-1C+ |
 | verify-agent-resources-acknowledgement.mjs | Explicit Mark as Read, idempotent duplicate, V2 resets unread. `--remote` live QA. | AR-1C+ |
 
+Live `--remote` HR actor (`qa.hr@primecare.test`) authenticates with `QA_HR_PASSWORD` from the environment or `.env.local`. Do not commit that secret. Admin/Executive/Lab catalog credentials are unchanged.
+
 ### Operations
 
 | Script | Checks | When |

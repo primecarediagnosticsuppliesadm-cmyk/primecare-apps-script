@@ -15,6 +15,8 @@ import {
   QA_HR,
   QA_HQ_TENANT_ID,
   QA_LAB,
+  hydrateQaHrPasswordFromEnv,
+  resolveQaHrPassword,
 } from "../qaCredentials.mjs";
 import { signInWithQaCredentials } from "../qaSignIn.mjs";
 import { PRIMECARE_SUPABASE_PROJECTS } from "./primecareReleaseManifest.mjs";
@@ -69,7 +71,7 @@ export function createReporter() {
 export function loadEnvLocal() {
   const path = resolve(root, ".env.local");
   if (!existsSync(path)) throw new Error("Missing .env.local");
-  return Object.fromEntries(
+  const env = Object.fromEntries(
     readFileSync(path, "utf8")
       .split("\n")
       .filter((l) => l && !l.startsWith("#"))
@@ -78,6 +80,8 @@ export function loadEnvLocal() {
         return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")];
       })
   );
+  hydrateQaHrPasswordFromEnv(env);
+  return env;
 }
 
 export function assertQaOnly(env) {
@@ -273,7 +277,14 @@ async function prepareActors(env, r) {
   const admin = await signIn(env, QA_ADMIN, { repairAgent: false });
   const agentA = await signIn(env, QA_AGENT, { repairAgent: true, fallbackEmail: "qa.agent@primecare.test" });
   const lab = await signIn(env, QA_LAB, { repairAgent: false });
-  const hr = await signIn(env, QA_HR, { repairAgent: false });
+  hydrateQaHrPasswordFromEnv(env);
+  let hr = { sb: null, error: "QA_HR_PASSWORD missing", userId: null };
+  try {
+    resolveQaHrPassword({ required: true });
+    hr = await signIn(env, QA_HR, { repairAgent: false });
+  } catch (error) {
+    hr = { sb: null, error: error.message, userId: null };
+  }
 
   r.assert(Boolean(exec.sb), "actor.executive", exec.error || "Executive signed in");
   r.assert(Boolean(admin.sb), "actor.admin", admin.error || "Admin signed in");

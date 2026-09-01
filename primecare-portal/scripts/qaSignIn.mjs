@@ -5,7 +5,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
-import { QA_ADMIN, QA_AGENT, QA_HQ_TENANT_ID } from "./qaCredentials.mjs";
+import { QA_ADMIN, QA_AGENT, QA_HQ_TENANT_ID, hydrateQaHrPasswordFromEnv } from "./qaCredentials.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -13,7 +13,7 @@ const root = resolve(__dirname, "..");
 export function loadEnvLocal() {
   const path = resolve(root, ".env.local");
   if (!existsSync(path)) return {};
-  return Object.fromEntries(
+  const env = Object.fromEntries(
     readFileSync(path, "utf8")
       .split("\n")
       .filter((l) => l && !l.startsWith("#"))
@@ -22,6 +22,8 @@ export function loadEnvLocal() {
         return [l.slice(0, i).trim(), l.slice(i + 1).trim()];
       })
   );
+  hydrateQaHrPasswordFromEnv(env);
+  return env;
 }
 
 async function repairAgentAuthIfNeeded(env) {
