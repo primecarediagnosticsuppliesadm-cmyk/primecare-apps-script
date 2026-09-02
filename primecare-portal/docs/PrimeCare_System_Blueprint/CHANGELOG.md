@@ -69,7 +69,6 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 ### Verification
 
 - `node scripts/verify-operations-user-directory-integrity.mjs`
-=======
 ## 2026-08-31 — Agent Resources AR-1C agent consumption + acknowledgement
 
 ### Change
@@ -138,7 +137,6 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 - `node scripts/verify-agent-resources-rls.mjs`
 - `node scripts/verify-agent-resources-storage.mjs`
 - Regression: invoice phase3 static, employee360 workspace, evidence SQL unchanged
->>>>>>> 20b7773 (feat: add agent resources publishing and agent consumption)
 
 ---
 
