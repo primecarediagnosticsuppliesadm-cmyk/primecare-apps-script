@@ -79,6 +79,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | Script | Checks | When |
 |--------|--------|------|
 | verify-operations-center-admin-flow.mjs | Provisioning, freeze | Ops center |
+| verify-operations-center-agent-merge.mjs | Profile-wins agent merge: same auth user / different agentId, canonical `profiles.agent_id` survives, name is not a dedupe key | Ops center agent list |
 | verify-operations-user-directory-integrity.mjs | Probe classification; Last Login mapping + production-shape timestamp contract; Operations Center build identity (existing `VITE_APP_COMMIT_HASH`) | User directory / release identity |
 | verify-provisioning-role-guard.mjs | No admin→executive | Provisioning |
 | verify-hq-rls-reads.mjs | Cross-role reads | **Any RLS change** |

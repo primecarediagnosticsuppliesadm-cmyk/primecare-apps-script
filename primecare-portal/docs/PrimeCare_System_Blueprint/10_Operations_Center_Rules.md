@@ -21,6 +21,16 @@ HQ user provisioning, lab ownership, agent assignment, audit, freeze.
 - **Admin cannot provision `executive` role**
 - Audit: `user_provisioning_events`
 
+## Operations Center agent list (read model)
+
+`loadOperationsCenterAdminBundle` merges profile-derived agents with operational `users`-table agents.
+
+- **Canonical identity:** `profiles.agent_id` (exposed as `agentId`). Never replace it with `users.user_code`.
+- **Canonical auth user:** `profiles.user_id` (exposed as `userId`).
+- **Operational backfill identity:** `users.user_code` is preserved as `userId` on the users-derived row. It is **not** the business owner key when a profile agent already exists for that auth user.
+- **Merge (`mergeAgentsByAgentId`):** start with profile-derived agents. Skip an operational row when its `agentId` matches an existing agent, **or** when its auth-user identity (`userId`) matches a profile-derived agent. Name/email/username are not dedupe keys.
+- Ownership writes continue to persist the selected `agentId` (`lab_ownership.primary_agent_id` / `labs.assigned_agent_id`). This merge does not rewrite stored ownership.
+
 ---
 
 ## Lab ownership
@@ -74,6 +84,7 @@ See [04_Role_Access_Matrix.md](./04_Role_Access_Matrix.md).
 ## Verification
 
 - `verify-operations-center-admin-flow.mjs`
+- `verify-operations-center-agent-merge.mjs`
 - `verify-operations-user-directory-integrity.mjs`
 - `verify-provisioning-role-guard.mjs`
 - `verify-hq-freeze-policy.mjs`

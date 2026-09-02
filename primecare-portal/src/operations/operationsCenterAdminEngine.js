@@ -12,6 +12,83 @@ function str(v) {
   return String(v ?? "").trim();
 }
 
+/** Comparison-only identity key. Does not mutate stored values. */
+export function normalizeIdentityKey(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function agentIdKey(agent = {}) {
+  return normalizeIdentityKey(agent.agentId) || normalizeIdentityKey(agent.id);
+}
+
+function authUserIdentityKey(agent = {}) {
+  return normalizeIdentityKey(
+    agent.userId ?? agent.user_id ?? agent.authUserId ?? agent.userCode ?? agent.user_code
+  );
+}
+
+/**
+ * Profile-derived agents win. Operational users-table rows are skipped when they
+ * share agentId or the same auth-user identity. Name/email/username are not keys.
+ */
+export function mergeAgentsByAgentId(profileAgents = [], operationalAgents = []) {
+  const byAgentId = new Map();
+  const profileAuthIds = new Set();
+
+  for (const agent of profileAgents) {
+    const key = agentIdKey(agent);
+    if (key) byAgentId.set(key, agent);
+    const authKey = authUserIdentityKey(agent);
+    if (authKey) profileAuthIds.add(authKey);
+  }
+
+  for (const agent of operationalAgents) {
+    const key = agentIdKey(agent);
+    if (!key || byAgentId.has(key)) continue;
+    const authKey = authUserIdentityKey(agent);
+    if (authKey && profileAuthIds.has(authKey)) continue;
+    byAgentId.set(key, agent);
+  }
+
+  return Array.from(byAgentId.values()).sort((a, b) =>
+    str(a.name).localeCompare(str(b.name), undefined, { sensitivity: "base" })
+  );
+}
+
+/**
+ * Same agent composition path used by loadOperationsCenterAdminBundle.
+ * `operationalAgentRows` are getOperationsOperationalAgentsRead mapped rows.
+ */
+export function composeOperationsCenterMergedAgents(
+  platformUserRows = [],
+  operationalAgentRows = []
+) {
+  const operationalAgents = (operationalAgentRows || []).map(mapOperationsAgentRow);
+  const operationalByUserId = new Map();
+  for (const agent of operationalAgents) {
+    const key = normalizeIdentityKey(agent.userId);
+    if (key) operationalByUserId.set(key, agent);
+  }
+
+  const users = (platformUserRows || []).map((row) => {
+    const op = operationalByUserId.get(normalizeIdentityKey(row.user_id ?? row.userId));
+    if (!op?.name) return mapPlatformUserRow(row);
+    return mapPlatformUserRow({
+      ...row,
+      user_name: str(row.user_name) || op.name,
+      agent_name: str(row.agent_name) || op.name,
+    });
+  });
+
+  const profileAgents = deriveAgentsFromPlatformUsers(users);
+  return {
+    users,
+    operationalAgents,
+    profileAgents,
+    agents: mergeAgentsByAgentId(profileAgents, operationalAgents),
+  };
+}
+
 export const OPERATIONS_CENTER_TABS = [
   { id: "directory", label: "User Directory" },
   { id: "labOwnership", label: "Assigned Laboratories" },
@@ -148,8 +225,9 @@ export function formatOpsDate(value) {
 }
 
 export function mapOperationsAgentRow(row = {}) {
-  const userId = str(row.user_id ?? row.userId);
-  const fromProfile = Boolean(userId);
+  const profileUserId = str(row.user_id);
+  const userId = str(row.user_id ?? row.userId ?? row.user_code);
+  const fromProfile = Boolean(profileUserId);
   return {
     id: fromProfile ? userId : str(row.id),
     userId: userId || null,

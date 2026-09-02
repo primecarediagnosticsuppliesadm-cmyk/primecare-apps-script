@@ -4,6 +4,25 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-01 — Operations Center agent merge: profile wins same auth user
+
+### Gap found
+
+- `mergeAgentsByAgentId` deduplicated only on `agentId`. Production Vishwak appears twice because `profiles.agent_id` (`AGT_VISHWAK_RATA_36CC`) ≠ `users.user_code` (auth UUID `685b0ff4-…`), even though both rows are the same auth user (`profiles.user_id` = `users.user_code`).
+- Operational mapper dropped `users.user_code` as a user identity field (`agentId` was set to `user_code`, `userId` was empty at merge).
+
+### Change
+
+- Profile-derived agents remain canonical. Operational rows are skipped when `agentId` matches **or** auth-user identity (`userId`) matches a profile agent. Display name/email/username are not dedupe keys.
+- `mapUsersTableAgentRow` preserves `userId` from `users.user_code`. `mapOperationsAgentRow` copies that identity without treating a users-table row as `source: "profile"`.
+- Read-model only. No SQL, RLS, ownership writes, or stored `agent_id` changes.
+
+### Verification
+
+- `node scripts/verify-operations-center-agent-merge.mjs`
+
+---
+
 ## 2026-09-01 — Production verification hardening (build identity + directory contract)
 
 ### Gap found
