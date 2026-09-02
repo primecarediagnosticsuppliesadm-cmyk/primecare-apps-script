@@ -92,6 +92,7 @@ Live `--remote` HR actor (`qa.hr@primecare.test`) authenticates with `QA_HR_PASS
 | Script | Checks | When |
 |--------|--------|------|
 | verify-operations-center-admin-flow.mjs | Provisioning, freeze | Ops center |
+| verify-operations-center-agent-merge.mjs | Same auth user from profiles/users collapses to one agent; `profiles.agent_id` wins; unrelated agents remain; name is not a dedupe key | Ops center agent list |
 | verify-operations-user-directory-integrity.mjs | Probe classification | User directory |
 | verify-provisioning-role-guard.mjs | No admin→executive | Provisioning |
 | verify-hq-rls-reads.mjs | Cross-role reads | **Any RLS change** |

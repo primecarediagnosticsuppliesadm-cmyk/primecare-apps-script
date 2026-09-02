@@ -8822,6 +8822,7 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
 function mapUsersTableAgentRow(row) {
   return {
     id: str(row.id),
+    userId: str(row.user_code),
     agentId: str(row.user_code),
     name: str(row.user_name),
     email: str(row.email),

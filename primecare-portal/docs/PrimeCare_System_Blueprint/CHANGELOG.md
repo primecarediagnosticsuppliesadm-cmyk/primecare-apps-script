@@ -4,6 +4,24 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-01 — Operations Center duplicate-agent merge (QA-native)
+
+### Gap found
+
+- `mergeAgentsByAgentId` deduplicated only on `agentId`. The same auth user can appear twice when `profiles.agent_id` differs from `users.user_code` (auth UUID), even though `profiles.user_id` equals `users.user_code`.
+- Operational mapper dropped `users.user_code` as a user identity field.
+
+### Change
+
+- Preserve `users.user_code` as `userId` on users-derived agent rows. Profile-derived agents remain canonical; operational duplicates of the same auth user are skipped. Canonical `profiles.agent_id` is the ownership value. No data migration required.
+- Implemented / pending QA browser certification.
+
+### Verification
+
+- `node scripts/verify-operations-center-agent-merge.mjs`
+
+---
+
 ## 2026-09-01 — Agent Resources live HR actor uses env password
 
 ### Change

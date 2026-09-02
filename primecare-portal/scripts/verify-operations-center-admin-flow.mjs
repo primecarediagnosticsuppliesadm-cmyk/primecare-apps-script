@@ -139,6 +139,26 @@ async function main() {
   const ownershipRows = bundle?.ownershipRows || [];
   const agents = bundle?.agents || [];
 
+  const agentsByAuthUser = new Map();
+  const duplicateAuthAgents = [];
+  for (const agent of agents) {
+    const uid = str(agent.userId).toLowerCase();
+    if (!uid) continue;
+    if (agentsByAuthUser.has(uid)) {
+      duplicateAuthAgents.push(`${agentsByAuthUser.get(uid)} + ${agent.agentId} (${uid})`);
+    } else {
+      agentsByAuthUser.set(uid, agent.agentId);
+    }
+  }
+  if (duplicateAuthAgents.length) {
+    fail("agents.unique_auth_user", `duplicate auth-user agents: ${duplicateAuthAgents.join("; ")}`);
+  } else {
+    pass(
+      "agents.unique_auth_user",
+      `${agents.length} merged agent(s); no duplicate userId (profile-wins merge)`
+    );
+  }
+
   const foreignUsers = directoryUsers.filter((u) => str(u.tenantId ?? u.tenant_id) !== HQ);
   if (foreignUsers.length) {
     fail("bundle.tenant_scope", `${foreignUsers.length} directory user(s) outside HQ tenant`);
