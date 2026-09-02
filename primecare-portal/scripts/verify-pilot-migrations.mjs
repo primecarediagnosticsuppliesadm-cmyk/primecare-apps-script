@@ -99,6 +99,7 @@ export const PILOT_MIGRATION_MANIFEST = [
       "agent_resources_v1_migration.sql",
       "agent_resources_v1_privilege_lockdown.sql",
       "agent_resources_v1_visibility_fix.sql",
+      "agent_resources_docx_mime.sql",
     ],
   },
 ];

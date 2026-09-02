@@ -4,6 +4,25 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-01 — Agent Resources DOCX download (no preview)
+
+### Change
+
+- HQ may publish validated `.docx` in addition to PDF/JPEG/PNG. New migration `agent_resources_docx_mime.sql` / `20260901210000_agent_resources_docx_mime.sql` widens `agent_resource_versions` MIME CHECK and the private `agent-resources` bucket allowlist only.
+- Client OPC inspection (ZIP **entry names**, no decompression, no extra dependency) requires `[Content_Types].xml` + `word/document.xml`. Still blocked: `.doc`, `.docm`, generic ZIP, XLSX, PPTX, macros. PDF/JPEG/PNG magic bytes unchanged.
+- DOCX Open is **Download** via 300s signed URL with `download` filename. No public URL, no Word preview engine, no conversion, no RLS change.
+
+### Verification
+
+- `node scripts/verify-agent-resources-file-types.mjs`
+- `node scripts/verify-agent-resources-schema.mjs`
+- `node scripts/verify-agent-resources-storage.mjs`
+- `node scripts/verify-agent-resources-publisher.mjs`
+- `node scripts/verify-agent-resources-agent-access.mjs`
+- `npm run build`
+
+---
+
 ## 2026-09-01 — Operations Center agent merge: profile wins same auth user
 
 ### Gap found

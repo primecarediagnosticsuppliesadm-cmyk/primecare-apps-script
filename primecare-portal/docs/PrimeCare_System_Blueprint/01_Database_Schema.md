@@ -274,7 +274,7 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 | **Business key** | `(resource_id, version_number)` unique; `version_number` integer ≥ 1 |
 | **Status** | `draft`, `published`, `archived` — **at most one published per resource** |
 | **Storage path** | `{tenant_id}/{resource_id}/{version_id}/{random_object_key}` |
-| **MIME** | `application/pdf`, `image/jpeg`, `image/png`; `file_size` 1–10485760 |
+| **MIME** | `application/pdf`, `image/jpeg`, `image/png`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`; `file_size` 1–10485760 |
 | **RLS** | Publisher: all tenant versions. Agent: **current published only** |
 
 ---

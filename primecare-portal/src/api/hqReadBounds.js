@@ -141,7 +141,7 @@ export const HQ_AGENT_RESOURCE_DETAIL_COLUMNS = HQ_AGENT_RESOURCE_LIST_COLUMNS;
 export const HQ_AGENT_RESOURCE_VERSION_COLUMNS =
   "id,resource_id,tenant_id,version_number,original_filename,mime_type,file_size,status,created_at,published_by,published_at,archived_at";
 export const HQ_AGENT_RESOURCE_VERSION_OPEN_COLUMNS =
-  "id,tenant_id,original_filename,storage_path";
+  "id,tenant_id,original_filename,mime_type,storage_path";
 export const HQ_AGENT_RESOURCE_AUDIENCE_COLUMNS =
   "id,resource_id,tenant_id,profile_user_id,created_at";
 export const HQ_AGENT_RESOURCE_ACK_COLUMNS =

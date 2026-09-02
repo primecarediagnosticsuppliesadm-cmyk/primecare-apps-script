@@ -19,6 +19,8 @@ import {
   createAgentResourceVersionWrite,
   createAgentResourceWrite,
   getAgentResourceDetailPublisherRead,
+  AGENT_RESOURCE_FILE_ACCEPT,
+  agentResourceOpenLabel,
   getAgentResourceSignedUrl,
   listActiveTenantAgentsPublisherRead,
   listAgentResourcesPublisherRead,
@@ -455,7 +457,7 @@ export default function AgentResourcesPublisherPage({ currentUser = null }) {
                         <div className="flex flex-wrap gap-1">
                           {row.currentPublished ? (
                             <Button type="button" size="xs" variant="outline" onClick={() => openFile(row.currentPublished.id)}>
-                              Open
+                              {agentResourceOpenLabel(row.currentPublished.mimeType)}
                             </Button>
                           ) : null}
                           <Button
@@ -542,13 +544,17 @@ export default function AgentResourcesPublisherPage({ currentUser = null }) {
               Required reading
             </label>
             <div className="space-y-1 sm:col-span-2">
-              <FieldLabel>File * (PDF, JPEG, or PNG · max 10 MB)</FieldLabel>
+              <FieldLabel>File * (PDF, JPEG, PNG, or DOCX · max 10 MB)</FieldLabel>
               <input
                 required
                 type="file"
-                accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png"
+                accept={AGENT_RESOURCE_FILE_ACCEPT}
                 onChange={(e) => setForm((f) => ({ ...f, file: e.target.files?.[0] || null }))}
               />
+              <p className="text-[11px] text-muted-foreground">
+                Word (.docx) files download for the agent. They do not preview in the browser. Legacy
+                .doc, Excel, and PowerPoint are not supported.
+              </p>
             </div>
           </div>
           <div className="mt-4 flex gap-2">
@@ -665,7 +671,7 @@ export default function AgentResourcesPublisherPage({ currentUser = null }) {
                 <StatusBadge variant="success">Published</StatusBadge>
                 <span className="text-muted-foreground">{formatWhen(detail.currentPublished.publishedAt)}</span>
                 <Button type="button" size="xs" variant="outline" onClick={() => openFile(detail.currentPublished.id)}>
-                  Open
+                  {agentResourceOpenLabel(detail.currentPublished.mimeType)}
                 </Button>
               </div>
             </section>
@@ -679,11 +685,14 @@ export default function AgentResourcesPublisherPage({ currentUser = null }) {
             <section className={enterpriseLayout.sectionDense}>
               <h3 className="mb-2 text-sm font-semibold">New version</h3>
               <form className="flex flex-wrap items-end gap-2" onSubmit={onNewVersion}>
-                <input
-                  type="file"
-                  accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png"
-                  onChange={(e) => setNewVersionFile(e.target.files?.[0] || null)}
-                />
+                <div className="space-y-1">
+                  <input
+                    type="file"
+                    accept={AGENT_RESOURCE_FILE_ACCEPT}
+                    onChange={(e) => setNewVersionFile(e.target.files?.[0] || null)}
+                  />
+                  <p className="text-[11px] text-muted-foreground">PDF, JPEG, PNG, or DOCX · max 10 MB</p>
+                </div>
                 <Button type="submit" size="sm" disabled={saving || !newVersionFile}>
                   Upload draft
                 </Button>
@@ -703,7 +712,7 @@ export default function AgentResourcesPublisherPage({ currentUser = null }) {
                     <StatusBadge variant="neutral">Draft</StatusBadge>
                     <span className="text-muted-foreground">{formatWhen(version.createdAt)}</span>
                     <Button type="button" size="xs" variant="outline" onClick={() => openFile(version.id)}>
-                      Open
+                      {agentResourceOpenLabel(version.mimeType)}
                     </Button>
                     {!resource.archivedAt ? (
                       <Button type="button" size="xs" onClick={() => setPublishTarget(version)}>
@@ -765,7 +774,7 @@ export default function AgentResourcesPublisherPage({ currentUser = null }) {
                       {formatWhen(version.publishedAt || version.archivedAt || version.createdAt)}
                     </span>
                     <Button type="button" size="xs" variant="outline" onClick={() => openFile(version.id)}>
-                      Open
+                      {agentResourceOpenLabel(version.mimeType)}
                     </Button>
                   </li>
                 ))}

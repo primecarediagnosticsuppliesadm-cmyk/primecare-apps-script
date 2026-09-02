@@ -56,10 +56,11 @@ Apply in Supabase SQL Editor. Verify after each tier with scripts in §4.
 | 29 | P2 Agent Resources | `agent_resources_v1_migration.sql` | **ACTIVE MIGRATION** — private bucket `agent-resources`; do **not** apply to Production from AR-1A without founder cert |
 | 30 | P2 Agent Resources | `agent_resources_v1_privilege_lockdown.sql` | **ACTIVE MIGRATION** — revoke Supabase default ALL on authenticated; re-grant intended privileges. Apply after step 29. **Do not apply to Production from AR-1A.** |
 | 31 | P2 Agent Resources | `agent_resources_v1_visibility_fix.sql` | **ACTIVE MIGRATION** — agent visibility uses `current_profile().user_id` (composite `IS NOT NULL` is false when lab_id is null). Apply after step 30. **Do not apply to Production from AR-1A.** |
+| 32 | P2 Agent Resources | `agent_resources_docx_mime.sql` | **ACTIVE MIGRATION** — widen versions MIME CHECK + `agent-resources` bucket for DOCX only. Apply after step 31. **Do not apply to Production until QA cert.** |
 
 **Apply note:** `purchase_orders_migration.sql` installs temporary `temp_anon_*` policies on PO tables; `production_auth_rls_pilot_migration.sql` (step 2) drops them and applies tenant-scoped authenticated RLS. Do not skip step 1 on greenfield databases.
 
-**Machine verification:** `node scripts/verify-pilot-migrations.mjs` — expects 31/31 on disk.
+**Machine verification:** `node scripts/verify-pilot-migrations.mjs` — expects 32/32 on disk.
 
 ---
 
@@ -76,6 +77,7 @@ Apply in Supabase SQL Editor. Verify after each tier with scripts in §4.
 | `20260831200000_agent_resources_v1.sql` | `agent_resources_v1_migration.sql` | **ACTIVE MIGRATION** (CLI) — Agent Resources V1; **do not apply to Production from AR-1A** |
 | `20260831201000_agent_resources_v1_privilege_lockdown.sql` | `agent_resources_v1_privilege_lockdown.sql` | **ACTIVE MIGRATION** (CLI) — privilege lockdown after default ALL; **do not apply to Production from AR-1A** |
 | `20260831202000_agent_resources_v1_visibility_fix.sql` | `agent_resources_v1_visibility_fix.sql` | **ACTIVE MIGRATION** (CLI) — agent composite-null visibility fix; **do not apply to Production from AR-1A** |
+| `20260901210000_agent_resources_docx_mime.sql` | `agent_resources_docx_mime.sql` | **ACTIVE MIGRATION** (CLI) — DOCX MIME on versions + `agent-resources` bucket; **do not apply to Production until QA cert** |
 
 **Note:** Track B does **not** include the full 27-file manifest. Production using Track B alone is **incomplete** — use Track A for full HQ pilot.
 

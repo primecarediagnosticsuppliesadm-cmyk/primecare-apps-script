@@ -43,6 +43,8 @@ const hr = src("src/peopleOps/employee360/peopleOpsHrModuleConfig.js");
 const visits = src("src/pages/AgentVisitPage.jsx");
 const collections = src("src/pages/CollectionsPage.jsx");
 const orders = src("src/pages/OrdersPage.jsx");
+const agentPage = src("src/pages/AgentResourcesPage.jsx");
+const inspect = src("src/api/agentResourceFileInspect.js");
 
 assert(api.length > 0, "api.exists", "agentResourceSupabaseApi.js present");
 assert(page.length > 0, "page.exists", "AgentResourcesPublisherPage present");
@@ -67,7 +69,16 @@ assert(/HQ_AGENT_RESOURCE_SIGNED_URL_TTL_SEC = 300/.test(bounds), "bounds.ttl", 
 assert(/HQ_AGENT_RESOURCE_LIST_COLUMNS/.test(bounds), "bounds.list", "list columns bounded");
 assert(/HQ_AGENT_RESOURCE_ACK_COLUMNS/.test(bounds), "bounds.ack", "ack roster columns bounded");
 assert(/inspectAgentResourceFile/.test(api), "api.file_inspect", "client file inspection");
-assert(/docx/i.test(api), "api.reject_docx", "DOCX rejected");
+assert(/agentResourceFileInspect/.test(api), "api.file_inspect_module", "file inspect extracted");
+assert(/AGENT_RESOURCE_FILE_ACCEPT/.test(page), "ui.accept_const", "publisher uses shared accept list");
+assert(/\.docx/.test(page), "ui.accept_docx", "publisher accept includes .docx");
+assert(/PDF, JPEG, PNG, or DOCX/.test(page), "ui.file_label", "create form lists DOCX");
+assert(/agentResourceOpenLabel/.test(page) && /agentResourceOpenLabel/.test(agentPage), "ui.open_label", "Open vs Download by MIME");
+assert(/createSignedUrl\([\s\S]*download: filename/.test(api), "api.docx_download", "DOCX signed URL uses download filename");
+assert(/sanitizeAgentResourceDownloadName/.test(api), "api.download_name", "DOCX download uses original filename");
+assert(/word\/document\.xml/.test(inspect), "inspect.docx_package", "DOCX requires word/document.xml");
+assert(/vbaProject/.test(inspect), "inspect.block_macros", "macro packages rejected");
+assert(/BLOCKED_EXTENSIONS/.test(inspect) && /docm/.test(inspect) && /xlsx/.test(inspect), "inspect.blocked_ext", ".doc/.docm/.zip/.xlsx/.pptx blocked");
 assert(/10485760|HQ_AGENT_RESOURCE_MAX_FILE_BYTES/.test(api), "api.max_size", "10 MiB cap");
 assert(/named_agents/.test(api) && /all_agents/.test(api), "api.audience_types", "All Agents and Named Agents");
 assert(/eq\(["']role["'], ["']agent["']\)/.test(api), "api.named_agents_only", "named picker is active agents");

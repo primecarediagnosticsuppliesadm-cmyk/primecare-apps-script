@@ -127,15 +127,17 @@ First-class table. Unique `(tenant_id, version_id, profile_user_id)`.
 
 ## Storage
 
-Bucket **`agent-resources`**: `public = false`, 10 MiB, MIME `application/pdf`, `image/jpeg`, `image/png` only.
+Bucket **`agent-resources`**: `public = false`, 10 MiB, MIME `application/pdf`, `image/jpeg`, `image/png`, and `application/vnd.openxmlformats-officedocument.wordprocessingml.document` (`.docx` only). Generic `application/zip` is not allowed.
 
 Path: `{tenant_id}/{resource_id}/{version_id}/{random_object_key}`
 
 Original filename lives on the version row only. No `getPublicUrl`. No authenticated DELETE in V1. No agent/lab/HR upload.
 
-Signed URLs (AR-1B/C): after metadata SELECT, `createSignedUrl` TTL **300 seconds**. Storage SELECT still requires metadata authorization.
+Signed URLs (AR-1B/C): after metadata SELECT, `createSignedUrl` TTL **300 seconds**. Storage SELECT still requires metadata authorization. PDF/JPEG/PNG open inline. **DOCX** signed URLs set `download` to the sanitized original filename (Content-Disposition attachment). No public URL.
 
-**V1 publish format is PDF** (JPEG/PNG allowed for simple sheets). DOCX is not allowed.
+**Publish formats:** PDF (canonical field-readable copy), JPEG/PNG (simple sheets), DOCX (downloadable Word playbook). Client inspection (`agentResourceFileInspect.js`) keeps PDF/JPEG/PNG magic-byte checks and validates DOCX as an OPC package (ZIP **names only**, no decompression): requires `[Content_Types].xml` and `word/document.xml`. Rejects `.doc`, `.docm`, generic `.zip`, XLSX, PPTX, macro `vbaProject.bin`, and ZIP files renamed to `.docx` that lack a Word package.
+
+There is **no** in-app Word preview, **no** collaborative editing, and **no** DOCX→PDF conversion in this release.
 
 ---
 
@@ -247,7 +249,7 @@ Agent cannot see publisher controls, version history, audience, ack roster, or n
 - Tenant isolation; no public objects; no filename in path
 - Draft/archived not agent-visible; named isolation; no cross-tenant
 - Guessed storage path denied
-- MIME and size enforced in table CHECK and bucket
+- MIME and size enforced in table CHECK and bucket (PDF/JPEG/PNG/DOCX; not generic ZIP)
 - Do not reuse `operational-evidence` or `invoice-pdfs`
 - Do not broaden `is_admin_or_executive()` or evidence insert helpers
 
@@ -255,7 +257,7 @@ Agent cannot see publisher controls, version history, audience, ack roster, or n
 
 ## Non-goals
 
-Employee Document Vault, Aadhaar/PAN, e-sign, ATS, LMS, quizzes, comments, collaborative editing, Drive/SharePoint, WhatsApp/SMS/email send, DOCX publish, folder ACLs, reminders, AI, approval chains, distributor-role publishers.
+Employee Document Vault, Aadhaar/PAN, e-sign, ATS, LMS, quizzes, comments, collaborative editing, Drive/SharePoint, WhatsApp/SMS/email send, DOCX preview or DOCX→PDF conversion, XLSX/PPTX/.doc/.docm/generic ZIP publish, folder ACLs, reminders, AI, approval chains, distributor-role publishers.
 
 ---
 
@@ -267,7 +269,7 @@ AR-1B: publisher API + Admin/Executive page (`agentResources`).
 
 AR-1C: Agent Resources consumer page + acknowledgement. Same permission key; role-specific page component.
 
-Verify: `verify-agent-resources-schema.mjs`, `verify-agent-resources-rls.mjs`, `verify-agent-resources-storage.mjs`, `verify-agent-resources-publisher.mjs`, `verify-agent-resources-agent-access.mjs`, `verify-agent-resources-acknowledgement.mjs`.
+Verify: `verify-agent-resources-schema.mjs`, `verify-agent-resources-rls.mjs`, `verify-agent-resources-storage.mjs`, `verify-agent-resources-publisher.mjs`, `verify-agent-resources-agent-access.mjs`, `verify-agent-resources-acknowledgement.mjs`, `verify-agent-resources-file-types.mjs`.
 
 Regression: invoice PDF, operational evidence, Employee 360 HR gate (`PEOPLE_OPS_HR_MODULE_ENABLED` remains `false`).
 
@@ -288,12 +290,12 @@ Run on QA only. Do not use Production.
 3. Category: Start Here.
 4. Required Reading: Yes.
 5. Audience: All Agents.
-6. Upload an approved PDF.
+6. Upload an approved PDF or validated `.docx`.
 7. Confirm the resource is Draft (no published version).
 8. Confirm no Published version.
 9. Publish V1.
 10. Confirm Published.
-11. Open the PDF (signed URL; expires in 300s).
+11. Open the PDF (signed URL; expires in 300s). Word files use **Download** (attachment filename).
 12. Upload V2.
 13. Confirm V1 remains current before publish.
 14. Publish V2.
@@ -328,10 +330,10 @@ Run on QA only. Do not use Production.
 
 ### File validation
 
-30. DOCX rejected.
+30. Valid `.docx` accepted (OPC package). `.doc`, `.docm`, generic `.zip`, XLSX, PPTX rejected.
 31. File larger than 10 MiB rejected.
 32. PNG accepted.
-33. Original filename is not used in the storage path.
+33. Original filename is not used in the storage path. DOCX signed download may use the original filename as Content-Disposition.
 
 ---
 

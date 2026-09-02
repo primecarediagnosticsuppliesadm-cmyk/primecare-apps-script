@@ -328,6 +328,8 @@ HQ_ORDER_LIST_COLUMNS =
 | `audience_type` | `all_agents` or `named_agents` |
 | `agent_resource_audiences.profile_user_id` | `profiles.user_id` = `auth.uid()` |
 | `agent_resource_versions.storage_path` | `{tenant_id}/{resource_id}/{version_id}/{random}` — never original filename |
+| `agent_resource_versions.mime_type` | Allowlist: PDF, JPEG, PNG, Word DOCX (`wordprocessingml.document`) |
+| `agent_resource_versions.original_filename` | Display / DOCX download name only; never the storage path |
 | `agent_resource_acknowledgements` | Unique `(tenant_id, version_id, profile_user_id)` |
 
 See [25_Agent_Resources.md](./25_Agent_Resources.md).

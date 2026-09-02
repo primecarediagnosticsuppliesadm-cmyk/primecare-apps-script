@@ -548,9 +548,10 @@ export async function runLiveStorage(r = createReporter()) {
       /application\/pdf/.test(mimeList) &&
         /image\/jpeg/.test(mimeList) &&
         /image\/png/.test(mimeList) &&
-        !/zip|docx/i.test(mimeList),
+        /wordprocessingml/.test(mimeList) &&
+        !/application\/zip/.test(mimeList),
       "live.bucket.mime",
-      "PDF/JPEG/PNG only"
+      "PDF/JPEG/PNG/DOCX; generic ZIP not allowed"
     );
 
     try {
@@ -1382,7 +1383,21 @@ export async function runLivePublisher(r = createReporter()) {
       file_size: 1000,
       status: "draft",
     });
-    r.assert(Boolean(docx.error), "live.file.docx_rejected", docx.error?.message || "DOCX mime rejected");
+    r.assert(!docx.error, "live.file.docx_mime_allowed", docx.error?.message || "DOCX mime accepted");
+
+    const zipId = randomUUID();
+    const zipMime = await exec.from("agent_resource_versions").insert({
+      id: zipId,
+      resource_id: resourceId,
+      tenant_id: tenantId,
+      version_number: 97,
+      storage_path: `${tenantId}/${resourceId}/${zipId}/${objectKey()}`,
+      original_filename: "pack.zip",
+      mime_type: "application/zip",
+      file_size: 1000,
+      status: "draft",
+    });
+    r.assert(Boolean(zipMime.error), "live.file.zip_rejected", zipMime.error?.message || "generic ZIP mime rejected");
 
     const hugeId = randomUUID();
     const huge = await exec.from("agent_resource_versions").insert({

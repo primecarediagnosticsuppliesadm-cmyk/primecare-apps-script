@@ -16,6 +16,8 @@ const LOCKDOWN_MIG = resolve(
   root,
   "supabase/migrations/20260831201000_agent_resources_v1_privilege_lockdown.sql"
 );
+const DOCX_SQL = resolve(root, "supabase/sql/agent_resources_docx_mime.sql");
+const DOCX_MIG = resolve(root, "supabase/migrations/20260901210000_agent_resources_docx_mime.sql");
 
 const TABLES = [
   "agent_resources",
@@ -56,11 +58,15 @@ if (!existsSync(SQL_PATH)) fail("file.sql", `missing ${SQL_PATH}`);
 if (!existsSync(MIGRATION_PATH)) fail("file.migration", `missing ${MIGRATION_PATH}`);
 if (!existsSync(LOCKDOWN_SQL)) fail("file.lockdown_sql", `missing ${LOCKDOWN_SQL}`);
 if (!existsSync(LOCKDOWN_MIG)) fail("file.lockdown_migration", `missing ${LOCKDOWN_MIG}`);
+if (!existsSync(DOCX_SQL)) fail("file.docx_sql", `missing ${DOCX_SQL}`);
+if (!existsSync(DOCX_MIG)) fail("file.docx_mig", `missing ${DOCX_MIG}`);
 
 const sql = existsSync(SQL_PATH) ? readFileSync(SQL_PATH, "utf8") : "";
 const mig = existsSync(MIGRATION_PATH) ? readFileSync(MIGRATION_PATH, "utf8") : "";
 const lockdownSql = existsSync(LOCKDOWN_SQL) ? readFileSync(LOCKDOWN_SQL, "utf8") : "";
 const lockdownMig = existsSync(LOCKDOWN_MIG) ? readFileSync(LOCKDOWN_MIG, "utf8") : "";
+const docxSql = existsSync(DOCX_SQL) ? readFileSync(DOCX_SQL, "utf8") : "";
+const docxMig = existsSync(DOCX_MIG) ? readFileSync(DOCX_MIG, "utf8") : "";
 assert(sql.length > 0 && sql === mig, "file.mirror", "sql mirror identical to timestamped migration");
 assert(
   lockdownSql.length > 0 && lockdownSql === lockdownMig,
@@ -139,11 +145,33 @@ assert(/'agent-resources'/.test(sql), "bucket.name", "bucket agent-resources");
 assert(/public = false/.test(sql), "bucket.private", "bucket private");
 assert(/10485760/.test(sql), "bucket.size", "10 MiB limit");
 
-assert(!/docx|wordprocessingml|application\/zip/i.test(sql), "no.docx", "no DOCX/zip MIME");
+assert(!/docx|wordprocessingml|application\/zip/i.test(sql), "v1.no.docx", "AR-1A SQL remains PDF/JPEG/PNG-only");
+assert(docxSql.length > 0 && docxSql === docxMig, "file.docx_mirror", "DOCX mime sql mirror identical");
+assert(
+  /wordprocessingml\.document/.test(docxSql),
+  "docx.mime_check",
+  "new migration adds DOCX MIME to versions CHECK"
+);
+assert(
+  /WHERE id = 'agent-resources'/.test(docxSql),
+  "docx.bucket_only",
+  "bucket MIME update is agent-resources only"
+);
+assert(!/invoice-pdfs/.test(docxSql), "docx.no_invoice", "DOCX migration does not touch invoice-pdfs");
+assert(
+  !/operational-evidence/.test(docxSql),
+  "docx.no_evidence",
+  "DOCX migration does not touch operational-evidence"
+);
 assert(!/\bSELECT \*/.test(sql), "no.select_star", "no SELECT * in SQL body (ROWTYPE excepted)");
 
 for (const pattern of FORBIDDEN) {
   assert(!pattern.test(sql), `forbidden.${pattern.source.slice(0, 40)}`, "O2C/evidence/invoice untouched");
+  assert(
+    !pattern.test(docxSql),
+    `docx.forbidden.${pattern.source.slice(0, 40)}`,
+    "DOCX migration leaves O2C/evidence/invoice untouched"
+  );
 }
 
 if (failures) {

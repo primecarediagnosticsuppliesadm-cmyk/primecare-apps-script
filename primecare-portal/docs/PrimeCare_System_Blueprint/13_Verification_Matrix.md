@@ -84,6 +84,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-agent-resources-publisher.mjs | Admin/Executive publisher page, APIs, RPC-only publish, nested Back to Agent Resources (no Labs hardcode), no Lab/HR menu, no public URLs, no SELECT * | AR-1B+ |
 | verify-agent-resources-agent-access.mjs | Agent Resources menu/page, named/all visibility, no publisher controls, Lab/HR denied. `--remote` live QA. | AR-1C+ |
 | verify-agent-resources-acknowledgement.mjs | Explicit Mark as Read, idempotent duplicate, V2 resets unread. `--remote` live QA. | AR-1C+ |
+| verify-agent-resources-file-types.mjs | PDF/JPEG/PNG magic bytes; valid DOCX OPC accepted; `.doc`/`.docm`/ZIP/XLSX/PPTX/spoofed DOCX rejected | AR-DOCX |
 
 ### Operations
 

@@ -19,6 +19,21 @@ import {
   HQ_AGENT_RESOURCE_VERSION_OPEN_COLUMNS,
   clampLimit,
 } from "@/api/hqReadBounds.js";
+import {
+  AGENT_RESOURCE_DOCX_MIME,
+  AGENT_RESOURCE_FILE_ACCEPT,
+  agentResourceOpenLabel,
+  inspectAgentResourceFile as inspectAgentResourceFileBytes,
+  isDocxMime,
+  sanitizeAgentResourceDownloadName,
+} from "@/api/agentResourceFileInspect.js";
+
+export {
+  AGENT_RESOURCE_DOCX_MIME,
+  AGENT_RESOURCE_FILE_ACCEPT,
+  agentResourceOpenLabel,
+  isDocxMime,
+};
 
 export const AGENT_RESOURCES_BUCKET = "agent-resources";
 export const AGENT_RESOURCE_CATEGORIES = [
@@ -32,7 +47,6 @@ export const AGENT_RESOURCE_CATEGORIES = [
   { id: "other", label: "Other" },
 ];
 
-const ALLOWED_MIME = new Set(["application/pdf", "image/jpeg", "image/png"]);
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -74,7 +88,9 @@ export function publicAgentResourceError(error, fallback = "Something went wrong
   }
   if (/23505|duplicate|unique/.test(lower)) return "That version already exists. Retry.";
   if (/413|too large|file_size|payload/.test(lower)) return "File is larger than 10 MB.";
-  if (/mime|unsupported|docx|wordprocessingml/.test(lower)) return "Use a PDF, JPEG, or PNG file.";
+  if (/mime|unsupported|docx|wordprocessingml|\.doc\b|zip/.test(lower)) {
+    return "Use a PDF, JPEG, PNG, or Word (.docx) file.";
+  }
   if (/failed to fetch|networkerror|network/.test(lower)) return "Network error. Check your connection and retry.";
   return fallback;
 }
@@ -93,39 +109,8 @@ function randomObjectKey() {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function mapMime(file) {
-  const type = str(file?.type).toLowerCase();
-  if (type === "image/jpg") return "image/jpeg";
-  return type;
-}
-
 export async function inspectAgentResourceFile(file) {
-  if (!file) return { ok: false, error: "Choose a file to upload." };
-  const name = str(file.name);
-  if (/\.(docx?|zip)$/i.test(name) || /wordprocessingml|application\/zip/i.test(file.type || "")) {
-    return { ok: false, error: "Word and ZIP files are not allowed. Use PDF, JPEG, or PNG." };
-  }
-  if (file.size <= 0) return { ok: false, error: "The file is empty." };
-  if (file.size > HQ_AGENT_RESOURCE_MAX_FILE_BYTES) {
-    return { ok: false, error: "File is larger than 10 MB." };
-  }
-  const mime = mapMime(file);
-  if (!ALLOWED_MIME.has(mime)) {
-    return { ok: false, error: "Use a PDF, JPEG, or PNG file." };
-  }
-  try {
-    const header = new Uint8Array(await file.slice(0, 8).arrayBuffer());
-    const isPdf = header[0] === 0x25 && header[1] === 0x50 && header[2] === 0x44 && header[3] === 0x46;
-    const isPng =
-      header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4e && header[3] === 0x47;
-    const isJpeg = header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
-    if (mime === "application/pdf" && !isPdf) return { ok: false, error: "That file is not a valid PDF." };
-    if (mime === "image/png" && !isPng) return { ok: false, error: "That file is not a valid PNG." };
-    if (mime === "image/jpeg" && !isJpeg) return { ok: false, error: "That file is not a valid JPEG." };
-  } catch {
-    return { ok: false, error: "Could not read the file. Try another file." };
-  }
-  return { ok: true, mime, size: file.size, filename: name || "document" };
+  return inspectAgentResourceFileBytes(file, HQ_AGENT_RESOURCE_MAX_FILE_BYTES);
 }
 
 async function nextVersionNumber(db, resourceId) {
@@ -717,9 +702,19 @@ export async function getAgentResourceSignedUrl({
       .maybeSingle();
     if (error) return fail("Unable to open this resource right now. Please try again.");
     if (!data?.storage_path) return fail("Unable to open this resource right now. Please try again.");
-    const signed = await db.storage
-      .from(AGENT_RESOURCES_BUCKET)
-      .createSignedUrl(data.storage_path, HQ_AGENT_RESOURCE_SIGNED_URL_TTL_SEC);
+    const filename = sanitizeAgentResourceDownloadName(
+      data.original_filename,
+      isDocxMime(data.mime_type) ? "resource.docx" : "resource"
+    );
+    const signed = isDocxMime(data.mime_type)
+      ? await db.storage
+          .from(AGENT_RESOURCES_BUCKET)
+          .createSignedUrl(data.storage_path, HQ_AGENT_RESOURCE_SIGNED_URL_TTL_SEC, {
+            download: filename,
+          })
+      : await db.storage
+          .from(AGENT_RESOURCES_BUCKET)
+          .createSignedUrl(data.storage_path, HQ_AGENT_RESOURCE_SIGNED_URL_TTL_SEC);
     if (signed.error || !signed.data?.signedUrl) {
       return fail("Unable to open this resource right now. Please try again.");
     }
@@ -728,7 +723,8 @@ export async function getAgentResourceSignedUrl({
       error: null,
       data: {
         url: signed.data.signedUrl,
-        filename: data.original_filename || "resource",
+        filename,
+        mimeType: data.mime_type || "",
         expiresAt: new Date(Date.now() + HQ_AGENT_RESOURCE_SIGNED_URL_TTL_SEC * 1000).toISOString(),
       },
     };

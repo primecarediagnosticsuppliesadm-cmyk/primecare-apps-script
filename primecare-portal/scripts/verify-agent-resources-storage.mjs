@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const SQL_PATH = resolve(root, "supabase/sql/agent_resources_v1_migration.sql");
+const DOCX_SQL = resolve(root, "supabase/sql/agent_resources_docx_mime.sql");
+const DOCX_MIG = resolve(root, "supabase/migrations/20260901210000_agent_resources_docx_mime.sql");
 const EVIDENCE = resolve(root, "supabase/sql/operational_evidence_storage_migration.sql");
 const INVOICE = resolve(root, "supabase/sql/invoice_system_phase1_migration.sql");
 
@@ -37,9 +39,18 @@ assert(/public = false/.test(sql), "bucket.public_false", "public = false");
 assert(/10485760/.test(sql), "bucket.limit", "10 MiB");
 assert(
   /ARRAY\['application\/pdf', 'image\/jpeg', 'image\/png'\]/.test(sql),
-  "bucket.mime",
-  "PDF/JPEG/PNG only"
+  "bucket.mime.v1",
+  "AR-1A bucket PDF/JPEG/PNG only"
 );
+const docxSql = existsSync(DOCX_SQL) ? readFileSync(DOCX_SQL, "utf8") : "";
+const docxMig = existsSync(DOCX_MIG) ? readFileSync(DOCX_MIG, "utf8") : "";
+assert(Boolean(docxSql) && docxSql === docxMig, "docx.mirror", "DOCX mime sql/migration identical");
+assert(/wordprocessingml\.document/.test(docxSql), "bucket.mime.docx", "DOCX added to agent-resources only");
+assert(/WHERE id = 'agent-resources'/.test(docxSql), "docx.bucket_where", "updates agent-resources bucket");
+assert(!/invoice-pdfs/.test(docxSql), "docx.no_invoice", "does not change invoice-pdfs");
+assert(!/operational-evidence/.test(docxSql), "docx.no_evidence", "does not change operational-evidence");
+assert(!/CREATE POLICY/.test(docxSql), "docx.no_policy", "does not rewrite storage RLS");
+assert(!/application\/zip/.test(docxSql), "docx.no_generic_zip", "does not allow generic ZIP MIME");
 
 assert(/agent_resources_storage_select/.test(sql), "policy.select", "storage SELECT policy");
 assert(/agent_resources_storage_insert/.test(sql), "policy.insert", "storage create policy");

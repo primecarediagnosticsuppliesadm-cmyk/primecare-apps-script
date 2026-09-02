@@ -53,6 +53,8 @@ assert(!/New Version/.test(page) && !/Confirm publish/.test(page), "ui.no_publis
 assert(!/Confirm archive/.test(page) && !/\bArchive\b/.test(page), "ui.no_archive", "no Archive action");
 assert(!/audience/i.test(page), "ui.no_audience", "no audience controls");
 assert(/Mark as Read/.test(page), "ui.mark_read", "explicit Mark as Read");
+assert(/agentResourceOpenLabel/.test(page), "ui.download_label", "DOCX uses Download vs Open");
+assert(/isDocxMime/.test(page), "ui.docx_hint", "DOCX is not implied as browser preview");
 assert(/max-w-lg/.test(page), "ui.mobile_width", "narrow agent layout");
 assert(!/<table/.test(page), "ui.no_table", "no desktop table");
 assert(/agentResources: \[ROLES\.EXECUTIVE, ROLES\.ADMIN, ROLES\.AGENT\]/.test(perms), "perm.agent", "Agent permitted");

@@ -13,7 +13,9 @@ import {
 import {
   AGENT_RESOURCE_CATEGORIES,
   acknowledgeAgentResourceVersionWrite,
+  agentResourceOpenLabel,
   getAgentResourceSignedUrl,
+  isDocxMime,
   listAgentResourcesAgentRead,
 } from "@/api/agentResourceSupabaseApi.js";
 
@@ -102,7 +104,7 @@ export default function AgentResourcesPage({ currentUser = null }) {
     <div className={`${enterprisePageClass(true)} max-w-lg mx-auto`}>
       <PageHeader
         title="Resources"
-        subtitle="Approved field guides. Opening a file does not mark it as read."
+        subtitle="Approved field guides. Opening or downloading a file does not mark it as read."
         icon={BookOpen}
       />
 
@@ -164,8 +166,13 @@ export default function AgentResourcesPage({ currentUser = null }) {
                         variant="outline"
                         onClick={() => onOpen(row)}
                       >
-                        Open
+                        {agentResourceOpenLabel(row.mimeType)}
                       </Button>
+                      {isDocxMime(row.mimeType) ? (
+                        <p className="w-full text-[11px] text-muted-foreground">
+                          Downloads a Word file. Opens in Word or Files — not a browser preview.
+                        </p>
+                      ) : null}
                       {!row.acknowledged ? (
                         <Button
                           type="button"
