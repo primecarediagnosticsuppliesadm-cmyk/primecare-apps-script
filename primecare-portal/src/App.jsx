@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, memo } from "react";
 import LoginPage from "./pages/LoginPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import { useAuth } from "./context/AuthContext";
@@ -33,6 +33,7 @@ import { ADMIN_DASHBOARD_INVALIDATE_EVENT } from "@/utils/dashboardInvalidate.js
 import { prefetchLikelyRoutes } from "@/utils/routePrefetch.js";
 import { isNavigationPageCacheWarm } from "@/utils/hqNavigationWarmth.js";
 import { QA_DIAGNOSTICS_ENABLED } from "@/config/environment.js";
+import { clearChunkLoadRecoveryGuard } from "@/utils/chunkLoadRecovery.js";
 
 const QaDiagnosticsPanel = lazy(() => import("@/components/qa/QaDiagnosticsPanel.jsx"));
 
@@ -50,7 +51,9 @@ const PrimeCareWebPortal = lazy(() => import("./PrimeCareWebPortal"));
 
 function normalizeRole(role) {
   const normalized = normalizePlatformRole(role);
-  return isLoginEnabledRole(normalized) ? normalized : null;
+  if (!isLoginEnabledRole(normalized)) return null;
+  if (!canAuthenticateRole(normalized)) return null;
+  return normalized;
 }
 
 function UnauthorizedScreen({ message, onLogout }) {
@@ -151,6 +154,14 @@ export default function App() {
   const [activePage, setActivePage] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [navBadges, setNavBadges] = useState({});
+
+  useEffect(() => {
+    if (loading) return undefined;
+    const timer = window.setTimeout(() => {
+      clearChunkLoadRecoveryGuard();
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [loading]);
 
   const navigateToPage = useCallback(
     (pageKey, { replace = false } = {}) => {
@@ -385,7 +396,7 @@ export default function App() {
   if (isAuthenticated && user && !role) {
     const rawRole = normalizePlatformRole(user.role);
     if (isLoginEnabledRole(rawRole) && !canAuthenticateRole(rawRole)) {
-      return <NonPilotReleaseScreen role={rawRole} onLogout={signOut} />;
+      return <UnauthorizedScreen message={NON_PILOT_RELEASE_MESSAGE} onLogout={signOut} />;
     }
   }
 
