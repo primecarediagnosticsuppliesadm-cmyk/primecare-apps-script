@@ -4,6 +4,26 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-04 — STAB-1 client stability (QA-native, no schema)
+
+### Gap found
+
+- Open tabs keep hashed `React.lazy()` chunk URLs after a Vercel deploy; `AppErrorBoundary` required a manual refresh and could loop if mis-reloaded.
+- `applySupabaseSession` had no generation guard: an older failed bootstrap/SIGNED_IN apply could `setCurrentUser(null)` after a newer success. Profile `maybeSingle()` had no client timeout, so `authLoading` could hang on "Verifying your session…".
+- `App.jsx` rendered `<NonPilotReleaseScreen />` which was never defined (first-paint crash for login-enabled non-pilot roles while `role` state is still null).
+
+### Change
+
+- One-shot stale-chunk reload via `chunkLoadRecovery.js` + `AppErrorBoundary`. Guard cleared after a healthy load. Idle `routePrefetch` still swallows import errors (must not reload).
+- Auth apply generation + 12s profile-read timeout. Stale applies cannot wipe a newer user. `TOKEN_REFRESHED` still token-only. Inactive/unauthorized profile still fail-closed.
+- Non-pilot branch uses existing `UnauthorizedScreen` + `NON_PILOT_RELEASE_MESSAGE`. `App.normalizeRole` also requires `canAuthenticateRole` so that crash-fix does not admit non-pilot roles into the shell. No migrations, RLS, or business-feature change.
+
+### Verification
+
+- `node scripts/verify-stab-1-client-stability.mjs`
+
+---
+
 ## 2026-09-01 — Operations Center duplicate-agent merge (QA-native)
 
 ### Gap found

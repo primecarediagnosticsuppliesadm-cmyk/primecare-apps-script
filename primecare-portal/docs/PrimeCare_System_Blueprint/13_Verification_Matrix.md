@@ -8,6 +8,12 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 
 ## By module
 
+### Client shell
+
+| Script | Checks | When |
+|--------|--------|------|
+| verify-stab-1-client-stability.mjs | Stale lazy-chunk detect/one-shot reload/guard; auth apply generation (older fail cannot wipe newer user); profile-read timeout; TOKEN_REFRESHED token-only; inactive/unauthorized fail-closed; `NonPilotReleaseScreen` removed | STAB-1 client stability |
+
 ### Finance & invoices
 
 | Script | Checks | When |

@@ -16,6 +16,12 @@ import { perfLog, perfMark, perfTime } from "@/utils/perfLog.js";
 import { predatorStore } from "@/predator/predatorStore.js";
 import { tenantContextFromUser } from "@/predator/predatorContext.js";
 import { recordPredatorTiming, predatorTrace } from "@/predator/predatorTiming.js";
+import { logClientError } from "@/utils/debugLogger.js";
+import {
+  AUTH_PROFILE_FETCH_TIMEOUT_MS,
+  createAuthApplyGate,
+  withTimeout,
+} from "@/utils/authSessionApply.js";
 
 const AuthContext = createContext(null);
 
@@ -105,61 +111,96 @@ export function AuthProvider({ children }) {
   const [authError, setAuthError] = useState("");
   /** Legacy Apps Script token at first mount only — bootstrap must not re-run on token refresh. */
   const initialLegacyAuthTokenRef = useRef(authToken);
+  const applyGateRef = useRef(createAuthApplyGate());
 
   const applySupabaseSession = useCallback(async (session, { recordLastLogin = false } = {}) => {
-    setAuthError("");
+    const gate = applyGateRef.current;
+    const generation = gate.begin();
 
-    if (!session?.user) {
+    const commitFailure = (error) => {
+      if (!gate.isCurrent(generation)) return false;
+      const message = error?.message || "Authentication failed.";
+      setAuthError(message);
       setAuthToken("");
       setCurrentUser(null);
       predatorStore.setActiveTenantContext(null);
-      return;
-    }
-
-    const user = await predatorTrace("Auth", "login.bootstrap.profile", async () => {
-      const endProfile = perfTime("auth.profile.fetch");
-      const t0 = performance.now();
-      const { data: profile, error } = await supabase
-        .from("profiles")
-        .select("user_id, tenant_id, role, lab_id, agent_id, agent_name, distributor_id, active")
-        .eq("user_id", session.user.id)
-        .maybeSingle();
-      recordPredatorTiming({
-        module: "Auth",
-        step: "login.profile_fetch",
-        durationMs: Math.round(performance.now() - t0),
-        detail: { hasProfile: Boolean(profile), hasError: Boolean(error) },
+      void logClientError({
+        page: "Auth",
+        component: "AuthContext",
+        actionType: "AUTH_SESSION_APPLY_FAIL",
+        errorCode: "AUTH_SESSION_APPLY_FAIL",
+        errorMessage: message,
+        stackTrace: error?.stack || "",
       });
-      endProfile({ hasProfile: Boolean(profile) });
+      return true;
+    };
 
-      if (error) {
-        throw new Error(error.message || "Failed to load PrimeCare profile.");
+    try {
+      if (!session?.user) {
+        if (!gate.isCurrent(generation)) return { status: "stale" };
+        setAuthError("");
+        setAuthToken("");
+        setCurrentUser(null);
+        predatorStore.setActiveTenantContext(null);
+        return { status: "applied" };
       }
 
-      return buildUserFromProfile(session.user, profile);
-    });
+      const user = await predatorTrace("Auth", "login.bootstrap.profile", async () => {
+        const endProfile = perfTime("auth.profile.fetch");
+        const t0 = performance.now();
+        const { data: profile, error } = await withTimeout(
+          supabase
+            .from("profiles")
+            .select("user_id, tenant_id, role, lab_id, agent_id, agent_name, distributor_id, active")
+            .eq("user_id", session.user.id)
+            .maybeSingle(),
+          AUTH_PROFILE_FETCH_TIMEOUT_MS,
+          "Profile lookup timed out. Refresh the page and try again."
+        );
+        recordPredatorTiming({
+          module: "Auth",
+          step: "login.profile_fetch",
+          durationMs: Math.round(performance.now() - t0),
+          detail: { hasProfile: Boolean(profile), hasError: Boolean(error) },
+        });
+        endProfile({ hasProfile: Boolean(profile) });
 
-    setAuthToken(session.access_token || "");
-    setCurrentUser((prev) => {
-      if (!prev) return user;
-      if (
-        prev.id === user.id &&
-        prev.role === user.role &&
-        prev.tenantId === user.tenantId &&
-        prev.agentId === user.agentId &&
-        prev.agentName === user.agentName &&
-        prev.labId === user.labId &&
-        prev.email === user.email
-      ) {
-        return prev;
+        if (error) {
+          throw new Error(error.message || "Failed to load PrimeCare profile.");
+        }
+
+        return buildUserFromProfile(session.user, profile);
+      });
+
+      if (!gate.isCurrent(generation)) return { status: "stale" };
+
+      setAuthError("");
+      setAuthToken(session.access_token || "");
+      setCurrentUser((prev) => {
+        if (!prev) return user;
+        if (
+          prev.id === user.id &&
+          prev.role === user.role &&
+          prev.tenantId === user.tenantId &&
+          prev.agentId === user.agentId &&
+          prev.agentName === user.agentName &&
+          prev.labId === user.labId &&
+          prev.email === user.email
+        ) {
+          return prev;
+        }
+        return user;
+      });
+
+      predatorStore.setActiveTenantContext(tenantContextFromUser(user));
+
+      if (recordLastLogin) {
+        await recordSignInLastLogin();
       }
-      return user;
-    });
-
-    predatorStore.setActiveTenantContext(tenantContextFromUser(user));
-
-    if (recordLastLogin) {
-      await recordSignInLastLogin();
+      return { status: "applied" };
+    } catch (error) {
+      if (!commitFailure(error)) return { status: "stale", error };
+      throw error;
     }
   }, []);
 
@@ -232,9 +273,9 @@ export function AuthProvider({ children }) {
         perfMark("auth.bootstrap.end");
       } catch (err) {
         console.error("Auth bootstrap failed", err);
-        setAuthError(err?.message || "Authentication failed.");
-        setCurrentUser(null);
-        setAuthToken("");
+        setAuthError((prev) => prev || err?.message || "Authentication failed.");
+        // Do not unguarded-wipe here: applySupabaseSession already generation-gates
+        // current-session failure. A stale bootstrap must not clear a newer user.
       } finally {
         if (mounted) {
           setAuthLoading(false);
@@ -271,12 +312,10 @@ export function AuthProvider({ children }) {
         return;
       }
 
+      // SIGNED_IN can overlap login()'s apply. Generation gating makes that harmless.
       const recordLastLogin = event === "SIGNED_IN";
-      applySupabaseSession(session, { recordLastLogin }).catch(async (err) => {
+      applySupabaseSession(session, { recordLastLogin }).catch((err) => {
         console.error("Supabase auth state rejected", err);
-        setAuthError(err?.message || "Authentication failed.");
-        setAuthToken("");
-        setCurrentUser(null);
       });
     });
 

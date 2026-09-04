@@ -1,6 +1,7 @@
 import React from "react";
 import PortalAccessCard, { PortalAccessAction } from "@/components/ux/PortalAccessCard.jsx";
 import { logClientError } from "@/utils/debugLogger.js";
+import { recoverFromChunkLoadError } from "@/utils/chunkLoadRecovery.js";
 
 export default class AppErrorBoundary extends React.Component {
   constructor(props) {
@@ -13,6 +14,10 @@ export default class AppErrorBoundary extends React.Component {
   }
 
   async componentDidCatch(error, errorInfo) {
+    if (recoverFromChunkLoadError(error)) {
+      return;
+    }
+
     await logClientError({
       authToken: this.props.authToken || "",
       page: this.props.page || "App",
