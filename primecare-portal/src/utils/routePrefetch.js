@@ -1,5 +1,10 @@
 /**
  * Idle-time route chunk prefetch — warms likely next pages without blocking first paint.
+ *
+ * Prefetch import() failures are swallowed on purpose. An idle prefetch of a
+ * missing hashed chunk must not reload the tab or surface an ErrorBoundary.
+ * Stale-chunk recovery is centralized in `chunkLoadRecovery.js` and only runs
+ * when a real navigation/render fails (AppErrorBoundary).
  */
 import { ROLES } from "@/config/roles.js";
 import { prefetchSharedRouteData } from "@/api/sharedReadBroker.js";
@@ -122,6 +127,7 @@ export function prefetchLikelyRoutes(role, activePage, currentUser = null) {
       if (!loader) continue;
       prefetched.add(cacheKey);
       void loader().catch(() => {
+        // Swallow: prefetch must never trigger stale-chunk reload. See file header.
         prefetched.delete(cacheKey);
       });
       prefetchSharedRouteData(role, key, currentUser);
@@ -141,6 +147,7 @@ export function prefetchRoute(role, pageKey) {
   if (!loader) return;
   prefetched.add(cacheKey);
   void loader().catch(() => {
+    // Swallow: prefetch must never trigger stale-chunk reload. See file header.
     prefetched.delete(cacheKey);
   });
 }
