@@ -5,6 +5,7 @@ import {
   peekOrdersReadCache,
   enrichOrdersListWithItemCounts,
   getOperationsLabAssignmentsRead,
+  lookupHqOrderByIdRead,
 } from "@/api/primecareSupabaseApi";
 import {
   prefetchBrokerRead,
@@ -48,6 +49,8 @@ import {
   ORDER_SORT_OPTIONS,
   DEFAULT_ORDER_SORT,
   filterOrders,
+  parseExactOrderIdSearch,
+  mergeExactOrderLookup,
   sortOrders,
   computeOrdersKpis,
   buildLabFilterOptions,
@@ -128,6 +131,7 @@ import {
 } from "@/orders/ordersWorkspaceUi.js";
 import { cn } from "@/lib/utils";
 import { isQaValidationLayerEnabled } from "@/config/qaValidation.js";
+import { isHqOpsRole } from "@/labOrdering/orderingGovernance.js";
 
 function str(v) {
   return String(v ?? "").trim();
@@ -390,7 +394,10 @@ export default function OrdersPage({
   const [focusOutsideReason, setFocusOutsideReason] = useState("");
   const [contextWarning, setContextWarning] = useState("");
   const [pendingOpenOrderId, setPendingOpenOrderId] = useState("");
+  const [exactLookupOrder, setExactLookupOrder] = useState(null);
+  const [exactLookupLoading, setExactLookupLoading] = useState(false);
   const statusActionInflightRef = useRef(false);
+  const exactLookupConsumedRef = useRef("");
   const navContextConsumedRef = useRef(false);
   const returnRestoreConsumedRef = useRef(false);
 
@@ -423,6 +430,48 @@ export default function OrdersPage({
     const handle = window.setTimeout(() => setSearch(searchInput), 300);
     return () => window.clearTimeout(handle);
   }, [searchInput]);
+
+  useEffect(() => {
+    const exactId = parseExactOrderIdSearch(search);
+    if (!exactId) {
+      setExactLookupOrder(null);
+      setExactLookupLoading(false);
+      exactLookupConsumedRef.current = "";
+      return undefined;
+    }
+    if (loading || !isHqOpsRole(currentUser?.role)) {
+      return undefined;
+    }
+    if (exactLookupConsumedRef.current === exactId) {
+      return undefined;
+    }
+
+    const inLoadedList =
+      orders.some((row) => str(row.orderId) === exactId) ||
+      allOrders.some((row) => str(row.orderId) === exactId);
+    if (inLoadedList) {
+      exactLookupConsumedRef.current = exactId;
+      setExactLookupOrder(null);
+      void openOrder(exactId);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setExactLookupLoading(true);
+    void lookupHqOrderByIdRead({ orderId: exactId }).then((res) => {
+      if (cancelled) return;
+      exactLookupConsumedRef.current = exactId;
+      const order = res?.data?.order || null;
+      setExactLookupOrder(order);
+      setExactLookupLoading(false);
+      if (order) {
+        void openOrder(exactId);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [search, loading, currentUser?.role, orders, allOrders]);
 
   useEffect(() => {
     if (distributorScope?.tenantId) {
@@ -768,8 +817,13 @@ export default function OrdersPage({
 
   const labOptions = useMemo(() => buildLabFilterOptions(orders), [orders]);
 
+  const ordersForFilter = useMemo(
+    () => mergeExactOrderLookup(orders, exactLookupOrder),
+    [orders, exactLookupOrder]
+  );
+
   const filteredOrders = useMemo(() => {
-    const filtered = filterOrders(orders, {
+    const filtered = filterOrders(ordersForFilter, {
       search,
       status,
       paymentStatus,
@@ -784,7 +838,7 @@ export default function OrdersPage({
     return filterVerificationTestOrders(sorted, {
       showTestOrders: isQaValidationLayerEnabled(),
     });
-  }, [orders, search, status, paymentStatus, labFilter, dateFrom, dateTo, sortKey, activeQueueKey]);
+  }, [ordersForFilter, search, status, paymentStatus, labFilter, dateFrom, dateTo, sortKey, activeQueueKey]);
 
   const showDeliveryAmountColumns = useMemo(
     () =>
@@ -1066,9 +1120,10 @@ export default function OrdersPage({
     if (!id) return false;
     return (
       orders.some((row) => str(row.orderId) === id) ||
-      allOrders.some((row) => str(row.orderId) === id)
+      allOrders.some((row) => str(row.orderId) === id) ||
+      str(exactLookupOrder?.orderId) === id
     );
-  }, [selectedOrder, focusOrderId, orders, allOrders]);
+  }, [selectedOrder, focusOrderId, orders, allOrders, exactLookupOrder]);
 
   const showFocusOutsideFilters =
     Boolean(selectedOrder || focusOrderId) &&
@@ -1346,6 +1401,11 @@ export default function OrdersPage({
 
             {loading ? (
               <ListSkeleton rows={6} />
+            ) : exactLookupLoading ? (
+              <div className="flex items-center gap-2 rounded-lg border border-dashed border-slate-200 px-3 py-6 text-sm text-slate-600">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Looking up order ID…
+              </div>
             ) : !ordersReadOk ? (
               <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-4 text-sm text-red-700">
                 Orders failed to load. Check the error banner above.

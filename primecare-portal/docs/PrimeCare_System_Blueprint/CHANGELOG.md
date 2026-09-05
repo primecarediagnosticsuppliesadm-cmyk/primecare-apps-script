@@ -4,6 +4,71 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-05 — Lab Ordering 1C HQ exact order-ID search (QA only)
+
+### Gap found
+
+- HQ Orders default list is bounded (`getOrdersRead` / `HQ_ORDERS_LIST_DEFAULT_LIMIT` = 100, recent `order_date` window).
+- OrdersPage search only filtered those loaded rows (`filterOrders` client-side). A valid same-tenant Lab order such as `ORD-1788618878140-s6x0x8` was invisible when it fell outside that window.
+
+### Change
+
+- Default Orders queue remains bounded (no full-table load, no limit increase).
+- Exact business `order_id` search (`ORD-…`) calls `lookupHqOrderByIdRead`: bounded `.eq("order_id").limit(1)` under RLS.
+- Authorization: session `profiles.role` must be admin or executive; tenant comes from session profile + RLS. Client `tenant_id` is not used to authorize. Agent/Lab are denied the HQ lookup.
+
+### Verification
+
+- `node scripts/verify-lab-ordering-1c-hq-order-search.mjs`
+- `node scripts/verify-lab-ordering-1c-hq-order-search.mjs --live` (QA read-only)
+- `node scripts/verify-lab-ordering-1a-security.mjs`
+- `node scripts/verify-lab-ordering-1b-price-and-item-lockdown.mjs`
+
+---
+
+## 2026-09-05 — Lab Ordering 1B catalog price consistency + order_items lockdown (QA only)
+
+### Gap found
+
+- QA `v_lab_catalog` joined `products` on `product_id` only. `QA_SKU_002` exists on HQ (`selling_price=800`) and another tenant (`selling_price=15`). Lab UI displayed ₹15; `create_lab_order` persisted HQ ₹800.
+- Lab role could `INSERT` `order_items` on own orders (legacy checkout fallback), bypassing RPC pricing.
+
+### Change
+
+- New versioned migration `20260905130000_lab_ordering_1b_catalog_price_and_item_lockdown.sql` recreates `v_lab_catalog` with `tenant_id + product_id` join so `unit_selling_price = products.selling_price` for that tenant.
+- Lab has no INSERT/UPDATE/DELETE on `order_items` or `order_lines`. HQ/Admin ops writes preserved. `create_lab_order` (SECURITY DEFINER) still writes lines.
+- Catalog mapper no longer falls back to `unit_price`. `getLabCatalogRead` filters to the preferred tenant.
+
+### Verification
+
+- `node scripts/verify-lab-ordering-1a-security.mjs`
+- `node scripts/verify-lab-ordering-1b-price-and-item-lockdown.mjs`
+- `node scripts/verify-lab-ordering-1b-price-and-item-lockdown.mjs --apply` (QA only)
+
+---
+
+## 2026-09-05 — Lab Ordering 1A server-authoritative price (QA only)
+
+### Gap found
+
+- `create_lab_order` persisted client `unit_price`, so a manipulated browser price could become `order_items.unit_price`.
+- Lab-initiated create did not fail closed on inactive Lab records and trusted client `tenant_id` / `lab_id` when they matched loosely.
+
+### Change
+
+- New versioned migration `20260905120000_create_lab_order_server_authoritative_price.sql` (Track A twin: `supabase/sql/create_lab_order_server_authoritative_price.sql`).
+- Authoritative unit price is existing `products.selling_price` (same as `v_lab_catalog.unit_selling_price`). No contract pricing.
+- Lab identity comes from the authenticated active profile. Client tenant/lab spoof is `forbidden`. `hq_managed` still blocks Lab initiate; HQ/Admin on-behalf still uses `p_tenant_id` / `p_lab_id`.
+- PLACE still validates stock only; fulfillment deduction is unchanged.
+- Lab checkout payload no longer sends `unit_price`. RPC rejection no longer falls back to client-priced inserts.
+
+### Verification
+
+- `node scripts/verify-lab-ordering-1a-security.mjs`
+- `node scripts/verify-lab-ordering-1a-security.mjs --apply` (QA only)
+
+---
+
 ## 2026-09-04 — STAB-1 client stability (QA-native, no schema)
 
 ### Gap found

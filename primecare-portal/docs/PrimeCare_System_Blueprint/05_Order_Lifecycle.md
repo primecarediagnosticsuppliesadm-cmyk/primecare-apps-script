@@ -100,9 +100,17 @@ Enforcement: `lab_ordering_allows_lab_initiate()` in `create_lab_order` RPC + `o
 |-----------|----------|
 | Create | `createOrderWrite` |
 | Status | `updateOrderStatusWrite` |
-| Read list | `getOrdersRead`, `getLabRecentOrdersRead` |
+| Read list | `getOrdersRead` (default ≤100 recent), `getLabRecentOrdersRead` |
+| Exact ID (HQ) | `lookupHqOrderByIdRead` — Admin/Executive session role; RLS tenant; no client `tenant_id` authorization |
 | Read detail | `getOrderDetailsRead`, `getLabOrderDetailsRead` |
 | RPC | `create_lab_order`, `deduct_inventory_for_order` |
+
+### HQ Orders list vs exact ID search (Lab Ordering 1C)
+
+- Default HQ Orders queue is a bounded recent list (`HQ_ORDERS_LIST_DEFAULT_LIMIT` = 100). Status, lab, date, and free-text filters apply to that window only.
+- Exact business `order_id` search (`ORD-…`) performs a bounded server lookup so Admin/Executive can open a same-tenant order outside the recent window.
+- Authorization: authenticated `profiles.role` must be `admin` or `executive`; tenant isolation is RLS plus session profile tenant. Do not trust client-supplied `tenant_id`.
+- Agent and Lab must not gain this HQ lookup. Lab tracking remains `getLabOrderDetailsRead`.
 
 ---
 
