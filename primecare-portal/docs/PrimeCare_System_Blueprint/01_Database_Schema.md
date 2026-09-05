@@ -50,11 +50,16 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 | **PK** | `id` (uuid) |
 | **Business key** | `(tenant_id, lab_id)` |
 | **Required** | `tenant_id`, `lab_id`, `lab_name` |
-| **Optional** | `owner_name`, `phone`, `area`, `assigned_agent_id`, `status`, `credit_terms`, `ordering_mode` |
+| **Optional** | `owner_name`, `phone`, `area`, `assigned_agent_id`, `sourced_by_agent_id`, `status`, `credit_terms`, `ordering_mode` |
 | **Relationships** | → orders, AR, qualifications, ownership |
-| **RLS** | Yes — lab visibility |
-| **Read** | agent (visible), lab (own), admin, executive |
-| **Write** | admin, executive, distributor create policies |
+| **RLS** | Yes — lab visibility (`lab_is_visible_to_current_user` / `lab_record_is_visible_to_current_user`) |
+| **Read** | agent (assigned **or** `sourced_by_agent_id` match), lab (own `lab_id` only), admin, executive (tenant) |
+| **Write** | admin, executive (ordinary updates); Agent PROSPECT create **only** via `create_prospect_lab` |
+| **Agent prospect (2A)** | New Agent-sourced Labs are `status=PROSPECT`, `ordering_mode=hq_managed`, `assigned_agent_id` NULL, `sourced_by_agent_id` = authenticated `profiles.agent_id`. No `ar_credit_control`, no `lab_ownership`, no Lab user. Existing Labs are **not** backfilled. |
+
+**Sourcing vs ownership:** `labs.sourced_by_agent_id` is immutable acquisition attribution. `labs.assigned_agent_id` / `lab_ownership` are mutable operational ownership. HQ assignment happens at activation/review (not 2A). A BEFORE UPDATE trigger raises `sourced_by_immutable` for ordinary authenticated writes (service_role / postgres migration sessions may still SET the column).
+
+**`create_prospect_lab`:** SECURITY DEFINER, `search_path=public`, EXECUTE granted to `authenticated` only. Inputs: `p_lab_name`, `p_owner_name`, `p_phone`, `p_area`. Server derives tenant + sourced_by; server generates `LAB-P-*` `lab_id`. Same-tenant duplicate phone → `prospect_phone_exists`; same-tenant normalized name+area → `prospect_name_area_exists`. Audit: `user_provisioning_events` `event_type=created` with `payload.action=lab_prospect_created`.
 
 ---
 
@@ -521,5 +526,7 @@ Phase 3C allows payroll statuses `draft`, `previewed`, `submitted`, `approved`, 
 | 20260703120001 | Delivery policy foundation (`policy_type` + flags) |
 | 20260704120000 | Logistics Phase 4 route planning |
 | 20260831200000 | Agent Resources V1 foundation (`agent_resources_*`, bucket `agent-resources`, publish RPC) |
+| 20260905150000 | Lab Ordering 1H AR UPDATE grant + projection overload drop |
+| 20260905160000 | Agent Prospect 2A `sourced_by_agent_id` + `create_prospect_lab` (QA only in 2A) |
 
 Full manual SQL: `supabase/sql/` (includes `agent_resources_v1_migration.sql` mirror).

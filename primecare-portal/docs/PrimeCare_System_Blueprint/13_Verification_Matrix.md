@@ -62,6 +62,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | Script | Checks | When |
 |--------|--------|------|
 | verify-labs-admin-flow.mjs | Tenant scope, ownership, Labs KPI definitions (`Total Labs`, `Prospect Labs`, `Active Labs`, `Inactive Labs`, `Order-Eligible Labs`, `Ordering Suspended`) | Labs |
+| verify-agent-prospect-2a.mjs | Agent `create_prospect_lab` PROSPECT create; identity/tenant/sourced_by derivation; no AR/ownership/lab user; spoof + role rejects; sourced_by immutability; same-tenant duplicates; visibility; HQ `create_lab_with_ar_credit` regression. Default static; `--apply` QA only | Agent Prospect 2A |
 | verify-lab-lifecycle-status-flow.mjs | Lifecycle transition contract: admin/executive-only writes, confirmation/reason requirements, `ACTIVE -> INACTIVE` forces `ordering_mode = suspended`, `INACTIVE -> ACTIVE` does not restore ordering mode, financial/history domains unchanged | Lab lifecycle |
 | verify-labs-projection-parity.mjs | Read-only `v_labs_credit` vs `read_labs_list_v1` parity, lifecycle status + ordering mode parity, deterministic ordering/limit window, role scope, freshness, SECURITY DEFINER vs table-RLS visibility | Labs projection |
 | verify-credit-risk-admin-flow.mjs | AR KPI, aging | Credit & Risk |
@@ -332,6 +333,7 @@ Use [templates/UAT_Checklist_Template.md](./templates/UAT_Checklist_Template.md)
 | Lab | Checkout → Track Order → Previous Orders |
 | Admin on-behalf ordering | From `OperationalLabDrawer` / Labs Admin, launch `LabOrderingPage` in `adminOnBehalf` mode; confirm `admin` and `executive` can order for `ACTIVE` labs in `hq_managed`, `hybrid`, and `self_service`; confirm `INACTIVE` and `suspended` are blocked; confirm selected lab is customer, authenticated HQ user is actor, `source = admin_on_behalf` is present in order/audit metadata, and pricing/catalog/credit/inventory/finance/delivery/AR/shipment/commission behavior is unchanged |
 | Lab lifecycle | `PROSPECT -> ACTIVE`, `ACTIVE -> INACTIVE`, `INACTIVE -> ACTIVE`; confirm reason/audit capture, inactive checkout/reorder blocked, ordering remains suspended after reactivation, and invoices/payments/Track Order/history remain visible |
+| Agent prospect 2A | No UI in 2A. QA: Agent RPC creates PROSPECT with sourced_by; Admin cannot change sourced_by; other Agent cannot read unassigned prospect; HQ `create_lab_with_ar_credit` still creates ACTIVE+AR |
 | Orders | Fulfill → invoice → shipment; Admin/Executive exact `order_id` search finds a same-tenant Lab order outside the recent 100 |
 | Finance | Pay → allocate → open balance |
 | Compensation / payroll | HR generates preview; commission uses collected cash only; Executive approves/locks/exports; Admin can recommend only; Agent sees own locked/exported history only; existing finance/O2C records unchanged |

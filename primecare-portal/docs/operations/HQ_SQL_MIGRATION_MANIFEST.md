@@ -102,6 +102,7 @@ Apply in Supabase SQL Editor. Verify after each tier with scripts in §4.
 | `order_status_update_migration.sql` | **LEGACY / ARCHIVE** | Absorbed by `order_write_migration.sql` |
 | `pilot_hardening_validation_queries.sql` | **MANUAL VALIDATION** | **DO NOT APPLY** — run as read-only checks |
 | `qa_role_seed_and_rls_validation.sql` | **MANUAL VALIDATION** | **DO NOT APPLY** to Production — QA seed only |
+| `agent_prospect_2a_sourced_by_and_create_rpc.sql` | **ACTIVE MIGRATION (QA 2A)** | Twin of `20260905160000`. **DO NOT APPLY** to Production from Flow 2A. Apply on QA only after `assert-supabase-environment --expect=qa`. |
 
 ---
 
