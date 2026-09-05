@@ -1404,7 +1404,6 @@ export default function LabOrderingPage({ currentUser, setActivePage, adminOnBeh
           productName:
             cartItems.find((row) => row.productId === item.productId)?.productName || item.productId,
           quantity: Number(item.quantity || 0),
-          unitSellingPrice: Number(item.unitPrice || 0),
         })),
       };
 

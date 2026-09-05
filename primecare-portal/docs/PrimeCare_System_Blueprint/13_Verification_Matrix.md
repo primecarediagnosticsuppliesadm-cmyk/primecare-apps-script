@@ -42,6 +42,10 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-orders-navigation-context.mjs | Sprint 1B Start Here, context strip, selection, return path, empty/focus recovery | Orders UX |
 | verify-orders-workspace-simplification.mjs | Sprint 1C page budget, collapsed portfolio, operational-first detail, no module split | Orders UX |
 | verify-lab-ordering-flow.mjs | Track order_id; RPC smoke; admin-on-behalf implementation must extend this gate for `adminOnBehalf` source/audit metadata and eligibility blocks | Lab portal / admin on-behalf ordering |
+| verify-lab-ordering-1a-security.mjs | Server-authoritative `products.selling_price`; Lab identity from auth profile; price/lab/tenant spoof; inactive profile/lab; ordering_mode; invalid product/qty; order isolation; catalog write denial; PLACE does not deduct stock | Lab Ordering 1A hardening (QA only) |
+| verify-lab-ordering-1b-price-and-item-lockdown.mjs | Tenant-scoped `v_lab_catalog.unit_selling_price` = `products.selling_price`; Lab catalog/cart/stored price match; Lab cannot INSERT/UPDATE/DELETE `order_items` | Lab Ordering 1B (QA only) |
+| verify-lab-ordering-1c-hq-order-search.mjs | Default Orders list stays ≤100; exact `ORD-…` search is a bounded HQ lookup; Admin/Executive same tenant allowed; Agent/Lab denied; client `tenant_id` not used to authorize | Lab Ordering 1C (QA only) |
+| verify-lab-ordering-1f-anon-order-lockdown.mjs | 1B does not close anon `order_items`; `20260905140000` drops `temp_anon_order_items_*` and `REVOKE`s anon on `orders` / `order_items` / `order_lines`; `--live` expects `42501` | Lab Ordering 1F anon lockdown (QA certified; not Production) |
 | verify-transaction-integrity-rpcs.mjs | Sprint 1 RPC symbols | Order/payment RPC |
 | verify-bounded-reads.mjs | No unbounded payment/PO select | Read paths |
 
@@ -305,6 +309,8 @@ verify-hq-rls-reads.mjs
 
 **Lab portal change:** `verify-lab-ordering-flow.mjs` + `verify-hq-rls-reads.mjs`
 
+**Lab Ordering 1C HQ search:** `verify-lab-ordering-1c-hq-order-search.mjs` + `verify-lab-ordering-1a-security.mjs` + `verify-lab-ordering-1b-price-and-item-lockdown.mjs` + `verify-bounded-reads.mjs`
+
 **Admin on-behalf ordering change:** `verify-lab-ordering-flow.mjs` + `verify-orders-admin-flow.mjs` + `verify-labs-admin-flow.mjs` + `verify-lab-lifecycle-status-flow.mjs` + `verify-financial-reconciliation.mjs` + `verify-delivery-charge-policy.mjs` + `verify-hq-rls-reads.mjs` + `run-browser-smoke-all-roles.mjs`
 
 **Lab lifecycle change:** `verify-lab-lifecycle-status-flow.mjs` + `verify-labs-admin-flow.mjs` + `verify-lab-ordering-flow.mjs` + `verify-labs-projection-parity.mjs` + `verify-financial-reconciliation.mjs` + `verify-hq-rls-reads.mjs`
@@ -324,7 +330,7 @@ Use [templates/UAT_Checklist_Template.md](./templates/UAT_Checklist_Template.md)
 | Lab | Checkout → Track Order → Previous Orders |
 | Admin on-behalf ordering | From `OperationalLabDrawer` / Labs Admin, launch `LabOrderingPage` in `adminOnBehalf` mode; confirm `admin` and `executive` can order for `ACTIVE` labs in `hq_managed`, `hybrid`, and `self_service`; confirm `INACTIVE` and `suspended` are blocked; confirm selected lab is customer, authenticated HQ user is actor, `source = admin_on_behalf` is present in order/audit metadata, and pricing/catalog/credit/inventory/finance/delivery/AR/shipment/commission behavior is unchanged |
 | Lab lifecycle | `PROSPECT -> ACTIVE`, `ACTIVE -> INACTIVE`, `INACTIVE -> ACTIVE`; confirm reason/audit capture, inactive checkout/reorder blocked, ordering remains suspended after reactivation, and invoices/payments/Track Order/history remain visible |
-| Orders | Fulfill → invoice → shipment |
+| Orders | Fulfill → invoice → shipment; Admin/Executive exact `order_id` search finds a same-tenant Lab order outside the recent 100 |
 | Finance | Pay → allocate → open balance |
 | Compensation / payroll | HR generates preview; commission uses collected cash only; Executive approves/locks/exports; Admin can recommend only; Agent sees own locked/exported history only; existing finance/O2C records unchanged |
 | Logistics | Status transitions → delivered_at |
