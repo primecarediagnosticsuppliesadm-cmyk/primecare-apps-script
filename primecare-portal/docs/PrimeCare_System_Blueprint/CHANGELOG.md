@@ -4,6 +4,30 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-05 — Lab Ordering 1F anon order table lockdown (QA certified)
+
+### Gap found
+
+- Production still has leftover `temp_anon_order_items_insert` / `temp_anon_order_items_select` policies. Certified 1B does not drop them.
+- Production anon currently has no SELECT/INSERT on `orders` / `order_items` / `order_lines` (no confirmed open data dump), but still has unused `REFERENCES` / `TRIGGER` / `TRUNCATE`.
+- QA before 140000: no `TO anon` policies, but anon had SELECT/INSERT/UPDATE/DELETE/TRUNCATE/TRIGGER/REFERENCES grants. RLS hid rows; PostgREST still accepted the request until REVOKE.
+
+### Change
+
+- Applied on **QA only**: `20260905140000_lab_ordering_1f_anon_order_lockdown.sql` (twin not applied separately).
+- Drops any `TO anon` policy on the three tables; `REVOKE ALL` from `PUBLIC` and `anon`; restores `authenticated` DML and `service_role` ALL; `NOTIFY pgrst`.
+- Does not change 1A `create_lab_order`, 1B `v_lab_catalog`, or 1C HQ search. **Not applied to Production.**
+
+### Verification
+
+- `node scripts/verify-lab-ordering-1f-anon-order-lockdown.mjs`
+- `node scripts/verify-lab-ordering-1f-anon-order-lockdown.mjs --live`
+- `node scripts/verify-lab-ordering-1a-security.mjs --apply`
+- `node scripts/verify-lab-ordering-1b-price-and-item-lockdown.mjs --apply`
+- `node scripts/verify-lab-ordering-1c-hq-order-search.mjs --live`
+
+---
+
 ## 2026-09-05 — Lab Ordering 1C HQ exact order-ID search (QA only)
 
 ### Gap found
