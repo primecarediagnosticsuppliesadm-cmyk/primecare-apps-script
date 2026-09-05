@@ -15,7 +15,7 @@ import {
   IndianRupee,
   ArrowRight,
 } from "lucide-react";
-import { createLabWrite, peekLabsCreditReadCache } from "@/api/primecareSupabaseApi";
+import { createLabWrite, invalidateLabsCreditReadCache, peekLabsCreditReadCache } from "@/api/primecareSupabaseApi";
 import {
   readLabOwnershipBundleBroker,
   readLabsCreditBroker,
@@ -24,7 +24,7 @@ import AssignLabOwnerPromptModal from "@/components/operations/AssignLabOwnerPro
 import { ROLES } from "@/config/roles";
 import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
 import { summarizeLabsCreditPortfolio } from "@/metrics/computeRiskMetrics.js";
-import { filterLabsForUser } from "@/utils/accessFilters.js";
+import { partitionAgentLabs } from "@/utils/accessFilters.js";
 import {
   startCollectionFromWorkspaceItem,
   startVisitFromWorkspaceItem,
@@ -57,6 +57,7 @@ import DataFetchError from "@/components/ux/DataFetchError";
 import { cn } from "@/lib/utils";
 import { consumeHqNavContext } from "@/operations/hqGlobalSearchEngine.js";
 import HqLabsAdminView from "@/components/hq/HqLabsAdminView.jsx";
+import AddProspectLabModal from "@/components/agent/AddProspectLabModal.jsx";
 import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
 import { scheduleIdleTask } from "@/utils/scheduleIdleTask.js";
 import ListSkeleton from "@/components/ux/ListSkeleton";
@@ -329,6 +330,7 @@ function normalizeLab(lab) {
     area: lab.area || "",
     assignedAgentId: lab.assignedAgentId || lab.assigned_agent_id || lab.agent_id || "",
     assignedAgent: lab.assignedAgent || lab.agent_name || lab.agentName || "",
+    sourcedByAgentId: lab.sourcedByAgentId || lab.sourced_by_agent_id || "",
     status:
       lab.status ||
       (String(lab.activeFlag || "").toUpperCase() === "N" ? "Inactive" : "Active"),
@@ -385,6 +387,44 @@ function CreditBadge({ status }) {
     >
       {getCreditLabel(status)}
     </span>
+  );
+}
+
+function AgentProspectLabCard({ lab }) {
+  return (
+    <article className="flex h-full flex-col rounded-xl border border-amber-200 bg-amber-50/40 p-3 shadow-sm">
+      <div className="mb-1 flex flex-wrap items-center gap-1.5">
+        <StatusBadge variant="warning" compact>
+          PROSPECT
+        </StatusBadge>
+      </div>
+      <h3 className="truncate text-base font-bold text-slate-900">{lab.labName || "Unnamed Lab"}</h3>
+      <dl className="mt-2 space-y-1 text-xs text-slate-700">
+        {lab.ownerName ? (
+          <div>
+            <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">Contact</dt>
+            <dd>{lab.ownerName}</dd>
+          </div>
+        ) : null}
+        {lab.phone ? (
+          <div>
+            <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">Phone</dt>
+            <dd>
+              <a className="underline-offset-2 hover:underline" href={`tel:${lab.phone}`}>
+                {lab.phone}
+              </a>
+            </dd>
+          </div>
+        ) : null}
+        {lab.area ? (
+          <div>
+            <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">City / locality</dt>
+            <dd>{lab.area}</dd>
+          </div>
+        ) : null}
+      </dl>
+      <p className="mt-3 text-xs font-semibold text-amber-900">Awaiting HQ review</p>
+    </article>
   );
 }
 
@@ -516,6 +556,8 @@ export default function LabsPage({
   const [error, setError] = useState("");
   const [creditFilter, setCreditFilter] = useState("ALL");
   const [showAddLab, setShowAddLab] = useState(false);
+  const [showAddProspect, setShowAddProspect] = useState(false);
+  const [agentLabTab, setAgentLabTab] = useState("all");
   const [distributors, setDistributors] = useState([]);
   const [msg, setMsg] = useState("");
   const [labContext, setLabContext] = useState(() =>
@@ -529,6 +571,7 @@ export default function LabsPage({
 
   const canAddLab =
     currentUser?.role === ROLES.EXECUTIVE || currentUser?.role === ROLES.ADMIN;
+  const canAddProspect = isAgentView && !isDistributorOs;
 
   const selectedDistributorTenantId = useMemo(() => {
     return str(distributorScope?.tenantId);
@@ -676,9 +719,16 @@ export default function LabsPage({
     });
   }, [canAddLab, currentUser, isDistributorOs]);
 
+  const agentLabPartition = useMemo(() => {
+    if (currentUser?.role !== ROLES.AGENT) {
+      return { prospects: [], operational: [] };
+    }
+    return partitionAgentLabs(labs, currentUser);
+  }, [labs, currentUser]);
+
   const visibleLabs = useMemo(() => {
     if (currentUser?.role === ROLES.AGENT) {
-      return filterLabsForUser(labs, currentUser);
+      return [...agentLabPartition.prospects, ...agentLabPartition.operational];
     }
     if (selectedDistributorTenantId) {
       return labs.filter(
@@ -693,7 +743,7 @@ export default function LabsPage({
       return labs.filter((lab) => str(lab.tenantId) === homeId);
     }
     return labs;
-  }, [labs, currentUser, selectedDistributorTenantId, homeTenantId]);
+  }, [labs, currentUser, selectedDistributorTenantId, homeTenantId, agentLabPartition]);
 
   usePredatorModuleValidation(
     "PrimeCare OS",
@@ -711,17 +761,36 @@ export default function LabsPage({
   );
 
   const filteredLabs = useMemo(() => {
+    if (isAgentView && !isDistributorOs) {
+      const operationalBase =
+        creditFilter === "ALL"
+          ? agentLabPartition.operational
+          : agentLabPartition.operational.filter(
+              (lab) => (lab.creditStatus || "OK").toUpperCase() === creditFilter
+            );
+      const operational = orderByLabId?.size
+        ? sortByAgentRouteOrder(operationalBase, orderByLabId, (row) => labIdKey(row.labId))
+        : operationalBase;
+      if (agentLabTab === "prospects") return agentLabPartition.prospects;
+      if (agentLabTab === "active") return operational;
+      return [...agentLabPartition.prospects, ...operational];
+    }
     const base =
       creditFilter === "ALL"
         ? visibleLabs
         : visibleLabs.filter(
             (lab) => (lab.creditStatus || "OK").toUpperCase() === creditFilter
           );
-    if (isAgentView && !isDistributorOs && orderByLabId?.size) {
-      return sortByAgentRouteOrder(base, orderByLabId, (row) => labIdKey(row.labId));
-    }
     return base;
-  }, [visibleLabs, creditFilter, isAgentView, isDistributorOs, orderByLabId]);
+  }, [
+    visibleLabs,
+    creditFilter,
+    isAgentView,
+    isDistributorOs,
+    orderByLabId,
+    agentLabPartition,
+    agentLabTab,
+  ]);
 
   const metrics = useMemo(() => {
     return {
@@ -799,7 +868,7 @@ export default function LabsPage({
               title={isAgentView ? "My Laboratories" : "Laboratories"}
               subtitle={
                 isAgentView
-                  ? "Your assigned accounts — outstanding, visits, and status at a glance."
+                  ? "Assigned Labs and prospects sent to HQ for review."
                   : currentUser?.role === "agent"
                     ? "Only laboratories assigned to this field agent are visible."
                     : selectedDistributorTenantId
@@ -852,6 +921,16 @@ export default function LabsPage({
             </div>
           ) : null}
         </div>
+        {canAddProspect ? (
+          <Button
+            type="button"
+            size="lg"
+            className="min-h-11"
+            onClick={() => setShowAddProspect(true)}
+          >
+            <Plus className="h-4 w-4" /> Add Prospect
+          </Button>
+        ) : null}
         {canAddLab && (isDistributorOs || currentUser?.role !== ROLES.EXECUTIVE || defaultTenantId) ? (
           <Button type="button" size="sm" onClick={() => setShowAddLab(true)}>
             <Plus className="h-4 w-4" /> Add lab
@@ -869,6 +948,18 @@ export default function LabsPage({
       ) : null}
 
       {msg ? <p className="text-sm text-emerald-700">{msg}</p> : null}
+
+      {showAddProspect ? (
+        <AddProspectLabModal
+          onClose={() => setShowAddProspect(false)}
+          onCreated={() => {
+            setMsg("Prospect added and sent to HQ for review.");
+            setAgentLabTab("prospects");
+            invalidateLabsCreditReadCache();
+            void loadLabs({ silent: true });
+          }}
+        />
+      ) : null}
 
       {showAddLab ? (
         <AddLabModal
@@ -931,52 +1022,117 @@ export default function LabsPage({
         <>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">
-              {filteredLabs.length} lab{filteredLabs.length === 1 ? "" : "s"} in your territory
+              {agentLabPartition.operational.length} assigned · {agentLabPartition.prospects.length} prospect
+              {agentLabPartition.prospects.length === 1 ? "" : "s"}
             </p>
+            <div className="flex flex-wrap gap-1">
+              {[
+                { id: "all", label: "All" },
+                { id: "active", label: "Active Labs" },
+                { id: "prospects", label: "Prospects" },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setAgentLabTab(tab.id)}
+                  className={`min-h-11 rounded-full border px-3 py-1.5 text-[11px] transition ${
+                    agentLabTab === tab.id
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-200 bg-white text-slate-700"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {agentLabTab !== "prospects" ? (
             <div className="flex flex-wrap gap-1">
               {["ALL", "OK", "NEAR_LIMIT", "HOLD"].map((filter) => (
                 <button
                   key={filter}
                   type="button"
                   onClick={() => setCreditFilter(filter)}
-                  className={`rounded-full px-2.5 py-0.5 text-[11px] border transition ${
+                  className={`min-h-11 rounded-full border px-3 py-1.5 text-[11px] transition ${
                     creditFilter === filter
-                      ? "bg-slate-900 text-white border-slate-900"
-                      : "bg-white text-slate-700 border-slate-200"
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-200 bg-white text-slate-700"
                   }`}
                 >
-                  {filter === "NEAR_LIMIT" ? "Near limit" : filter === "ALL" ? "All" : filter}
+                  {filter === "NEAR_LIMIT" ? "Near limit" : filter === "ALL" ? "All credit" : filter}
                 </button>
               ))}
             </div>
-          </div>
-          {filteredLabs.length === 0 ? (
-            <div className="text-sm text-slate-500">No labs assigned to you yet.</div>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {filteredLabs.map((lab, idx) => (
-                <AgentMyLabCard
-                  key={`${lab.labId || lab.labName}-${idx}`}
-                  lab={lab}
-                  routeStopNumber={orderByLabId.get(labIdKey(lab.labId))}
-                  recentVisits={agentWorkspace?.recentVisits}
-                  assignedLabs={agentWorkspace?.assignedLabs}
-                  onStartVisit={(item) => {
-                    startVisitFromWorkspaceItem(item, {
-                      visitType: "Field Visit",
-                      source: "agent_labs",
-                    });
-                    setActivePage?.("visits");
-                  }}
-                  onRecordPayment={(item) => {
-                    startCollectionFromWorkspaceItem(item);
-                    setActivePage?.("collections");
-                  }}
-                  onOpenLab={() => setActivePage?.("collections")}
-                />
-              ))}
-            </div>
-          )}
+          ) : null}
+          {agentLabTab !== "active" ? (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-900">
+                Prospects awaiting HQ review
+              </h3>
+              {agentLabPartition.prospects.length === 0 ? (
+                <p className="text-sm text-slate-500">No prospects captured yet.</p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {agentLabPartition.prospects.map((lab, idx) => (
+                    <AgentProspectLabCard key={`${lab.labId || lab.labName}-p-${idx}`} lab={lab} />
+                  ))}
+                </div>
+              )}
+            </section>
+          ) : null}
+          {agentLabTab !== "prospects" ? (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                Active / assigned Labs
+              </h3>
+              {agentLabPartition.operational.filter((lab) =>
+                creditFilter === "ALL"
+                  ? true
+                  : (lab.creditStatus || "OK").toUpperCase() === creditFilter
+              ).length === 0 ? (
+                <p className="text-sm text-slate-500">No labs assigned to you yet.</p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {(orderByLabId?.size
+                    ? sortByAgentRouteOrder(
+                        agentLabPartition.operational.filter((lab) =>
+                          creditFilter === "ALL"
+                            ? true
+                            : (lab.creditStatus || "OK").toUpperCase() === creditFilter
+                        ),
+                        orderByLabId,
+                        (row) => labIdKey(row.labId)
+                      )
+                    : agentLabPartition.operational.filter((lab) =>
+                        creditFilter === "ALL"
+                          ? true
+                          : (lab.creditStatus || "OK").toUpperCase() === creditFilter
+                      )
+                  ).map((lab, idx) => (
+                    <AgentMyLabCard
+                      key={`${lab.labId || lab.labName}-${idx}`}
+                      lab={lab}
+                      routeStopNumber={orderByLabId.get(labIdKey(lab.labId))}
+                      recentVisits={agentWorkspace?.recentVisits}
+                      assignedLabs={agentWorkspace?.assignedLabs}
+                      onStartVisit={(item) => {
+                        startVisitFromWorkspaceItem(item, {
+                          visitType: "Field Visit",
+                          source: "agent_labs",
+                        });
+                        setActivePage?.("visits");
+                      }}
+                      onRecordPayment={(item) => {
+                        startCollectionFromWorkspaceItem(item);
+                        setActivePage?.("collections");
+                      }}
+                      onOpenLab={() => setActivePage?.("collections")}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          ) : null}
         </>
       ) : isHqAdminView ? (
         <HqLabsAdminView

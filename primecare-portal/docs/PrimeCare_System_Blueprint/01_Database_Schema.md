@@ -492,7 +492,7 @@ Phase 3C allows payroll statuses `draft`, `previewed`, `submitted`, `approved`, 
 
 | View | Use |
 |------|-----|
-| v_labs_credit | Labs + AR |
+| v_labs_credit | Labs + AR + `ordering_mode` + `sourced_by_agent_id` (2B; security_invoker) |
 | v_lab_catalog | Lab ordering catalog |
 | v_stock_dashboard | Inventory health |
 | v_reorder_candidates | Reorder forecast |
@@ -528,5 +528,6 @@ Phase 3C allows payroll statuses `draft`, `previewed`, `submitted`, `approved`, 
 | 20260831200000 | Agent Resources V1 foundation (`agent_resources_*`, bucket `agent-resources`, publish RPC) |
 | 20260905150000 | Lab Ordering 1H AR UPDATE grant + projection overload drop |
 | 20260905160000 | Agent Prospect 2A `sourced_by_agent_id` + `create_prospect_lab` (QA only in 2A) |
+| 20260905170000 | Agent Prospect 2B append `sourced_by_agent_id` to `v_labs_credit` (QA only in 2B) |
 
 Full manual SQL: `supabase/sql/` (includes `agent_resources_v1_migration.sql` mirror).

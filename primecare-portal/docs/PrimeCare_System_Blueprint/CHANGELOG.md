@@ -4,6 +4,27 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-05 — Agent Prospect 2B Add Prospect UI + list categorization
+
+### Gap found
+
+- 2A RPC existed, but Agent Labs still filtered on assignment/area and had no capture form.
+- `v_labs_credit` did not expose `sourced_by_agent_id`, so the UI could not categorize sourced PROSPECT rows.
+
+### Change
+
+- Append `sourced_by_agent_id` to `v_labs_credit` (security_invoker unchanged).
+- Agent-only `AddProspectLabModal` + `createProspectLabWrite` (four RPC args only).
+- Agent list: sourced PROSPECT cards vs assigned operational `AgentMyLabCard`. No activation.
+
+### Verification
+
+- `node scripts/verify-agent-prospect-2a.mjs`
+- `node scripts/verify-agent-prospect-2b.mjs`
+- `node scripts/verify-agent-prospect-2b.mjs --apply` (QA only)
+
+---
+
 ## 2026-09-05 — Agent Prospect 2A sourced_by + create_prospect_lab
 
 ### Gap found

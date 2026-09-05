@@ -127,6 +127,7 @@ Critical fields and **id vs business key** rules. Full table columns: `01_Databa
 | **Immutability** | BEFORE UPDATE trigger `labs_sourced_by_agent_id_immutable` — ordinary authenticated UPDATE (including Admin/Executive ownership changes) cannot change this column. |
 | **Index** | `(tenant_id, sourced_by_agent_id) WHERE sourced_by_agent_id IS NOT NULL` |
 | **FK** | None (no FK to `profiles.agent_id`) |
+| **Read by** | Agent Labs list (2B categorization); HQ labs directory |
 
 ## labs.assigned_agent_id
 

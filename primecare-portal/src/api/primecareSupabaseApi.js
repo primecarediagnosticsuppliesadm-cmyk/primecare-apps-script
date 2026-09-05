@@ -1275,6 +1275,7 @@ export function mapLabsCreditRow(row) {
         row.agent_name ??
         row.agentName
     ),
+    sourcedByAgentId: str(row.sourced_by_agent_id ?? row.sourcedByAgentId ?? ""),
     status: str(row.status ?? row.Status),
     activeFlag: str(row.active_flag ?? row.activeFlag ?? row.Active_Flag ?? ""),
     stage: str(row.stage ?? row.Stage),
@@ -1372,6 +1373,72 @@ export async function getLabsCredit(options = {}) {
   } finally {
     if (!force) labsCreditReadInFlight = null;
   }
+}
+
+function mapProspectLabCreateError(raw) {
+  const message = str(raw).toLowerCase();
+  if (message.includes("prospect_phone_exists")) {
+    return "This Lab appears to already be on file. Please contact HQ if you believe this is a different Lab.";
+  }
+  if (message.includes("prospect_name_area_exists")) {
+    return "A Lab with this name and locality appears to already be on file.";
+  }
+  if (
+    message.includes("prospect_agent_id_required") ||
+    message.includes("prospect_inactive") ||
+    message.includes("prospect_not_agent") ||
+    message.includes("prospect_unauthenticated") ||
+    message.includes("prospect_profile_missing") ||
+    message.includes("prospect_tenant_required")
+  ) {
+    return "Your Agent profile is not ready to add a prospect. Please contact HQ.";
+  }
+  if (message.includes("prospect_args_required")) {
+    return "Lab name, contact name, phone, and city/locality are required.";
+  }
+  return "Could not add this prospect. Please try again or contact HQ.";
+}
+
+/**
+ * Agent PROSPECT capture. Calls create_prospect_lab with only the four input fields.
+ * Tenant, sourced_by, status, and lab_id are derived server-side.
+ */
+export async function createProspectLabWrite(payload = {}) {
+  if (!supabase) {
+    return { success: false, error: "Could not add this prospect. Please try again or contact HQ." };
+  }
+
+  const labName = str(payload.labName ?? payload.lab_name ?? payload.p_lab_name);
+  const contactName = str(payload.contactName ?? payload.owner_name ?? payload.p_owner_name);
+  const phone = str(payload.phone ?? payload.p_phone);
+  const area = str(payload.area ?? payload.cityTerritory ?? payload.p_area);
+
+  if (!labName || !contactName || !phone || !area) {
+    return { success: false, error: "Lab name, contact name, phone, and city/locality are required." };
+  }
+
+  const { data, error } = await supabase.rpc("create_prospect_lab", {
+    p_lab_name: labName,
+    p_owner_name: contactName,
+    p_phone: phone,
+    p_area: area,
+  });
+
+  if (error) {
+    return { success: false, error: mapProspectLabCreateError(error.message || error.code) };
+  }
+
+  const row = data && typeof data === "object" ? data : {};
+  invalidateLabsCreditReadCache();
+  return {
+    success: true,
+    data: {
+      labId: str(row.lab_id ?? row.labId),
+      labName: str(row.lab_name ?? row.labName) || labName,
+      status: str(row.status) || "PROSPECT",
+      sourcedByAgentId: str(row.sourced_by_agent_id ?? row.sourcedByAgentId),
+    },
+  };
 }
 
 /**

@@ -107,6 +107,10 @@ Ordering mode and lifecycle status are separate dimensions.
 
 `Prospect Labs`, `Active Labs`, and `Inactive Labs` are mutually exclusive lifecycle counts. `Order-Eligible Labs` and `Ordering Suspended` are operational posture counts and must not be used to silently redefine lifecycle status.
 
+### Agent Add Prospect (Flow 2B)
+
+Agent My Laboratories can capture a PROSPECT for HQ review via `createProspectLabWrite` → `create_prospect_lab`. The Agent UI categorizes RLS-visible rows into sourced prospects vs assigned operational Labs (`partitionAgentLabs`). Prospects show name, contact, phone, locality, and “Awaiting HQ review” only. `filterLabsForUser` excludes `PROSPECT` so visits/collections cannot treat a sourced prospect as operational via area matching. Activation, credit, Lab login, and ordering changes are Flow 2C.
+
 ---
 
 ## Data scope
