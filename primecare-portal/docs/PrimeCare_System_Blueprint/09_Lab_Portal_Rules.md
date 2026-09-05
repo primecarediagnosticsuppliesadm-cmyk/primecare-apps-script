@@ -67,7 +67,7 @@ Lifecycle status is owned by `labs.status`. Ordering Mode remains a separate ope
 
 | Status | Meaning | Ordering behavior | History / financial visibility |
 |--------|---------|-------------------|--------------------------------|
-| `PROSPECT` | Commercial/onboarding lab record that is not yet lifecycle-active | Uses `ordering_mode`; generally HQ Managed until activation | Visible to authorized HQ users |
+| `PROSPECT` | Commercial/onboarding lab record that is not yet lifecycle-active. Agent-created 2A prospects have **no AR**, **no Lab login**, `ordering_mode=hq_managed`, and are **not** operationally ACTIVE. | Uses `ordering_mode`; Agent 2A create always `hq_managed` | Visible to authorized HQ users and the sourcing Agent via `sourced_by_agent_id`. Not visible to Lab users, HR, anon, or other Agents unless assigned through an existing legitimate mechanism. |
 | `ACTIVE` | Lifecycle-active laboratory | Uses `ordering_mode` and credit eligibility to determine order initiation | All invoices, payments, Track Order, shipment history, audit, and reporting remain available |
 | `INACTIVE` | Retained but inactive laboratory account | Lab checkout/reorder blocked because status transition forces `ordering_mode = suspended` | Must remain visible for AR, invoices, payments, allocations, orders, shipments, Track Order, audit history, reporting, and authorized HQ views |
 

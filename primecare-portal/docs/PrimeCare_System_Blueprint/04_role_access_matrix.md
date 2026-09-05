@@ -52,9 +52,9 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 | Dimension | Access |
 |-----------|--------|
 | **Visible modules** | dashboard, visits, **Resources**, labs, collections |
-| **Read** | Assigned/visible labs; orders via lab visibility; own visits; own locked/exported compensation history when payroll self-view is implemented; **Agent Resources: current published versions authorized by audience** |
-| **Write** | Collections (payments); visits; shipment updates when assigned; **Agent Resources acknowledgements (self only)** |
-| **Blocked** | HQ orders fulfill; catalog; logistics board; provisioning; compensation/payroll edits; Agent Resources upload/publish/archive; drafts/archived versions |
+| **Read** | Assigned/visible labs **or** Labs where `sourced_by_agent_id` = current `profiles.agent_id` (same tenant); orders via lab visibility; own visits; own locked/exported compensation history when payroll self-view is implemented; **Agent Resources: current published versions authorized by audience** |
+| **Write** | Collections (payments); visits; shipment updates when assigned; **Agent Resources acknowledgements (self only)**; **PROSPECT lab create via `create_prospect_lab` only** (no generic `labs` INSERT) |
+| **Blocked** | HQ orders fulfill; catalog; logistics board; provisioning; compensation/payroll edits; Agent Resources upload/publish/archive; drafts/archived versions; creating ACTIVE Labs; choosing tenant/status/`ordering_mode`/AR/credit; mutating `sourced_by_agent_id`; activating a prospect |
 | **Freeze** | Collections/payments typically allowed (daily ops) |
 
 ---
@@ -165,6 +165,7 @@ Verified: `verify-hq-freeze-policy.mjs`
 | Table | lab | agent | admin | hr | executive |
 |-------|-----|-------|-------|--------------|-----------|
 | orders | own lab (SELECT, INSERT); delivery snapshot via RPC only — **no direct UPDATE** | visible labs | tenant ops | no payroll dependency | tenant ops |
+| labs | own `lab_id` only | assigned **or** `sourced_by_agent_id` match (same tenant); create PROSPECT via RPC only | tenant ops (no `sourced_by` mutation) | no prospect create | tenant ops (no `sourced_by` mutation) |
 | invoices | own lab | — | tenant | no payroll mutation | tenant |
 | payments | own lab | agent + lab | tenant | read only via bounded payroll derivation after approval | tenant |
 | order_shipments | — | assigned | tenant ops | — | tenant ops |
@@ -179,4 +180,15 @@ Verified: `verify-hq-freeze-policy.mjs`
 
 ## Lab portal provisioning note
 
-Lab portal is **not default Day-1 for all labs**. Access requires lab user provisioned in Operations Center. Default commercial mode: **HQ Managed** until onboarding enables self-service (see `09_Lab_Portal_Rules.md`).
+Lab portal is **not default Day-1 for all labs**. Access requires lab user provisioned in Operations Center. Default commercial mode: **HQ Managed** until onboarding enables self-service (see `09_Lab_Portal_Rules.md`). Agent-created `PROSPECT` Labs (Flow 2A) do **not** create a Lab user, AR, or credit state.
+
+---
+
+## Agent prospect create (Flow 2A)
+
+- RPC: `create_prospect_lab` (authenticated Agent only).
+- `labs.status = PROSPECT`. Do not invent `PENDING`.
+- `ordering_mode` remains default `hq_managed`.
+- No `ar_credit_control` row, no credit setup, no self-service.
+- `sourced_by_agent_id` = authenticated `profiles.agent_id` (immutable attribution).
+- `assigned_agent_id` stays NULL at create. HQ ownership assignment is later (activation/review).

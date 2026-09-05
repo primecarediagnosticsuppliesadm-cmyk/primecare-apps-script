@@ -39,6 +39,7 @@ HQ user provisioning, lab ownership, agent assignment, audit, freeze.
 - Drives agent collections filter + ops metrics + People Ops Business Ownership read façade (Phase 8.4)
 - Write API: `assignPrimaryLabOwnerWrite` / `assignLabOwnership` (Operations Center only)
 - People Ops must **not** invent a second ownership store — see `20_People_Operations.md` Phase 8.4
+- **Sourcing is not ownership.** `labs.sourced_by_agent_id` is immutable acquisition attribution set at Agent prospect create. HQ ownership writes must not mutate `sourced_by_agent_id`. Agent prospect create must not insert `lab_ownership` or copy sourced_by into `assigned_agent_id`.
 
 ---
 

@@ -4,6 +4,30 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-05 — Agent Prospect 2A sourced_by + create_prospect_lab
+
+### Gap found
+
+- Agents had no server-authorized way to capture a Lab as `PROSPECT` without HQ `create_lab_with_ar_credit` (ACTIVE + AR + client-chosen `lab_id`).
+- Lab visibility was assignment/`agent_name` based, so a sourced-only prospect would be invisible to the capturing Agent unless `assigned_agent_id` was set — which would collapse sourcing into ownership.
+
+### Change
+
+- `labs.sourced_by_agent_id text NULL` — immutable acquisition attribution. Existing Labs remain NULL (no backfill).
+- Bounded index `(tenant_id, sourced_by_agent_id) WHERE sourced_by_agent_id IS NOT NULL`. No FK to `profiles.agent_id`.
+- BEFORE UPDATE trigger `labs_sourced_by_agent_id_immutable`.
+- RPC `create_prospect_lab(p_lab_name, p_owner_name, p_phone, p_area)` — Agent-only; tenant + sourced_by derived from authenticated `profiles`; server `LAB-P-*` id; `status=PROSPECT`; `ordering_mode=hq_managed`; `assigned_agent_id` NULL; no AR / ownership / lab user.
+- Visibility helpers include `sourced_by_agent_id = current_profile_agent_id()`.
+- Audit via existing `user_provisioning_events` (`event_type=created`, `payload.action=lab_prospect_created`).
+- Flow 1 frozen. No Agent Add Prospect UI (2B). Not applied to Production in 2A.
+
+### Verification
+
+- `node scripts/verify-agent-prospect-2a.mjs`
+- `node scripts/verify-agent-prospect-2a.mjs --apply` (QA only)
+
+---
+
 ## 2026-09-05 — Lab Ordering 1H AR UPDATE grant + projection overload drop
 
 ### Gap found

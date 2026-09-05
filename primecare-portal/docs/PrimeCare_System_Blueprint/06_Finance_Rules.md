@@ -14,6 +14,8 @@ Invoice, payment, allocation, and AR — strict lifecycle for Year-1 pilot.
 | Order merchandise value | `orders.total_amount` (excludes delivery Phase 3A) |
 | Payroll commission input | `payments.amount_received` cash actually collected only |
 
+Agent-created `PROSPECT` Labs (Flow 2A `create_prospect_lab`) must **not** insert `ar_credit_control`. Credit setup is an HQ activation concern, not prospect capture.
+
 ---
 
 ## Invoice lifecycle

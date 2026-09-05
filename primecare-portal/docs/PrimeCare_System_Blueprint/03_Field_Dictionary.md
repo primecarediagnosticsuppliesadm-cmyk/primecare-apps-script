@@ -115,6 +115,28 @@ Critical fields and **id vs business key** rules. Full table columns: `01_Databa
 
 ---
 
+## labs.sourced_by_agent_id
+
+| Attribute | Value |
+|-----------|-------|
+| **Type** | text NULL |
+| **Meaning** | Immutable acquisition attribution: the Agent who sourced/captured the Lab |
+| **Written by** | `create_prospect_lab` only (server copies `profiles.agent_id`). Never accepted from the client. |
+| **Not** | Current ownership. Do **not** copy to `assigned_agent_id` at prospect create. |
+| **Historical Labs** | Remain NULL. Do **not** backfill from `assigned_agent_id`, `agent_id`, `agent_name`, or `lab_ownership`. |
+| **Immutability** | BEFORE UPDATE trigger `labs_sourced_by_agent_id_immutable` — ordinary authenticated UPDATE (including Admin/Executive ownership changes) cannot change this column. |
+| **Index** | `(tenant_id, sourced_by_agent_id) WHERE sourced_by_agent_id IS NOT NULL` |
+| **FK** | None (no FK to `profiles.agent_id`) |
+
+## labs.assigned_agent_id
+
+| Attribute | Value |
+|-----------|-------|
+| **Type** | text NULL |
+| **Meaning** | Mutable operational ownership pointer (legacy sync with `lab_ownership.primary_agent_id`) |
+| **Written by** | HQ ownership assignment / `updateLabAgentAssignmentWrite` / `assign_lab_ownership` |
+| **Prospect create (2A)** | Remains NULL. Sourcing visibility uses `sourced_by_agent_id`, not assignment. |
+
 ## labs.status
 
 | Attribute | Value |
@@ -123,7 +145,7 @@ Critical fields and **id vs business key** rules. Full table columns: `01_Databa
 | **Meaning** | Lab lifecycle/account status |
 | **Values** | `PROSPECT`, `ACTIVE`, `INACTIVE` |
 | **KPI** | `Total Labs` counts all visible labs; `Prospect Labs`, `Active Labs`, and `Inactive Labs` count `labs.status == PROSPECT`, `ACTIVE`, and `INACTIVE` respectively |
-| **Written by** | `createLabWrite` for new labs; `updateLabLifecycleStatusWrite` for lifecycle transitions |
+| **Written by** | HQ `createLabWrite` / `create_lab_with_ar_credit` writes `ACTIVE`; Agent `create_prospect_lab` writes `PROSPECT`; `updateLabLifecycleStatusWrite` for HQ lifecycle transitions |
 | **Transition roles** | `admin`, `executive` only |
 | **Transition controls** | Confirmation required; reason required for `PROSPECT -> INACTIVE`, `ACTIVE -> INACTIVE`, and `INACTIVE -> ACTIVE` |
 | **INACTIVE rule** | `ACTIVE -> INACTIVE` must force `labs.ordering_mode = suspended`; `INACTIVE -> ACTIVE` does not restore prior ordering mode |

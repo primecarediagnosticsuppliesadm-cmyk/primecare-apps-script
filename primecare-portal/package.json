@@ -23,6 +23,7 @@
     "verify:lab-ordering-1c": "node scripts/verify-lab-ordering-1c-hq-order-search.mjs",
     "verify:lab-ordering-1f": "node scripts/verify-lab-ordering-1f-anon-order-lockdown.mjs",
     "verify:lab-ordering-1h": "node scripts/verify-lab-ordering-1h-ar-and-projection.mjs",
+    "verify:agent-prospect-2a": "node scripts/verify-agent-prospect-2a.mjs",
     "enforce:pre-commit": "node scripts/enforcement/run-architecture-enforcement.mjs --profile pre-commit",
     "enforce:pr": "node scripts/enforcement/run-architecture-enforcement.mjs --profile pr --all",
     "enforce:full": "ENFORCEMENT_MODE=full node scripts/enforcement/run-architecture-enforcement.mjs --profile nightly --all",
