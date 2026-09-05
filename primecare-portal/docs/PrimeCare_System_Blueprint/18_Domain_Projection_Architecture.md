@@ -386,6 +386,17 @@ Projection tables may exist while flags OFF (shadow mode).
 3. Workers: `refresh_proj_order_row_v1`, `refresh_proj_lab_receivable_row_v1`, `rebuild_projection_v1`
 4. Shadow mode; flags OFF; parity PASS on QA
 
+### Canonical worker signatures (Lab Ordering 1H)
+
+PostgreSQL must keep **exactly one** overload per worker. The obsolete 2-argument forms caused PostgREST “could not choose the best candidate function” when the client sent only `p_tenant_id` + `p_order_id` / `p_lab_id`.
+
+| Worker | Canonical | Obsolete (dropped by `20260905150000`) |
+|--------|-----------|----------------------------------------|
+| `refresh_proj_order_row_v1` | `(p_tenant_id uuid, p_order_id text, p_cascade_metrics boolean DEFAULT true)` | `(uuid, text)` |
+| `refresh_proj_lab_receivable_row_v1` | `(p_tenant_id uuid, p_lab_id text, p_cascade_metrics boolean DEFAULT true)` | `(uuid, text)` |
+
+Client (`projectionRefreshApi.js`) always passes `p_cascade_metrics: true`. `rebuild_projection_v1` already calls the 3-argument forms with `false`. Do not recreate the 2-argument overloads.
+
 ---
 
 ## Sprint 6A — Orders adapter QA enablement

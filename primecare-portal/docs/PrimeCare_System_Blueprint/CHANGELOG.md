@@ -4,6 +4,27 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-05 — Lab Ordering 1H AR UPDATE grant + projection overload drop
+
+### Gap found
+
+- Production `updateOrderStatusWrite` attempted AR posting on Fulfilled, but `has_table_privilege('authenticated','public.ar_credit_control','UPDATE') = false`. The bump was classified `skipped: true`, so `orders.ar_posted` stayed false while inventory/invoice/shipment succeeded. Certified GOLD order `ORD-1788630162033-btia0v` is **not** re-fulfilled; repair is a separate Founder-authorized exact-order step.
+- QA already had authenticated AR UPDATE. Production did not. RLS `ar_credit_update_by_role` already authorizes Admin/Executive via `can_manage_distributor_ops_for_tenant` (tenants row present). 1H does **not** change that policy unless QA proves it still blocks HQ after GRANT.
+- Both environments had 2-argument and 3-argument overloads of `refresh_proj_order_row_v1` and `refresh_proj_lab_receivable_row_v1`. PostgREST could not choose when the client omitted `p_cascade_metrics`. 3-argument with `DEFAULT true` is canonical. `rebuild_projection_v1` already calls 3-arg. No `pg_depend` on the 2-arg forms.
+
+### Change
+
+- `GRANT UPDATE ON TABLE public.ar_credit_control TO authenticated`. No anon GRANT. No RLS rewrite.
+- `DROP FUNCTION` only the `(uuid, text)` overloads. Canonical 3-arg workers unchanged.
+- `projectionRefreshApi.js` always sends `p_cascade_metrics: true`.
+
+### Verification
+
+- `node scripts/verify-lab-ordering-1h-ar-and-projection.mjs`
+- `node scripts/verify-lab-ordering-1h-ar-and-projection.mjs --apply` (QA only; new QA order; refuses Production)
+
+---
+
 ## 2026-09-05 — Lab Ordering 1F anon order table lockdown (QA certified)
 
 ### Gap found
