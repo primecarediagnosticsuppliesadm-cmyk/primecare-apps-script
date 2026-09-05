@@ -191,6 +191,7 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 | **RLS** | Yes |
 | **Read** | lab (own), agent, admin |
 | **Write** | fulfill bump, payment RPC, admin |
+| **Table GRANT** | `authenticated` needs **SELECT + INSERT + UPDATE**. Lab Ordering 1H (`20260905150000`) grants UPDATE (Production was missing it). Do **not** GRANT UPDATE to `anon`. RLS `ar_credit_update_by_role` is unchanged: Admin/Executive via `can_manage_distributor_ops_for_tenant`; Agent only for labs visible to them. |
 
 ---
 

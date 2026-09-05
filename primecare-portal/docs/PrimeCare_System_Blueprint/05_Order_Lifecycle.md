@@ -75,6 +75,8 @@ Enforcement: `lab_ordering_allows_lab_initiate()` in `create_lab_order` RPC + `o
 | 4 | Invoice RPC | RPC idempotent |
 | 5 | Shipment create | unique (tenant, order_id) |
 
+**AR bump (Lab Ordering 1H):** `updateOrderStatusWrite` → `bumpArOutstandingForFulfillment` client-updates `ar_credit_control.outstanding` and `total_delivered` by **merchandise** `orders.total_amount` (delivery estimate is **not** included; see [06_Finance_Rules.md](./06_Finance_Rules.md)). Requires table privilege `UPDATE` on `ar_credit_control` for `authenticated` plus existing RLS. If the UPDATE is denied, fulfillment still continues and `orders.ar_posted` stays false.
+
 **Failure policy:** Invoice/shipment failures **do not roll back** fulfill.
 
 ---
@@ -185,6 +187,7 @@ Presentation-only page budget. **Does not** split Orders into persona workspaces
 - `verify-orders-workspace-simplification.mjs` (Sprint 1C UX gate)
 - `verify-transaction-integrity-rpcs.mjs`
 - `verify-lab-ordering-flow.mjs`
+- `verify-lab-ordering-1h-ar-and-projection.mjs` (AR table UPDATE grant + canonical projection RPC; `--apply` QA fulfill path)
 - Compensation/payroll changes must additionally prove no order lifecycle mutation and no commission from order value.
 
 ---

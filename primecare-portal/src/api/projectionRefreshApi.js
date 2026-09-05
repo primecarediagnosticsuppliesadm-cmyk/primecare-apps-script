@@ -26,6 +26,7 @@ export async function refreshProjectionOrderRow(tenantId, orderId) {
   return rpcRefresh("refresh_proj_order_row_v1", {
     p_tenant_id: tid,
     p_order_id: oid,
+    p_cascade_metrics: true,
   });
 }
 
@@ -36,6 +37,7 @@ export async function refreshProjectionLabReceivableRow(tenantId, labId) {
   return rpcRefresh("refresh_proj_lab_receivable_row_v1", {
     p_tenant_id: tid,
     p_lab_id: lid,
+    p_cascade_metrics: true,
   });
 }
 

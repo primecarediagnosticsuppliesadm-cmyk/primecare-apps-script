@@ -54,6 +54,13 @@ Invoice, payment, allocation, and AR — strict lifecycle for Year-1 pilot.
 
 ---
 
+## Fulfill AR posting
+
+- Client path: `bumpArOutstandingForFulfillment` from `updateOrderStatusWrite` when status becomes Fulfilled, `ar_posted` is not already true, lab_id is present, and merchandise amount > 0.
+- Amount: `orders.total_amount` (merchandise). Delivery estimate is not added.
+- Table privilege: `GRANT UPDATE ON TABLE public.ar_credit_control TO authenticated` (Lab Ordering 1H). RLS policy `ar_credit_update_by_role` is not loosened by 1H.
+- Idempotency: `orders.ar_posted`.
+
 ## Delivery charges (Phase 3A)
 
 - **Not** in invoice subtotal
@@ -100,6 +107,7 @@ Invoice, payment, allocation, and AR — strict lifecycle for Year-1 pilot.
 
 ## Verification
 
+- `verify-lab-ordering-1h-ar-and-projection.mjs`
 - `verify-financial-reconciliation.mjs`
 - `verify-partial-payment-sync.mjs`
 - `verify-invoice-phase1.mjs` – `phase5.mjs`
