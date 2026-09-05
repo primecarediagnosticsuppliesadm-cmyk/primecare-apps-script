@@ -53,7 +53,7 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 |-----------|--------|
 | **Visible modules** | dashboard, visits, **Resources**, labs, collections |
 | **Read** | Assigned/visible labs **or** Labs where `sourced_by_agent_id` = current `profiles.agent_id` (same tenant); orders via lab visibility; own visits; own locked/exported compensation history when payroll self-view is implemented; **Agent Resources: current published versions authorized by audience** |
-| **Write** | Collections (payments); visits; shipment updates when assigned; **Agent Resources acknowledgements (self only)**; **PROSPECT lab create via `create_prospect_lab` only** (no generic `labs` INSERT) |
+| **Write** | Collections (payments); visits; shipment updates when assigned; **Agent Resources acknowledgements (self only)**; **PROSPECT lab create via `create_prospect_lab` only** (no generic `labs` INSERT); **Add Prospect** on Agent Labs (`AddProspectLabModal`) |
 | **Blocked** | HQ orders fulfill; catalog; logistics board; provisioning; compensation/payroll edits; Agent Resources upload/publish/archive; drafts/archived versions; creating ACTIVE Labs; choosing tenant/status/`ordering_mode`/AR/credit; mutating `sourced_by_agent_id`; activating a prospect |
 | **Freeze** | Collections/payments typically allowed (daily ops) |
 
@@ -192,3 +192,11 @@ Lab portal is **not default Day-1 for all labs**. Access requires lab user provi
 - No `ar_credit_control` row, no credit setup, no self-service.
 - `sourced_by_agent_id` = authenticated `profiles.agent_id` (immutable attribution).
 - `assigned_agent_id` stays NULL at create. HQ ownership assignment is later (activation/review).
+
+### Agent Labs UI (Flow 2B)
+
+- Agent-only **Add Prospect** on My Laboratories. Does not reuse HQ Add Lab.
+- Fields: lab name, contact name, phone, city/locality.
+- Success: “Prospect added and sent to HQ for review.”
+- List categories: Active / assigned Labs vs sourced PROSPECT cards (Awaiting HQ review). No credit/visit/payment actions on prospects.
+- No HQ activation in 2B.

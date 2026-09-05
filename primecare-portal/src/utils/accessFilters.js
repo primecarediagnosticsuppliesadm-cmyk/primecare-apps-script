@@ -63,6 +63,38 @@ export function filterVisitsForUser(visits = [], currentUser) {
   return [];
 }
 
+export function isAgentSourcedProspect(lab, currentUser) {
+  if (!currentUser || currentUser.role !== ROLES.AGENT) return false;
+  const status = String(lab?.status || "").trim().toUpperCase();
+  if (status !== "PROSPECT") return false;
+  const sourced = normalizeAgentIdKey(lab?.sourcedByAgentId || lab?.sourced_by_agent_id);
+  const profileId = profileAgentId(currentUser);
+  return Boolean(profileId && sourced && sourced === profileId);
+}
+
+/**
+ * Agent Labs list: sourced PROSPECT rows from the RLS-visible set, plus existing
+ * assignment filtering for operational Labs. Does not use area matching to
+ * authorize prospects.
+ */
+export function partitionAgentLabs(labs = [], currentUser) {
+  const prospects = [];
+  const rest = [];
+  for (const lab of labs) {
+    if (isAgentSourcedProspect(lab, currentUser)) prospects.push(lab);
+    else rest.push(lab);
+  }
+  return {
+    prospects,
+    operational: filterLabsForUser(rest, currentUser),
+  };
+}
+
+/**
+ * Operational Agent lab filter (visits, collections, assigned cards).
+ * PROSPECT rows are excluded here so area matching cannot treat a sourced
+ * prospect as an operational Lab. Agent Labs uses partitionAgentLabs instead.
+ */
 export function filterLabsForUser(labs = [], currentUser) {
   if (!currentUser) return [];
 
@@ -70,6 +102,9 @@ export function filterLabsForUser(labs = [], currentUser) {
 
   if (currentUser.role === ROLES.AGENT) {
     return labs.filter((lab) => {
+      const status = String(lab?.status || "").trim().toUpperCase();
+      if (status === "PROSPECT") return false;
+
       const assignedAgentId =
         lab.assignedAgentId ||
         lab.assigned_agent_id ||
