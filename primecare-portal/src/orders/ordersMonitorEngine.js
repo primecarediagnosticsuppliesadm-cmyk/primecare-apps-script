@@ -83,6 +83,26 @@ function paymentSortKey(order) {
   return PAYMENT_PRIORITY[normalizePaymentStatusLabel(order.paymentStatus).toLowerCase()] ?? 5;
 }
 
+/**
+ * Exact HQ order-id query (business key). Empty when the box is free-text / partial.
+ * Example: ORD-1788618878140-s6x0x8
+ */
+export function parseExactOrderIdSearch(search) {
+  const q = str(search);
+  if (!q || /\s/.test(q)) return "";
+  if (/^ORD-[A-Za-z0-9._-]{8,80}$/i.test(q)) return q;
+  return "";
+}
+
+/** Overlay a bounded exact-ID hit onto the default recent list without replacing it. */
+export function mergeExactOrderLookup(orders, lookupOrder) {
+  const list = Array.isArray(orders) ? [...orders] : [];
+  const id = str(lookupOrder?.orderId ?? lookupOrder?.order_id);
+  if (!id) return list;
+  if (list.some((o) => str(o.orderId ?? o.order_id) === id)) return list;
+  return [lookupOrder, ...list];
+}
+
 export function filterOrders(orders, filters = {}) {
   const q = str(filters.search).toLowerCase();
   const statusFilter = str(filters.status);

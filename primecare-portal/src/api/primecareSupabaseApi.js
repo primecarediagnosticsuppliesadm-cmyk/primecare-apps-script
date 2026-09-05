@@ -504,10 +504,7 @@ export function mapLabCatalogRow(row) {
       row.unit_selling_price ??
         row.unitSellingPrice ??
         row.selling_price ??
-        row.sellingPrice ??
-        row.price ??
-        row.unit_price ??
-        row.unitPrice
+        row.sellingPrice
     ),
     unitCost: num(row.unit_cost ?? row.unitCost ?? row.cost_price ?? row.costPrice),
     transferPrice: num(
@@ -633,7 +630,10 @@ export async function getLabCatalogRead(options = {}) {
     const mapped = (data || [])
       .map(mapLabCatalogRow)
       .filter((item) => item.productId);
-    const products = dedupeLabCatalogProducts(mapped, preferredTenantId).sort((a, b) => {
+    const tenantScoped = preferredTenantId
+      ? mapped.filter((item) => str(item.tenantId) === preferredTenantId)
+      : mapped;
+    const products = dedupeLabCatalogProducts(tenantScoped, preferredTenantId).sort((a, b) => {
         if (a.canOrder !== b.canOrder) return a.canOrder ? -1 : 1;
         return a.productName.localeCompare(b.productName);
       });
@@ -7171,16 +7171,16 @@ export async function createOrderWrite(payload = {}) {
 
     const client_request_id =
       str(payload.clientRequestId ?? payload.client_request_id) || null;
+    // Server is authoritative for product, unit_price, and Lab identity.
+    // Do not send client unit_price; create_lab_order reads products.selling_price.
     const rpcItems = normalizedLines.map((line) => ({
       product_id: line.product_id,
-      product_name: line.product_name,
       quantity: line.quantity,
-      unit_price: line.unit_price,
     }));
 
-    if (tenant_id) {
+    {
       const rpcOrder = await supabase.rpc("create_lab_order", {
-        p_tenant_id: tenant_id,
+        p_tenant_id: tenant_id || "",
         p_lab_id: lab_id,
         p_order_id: order_id,
         p_items: rpcItems,
@@ -7274,7 +7274,7 @@ export async function createOrderWrite(payload = {}) {
               tenant_id,
               order_id: returnedOrderId,
               lab_id,
-              merchandiseSubtotal: total_amount,
+              merchandiseSubtotal: num(savedOrder?.total_amount) || total_amount,
               deliveryMethodIntent:
                 str(payload.deliveryMethodIntent ?? payload.delivery_method_intent) ||
                 DELIVERY_METHOD_INTENT.DELIVERY,
@@ -7339,7 +7339,7 @@ export async function createOrderWrite(payload = {}) {
             actorRole,
             actorUserId,
             actorEmail,
-            totalAmount: total_amount,
+            totalAmount: num(savedOrder?.total_amount) || total_amount,
             lineCount: normalizedLines.length,
           });
           if (!audit.success) {
@@ -7350,11 +7350,20 @@ export async function createOrderWrite(payload = {}) {
       }
 
       if (rpcOrder.error && !isMissingSupabaseRpcError(rpcOrder.error, "create_lab_order")) {
-        hqDebugWarn(
-          "[createOrderWrite] create_lab_order:",
-          rpcOrder.error.message,
-          "— falling back to legacy write path"
-        );
+        hqDebugWarn("[createOrderWrite] create_lab_order:", rpcOrder.error.message);
+        return {
+          success: false,
+          error: rpcOrder.error.message || LAB_CHECKOUT_CONFIRM_ERROR,
+          data: {
+            confirmed: false,
+            diagnostic: {
+              reason: "create_lab_order_rejected",
+              rpcError: rpcOrder.error.message,
+              orderId: order_id,
+              clientRequestId: client_request_id,
+            },
+          },
+        };
       }
     }
 
@@ -8250,6 +8259,81 @@ export async function getOrderDetailsRead(orderId) {
   } catch (err) {
     hqDebugWarn("[getOrderDetailsRead] failed:", err?.message || err);
     return empty;
+  }
+}
+
+/**
+ * Bounded HQ exact order_id lookup for Admin/Executive search.
+ * Does not change the default recent list. Does not trust client tenant_id.
+ * Tenant isolation: RLS + session profile tenant. Agent/Lab are denied.
+ */
+export async function lookupHqOrderByIdRead({ orderId } = {}) {
+  const empty = { success: true, data: { order: null }, error: null };
+  const denied = {
+    success: false,
+    error: "HQ exact order search is limited to Admin and Executive.",
+    data: { order: null },
+  };
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: { order: null } };
+  }
+  const oid = str(orderId);
+  if (!oid) return empty;
+
+  try {
+    const actor = await resolveCurrentActorContext();
+    if (!isHqOpsRole(actor.role)) {
+      return denied;
+    }
+
+    traceSupabaseRead("Orders.lookupHqOrderByIdRead", {
+      table: "orders",
+      orderId: oid,
+      limit: 1,
+    });
+
+    let orderRow = null;
+    const byBusinessId = await supabase
+      .from("orders")
+      .select(HQ_ORDER_LIST_COLUMNS)
+      .eq("order_id", oid)
+      .limit(1);
+    if (!byBusinessId.error && Array.isArray(byBusinessId.data) && byBusinessId.data[0]) {
+      orderRow = byBusinessId.data[0];
+    } else if (byBusinessId.error) {
+      hqDebugWarn("[lookupHqOrderByIdRead] orders by order_id:", byBusinessId.error.message);
+    }
+
+    if (!orderRow) {
+      return empty;
+    }
+
+    const sessionTenant = str(actor.tenantId);
+    const rowTenant = str(orderRow.tenant_id ?? orderRow.tenantId);
+    if (sessionTenant && rowTenant && sessionTenant !== rowTenant) {
+      return empty;
+    }
+
+    const labMap = await fetchLabsNameMap().catch(() => new Map());
+    const labId = str(orderRow.lab_id ?? orderRow.labId);
+    const mapped = mapOrderRow(orderRow, labMap instanceof Map ? labMap.get(labId) || "" : "");
+    const lineCounts = await fetchOrderUnitCountsForOrders(
+      supabase,
+      [mapped.orderId],
+      [orderRow]
+    );
+    const uuidId = orderRow.id != null ? str(orderRow.id) : "";
+    const itemCount =
+      lineCounts.get(str(mapped.orderId)) ?? (uuidId ? lineCounts.get(uuidId) : 0) ?? 0;
+
+    return {
+      success: true,
+      data: { order: { ...mapped, itemCount } },
+      error: null,
+    };
+  } catch (err) {
+    hqDebugWarn("[lookupHqOrderByIdRead] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: { order: null } };
   }
 }
 
