@@ -105,6 +105,12 @@ Enforcement: `lab_ordering_allows_lab_initiate()` in `create_lab_order` RPC + `o
 | Read detail | `getOrderDetailsRead`, `getLabOrderDetailsRead` |
 | RPC | `create_lab_order`, `deduct_inventory_for_order` |
 
+### Anon / unauthenticated order table access (Lab Ordering 1F)
+
+- Lab and HQ order writes for authenticated users remain `create_lab_order` (SECURITY DEFINER) plus 1B HQ-only `order_items` / `order_lines` write policies.
+- **1B does not close unauthenticated access.** Leftover `temp_anon_order_items_select` / `temp_anon_order_items_insert` (`USING true` / `WITH CHECK true`) survive 1B if present.
+- `20260905140000_lab_ordering_1f_anon_order_lockdown.sql` drops anon policies on `orders`, `order_items`, and `order_lines` and revokes anon/`PUBLIC` table privileges. **QA certified. Not applied to Production.** D3 still forbids re-introducing `temp_anon_*` policies.
+
 ### HQ Orders list vs exact ID search (Lab Ordering 1C)
 
 - Default HQ Orders queue is a bounded recent list (`HQ_ORDERS_LIST_DEFAULT_LIMIT` = 100). Status, lab, date, and free-text filters apply to that window only.

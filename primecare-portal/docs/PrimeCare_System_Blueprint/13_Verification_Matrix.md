@@ -45,6 +45,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-lab-ordering-1a-security.mjs | Server-authoritative `products.selling_price`; Lab identity from auth profile; price/lab/tenant spoof; inactive profile/lab; ordering_mode; invalid product/qty; order isolation; catalog write denial; PLACE does not deduct stock | Lab Ordering 1A hardening (QA only) |
 | verify-lab-ordering-1b-price-and-item-lockdown.mjs | Tenant-scoped `v_lab_catalog.unit_selling_price` = `products.selling_price`; Lab catalog/cart/stored price match; Lab cannot INSERT/UPDATE/DELETE `order_items` | Lab Ordering 1B (QA only) |
 | verify-lab-ordering-1c-hq-order-search.mjs | Default Orders list stays ≤100; exact `ORD-…` search is a bounded HQ lookup; Admin/Executive same tenant allowed; Agent/Lab denied; client `tenant_id` not used to authorize | Lab Ordering 1C (QA only) |
+| verify-lab-ordering-1f-anon-order-lockdown.mjs | 1B does not close anon `order_items`; `20260905140000` drops `temp_anon_order_items_*` and `REVOKE`s anon on `orders` / `order_items` / `order_lines`; `--live` expects `42501` | Lab Ordering 1F anon lockdown (QA certified; not Production) |
 | verify-transaction-integrity-rpcs.mjs | Sprint 1 RPC symbols | Order/payment RPC |
 | verify-bounded-reads.mjs | No unbounded payment/PO select | Read paths |
 
