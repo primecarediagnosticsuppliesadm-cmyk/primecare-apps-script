@@ -91,9 +91,9 @@ function staticWiringChecks() {
   assert(/finalizeInvoiceForOrderPayment/.test(invoiceApi), "finalizeInvoiceForOrderPayment");
   assert(/INVOICE_PAYMENT_FINALIZE_ERROR/.test(invoiceApi), "finalize error message");
   assert(/resolveOrderInvoiceForPayment/.test(primeApi), "pre-payment invoice finalize gate");
-  assert(/completeOrderLinkedPaymentAllocation/.test(primeApi), "post-payment allocation gate");
-  assert(/compensateFailedOrderPaymentWrite/.test(primeApi), "AR/payment compensation");
-  assert(/logFinancialDriftDetected/.test(primeApi), "financial_drift_detected logging");
+  assert(/p_client_request_id/.test(primeApi), "client_request_id passed to payment RPC");
+  assert(!/compensateFailedOrderPaymentWrite/.test(primeApi), "compensation-by-delete removed");
+  assert(!/completeOrderLinkedPaymentAllocation/.test(primeApi), "client post-payment allocation hop removed");
   assert(/isInvoiceCustomerFacingForPayment/.test(statusJs), "customer-facing payment check");
 
   assert(

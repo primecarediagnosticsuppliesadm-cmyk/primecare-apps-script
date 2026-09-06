@@ -19,7 +19,6 @@ import {
 } from "@/labOrdering/orderingGovernance.js";
 import { supabase } from "./supabaseClient.js";
 import {
-  autoAllocatePaymentToOrderInvoice,
   finalizeInvoiceForOrderPayment,
   getInvoiceByOrderRead,
   INVOICE_PAYMENT_FINALIZE_ERROR,
@@ -88,6 +87,7 @@ import {
   clampLimit,
   HQ_AGENT_VISIT_COLUMNS,
   HQ_AR_COLUMNS,
+  HQ_AR_COLLECTION_WRITE_COLUMNS,
   HQ_COLLECTIONS_AR_LIMIT,
   HQ_DASHBOARD_ORDERS_LIMIT,
   HQ_DASHBOARD_RECENT_DAYS,
@@ -127,7 +127,6 @@ import {
   loadReorderCandidatesBoundedRows,
 } from "@/api/hqBoundedReads.js";
 import { hqDebugLog, hqDebugWarn, isHqDebugLogEnabled } from "@/utils/hqDebugLog.js";
-import { logFinancialDriftDetected } from "@/utils/financialDriftLog.js";
 import { recordPredatorCacheEvent } from "@/predator/cacheDiagnostics.js";
 import {
   estimatePayloadBytes,
@@ -2060,16 +2059,6 @@ function sumTodayPayments(paymentRows) {
   return sum;
 }
 
-function isMissingPaymentsOptionalColumnError(err) {
-  const msg = String(err?.message ?? err ?? "").toLowerCase();
-  return (
-    (msg.includes("schema cache") ||
-      msg.includes("could not find") ||
-      msg.includes("does not exist")) &&
-    (msg.includes("collected_by") || msg.includes("'note'") || msg.includes(" note"))
-  );
-}
-
 function isMissingSupabaseRpcError(err, rpcName = "") {
   const msg = String(err?.message ?? err ?? "").toLowerCase();
   const name = str(rpcName).toLowerCase();
@@ -2078,98 +2067,6 @@ function isMissingSupabaseRpcError(err, rpcName = "") {
     (msg.includes("function") && msg.includes("does not exist")) ||
     msg.includes("schema cache") && msg.includes("function")
   );
-}
-
-/** Inserts payment row; retries without optional note/collected_by if columns are not migrated yet. */
-async function insertPaymentsRow(paymentRow) {
-  const attempt = (row) => supabase.from("payments").insert([row]).select();
-  let res = await attempt(paymentRow);
-  if (!res.error) return res;
-
-  if (!isMissingPaymentsOptionalColumnError(res.error)) return res;
-
-  const slim = { ...paymentRow };
-  delete slim.collected_by;
-  delete slim.note;
-  hqDebugWarn(
-    "[createPaymentWrite] payments.note/collected_by missing in Supabase — retrying core columns only. Run primecare-portal/supabase/sql/collections_notes_migration.sql",
-    res.error.message
-  );
-  return attempt(slim);
-}
-
-/**
- * Records a collection payment in `payments` and rolls `ar_credit_control` forward for the lab.
- * Payload: { labId, amountReceived | amountCollected, paymentMode | mode, paymentDate?, orderId?, tenantId?, outstandingBefore?, collectedBy? }
- */
-function orderPaymentAllocationSucceeded(allocRes) {
-  if (!allocRes?.success) return false;
-  if (!allocRes.skipped) return true;
-  return allocRes.reason === "zero_open_balance";
-}
-
-async function compensateFailedOrderPaymentWrite({
-  tenantId,
-  labId,
-  paymentId,
-  amountReceived,
-  driftContext = {},
-}) {
-  logFinancialDriftDetected({
-    source: "createPaymentWrite",
-    tenantId,
-    labId,
-    paymentId,
-    amountReceived,
-    ...driftContext,
-  });
-
-  const tid = str(tenantId);
-  const lid = normalizeLabIdKey(labId);
-  const pid = str(paymentId);
-  const amount = num(amountReceived);
-  if (!supabase || !tid || !lid || !pid || amount <= 0) {
-    return { success: false, error: "compensation_args_invalid" };
-  }
-
-  const { data: arRow, error: arSelErr } = await supabase
-    .from("ar_credit_control")
-    .select("outstanding,total_paid")
-    .eq("tenant_id", tid)
-    .eq("lab_id", lid)
-    .maybeSingle();
-
-  if (arSelErr) {
-    hqDebugWarn("[compensateFailedOrderPaymentWrite] AR read:", arSelErr.message);
-    return { success: false, error: arSelErr.message };
-  }
-
-  const reversePatch = {
-    outstanding: num(arRow?.outstanding) + amount,
-    total_paid: Math.max(0, num(arRow?.total_paid) - amount),
-    updated_at: new Date().toISOString(),
-  };
-  const arUpd = await supabase
-    .from("ar_credit_control")
-    .update(reversePatch)
-    .eq("tenant_id", tid)
-    .eq("lab_id", lid);
-  if (arUpd.error) {
-    hqDebugWarn("[compensateFailedOrderPaymentWrite] AR reverse:", arUpd.error.message);
-    return { success: false, error: arUpd.error.message };
-  }
-
-  const payDel = await supabase
-    .from("payments")
-    .delete()
-    .eq("tenant_id", tid)
-    .eq("payment_id", pid);
-  if (payDel.error) {
-    hqDebugWarn("[compensateFailedOrderPaymentWrite] payment delete:", payDel.error.message);
-    return { success: false, error: payDel.error.message };
-  }
-
-  return { success: true, error: null };
 }
 
 async function resolveOrderInvoiceForPayment({ tenantId, orderId }) {
@@ -2196,81 +2093,10 @@ async function resolveOrderInvoiceForPayment({ tenantId, orderId }) {
   return { invoice: finalize.invoice || invoiceRes.data, error: null };
 }
 
-async function completeOrderLinkedPaymentAllocation({
-  tenantId,
-  labId,
-  orderId,
-  paymentId,
-  amountReceived,
-  actorId,
-  orderInvoice,
-  paymentJustCreated,
-}) {
-  if (!orderInvoice?.id) {
-    return { success: true, allocation: null, error: null };
-  }
-
-  const allocRes = await autoAllocatePaymentToOrderInvoice({
-    tenantId,
-    paymentId,
-    orderId,
-    amountReceived,
-    actorId,
-  });
-
-  if (orderPaymentAllocationSucceeded(allocRes)) {
-    return {
-      success: true,
-      allocation: allocRes.skipped ? null : allocRes.data,
-      error: null,
-    };
-  }
-
-  const driftContext = {
-    orderId,
-    invoiceId: orderInvoice.id,
-    allocReason: allocRes.reason,
-    allocError: allocRes.error,
-    paymentJustCreated,
-  };
-
-  if (paymentJustCreated) {
-    const compensated = await compensateFailedOrderPaymentWrite({
-      tenantId,
-      labId,
-      paymentId,
-      amountReceived,
-      driftContext,
-    });
-    const suffix = compensated.success
-      ? " The payment was reversed."
-      : " Payment reversal may have failed — reconcile manually.";
-    return {
-      success: false,
-      allocation: null,
-      error: `Payment could not be allocated to the invoice.${suffix}`,
-      drift: true,
-    };
-  }
-
-  logFinancialDriftDetected({
-    source: "createPaymentWrite",
-    tenantId,
-    labId,
-    paymentId,
-    amountReceived,
-    ...driftContext,
-  });
-  return {
-    success: false,
-    allocation: null,
-    error:
-      allocRes.error ||
-      "Payment exists but invoice allocation failed. Finalize the invoice and run payment drift repair.",
-    drift: true,
-  };
-}
-
+/**
+ * Records a collection payment via post_collection_payment only (fail closed).
+ * Payload: { labId, amountReceived, clientRequestId, paymentMode, paymentDate?, orderId?, tenantId?, collectedBy?, note? }
+ */
 export async function createPaymentWrite(payload = {}) {
   return predatorTrace("Collections", "save.payment", async () => {
   traceSupabaseRead("Collections.createPaymentWrite", { tables: ["payments", "ar_credit_control"] });
@@ -2289,14 +2115,10 @@ export async function createPaymentWrite(payload = {}) {
     const payment_date = str(
       payload.paymentDate ?? payload.payment_date ?? localDateYmd(new Date())
     ).slice(0, 10);
-    const outstanding_before_fallback = num(
-      payload.outstandingBefore ?? payload.outstanding_before ?? 0
-    );
-
-    let payment_id = str(payload.paymentId ?? payload.payment_id);
-    if (!payment_id) {
-      payment_id = `PAY-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    }
+    const payment_id = str(payload.paymentId ?? payload.payment_id);
+    const client_request_id = str(payload.clientRequestId ?? payload.client_request_id);
+    const note = str(payload.note);
+    const collected_by = str(payload.collectedBy ?? payload.collected_by);
 
     if (!lab_id) {
       return { success: false, error: "lab_id is required", data: null };
@@ -2304,8 +2126,11 @@ export async function createPaymentWrite(payload = {}) {
     if (amount_received <= 0) {
       return { success: false, error: "amount_received must be > 0", data: null };
     }
+    if (!client_request_id) {
+      return { success: false, error: "client_request_id is required", data: null };
+    }
 
-    let arSelQuery = supabase.from("ar_credit_control").select("*").eq("lab_id", lab_id);
+    let arSelQuery = supabase.from("ar_credit_control").select(HQ_AR_COLUMNS).eq("lab_id", lab_id);
     if (tenant_id) arSelQuery = arSelQuery.eq("tenant_id", tenant_id);
     const arSel = await arSelQuery.limit(1);
 
@@ -2320,10 +2145,6 @@ export async function createPaymentWrite(payload = {}) {
       return { success: false, error: "tenant_id is required for AR write", data: null };
     }
 
-    const note = str(payload.note);
-    const collected_by = str(payload.collectedBy ?? payload.collected_by);
-
-    let orderInvoice = null;
     if (order_id) {
       const prep = await resolveOrderInvoiceForPayment({
         tenantId: scoped_tenant_id,
@@ -2332,14 +2153,17 @@ export async function createPaymentWrite(payload = {}) {
       if (prep.error) {
         return { success: false, error: prep.error, data: null };
       }
-      orderInvoice = prep.invoice;
+      if (!prep.invoice?.id) {
+        return { success: false, error: "invoice_not_found", data: null };
+      }
     }
 
     const rpcPay = await supabase.rpc("post_collection_payment", {
       p_tenant_id: scoped_tenant_id,
       p_lab_id: lab_id,
-      p_payment_id: payment_id,
+      p_payment_id: payment_id || null,
       p_amount_received: amount_received,
+      p_client_request_id: client_request_id,
       p_mode: mode,
       p_payment_date: payment_date,
       p_order_id: order_id || null,
@@ -2347,193 +2171,44 @@ export async function createPaymentWrite(payload = {}) {
       p_collected_by: collected_by || null,
     });
 
-    if (!rpcPay.error && rpcPay.data && rpcPay.data.success !== false) {
-      const rpcBody = rpcPay.data;
-      const savedPay = rpcBody.payment || null;
-      const arPatch = rpcBody.ar || {};
-      const paymentJustCreated = !Boolean(rpcBody.idempotent);
-
-      const allocWrap = await completeOrderLinkedPaymentAllocation({
-        tenantId: scoped_tenant_id,
-        labId: lab_id,
-        orderId: order_id,
-        paymentId: payment_id,
-        amountReceived: amount_received,
-        actorId: collected_by || payload.actorId,
-        orderInvoice,
-        paymentJustCreated,
-      });
-
-      if (!allocWrap.success) {
-        return {
-          success: false,
-          error: allocWrap.error,
-          data: {
-            payment: savedPay,
-            ar: { lab_id, ...arPatch },
-            allocation: null,
-            drift: Boolean(allocWrap.drift),
-          },
-        };
-      }
-
-      const allocation = allocWrap.allocation;
-      fireNotificationEvent(
-        {
-          eventType: "payment_received",
-          sourceModule: "collections",
-          sourceId: payment_id,
-          tenantId: scoped_tenant_id,
-          targetLabId: lab_id,
-          targetRole: "admin",
-          severity: "info",
-          payload: {
-            paymentId: payment_id,
-            labId: lab_id,
-            amountReceived: amount_received,
-            mode,
-          },
-        },
-        "createPaymentWrite"
-      );
-      return {
-        success: true,
-        data: {
-          payment: savedPay,
-          ar: { lab_id, ...arPatch },
-          allocation,
-          idempotent: Boolean(rpcBody.idempotent),
-        },
-        error: null,
-      };
-    }
-
-    if (rpcPay.error && !isMissingSupabaseRpcError(rpcPay.error, "post_collection_payment")) {
-      hqDebugWarn(
-        "[createPaymentWrite] post_collection_payment:",
-        rpcPay.error.message,
-        "— falling back to legacy write path"
-      );
-    }
-
-    const old_outstanding = arRow
-      ? num(
-          arRow.outstanding ??
-            arRow.outstanding_amount ??
-            arRow.outstandingAmount ??
-            arRow.balance ??
-            0
-        )
-      : outstanding_before_fallback;
-    const old_total_paid = arRow
-      ? num(arRow.total_paid ?? arRow.totalPaid ?? arRow.amount_paid ?? arRow.amountPaid ?? 0)
-      : 0;
-
-    const new_total_paid = old_total_paid + amount_received;
-    const new_outstanding = Math.max(0, old_outstanding - amount_received);
-
-    const created_at = new Date().toISOString();
-    const writePayload = {
-      payment_id,
-      tenant_id: scoped_tenant_id,
-      order_id,
-      lab_id,
-      amount_received,
-      payment_date,
-      mode,
-      outstanding_balance: new_outstanding,
-      created_at,
-    };
-
-    const paymentRow = { ...writePayload };
-    if (note) paymentRow.note = note;
-    if (collected_by) paymentRow.collected_by = collected_by;
-
-    const { data: payData, error: payErr } = await insertPaymentsRow(paymentRow);
-
-    if (payErr) {
-      hqDebugWarn("[createPaymentWrite] payments insert:", payErr.message);
-      return { success: false, error: payErr.message || "Payment insert failed", data: null };
-    }
-
-    const savedPay = Array.isArray(payData) ? payData[0] : payData;
-
-    const arPatch = {
-      total_paid: new_total_paid,
-      outstanding: new_outstanding,
-      updated_at: new Date().toISOString(),
-    };
-
-    const arUpd = await supabase
-      .from("ar_credit_control")
-      .update(arPatch)
-      .eq("tenant_id", scoped_tenant_id)
-      .eq("lab_id", lab_id);
-
-    if (arUpd.error) {
-      hqDebugWarn(
-        "[createPaymentWrite] ar_credit_control update FAILED — rolling back payment row:",
-        arUpd.error.message
-      );
-      const rollback = await supabase
-        .from("payments")
-        .delete()
-        .eq("tenant_id", scoped_tenant_id)
-        .eq("payment_id", payment_id);
-      if (rollback.error) {
-        hqDebugWarn(
-          "[createPaymentWrite] payment rollback FAILED — reconcile manually:",
-          rollback.error.message
-        );
-      }
+    if (rpcPay.error) {
+      hqDebugWarn("[createPaymentWrite] post_collection_payment:", rpcPay.error.message);
       return {
         success: false,
-        error: `AR update failed; payment rolled back: ${arUpd.error.message}`,
+        error: rpcPay.error.message || "Payment posting failed",
         data: null,
       };
     }
 
-    let allocation = null;
-    const allocWrap = await completeOrderLinkedPaymentAllocation({
-      tenantId: scoped_tenant_id,
-      labId: lab_id,
-      orderId: order_id,
-      paymentId: payment_id,
-      amountReceived: amount_received,
-      actorId: collected_by || payload.actorId,
-      orderInvoice,
-      paymentJustCreated: true,
-    });
-
-    if (!allocWrap.success) {
+    const rpcBody = rpcPay.data;
+    if (!rpcBody || rpcBody.success === false) {
       return {
         success: false,
-        error: allocWrap.error,
-        data: {
-          payment: savedPay,
-          ar: { lab_id, ...arPatch },
-          allocation: null,
-          drift: Boolean(allocWrap.drift),
-        },
+        error: str(rpcBody?.error) || "Payment posting failed",
+        data: null,
       };
     }
 
-    allocation = allocWrap.allocation;
+    const savedPay = rpcBody.payment || null;
+    const arPatch = rpcBody.ar || {};
+    const allocation = rpcBody.allocation || null;
 
     fireNotificationEvent(
       {
         eventType: "payment_received",
         sourceModule: "collections",
-        sourceId: payment_id,
+        sourceId: savedPay?.payment_id || payment_id || client_request_id,
         tenantId: scoped_tenant_id,
         targetLabId: lab_id,
         targetRole: "admin",
         severity: "info",
         payload: {
-          paymentId: payment_id,
+          paymentId: savedPay?.payment_id || payment_id,
+          clientRequestId: client_request_id,
           labId: lab_id,
           amountReceived: amount_received,
           mode,
+          idempotent: Boolean(rpcBody.idempotent),
         },
       },
       "createPaymentWrite"
@@ -2541,7 +2216,12 @@ export async function createPaymentWrite(payload = {}) {
 
     return {
       success: true,
-      data: { payment: savedPay, ar: { lab_id, ...arPatch }, allocation },
+      data: {
+        payment: savedPay,
+        ar: { lab_id, ...arPatch },
+        allocation,
+        idempotent: Boolean(rpcBody.idempotent),
+      },
       error: null,
     };
   } catch (err) {
@@ -2909,7 +2589,10 @@ export async function updateCollectionNotesWrite(payload = {}) {
     const next_action = str(payload.nextAction ?? payload.next_action);
     const tenant_id = str(payload.tenantId ?? payload.tenant_id) || null;
 
-    let arSelQuery = supabase.from("ar_credit_control").select("*").eq("lab_id", lab_id);
+    let arSelQuery = supabase
+      .from("ar_credit_control")
+      .select(HQ_AR_COLLECTION_WRITE_COLUMNS)
+      .eq("lab_id", lab_id);
     if (tenant_id) arSelQuery = arSelQuery.eq("tenant_id", tenant_id);
     const arSel = await arSelQuery.limit(1);
     if (arSel.error) {
@@ -7442,6 +7125,7 @@ export async function createOrderWrite(payload = {}) {
                   lab_id,
                   tenant_id,
                   deltaAmount: amt,
+                  order_id: returnedOrderId,
                 });
                 const flagPatch = {
                   fulfilled_at: new Date().toISOString(),
@@ -7627,6 +7311,7 @@ export async function createOrderWrite(payload = {}) {
         lab_id,
         tenant_id,
         deltaAmount: amt,
+        order_id,
       });
       if (bump.success && !bump.skipped) {
         hqDebugLog("AR POSTED FOR ORDER", {
@@ -8541,7 +8226,7 @@ async function ledgerHasOrderOutMovement(orderId) {
   return Array.isArray(q.data) && q.data.length > 0;
 }
 
-async function bumpArOutstandingForFulfillment({ lab_id, tenant_id, deltaAmount }) {
+async function bumpArOutstandingForFulfillment({ lab_id, tenant_id, deltaAmount, order_id }) {
   if (!supabase || !lab_id || num(deltaAmount) <= 0) {
     return { success: true, skipped: true };
   }
@@ -8551,50 +8236,24 @@ async function bumpArOutstandingForFulfillment({ lab_id, tenant_id, deltaAmount 
     return { success: false, error: "tenant_id is required for AR write", skipped: true };
   }
 
-  const sel = await supabase
-    .from("ar_credit_control")
-    .select("*")
-    .eq("tenant_id", tid)
-    .eq("lab_id", sid)
-    .limit(1);
-  if (sel.error) {
-    return { success: false, error: sel.error.message, skipped: true };
+  const rpc = await supabase.rpc("post_fulfillment_ar_bump", {
+    p_tenant_id: tid,
+    p_lab_id: sid,
+    p_order_id: str(order_id) || null,
+    p_delta_amount: num(deltaAmount),
+  });
+  if (rpc.error) {
+    hqDebugWarn("[bumpArOutstandingForFulfillment]", rpc.error.message);
+    return { success: false, error: rpc.error.message, skipped: true };
   }
-  const row = Array.isArray(sel.data) && sel.data[0];
-  if (!row) {
-    hqDebugWarn("[bumpArOutstandingForFulfillment] No ar_credit_control row for lab:", sid);
-    return { success: false, error: "No AR row for lab", skipped: true };
+  const body = rpc.data || {};
+  if (body.success === false) {
+    return { success: false, error: str(body.error) || "AR bump failed", skipped: true };
   }
-  const d = num(deltaAmount);
-  const curOut = num(
-    row.outstanding ??
-      row.outstanding_amount ??
-      row.outstandingAmount ??
-      row.balance ??
-      0
-  );
-  let patch = {
-    outstanding: curOut + d,
-    updated_at: new Date().toISOString(),
-  };
-  const td = num(row.total_delivered ?? row.totalDelivered ?? 0);
-  if (td >= 0) {
-    patch.total_delivered = td + d;
+  if (body.skipped) {
+    return { success: true, skipped: true };
   }
-  let upd = await supabase
-    .from("ar_credit_control")
-    .update(patch)
-    .eq("tenant_id", tid)
-    .eq("lab_id", sid);
-  if (!upd.error) return { success: true, skipped: false };
-  delete patch.total_delivered;
-  upd = await supabase
-    .from("ar_credit_control")
-    .update(patch)
-    .eq("tenant_id", tid)
-    .eq("lab_id", sid);
-  if (!upd.error) return { success: true, skipped: false };
-  return { success: false, error: upd.error.message, skipped: true };
+  return { success: true, skipped: false };
 }
 
 async function tryPersistOrderDeliverySnapshot({
@@ -8926,6 +8585,7 @@ export async function updateOrderStatusWrite(orderId, status, payload = {}) {
           lab_id: labId,
           tenant_id: str(orderRow.tenant_id ?? orderRow.tenantId) || null,
           deltaAmount: orderAmt,
+          order_id: businessOrderId,
         });
         if (bump.success && !bump.skipped) {
           hqDebugLog("AR POSTED FOR ORDER", {

@@ -4,6 +4,28 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-06 — Flow 3A financial server hardening
+
+### Gap found
+
+- Phase 0: payment+AR RPC was atomic, but order-linked allocation was a second client hop with compensation-by-delete. Legacy `createPaymentWrite` table fallback could INSERT payment then UPDATE AR. Agent/Admin could UPDATE AR financial columns and Admin could DELETE payments. `GREATEST(0, outstanding - amount)` hid overpayment. Idempotency relied on random `payment_id`.
+
+### Change
+
+- Canonical post is `post_collection_payment` only (fail closed). Linked `order_id` posts payment + AR + allocation in one transaction.
+- `client_request_id` unique per tenant; payload mismatch → `idempotency_payload_conflict`.
+- Overpayment rejected (`payment_exceeds_receivable`). No unapplied-cash ledger in 3A.
+- Trigger `ar_credit_protect_financial_columns`; fulfill AR via `post_fulfillment_ar_bump` (Flow 1 compatible).
+- Authenticated `payments` INSERT/UPDATE/DELETE policies dropped. Actor `created_by_user_id` from `auth.uid()`.
+- QA migration `20260906120000` only. Do not apply to Production from 3A.
+
+### Verification
+
+- `node scripts/verify-flow-3a.mjs`
+- `node scripts/verify-flow-3a.mjs --apply` (QA only)
+
+---
+
 ## 2026-09-06 — Flow 2E prospect order + ordering_mode invariants
 
 ### Gap found

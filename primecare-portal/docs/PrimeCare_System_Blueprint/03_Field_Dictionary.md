@@ -86,9 +86,31 @@ Critical fields and **id vs business key** rules. Full table columns: `01_Databa
 | **Type** | text |
 | **Required** | yes |
 | **Unique** | per `(tenant_id, payment_id)` |
-| **Written by** | `createPaymentWrite` / `post_collection_payment` |
+| **Written by** | `post_collection_payment` (via `createPaymentWrite`) |
 | **Read by** | Collections, allocations junction |
 | **Not** | `payments.id` (uuid) for user display |
+
+---
+
+## payments.client_request_id
+
+| Attribute | Value |
+|-----------|-------|
+| **Type** | text |
+| **Required** | yes on new posts |
+| **Unique** | per `(tenant_id, client_request_id)` |
+| **Written by** | `post_collection_payment` from client idempotency key |
+| **Rule** | Same key + same financial payload → idempotent success. Same key + different lab/amount/`order_id` → `idempotency_payload_conflict` |
+
+---
+
+## payments.created_by_user_id
+
+| Attribute | Value |
+|-----------|-------|
+| **Type** | uuid |
+| **Required** | no (null on historical rows) |
+| **Written by** | `auth.uid()` inside `post_collection_payment` — not client-supplied |
 
 ---
 

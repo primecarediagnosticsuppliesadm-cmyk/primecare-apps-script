@@ -26,6 +26,8 @@ assert(sql.includes("client_request_id"), "client_request_id missing");
 
 const api = readFileSync(resolve(root, "src/api/primecareSupabaseApi.js"), "utf8");
 assert(api.includes('rpc("post_collection_payment"'), "client must call post_collection_payment");
+assert(api.includes("p_client_request_id"), "client must send payment client_request_id");
+assert(!api.includes("falling back to legacy write path"), "legacy payment fallback must be gone");
 assert(api.includes('rpc("deduct_inventory_for_order"'), "client must call deduct_inventory_for_order");
 assert(api.includes('rpc("create_lab_order"'), "client must call create_lab_order");
 

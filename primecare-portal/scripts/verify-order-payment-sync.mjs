@@ -32,7 +32,8 @@ assert(/focusSection:\s*"payment"/.test(orders), "Orders navigates with payment 
 assert(/orderId:/.test(nav), "hqWorkflowNav passes orderId context");
 assert(/paymentAmount/.test(nav), "hqWorkflowNav passes paymentAmount context");
 assert(/finalizeInvoiceForOrderPayment/.test(invoiceApi), "finalize before payment");
-assert(/financial_drift_detected|logFinancialDriftDetected/.test(primeApi), "drift detection");
+assert(/rpc\("post_collection_payment"/.test(primeApi), "payment posting uses RPC");
+assert(!/compensateFailedOrderPaymentWrite/.test(primeApi), "compensation-by-delete removed");
 assert(/invalidateOrdersReadCache/.test(collections), "payment invalidates orders cache");
 assert(/invalidateCollectionsReadCache/.test(collections), "payment invalidates collections cache");
 assert(/notifyFinancialSyncCompleted|notifyFinancialSyncRefresh/.test(collections), "payment notifies financial sync");

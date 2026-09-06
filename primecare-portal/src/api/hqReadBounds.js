@@ -66,8 +66,11 @@ export const HQ_ORDER_LINE_METRIC_COLUMNS =
 export const HQ_AR_COLUMNS =
   "lab_id,lab_name,outstanding,total_paid,credit_limit,credit_hold,tenant_id,total_delivered";
 
+export const HQ_AR_COLLECTION_WRITE_COLUMNS =
+  "lab_id,tenant_id,outstanding,total_paid,credit_limit,credit_hold,collections_notes,next_follow_up_date,next_action,last_follow_up_date";
+
 export const HQ_PAYMENT_COLUMNS =
-  "payment_id,order_id,lab_id,amount_received,payment_date,mode,tenant_id,created_at,agent_id";
+  "payment_id,order_id,lab_id,amount_received,payment_date,mode,tenant_id,created_at,agent_id,client_request_id,created_by_user_id";
 
 /** Bounded invoice list projection (Phase 2+ reads). */
 export const HQ_INVOICE_LIST_COLUMNS =
