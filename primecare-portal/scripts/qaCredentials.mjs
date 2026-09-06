@@ -19,6 +19,10 @@ export const QA_LAB = {
   password: "1234",
 };
 
+export function hydrateQaHrPasswordFromEnv() {
+  return "";
+}
+
 export const QA_HR = {
   email: "qa.hr@primecare.test",
   password: "1234",
