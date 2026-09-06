@@ -26,6 +26,7 @@
     "verify:agent-prospect-2a": "node scripts/verify-agent-prospect-2a.mjs",
     "verify:agent-prospect-2b": "node scripts/verify-agent-prospect-2b.mjs",
     "verify:agent-prospect-2c": "node scripts/verify-agent-prospect-2c.mjs",
+    "verify:agent-prospect-2e": "node scripts/verify-agent-prospect-2e.mjs",
     "enforce:pre-commit": "node scripts/enforcement/run-architecture-enforcement.mjs --profile pre-commit",
     "enforce:pr": "node scripts/enforcement/run-architecture-enforcement.mjs --profile pr --all",
     "enforce:full": "ENFORCEMENT_MODE=full node scripts/enforcement/run-architecture-enforcement.mjs --profile nightly --all",

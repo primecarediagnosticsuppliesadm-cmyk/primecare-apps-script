@@ -33,11 +33,13 @@ Placed → Processing → Fulfilled
 | **Self Service** | Lab + admin / executive on behalf of an `ACTIVE` lab |
 | **Suspended** | No new order initiation |
 
-**Admin on-behalf ordering:** HQ `admin` / `executive` users may create orders on behalf of `ACTIVE` labs when `ordering_mode` is `hq_managed`, `hybrid`, or `self_service`. This is blocked when `labs.status = INACTIVE` or `ordering_mode = suspended`.
+**Admin on-behalf ordering:** HQ `admin` / `executive` users may create orders on behalf of `ACTIVE` labs when `ordering_mode` is `hq_managed`, `hybrid`, or `self_service`. This is blocked when `labs.status` is not `ACTIVE` (`PROSPECT` and `INACTIVE` included) or `ordering_mode = suspended`.
+
+**Server invariant (Flow 2E):** `create_lab_order` requires `labs.status = ACTIVE` for **every** caller (Lab, Admin, Executive, other authenticated ops). Client/UI checks are not sufficient. Non-ACTIVE → `lab_inactive`. `PROSPECT` Labs cannot receive orders.
 
 Admin-on-behalf orders must reuse the existing `LabOrderingPage`/cart path in explicit `adminOnBehalf` mode, preserve the selected lab as the customer, preserve the authenticated HQ user as the actor, and record `source = admin_on_behalf` in order/audit metadata. The flow must not impersonate a lab user.
 
-Enforcement: `lab_ordering_allows_lab_initiate()` in `create_lab_order` RPC + `orders_insert_by_role` RLS for lab callers.
+Enforcement: `create_lab_order` ACTIVE check for all callers; `lab_ordering_allows_lab_initiate()` for Lab self-initiate; `orders_insert_by_role` RLS requires `lab_row_is_active` for Lab and HQ inserts.
 
 ---
 
@@ -49,6 +51,7 @@ Enforcement: `lab_ordering_allows_lab_initiate()` in `create_lab_order` RPC + `o
 | HQ create | `createOrderWrite` | configurable |
 
 ### Preconditions
+- `labs.status = ACTIVE` (all callers; server `create_lab_order`)
 - Ordering mode gate (lab callers only)
 - Admin-on-behalf eligibility: customer lab must be `ACTIVE`; `ordering_mode` must be `hq_managed`, `hybrid`, or `self_service`
 - Credit hold check (`assertLabOrderCreditEligible`)

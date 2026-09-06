@@ -63,6 +63,8 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 
 **`activate_prospect_lab` (Flow 2C):** SECURITY DEFINER, `search_path=public`, REVOKE PUBLIC/anon, GRANT authenticated. Inputs: `p_lab_id`, optional `p_initial_agent_id`. Tenant derived from authenticated Admin/Executive profile (client tenant_id not trusted). Preconditions: active HQ profile, same tenant, target `status=PROSPECT`. Result: `status=ACTIVE`, `ordering_mode=hq_managed`, one `ar_credit_control` row (HQ Add Lab defaults: limit 0, outstanding/delivered/paid 0), optional `lab_ownership` + `assigned_agent_id` (sourcing Agent if still active, else explicit `p_initial_agent_id`, else unassigned). Does **not** SET `sourced_by_agent_id`. Does **not** create Lab user, order, invoice, shipment, inventory, or payment. Repeat call on ACTIVE → `activate_already_active` with no second AR/ownership. Audit: `user_provisioning_events` `event_type=updated` with `payload.action=lab_prospect_activated`. Generic `labs` PATCH of `PROSPECT -> ACTIVE` is rejected by `labs_prospect_activate_via_rpc_only` (`use_activate_prospect_lab`) and by `updateLabLifecycleStatusWrite`.
 
+**Flow 2E invariants:** `create_lab_order` requires `labs.status = ACTIVE` for every caller (`lab_inactive` otherwise). `orders_insert_by_role` HQ insert also requires `lab_row_is_active`. WHILE `status` remains `PROSPECT`, `ordering_mode` must stay `hq_managed` (`labs_prospect_ordering_hq_managed` BEFORE INSERT/UPDATE; `prospect_ordering_hq_managed`). `activate_prospect_lab` is not blocked (it sets `ACTIVE` + `hq_managed` in one UPDATE).
+
 ---
 
 ## lab_ownership
@@ -532,5 +534,6 @@ Phase 3C allows payroll statuses `draft`, `previewed`, `submitted`, `approved`, 
 | 20260905160000 | Agent Prospect 2A `sourced_by_agent_id` + `create_prospect_lab` (QA only in 2A) |
 | 20260905170000 | Agent Prospect 2B append `sourced_by_agent_id` to `v_labs_credit` (QA only in 2B) |
 | 20260905200000 | Agent Prospect 2C `activate_prospect_lab` + `v_labs_credit.created_at` (QA only in 2C) |
+| 20260906080000 | Flow 2E: `create_lab_order` ACTIVE for all callers + PROSPECT `ordering_mode=hq_managed` (QA only in 2E) |
 
 Full manual SQL: `supabase/sql/` (includes `agent_resources_v1_migration.sql` mirror).

@@ -40,7 +40,7 @@ Suspended           ← lab checkout blocked; HQ on-behalf ordering blocked
 | **Self Service** | ✔ | ✔ when `labs.status = ACTIVE` | ✔ always |
 | **Suspended** | ✖ | ✖ | ✔ always |
 
-**Admin on-behalf ordering:** HQ (`admin` / `executive`) may create orders on behalf of an `ACTIVE` lab when `ordering_mode` is `hq_managed`, `hybrid`, or `self_service`. On-behalf order creation is blocked when `labs.status = INACTIVE` or `ordering_mode = suspended`.
+**Admin on-behalf ordering:** HQ (`admin` / `executive`) may create orders on behalf of an `ACTIVE` lab when `ordering_mode` is `hq_managed`, `hybrid`, or `self_service`. On-behalf order creation is blocked when `labs.status` is not `ACTIVE` (including `PROSPECT` and `INACTIVE`) or `ordering_mode = suspended`. Server `create_lab_order` enforces ACTIVE for all roles.
 
 Admin on-behalf ordering must reuse the existing `LabOrderingPage` catalog/cart/checkout flow in an explicit `adminOnBehalf` mode. It must not duplicate the ordering UI and must not impersonate a lab user. The selected lab remains the order customer, while the authenticated HQ user remains the actor. Order/audit metadata must identify `source = admin_on_behalf`, the originating screen, selected customer lab, authenticated HQ actor, lifecycle status, and ordering mode at submit time.
 
@@ -67,7 +67,7 @@ Lifecycle status is owned by `labs.status`. Ordering Mode remains a separate ope
 
 | Status | Meaning | Ordering behavior | History / financial visibility |
 |--------|---------|-------------------|--------------------------------|
-| `PROSPECT` | Commercial/onboarding lab record that is not yet lifecycle-active. Agent-created 2A prospects have **no AR**, **no Lab login**, `ordering_mode=hq_managed`, and are **not** operationally ACTIVE. | Uses `ordering_mode`; Agent 2A create always `hq_managed` | Visible to authorized HQ users and the sourcing Agent via `sourced_by_agent_id`. Not visible to Lab users, HR, anon, or other Agents unless assigned through an existing legitimate mechanism. |
+| `PROSPECT` | Commercial/onboarding lab record that is not yet lifecycle-active. Agent-created 2A prospects have **no AR**, **no Lab login**, `ordering_mode=hq_managed`, and are **not** operationally ACTIVE. | **Must remain `hq_managed` until `activate_prospect_lab`.** Ordinary HQ `ordering_mode` writes to `hybrid` / `self_service` / `suspended` while still PROSPECT are rejected (`prospect_ordering_hq_managed`). **Cannot receive orders** (`create_lab_order` → `lab_inactive` for every caller). | Visible to authorized HQ users and the sourcing Agent via `sourced_by_agent_id`. Not visible to Lab users, HR, anon, or other Agents unless assigned through an existing legitimate mechanism. |
 | `ACTIVE` | Lifecycle-active laboratory | Uses `ordering_mode` and credit eligibility to determine order initiation | All invoices, payments, Track Order, shipment history, audit, and reporting remain available |
 | `INACTIVE` | Retained but inactive laboratory account | Lab checkout/reorder blocked because status transition forces `ordering_mode = suspended` | Must remain visible for AR, invoices, payments, allocations, orders, shipments, Track Order, audit history, reporting, and authorized HQ views |
 

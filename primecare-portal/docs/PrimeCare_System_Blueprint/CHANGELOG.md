@@ -4,6 +4,27 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-06 — Flow 2E prospect order + ordering_mode invariants
+
+### Gap found
+
+- Flow 2D: `create_lab_order` enforced `labs.status = ACTIVE` only for `role = lab`. HQ Admin/Executive SECURITY DEFINER callers could place an order on a PROSPECT. UI checkout blocked PROSPECT; server did not.
+- Ordinary HQ `labs.ordering_mode` PATCH could set `hybrid` / `self_service` while `status` remained `PROSPECT`.
+
+### Change
+
+- `create_lab_order`: every caller (Lab, Admin, Executive, other authenticated ops) must see `labs.status = ACTIVE` or raise existing `lab_inactive`. Lab `ordering_mode` self-initiate rules unchanged. No pricing, inventory, AR, or fulfillment change.
+- `orders_insert_by_role`: HQ insert path also requires `lab_row_is_active`.
+- BEFORE INSERT/UPDATE trigger `labs_prospect_ordering_hq_managed`: a remaining-PROSPECT row cannot leave `ordering_mode = hq_managed`. `activate_prospect_lab` (`PROSPECT -> ACTIVE`) is unaffected.
+- QA migration `20260906080000` only. Do not apply to Production from 2E.
+
+### Verification
+
+- `node scripts/verify-agent-prospect-2e.mjs`
+- `node scripts/verify-agent-prospect-2e.mjs --apply` (QA only)
+
+---
+
 ## 2026-09-05 — Agent Prospect 2C HQ review + activate_prospect_lab
 
 ### Gap found

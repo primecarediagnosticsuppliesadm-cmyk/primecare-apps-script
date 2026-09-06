@@ -163,8 +163,8 @@ Critical fields and **id vs business key** rules. Full table columns: `01_Databa
 | **Values** | `hq_managed`, `hybrid`, `self_service`, `suspended` |
 | **Meaning** | Runtime order-initiation governance for lab callers |
 | **KPI** | `Ordering Suspended` counts rows where `ordering_mode == suspended`; `Order-Eligible Labs` also requires `ordering_eligible == true` |
-| **Lifecycle interaction** | `ACTIVE -> INACTIVE` forces `suspended`; `INACTIVE -> ACTIVE` leaves `ordering_mode` unchanged until admin explicitly selects HQ Managed, Hybrid, or Self Service |
-| **Admin on-behalf ordering** | `admin` / `executive` may create orders on behalf of `ACTIVE` labs when mode is `hq_managed`, `hybrid`, or `self_service`; blocked when `labs.status = INACTIVE` or mode is `suspended` |
+| **Lifecycle interaction** | `ACTIVE -> INACTIVE` forces `suspended`; `INACTIVE -> ACTIVE` leaves `ordering_mode` unchanged until admin explicitly selects HQ Managed, Hybrid, or Self Service. **PROSPECT must remain `hq_managed` until `activate_prospect_lab`** (server trigger `labs_prospect_ordering_hq_managed`). |
+| **Admin on-behalf ordering** | `admin` / `executive` may create orders on behalf of `ACTIVE` labs when mode is `hq_managed`, `hybrid`, or `self_service`; blocked when `labs.status` is not `ACTIVE` (including `PROSPECT`) or mode is `suspended`. Server `create_lab_order` enforces ACTIVE for all callers. |
 | **Does not affect** | Invoices, payments, Track Order, finance, logistics, history, or `Active Labs` lifecycle status |
 
 ---
