@@ -4,6 +4,31 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-05 — Agent Prospect 2C HQ review + activate_prospect_lab
+
+### Gap found
+
+- 09 said `PROSPECT -> ACTIVE` “sets lifecycle state only.” Generic `updateLabLifecycleStatusWrite` / OperationalLabDrawer **Activate** would mark a sourced prospect ACTIVE without AR, ownership, or `hq_managed` lock — colliding with 2A (no AR at capture) and 2C product intent.
+- HQ Labs directory had no Prospects filter; prospect cards reused operational credit/orders/collections actions.
+
+### Change
+
+- Dedicated RPC `activate_prospect_lab(p_lab_id, p_initial_agent_id optional)` — Admin/Executive, same tenant, SECURITY DEFINER. Status `PROSPECT -> ACTIVE`; AR initialized with existing HQ Add Lab defaults (`credit_limit` 0, outstanding/delivered/paid 0); `ordering_mode` remains `hq_managed`; `sourced_by_agent_id` never written.
+- Server trigger `labs_prospect_activate_via_rpc_only` rejects generic `PROSPECT -> ACTIVE` unless the RPC sets `primecare.activate_prospect`.
+- Ownership: default to sourcing Agent if still active in tenant; else unassigned unless HQ passes `p_initial_agent_id`. Later ownership changes still cannot mutate sourced_by.
+- Generic lifecycle PATCH **rejects** `PROSPECT -> ACTIVE` (`use_activate_prospect_lab`). `INACTIVE -> ACTIVE` unchanged.
+- `v_labs_credit.created_at` is appended at the end of the view (Postgres cannot insert a column in the middle of `CREATE OR REPLACE VIEW`).
+- Freeze: client `isHqProspectActivationWriteBlocked()` is a **narrow allow** (does not follow structural freeze). Do not globally unfreeze HQ. Production freeze exception is this action only — not implemented as a Production SQL change in 2C.
+
+### Verification
+
+- `node scripts/verify-agent-prospect-2a.mjs`
+- `node scripts/verify-agent-prospect-2b.mjs`
+- `node scripts/verify-agent-prospect-2c.mjs`
+- `node scripts/verify-agent-prospect-2c.mjs --apply` (QA only)
+
+---
+
 ## 2026-09-05 — Agent Prospect 2B Add Prospect UI + list categorization
 
 ### Gap found

@@ -40,6 +40,7 @@ HQ user provisioning, lab ownership, agent assignment, audit, freeze.
 - Write API: `assignPrimaryLabOwnerWrite` / `assignLabOwnership` (Operations Center only)
 - People Ops must **not** invent a second ownership store — see `20_People_Operations.md` Phase 8.4
 - **Sourcing is not ownership.** `labs.sourced_by_agent_id` is immutable acquisition attribution set at Agent prospect create. HQ ownership writes must not mutate `sourced_by_agent_id`. Agent prospect create must not insert `lab_ownership` or copy sourced_by into `assigned_agent_id`.
+- **Prospect activation (2C):** `activate_prospect_lab` may create the first ACTIVE `lab_ownership` row and set `assigned_agent_id`, defaulting to the sourcing Agent when that Agent is still active for the tenant. HQ may pass a different `p_initial_agent_id`. If the source Agent is inactive/missing and no explicit Agent is passed, activation may proceed unassigned (same as HQ Add Lab skip-owner). Later `assign_lab_ownership` still must not mutate `sourced_by_agent_id`.
 
 ---
 
@@ -80,7 +81,7 @@ Field playbooks live in [25_Agent_Resources.md](./25_Agent_Resources.md). Publis
 
 **Blocks:** order status mutations, structural provisioning, catalog structural writes, optional procurement.
 
-**Allows:** record payment, invoice download, review orders, credit & risk drawer, daily collections.
+**Allows:** record payment, invoice download, review orders, credit & risk drawer, daily collections, **prospect Activate Lab** (narrow exception — not a global unfreeze).
 
 See [04_Role_Access_Matrix.md](./04_Role_Access_Matrix.md).
 
@@ -93,3 +94,4 @@ See [04_Role_Access_Matrix.md](./04_Role_Access_Matrix.md).
 - `verify-operations-user-directory-integrity.mjs`
 - `verify-provisioning-role-guard.mjs`
 - `verify-hq-freeze-policy.mjs`
+- `verify-agent-prospect-2c.mjs`

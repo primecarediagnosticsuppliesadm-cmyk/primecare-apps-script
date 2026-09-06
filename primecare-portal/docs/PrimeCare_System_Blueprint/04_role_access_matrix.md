@@ -54,7 +54,7 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 | **Visible modules** | dashboard, visits, **Resources**, labs, collections |
 | **Read** | Assigned/visible labs **or** Labs where `sourced_by_agent_id` = current `profiles.agent_id` (same tenant); orders via lab visibility; own visits; own locked/exported compensation history when payroll self-view is implemented; **Agent Resources: current published versions authorized by audience** |
 | **Write** | Collections (payments); visits; shipment updates when assigned; **Agent Resources acknowledgements (self only)**; **PROSPECT lab create via `create_prospect_lab` only** (no generic `labs` INSERT); **Add Prospect** on Agent Labs (`AddProspectLabModal`) |
-| **Blocked** | HQ orders fulfill; catalog; logistics board; provisioning; compensation/payroll edits; Agent Resources upload/publish/archive; drafts/archived versions; creating ACTIVE Labs; choosing tenant/status/`ordering_mode`/AR/credit; mutating `sourced_by_agent_id`; activating a prospect |
+| **Blocked** | HQ orders fulfill; catalog; logistics board; provisioning; compensation/payroll edits; Agent Resources upload/publish/archive; drafts/archived versions; creating ACTIVE Labs; choosing tenant/status/`ordering_mode`/AR/credit; mutating `sourced_by_agent_id`; calling `activate_prospect_lab` |
 | **Freeze** | Collections/payments typically allowed (daily ops) |
 
 ---
@@ -155,6 +155,7 @@ Full map: `PERMISSION_BY_KEY` in `rolePermissionMatrix.js`.
 | Agent Resources publish | **Allowed** (not O2C/inventory structural) |
 | Review order details | **Allowed** |
 | Credit & Risk drawer | **Allowed** |
+| Prospect Activate Lab (`activate_prospect_lab`) | **Allowed** (narrow exception; not a global unfreeze) |
 
 Verified: `verify-hq-freeze-policy.mjs`
 
@@ -200,3 +201,10 @@ Lab portal is **not default Day-1 for all labs**. Access requires lab user provi
 - Success: “Prospect added and sent to HQ for review.”
 - List categories: Active / assigned Labs vs sourced PROSPECT cards (Awaiting HQ review). No credit/visit/payment actions on prospects.
 - No HQ activation in 2B.
+
+### HQ prospect activation (Flow 2C)
+
+- RPC: `activate_prospect_lab` (authenticated Admin/Executive, same tenant).
+- Agent, Lab, HR, anon, foreign tenant: denied.
+- Generic `updateLabLifecycleStatusWrite` must not transition `PROSPECT -> ACTIVE`.
+- Freeze: `isHqProspectActivationWriteBlocked()` stays **false** (narrow exception). Structural freeze still blocks user provisioning / ownership UI. Do not globally unfreeze HQ.

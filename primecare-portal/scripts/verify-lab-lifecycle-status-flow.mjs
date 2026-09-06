@@ -160,11 +160,11 @@ function assertStaticContract(api) {
   pass("static.validator_export", "validateLabLifecycleTransition exported");
 
   const cases = [
-    ["transition.prospect_active.confirm_required", { previousStatus: "PROSPECT", nextStatus: "ACTIVE" }, false],
+    ["transition.prospect_active.blocked", { previousStatus: "PROSPECT", nextStatus: "ACTIVE" }, false],
     [
-      "transition.prospect_active.allowed",
-      { previousStatus: "PROSPECT", nextStatus: "ACTIVE", confirmed: true },
-      true,
+      "transition.prospect_active.rpc_only",
+      { previousStatus: "PROSPECT", nextStatus: "ACTIVE", confirmed: true, reason: REASON },
+      false,
     ],
     [
       "transition.active_inactive.reason_required",
@@ -192,6 +192,18 @@ function assertStaticContract(api) {
     const res = validator(input);
     if (Boolean(res?.ok) === expected) pass(id, expected ? "allowed" : res?.code || "blocked");
     else fail(id, `expected ok=${expected}, got ${JSON.stringify(res)}`);
+  }
+
+  const prospectActivate = validator({
+    previousStatus: "PROSPECT",
+    nextStatus: "ACTIVE",
+    confirmed: true,
+    reason: REASON,
+  });
+  if (prospectActivate?.code === "use_activate_prospect_lab") {
+    pass("transition.prospect_active.code", "use_activate_prospect_lab");
+  } else {
+    fail("transition.prospect_active.code", JSON.stringify(prospectActivate));
   }
 
   if (

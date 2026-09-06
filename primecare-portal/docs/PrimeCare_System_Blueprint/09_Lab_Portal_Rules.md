@@ -75,7 +75,7 @@ Lifecycle status is owned by `labs.status`. Ordering Mode remains a separate ope
 
 | Transition | Authorized roles | Confirmation | Reason | Side effects |
 |------------|------------------|--------------|--------|--------------|
-| `PROSPECT` -> `ACTIVE` | `admin`, `executive` | Required | Recommended | Sets lifecycle state only |
+| `PROSPECT` -> `ACTIVE` | `admin`, `executive` via `activate_prospect_lab` only | Required (Activate Lab) | Not required | Sets `ACTIVE`; creates AR with HQ Add Lab defaults; optional ownership; keeps `ordering_mode=hq_managed`; never writes `sourced_by_agent_id`. Generic lifecycle PATCH is rejected. |
 | `PROSPECT` -> `INACTIVE` | `admin`, `executive` | Required | Required | Sets lifecycle state and `ordering_mode = suspended` |
 | `ACTIVE` -> `INACTIVE` | `admin`, `executive` | Required | Required | Must atomically set `ordering_mode = suspended` |
 | `INACTIVE` -> `ACTIVE` | `admin`, `executive` | Required | Required | Sets lifecycle state only; does **not** restore previous `ordering_mode` |
@@ -109,7 +109,7 @@ Ordering mode and lifecycle status are separate dimensions.
 
 ### Agent Add Prospect (Flow 2B)
 
-Agent My Laboratories can capture a PROSPECT for HQ review via `createProspectLabWrite` → `create_prospect_lab`. The Agent UI categorizes RLS-visible rows into sourced prospects vs assigned operational Labs (`partitionAgentLabs`). Prospects show name, contact, phone, locality, and “Awaiting HQ review” only. `filterLabsForUser` excludes `PROSPECT` so visits/collections cannot treat a sourced prospect as operational via area matching. Activation, credit, Lab login, and ordering changes are Flow 2C.
+Agent My Laboratories can capture a PROSPECT for HQ review via `createProspectLabWrite` → `create_prospect_lab`. The Agent UI categorizes RLS-visible rows into sourced prospects vs assigned operational Labs (`partitionAgentLabs`). Prospects show name, contact, phone, locality, and “Awaiting HQ review” only. `filterLabsForUser` excludes `PROSPECT` so visits/collections cannot treat a sourced prospect as operational via area matching. HQ Labs (Admin/Executive) review sourced prospects via All / Active Labs / Prospects filters. **Activate Lab** calls `activateProspectLabWrite` → `activate_prospect_lab`. Lab login and self-service ordering remain later sprints.
 
 ---
 
