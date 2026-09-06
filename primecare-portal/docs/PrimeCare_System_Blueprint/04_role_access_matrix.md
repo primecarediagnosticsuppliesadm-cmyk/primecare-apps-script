@@ -96,7 +96,7 @@ Only `admin` and `executive` may change `labs.status`. Agents and lab users cann
 
 | Lifecycle status | Lab login | Create order / checkout | Track orders | View invoices | View payments | View history |
 |------------------|-----------|-------------------------|--------------|---------------|---------------|--------------|
-| `PROSPECT` | If provisioned | Governed by `ordering_mode` and credit eligibility | ✔ | ✔ | ✔ | ✔ |
+| `PROSPECT` | If provisioned | ✖ (`create_lab_order` → `lab_inactive` for every caller; `ordering_mode` stays `hq_managed`) | ✔ | ✔ | ✔ | ✔ |
 | `ACTIVE` | If provisioned | Governed by `ordering_mode` and credit eligibility | ✔ | ✔ | ✔ | ✔ |
 | `INACTIVE` | If provisioned | ✖ (`ordering_mode` must be `suspended`) | ✔ | ✔ | ✔ | ✔ |
 
@@ -208,3 +208,8 @@ Lab portal is **not default Day-1 for all labs**. Access requires lab user provi
 - Agent, Lab, HR, anon, foreign tenant: denied.
 - Generic `updateLabLifecycleStatusWrite` must not transition `PROSPECT -> ACTIVE`.
 - Freeze: `isHqProspectActivationWriteBlocked()` stays **false** (narrow exception). Structural freeze still blocks user provisioning / ownership UI. Do not globally unfreeze HQ.
+
+### Cross-flow invariants (Flow 2E)
+
+- Only `ACTIVE` Labs may receive `create_lab_order` (Lab, Admin, Executive, other authenticated ops). Error: `lab_inactive`.
+- While `status` remains `PROSPECT`, ordinary `ordering_mode` writes cannot leave `hq_managed` (`prospect_ordering_hq_managed`). Activation is unaffected.
