@@ -167,11 +167,13 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 | **PK** | `id` (uuid) |
 | **Business key** | `payment_id`; UNIQUE `(tenant_id, payment_id)` |
 | **Required** | `tenant_id`, `payment_id`, `lab_id`, `amount_received` |
-| **Optional** | `order_id`, `mode`, `agent_id` |
+| **Optional** | `order_id`, `mode`, `agent_id`, `note`, `collected_by` |
+| **Idempotency** | `client_request_id`; UNIQUE `(tenant_id, client_request_id)` where not null |
+| **Actor** | `created_by_user_id` from `auth.uid()` inside RPC |
 | **Rule** | **No invoice_id column** |
-| **RLS** | Yes |
+| **RLS** | Yes — SELECT by role; **no authenticated INSERT/UPDATE/DELETE** |
 | **Read** | lab (own), agent, admin |
-| **Write** | agent insert, admin, RPC |
+| **Write** | `post_collection_payment` RPC only |
 
 ---
 
@@ -199,8 +201,8 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 | **Required** | `outstanding`, `credit_limit`, `credit_hold` |
 | **RLS** | Yes |
 | **Read** | lab (own), agent, admin |
-| **Write** | fulfill bump, payment RPC, admin |
-| **Table GRANT** | `authenticated` needs **SELECT + INSERT + UPDATE**. Lab Ordering 1H (`20260905150000`) grants UPDATE (Production was missing it). Do **not** GRANT UPDATE to `anon`. RLS `ar_credit_update_by_role` is unchanged: Admin/Executive via `can_manage_distributor_ops_for_tenant`; Agent only for labs visible to them. |
+| **Write** | Financial columns (`outstanding`, `total_paid`, `total_delivered`) via `post_fulfillment_ar_bump` / `post_collection_payment` only. Operational columns (notes, follow-up, next action, `updated_at`) via authenticated UPDATE + `ar_credit_update_by_role`. |
+| **Table GRANT** | `authenticated` keeps **SELECT + INSERT + UPDATE** (Lab Ordering 1H). Do **not** GRANT UPDATE to `anon`. Trigger `ar_credit_protect_financial_columns` rejects authenticated changes to financial ledger columns. RLS `ar_credit_update_by_role` is unchanged for operational writes: Admin/Executive via `can_manage_distributor_ops_for_tenant`; Agent only for labs visible to them. |
 
 ---
 

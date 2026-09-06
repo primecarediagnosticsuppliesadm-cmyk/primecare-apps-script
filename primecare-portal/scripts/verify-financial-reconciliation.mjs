@@ -234,10 +234,15 @@ async function main() {
   else pass("FR-90", "Guntur tenant untouched");
 
   const primeApiSrc = readFileSync(resolve(root, "src/api/primecareSupabaseApi.js"), "utf8");
-  if (/rolling back payment row/.test(primeApiSrc) && /\.from\("payments"\)[\s\S]*\.delete\(\)/.test(primeApiSrc)) {
-    pass("FR-60", "createPaymentWrite compensating rollback on AR failure");
+  if (
+    /rpc\("post_collection_payment"/.test(primeApiSrc) &&
+    /p_client_request_id/.test(primeApiSrc) &&
+    !/\.from\("payments"\)[\s\S]{0,80}\.delete\(\)/.test(primeApiSrc) &&
+    !/falling back to legacy write path/.test(primeApiSrc)
+  ) {
+    pass("FR-60", "createPaymentWrite fail-closed RPC; no compensation-by-delete");
   } else {
-    fail("FR-60", "Payment+AR atomicity rollback missing in createPaymentWrite");
+    fail("FR-60", "Payment posting must be RPC-only without payment DELETE compensation");
   }
 
   const fails = results.filter((r) => r.status === "FAIL");

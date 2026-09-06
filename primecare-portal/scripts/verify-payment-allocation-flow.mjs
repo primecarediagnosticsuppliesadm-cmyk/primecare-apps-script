@@ -22,7 +22,9 @@ assert(existsSync(sqlPath), "phase5 migration missing");
 const sql = readFileSync(sqlPath, "utf8");
 
 assert(/export async function createPaymentWrite/.test(primeApi), "createPaymentWrite export");
-assert(/autoAllocatePaymentToOrderInvoice/.test(primeApi), "payment auto-allocation hook");
+assert(/p_client_request_id/.test(primeApi), "payment RPC sends client_request_id");
+assert(/rpc\("post_collection_payment"/.test(primeApi), "createPaymentWrite calls post_collection_payment");
+assert(!/falling back to legacy write path/.test(primeApi), "legacy payment fallback removed");
 assert(/allocate_payment_to_invoice/.test(sql), "allocate_payment_to_invoice RPC in SQL");
 assert(/allocatePaymentToInvoiceWrite/.test(invoiceApi), "allocatePaymentToInvoiceWrite");
 assert(/autoAllocatePaymentToOrderInvoice/.test(invoiceApi), "autoAllocatePaymentToOrderInvoice");
@@ -31,6 +33,7 @@ assert(/resolveOrderInvoiceForPayment/.test(primeApi), "createPaymentWrite pre-f
 assert(/createPaymentWrite\(/.test(collections), "Collections uses createPaymentWrite");
 assert(/resolvePaymentOrderIdForLab/.test(collections), "order-linked payment resolution");
 assert(/paymentOrderId/.test(collections), "payment order context wired");
+assert(/clientRequestId/.test(collections), "Collections sends payment idempotency key");
 
 const policy = readFileSync(resolve(root, "src/config/hqReleasePolicy.js"), "utf8");
 const orders = readFileSync(resolve(root, "src/pages/OrdersPage.jsx"), "utf8");

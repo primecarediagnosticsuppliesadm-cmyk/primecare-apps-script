@@ -2049,6 +2049,7 @@ export default function CollectionsPage({
   const labAutoOpenedRef = useRef("");
   const labLedgerLoadKeyRef = useRef("");
   const saveInflightRef = useRef(false);
+  const paymentClientRequestRef = useRef({ fingerprint: "", clientRequestId: "" });
   const agentSelectionRestoredRef = useRef(false);
   collectionsLengthRef.current = collections.length;
   const [collectionEvidence, setCollectionEvidence] = useState([]);
@@ -2624,6 +2625,16 @@ export default function CollectionsPage({
 
         if (supabase && amt > 0) {
           const linkedOrderId = resolvePaymentOrderIdForLab(selectedLabId);
+          const fingerprint = `${labIdKey(selectedLabId)}|${amt}|${str(linkedOrderId)}`;
+          if (paymentClientRequestRef.current.fingerprint !== fingerprint) {
+            paymentClientRequestRef.current = {
+              fingerprint,
+              clientRequestId:
+                typeof crypto !== "undefined" && crypto.randomUUID
+                  ? crypto.randomUUID()
+                  : `CRQ-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+            };
+          }
           const sbRes = await createPaymentWrite({
             labId: labIdKey(selectedLabId),
             tenantId: tenantId || null,
@@ -2633,10 +2644,12 @@ export default function CollectionsPage({
             outstandingBefore: Number(selectedCollection?.outstandingAmount ?? 0),
             collectedBy: currentUser?.name || "System User",
             note,
+            clientRequestId: paymentClientRequestRef.current.clientRequestId,
           });
 
           logSupabaseFeatureSource("Collections.paymentWrite", { api: "createPaymentWrite" });
           if (sbRes.success) {
+            paymentClientRequestRef.current = { fingerprint: "", clientRequestId: "" };
             if (note || nextFollowUp || nextAction) {
               await updateCollectionNotesWrite(notesPayload);
             }

@@ -35,15 +35,15 @@ Agent-created `PROSPECT` Labs (Flow 2A `create_prospect_lab`) must **not** inser
 
 ## Payment lifecycle
 
-1. `createPaymentWrite` validates lab + amount
-2. Optional `order_id` → `finalizeInvoiceForOrderPayment`
-3. `post_collection_payment` RPC (preferred)
-4. AR outstanding reduced
-5. `completeOrderLinkedPaymentAllocation` if invoice exists
+1. `createPaymentWrite` validates lab + amount + `client_request_id`
+2. Optional `order_id` → `finalizeInvoiceForOrderPayment` (draft must become customer-facing before allocate)
+3. **Only** `post_collection_payment` RPC — fail closed if the RPC is missing or errors
+4. Linked path (`order_id` present): one transaction creates the payment, reduces AR, inserts `invoice_payment_allocations`, and syncs invoice status
+5. Unlinked path (no `order_id`): one transaction creates the payment and reduces AR; no allocation
 
-**Compensation:** New payment + allocation failure → reverse AR + delete payment.
+**Forbidden:** client INSERT/UPDATE/DELETE on `payments`; client UPDATE of AR financial columns; compensation-by-delete; `payments.invoice_id`.
 
-**Forbidden:** `payments.invoice_id` — junction only.
+**Overpayment (Flow 3A):** reject when `amount_received` exceeds AR `outstanding`, or (linked) exceeds invoice open balance. Do not floor with `GREATEST(0, outstanding - amount)` to hide surplus. No unapplied-cash subsystem in 3A.
 
 ---
 
@@ -58,10 +58,10 @@ Agent-created `PROSPECT` Labs (Flow 2A `create_prospect_lab`) must **not** inser
 
 ## Fulfill AR posting
 
-- Client path: `bumpArOutstandingForFulfillment` from `updateOrderStatusWrite` when status becomes Fulfilled, `ar_posted` is not already true, lab_id is present, and merchandise amount > 0.
+- Client path: `bumpArOutstandingForFulfillment` → **`post_fulfillment_ar_bump` RPC** from `updateOrderStatusWrite` / `createOrderWrite` when status becomes Fulfilled, `ar_posted` is not already true, lab_id is present, and merchandise amount > 0.
 - Amount: `orders.total_amount` (merchandise). Delivery estimate is not added.
-- Table privilege: `GRANT UPDATE ON TABLE public.ar_credit_control TO authenticated` (Lab Ordering 1H). RLS policy `ar_credit_update_by_role` is not loosened by 1H.
-- Idempotency: `orders.ar_posted`.
+- Authenticated clients must not UPDATE `outstanding` / `total_paid` / `total_delivered`. Trigger `ar_credit_protect_financial_columns` enforces RPC-only financial mutation. Table `GRANT UPDATE` remains for operational columns (notes/follow-up/`updated_at`) and Lab Ordering 1H probes.
+- Idempotency: `orders.ar_posted` inside the RPC.
 
 ## Delivery charges (Phase 3A)
 
@@ -93,6 +93,7 @@ Agent-created `PROSPECT` Labs (Flow 2A `create_prospect_lab`) must **not** inser
 4. Guntur tenant untouched by golden scripts
 5. Bounded payment reads
 6. Compensation/payroll does not mutate finance SoT and does not compute commission from revenue or receivables
+7. Payment posting is atomic in `post_collection_payment` (linked: payment + AR + allocation). Fail closed. No client compensation-by-delete.
 
 ---
 
@@ -101,7 +102,8 @@ Agent-created `PROSPECT` Labs (Flow 2A `create_prospect_lab`) must **not** inser
 | Domain | Key functions |
 |--------|---------------|
 | Invoice | `createInvoiceForFulfilledOrderWrite`, `getInvoicesForLabRead`, `generateInvoicePdf` |
-| Payment | `createPaymentWrite`, `allocatePaymentToInvoiceWrite` |
+| Payment | `createPaymentWrite` → `post_collection_payment` (fail closed; `client_request_id` required), `allocatePaymentToInvoiceWrite` (repair/legacy allocate) |
+| Fulfill AR | `bumpArOutstandingForFulfillment` → `post_fulfillment_ar_bump` |
 | Status | `invoiceAccountStatus.js`, `buildLabAccountLedger` |
 | Compensation / payroll | Phase 3B preview calculation APIs and Phase 3C payroll-domain workflow APIs; see `19_Executive_Compensation_Payroll_Engine.md` |
 
@@ -109,7 +111,7 @@ Agent-created `PROSPECT` Labs (Flow 2A `create_prospect_lab`) must **not** inser
 
 ## Verification
 
-- `verify-lab-ordering-1h-ar-and-projection.mjs`
+- `verify-flow-3a.mjs`
 - `verify-financial-reconciliation.mjs`
 - `verify-partial-payment-sync.mjs`
 - `verify-invoice-phase1.mjs` – `phase5.mjs`
