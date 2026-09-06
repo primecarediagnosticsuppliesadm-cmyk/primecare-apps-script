@@ -61,6 +61,8 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 
 **`create_prospect_lab`:** SECURITY DEFINER, `search_path=public`, EXECUTE granted to `authenticated` only. Inputs: `p_lab_name`, `p_owner_name`, `p_phone`, `p_area`. Server derives tenant + sourced_by; server generates `LAB-P-*` `lab_id`. Same-tenant duplicate phone → `prospect_phone_exists`; same-tenant normalized name+area → `prospect_name_area_exists`. Audit: `user_provisioning_events` `event_type=created` with `payload.action=lab_prospect_created`.
 
+**`activate_prospect_lab` (Flow 2C):** SECURITY DEFINER, `search_path=public`, REVOKE PUBLIC/anon, GRANT authenticated. Inputs: `p_lab_id`, optional `p_initial_agent_id`. Tenant derived from authenticated Admin/Executive profile (client tenant_id not trusted). Preconditions: active HQ profile, same tenant, target `status=PROSPECT`. Result: `status=ACTIVE`, `ordering_mode=hq_managed`, one `ar_credit_control` row (HQ Add Lab defaults: limit 0, outstanding/delivered/paid 0), optional `lab_ownership` + `assigned_agent_id` (sourcing Agent if still active, else explicit `p_initial_agent_id`, else unassigned). Does **not** SET `sourced_by_agent_id`. Does **not** create Lab user, order, invoice, shipment, inventory, or payment. Repeat call on ACTIVE → `activate_already_active` with no second AR/ownership. Audit: `user_provisioning_events` `event_type=updated` with `payload.action=lab_prospect_activated`. Generic `labs` PATCH of `PROSPECT -> ACTIVE` is rejected by `labs_prospect_activate_via_rpc_only` (`use_activate_prospect_lab`) and by `updateLabLifecycleStatusWrite`.
+
 ---
 
 ## lab_ownership
@@ -529,5 +531,6 @@ Phase 3C allows payroll statuses `draft`, `previewed`, `submitted`, `approved`, 
 | 20260905150000 | Lab Ordering 1H AR UPDATE grant + projection overload drop |
 | 20260905160000 | Agent Prospect 2A `sourced_by_agent_id` + `create_prospect_lab` (QA only in 2A) |
 | 20260905170000 | Agent Prospect 2B append `sourced_by_agent_id` to `v_labs_credit` (QA only in 2B) |
+| 20260905200000 | Agent Prospect 2C `activate_prospect_lab` + `v_labs_credit.created_at` (QA only in 2C) |
 
 Full manual SQL: `supabase/sql/` (includes `agent_resources_v1_migration.sql` mirror).

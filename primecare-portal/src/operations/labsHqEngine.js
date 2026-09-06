@@ -57,6 +57,10 @@ function labOrderingEligible(lab = {}) {
   return labLifecycleActive(lab) && !labOrderingSuspended(lab) && eligible;
 }
 
+export function isHqProspectLab(lab = {}) {
+  return str(lab.status).toUpperCase() === "PROSPECT";
+}
+
 function parseFollowUpDate(value) {
   const raw = str(value);
   if (!raw || raw === "-") return null;
@@ -72,7 +76,7 @@ function startOfToday() {
 
 /** HQ Labs attention queue cards from visible lab rows (read-only). */
 export function buildLabsAttentionCards(labs = [], users = []) {
-  const list = Array.isArray(labs) ? labs : [];
+  const list = (Array.isArray(labs) ? labs : []).filter((lab) => !isHqProspectLab(lab));
   const today = startOfToday();
 
   const outstanding = list.filter((lab) => num(lab.outstandingAmount ?? lab.outstanding) > 0);
@@ -158,11 +162,13 @@ export function filterLabsForAttention(labs = [], filter = "ALL", users = []) {
 export function buildLabsPortfolioSummary(labs = [], summary = null) {
   const list = Array.isArray(labs) ? labs : [];
   const active = list.filter(labLifecycleActive).length;
+  const prospects = list.filter(isHqProspectLab).length;
   const orderEligible = list.filter(labOrderingEligible).length;
   const orderingSuspended = list.filter(labOrderingSuspended).length;
   return {
     totalLabs: list.length,
     activeLabs: active,
+    prospectLabs: prospects,
     orderEligibleLabs: orderEligible,
     orderingSuspendedLabs: orderingSuspended,
     revenue: num(summary?.totalRevenue),
@@ -196,7 +202,7 @@ export function labOutstandingAmount(lab = {}) {
  * Uses resolved agent id/name; unassigned labs returned separately.
  */
 export function buildAgentCoverage(labs = [], users = []) {
-  const list = Array.isArray(labs) ? labs : [];
+  const list = (Array.isArray(labs) ? labs : []).filter((lab) => !isHqProspectLab(lab));
   const byAgent = new Map();
   const unassignedLabs = [];
 

@@ -12,6 +12,7 @@ import {
   formatLabsCurrency,
   formatLabsDate,
   hasLabField,
+  isHqProspectLab,
 } from "@/operations/labsHqEngine.js";
 import {
   resolveLabAgent,
@@ -40,6 +41,12 @@ import {
   ShieldAlert,
   Users,
 } from "lucide-react";
+
+const HQ_LAB_TABS = [
+  { id: "all", label: "All Labs" },
+  { id: "active", label: "Active Labs" },
+  { id: "prospects", label: "Prospects" },
+];
 
 const ATTENTION_ICONS = {
   outstanding: IndianRupee,
@@ -78,6 +85,68 @@ function CreditBadge({ status }) {
     <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", cls)}>
       {s === "NEAR_LIMIT" ? "Near Limit" : s === "HOLD" ? "Hold" : "OK"}
     </span>
+  );
+}
+
+function sourcedAgentLabel(lab, directoryUsers = []) {
+  const sourcedId = str(lab.sourcedByAgentId || lab.sourced_by_agent_id);
+  if (!sourcedId) return "—";
+  const match = (directoryUsers || []).find(
+    (u) => str(u.agentId || u.agent_id).toLowerCase() === sourcedId.toLowerCase()
+  );
+  const name = str(match?.agentName || match?.name || match?.fullName);
+  return name ? `${name} (${sourcedId})` : sourcedId;
+}
+
+function HqProspectDirectoryCard({ lab, directoryUsers, focusLabId, onReviewLab }) {
+  return (
+    <article
+      id={lab.labId ? `hq-lab-row-${labIdKey(lab.labId)}` : undefined}
+      className={cn(
+        "rounded-xl border border-amber-200 bg-amber-50/70 p-3 shadow-sm",
+        focusLabId && labIdKey(lab.labId) === focusLabId &&
+          "border-amber-400 ring-2 ring-amber-400/50"
+      )}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <h3 className="text-sm font-semibold text-slate-900">{lab.labName || "Unnamed Lab"}</h3>
+            <Badge className="bg-amber-100 text-[10px] text-amber-900">PROSPECT</Badge>
+          </div>
+          <p className="mt-1 text-[11px] font-medium text-amber-900">Awaiting activation / Prospect</p>
+        </div>
+      </div>
+      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs sm:grid-cols-4">
+        <div>
+          <dt className="text-slate-500">Contact</dt>
+          <dd className="font-medium text-slate-800">{hasLabField(lab.ownerName) ? lab.ownerName : "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">Phone</dt>
+          <dd className="font-medium text-slate-800">{hasLabField(lab.phone) ? lab.phone : "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">City / locality</dt>
+          <dd className="font-medium text-slate-800">{hasLabField(lab.area) ? lab.area : "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">Sourced Agent</dt>
+          <dd className="font-medium text-slate-800">{sourcedAgentLabel(lab, directoryUsers)}</dd>
+        </div>
+        {hasLabField(lab.createdAt) ? (
+          <div>
+            <dt className="text-slate-500">Created</dt>
+            <dd className="font-medium text-slate-800">{formatLabsDate(lab.createdAt)}</dd>
+          </div>
+        ) : null}
+      </dl>
+      <div className="mt-3">
+        <Button type="button" size="sm" className="h-8 text-xs" onClick={() => onReviewLab(lab)}>
+          Review Prospect
+        </Button>
+      </div>
+    </article>
   );
 }
 
@@ -280,6 +349,7 @@ export default function HqLabsAdminView({
   const [opsLoading, setOpsLoading] = useState(false);
   const [attentionFilter, setAttentionFilter] = useState(null);
   const [directoryUsers, setDirectoryUsers] = useState([]);
+  const [hqLabTab, setHqLabTab] = useState("all");
 
   const attentionCards = useMemo(
     () => buildLabsAttentionCards(visibleLabs, directoryUsers),
@@ -294,11 +364,20 @@ export default function HqLabsAdminView({
     [visibleLabs, directoryUsers]
   );
 
+  const tabbedLabs = useMemo(() => {
+    const list = Array.isArray(visibleLabs) ? visibleLabs : [];
+    if (hqLabTab === "prospects") return list.filter(isHqProspectLab);
+    if (hqLabTab === "active") {
+      return list.filter((lab) => str(lab.status).toUpperCase() === "ACTIVE");
+    }
+    return list;
+  }, [visibleLabs, hqLabTab]);
+
   const directoryFilter = attentionFilter || creditFilter;
-  const filteredLabs = useMemo(
-    () => filterLabsForAttention(visibleLabs, directoryFilter, directoryUsers),
-    [visibleLabs, directoryFilter, directoryUsers]
-  );
+  const filteredLabs = useMemo(() => {
+    if (hqLabTab === "prospects") return tabbedLabs;
+    return filterLabsForAttention(tabbedLabs, directoryFilter, directoryUsers);
+  }, [tabbedLabs, directoryFilter, directoryUsers, hqLabTab]);
 
   const reviewLab = useMemo(
     () => visibleLabs.find((lab) => labIdKey(lab.labId) === reviewLabId) || null,
@@ -380,6 +459,14 @@ export default function HqLabsAdminView({
   function handleCreditChip(filter) {
     setAttentionFilter(null);
     setCreditFilter(filter);
+  }
+
+  function handleHqLabTab(tabId) {
+    setHqLabTab(tabId);
+    if (tabId === "prospects") {
+      setAttentionFilter(null);
+      setCreditFilter("ALL");
+    }
   }
 
   function handleReviewLab(lab) {
@@ -534,10 +621,11 @@ export default function HqLabsAdminView({
 
       <section aria-label="Portfolio summary">
         <h2 className="mb-2 text-sm font-semibold text-slate-900">Portfolio Summary</h2>
-        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
           {[
             { label: "Total Labs", value: portfolio.totalLabs },
             { label: "Active Labs", value: portfolio.activeLabs },
+            { label: "Prospect Labs", value: portfolio.prospectLabs },
             { label: "Order-Eligible Labs", value: portfolio.orderEligibleLabs },
             { label: "Ordering Suspended", value: portfolio.orderingSuspendedLabs },
           ].map((kpi) => (
@@ -620,52 +708,88 @@ export default function HqLabsAdminView({
           </span>
         </div>
 
-        <div className="mb-3 flex flex-wrap gap-1.5">
-          {["ALL", "OK", "NEAR_LIMIT", "HOLD"].map((filter) => (
+        <div className="mb-3 flex flex-wrap gap-1">
+          {HQ_LAB_TABS.map((tab) => (
             <button
-              key={filter}
+              key={tab.id}
               type="button"
-              onClick={() => handleCreditChip(filter)}
+              onClick={() => handleHqLabTab(tab.id)}
               className={cn(
-                "rounded-full border px-2.5 py-0.5 text-[11px] transition",
-                !attentionFilter && creditFilter === filter
+                "rounded-full border px-3 py-1 text-[11px] transition",
+                hqLabTab === tab.id
                   ? "border-slate-900 bg-slate-900 text-white"
                   : "border-slate-200 bg-white text-slate-700"
               )}
             >
-              {filter === "NEAR_LIMIT" ? "Near Limit" : filter === "ALL" ? "All" : filter}
+              {tab.label}
             </button>
           ))}
-          {attentionFilter ? (
-            <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-[11px] font-medium text-indigo-800">
-              Filter: {attentionFilter.replace(/_/g, " ")}
-              <button
-                type="button"
-                className="ml-1 underline"
-                onClick={() => setAttentionFilter(null)}
-              >
-                clear
-              </button>
-            </span>
-          ) : null}
         </div>
 
+        {hqLabTab !== "prospects" ? (
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {["ALL", "OK", "NEAR_LIMIT", "HOLD"].map((filter) => (
+              <button
+                key={filter}
+                type="button"
+                onClick={() => handleCreditChip(filter)}
+                className={cn(
+                  "rounded-full border px-2.5 py-0.5 text-[11px] transition",
+                  !attentionFilter && creditFilter === filter
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-700"
+                )}
+              >
+                {filter === "NEAR_LIMIT" ? "Near Limit" : filter === "ALL" ? "All" : filter}
+              </button>
+            ))}
+            {attentionFilter ? (
+              <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-[11px] font-medium text-indigo-800">
+                Filter: {attentionFilter.replace(/_/g, " ")}
+                <button
+                  type="button"
+                  className="ml-1 underline"
+                  onClick={() => setAttentionFilter(null)}
+                >
+                  clear
+                </button>
+              </span>
+            ) : null}
+          </div>
+        ) : (
+          <p className="mb-3 text-[11px] text-amber-800">
+            Prospects awaiting HQ activation. AR, Lab login, and self-service ordering are not created yet.
+          </p>
+        )}
+
         {filteredLabs.length === 0 ? (
-          <p className="py-4 text-center text-sm text-slate-500">No labs match the current filter.</p>
+          <p className="py-4 text-center text-sm text-slate-500">
+            {hqLabTab === "prospects" ? "No prospects awaiting activation." : "No labs match the current filter."}
+          </p>
         ) : (
           <div className="space-y-2">
-            {filteredLabs.map((lab, idx) => (
-              <HqLabDirectoryCard
-                key={`${lab.labId || lab.labName}-${idx}`}
-                lab={lab}
-                focusLabId={focusLabId}
-                homeTenantId={homeTenantId}
-                directoryUsers={directoryUsers}
-                onReviewLab={handleReviewLab}
-                onOpenDistributorOs={handleOpenDistributorOs}
-                onNavigate={handleHqNavigate}
-              />
-            ))}
+            {filteredLabs.map((lab, idx) =>
+              isHqProspectLab(lab) ? (
+                <HqProspectDirectoryCard
+                  key={`${lab.labId || lab.labName}-${idx}`}
+                  lab={lab}
+                  directoryUsers={directoryUsers}
+                  focusLabId={focusLabId}
+                  onReviewLab={handleReviewLab}
+                />
+              ) : (
+                <HqLabDirectoryCard
+                  key={`${lab.labId || lab.labName}-${idx}`}
+                  lab={lab}
+                  focusLabId={focusLabId}
+                  homeTenantId={homeTenantId}
+                  directoryUsers={directoryUsers}
+                  onReviewLab={handleReviewLab}
+                  onOpenDistributorOs={handleOpenDistributorOs}
+                  onNavigate={handleHqNavigate}
+                />
+              )
+            )}
           </div>
         )}
       </section>

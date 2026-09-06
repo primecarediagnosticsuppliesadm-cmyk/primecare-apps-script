@@ -5,6 +5,7 @@ import {
   getCollectionHistoryRead,
   updateLabLifecycleStatusWrite,
   updateLabOrderingModeWrite,
+  activateProspectLabWrite,
 } from "@/api/primecareSupabaseApi.js";
 import {
   emitSharedReadBrokerInvalidation,
@@ -34,6 +35,7 @@ import {
 } from "@/labOrdering/orderingGovernance.js";
 import { labAssignedAgentId, resolveLabAgent } from "@/operations/labAgentResolver.js";
 import { ROLES } from "@/config/rolePermissionMatrix.js";
+import { isHqProspectActivationWriteBlocked } from "@/config/hqReleasePolicy.js";
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -43,6 +45,27 @@ const TABS = [
   { id: "orders", label: "Orders" },
   { id: "createHqOrder", label: "Create HQ Order" },
 ];
+
+function sourcedAgentIdOf(lab = {}) {
+  return str(lab?.sourcedByAgentId || lab?.sourced_by_agent_id);
+}
+
+function sourcedAgentLabel(lab, directoryUsers = []) {
+  const sourcedId = sourcedAgentIdOf(lab);
+  if (!sourcedId) return "—";
+  const match = (directoryUsers || []).find(
+    (u) => str(u.agentId || u.agent_id).toLowerCase() === sourcedId.toLowerCase()
+  );
+  const name = str(match?.agentName || match?.name || match?.fullName);
+  return name ? `${name} (${sourcedId})` : sourcedId;
+}
+
+function activeDirectoryAgents(users = []) {
+  return (Array.isArray(users) ? users : []).filter((u) => {
+    const role = str(u.role).toLowerCase();
+    return role === "agent" && u.active !== false && str(u.agentId || u.agent_id);
+  });
+}
 
 function formatWhen(iso) {
   return formatLabsDate(iso) || null;
@@ -126,6 +149,7 @@ export default function OperationalLabDrawer({
   const [lifecycleSaving, setLifecycleSaving] = useState(false);
   const [lifecycleMessage, setLifecycleMessage] = useState("");
   const [lifecycleError, setLifecycleError] = useState("");
+  const [initialAgentId, setInitialAgentId] = useState("");
   const [collectionDetail, setCollectionDetail] = useState(null);
   const [collectionHistory, setCollectionHistory] = useState([]);
   const [collectionsLoading, setCollectionsLoading] = useState(false);
@@ -170,12 +194,20 @@ export default function OperationalLabDrawer({
     setPreferredDeliveryDay(
       normalizeDeliveryDay(labRecord?.preferredDeliveryDay ?? labRecord?.preferred_delivery_day)
     );
+    const sourced = sourcedAgentIdOf(labRecord);
+    const stillActive = activeDirectoryAgents(directoryUsers).some(
+      (u) => str(u.agentId || u.agent_id) === sourced
+    );
+    setInitialAgentId(stillActive ? sourced : "");
   }, [
     labRecord?.orderingMode,
     labRecord?.ordering_mode,
     labRecord?.status,
     labRecord?.preferredDeliveryDay,
     labRecord?.preferred_delivery_day,
+    labRecord?.sourcedByAgentId,
+    labRecord?.sourced_by_agent_id,
+    directoryUsers,
     labId,
     open,
   ]);
@@ -190,7 +222,7 @@ export default function OperationalLabDrawer({
   }, [open]);
 
   useEffect(() => {
-    if (!open || !labId) {
+    if (!open || !labId || normalizeLifecycleStatus(labRecord?.status) === "PROSPECT") {
       setQualification(null);
       return;
     }
@@ -209,10 +241,10 @@ export default function OperationalLabDrawer({
     return () => {
       cancelled = true;
     };
-  }, [open, labId]);
+  }, [open, labId, labRecord?.status]);
 
   useEffect(() => {
-    if (!open || !labId) {
+    if (!open || !labId || normalizeLifecycleStatus(labRecord?.status) === "PROSPECT") {
       setVisitRows([]);
       return;
     }
@@ -236,10 +268,10 @@ export default function OperationalLabDrawer({
     return () => {
       cancelled = true;
     };
-  }, [open, labId, labTenantId, currentUser]);
+  }, [open, labId, labTenantId, currentUser, labRecord?.status]);
 
   useEffect(() => {
-    if (!open || !labId) {
+    if (!open || !labId || normalizeLifecycleStatus(labRecord?.status) === "PROSPECT") {
       setCollectionDetail(null);
       setCollectionHistory([]);
       return;
@@ -269,7 +301,7 @@ export default function OperationalLabDrawer({
     return () => {
       cancelled = true;
     };
-  }, [open, labId, labTenantId, currentUser]);
+  }, [open, labId, labTenantId, currentUser, labRecord?.status]);
 
   if (!open) return null;
 
@@ -372,6 +404,51 @@ export default function OperationalLabDrawer({
     }
   }
 
+  async function handleActivateProspect() {
+    if (!canEditOrderingMode || !labId) return;
+    if (lifecycleStatus !== "PROSPECT") return;
+    if (isHqProspectActivationWriteBlocked()) {
+      setLifecycleError("Prospect activation is not available in this environment.");
+      return;
+    }
+    const ok = window.confirm(
+      "Activate this prospect as an operational Lab?\n\nAR will be initialized.\nOrdering remains HQ managed.\nLab login is NOT created.\nSource attribution remains unchanged."
+    );
+    if (!ok) return;
+    setLifecycleSaving(true);
+    setLifecycleError("");
+    setLifecycleMessage("");
+    try {
+      const res = await activateProspectLabWrite({
+        labId,
+        initialAgentId,
+      });
+      if (!res?.success) throw new Error(res?.error || "Could not activate this prospect.");
+      setLifecycleStatus("ACTIVE");
+      setOrderingMode(normalizeOrderingMode(res?.data?.orderingMode || "hq_managed"));
+      setLifecycleMessage("Prospect activated as an operational Lab. Ordering remains HQ managed.");
+      emitSharedReadBrokerInvalidation({
+        tenantId: labTenantId,
+        labId,
+        source: "lab-prospect-activated",
+      });
+      onAction?.("refreshLabs", { labId, status: "ACTIVE" });
+      onClose?.();
+    } catch (err) {
+      setLifecycleError(err?.message || "Could not activate this prospect.");
+    } finally {
+      setLifecycleSaving(false);
+    }
+  }
+
+  const isProspect = lifecycleStatus === "PROSPECT";
+  const visibleTabs = isProspect
+    ? TABS.filter((tab) => tab.id === "overview" || tab.id === "lifecycle")
+    : TABS;
+  const prospectAgents = activeDirectoryAgents(directoryUsers);
+  const canActivateProspect =
+    canEditOrderingMode && isProspect && !isHqProspectActivationWriteBlocked();
+
   return (
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Review lab">
       <button
@@ -392,7 +469,9 @@ export default function OperationalLabDrawer({
               {labRecord?.labName || snapshot?.labName || "Lab"}
             </p>
             <p className="text-[11px] text-slate-500">
-              {labRecord?.area ? (
+              {isProspect ? (
+                <span className="font-medium text-amber-800">Awaiting activation / Prospect</span>
+              ) : labRecord?.area ? (
                 <>
                   <MapPin className="mr-0.5 inline h-3 w-3" />
                   {labRecord.area}
@@ -409,7 +488,7 @@ export default function OperationalLabDrawer({
 
         <div className="shrink-0 border-b px-2 py-1.5">
           <div className="flex gap-1 overflow-x-auto">
-            {TABS.map((tab) => (
+            {visibleTabs.map((tab) => (
               <button
                 key={tab.id}
                 type="button"
@@ -437,6 +516,38 @@ export default function OperationalLabDrawer({
 
           {activeTab === "overview" ? (
             <div className="space-y-3">
+              {isProspect ? (
+                <>
+                  <section className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <StatusBadge variant="warning" compact>
+                        PROSPECT
+                      </StatusBadge>
+                      <StatusBadge variant="neutral" compact>
+                        {orderingModeLabel(orderingMode)}
+                      </StatusBadge>
+                    </div>
+                    <p className="mt-2 text-sm font-semibold text-amber-950">
+                      Awaiting activation / Prospect
+                    </p>
+                    <p className="mt-1 text-[11px] text-amber-900">
+                      This account is not operational yet. AR, Lab login, and self-service ordering
+                      are not created until HQ activates.
+                    </p>
+                  </section>
+                  <dl className="grid grid-cols-2 gap-3 text-xs">
+                    <Field label="Lab name" value={labRecord?.labName} />
+                    <Field label="Contact" value={labRecord?.ownerName} />
+                    <Field label="Phone" value={labRecord?.phone} />
+                    <Field label="City / locality" value={labRecord?.area} />
+                    <Field label="Sourced Agent" value={sourcedAgentLabel(labRecord, directoryUsers)} />
+                    <Field label="Created" value={formatWhen(labRecord?.createdAt)} />
+                    <Field label="Status" value="PROSPECT" />
+                    <Field label="Ordering" value="HQ Managed" />
+                  </dl>
+                </>
+              ) : (
+                <>
               <section className="rounded-lg border bg-slate-50/80 p-3">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <StatusBadge variant={collectionRiskToVariant(riskLevel)} compact>
@@ -473,6 +584,8 @@ export default function OperationalLabDrawer({
               <dl className="grid grid-cols-2 gap-3 text-xs">
                 <Field label="Revenue" value={formatLabsCurrency(labRecord?.revenue)} />
                 <Field label="Credit limit" value={formatLabsCurrency(labRecord?.creditLimit)} />
+                <Field label="Assigned Agent" value={assignedAgent.displayLabel || agentName || "Unassigned"} />
+                <Field label="Sourced Agent" value={sourcedAgentLabel(labRecord, directoryUsers)} />
                 <Field label="Stage" value={labRecord?.stage} />
                 <Field label="Last visit" value={formatWhen(labRecord?.lastVisit)} />
                 <Field label="Next follow-up" value={formatWhen(labRecord?.nextFollowUp)} />
@@ -585,6 +698,8 @@ export default function OperationalLabDrawer({
                   </p>
                 )}
               </section>
+                </>
+              )}
             </div>
           ) : null}
 
@@ -592,7 +707,14 @@ export default function OperationalLabDrawer({
             <div className="space-y-3">
               <section className="rounded-lg border bg-white p-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <StatusBadge variant={lifecycleStatus === "INACTIVE" ? "warning" : "success"} compact>
+                  <StatusBadge
+                    variant={
+                      lifecycleStatus === "PROSPECT" || lifecycleStatus === "INACTIVE"
+                        ? "warning"
+                        : "success"
+                    }
+                    compact
+                  >
                     {lifecycleStatus}
                   </StatusBadge>
                   <StatusBadge variant="neutral" compact>
@@ -602,9 +724,72 @@ export default function OperationalLabDrawer({
                 <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
                   <Field label="Current lifecycle status" value={lifecycleStatus} />
                   <Field label="Current ordering mode" value={orderingModeLabel(orderingMode)} />
+                  <Field label="Sourced Agent" value={sourcedAgentLabel(labRecord, directoryUsers)} />
+                  <Field
+                    label="Assigned Agent"
+                    value={assignedAgent.isAssigned ? assignedAgent.displayLabel : "Unassigned"}
+                  />
                 </dl>
               </section>
 
+              {isProspect ? (
+                <section className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                  <p className="text-sm font-semibold text-amber-950">Awaiting activation / Prospect</p>
+                  <p className="text-[11px] text-amber-900">
+                    Activation initializes AR, keeps ordering HQ managed, does not create a Lab login,
+                    and leaves source attribution unchanged.
+                  </p>
+                  {canActivateProspect ? (
+                    <label className="block text-[11px] font-medium text-slate-700">
+                      Initial assigned Agent
+                      <select
+                        className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                        value={initialAgentId}
+                        onChange={(e) => setInitialAgentId(e.target.value)}
+                        disabled={lifecycleSaving}
+                      >
+                        <option value="">
+                          {sourcedAgentIdOf(labRecord)
+                            ? "Default: sourcing Agent if still active, otherwise unassigned"
+                            : "Unassigned"}
+                        </option>
+                        {prospectAgents.map((agent) => {
+                          const id = str(agent.agentId || agent.agent_id);
+                          const name = str(agent.agentName || agent.name || id);
+                          return (
+                            <option key={id} value={id}>
+                              {name} ({id})
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </label>
+                  ) : null}
+                  {lifecycleError ? (
+                    <p className="text-[11px] text-red-700">{lifecycleError}</p>
+                  ) : null}
+                  {lifecycleMessage ? (
+                    <p className="text-[11px] text-emerald-700">{lifecycleMessage}</p>
+                  ) : null}
+                  {canActivateProspect ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8 text-xs"
+                      disabled={lifecycleSaving}
+                      onClick={() => void handleActivateProspect()}
+                    >
+                      {lifecycleSaving ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                      Activate Lab
+                    </Button>
+                  ) : (
+                    <p className="text-[11px] text-slate-600">
+                      Only HQ Admin or Executive can activate this prospect.
+                    </p>
+                  )}
+                </section>
+              ) : (
+                <>
               <section className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
                 <p className="font-semibold">Inactive warning</p>
                 <p className="mt-1">
@@ -641,16 +826,18 @@ export default function OperationalLabDrawer({
                   <p className="text-[11px] text-emerald-700">{lifecycleMessage}</p>
                 ) : null}
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="h-8 text-xs"
-                    disabled={lifecycleSaving || lifecycleStatus === "ACTIVE"}
-                    onClick={() => void handleLifecycleChange("ACTIVE")}
-                  >
-                    {lifecycleSaving ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
-                    Activate
-                  </Button>
+                  {lifecycleStatus !== "ACTIVE" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8 text-xs"
+                      disabled={lifecycleSaving}
+                      onClick={() => void handleLifecycleChange("ACTIVE")}
+                    >
+                      {lifecycleSaving ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                      Activate
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
                     size="sm"
@@ -670,6 +857,8 @@ export default function OperationalLabDrawer({
                   </p>
                 ) : null}
               </section>
+                </>
+              )}
             </div>
           ) : null}
 

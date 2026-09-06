@@ -49,6 +49,14 @@ export function isHqStructuralWriteBlocked() {
   return isHqAdminFrozen();
 }
 
+/**
+ * Prospect Activate Lab is a certified HQ operational exception.
+ * Does not globally unfreeze catalog, order status, or user provisioning.
+ */
+export function isHqProspectActivationWriteBlocked() {
+  return false;
+}
+
 /** Master catalog create/edit/enable-disable blocked during freeze. */
 export function isHqCatalogWriteBlocked() {
   return isHqAdminFrozen();

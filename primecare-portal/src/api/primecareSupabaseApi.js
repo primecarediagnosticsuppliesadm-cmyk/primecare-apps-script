@@ -174,7 +174,6 @@ export const LAB_LIFECYCLE_STATUS = {
 
 const LAB_LIFECYCLE_STATUS_VALUES = new Set(Object.values(LAB_LIFECYCLE_STATUS));
 const LAB_LIFECYCLE_ALLOWED_TRANSITIONS = new Set([
-  `${LAB_LIFECYCLE_STATUS.PROSPECT}->${LAB_LIFECYCLE_STATUS.ACTIVE}`,
   `${LAB_LIFECYCLE_STATUS.ACTIVE}->${LAB_LIFECYCLE_STATUS.INACTIVE}`,
   `${LAB_LIFECYCLE_STATUS.INACTIVE}->${LAB_LIFECYCLE_STATUS.ACTIVE}`,
 ]);
@@ -218,6 +217,13 @@ export function validateLabLifecycleTransition({
   }
   if (previous === next) {
     return { ok: false, code: "no_status_change", error: "Lab is already in that status" };
+  }
+  if (previous === LAB_LIFECYCLE_STATUS.PROSPECT && next === LAB_LIFECYCLE_STATUS.ACTIVE) {
+    return {
+      ok: false,
+      code: "use_activate_prospect_lab",
+      error: "Activate this prospect with Activate Lab. Generic status change is not used.",
+    };
   }
   const transition = `${previous}->${next}`;
   if (!LAB_LIFECYCLE_ALLOWED_TRANSITIONS.has(transition)) {
@@ -1276,6 +1282,7 @@ export function mapLabsCreditRow(row) {
         row.agentName
     ),
     sourcedByAgentId: str(row.sourced_by_agent_id ?? row.sourcedByAgentId ?? ""),
+    createdAt: str(row.created_at ?? row.createdAt ?? ""),
     status: str(row.status ?? row.Status),
     activeFlag: str(row.active_flag ?? row.activeFlag ?? row.Active_Flag ?? ""),
     stage: str(row.stage ?? row.Stage),
@@ -1397,6 +1404,73 @@ function mapProspectLabCreateError(raw) {
     return "Lab name, contact name, phone, and city/locality are required.";
   }
   return "Could not add this prospect. Please try again or contact HQ.";
+}
+
+function mapActivateProspectError(raw) {
+  const message = str(raw);
+  const lower = message.toLowerCase();
+  if (lower.includes("activate_already_active")) {
+    return "This Lab is already active.";
+  }
+  if (lower.includes("activate_not_prospect")) {
+    return "Only a PROSPECT Lab can be activated this way.";
+  }
+  if (lower.includes("activate_agent_invalid")) {
+    return "Choose an active Agent in this tenant, or leave assignment defaulted.";
+  }
+  if (lower.includes("activate_forbidden") || lower.includes("activate_inactive")) {
+    return "Only an active HQ Admin or Executive can activate a prospect.";
+  }
+  if (lower.includes("activate_lab_not_found")) {
+    return "Prospect not found in your tenant.";
+  }
+  if (lower.includes("activate_unauthenticated") || lower.includes("activate_profile_missing")) {
+    return "Sign in as HQ Admin or Executive to activate this prospect.";
+  }
+  if (lower.includes("activate_lab_required")) {
+    return "Lab id is required.";
+  }
+  return "Could not activate this prospect. Please try again or contact HQ.";
+}
+
+/**
+ * HQ Admin/Executive: PROSPECT -> ACTIVE via activate_prospect_lab.
+ * Sends only lab id and optional initial agent. Tenant is derived server-side.
+ */
+export async function activateProspectLabWrite(payload = {}) {
+  if (!supabase) {
+    return { success: false, error: "Could not activate this prospect. Please try again or contact HQ." };
+  }
+  const labId = labIdKey(payload.labId ?? payload.lab_id ?? payload.p_lab_id);
+  const initialAgentId = str(payload.initialAgentId ?? payload.p_initial_agent_id);
+  if (!labId) {
+    return { success: false, code: "activate_lab_required", error: "Lab id is required." };
+  }
+  const args = { p_lab_id: labId };
+  if (initialAgentId) args.p_initial_agent_id = initialAgentId;
+  const { data, error } = await supabase.rpc("activate_prospect_lab", args);
+  if (error) {
+    const mapped = mapActivateProspectError(error.message || error.code);
+    return {
+      success: false,
+      code: /activate_[a-z_]+/.exec(str(error.message))?.[0] || "activate_failed",
+      error: mapped,
+    };
+  }
+  invalidateLabsCreditReadCache();
+  const row = data && typeof data === "object" ? data : {};
+  return {
+    success: true,
+    data: {
+      labId: str(row.lab_id ?? row.labId) || labId,
+      status: str(row.status) || "ACTIVE",
+      orderingMode: str(row.ordering_mode ?? row.orderingMode) || "hq_managed",
+      sourcedByAgentId: str(row.sourced_by_agent_id ?? row.sourcedByAgentId),
+      assignedAgentId: str(row.assigned_agent_id ?? row.assignedAgentId),
+      arCreated: row.ar_created === true,
+      ownershipCreated: row.ownership_created === true,
+    },
+  };
 }
 
 /**

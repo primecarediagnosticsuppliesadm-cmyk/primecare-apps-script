@@ -146,9 +146,9 @@ Critical fields and **id vs business key** rules. Full table columns: `01_Databa
 | **Meaning** | Lab lifecycle/account status |
 | **Values** | `PROSPECT`, `ACTIVE`, `INACTIVE` |
 | **KPI** | `Total Labs` counts all visible labs; `Prospect Labs`, `Active Labs`, and `Inactive Labs` count `labs.status == PROSPECT`, `ACTIVE`, and `INACTIVE` respectively |
-| **Written by** | HQ `createLabWrite` / `create_lab_with_ar_credit` writes `ACTIVE`; Agent `create_prospect_lab` writes `PROSPECT`; `updateLabLifecycleStatusWrite` for HQ lifecycle transitions |
+| **Written by** | HQ `createLabWrite` / `create_lab_with_ar_credit` writes `ACTIVE`; Agent `create_prospect_lab` writes `PROSPECT`; HQ `activate_prospect_lab` writes `PROSPECT -> ACTIVE` (AR + optional ownership); `updateLabLifecycleStatusWrite` for `ACTIVE <-> INACTIVE` only (rejects `PROSPECT -> ACTIVE`) |
 | **Transition roles** | `admin`, `executive` only |
-| **Transition controls** | Confirmation required; reason required for `PROSPECT -> INACTIVE`, `ACTIVE -> INACTIVE`, and `INACTIVE -> ACTIVE` |
+| **Transition controls** | Prospect activation uses dedicated **Activate Lab** confirmation (not generic PATCH). Reason required for `ACTIVE -> INACTIVE` and `INACTIVE -> ACTIVE`. |
 | **INACTIVE rule** | `ACTIVE -> INACTIVE` must force `labs.ordering_mode = suspended`; `INACTIVE -> ACTIVE` does not restore prior ordering mode |
 | **Not affected by** | `labs.ordering_mode`; checkout suspension does not change lifecycle-active status |
 | **Must not affect** | AR, invoices, payments, allocations, orders, shipments, Track Order, audit history, reporting history, or authorized HQ visibility |

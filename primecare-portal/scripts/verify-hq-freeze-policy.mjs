@@ -26,6 +26,11 @@ assert(/isHqOrderStatusWriteBlocked/.test(policy), "order status write policy");
 assert(/isHqStructuralWriteBlocked/.test(policy), "structural write policy");
 assert(/isHqCatalogWriteBlocked/.test(policy), "catalog write policy");
 assert(/isHqProcurementWriteBlocked/.test(policy), "procurement write policy");
+assert(/isHqProspectActivationWriteBlocked/.test(policy), "prospect activation write policy");
+assert(
+  /export function isHqProspectActivationWriteBlocked\(\) \{\s*return false;/.test(policy),
+  "prospect activation is a narrow allow, not a global unfreeze"
+);
 assert(/HQ configuration is frozen/.test(policy), "default freeze banner copy");
 
 assert(/isHqOrderStatusWriteBlocked/.test(orders), "Orders uses status write policy");
@@ -45,5 +50,15 @@ assert(/disabled=\{catalogWriteBlocked\}/.test(catalog), "Catalog writes disable
 
 assert(/Record Payment/.test(creditRisk), "Credit & Risk Record Payment available");
 assert(!/hqFrozen/.test(creditRisk), "Credit & Risk not tied to HQ freeze");
+
+const drawer = readFileSync(
+  resolve(root, "src/components/operations/OperationalLabDrawer.jsx"),
+  "utf8"
+);
+assert(/isHqProspectActivationWriteBlocked/.test(drawer), "Activate Lab uses prospect freeze helper");
+assert(
+  !/isHqAdminFrozen\(/.test(drawer) && !/isHqStructuralWriteBlocked\(/.test(drawer),
+  "Activate Lab is not gated by global HQ freeze"
+);
 
 console.log("PASS — HQ freeze policy wiring");
