@@ -18,6 +18,7 @@ import {
 import { optionsMatchCertifiedEnums } from "../src/visits/agentVisitEvidenceFormModel.js";
 import {
   fetchAgentVisitEvidenceBundle,
+  persistAgentVisitDiscoveryLines,
   persistAgentVisitWithOptionalDiscovery,
 } from "../src/visits/agentVisitEvidenceApi.js";
 import {
@@ -103,7 +104,7 @@ assert(
 assert(!/status === "PROSPECT"[\s\S]{0,80}return true/.test(filterFn), "ux.filterLabs_no_include", "filterLabsForUser must not include PROSPECT");
 assert(/Log Visit/.test(form) || /Save visit/.test(form), "ux.save_label", "clear save action");
 assert(/Sourced prospects/.test(page), "ux.prospect_cards", "Visit page shows sourced prospects");
-assert(/Qualify \/ product mix/.test(page), "ux.wizard_parity", "existing qualify wizard remains reachable");
+assert(/Deep qualification/.test(page), "ux.wizard_parity", "existing qualify wizard remains reachable as Deep qualification");
 assert(/AGENT_VISIT_SECTION_STEPS/.test(page) && /upsertLabProductIntelligenceWrite/.test(piPage), "ux.pi_wizard", "wizard snapshot path unchanged");
 assert(/function AgentProspectLabCard/.test(labsPage), "ux.flow2_prospect_card", "Flow 2 AgentProspectLabCard remains");
 assert(/partitionAgentLabs/.test(labsPage), "ux.flow2_partition", "Flow 2 partitionAgentLabs remains the Agent Labs splitter");
@@ -125,12 +126,20 @@ assert(!/VisitProductIntelligenceStep/.test(form), "uat.G.no_pi_step", "fast for
 assert(/data-ve3-add-line=\{kind\}/.test(form) || /data-ve3-add-line/.test(form), "uat.A_D.add_line_attr", "Add Analyzer/Reagent/Consumable stay on fast form");
 assert(/ANALYZER/.test(form) && /REAGENT/.test(form) && /CONSUMABLE/.test(form), "uat.A_D.line_kinds", "all three discovery kinds on fast form");
 assert(/type="button"/.test(form), "uat.add_not_submit", "Add evidence buttons are type=button");
+assert(/Lab size/.test(form) && /data-ve3-lab-size/.test(form), "uat.lab_size_label", "lab size is labeled, not an anonymous Skip");
+assert(!/walletConfidence/.test(form) && !/evidenceConfidence/.test(form), "uat.no_anon_confidence_skip", "wallet/evidence confidence are not unlabeled Skip controls on the fast form");
+assert(/createEmptyVisitEvidenceForm\(\)/.test(form) && /labId: form.labId/.test(form), "uat.reset_after_save", "complete save clears discovery line UUIDs for the next visit");
+assert(/prev.discoveryLines/.test(form), "uat.add_line_functional", "Add Analyzer/Reagent/Consumable append against latest state");
+assert(/data-ve3-uat-fix="idempotent-20260907"/.test(form), "uat.hosted_marker", "hosted QA can prove this UAT fix bundle");
 const wizardModeSets = page.match(/setVisitMode\(["']wizard["']\)/g) || [];
 assert(wizardModeSets.length === 1, "uat.F.wizard_toggle_once", `setVisitMode(wizard) only from Qualify toggle (${wizardModeSets.length})`);
-const qualifyAt = page.indexOf("Qualify / product mix");
+const qualifyAt = page.indexOf("Deep qualification");
 const wizardSetAt = page.indexOf('setVisitMode("wizard")');
-assert(qualifyAt >= 0 && wizardSetAt >= 0 && Math.abs(qualifyAt - wizardSetAt) < 2500, "uat.F.explicit_qualify", "wizard opens only from Qualify / product mix");
-assert(/data-ve3-open-wizard/.test(page), "uat.F.qualify_attr", "explicit Qualify toggle marked");
+assert(qualifyAt >= 0 && wizardSetAt >= 0 && Math.abs(qualifyAt - wizardSetAt) < 2500, "uat.F.explicit_qualify", "wizard opens only from Deep qualification");
+assert(/data-ve3-open-wizard/.test(page) && /data-ve3-deep-qualify/.test(page), "uat.F.qualify_attr", "explicit Deep qualification toggle marked");
+assert(/Optional — open the detailed qualification and product-mix workflow/.test(page), "uat.F.qualify_hint", "Deep qualification is labeled as optional detailed workflow");
+assert(/draftBannerVisible && visitMode === "wizard"/.test(page), "uat.draft_banner_wizard_only", "draft restored banner cannot appear on fast Log Visit");
+assert(/setFastFormEpoch/.test(page), "uat.fast_remount_after_save", "successful save remounts fast form so line UUIDs are not reused on a new visit");
 assert(/visitMode === "wizard" && !isReviewStep/.test(page), "uat.nav_wizard_only", "sticky Continue bar only while wizard is open");
 assert(/visitMode === "fast" \?/.test(page), "uat.fast_not_wizard", "fast Log Visit unmounts wizard");
 assert(/upsertLabProductIntelligenceWrite/.test(page) && !/upsertLabProductIntelligenceWrite/.test(form), "uat.G.H.pi_wizard_only", "PI snapshot remains wizard-only");
@@ -396,6 +405,26 @@ async function runLive() {
   r.assert(header.reorder_interval === "monthly" && header.payment_method_or_terms === "NEFT", "live.13.terms", `${header.reorder_interval}/${header.payment_method_or_terms}`);
   r.assert(header.top_complaint === "PRICE", "live.14.complaint", header.top_complaint || "missing");
 
+  const retrySame = await persistAgentVisitDiscoveryLines(
+    agent.sb,
+    rich.data.id,
+    (rich.discoveryLines || lines).map((row) => ({
+      id: row.id,
+      line_kind: row.line_kind,
+      manufacturer: row.manufacturer,
+      brand: row.brand,
+      product_category: row.product_category,
+    }))
+  );
+  r.assert(
+    !retrySame.error && (retrySame.rows || []).length === 3,
+    "live.27.retry_idempotent",
+    retrySame.error || `retry rows=${(retrySame.rows || []).length}`
+  );
+  const afterRetry = await fetchAgentVisitEvidenceBundle(agent.sb, rich.data.id);
+  r.assert((afterRetry.lines || []).length === 3, "live.27b.no_dup_rows", String((afterRetry.lines || []).length));
+  r.assert(afterRetry.header?.id === rich.data.id, "live.27c.header_unchanged", afterRetry.header?.id || "missing");
+
   const legacy = await persistAgentVisitWithOptionalDiscovery(agent.sb, {
     insertRow: headerRow({ labId: assignedLabId, notes: `${PREFIX} legacy` }),
   });
@@ -428,7 +457,6 @@ async function runLive() {
 
   r.pass("live.25.header_only_ui", "partial-save copy present (static)");
   r.pass("live.26.retry_no_header", "retry uses createAgentVisitDiscoveryLinesWrite (static)");
-  r.pass("live.27.no_dup_lines", "retry reuses line UUIDs / PK (VE-2 certified)");
 
   if (lab.sb) {
     const labRead = await lab.sb.from("agent_visits").select("id").limit(1);

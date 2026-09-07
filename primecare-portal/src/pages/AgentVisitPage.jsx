@@ -1001,6 +1001,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
   const [visitMode, setVisitMode] = useState("fast");
   const [visitAccounts, setVisitAccounts] = useState({ operational: [], prospects: [], all: [] });
   const [fastFormLabId, setFastFormLabId] = useState("");
+  const [fastFormEpoch, setFastFormEpoch] = useState(0);
   const [showWorkspaceReturnCta, setShowWorkspaceReturnCta] = useState(false);
   const [workspaceReturnPath, setWorkspaceReturnPath] = useState(() => peekAgentWorkspaceReturnPath());
   const lastSavedVisitRef = useRef(null);
@@ -2247,7 +2248,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
         />
       </div>
 
-      {draftBannerVisible ? (
+      {draftBannerVisible && visitMode === "wizard" ? (
         <div className="flex items-center justify-between gap-2 rounded-lg border border-blue-200/80 bg-blue-50/80 px-3 py-2 text-sm text-blue-900">
           <span className="min-w-0">Draft restored — pick up where you left off.</span>
           <div className="flex shrink-0 items-center gap-1">
@@ -2285,57 +2286,66 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
         />
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-start gap-2">
         <Button
           type="button"
           variant={visitMode === "fast" ? "default" : "outline"}
           className="h-11"
-          onClick={() => setVisitMode("fast")}
+          onClick={() => {
+            setDraftBannerVisible(false);
+            setVisitMode("fast");
+          }}
         >
           Log Visit
         </Button>
-        <Button
-          type="button"
-          variant={visitMode === "wizard" ? "default" : "outline"}
-          className="h-11"
-          data-ve3-open-wizard="true"
-          onClick={() => {
-            const draft = skippedWizardDraftRef.current;
-            const selectedId = labIdKey(fastFormLabId || form.labId);
-            const draftLabId = labIdKey(draft?.form?.labId);
-            const resumeSameLab =
-              Boolean(draft && selectedId && draftLabId === selectedId) &&
-              !newFastVisitIntentRef.current;
-            setVisitMode("wizard");
-            if (resumeSameLab) {
-              if (draft.qualificationForm && typeof draft.qualificationForm === "object") {
-                setQualificationForm((prev) => ({ ...prev, ...draft.qualificationForm }));
+        <div className="min-w-0 space-y-1">
+          <Button
+            type="button"
+            variant={visitMode === "wizard" ? "default" : "outline"}
+            className="h-11"
+            data-ve3-open-wizard="true"
+            data-ve3-deep-qualify="true"
+            onClick={() => {
+              const draft = skippedWizardDraftRef.current;
+              const selectedId = labIdKey(fastFormLabId || form.labId);
+              const draftLabId = labIdKey(draft?.form?.labId);
+              const resumeSameLab =
+                Boolean(draft && selectedId && draftLabId === selectedId) &&
+                !newFastVisitIntentRef.current;
+              setVisitMode("wizard");
+              if (resumeSameLab) {
+                if (draft.qualificationForm && typeof draft.qualificationForm === "object") {
+                  setQualificationForm((prev) => ({ ...prev, ...draft.qualificationForm }));
+                }
+                if (typeof draft.qualificationEditing === "boolean") {
+                  setQualificationEditing(draft.qualificationEditing);
+                }
+                if (Array.isArray(draft.productLines) && draft.productLines.length) {
+                  skipNextProductLoadRef.current = true;
+                  setProductLines(draft.productLines);
+                }
+                const stepIdx = Math.min(
+                  Math.max(0, Number(draft.currentStepIndex) || 0),
+                  AGENT_VISIT_SECTION_STEPS.length - 1
+                );
+                setCurrentStepIndex(stepIdx);
+                setDraftBannerVisible(true);
+                showToast("info", "Draft restored — pick up where you left off.");
+                recordAgentVisitDraftRestore({
+                  stepIndex: stepIdx,
+                  stepKey: AGENT_VISIT_SECTION_STEPS[stepIdx]?.key,
+                });
+              } else {
+                setCurrentStepIndex(0);
               }
-              if (typeof draft.qualificationEditing === "boolean") {
-                setQualificationEditing(draft.qualificationEditing);
-              }
-              if (Array.isArray(draft.productLines) && draft.productLines.length) {
-                skipNextProductLoadRef.current = true;
-                setProductLines(draft.productLines);
-              }
-              const stepIdx = Math.min(
-                Math.max(0, Number(draft.currentStepIndex) || 0),
-                AGENT_VISIT_SECTION_STEPS.length - 1
-              );
-              setCurrentStepIndex(stepIdx);
-              setDraftBannerVisible(true);
-              showToast("info", "Draft restored — pick up where you left off.");
-              recordAgentVisitDraftRestore({
-                stepIndex: stepIdx,
-                stepKey: AGENT_VISIT_SECTION_STEPS[stepIdx]?.key,
-              });
-            } else {
-              setCurrentStepIndex(0);
-            }
-          }}
-        >
-          Qualify / product mix
-        </Button>
+            }}
+          >
+            Deep qualification
+          </Button>
+          <p className="max-w-xs text-xs text-muted-foreground" data-ve3-deep-qualify-hint="true">
+            Optional — open the detailed qualification and product-mix workflow.
+          </p>
+        </div>
       </div>
 
       {visitMode === "fast" ? (
@@ -2368,7 +2378,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
               </div>
             ) : null}
             <AgentVisitEvidenceForm
-              key={fastFormLabId || "fast-visit"}
+              key={`${fastFormLabId || "fast-visit"}-${fastFormEpoch}`}
               currentUser={currentUser}
               accounts={fastAccounts}
               initialLabId={fastFormLabId || form.labId}
@@ -2376,6 +2386,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
                 const vid = res?.data?.visit_id ?? res?.data?.visitId ?? res?.data?.id ?? "";
                 setSavedVisitSummary({ visitId: vid, labName: form.labName });
                 setSavePhase("success");
+                setFastFormEpoch((n) => n + 1);
                 showToast("success", "Visit saved.");
                 void loadPageData();
               }}
