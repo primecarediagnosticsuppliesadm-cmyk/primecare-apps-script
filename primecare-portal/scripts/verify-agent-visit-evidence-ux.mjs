@@ -15,7 +15,17 @@ import {
   isAgentSourcedProspect,
   filterOperationalLabsForVisit,
 } from "../src/visits/visitEligibleAccounts.js";
-import { optionsMatchCertifiedEnums } from "../src/visits/agentVisitEvidenceFormModel.js";
+import {
+  buildVisitEvidenceWritePayload,
+  compactDiscoveryLine,
+  createEmptyDiscoveryLine,
+  createEmptyVisitEvidenceForm,
+  optionsMatchCertifiedEnums,
+} from "../src/visits/agentVisitEvidenceFormModel.js";
+import {
+  buildAgentVisitDiscoveryLineInsertRows,
+  resolveAgentVisitFollowUpWriteFields,
+} from "../src/visits/agentVisitEvidenceContract.js";
 import {
   fetchAgentVisitEvidenceBundle,
   persistAgentVisitDiscoveryLines,
@@ -55,6 +65,7 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const PREFIX = "[VE-3-CERT]";
+const P1_PREFIX = "[VE-3-P1-CERT]";
 const HQ = QA_HQ_TENANT_ID;
 
 let failures = 0;
@@ -131,6 +142,8 @@ assert(!/walletConfidence/.test(form) && !/evidenceConfidence/.test(form), "uat.
 assert(/createEmptyVisitEvidenceForm\(\)/.test(form) && /labId: form.labId/.test(form), "uat.reset_after_save", "complete save clears discovery line UUIDs for the next visit");
 assert(/prev.discoveryLines/.test(form), "uat.add_line_functional", "Add Analyzer/Reagent/Consumable append against latest state");
 assert(/data-ve3-uat-fix="idempotent-20260907"/.test(form), "uat.hosted_marker", "hosted QA can prove this UAT fix bundle");
+assert(/data-ve3-p1-fix="followup-compact-20260907"/.test(form), "p1.hosted_marker", "hosted QA can prove P1 follow-up/compact bundle");
+assert(/resolveAgentVisitFollowUpWriteFields/.test(api), "p1.insert_uses_followup_helper", "visit insert uses follow-up persist helper");
 const wizardModeSets = page.match(/setVisitMode\(["']wizard["']\)/g) || [];
 assert(wizardModeSets.length === 1, "uat.F.wizard_toggle_once", `setVisitMode(wizard) only from Qualify toggle (${wizardModeSets.length})`);
 const qualifyAt = page.indexOf("Deep qualification");
@@ -162,6 +175,118 @@ assert(
   "entry.keys.pending",
   "pending visit task is a new fast intent"
 );
+
+{
+  const blankForm = { ...createEmptyVisitEvidenceForm(), labId: "LAB-P1" };
+  const blankPayload = buildVisitEvidenceWritePayload(blankForm);
+  assert(
+    !blankPayload.nextFollowUpDate && !blankPayload.nextFollowUpType,
+    "p1.payload.blank_followup",
+    `type=${blankPayload.nextFollowUpType || "empty"} date=${blankPayload.nextFollowUpDate || "empty"}`
+  );
+  const dateOnly = buildVisitEvidenceWritePayload({ ...blankForm, nextFollowUpDate: "2026-09-21" });
+  assert(
+    dateOnly.nextFollowUpDate === "2026-09-21" && dateOnly.nextFollowUpType === "Call",
+    "p1.payload.date_defaults_call",
+    `${dateOnly.nextFollowUpType}/${dateOnly.nextFollowUpDate}`
+  );
+  const actionOnly = buildVisitEvidenceWritePayload({ ...blankForm, nextAction: "Send rate" });
+  assert(
+    actionOnly.nextAction === "Send rate" && !actionOnly.nextFollowUpType,
+    "p1.payload.action_only_no_type",
+    `type=${actionOnly.nextFollowUpType || "empty"}`
+  );
+  const both = buildVisitEvidenceWritePayload({
+    ...blankForm,
+    nextAction: "Send rate",
+    nextFollowUpDate: "2026-09-21",
+  });
+  assert(
+    both.nextFollowUpType === "Call" && both.nextFollowUpDate === "2026-09-21" && both.nextAction === "Send rate",
+    "p1.payload.action_and_date",
+    `${both.nextFollowUpType}/${both.nextFollowUpDate}`
+  );
+  const cleared = buildVisitEvidenceWritePayload({
+    ...blankForm,
+    nextFollowUpDate: "",
+    nextFollowUpType: "Call",
+  });
+  assert(
+    !cleared.nextFollowUpDate && !cleared.nextFollowUpType,
+    "p1.payload.clear_date",
+    `type=${cleared.nextFollowUpType || "empty"}`
+  );
+  const helperBlank = resolveAgentVisitFollowUpWriteFields({ nextFollowUpType: "Call" });
+  assert(
+    helperBlank.next_follow_up_type === null &&
+      helperBlank.next_follow_up_date === null &&
+      helperBlank.follow_up_required === false,
+    "p1.helper.no_date_nulls_type",
+    `${helperBlank.next_follow_up_type}/${helperBlank.follow_up_required}`
+  );
+  const helperDate = resolveAgentVisitFollowUpWriteFields({ nextFollowUpDate: "2026-09-21" });
+  assert(
+    helperDate.next_follow_up_type === "Call" && helperDate.follow_up_required === true,
+    "p1.helper.date_defaults_call",
+    `${helperDate.next_follow_up_type}/${helperDate.follow_up_required}`
+  );
+}
+
+{
+  const analyzer = createEmptyDiscoveryLine("ANALYZER");
+  const reagent = createEmptyDiscoveryLine("REAGENT");
+  const consumable = createEmptyDiscoveryLine("CONSUMABLE");
+  assert(!compactDiscoveryLine(analyzer), "p1.compact.A_empty", "blank analyzer omitted");
+  assert(!compactDiscoveryLine({ ...analyzer, manufacturer: "   " }), "p1.compact.B_spaces", "whitespace manufacturer omitted");
+  const mindray = compactDiscoveryLine({ ...analyzer, manufacturer: " Mindray " });
+  assert(mindray?.manufacturer === "Mindray", "p1.compact.C_trim", mindray?.manufacturer || "missing");
+  assert(Boolean(compactDiscoveryLine({ ...analyzer, model: "XN-550" })), "p1.compact.D_model", "model-only analyzer kept");
+  assert(!compactDiscoveryLine(reagent), "p1.compact.E_empty_reagent", "blank reagent omitted");
+  assert(!compactDiscoveryLine({ ...reagent, monthlySpendInr: "abc" }), "p1.compact.F_invalid_spend", "invalid spend omitted");
+  const spendZero = compactDiscoveryLine({ ...reagent, monthlySpendInr: "0" });
+  assert(spendZero?.monthly_spend_inr === 0, "p1.compact.G_spend_zero", String(spendZero?.monthly_spend_inr));
+  const glucose = compactDiscoveryLine({ ...reagent, description: " Glucose kit " });
+  assert(glucose?.description === "Glucose kit", "p1.compact.H_trim_desc", glucose?.description || "missing");
+  assert(
+    !compactDiscoveryLine({ ...consumable, productCategory: "   " }),
+    "p1.compact.I_ws_consumable",
+    "whitespace consumable omitted"
+  );
+  assert(
+    !compactDiscoveryLine({ ...consumable, approxPricePack: "nope" }),
+    "p1.compact.J_invalid_price",
+    "invalid price omitted"
+  );
+  const priceZero = compactDiscoveryLine({ ...consumable, approxPricePack: "0" });
+  assert(priceZero?.approx_price_pack === 0, "p1.compact.K_price_zero", String(priceZero?.approx_price_pack));
+  const mixed = buildVisitEvidenceWritePayload({
+    ...createEmptyVisitEvidenceForm(),
+    labId: "LAB-P1",
+    discoveryLines: [
+      { ...analyzer, manufacturer: "Mindray" },
+      { ...reagent, monthlySpendInr: "abc" },
+      { ...consumable, productCategory: "EDTA" },
+    ],
+  });
+  assert(
+    mixed.discoveryLines.length === 2 && !mixed.discoveryLines.some((line) => line.line_kind === "REAGENT"),
+    "p1.compact.L_mixed",
+    mixed.discoveryLines.map((line) => line.line_kind).join(",")
+  );
+  const persistSkip = buildAgentVisitDiscoveryLineInsertRows("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", [
+    { line_kind: "ANALYZER", manufacturer: "   " },
+    { line_kind: "REAGENT", monthly_spend_inr: "abc" },
+    { line_kind: "CONSUMABLE", approx_price_pack: 0 },
+  ]);
+  assert(
+    !persistSkip.error &&
+      persistSkip.rows.length === 1 &&
+      persistSkip.rows[0].line_kind === "CONSUMABLE" &&
+      persistSkip.rows[0].approx_price_pack === 0,
+    "p1.persist.skip_empty_keep_zero",
+    persistSkip.error || `${persistSkip.rows.length} rows`
+  );
+}
 
 if (typeof globalThis.window === "undefined") {
   const mem = {};
@@ -475,9 +600,87 @@ async function runLive() {
   });
   r.assert(spoof.data?.agent_id === agentId, "live.30.rls_spoof", `stored ${spoof.data?.agent_id}`);
 
+  const followUpBlank = resolveAgentVisitFollowUpWriteFields({ nextFollowUpType: "Call", nextAction: "" });
+  const p1Blank = await persistAgentVisitWithOptionalDiscovery(agent.sb, {
+    insertRow: headerRow({
+      labId: assignedLabId,
+      notes: `${P1_PREFIX} blank follow-up`,
+      fields: {
+        ...followUpBlank,
+        commercial_outcome: "UNKNOWN",
+      },
+    }),
+  });
+  r.assert(p1Blank.success, "live.p1.blank_save", p1Blank.error || p1Blank.data?.id);
+  if (service && p1Blank.data?.id) {
+    const rawBlank = await service
+      .from("agent_visits")
+      .select("next_follow_up_date,follow_up_required,next_follow_up_type,next_action")
+      .eq("id", p1Blank.data.id)
+      .maybeSingle();
+    r.assert(
+      rawBlank.data?.next_follow_up_date == null &&
+        rawBlank.data?.follow_up_required === false &&
+        rawBlank.data?.next_follow_up_type == null,
+      "live.p1.blank_raw",
+      JSON.stringify(rawBlank.data || rawBlank.error)
+    );
+  }
+  const mappedBlank = p1Blank.data?.id ? await fetchAgentVisitEvidenceBundle(agent.sb, p1Blank.data.id) : { header: p1Blank.data };
+  r.assert(
+    mappedBlank.header?.nextFollowUpType !== "Call" && !mappedBlank.header?.nextFollowUpDate,
+    "live.p1.blank_mapped_not_call",
+    `mapped type=${mappedBlank.header?.nextFollowUpType || "empty"}`
+  );
+
+  const followUpDate = resolveAgentVisitFollowUpWriteFields({ nextFollowUpDate: "2026-09-21" });
+  const p1Date = await persistAgentVisitWithOptionalDiscovery(agent.sb, {
+    insertRow: headerRow({
+      labId: assignedLabId,
+      notes: `${P1_PREFIX} date only`,
+      fields: followUpDate,
+    }),
+  });
+  r.assert(p1Date.success && p1Date.data?.next_follow_up_type === "Call", "live.p1.date_defaults_call", p1Date.error || p1Date.data?.next_follow_up_type);
+
+  const p1Lines = await persistAgentVisitWithOptionalDiscovery(agent.sb, {
+    insertRow: headerRow({ labId: assignedLabId, notes: `${P1_PREFIX} compact matrix` }),
+    discoveryLines: [
+      { line_kind: "ANALYZER", manufacturer: " Mindray " },
+      { line_kind: "REAGENT", monthly_spend_inr: "abc" },
+      { line_kind: "CONSUMABLE", product_category: "EDTA", approx_price_pack: 0 },
+      { line_kind: "ANALYZER", manufacturer: "   " },
+      { line_kind: "REAGENT", monthly_spend_inr: 0 },
+    ],
+  });
+  const p1Kinds = (p1Lines.discoveryLines || []).map((line) => line.line_kind).sort();
+  r.assert(
+    p1Lines.success && (p1Lines.discoveryLines || []).length === 3,
+    "live.p1.compact_count",
+    p1Lines.error || `${(p1Lines.discoveryLines || []).length}:${p1Kinds.join(",")}`
+  );
+  r.assert(
+    (p1Lines.discoveryLines || []).some((line) => line.manufacturer === "Mindray") &&
+      (p1Lines.discoveryLines || []).some((line) => Number(line.monthly_spend_inr) === 0) &&
+      (p1Lines.discoveryLines || []).some((line) => Number(line.approx_price_pack) === 0),
+    "live.p1.compact_values",
+    JSON.stringify(
+      (p1Lines.discoveryLines || []).map((line) => ({
+        k: line.line_kind,
+        m: line.manufacturer,
+        s: line.monthly_spend_inr,
+        p: line.approx_price_pack,
+      }))
+    )
+  );
+
   try {
     const cleaned = await cleanupCertVisits(service, PREFIX);
-    r.pass("live.cleanup", `visits=${cleaned.visits} lines=${cleaned.lines} prospects=${cleaned.prospects}`);
+    const cleanedP1 = await cleanupCertVisits(service, P1_PREFIX);
+    r.pass(
+      "live.cleanup",
+      `ve3 visits=${cleaned.visits} lines=${cleaned.lines}; p1 visits=${cleanedP1.visits} lines=${cleanedP1.lines}`
+    );
   } catch (error) {
     r.skip("live.cleanup", error.message, { critical: false });
   }

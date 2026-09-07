@@ -227,7 +227,13 @@ export default function AgentVisitEvidenceForm({
   }
 
   return (
-    <form className="space-y-3" onSubmit={handleSave} data-ve3-fast-form="true" data-ve3-uat-fix="idempotent-20260907">
+    <form
+      className="space-y-3"
+      onSubmit={handleSave}
+      data-ve3-fast-form="true"
+      data-ve3-uat-fix="idempotent-20260907"
+      data-ve3-p1-fix="followup-compact-20260907"
+    >
       <div className="rounded-xl border border-border bg-card p-3">
         <FieldLabel>Lab or prospect</FieldLabel>
         <select

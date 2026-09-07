@@ -149,6 +149,7 @@ import {
 import {
   normalizeDiscoveryLinesInput,
   pickVisitEvidenceHeaderFields,
+  resolveAgentVisitFollowUpWriteFields,
 } from "@/visits/agentVisitEvidenceContract.js";
 import { isPerfLogEnabled, perfLog, perfTime, shouldRunDashboardKpiAudit } from "@/utils/perfLog.js";
 import { fireNotificationEvent } from "@/notifications/fireNotificationEvent.js";
@@ -4530,13 +4531,8 @@ export function buildAgentVisitInsertRow(payload = {}) {
   const visit_date = str(payload.visitDate ?? payload.visit_date).slice(0, 10);
   const visit_type = str(payload.visitType ?? payload.visit_type);
   const notesRaw = str(payload.notes);
-  const next_follow_up_date = str(
-    payload.nextFollowUpDate ?? payload.next_follow_up_date ?? ""
-  ).slice(0, 10);
-  const next_follow_up_type = str(
-    payload.nextFollowUpType ?? payload.next_follow_up_type ?? ""
-  );
-  const next_action = str(payload.nextAction ?? payload.next_action ?? "");
+  const followUp = resolveAgentVisitFollowUpWriteFields(payload);
+  const next_action = followUp.next_action;
   const labResponse = str(payload.labResponse ?? payload.lab_response);
   const sold_value = num(payload.soldValue ?? payload.sold_value ?? 0);
   const lab_name = str(payload.labName ?? payload.lab_name) || null;
@@ -4553,8 +4549,7 @@ export function buildAgentVisitInsertRow(payload = {}) {
     return { row: {}, dropped: [], error: "visit_type is required" };
   }
 
-  const follow_up_required =
-    Boolean(next_follow_up_date) || labResponse === "Need Follow-up";
+  const follow_up_required = followUp.follow_up_required;
 
   const notes = appendAgentVisitNoteMetadata(notesRaw, {
     labResponse,
@@ -4578,8 +4573,8 @@ export function buildAgentVisitInsertRow(payload = {}) {
     visit_type,
     notes,
     follow_up_required,
-    next_follow_up_date: next_follow_up_date || null,
-    next_follow_up_type: next_follow_up_type || null,
+    next_follow_up_date: followUp.next_follow_up_date,
+    next_follow_up_type: followUp.next_follow_up_type,
     next_action: next_action || null,
     lab_response: labResponse || null,
     sold_value: sold_value > 0 ? sold_value : null,

@@ -2,7 +2,7 @@
 
 **Canonical product and architecture source of truth for PrimeCare Agent Visit Evidence V1 (VE).**
 
-Status: **VE-3 GREEN** (QA field UX certified). VE-2 write/read contract reused. Production **unchanged**. No merge to main.
+Status: **VE-3 P1 CLOSURE** (fast Log Visit follow-up type + empty discovery-line persist). VE-2 write/read contract reused. Production **unchanged**. No merge to main. No VE-4.
 
 Owner: this document. Not Commercial CRM schema. Not Agent Resources. Not `operational_evidence` photos. Not Orders / AR / Inventory.
 
@@ -357,7 +357,8 @@ Canonical write path remains `createAgentVisitWrite` → `persistAgentVisitWithO
 |---------|----------|
 | Legacy payload | `lab_id` + `visit_date` + `visit_type` (+ notes/follow-up) still saves. Evidence columns omitted when null. |
 | Header evidence | Optional VE-1 columns on the same insert. Invalid enums fail closed before/at persist. None required to save. |
-| Discovery lines | Optional `discoveryLines` array after header insert. Child FK is `visit_uuid` → `agent_visits.id`. Never `visit_id` text. |
+| Follow-up | No follow-up date → `next_follow_up_date` NULL, `follow_up_required` false (unless legacy `lab_response` is Need Follow-up), `next_follow_up_type` NULL. Date present → `follow_up_required` true; V1 default type is `Call` only when a date exists. Fast Log Visit does not expose a type control. |
+| Discovery lines | Optional `discoveryLines` array after header insert. Child FK is `visit_uuid` → `agent_visits.id`. Never `visit_id` text. Persist a line only when at least one evidence value remains after trim / finite-number normalization. Whitespace-only text and non-finite numeric input are absent (not `0`). Explicit valid `0` remains `0`. |
 | Identity | Client `agent_id` / `tenant_id` are not authoritative. VE-1 BEFORE trigger stamps from `current_profile()`. |
 | Reads | Dedicated `getAgentVisitEvidenceRead` / `fetchAgentVisitEvidenceBundle`. Dashboard lists stay on production-safe `HQ_AGENT_VISIT_COLUMNS`. No `SELECT *`. |
 | Snapshot firewall | Visit Evidence persist must not write `lab_qualifications` or `lab_product_intelligence`. AgentVisitPage may still snapshot product mix **separately**. |
@@ -419,6 +420,22 @@ That is **2–4 taps**. 60–90 seconds is realistic on a phone when the account
 **Parity:** Deep qualification (legacy six-step wizard) remains for snapshot qualification and `lab_product_intelligence`. Fast Log Visit does **not** dual-write those snapshots. Add Prospect remains the four-field RPC.
 
 Wallet/size/product notes are labeled as field estimates — not PrimeCare revenue, AR, or inventory.
+
+**Follow-up persist (P1):** the fast form default `nextFollowUpType: "Call"` is a UI placeholder, not stored evidence. `createAgentVisitWrite` / `buildAgentVisitInsertRow` must omit `next_follow_up_type` unless `next_follow_up_date` is present.
+
+**Discovery compact-line persist (P1):** Add Analyzer/Reagent/Consumable with no meaningful evidence after trim/normalize must not insert a child row. Mixed visits persist only the meaningful lines. Same-visit line UUID retry remains idempotent.
+
+### Deferred DEEP CERT P2/P3 (do not fix in this P1 closure)
+
+- Blank notes becoming `[Visit] Area: … · Lab: …` metadata
+- VE-2 mapper `null` → `""` for optional text/enums
+- Negative wallet/spend/credit handling
+- Credit decimal truncation
+- Wallet maximum/overflow UX
+- Decision Maker Skip still showing Name/Role
+- Mobile Save-button positioning
+- Collapsed `<details>` accessibility
+- Field-scoped overflow copy
 
 ---
 
