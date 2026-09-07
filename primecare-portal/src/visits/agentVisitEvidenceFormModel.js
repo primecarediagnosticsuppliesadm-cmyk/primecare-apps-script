@@ -123,22 +123,37 @@ export function createEmptyVisitEvidenceForm() {
   };
 }
 
-function compactLine(line) {
+function trimText(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  return text === "" ? null : text;
+}
+
+function finiteNumberOrAbsent(value) {
+  if (value == null) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  if (value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function compactDiscoveryLine(line) {
+  if (!line || typeof line !== "object") return null;
   const row = {
     id: line.id,
-    line_kind: line.lineKind,
-    confidence: line.confidence || null,
-    manufacturer: line.manufacturer || null,
-    model: line.model || null,
-    notes: line.notes || null,
-    description: line.description || null,
-    brand: line.brand || null,
-    monthly_spend_inr: line.monthlySpendInr === "" ? null : line.monthlySpendInr,
-    monthly_quantity: line.monthlyQuantity === "" ? null : line.monthlyQuantity,
-    supplier: line.supplier || null,
-    product_category: line.productCategory || null,
-    approx_volume: line.approxVolume === "" ? null : line.approxVolume,
-    approx_price_pack: line.approxPricePack === "" ? null : line.approxPricePack,
+    line_kind: line.lineKind || line.line_kind,
+    confidence: trimText(line.confidence),
+    manufacturer: trimText(line.manufacturer),
+    model: trimText(line.model),
+    notes: trimText(line.notes),
+    description: trimText(line.description),
+    brand: trimText(line.brand),
+    monthly_spend_inr: finiteNumberOrAbsent(line.monthlySpendInr ?? line.monthly_spend_inr),
+    monthly_quantity: finiteNumberOrAbsent(line.monthlyQuantity ?? line.monthly_quantity),
+    supplier: trimText(line.supplier),
+    product_category: trimText(line.productCategory ?? line.product_category),
+    approx_volume: finiteNumberOrAbsent(line.approxVolume ?? line.approx_volume),
+    approx_price_pack: finiteNumberOrAbsent(line.approxPricePack ?? line.approx_price_pack),
   };
   const meaningful = Object.entries(row).some(([key, value]) => {
     if (key === "id" || key === "line_kind") return false;
@@ -148,17 +163,16 @@ function compactLine(line) {
 }
 
 export function buildVisitEvidenceWritePayload(form, extras = {}) {
-  const lines = (form.discoveryLines || [])
-    .map(compactLine)
-    .filter(Boolean);
+  const lines = (form.discoveryLines || []).map(compactDiscoveryLine).filter(Boolean);
+  const nextFollowUpDate = trimText(form.nextFollowUpDate) || "";
   return {
     labId: form.labId,
     visitDate: form.visitDate,
     visitType: extras.visitType || "Follow-up",
     notes: form.notes,
     nextAction: form.nextAction,
-    nextFollowUpDate: form.nextFollowUpDate,
-    nextFollowUpType: form.nextFollowUpType,
+    nextFollowUpDate,
+    nextFollowUpType: nextFollowUpDate ? form.nextFollowUpType || "Call" : "",
     commercialOutcome: OUTCOME_SET.has(form.commercialOutcome) ? form.commercialOutcome : "UNKNOWN",
     labSizeBand: SIZE_SET.has(form.labSizeBand) ? form.labSizeBand : "",
     estimatedMonthlyWalletInr: form.estimatedMonthlyWalletInr,

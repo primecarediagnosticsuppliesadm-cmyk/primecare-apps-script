@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import {
   buildAgentVisitDiscoveryLineInsertRows,
   pickVisitEvidenceHeaderFields,
+  resolveAgentVisitFollowUpWriteFields,
 } from "../src/visits/agentVisitEvidenceContract.js";
 import {
   fetchAgentVisitEvidenceBundle,
@@ -229,6 +230,33 @@ assert(
   !kinds.error && kinds.rows.length === 3 && kinds.rows.every((row) => row.visit_uuid.startsWith("aaaaaaaa")),
   "unit.multi_lines",
   "ANALYZER/REAGENT/CONSUMABLE rows attach to visit uuid"
+);
+
+const followUpNone = resolveAgentVisitFollowUpWriteFields({ nextFollowUpType: "Call" });
+assert(
+  followUpNone.next_follow_up_type === null && followUpNone.follow_up_required === false,
+  "unit.p1.followup_no_date",
+  `${followUpNone.next_follow_up_type}/${followUpNone.follow_up_required}`
+);
+const followUpDate = resolveAgentVisitFollowUpWriteFields({ nextFollowUpDate: "2026-09-21" });
+assert(
+  followUpDate.next_follow_up_type === "Call" && followUpDate.follow_up_required === true,
+  "unit.p1.followup_date_defaults_call",
+  `${followUpDate.next_follow_up_type}/${followUpDate.next_follow_up_date}`
+);
+const emptyish = buildAgentVisitDiscoveryLineInsertRows("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", [
+  { line_kind: "ANALYZER", manufacturer: "   " },
+  { line_kind: "REAGENT", monthly_spend_inr: "abc" },
+  { line_kind: "REAGENT", monthly_spend_inr: 0 },
+  { line_kind: "CONSUMABLE", description: " Glucose kit " },
+]);
+assert(
+  !emptyish.error &&
+    emptyish.rows.length === 2 &&
+    emptyish.rows.some((row) => row.monthly_spend_inr === 0) &&
+    emptyish.rows.some((row) => row.description === "Glucose kit"),
+  "unit.p1.skip_empty_keep_zero_trim",
+  emptyish.error || `${emptyish.rows.length} ${emptyish.rows.map((row) => row.line_kind).join(",")}`
 );
 
 if (!process.argv.includes("--remote")) {

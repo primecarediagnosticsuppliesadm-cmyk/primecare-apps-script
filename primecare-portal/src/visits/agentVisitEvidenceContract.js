@@ -76,7 +76,14 @@ function optionalBool(v) {
 }
 
 function optionalNumber(v) {
-  if (v == null || v === "") return null;
+  if (v == null) return null;
+  if (typeof v === "string") {
+    const trimmed = v.trim();
+    if (trimmed === "") return null;
+    v = trimmed;
+  } else if (v === "") {
+    return null;
+  }
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
@@ -156,6 +163,46 @@ export function pickVisitEvidenceHeaderFields(payload = {}) {
   };
 }
 
+/**
+ * Follow-up write contract:
+ * - no date → date NULL, type NULL, follow_up_required false (unless Need Follow-up lab_response)
+ * - date present → follow_up_required true; V1 default type Call only with a date
+ */
+export function resolveAgentVisitFollowUpWriteFields(payload = {}) {
+  const next_follow_up_date =
+    str(payload.nextFollowUpDate ?? payload.next_follow_up_date ?? "").slice(0, 10) || null;
+  const requestedType = str(payload.nextFollowUpType ?? payload.next_follow_up_type ?? "");
+  const labResponse = str(payload.labResponse ?? payload.lab_response);
+  return {
+    follow_up_required: Boolean(next_follow_up_date) || labResponse === "Need Follow-up",
+    next_follow_up_date,
+    next_follow_up_type: next_follow_up_date ? requestedType || "Call" : null,
+    next_action: str(payload.nextAction ?? payload.next_action ?? "") || null,
+  };
+}
+
+const DISCOVERY_EVIDENCE_KEYS = [
+  "confidence",
+  "manufacturer",
+  "model",
+  "notes",
+  "description",
+  "brand",
+  "monthly_spend_inr",
+  "monthly_quantity",
+  "supplier",
+  "product_category",
+  "approx_volume",
+  "approx_price_pack",
+];
+
+export function discoveryLineHasMeaningfulEvidence(row = {}) {
+  return DISCOVERY_EVIDENCE_KEYS.some((key) => {
+    const value = row[key];
+    return value != null && value !== "";
+  });
+}
+
 export function normalizeDiscoveryLinesInput(payload = {}) {
   const raw = payload.discoveryLines ?? payload.discovery_lines;
   if (raw == null) return [];
@@ -192,7 +239,7 @@ export function buildAgentVisitDiscoveryLineInsertRows(visitUuid, lines = [], ex
       return { rows: [], error: "discovery lines must use visit_uuid, not visit_id text" };
     }
 
-    rows.push({
+    const row = {
       id: optionalText(line.id) || newUuid(),
       visit_uuid,
       tenant_id: optionalText(extras.tenant_id ?? line.tenant_id) || null,
@@ -210,7 +257,11 @@ export function buildAgentVisitDiscoveryLineInsertRows(visitUuid, lines = [], ex
       product_category: optionalText(line.productCategory ?? line.product_category),
       approx_volume: optionalNumber(line.approxVolume ?? line.approx_volume),
       approx_price_pack: optionalNumber(line.approxPricePack ?? line.approx_price_pack),
-    });
+    };
+    if (!discoveryLineHasMeaningfulEvidence(row)) {
+      continue;
+    }
+    rows.push(row);
   }
   return { rows, error: null };
 }

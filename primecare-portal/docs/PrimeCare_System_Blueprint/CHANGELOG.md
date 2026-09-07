@@ -4,6 +4,32 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-07 — VE-3 DEEP CERT P1 closure: follow-up type + empty discovery lines
+
+### Gap found
+
+- Fast Log Visit persisted `next_follow_up_type = 'Call'` when the Agent never selected Call and `next_follow_up_date` was NULL (`follow_up_required` false). Hidden form default leaked into the insert row.
+- `compactLine` treated whitespace (`"   "`) and invalid numbers (`"abc"`) as meaningful, so persist could insert ANALYZER/REAGENT/CONSUMABLE rows with no remaining evidence after VE-2 `optionalText` / `optionalNumber`.
+
+### Change
+
+- No follow-up date → type NULL / omitted. Date present → `follow_up_required` true; V1 still defaults type to `Call` only with a date. No new fast-UI control. Wizard UI unchanged.
+- Discovery lines trim text, treat whitespace and non-finite numerics as absent (not `0`), keep explicit `0`, and persist a child row only when ≥1 meaningful evidence value remains. No schema/RLS/RPC/idempotency architecture change.
+
+### Deferred (P2/P3 — do not fix here)
+
+Notes metadata; VE-2 null→`""` read mapping; negative wallet/spend/credit; credit truncation; wallet overflow UX; Decision Maker Skip Name/Role; mobile Save position; collapsed details a11y; field-scoped overflow copy.
+
+### Verification
+
+- `node scripts/verify-agent-visit-evidence-ux.mjs` and `--remote` (QA only; `[VE-3-P1-CERT]`)
+- `node scripts/verify-agent-visit-evidence-api.mjs` and `--remote` (QA only)
+- Hosted QA browser + raw DB readback (not localhost)
+
+Production **UNCHANGED**. No merge to main. No VE-4.
+
+---
+
 ## 2026-09-07 — VE-3 Founder UAT: idempotent discovery lines + Skip/Deep qualification UX
 
 ### Gap found
