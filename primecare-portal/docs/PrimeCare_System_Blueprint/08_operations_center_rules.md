@@ -85,7 +85,7 @@ Scripts must not mutate cross-environment or certified tenants without explicit 
 Source: `src/config/hqReleasePolicy.js`
 
 ### Blocked during freeze
-- Order status mutations (fulfill/cancel from HQ)
+- Order status mutations (fulfill/cancel/reset from HQ)
 - Structural user provisioning writes
 - Structural catalog writes
 - Procurement writes (when `VITE_HQ_PROCUREMENT_FROZEN=true`)
@@ -96,7 +96,15 @@ Source: `src/config/hqReleasePolicy.js`
 - Download invoices
 - Credit & Risk payment drawer
 - Review order details
+- HQ on-behalf order creation (Placed)
 - Monitoring dashboards
+
+### Temporary Flow 3A Mark Fulfilled exception
+- Production only, UI/UX gate only (`isHqOrderFulfillWriteBlocked`)
+- `VITE_FLOW3A_CERT_FULFILL_ORDER_ID` must equal the exact HQ `orders.order_id`
+- Unset / empty: fulfill remains frozen for every order
+- Does not allow Cancel, Reset, Processing, or any other order
+- Does not reclassify fulfillment as an ongoing daily-operation exception
 
 **Intent:** Freeze stops structural change, not cash collection or customer service.
 

@@ -5,6 +5,7 @@
 
 import { IS_DEV, IS_PROD, IS_QA } from "@/config/environment.js";
 import { ROLES } from "@/config/roles.js";
+import { resolveHqOrderFulfillWriteBlocked } from "@/config/hqOrderFulfillFreezePolicy.js";
 
 function envFlag(name, defaultValue) {
   const value = import.meta.env[name];
@@ -42,6 +43,35 @@ export function getHqFreezeBannerMessage(scope = "default") {
 /** Order status mutations (fulfill, cancel, reset) blocked during freeze. */
 export function isHqOrderStatusWriteBlocked() {
   return isHqAdminFrozen();
+}
+
+function envString(name) {
+  const value = import.meta.env[name];
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
+}
+
+/**
+ * Production Flow 3A Gold: exactly one configured business `order_id`.
+ * Unset / empty → freeze behavior unchanged (no fulfill exception).
+ */
+export function getFlow3aCertFulfillOrderId() {
+  return envString("VITE_FLOW3A_CERT_FULFILL_ORDER_ID");
+}
+
+/**
+ * Mark Fulfilled during HQ freeze is blocked unless this exact Production
+ * certification order_id matches VITE_FLOW3A_CERT_FULFILL_ORDER_ID.
+ * Does not weaken cancel / reset / processing. Empty env = no exception.
+ */
+export function isHqOrderFulfillWriteBlocked(orderId, currentStatus) {
+  return resolveHqOrderFulfillWriteBlocked({
+    hqAdminFrozen: isHqAdminFrozen(),
+    isProd: IS_PROD,
+    certFulfillOrderId: getFlow3aCertFulfillOrderId(),
+    orderId,
+    currentStatus,
+  });
 }
 
 /** User provisioning, ownership, security, and tenant structural writes. */

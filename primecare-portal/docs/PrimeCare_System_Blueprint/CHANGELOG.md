@@ -24,6 +24,24 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-07 — Flow 3A single-order Production Mark Fulfilled exception
+
+### Gap found
+
+- Production HQ freeze (`VITE_HQ_ADMIN_FROZEN` default true) blocks Orders **Mark Fulfilled** in the UI. Flow 3A Gold needs exactly one Tesla certification order to use the supported fulfill path. A general Mark Fulfilled allow, a global unfreeze, or an API/SQL bypass would violate freeze scope.
+
+### Change
+
+- UI/UX only. `isHqOrderStatusWriteBlocked()` is unchanged (cancel / reset / Processing stay frozen).
+- New `isHqOrderFulfillWriteBlocked(orderId, currentStatus)`: when freeze is ON, Mark Fulfilled stays blocked unless Production **and** `VITE_FLOW3A_CERT_FULFILL_ORDER_ID` is set **and** the current row's business `order_id` matches exactly **and** status is `Placed` or `Processing`. Unset env = previous freeze behavior.
+- Orders page Mark Fulfilled button + `handleUpdateStatus("Fulfilled")` both enforce the same exact-order condition. No SQL, RLS, RPC, or `updateOrderStatusWrite` change. Do not set `VITE_HQ_ADMIN_FROZEN=false`.
+
+### Verification
+
+- `node scripts/verify-hq-freeze-policy.mjs`
+
+---
+
 ## 2026-09-07 — Flow 3A anon EXECUTE revoke on financial posting RPCs
 
 ### Gap found

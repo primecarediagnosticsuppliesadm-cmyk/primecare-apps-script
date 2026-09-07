@@ -146,7 +146,8 @@ Full map: `PERMISSION_BY_KEY` in `rolePermissionMatrix.js`.
 
 | Action | Frozen? |
 |--------|---------|
-| Order status change (fulfill/cancel) | **Blocked** |
+| Order status change (fulfill/cancel/reset) | **Blocked** |
+| Temporary Flow 3A Mark Fulfilled | **Exactly one** Production `orders.order_id` listed in `VITE_FLOW3A_CERT_FULFILL_ORDER_ID` may use Mark Fulfilled while freeze stays ON. Unset / empty = no exception. This does **not** reclassify fulfillment as a daily-ops exception. Cancel, reset, Processing, and every other order remain blocked. |
 | User provisioning structural | **Blocked** |
 | Catalog structural writes | **Blocked** |
 | Procurement (optional) | **Blocked** if flag set |
@@ -155,6 +156,7 @@ Full map: `PERMISSION_BY_KEY` in `rolePermissionMatrix.js`.
 | Agent Resources publish | **Allowed** (not O2C/inventory structural) |
 | Review order details | **Allowed** |
 | Credit & Risk drawer | **Allowed** |
+| HQ on-behalf order creation (`create_lab_order`) | **Allowed** (not an order-status mutation; freeze does not gate checkout) |
 | Prospect Activate Lab (`activate_prospect_lab`) | **Allowed** (narrow exception; not a global unfreeze) |
 
 Verified: `verify-hq-freeze-policy.mjs`

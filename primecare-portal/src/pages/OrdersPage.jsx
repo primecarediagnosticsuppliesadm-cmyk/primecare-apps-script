@@ -21,7 +21,11 @@ import { invalidateAdminDashboardCaches } from "@/utils/dashboardInvalidate.js";
 import { readPageUiCache, writePageUiCache } from "@/utils/hqPageUiCache.js";
 import { scheduleIdleTask } from "@/utils/scheduleIdleTask.js";
 import { ALLOW_LEGACY_APPS_SCRIPT } from "@/config/environment";
-import { isHqOrderStatusWriteBlocked, getHqFreezeBannerMessage } from "@/config/hqReleasePolicy.js";
+import {
+  isHqOrderStatusWriteBlocked,
+  isHqOrderFulfillWriteBlocked,
+  getHqFreezeBannerMessage,
+} from "@/config/hqReleasePolicy.js";
 import { isPredatorAutoValidationEnabled } from "@/predator/predatorGuards.js";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -728,7 +732,19 @@ export default function OrdersPage({
   async function handleUpdateStatus(nextStatus) {
     if (!selectedOrder) return;
     if (statusActionInflightRef.current || updatingStatus) return;
-    if (hqStatusWriteBlocked) {
+    const currentStatus = normalizeOrderStatusLabel(
+      details?.order?.orderStatus ?? details?.order?.status ?? details?.order?.order_status
+    );
+    if (str(nextStatus) === "Fulfilled") {
+      if (isHqOrderFulfillWriteBlocked(selectedOrder, currentStatus)) {
+        setStatusMutationError(
+          mapOrderMutationError("Order fulfillment is frozen for this certified HQ release.", {
+            nextStatus,
+          })
+        );
+        return;
+      }
+    } else if (hqStatusWriteBlocked) {
       setStatusMutationError(
         mapOrderMutationError("Order status changes are frozen for this certified HQ release.", {
           nextStatus,
@@ -1109,6 +1125,11 @@ export default function OrdersPage({
       cancelledByLabel: resolveCancelledByLabel(selectedOrderSummary.createdBy),
     };
   }, [selectedOrderSummary, selectedOrderInvoice, details?.lines]);
+
+  const hqFulfillWriteBlocked = isHqOrderFulfillWriteBlocked(
+    selectedOrder,
+    selectedOrderUx?.orderStatus
+  );
 
   const selectedInFilteredList = useMemo(() => {
     if (!selectedOrder) return false;
@@ -1803,7 +1824,7 @@ export default function OrdersPage({
                     placeholder="Optional note for this status update…"
                     value={statusNote}
                     onChange={(e) => setStatusNote(e.target.value)}
-                    disabled={updatingStatus || hqStatusWriteBlocked || detailsLoading}
+                    disabled={updatingStatus || detailsLoading || (hqStatusWriteBlocked && hqFulfillWriteBlocked)}
                     className="min-h-[72px] rounded-lg text-sm"
                   />
                   <div className="grid grid-cols-2 gap-2">
@@ -1834,7 +1855,7 @@ export default function OrdersPage({
                       size="sm"
                       disabled={
                         updatingStatus ||
-                        hqStatusWriteBlocked ||
+                        hqFulfillWriteBlocked ||
                         detailsLoading ||
                         selectedOrderUx?.cancelled ||
                         selectedOrderUx?.fulfilled

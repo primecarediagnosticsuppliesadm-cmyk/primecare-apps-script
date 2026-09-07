@@ -81,7 +81,7 @@ node scripts/verify-hq-rls-reads.mjs
 | `verify-operations-user-directory-integrity.mjs` | Directory classification; probe detection | User directory |
 | `verify-provisioning-role-guard.mjs` | Admin cannot assign executive | Provisioning |
 | `verify-hq-rls-reads.mjs` | Cross-role auth + read probes | **Any RLS change** |
-| `verify-hq-freeze-policy.mjs` | Freeze wiring static | Freeze policy changes |
+| `verify-hq-freeze-policy.mjs` | Freeze wiring static; Flow 3A single-order fulfill env | Freeze policy changes |
 | `verify-hq-search-runtime.mjs` | Global search bounded index | Search changes |
 
 ### Inventory & procurement

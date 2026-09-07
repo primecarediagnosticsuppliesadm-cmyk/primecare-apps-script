@@ -111,7 +111,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-operations-user-directory-integrity.mjs | Probe classification; Last Login mapping + production-shape timestamp contract; Operations Center build identity (existing `VITE_APP_COMMIT_HASH`) | User directory / release identity |
 | verify-provisioning-role-guard.mjs | No admin→executive | Provisioning |
 | verify-hq-rls-reads.mjs | Cross-role reads | **Any RLS change** |
-| verify-hq-freeze-policy.mjs | Freeze wiring | Freeze policy |
+| verify-hq-freeze-policy.mjs | Freeze wiring; Production default ON; generic status writes blocked; Flow 3A single-order Mark Fulfilled env; Cancel/Reset remain blocked; Record Payment and Activate Lab unchanged; no SQL/RPC freeze change | Freeze policy |
 | verify-hq-search-runtime.mjs | Global search bounded | Search |
 
 ### Inventory

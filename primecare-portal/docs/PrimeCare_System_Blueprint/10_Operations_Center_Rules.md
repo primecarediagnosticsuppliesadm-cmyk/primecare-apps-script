@@ -79,9 +79,11 @@ Field playbooks live in [25_Agent_Resources.md](./25_Agent_Resources.md). Publis
 
 ## HQ freeze
 
-**Blocks:** order status mutations, structural provisioning, catalog structural writes, optional procurement.
+**Blocks:** order status mutations (fulfill / cancel / reset), structural provisioning, catalog structural writes, optional procurement.
 
-**Allows:** record payment, invoice download, review orders, credit & risk drawer, daily collections, **prospect Activate Lab** (narrow exception — not a global unfreeze).
+**Allows:** record payment, invoice download, review orders, credit & risk drawer, daily collections, HQ on-behalf **order creation**, **prospect Activate Lab** (narrow exception — not a global unfreeze).
+
+**Temporary Flow 3A certification exception:** exactly one Production order ID in `VITE_FLOW3A_CERT_FULFILL_ORDER_ID` may use **Mark Fulfilled** (`isHqOrderFulfillWriteBlocked`). Empty env leaves fulfill frozen. This is not a standing daily-ops fulfill allow. `isHqOrderStatusWriteBlocked()` stays freeze-true for every other status write.
 
 HQ Admin/Executive Operations Center may show a compact build identity (`Production · <sha> · <branch>`) from existing Vite `getAppBuildStamp()` values. It is not a user-facing product surface.
 

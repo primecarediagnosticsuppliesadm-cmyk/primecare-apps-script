@@ -67,7 +67,7 @@ Hard constraints. Violations require explicit approval + blueprint amendment + v
 |----|------|
 | P1 | Lab portal not default for all labs Day-1 |
 | P2 | Default ordering mode HQ Managed until onboarding (`labs.ordering_mode`) |
-| P3 | Admin freeze blocks structural changes, not daily payments |
+| P3 | Admin freeze blocks structural changes, not daily payments. Order status writes (fulfill/cancel/reset) remain frozen. Flow 3A Gold may allow **Mark Fulfilled only** for the exact `VITE_FLOW3A_CERT_FULFILL_ORDER_ID` (UI/UX). Empty env = no exception. Do not globally unfreeze. Do not treat fulfill as a standing daily-ops exception. |
 | P4 | Permissions from matrix — not hardcoded |
 | P5 | **Ordering Mode controls order initiation only** — never block track order, invoices, payments, collections, finance, inventory, or shipment lifecycle |
 | P6 | HQ admin/executive on-behalf order creation is allowed only for `ACTIVE` labs with `ordering_mode` in `hq_managed`, `hybrid`, or `self_service`; it is blocked for `INACTIVE` labs and `suspended` Ordering Mode |
