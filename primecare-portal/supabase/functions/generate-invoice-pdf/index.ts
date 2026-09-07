@@ -12,6 +12,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { PDFDocument, StandardFonts, rgb } from "https://esm.sh/pdf-lib@1.17.1";
 
 const ALLOWED_ORIGINS = new Set([
+  "https://app.primecarediagnostics.in",
   "https://primecare-portal-prod.vercel.app",
   "https://primecare-portal.vercel.app",
   "http://localhost:5173",

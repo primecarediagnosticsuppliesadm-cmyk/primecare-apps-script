@@ -31,6 +31,8 @@ Agent-created `PROSPECT` Labs (Flow 2A `create_prospect_lab`) must **not** inser
 
 **PDF reads:** `invoice_line_items` only — not live catalog.
 
+**PDF CORS:** `generate-invoice-pdf` uses an explicit origin allowlist. Canonical Production (`https://app.primecarediagnostics.in`) must be included. CORS is browser transport policy only and does not weaken JWT or invoice RLS checks.
+
 ---
 
 ## Payment lifecycle

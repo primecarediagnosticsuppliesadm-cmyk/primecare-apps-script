@@ -26,6 +26,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-invoice-phase1.mjs | Schema, no payments.invoice_id | Invoice foundation |
 | verify-invoice-phase2.mjs | Auto-invoice on fulfill | Invoice create |
 | verify-invoice-phase3.mjs | PDF immutable lines | PDF |
+| verify-generate-invoice-pdf-cors.mjs | Explicit CORS allowlist includes canonical Production origin; no `*` / wildcard; OPTIONS + POST header contract; optional QA `--remote` OPTIONS (no invoice mutation) | PDF CORS |
 | verify-invoice-phase4.mjs | Invoice Center bounded reads | Invoice UI |
 | verify-invoice-phase5.mjs | Allocation RPC, partially_paid | Allocations |
 | verify-invoice-lifecycle.mjs | Read-only bundle for invoice phase/lifecycle checks | Invoice regression |

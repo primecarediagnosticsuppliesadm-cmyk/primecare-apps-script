@@ -4,6 +4,24 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-07 — generate-invoice-pdf CORS missing canonical Production origin
+
+### Gap found
+
+- Flow 3A linked-payment certification on canonical Production (`https://app.primecarediagnostics.in`) could not finalize `INV-2026-000003`. Browser OPTIONS to `generate-invoice-pdf` failed. The Edge Function already used an explicit origin allowlist (not `*`), but the set included only Vercel hosts and localhost — not the canonical Production origin. Draft invoices therefore could not become customer-facing through the supported Download Invoice / Record Payment finalize path. `docs/operations/HQ_EDGE_FUNCTION_HEALTH_CHECK.md` still described CORS as `*` for all three functions; that did not match `generate-invoice-pdf`.
+
+### Change
+
+- Add exact origin `https://app.primecarediagnostics.in` to `ALLOWED_ORIGINS`. Existing Vercel and localhost origins unchanged. Still explicit membership only (`ALLOWED_ORIGINS.has(origin)`). No `*`, no `*.primecarediagnostics.in`, no reflected arbitrary Origin. JWT + invoice RLS access gate unchanged. CORS is transport policy only.
+- Docs: PDF CORS row in finance/order-invoice rules; health-check CORS note for this function.
+
+### Verification
+
+- `node scripts/verify-generate-invoice-pdf-cors.mjs`
+- `node scripts/verify-generate-invoice-pdf-cors.mjs --remote --expect=qa`
+
+---
+
 ## 2026-09-07 — STAB-1 profile timeout must not eject a valid session
 
 ### Gap found

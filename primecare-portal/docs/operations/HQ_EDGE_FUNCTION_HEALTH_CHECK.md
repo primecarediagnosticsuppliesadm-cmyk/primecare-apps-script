@@ -14,7 +14,7 @@
 | QA project ref | `zipuzmfkwwucbchlphcj` |
 | Auth model | Caller `Authorization: Bearer <user JWT>` validated via `supabase.auth.getUser()` |
 | Service role | `SUPABASE_SERVICE_ROLE_KEY` — Deno env only, never exposed to browser |
-| CORS | `Access-Control-Allow-Origin: *` (POST + OPTIONS) |
+| CORS | `provision-platform-user` / `reset-platform-user-password`: `Access-Control-Allow-Origin: *`. `generate-invoice-pdf`: explicit origin allowlist (`corsHeadersFor`); includes canonical Production `https://app.primecarediagnostics.in`, Vercel hosts, and localhost. Unlisted origins do not receive `Access-Control-Allow-Origin`. JWT/RLS authorization is separate from CORS. |
 | Logs | Supabase Dashboard → Edge Functions → [function] → Logs |
 
 **Deploy all three (QA):**

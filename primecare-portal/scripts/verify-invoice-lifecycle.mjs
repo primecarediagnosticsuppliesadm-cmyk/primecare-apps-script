@@ -16,6 +16,7 @@ const SCRIPTS = [
   "verify-invoice-phase1.mjs",
   "verify-invoice-phase2.mjs",
   "verify-invoice-phase3.mjs",
+  "verify-generate-invoice-pdf-cors.mjs",
   "verify-invoice-phase4.mjs",
   "verify-invoice-phase5.mjs",
   "verify-invoice-account-status.mjs",

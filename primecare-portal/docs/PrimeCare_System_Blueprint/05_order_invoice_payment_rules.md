@@ -96,6 +96,7 @@ Triggered by `updateOrderStatusWrite` (HQ) or `createOrderWrite` with status Ful
 | **Finalize** | `finalizeInvoiceForOrderPayment` before allocation on order-linked payments |
 | **PDF source** | Edge function reads **`invoice_line_items` only** — not live catalog |
 | **Storage** | `invoice-pdfs` bucket |
+| **CORS** | Explicit origin allowlist on `generate-invoice-pdf`. Must include canonical Production `https://app.primecarediagnostics.in` plus existing Vercel/localhost origins. No `*`, no wildcard subdomain, no reflected arbitrary Origin. CORS does not replace JWT / invoice RLS authorization. |
 
 **Allocatability rule** (`invoiceAccountStatus.js`): Payment allocation allowed only when invoice is customer-facing (`sent` or `partially_paid` with PDF/sent), not `cancelled`/`failed`/fully `paid`.
 

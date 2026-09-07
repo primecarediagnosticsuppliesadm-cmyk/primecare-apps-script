@@ -38,6 +38,7 @@ node scripts/verify-hq-rls-reads.mjs
 | `verify-invoice-phase1.mjs` | Tables, RLS, no payments.invoice_id, stubs | Invoice schema |
 | `verify-invoice-phase2.mjs` | Auto-invoice on fulfill, numbering, RPC hooks | Invoice creation |
 | `verify-invoice-phase3.mjs` | PDF edge function, storage, immutable lines | PDF generation |
+| `verify-generate-invoice-pdf-cors.mjs` | Explicit CORS allowlist includes canonical Production origin | PDF CORS |
 | `verify-invoice-phase4.mjs` | Invoice Center UX, bounded reads, pagination | Invoice UI |
 | `verify-invoice-phase5.mjs` | partially_paid, allocate RPC, junction-only | Allocation RPC |
 | `verify-primecare-production-golden-path.mjs` | Full E2E: order→fulfill→invoice→pay→allocate on QA_LAB_001 | Pre-release golden path |
