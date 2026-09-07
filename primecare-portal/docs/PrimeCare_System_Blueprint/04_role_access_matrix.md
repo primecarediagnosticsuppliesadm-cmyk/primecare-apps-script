@@ -168,7 +168,7 @@ Verified: `verify-hq-freeze-policy.mjs`
 | orders | own lab (SELECT, INSERT); delivery snapshot via RPC only — **no direct UPDATE** | visible labs | tenant ops | no payroll dependency | tenant ops |
 | labs | own `lab_id` only | assigned **or** `sourced_by_agent_id` match (same tenant); create PROSPECT via RPC only | tenant ops (no `sourced_by` mutation) | no prospect create | tenant ops (no `sourced_by` mutation) |
 | invoices | own lab | — | tenant | no payroll mutation | tenant |
-| payments | own lab SELECT | SELECT visible labs; post via RPC only (no table INSERT/DELETE) | SELECT + RPC post; **no table DELETE** | read only via bounded payroll derivation after approval | SELECT + RPC post; **no table DELETE** |
+| payments | own lab SELECT; `post_collection_payment` returns `forbidden` | SELECT visible labs; post via RPC only (no table INSERT/DELETE) | SELECT + RPC post; **no table DELETE** | read only via bounded payroll derivation after approval | SELECT + RPC post; **no table DELETE** |
 | order_shipments | — | assigned | tenant ops | — | tenant ops |
 | compensation/payroll tables | — | own locked/exported/paid lines only | view only | preview/submit/support only; no approval/lock/export/pay/reopen | full compensation workflow |
 | profiles | self | self | tenant | payroll-scoped agent profile reads | cross-tenant read patterns |
@@ -176,6 +176,8 @@ Verified: `verify-hq-freeze-policy.mjs`
 | agent_resource_acknowledgements | — | INSERT/SELECT own | tenant SELECT | — | tenant SELECT |
 
 **Never weaken RLS without approval** — run `verify-hq-rls-reads.mjs`.
+
+**Financial RPC EXECUTE:** `anon` / `PUBLIC` must not EXECUTE `post_collection_payment` or `post_fulfillment_ar_bump`. Authenticated roles use those RPCs only when the function body authorizes the actor.
 
 ---
 

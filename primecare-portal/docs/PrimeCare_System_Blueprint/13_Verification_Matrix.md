@@ -31,7 +31,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-invoice-lifecycle.mjs | Read-only bundle for invoice phase/lifecycle checks | Invoice regression |
 | verify-primecare-production-golden-path.mjs | Full E2E golden | Pre-release |
 | verify-ar-reconcile.mjs | Read-only AR inconsistency audit; repair lives in `repair-ar-reconcile.mjs --apply` | AR drift |
-| verify-flow-3a.mjs | Flow 3A: fail-closed payment RPC, no compensation-by-delete, AR financial-column trigger, payment DELETE denied, idempotency + atomic linked post. Default static; `--apply` QA only | Flow 3A |
+| verify-flow-3a.mjs | Flow 3A: fail-closed payment RPC, no compensation-by-delete, AR financial-column trigger, payment DELETE denied, idempotency + atomic linked post, anon EXECUTE revoked on posting RPCs (`20260907120000`). Default static; `--apply` QA only | Flow 3A |
 | verify-collection-inconsistencies.mjs | Golden lab cleanliness | Collections hygiene |
 
 ### Orders & lab
