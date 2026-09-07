@@ -43,6 +43,8 @@ Agent-created `PROSPECT` Labs (Flow 2A `create_prospect_lab`) must **not** inser
 
 **Forbidden:** client INSERT/UPDATE/DELETE on `payments`; client UPDATE of AR financial columns; compensation-by-delete; `payments.invoice_id`.
 
+**EXECUTE least privilege (Flow 3A follow-up):** `anon` and `PUBLIC` must not have EXECUTE on `post_collection_payment` or `post_fulfillment_ar_bump`. `authenticated` is granted EXECUTE (role/RLS/`forbidden` still gate Lab vs HQ/Agent). `service_role` may retain EXECUTE for trusted server operations. Function bodies are unchanged. QA migration `20260907120000` (do not apply to Production from this follow-up).
+
 **Overpayment (Flow 3A):** reject when `amount_received` exceeds AR `outstanding`, or (linked) exceeds invoice open balance. Do not floor with `GREATEST(0, outstanding - amount)` to hide surplus. No unapplied-cash subsystem in 3A.
 
 ---

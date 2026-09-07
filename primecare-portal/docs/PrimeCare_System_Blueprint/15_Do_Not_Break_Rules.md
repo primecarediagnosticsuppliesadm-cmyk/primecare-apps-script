@@ -28,7 +28,7 @@ Hard constraints. Violations require explicit approval + blueprint amendment + v
 | F5 | No draft invoice allocation (without approved policy) |
 | F6 | No `payments.invoice_id` |
 | F7 | Fulfill does not roll back on invoice/shipment failure |
-| F8 | Payment posting is atomic (`post_collection_payment`). Do not compensate by deleting payments. Authenticated must not DELETE `payments` or UPDATE AR financial columns |
+| F8 | Payment posting is atomic (`post_collection_payment`). Do not compensate by deleting payments. Authenticated must not DELETE `payments` or UPDATE AR financial columns. `anon` / `PUBLIC` must not EXECUTE financial posting RPCs |
 | F9 | Delivery charge **not** in invoice/AR in Phase 3A |
 | F10 | Commission must not change payment logic |
 | F11 | PDF reads invoice_line_items only |

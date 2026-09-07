@@ -22,6 +22,8 @@ const QA_REF = PRIMECARE_SUPABASE_PROJECTS.qa.projectRef;
 const PROD_REF = PRIMECARE_SUPABASE_PROJECTS.prod.projectRef;
 const MIG_REL = "supabase/migrations/20260906120000_flow3a_financial_server_hardening.sql";
 const TWIN_REL = "supabase/sql/flow3a_financial_server_hardening.sql";
+const REVOKE_REL = "supabase/migrations/20260907120000_flow3a_revoke_anon_financial_rpc_execute.sql";
+const REVOKE_TWIN_REL = "supabase/sql/flow3a_revoke_anon_financial_rpc_execute.sql";
 const QA_LAB_ID = "QA_LAB_001";
 const OTHER_LAB_ID = "QA_LAB_002";
 const FOREIGN_TENANT = "787999b9-72f5-4163-a860-551c12ce3414";
@@ -75,6 +77,39 @@ const collectionsSrc = readSrc("src/pages/CollectionsPage.jsx");
 
 if (mig && twin && mig === twin) pass("static.twin", `${MIG_REL} matches SQL twin`);
 else fail("static.twin", "migration/twin missing or diverge");
+
+const revokeMig = existsSync(resolve(root, REVOKE_REL)) ? readSrc(REVOKE_REL) : "";
+const revokeTwin = existsSync(resolve(root, REVOKE_TWIN_REL)) ? readSrc(REVOKE_TWIN_REL) : "";
+if (revokeMig && revokeTwin && revokeMig === revokeTwin) {
+  pass("static.twin.revoke_anon", `${REVOKE_REL} matches SQL twin`);
+} else {
+  fail("static.twin.revoke_anon", "anon EXECUTE revoke migration/twin missing or diverge");
+}
+
+if (
+  /REVOKE EXECUTE ON FUNCTION public\.post_collection_payment\(text, text, text, numeric, text, text, date, text, text, text\) FROM anon/.test(
+    revokeMig
+  ) &&
+  /REVOKE EXECUTE ON FUNCTION public\.post_fulfillment_ar_bump\(text, text, text, numeric\) FROM anon/.test(
+    revokeMig
+  ) &&
+  /FROM PUBLIC/.test(revokeMig) &&
+  /GRANT EXECUTE ON FUNCTION public\.post_collection_payment\(text, text, text, numeric, text, text, date, text, text, text\) TO authenticated/.test(
+    revokeMig
+  ) &&
+  /GRANT EXECUTE ON FUNCTION public\.post_fulfillment_ar_bump\(text, text, text, numeric\) TO authenticated/.test(
+    revokeMig
+  ) &&
+  /TO service_role/.test(revokeMig) &&
+  !/CREATE OR REPLACE FUNCTION/.test(revokeMig)
+) {
+  pass(
+    "static.rpc.anon_no_execute",
+    "anon/PUBLIC EXECUTE revoked; authenticated + service_role preserved; no body rewrite"
+  );
+} else {
+  fail("static.rpc.anon_no_execute", "anon EXECUTE revoke migration incomplete or rewrites function bodies");
+}
 
 if (/CREATE OR REPLACE FUNCTION public\.post_collection_payment/.test(mig) && /p_client_request_id/.test(mig)) {
   pass("static.rpc.payment", "post_collection_payment requires client_request_id");
@@ -275,6 +310,46 @@ const labPay = await labClient.rpc("post_collection_payment", {
 });
 if (labPay.error && /forbidden/i.test(labPay.error.message)) pass("live.G.lab_rpc", labPay.error.message);
 else fail("live.G.lab_rpc", labPay.error?.message || "lab RPC succeeded");
+
+const anonClient = userClient();
+const anonPay = await anonClient.rpc("post_collection_payment", {
+  p_tenant_id: QA_HQ_TENANT_ID,
+  p_lab_id: QA_LAB_ID,
+  p_payment_id: "PAY-3A-ANON-SHOULD-FAIL",
+  p_amount_received: 1,
+  p_client_request_id: `crq-anon-${Date.now()}`,
+});
+const anonMsg = str(anonPay.error?.message).toLowerCase();
+const anonCode = str(anonPay.error?.code);
+if (
+  anonPay.error &&
+  (anonCode === "42501" ||
+    anonCode === "PGRST301" ||
+    /permission|denied|jwt|not authenticated|unauthorized/i.test(anonMsg))
+) {
+  pass("live.anon_rpc", anonPay.error.message);
+} else {
+  fail("live.anon_rpc", anonPay.error?.message || "anon EXECUTE succeeded");
+}
+
+const anonBump = await anonClient.rpc("post_fulfillment_ar_bump", {
+  p_tenant_id: QA_HQ_TENANT_ID,
+  p_lab_id: QA_LAB_ID,
+  p_order_id: "ORD-3A-ANON-SHOULD-FAIL",
+  p_delta_amount: 1,
+});
+const bumpMsg = str(anonBump.error?.message).toLowerCase();
+const bumpCode = str(anonBump.error?.code);
+if (
+  anonBump.error &&
+  (bumpCode === "42501" ||
+    bumpCode === "PGRST301" ||
+    /permission|denied|jwt|not authenticated|unauthorized/i.test(bumpMsg))
+) {
+  pass("live.anon_fulfill_rpc", anonBump.error.message);
+} else {
+  fail("live.anon_fulfill_rpc", anonBump.error?.message || "anon fulfill EXECUTE succeeded");
+}
 
 const xtenant = await adminClient.rpc("post_collection_payment", {
   p_tenant_id: FOREIGN_TENANT,

@@ -4,6 +4,24 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-07 — Flow 3A anon EXECUTE revoke on financial posting RPCs
+
+### Gap found
+
+- `20260906120000` granted EXECUTE on `post_collection_payment` / `post_fulfillment_ar_bump` to `authenticated` and revoked `PUBLIC`, but Supabase default privileges still left **explicit** `anon` EXECUTE. `has_function_privilege('anon', …, 'EXECUTE')` was true on QA. Function bodies matched; this is grant-only.
+
+### Change
+
+- `REVOKE EXECUTE … FROM anon` and `FROM PUBLIC` on the exact 3A signatures. Re-`GRANT` `authenticated` and `service_role`. No function-body change. No `schema_migrations` repair of `20260906120000`.
+- QA migration `20260907120000` only. Do not apply to Production from this follow-up.
+
+### Verification
+
+- `node scripts/verify-flow-3a.mjs`
+- `node scripts/verify-flow-3a.mjs --apply` (QA only; includes unauthenticated RPC deny)
+
+---
+
 ## 2026-09-06 — Flow 3A financial server hardening
 
 ### Gap found
