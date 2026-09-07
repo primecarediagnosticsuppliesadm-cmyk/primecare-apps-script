@@ -55,21 +55,29 @@ tenants (id)
 |-----------|--------|
 | **Join** | `(tenant_id, lab_id)` unique |
 | **Cardinality** | 1:1 |
-| **Business rule** | Pipeline stage drives executive action queue |
+| **Business rule** | Pipeline stage drives executive action queue. **Current snapshot** — not visit history. |
 
 ### labs → agent_visits
 | Attribute | Detail |
 |-----------|--------|
 | **Join** | `(tenant_id, lab_id)` |
 | **Cardinality** | 1:N visits |
+| **Business rule** | Historical Visit Evidence header. Sourced PROSPECT may be visited without becoming operational. |
 | **Query pattern** | Agent dashboard bounded by `agent_id` + lab visibility |
+
+### agent_visits → agent_visit_discovery_lines
+| Attribute | Detail |
+|-----------|--------|
+| **Join** | `agent_visits.id` (uuid) + `tenant_id` |
+| **Cardinality** | 1:N lines |
+| **Business rule** | VE-1. Observational analyzer/reagent/consumable evidence. **Not** a CRM table. **Not** `lab_product_intelligence`. |
 
 ### labs → lab_product_intelligence
 | Attribute | Detail |
 |-----------|--------|
 | **Join** | `(tenant_id, lab_id)` |
 | **Cardinality** | 1:N incumbent product lines |
-| **Business rule** | Market discovery SoT. Do **not** store mix on `lab_qualifications` or visit notes. Optional `source_visit_id` for the visit that last captured the row. |
+| **Business rule** | **Current** mix snapshot. Do **not** store mix on `lab_qualifications`. Historical mix belongs on visit discovery lines (VE-1). Optional `source_visit_id` is a pointer only (`visit_id` text is not unique). |
 | **Query pattern** | `getLabProductIntelligenceRead({ tenantId, labId })` |
 
 ---

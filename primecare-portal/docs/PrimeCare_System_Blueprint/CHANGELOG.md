@@ -60,6 +60,22 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-07 — VE-3 integrated into current QA Flow 2 Labs UX
+
+### Change
+
+- Cherry-pick of visit evidence onto current `origin/qa` kept Flow 2/2A/2C/2E/3A Labs architecture (`partitionAgentLabs`, `AgentProspectLabCard`, Active / Prospects tabs).
+- VE-3 Start Visit / Log Visit fast-entry is added onto those cards. Sourced PROSPECT Log Visit does not activate, order, collect, or open operational Lab actions.
+- `filterLabsForUser` is not reintroduced as the Agent Labs list filter. Production **UNCHANGED**. No merge to main.
+
+### Verification
+
+- `node scripts/verify-agent-visit-evidence-ux.mjs` (static + `--remote` QA only)
+- `node scripts/verify-agent-prospect-2a.mjs` / `2c` / `2e`
+- `node scripts/verify-flow-3a.mjs`
+
+---
+
 ## 2026-09-07 — Flow 3A anon EXECUTE revoke on financial posting RPCs
 
 ### Gap found
@@ -356,6 +372,107 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 ### Verification
 
 - `node scripts/verify-operations-center-agent-merge.mjs`
+## 2026-09-07 — VE-3 entry UAT: Start Visit must open fast Log Visit (QA)
+
+### Change
+
+- Founder UAT: Pilot Lab 7 → Start Visit opened the legacy 6-step wizard (`Log field visit` / Guided workflow) with “Draft restored”.
+- Cause: Start Visit wrote sessionStorage then AgentVisitPage could restore a wizard draft after the pending task was consumed; wizard chrome is the default historical page. Fast mode was not forced as an entry contract.
+- Fix: `startVisitFromWorkspaceItem` writes `VISIT_ENTRY_INTENT_KEY` (`mode: fast`) and dispatches `primecare:startFastVisit`. AgentVisitPage applies `applyFastVisitEntry` (visitMode fast, step 0, no wizard banner). Wizard draft restore is skipped on this intent and applied only from **Qualify / product mix** for the same lab.
+- Verify: `verify-agent-visit-evidence-ux.mjs` `entry.1.*` covers the real Labs Start Visit handler, not only the isolated fast form. Production **UNCHANGED**.
+
+---
+
+## 2026-09-07 — VE-3 UAT bugfix: Add Reagent stays on fast Log Visit (QA)
+
+### Change
+
+- Founder UAT: Add Reagent from fast Log Visit opened the legacy Qualification wizard.
+- Cause: optional `<details open={false}>` was controlled-closed, so Add Analyzer/Reagent/Consumable re-rendered the parent and slammed the section shut (and the Qualify / product mix toggle remained a primary peer CTA).
+- Fix: optional sections keep their own open state; add-line buttons `type="button"` + stopPropagation; sticky wizard Continue chrome only while `visitMode === "wizard"`. Wizard still opens only from **Qualify / product mix**.
+- Verify regression in `verify-agent-visit-evidence-ux.mjs` (`uat.A_D.*`, `uat.F.*`, `uat.G.H.*`). No schema/RLS/RPC. Production **UNCHANGED**.
+
+---
+
+## 2026-09-07 — VE-3 Agent Visit Evidence field UX (QA)
+
+### Change
+
+- Fast **Log Visit** form is the default Agent visit path. Optional progressive sections. Existing qualify / product-mix wizard remains.
+- Visit eligibility helper `partitionVisitEligibleAccounts` (assigned operational ∪ sourced PROSPECT). `filterLabsForUser` unchanged and not used for the Visit picker.
+- Prospect cards: Log Visit only. No activation. Partial save uses VE-2 `header_only` retry.
+- Live QA `--remote` GO. Cleanup `[VE-3-CERT]` only. Production **UNCHANGED**. No merge to main.
+- Verify: `scripts/verify-agent-visit-evidence-ux.mjs` (static + `--remote` QA only).
+
+### Environment
+
+CLI + `.env.local` QA `zipuzmfkwwucbchlphcj`. Production **UNCHANGED**. No merge to main.
+
+---
+
+## 2026-09-07 — VE-2 Agent Visit Evidence application contract (QA)
+
+### Change
+
+- Canonical Visit write remains `createAgentVisitWrite`. Optional VE-1 header fields + optional `discoveryLines` persist through `persistAgentVisitWithOptionalDiscovery`. Child FK is `visit_uuid` → `agent_visits.id`.
+- Bounded evidence readers: `getAgentVisitEvidenceRead` / `fetchAgentVisitEvidenceBundle`. Dashboard visit lists stay on production-safe `HQ_AGENT_VISIT_COLUMNS`.
+- Partial failure: header+lines is sequential (existing PrimeCare pattern). Line failure returns `success: false` + `persistence: header_only`. Retry by visit uuid + stable line ids. No new RPC.
+- Verify: `scripts/verify-agent-visit-evidence-api.mjs` (static + `--remote` QA only). Cleanup `[VE-2-CERT]` only.
+- No Agent UX (VE-3). No Production apply. No merge to main. No snapshot/finance dual-write.
+
+### Environment
+
+CLI + `.env.local` must remain QA `zipuzmfkwwucbchlphcj`. Production `alxhrnotnvwpblsiadxj` **UNCHANGED**.
+
+---
+
+## 2026-09-07 — VE-1 QA apply + live certification (AMBER → GREEN)
+
+- Relinked CLI to QA `zipuzmfkwwucbchlphcj` (`npm run db:qa:check` PASS). Applied Track A `agent_visit_evidence_ve1_migration.sql` via `supabase db query --linked` (not `db push`).
+- Live `--remote` schema + RLS items 8–18 PASS. Cert harness cleanup removed `[VE-1-CERT]` visits/lines and disposable sourced PROSPECT only.
+- Production `alxhrnotnvwpblsiadxj` not linked during apply. No merge to main. No VE-2/UX.
+
+---
+
+## 2026-09-07 — VE-1 Agent Visit Evidence schema + RLS (QA path; Production unchanged)
+
+### Change
+
+- Additive migration `supabase/migrations/20260907140000_agent_visit_evidence_ve1.sql` (Track A mirror `supabase/sql/agent_visit_evidence_ve1_migration.sql`): nullable discovery columns on `agent_visits`; child `agent_visit_discovery_lines` FK `(visit_uuid, tenant_id) → agent_visits(id, tenant_id)`; Visit Evidence RLS composing `can_write_agent_work` AND `lab_record_is_visible_to_current_user`; server-stamp Agent identity.
+- Verify: `scripts/verify-agent-visit-evidence-schema.mjs`, `scripts/verify-agent-visit-evidence-rls.mjs` (static + `--remote` QA URL only).
+- `hqReadBounds` evidence projections added; live `HQ_AGENT_VISIT_COLUMNS` kept production-safe until QA apply.
+- UX verify script remains **VE-3**. `filterLabsForUser`, Add Prospect, activation, Orders/AR/Inventory untouched.
+
+### Environment
+
+CLI linked project is Production `alxhrnotnvwpblsiadxj`. VE-1 SQL **must not** be applied via `--linked`. QA apply requires relink to `zipuzmfkwwucbchlphcj` then `npm run db:qa:check`. Production **UNCHANGED**.
+
+### Explicitly not done
+
+AgentVisitPage, prospect Log Visit, visit picker, HQ analytics, dual-write, Production apply, merge to main, VE-2.
+
+---
+
+## 2026-09-07 — VE-0 Agent Visit Evidence Blueprint (AMBER → GREEN)
+
+### Gap found
+
+Architecture review: historical field discovery was missing; `lab_qualifications` / `lab_product_intelligence` are current snapshots; Add Prospect (Flow 2) excludes `PROSPECT` from operational visit pickers; `agent_visits` INSERT does not AND lab visibility; doc 21 forbade “new CRM tables” without distinguishing visit evidence children.
+
+### Change (documentation only — no schema, RLS, API, UI, QA, or Production)
+
+- New owner doc [26_Agent_Visit_Evidence.md](./26_Agent_Visit_Evidence.md): three truth layers; snapshot vs history; prospect Log Visit without operational activation; visit RLS contract; header/line/enum/UX contracts; open WC and days-to-close definitions.
+- ADRs Accepted: [decisions/ADR_VE_Visit_Evidence.md](./decisions/ADR_VE_Visit_Evidence.md) (ADR-VE-001 … ADR-VE-008).
+- Index and domain docs: README, 00, 01, 01_schema_catalog, 02_Object_Relationships, 02_field_dictionary, 03_Field_Dictionary, 04_Role_Access_Matrix, 12, 13 (planned verify scripts), 15 (P16–P20), 21 (visit children ≠ CRM).
+- DA-004: customer-level WC allocation deferred. FD-006: engine discovery via field evidence.
+
+### Explicitly not done
+
+No migration, no Production/QA apply, no VE-1 implementation. Do not start VE-1 automatically.
+
+### Verification
+
+- Documentation consistency: README index → 26; ADR IDs ADR-VE-001…008; 21 exception text; 15 P16–P20.
 
 ---
 

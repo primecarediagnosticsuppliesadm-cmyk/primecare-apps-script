@@ -60,7 +60,20 @@ Apply in Supabase SQL Editor. Verify after each tier with scripts in §4.
 
 **Apply note:** `purchase_orders_migration.sql` installs temporary `temp_anon_*` policies on PO tables; `production_auth_rls_pilot_migration.sql` (step 2) drops them and applies tenant-scoped authenticated RLS. Do not skip step 1 on greenfield databases.
 
-**Machine verification:** `node scripts/verify-pilot-migrations.mjs` — expects 32/32 on disk.
+**Machine verification:** `node scripts/verify-pilot-migrations.mjs` — expects 32/32 on disk. VE-1 is **not** in this Production 32-file track.
+
+---
+
+## §1b — Agent Visit Evidence VE-1 (QA only — not Production)
+
+| File | Track | Classification |
+|------|-------|----------------|
+| `agent_visit_evidence_ve1_migration.sql` | A | **QA ONLY** — do **not** apply to Production during VE-1 |
+| `20260907140000_agent_visit_evidence_ve1.sql` | B | **QA ONLY** — same SQL; do **not** `db push` while CLI is linked to Production |
+
+**QA apply:** VE-1 was applied and certified on QA `zipuzmfkwwucbchlphcj` (`npm run db:qa:check` PASS, then Track A `supabase db query`). **Do not apply to Production.** Re-verify with `node scripts/verify-agent-visit-evidence-schema.mjs --remote` and `node scripts/verify-agent-visit-evidence-rls.mjs --remote` if re-checking QA.
+
+**Destructive statements:** none (no DROP TABLE/COLUMN, no TRUNCATE, no DELETE FROM). DROP POLICY/TRIGGER only to replace visit RLS.
 
 ---
 
@@ -78,6 +91,7 @@ Apply in Supabase SQL Editor. Verify after each tier with scripts in §4.
 | `20260831201000_agent_resources_v1_privilege_lockdown.sql` | `agent_resources_v1_privilege_lockdown.sql` | **ACTIVE MIGRATION** (CLI) — privilege lockdown after default ALL; **do not apply to Production from AR-1A** |
 | `20260831202000_agent_resources_v1_visibility_fix.sql` | `agent_resources_v1_visibility_fix.sql` | **ACTIVE MIGRATION** (CLI) — agent composite-null visibility fix; **do not apply to Production from AR-1A** |
 | `20260901210000_agent_resources_docx_mime.sql` | `agent_resources_docx_mime.sql` | **ACTIVE MIGRATION** (CLI) — DOCX MIME on versions + `agent-resources` bucket; **do not apply to Production until QA cert** |
+| `20260907140000_agent_visit_evidence_ve1.sql` | `agent_visit_evidence_ve1_migration.sql` | **QA ONLY (VE-1)** — **DO NOT APPLY** to Production |
 
 **Note:** Track B does **not** include the full 27-file manifest. Production using Track B alone is **incomplete** — use Track A for full HQ pilot.
 
@@ -108,6 +122,7 @@ Apply in Supabase SQL Editor. Verify after each tier with scripts in §4.
 | `agent_prospect_2b_v_labs_credit_sourced_by.sql` | **ACTIVE MIGRATION (QA 2B)** | Twin of `20260905170000`. Appends `sourced_by_agent_id` to `v_labs_credit`. **DO NOT APPLY** to Production from Flow 2B. |
 | `agent_prospect_2c_activate_prospect_lab.sql` | **ACTIVE MIGRATION (QA 2C)** | Twin of `20260905200000`. `activate_prospect_lab` + `v_labs_credit.created_at`. **DO NOT APPLY** to Production from Flow 2C. |
 | `agent_prospect_2e_prospect_order_and_ordering_mode_invariants.sql` | **ACTIVE MIGRATION (QA 2E)** | Twin of `20260906080000`. `create_lab_order` ACTIVE for all callers + PROSPECT `hq_managed` lock. **DO NOT APPLY** to Production from Flow 2E. |
+| `agent_visit_evidence_ve1_migration.sql` | **QA ONLY (VE-1)** | Applied and certified on QA `zipuzmfkwwucbchlphcj` only. **DO NOT APPLY** to Production — Agent Visit Evidence schema/RLS |
 
 ---
 

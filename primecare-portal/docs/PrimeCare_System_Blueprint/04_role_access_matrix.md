@@ -14,7 +14,7 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 | Dimension | Access |
 |-----------|--------|
 | **Visible modules** | Full founder suite, EFI, orders, logistics, risk, inventory, catalog, purchase, ops center, access audit, qualification, commission, contracts, tenant/distributor mgmt (some hidden in pilot sidebar), **Agent Resources publisher** |
-| **Read** | Cross-tenant profiles; tenant ops data; all pilot tables via RLS |
+| **Read** | Cross-tenant profiles; tenant ops data; all pilot tables via RLS; **Visit Evidence tenant-scoped SELECT (VE-1)** |
 | **Write** | All roles provisionable; structural ops; fulfill; create orders on behalf of eligible active labs; payments; logistics; catalog; lab lifecycle status transitions with confirmation and reason; compensation/payroll approval, lock, payout authorization, and export when implemented; **Agent Resources publish** |
 | **Blocked** | — |
 | **Freeze** | Structural writes blocked; payments/collections allowed |
@@ -28,7 +28,7 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 | **Visible modules** | Compensation / Payroll foundation placeholder only until payroll screens are explicitly implemented |
 | **Read** | Payroll periods, plan assignments, payroll previews, own-tenant compensation records needed for payroll support |
 | **Write** | Generate preview and submit payroll runs; create adjustment requests. Cannot approve, lock, export, mark paid, or reopen locked payroll. |
-| **Blocked** | Cannot approve payouts, approve commission changes, lock payroll runs, authorize exports, mutate finance records, or create accounting entries. **No Agent Resources access in V1.** |
+| **Blocked** | Cannot approve payouts, approve commission changes, lock payroll runs, authorize exports, mutate finance records, or create accounting entries. **No Agent Resources access in V1.** **No Visit Evidence access in V1.** |
 | **Freeze** | Payroll preview support only; no payout authorization |
 
 `hr` must be implemented as an HQ role with explicit RLS. It is not a distributor role and does not grant Distributor OS payroll ownership.
@@ -40,7 +40,7 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 | Dimension | Access |
 |-----------|--------|
 | **Visible modules** | dashboard, labs, orders, logistics, risk, catalog, inventory, purchase, ops center, access audit, qualification, **Agent Resources publisher** |
-| **Read** | Tenant-scoped all ops tables |
+| **Read** | Tenant-scoped all ops tables; **Visit Evidence tenant-scoped SELECT (VE-1)** |
 | **Write** | Fulfill/cancel orders; **create orders on behalf of eligible active labs**; set `labs.ordering_mode`; lab lifecycle status transitions with confirmation and reason; payments; inventory; catalog; provision users (**not executive role**); logistics; lab ownership; **Agent Resources publish (same as executive)** |
 | **Blocked** | Founder-only pages; cannot assign executive role; compensation/payroll approval, lock, payout authorization, and export |
 | **Freeze** | Order status mutations blocked; record payment allowed |
@@ -52,10 +52,12 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 | Dimension | Access |
 |-----------|--------|
 | **Visible modules** | dashboard, visits, **Resources**, labs, collections |
-| **Read** | Assigned/visible labs **or** Labs where `sourced_by_agent_id` = current `profiles.agent_id` (same tenant); orders via lab visibility; own visits; own locked/exported compensation history when payroll self-view is implemented; **Agent Resources: current published versions authorized by audience** |
-| **Write** | Collections (payments); visits; shipment updates when assigned; **Agent Resources acknowledgements (self only)**; **PROSPECT lab create via `create_prospect_lab` only** (no generic `labs` INSERT); **Add Prospect** on Agent Labs (`AddProspectLabModal`) |
-| **Blocked** | HQ orders fulfill; catalog; logistics board; provisioning; compensation/payroll edits; Agent Resources upload/publish/archive; drafts/archived versions; creating ACTIVE Labs; choosing tenant/status/`ordering_mode`/AR/credit; mutating `sourced_by_agent_id`; calling `activate_prospect_lab` |
+| **Read** | Assigned/visible labs **or** Labs where `sourced_by_agent_id` = current `profiles.agent_id` (same tenant); orders via **operational** lab visibility only; own visits; **Visit Evidence** on assigned operational labs **or** Agent-sourced `PROSPECT`; own locked/exported compensation history when payroll self-view is implemented; **Agent Resources: current published versions authorized by audience** |
+| **Write** | Collections (payments) on **operational assigned** labs only; visits **including sourced PROSPECT** (Log Visit / Visit Evidence — does **not** activate); shipment updates when assigned; **Agent Resources acknowledgements (self only)**; **PROSPECT lab create via `create_prospect_lab` only** (no generic `labs` INSERT); **Add Prospect** on Agent Labs (`AddProspectLabModal`) |
+| **Blocked** | HQ orders fulfill; catalog; logistics board; provisioning; compensation/payroll edits; Agent Resources upload/publish/archive; drafts/archived versions; creating ACTIVE Labs; choosing tenant/status/`ordering_mode`/AR/credit; mutating `sourced_by_agent_id`; calling `activate_prospect_lab`; **Record Payment / orders / Open Lab operational access on PROSPECT** |
 | **Freeze** | Collections/payments typically allowed (daily ops) |
+
+**Visit Evidence vs operational labs (VE-0):** Sourced `PROSPECT` may receive **Log Visit** only. Do **not** put `PROSPECT` into `filterLabsForUser` (collections / Record Payment / orders). Visit picker = assigned operational ∪ sourced prospects. See [26_Agent_Visit_Evidence.md](./26_Agent_Visit_Evidence.md).
 
 ---
 
@@ -66,7 +68,7 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 | **Visible modules** | labOrders, labInvoices, labAccount only |
 | **Read** | Own lab orders, invoices, AR, catalog, own `labs.ordering_mode` |
 | **Write** | Place orders when `ordering_mode` ∈ {`hybrid`, `self_service`} + credit eligible; delivery snapshot via `persist_order_delivery_snapshot` RPC only |
-| **Blocked** | Order initiation when `ordering_mode` ∈ {`hq_managed`, `suspended`}; direct `UPDATE` on `orders`; HQ logistics, ops center, fulfill, other labs' data; **Agent Resources (no metadata, no storage)** |
+| **Blocked** | Order initiation when `ordering_mode` ∈ {`hq_managed`, `suspended`}; direct `UPDATE` on `orders`; HQ logistics, ops center, fulfill, other labs' data; **Agent Resources (no metadata, no storage)**; **Visit Evidence (no access in V1)** |
 | **Freeze** | Lab ordering allowed per `ordering_mode` unless credit hold |
 
 ### Lab ordering permissions by `ordering_mode`
@@ -101,6 +103,8 @@ Only `admin` and `executive` may change `labs.status`. Agents and lab users cann
 | `INACTIVE` | If provisioned | ✖ (`ordering_mode` must be `suspended`) | ✔ | ✔ | ✔ | ✔ |
 
 `ACTIVE -> INACTIVE` requires confirmation and reason and must force `ordering_mode = suspended`. `INACTIVE -> ACTIVE` requires confirmation and reason but must not restore prior ordering mode. Lifecycle status must never hide AR, invoices, payments, allocations, orders, shipments, Track Order, audit history, reporting, or authorized HQ visibility.
+
+**Visit Evidence / Flow 2E:** A sourced `PROSPECT` may receive Agent visits. It still must **not** gain orders, collections, payments, AR, credit, fulfillment, or lab portal through Visit Evidence. Production `create_lab_order` requires `ACTIVE`. Do not treat this table’s “Create order / checkout” column as permission for Agent prospect capture.
 
 ---
 
@@ -154,6 +158,7 @@ Full map: `PERMISSION_BY_KEY` in `rolePermissionMatrix.js`.
 | Record payment | **Allowed** |
 | Invoice download | **Allowed** |
 | Agent Resources publish | **Allowed** (not O2C/inventory structural) |
+| Agent Visit Evidence write (VE-1) | **Allowed** (daily field ops; not structural O2C) |
 | Review order details | **Allowed** |
 | Credit & Risk drawer | **Allowed** |
 | HQ on-behalf order creation (`create_lab_order`) | **Allowed** (not an order-status mutation; freeze does not gate checkout) |

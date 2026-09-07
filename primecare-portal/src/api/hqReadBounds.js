@@ -133,8 +133,28 @@ export const HQ_PURCHASE_ORDER_LIST_COLUMNS =
 export const HQ_PURCHASE_ORDER_ITEM_COLUMNS =
   "po_id,product_id,product_name,quantity,received_qty,unit_cost,total_cost,tenant_id,created_at,updated_at";
 
+/** Production-safe visit projection. Do not add VE-1 columns here until QA apply + dedicated readers. */
 export const HQ_AGENT_VISIT_COLUMNS =
   "id,lab_id,agent_id,agent_name,visit_date,created_at,notes,visit_type,tenant_id,visit_id,follow_up_required,next_follow_up_date,next_follow_up_type,next_action";
+
+/**
+ * VE-2 Visit Evidence header projection (post VE-1 migration).
+ * Dedicated evidence readers only — do not replace HQ_AGENT_VISIT_COLUMNS on dashboard lists.
+ */
+export const HQ_AGENT_VISIT_EVIDENCE_COLUMNS =
+  "id,lab_id,agent_id,agent_name,visit_date,created_at,updated_at,notes,visit_type,tenant_id,visit_id,follow_up_required,next_follow_up_date,next_follow_up_type,next_action,visited_at,decision_maker_met,decision_maker_name,decision_maker_role,commercial_outcome,lab_size_band,estimated_monthly_wallet_inr,wallet_range_band,wallet_confidence,evidence_confidence,reorder_interval,payment_method_or_terms,approx_credit_days,top_complaint,top_complaint_notes";
+
+/** Visit Evidence discovery lines (VE-2 bounded readers). No SELECT *. Not used by dashboard visit lists. */
+export const HQ_AGENT_VISIT_DISCOVERY_LINE_LIMIT = 200;
+export const HQ_AGENT_VISIT_DISCOVERY_LINE_COLUMNS =
+  "id,tenant_id,lab_id,visit_uuid,line_kind,confidence,manufacturer,model,notes,description,brand,monthly_spend_inr,monthly_quantity,supplier,product_category,approx_volume,approx_price_pack,created_at,updated_at";
+
+/** Visit-only account picker. Not used by Orders/AR/Collections. */
+export const HQ_VISIT_ELIGIBLE_ACCOUNT_LIMIT = 500;
+export const HQ_VISIT_ELIGIBLE_ACCOUNT_COLUMNS =
+  "lab_id,lab_name,tenant_id,area,owner_name,phone,status,agent_id,assigned_agent_id,sourced_by_agent_id";
+export const HQ_VISIT_ELIGIBLE_ACCOUNT_COLUMNS_FALLBACK =
+  "lab_id,lab_name,tenant_id,area,owner_name,phone,status,agent_id,assigned_agent_id";
 
 /** Agent Resources publisher list (AR-1B). storage_path is selected only for signed-URL open. */
 export const HQ_AGENT_RESOURCE_LIST_LIMIT = 200;

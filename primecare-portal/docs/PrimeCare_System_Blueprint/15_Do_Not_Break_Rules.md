@@ -80,6 +80,11 @@ Hard constraints. Violations require explicit approval + blueprint amendment + v
 | P13 | Agent Resource acknowledgements are `agent_resource_acknowledgements` only — never notification read state or localStorage |
 | P14 | Agent Resources is not Employee 360 Documents; do not enable `PEOPLE_OPS_HR_MODULE_ENABLED` for this product |
 | P15 | Files in Agent Resources must not be public; storage SELECT requires authorized metadata |
+| P16 | Agent Visit Evidence is `agent_visits` + `agent_visit_discovery_lines` only — never a parallel CRM/activity table, never economic columns on `labs`, never Agent estimates as Orders/AR/Inventory truth ([26](./26_Agent_Visit_Evidence.md)) |
+| P17 | Agent visit INSERT/UPDATE must use `can_write_agent_work` **and** `lab_record_is_visible_to_current_user`; server-stamp Agent identity |
+| P18 | Sourced `PROSPECT` may receive visits without operational activation; do not broaden operational lab filters (`filterLabsForUser`) to include PROSPECT |
+| P19 | Do not encode wallet ₹ thresholds, 8/8/4 sampling quotas, or a per-lab working-capital formula until a certified analytics methodology exists |
+| P20 | Do not dual-write Visit Evidence into `lab_qualifications` or `lab_product_intelligence` in V1 |
 
 ---
 

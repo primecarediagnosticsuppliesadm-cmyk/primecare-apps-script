@@ -381,6 +381,30 @@ See [25_Agent_Resources.md](./25_Agent_Resources.md).
 
 ---
 
+## Agent Visit Evidence (VE-0 certified / VE-1 columns)
+
+Canonical: [26_Agent_Visit_Evidence.md](./26_Agent_Visit_Evidence.md).
+
+| Field | Rule |
+|-------|------|
+| `agent_visits.id` | uuid PK; **FK target** for discovery lines |
+| `agent_visits.visit_id` | text; **not unique**; never child FK |
+| `agent_visits.visit_date` | Existing calendar SoT when `visited_at` is null |
+| `agent_visits.visit_type` | Why the Agent went — keep; not commercial_outcome |
+| `agent_visits.commercial_outcome` | VE-1: REQUIREMENT / QUOTE_OPPORTUNITY / FOLLOW_UP / ORDER_OPPORTUNITY / NO_OPPORTUNITY / UNKNOWN |
+| `agent_visits.lab_size_band` | VE-1: SMALL / MEDIUM / LARGE / CHAIN_HOSPITAL / UNKNOWN — no ₹ thresholds |
+| `agent_visits.estimated_monthly_wallet_inr` | Discovery only — not revenue, not AR |
+| `agent_visits.wallet_range_band` | Qualitative text; **no coded INR CHECKs** |
+| `agent_visits.evidence_confidence` / `wallet_confidence` / line `confidence` | ESTIMATED / CUSTOMER_STATED / DOCUMENT_CONFIRMED / UNKNOWN; optional |
+| `agent_visits.approx_credit_days` / `payment_method_or_terms` | Discovery — never write `ar_credit_control` |
+| `agent_visit_discovery_lines.line_kind` | ANALYZER / REAGENT / CONSUMABLE |
+| `lab_qualifications.*` | Current snapshot — not history |
+| `lab_product_intelligence.*` | Current mix snapshot — not history |
+
+Do not put these discovery fields on `labs`.
+
+---
+
 ## Anti-patterns
 
 | Don't | Do instead |
@@ -392,3 +416,7 @@ See [25_Agent_Resources.md](./25_Agent_Resources.md).
 | Store field playbooks in `operational-evidence` or `invoice-pdfs` | `agent-resources` + `agent_resources` |
 | Key Agent Resource audience on `agent_id` | `profiles.user_id` / `auth.uid()` |
 | Treat notification read as document acknowledgement | `agent_resource_acknowledgements` |
+| Put wallet/size/analyzers on `labs` | `agent_visits` + discovery lines |
+| Use Agent estimates as finance | Orders / invoices / payments / AR |
+| FK discovery lines to `visit_id` text | FK `agent_visits.id` |
+| Dual-write visit history into `lab_qualifications` | Keep snapshot vs history separate |

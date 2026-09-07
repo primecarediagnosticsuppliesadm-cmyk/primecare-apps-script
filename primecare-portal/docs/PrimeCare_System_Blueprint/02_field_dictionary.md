@@ -331,11 +331,23 @@ Critical fields across PrimeCare. For full column lists see [01_schema_catalog.m
 ### `agent_visits.visit_id`
 - **Type:** text
 - **Note:** No DB unique constraint — app should avoid duplicates
+- **Rule:** Child Visit Evidence FKs **`agent_visits.id` (uuid)**, never this column ([26](./26_Agent_Visit_Evidence.md))
 
 ### `agent_visits.next_follow_up_type`
 - **Type:** text
 - **Meaning:** Call / Visit / Send Pricing / Demo / Collection
 - **Note:** Must persist with `next_follow_up_date` and `next_action` — not notes-only
+
+### `agent_visits.commercial_outcome` (VE-1)
+- **Type:** text enum
+- **Values:** `REQUIREMENT`, `QUOTE_OPPORTUNITY`, `FOLLOW_UP`, `ORDER_OPPORTUNITY`, `NO_OPPORTUNITY`, `UNKNOWN`
+- **Meaning:** Structured commercial output of this visit — **not** an order
+- **Compatibility:** Distinct from `visit_type` and legacy `lab_response` (notes remap). Mapping in 26. No historical backfill.
+
+### `agent_visits.lab_size_band` (VE-1)
+- **Type:** text enum
+- **Values:** `SMALL`, `MEDIUM`, `LARGE`, `CHAIN_HOSPITAL`, `UNKNOWN`
+- **Meaning:** Qualitative discovery. **No ₹ thresholds.** Distinct from `lab_qualifications.lab_size`.
 
 ### `lab_product_intelligence.product_category`
 - **Type:** text

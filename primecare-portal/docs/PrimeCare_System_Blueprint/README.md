@@ -51,7 +51,9 @@ Read Blueprint → Inspect code/migrations → Compare doc vs implementation
 | 23 | [23_Founder_Operating_System.md](./23_Founder_Operating_System.md) | Founder OS decision cockpit (compose-only) |
 | 24 | [24_Collections_Credit_Risk.md](./24_Collections_Credit_Risk.md) | Collections / Credit & Risk payment UX, action feedback |
 | 25 | [25_Agent_Resources.md](./25_Agent_Resources.md) | Agent Resources V1 — field library SoT (not evidence, invoices, or Employee Documents) |
+| 26 | [26_Agent_Visit_Evidence.md](./26_Agent_Visit_Evidence.md) | Agent Visit Evidence V1 — historical field discovery; VE-2 write/read contract; VE-3 Agent Log Visit UX (QA); not CRM, not finance |
 | — | [CHANGELOG.md](./CHANGELOG.md) | Gaps, conflicts, structural changes |
+| — | [decisions/ADR_VE_Visit_Evidence.md](./decisions/ADR_VE_Visit_Evidence.md) | ADR-VE-001 … ADR-VE-008 (Accepted VE-0) |
 
 ### Templates
 
@@ -81,6 +83,8 @@ Earlier blueprint files (`01_schema_catalog.md` … `12_verification_matrix.md`)
 | Permissions | `rolePermissionMatrix.js` |
 | Bounded reads | `hqReadBounds.js` |
 | Compensation / payroll | HQ payroll domain tables; derived from collected cash only |
+| Field visit evidence (historical) | `agent_visits` + `agent_visit_discovery_lines` — **discovery only**; not Orders/AR/Inventory |
+| Qualification / current mix snapshots | `lab_qualifications` (1:1), `lab_product_intelligence` (current mix) — not visit history |
 
 ---
 
