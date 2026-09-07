@@ -61,6 +61,18 @@ Source: `executiveFinancialIntelligenceEngine.js` — aggregates from existing r
 
 ---
 
+## Field discovery vs finance (VE-0)
+
+Agent Visit Evidence (wallet, credit days, prices, volumes, size band) is **Layer 2 discovery**. EFI / founder analytics **must not** treat it as revenue, AR, inventory, or WC-days.
+
+Customer-level working-capital days are an **open analytics definition** until a certified allocation methodology exists (ADR-VE-008, DA-004). HQ inventory and AP are not lab-scoped.
+
+Days-to-close must not be implemented as a single undocumented formula. See [26_Agent_Visit_Evidence.md](./26_Agent_Visit_Evidence.md) (activation cycle vs order conversion).
+
+Do **not** implement segment economics, 8/8/4 quotas, wallet ₹ thresholds, or founder wealth targets in V1.
+
+---
+
 ## Verification
 
 - `verify-executive-financial-intelligence.mjs` — isolation, 7 sections, no write API touch
@@ -73,3 +85,4 @@ Source: `executiveFinancialIntelligenceEngine.js` — aggregates from existing r
 - `docs/Architecture/Founder_Decisions.md`
 - Finance SoT: [06_Finance_Rules.md](./06_Finance_Rules.md)
 - Compensation / payroll: [19_Executive_Compensation_Payroll_Engine.md](./19_Executive_Compensation_Payroll_Engine.md)
+- Visit Evidence (discovery, not finance): [26_Agent_Visit_Evidence.md](./26_Agent_Visit_Evidence.md)

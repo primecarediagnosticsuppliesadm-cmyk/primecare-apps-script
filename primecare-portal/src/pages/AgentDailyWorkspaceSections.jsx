@@ -389,6 +389,7 @@ export const ActionQueueCard = memo(function ActionQueueCard({
   const outstanding = Number(item.outstanding || 0);
   const priorityLabel = deriveQueuePriorityLabel(priorityIndex, item);
   const stopNum = routeStopNumber ?? priorityIndex + 1;
+  const prospect = String(item.status || "").toUpperCase() === "PROSPECT";
 
   return (
     <article className="flex h-full flex-col rounded-xl border border-border bg-card p-3 shadow-sm">
@@ -461,10 +462,10 @@ export const ActionQueueCard = memo(function ActionQueueCard({
           className="h-8 rounded-lg px-2.5 text-xs font-semibold"
           onClick={() => onStartVisit(item)}
         >
-          Start Visit
+          {prospect ? "Log Visit" : "Start Visit"}
           <ArrowRight className="ml-1 h-3.5 w-3.5" />
         </Button>
-        {outstanding > 0 ? (
+        {!prospect && outstanding > 0 ? (
           <Button
             type="button"
             size="sm"
@@ -476,6 +477,7 @@ export const ActionQueueCard = memo(function ActionQueueCard({
             Record Payment
           </Button>
         ) : null}
+        {!prospect ? (
         <Button
           type="button"
           size="sm"
@@ -485,6 +487,7 @@ export const ActionQueueCard = memo(function ActionQueueCard({
         >
           Open Lab
         </Button>
+        ) : null}
       </div>
     </article>
   );
@@ -515,9 +518,9 @@ export const LabPriorityRow = memo(function LabPriorityRow({ lab, onStartVisit, 
       </div>
       <div className="flex shrink-0 gap-1.5">
         <Button type="button" size="sm" className="h-8 rounded-lg text-xs" onClick={() => onStartVisit(lab)}>
-          Visit
+          {String(lab.status || "").toUpperCase() === "PROSPECT" ? "Log Visit" : "Visit"}
         </Button>
-        {Number(lab.outstanding) > 0 ? (
+        {String(lab.status || "").toUpperCase() !== "PROSPECT" && Number(lab.outstanding) > 0 ? (
           <Button
             type="button"
             size="sm"

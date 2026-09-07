@@ -314,17 +314,29 @@ Major tables and objects in PrimeCare QA/Prod Supabase (`public` schema).
 ### `agent_visits`
 | Attribute | Value |
 |-----------|-------|
-| **Purpose** | Field agent visit log per lab |
+| **Purpose** | Canonical field visit header + historical Visit Evidence ([26_Agent_Visit_Evidence.md](./26_Agent_Visit_Evidence.md)) |
 | **Owner module** | Agent Visits |
-| **PK** | `id` (uuid) |
-| **Business key** | `visit_id` (text — **no unique constraint in schema**) |
+| **PK** | `id` (uuid) — child FK target |
+| **Business key** | `visit_id` (text — **no unique constraint in schema** — not a child FK) |
 | **Optional** | `next_follow_up_date`, `next_follow_up_type`, `next_action`, `follow_up_required`, `notes` |
-| **RLS** | Yes — agent work + lab visibility |
+| **VE-1 additive** | Nullable discovery columns listed in 26 / 01 — SQL in repo (`20260907140000_agent_visit_evidence_ve1.sql`); **not applied to Production**; QA apply pending CLI relink |
+| **RLS** | Yes — VE-1: agent work **and** lab visibility |
+| **Prospects** | Sourced PROSPECT visitable; not operational |
+
+### `agent_visit_discovery_lines`
+| Attribute | Value |
+|-----------|-------|
+| **Purpose** | Visit-scoped observational lines (ANALYZER / REAGENT / CONSUMABLE) |
+| **Owner module** | Agent Visit Evidence |
+| **Status** | VE-1 SQL in repo; **not on Production**; QA apply pending |
+| **PK** | `id` (uuid) |
+| **FK** | `agent_visits.id` (uuid) |
+| **Not** | CRM table, product master, `lab_product_intelligence` replacement |
 
 ### `lab_product_intelligence`
 | Attribute | Value |
 |-----------|-------|
-| **Purpose** | Incumbent product mix per lab (market discovery). One lab, many product lines (e.g. BD EDTA + other-brand SST + gloves). |
+| **Purpose** | Incumbent product mix per lab (market discovery). One lab, many product lines (e.g. BD EDTA + other-brand SST + gloves). **Current snapshot** — not visit history. |
 | **Owner module** | Agent Visits (Qualify stays lab-level) |
 | **PK** | `id` (uuid) |
 | **Business key** | None unique — multiple rows per `(tenant_id, lab_id)` |
@@ -387,6 +399,7 @@ Major tables and objects in PrimeCare QA/Prod Supabase (`public` schema).
 4. **`event_log` RLS** — enabled without policies → denies unless bypassed.
 5. **Phase 3A columns** — may exist in code before migration applied on environment (QA gap observed for delivery columns).
 6. **Migrations vs sql/** — not all `supabase/sql` scripts are in `migrations/` folder.
+7. **`agent_visits` INSERT RLS** — Production still checks `can_write_agent_work` only. VE-1 SQL in repo composes lab visibility (ADR-VE-005) but is **not applied to Production**; QA apply pending.
 
 ---
 

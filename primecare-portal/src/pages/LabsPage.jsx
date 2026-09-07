@@ -390,7 +390,7 @@ function CreditBadge({ status }) {
   );
 }
 
-function AgentProspectLabCard({ lab }) {
+function AgentProspectLabCard({ lab, onLogVisit }) {
   return (
     <article className="flex h-full flex-col rounded-xl border border-amber-200 bg-amber-50/40 p-3 shadow-sm">
       <div className="mb-1 flex flex-wrap items-center gap-1.5">
@@ -423,7 +423,20 @@ function AgentProspectLabCard({ lab }) {
           </div>
         ) : null}
       </dl>
-      <p className="mt-3 text-xs font-semibold text-amber-900">Awaiting HQ review</p>
+      <p className="mt-3 text-xs font-semibold text-amber-900">
+        Awaiting HQ review — Log Visit only. No orders, payments, or activation.
+      </p>
+      <div className="mt-2.5 flex flex-wrap gap-1.5 border-t border-amber-200/80 pt-2.5">
+        <Button
+          type="button"
+          size="sm"
+          className="h-8 rounded-lg px-2.5 text-xs font-semibold"
+          onClick={() => onLogVisit(lab)}
+        >
+          Log Visit
+          <ArrowRight className="ml-1 h-3 w-3" />
+        </Button>
+      </div>
     </article>
   );
 }
@@ -441,6 +454,7 @@ function AgentMyLabCard({
   const recommended = deriveLabRecommendedAction(lab);
   const creditHold =
     String(lab.creditHold || lab.creditStatus || "").toUpperCase() === "HOLD";
+  const prospect = String(lab.status || "").toUpperCase() === "PROSPECT";
 
   return (
     <article className="flex h-full flex-col rounded-xl border border-border bg-card p-3 shadow-sm">
@@ -454,6 +468,11 @@ function AgentMyLabCard({
           </h3>
           {lab.area ? (
             <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{lab.area}</p>
+          ) : null}
+          {prospect ? (
+            <StatusBadge variant="warning" compact className="mt-1">
+              Prospect
+            </StatusBadge>
           ) : null}
           {creditHold ? (
             <StatusBadge variant="danger" compact className="mt-1">
@@ -494,10 +513,10 @@ function AgentMyLabCard({
           className="h-8 rounded-lg px-2.5 text-xs font-semibold"
           onClick={() => onStartVisit(lab)}
         >
-          Start Visit
+          {prospect ? "Log Visit" : "Start Visit"}
           <ArrowRight className="ml-1 h-3 w-3" />
         </Button>
-        {outstanding > 0 ? (
+        {!prospect && outstanding > 0 ? (
           <Button
             type="button"
             size="sm"
@@ -509,6 +528,7 @@ function AgentMyLabCard({
             Record Payment
           </Button>
         ) : null}
+        {!prospect ? (
         <Button
           type="button"
           size="sm"
@@ -518,6 +538,7 @@ function AgentMyLabCard({
         >
           Open Lab
         </Button>
+        ) : null}
       </div>
     </article>
   );
@@ -1074,7 +1095,17 @@ export default function LabsPage({
               ) : (
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   {agentLabPartition.prospects.map((lab, idx) => (
-                    <AgentProspectLabCard key={`${lab.labId || lab.labName}-p-${idx}`} lab={lab} />
+                    <AgentProspectLabCard
+                      key={`${lab.labId || lab.labName}-p-${idx}`}
+                      lab={lab}
+                      onLogVisit={(item) => {
+                        startVisitFromWorkspaceItem(item, {
+                          visitType: "Field Visit",
+                          source: "agent_prospects",
+                        });
+                        setActivePage?.("visits");
+                      }}
+                    />
                   ))}
                 </div>
               )}

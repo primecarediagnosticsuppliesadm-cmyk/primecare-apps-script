@@ -51,7 +51,8 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 | **Business key** | `(tenant_id, lab_id)` |
 | **Required** | `tenant_id`, `lab_id`, `lab_name` |
 | **Optional** | `owner_name`, `phone`, `area`, `assigned_agent_id`, `sourced_by_agent_id`, `status`, `credit_terms`, `ordering_mode` |
-| **Relationships** | → orders, AR, qualifications, ownership |
+| **Not** | Visit Evidence discovery (size band, wallet, analyzers, terms, complaints) is **not** a second economic-truth layer on `labs`. Those observations belong on `agent_visits` / `agent_visit_discovery_lines` ([26](./26_Agent_Visit_Evidence.md)). Flow 2 lifecycle and sourcing fields on `labs` (`status`, `ordering_mode`, `sourced_by_agent_id`) remain as certified. |
+| **Relationships** | → orders, AR, qualifications, ownership, agent_visits |
 | **RLS** | Yes — lab visibility (`lab_is_visible_to_current_user` / `lab_record_is_visible_to_current_user`) |
 | **Read** | agent (assigned **or** `sourced_by_agent_id` match), lab (own `lab_id` only), admin, executive (tenant) |
 | **Write** | admin, executive (ordinary updates); Agent PROSPECT create **only** via `create_prospect_lab` |
@@ -64,6 +65,8 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 **`activate_prospect_lab` (Flow 2C):** SECURITY DEFINER, `search_path=public`, REVOKE PUBLIC/anon, GRANT authenticated. Inputs: `p_lab_id`, optional `p_initial_agent_id`. Tenant derived from authenticated Admin/Executive profile (client tenant_id not trusted). Preconditions: active HQ profile, same tenant, target `status=PROSPECT`. Result: `status=ACTIVE`, `ordering_mode=hq_managed`, one `ar_credit_control` row (HQ Add Lab defaults: limit 0, outstanding/delivered/paid 0), optional `lab_ownership` + `assigned_agent_id` (sourcing Agent if still active, else explicit `p_initial_agent_id`, else unassigned). Does **not** SET `sourced_by_agent_id`. Does **not** create Lab user, order, invoice, shipment, inventory, or payment. Repeat call on ACTIVE → `activate_already_active` with no second AR/ownership. Audit: `user_provisioning_events` `event_type=updated` with `payload.action=lab_prospect_activated`. Generic `labs` PATCH of `PROSPECT -> ACTIVE` is rejected by `labs_prospect_activate_via_rpc_only` (`use_activate_prospect_lab`) and by `updateLabLifecycleStatusWrite`.
 
 **Flow 2E invariants:** `create_lab_order` requires `labs.status = ACTIVE` for every caller (`lab_inactive` otherwise). `orders_insert_by_role` HQ insert also requires `lab_row_is_active`. WHILE `status` remains `PROSPECT`, `ordering_mode` must stay `hq_managed` (`labs_prospect_ordering_hq_managed` BEFORE INSERT/UPDATE; `prospect_ordering_hq_managed`). `activate_prospect_lab` is not blocked (it sets `ACTIVE` + `hq_managed` in one UPDATE).
+
+**Visit Evidence:** Log Visit on a sourced `PROSPECT` writes `agent_visits` (+ optional discovery lines). It does **not** activate the lab, create AR, or grant orders/collections/inventory.
 
 ---
 
@@ -250,11 +253,12 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 
 | Attribute | Value |
 |-----------|-------|
-| **Purpose** | Sales qualification + pipeline per lab |
+| **Purpose** | Sales qualification + pipeline per lab — **current snapshot only** (1:1). Not visit history. |
 | **Module** | Qualification Review |
 | **PK** | `id` (uuid) |
 | **Business key** | `(tenant_id, lab_id)` |
 | **RLS** | Yes — lab visibility |
+| **Not** | Historical field evidence SoT — see `agent_visits` / [26](./26_Agent_Visit_Evidence.md). V1 Visit Evidence must not dual-write here. |
 
 ---
 
@@ -318,12 +322,34 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 
 | Attribute | Value |
 |-----------|-------|
-| **Purpose** | Field visit log |
+| **Purpose** | Canonical **field visit header** and historical Visit Evidence SoT ([26](./26_Agent_Visit_Evidence.md), ADR-VE-001) |
 | **Module** | Agent Visits |
-| **PK** | `id` (uuid) |
-| **Business key** | `visit_id` (text — no unique DB constraint) |
+| **PK** | `id` (uuid) — **child FK target** |
+| **Business key** | `visit_id` (text — **no unique DB constraint** — do **not** use as child FK) |
 | **Follow-up** | `next_follow_up_date`, `next_follow_up_type`, `next_action`, `follow_up_required` |
-| **RLS** | Yes — agent work + lab visibility |
+| **Compatibility** | `visit_date`, `visit_type`, `notes`, `tenant_id`, `lab_id`, `agent_id`, `agent_name`, `created_at` |
+| **VE-1 additive (SQL in repo, QA apply pending, Production unchanged)** | Nullable discovery: `visited_at`, `decision_maker_met`, `decision_maker_name`, `decision_maker_role`, `commercial_outcome`, `lab_size_band`, `estimated_monthly_wallet_inr`, `wallet_range_band`, `wallet_confidence`, `evidence_confidence`, `reorder_interval`, `payment_method_or_terms`, `approx_credit_days`, `top_complaint`, `top_complaint_notes`, `updated_at` |
+| **RLS today / VE-1** | INSERT/UPDATE: `can_write_agent_work` **AND** `lab_record_is_visible_to_current_user`; Agent identity server-stamped; Admin/Exec SELECT tenant; Lab/HR none |
+| **Prospects** | Sourced `PROSPECT` may receive visits; does **not** become operational (ADR-VE-004) |
+
+Enums and mapping: [26_Agent_Visit_Evidence.md](./26_Agent_Visit_Evidence.md). Discovery fields are **never** financial SoT.
+
+---
+
+## agent_visit_discovery_lines
+
+| Attribute | Value |
+|-----------|-------|
+| **Purpose** | Historical multi-line observational evidence for **one visit** (analyzer / reagent / consumable) |
+| **Module** | Agent Visit Evidence — [26](./26_Agent_Visit_Evidence.md) |
+| **Status** | **VE-1 SQL in repo** — table does not exist in Production yet; QA apply pending |
+| **PK** | `id` (uuid) |
+| **FK** | `agent_visits.id` (uuid) + `tenant_id`. **Forbidden:** FK to `visit_id` text |
+| **Required** | `tenant_id`, visit uuid, `line_kind`, `lab_id` (stamped from parent visit for RLS; not client-trusted) |
+| **Optional** | kind-specific observational fields, `confidence` |
+| **line_kind** | `ANALYZER` \| `REAGENT` \| `CONSUMABLE` |
+| **RLS** | Same visibility as parent visit (VE-1) |
+| **Not** | CRM activity table, equipment/product/reagent master, `products` FK, inventory, orders, replacement for `lab_product_intelligence` |
 
 ---
 
@@ -331,11 +357,12 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 
 | Attribute | Value |
 |-----------|-------|
-| **Purpose** | Incumbent purchasing mix (N product lines per lab) |
+| **Purpose** | Incumbent purchasing mix (N product lines per lab) — **current snapshot only**, not visit history |
 | **Module** | Agent Visits — Products & Purchasing step |
 | **PK** | `id` (uuid) |
 | **Cardinality** | labs 1 : N product lines |
 | **RLS** | Yes — lab visibility; agent write when lab visible |
+| **Not** | Historical Visit Evidence SoT; warehouse stock; `products` catalog. V1 Visit Evidence must not dual-write here ([26](./26_Agent_Visit_Evidence.md)). |
 
 ---
 

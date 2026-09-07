@@ -3,6 +3,11 @@
  * Same tenant (RLS session), column projections, date windows, and row limits.
  */
 import {
+  fetchAgentVisitDiscoveryLines,
+  fetchAgentVisitEvidenceBundle,
+  fetchAgentVisitEvidenceHeader,
+} from "@/visits/agentVisitEvidenceApi.js";
+import {
   HQ_AGENT_VISIT_COLUMNS,
   HQ_AR_COLUMNS,
   HQ_COLLECTIONS_AR_LIMIT,
@@ -405,6 +410,12 @@ export async function fetchAgentVisitsForLabBoundedRows(client, options = {}) {
     tenantId
   ).limit(limit);
 }
+
+export {
+  fetchAgentVisitDiscoveryLines,
+  fetchAgentVisitEvidenceBundle,
+  fetchAgentVisitEvidenceHeader,
+};
 
 export async function fetchLabProductIntelligenceForLabBoundedRows(client, options = {}) {
   if (!client) {

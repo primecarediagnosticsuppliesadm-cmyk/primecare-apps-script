@@ -19,6 +19,7 @@ tenants
   │     ├── lab_ownership
   │     ├── lab_qualifications
   │     └── agent_visits
+  │           └── agent_visit_discovery_lines (VE-1; visit evidence, not CRM)
   ├── inventory ── inventory_ledger
   ├── purchase_orders ── purchase_order_items
   └── agent_resources
@@ -71,6 +72,8 @@ logistics_warehouses
 | delivery_routes | logistics_couriers | courier_id (text) | N:1 | Driver assignment on route |
 | labs | delivery planning | preferred_delivery_day | attr | Groups unassigned shipments |
 | labs | lab_ownership | tenant_id + lab_id | 0..1 ACTIVE | Agent collections filter |
+| labs | agent_visits | tenant_id + lab_id | 1:N | Historical visits; sourced PROSPECT allowed for visits only |
+| agent_visits | agent_visit_discovery_lines | agent_visits.id (uuid) + tenant_id | 1:N | Visit evidence lines; **not** CRM; VE-1 |
 | payments | compensation_commission_entries | payment_id snapshot/ref | derived | Cash-only commission input; no payment mutation |
 | lab_ownership | compensation_commission_entries | tenant_id + lab_id + payment date snapshot | derived | Fallback attribution when payments.agent_id is absent |
 | payroll_periods | payroll_runs | period_id | 1:N | Preview/versioned payroll runs |

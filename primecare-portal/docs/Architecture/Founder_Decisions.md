@@ -17,3 +17,6 @@ PrimeCare HQ itself is a tenant. Future distributors will be additional tenants.
 
 ## FD-005: Inventory redesign deferred
 The current Master Catalog + opening stock flow is acceptable for pilot. A ledger-first inventory redesign is deferred.
+
+## FD-006: Field evidence discovers the economic engine
+PrimeCare does not encode a predetermined winning engine (consumables, reagents, analyzers, private label, software, chains, etc.). Agent Visit Evidence captures historical discovery. Canonical Orders / Invoices / Payments / AR / Inventory remain financial truth. See Blueprint [26_Agent_Visit_Evidence.md](../PrimeCare_System_Blueprint/26_Agent_Visit_Evidence.md) and ADR-VE-007.
