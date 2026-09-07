@@ -63,7 +63,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 
 | Script | Checks | When |
 |--------|--------|------|
-| verify-labs-admin-flow.mjs | Tenant scope, ownership, Labs KPI definitions (`Total Labs`, `Prospect Labs`, `Active Labs`, `Inactive Labs`, `Order-Eligible Labs`, `Ordering Suspended`) | Labs |
+| verify-labs-admin-flow.mjs | Tenant scope, ownership, Labs KPI definitions (`Total Labs`, `Prospect Labs`, `Active Labs`, `Inactive Labs`, `Order-Eligible Labs`, `Ordering Suspended`); **HQ attention/coverage use non-PROSPECT operational denominator** (outstanding, unassigned, leftover PROSPECT AR excluded) | Labs |
 | verify-agent-prospect-2a.mjs | Agent `create_prospect_lab` PROSPECT create; identity/tenant/sourced_by derivation; no AR/ownership/lab user; spoof + role rejects; sourced_by immutability; same-tenant duplicates; visibility; HQ `create_lab_with_ar_credit` regression. Default static; `--apply` QA only | Agent Prospect 2A |
 | verify-agent-prospect-2b.mjs | Agent Add Prospect UI + list categorization; `createProspectLabWrite` bounded args/errors; role gating; no HQ Add Lab reuse; prospect card has no credit/visit/payment actions; 2A + Flow 1 static regression. Default static; `--apply` QA only (view column + Agent list read + duplicate UX; no activation) | Agent Prospect 2B |
 | verify-agent-prospect-2c.mjs | HQ `activate_prospect_lab`; AR once; optional ownership; sourced_by immutable; repeat activation reject; role/tenant denies; generic PATCH cannot PROSPECT→ACTIVE; HQ UI Activate Lab + Prospects filter. Default static; `--apply` QA only | Agent Prospect 2C |

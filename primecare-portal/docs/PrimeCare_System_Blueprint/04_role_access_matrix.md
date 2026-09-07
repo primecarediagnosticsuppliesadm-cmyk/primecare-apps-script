@@ -13,7 +13,7 @@ Database: RLS in `supabase/sql/production_auth_rls_pilot_migration.sql` + patche
 
 | Dimension | Access |
 |-----------|--------|
-| **Visible modules** | Full founder suite, EFI, orders, logistics, risk, inventory, catalog, purchase, ops center, access audit, qualification, commission, contracts, tenant/distributor mgmt (some hidden in pilot sidebar), **Agent Resources publisher** |
+| **Visible modules** | Full founder suite, EFI, orders, logistics, risk, inventory, catalog, purchase, ops center, access audit, qualification, commission, contracts, tenant/distributor mgmt (some hidden in pilot sidebar), **Agent Resources publisher**. **Labs** is permissioned (`PERMISSION_BY_KEY.labs`) and reachable by deep-link `/labs`; it is **not** in the HQ Executive sidebar. **Collections** is Admin/Agent (and auditor), not Executive — Credit & Risk is the Executive collections-adjacent page. |
 | **Read** | Cross-tenant profiles; tenant ops data; all pilot tables via RLS; **Visit Evidence tenant-scoped SELECT (VE-1)** |
 | **Write** | All roles provisionable; structural ops; fulfill; create orders on behalf of eligible active labs; payments; logistics; catalog; lab lifecycle status transitions with confirmation and reason; compensation/payroll approval, lock, payout authorization, and export when implemented; **Agent Resources publish** |
 | **Blocked** | — |
