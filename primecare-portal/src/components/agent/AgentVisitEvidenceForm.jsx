@@ -11,7 +11,6 @@ import { labIdKey } from "@/utils/labId.js";
 import { isProspectLab } from "@/visits/visitEligibleAccounts.js";
 import {
   VISIT_COMPLAINT_OPTIONS,
-  VISIT_CONFIDENCE_OPTIONS,
   VISIT_LINE_KIND_LABELS,
   VISIT_OUTCOME_OPTIONS,
   VISIT_SIZE_OPTIONS,
@@ -102,17 +101,6 @@ function DiscoveryLineFields({ line, onChange, onRemove }) {
           <Input className={FIELD} placeholder="Supplier" value={line.supplier} onChange={(e) => onChange({ supplier: e.target.value })} />
         </>
       ) : null}
-      <select
-        className={FIELD}
-        value={line.confidence}
-        onChange={(e) => onChange({ confidence: e.target.value })}
-      >
-        {VISIT_CONFIDENCE_OPTIONS.map((opt) => (
-          <option key={opt.value || "skip"} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
     </div>
   );
 }
@@ -152,7 +140,10 @@ export default function AgentVisitEvidenceForm({
   function addDiscoveryLine(kind, event) {
     event?.preventDefault?.();
     event?.stopPropagation?.();
-    patch({ discoveryLines: [...form.discoveryLines, createEmptyDiscoveryLine(kind)] });
+    setForm((prev) => ({
+      ...prev,
+      discoveryLines: [...prev.discoveryLines, createEmptyDiscoveryLine(kind)],
+    }));
   }
 
   async function persist(payload) {
@@ -201,6 +192,10 @@ export default function AgentVisitEvidenceForm({
         setError(res?.error || "Visit could not be saved.");
         return;
       }
+      setForm({
+        ...createEmptyVisitEvidenceForm(),
+        labId: form.labId,
+      });
       onSuccess?.(res);
     } catch (err) {
       setError(err?.message || String(err));
@@ -232,7 +227,7 @@ export default function AgentVisitEvidenceForm({
   }
 
   return (
-    <form className="space-y-3" onSubmit={handleSave} data-ve3-fast-form="true">
+    <form className="space-y-3" onSubmit={handleSave} data-ve3-fast-form="true" data-ve3-uat-fix="idempotent-20260907">
       <div className="rounded-xl border border-border bg-card p-3">
         <FieldLabel>Lab or prospect</FieldLabel>
         <select
@@ -333,32 +328,33 @@ export default function AgentVisitEvidenceForm({
       </p>
 
       <OptionalSection title="Lab size & wallet" hint="Discovery only. No rupee thresholds.">
-        <select className={FIELD} value={form.labSizeBand} onChange={(e) => patch({ labSizeBand: e.target.value })}>
-          {VISIT_SIZE_OPTIONS.map((opt) => (
-            <option key={opt.value || "skip"} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-        <Input className={FIELD} inputMode="decimal" placeholder="Estimated monthly wallet (₹)" value={form.estimatedMonthlyWalletInr} onChange={(e) => patch({ estimatedMonthlyWalletInr: e.target.value })} />
-        <Input className={FIELD} placeholder="Wallet range in their words" value={form.walletRangeBand} onChange={(e) => patch({ walletRangeBand: e.target.value })} />
-        <select className={FIELD} value={form.walletConfidence} onChange={(e) => patch({ walletConfidence: e.target.value })}>
-          {VISIT_CONFIDENCE_OPTIONS.map((opt) => (
-            <option key={`w-${opt.value || "skip"}`} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-        <select className={FIELD} value={form.evidenceConfidence} onChange={(e) => patch({ evidenceConfidence: e.target.value })}>
-          {VISIT_CONFIDENCE_OPTIONS.map((opt) => (
-            <option key={`e-${opt.value || "skip"}`} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+        <div>
+          <FieldLabel optional>Lab size</FieldLabel>
+          <select
+            className={FIELD}
+            value={form.labSizeBand}
+            onChange={(e) => patch({ labSizeBand: e.target.value })}
+            data-ve3-lab-size="true"
+          >
+            {VISIT_SIZE_OPTIONS.map((opt) => (
+              <option key={opt.value || "skip"} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <FieldLabel optional>Estimated monthly wallet (₹)</FieldLabel>
+          <Input className={FIELD} inputMode="decimal" placeholder="Estimated monthly wallet (₹)" value={form.estimatedMonthlyWalletInr} onChange={(e) => patch({ estimatedMonthlyWalletInr: e.target.value })} />
+        </div>
+        <div>
+          <FieldLabel optional>Wallet range in their words</FieldLabel>
+          <Input className={FIELD} placeholder="Wallet range in their words" value={form.walletRangeBand} onChange={(e) => patch({ walletRangeBand: e.target.value })} />
+        </div>
       </OptionalSection>
 
       <OptionalSection title="Decision maker">
+        <FieldLabel optional>Decision maker</FieldLabel>
         <select className={FIELD} value={form.decisionMakerMet} onChange={(e) => patch({ decisionMakerMet: e.target.value })}>
           <option value="">Skip</option>
           <option value="true">Met decision maker</option>
@@ -406,6 +402,7 @@ export default function AgentVisitEvidenceForm({
       </OptionalSection>
 
       <OptionalSection title="Main pain / complaint">
+        <FieldLabel optional>Main pain</FieldLabel>
         <select className={FIELD} value={form.topComplaint} onChange={(e) => patch({ topComplaint: e.target.value })}>
           {VISIT_COMPLAINT_OPTIONS.map((opt) => (
             <option key={opt.value || "skip"} value={opt.value}>

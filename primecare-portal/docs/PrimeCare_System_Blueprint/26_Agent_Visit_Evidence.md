@@ -396,7 +396,9 @@ Open Visits (or Prospect card Log Visit)
 
 **Optional sections (all skippable, collapsed):** lab size & wallet; decision maker; analyzers/reagents/consumables; terms/reordering; main pain/complaint.
 
-Adding ANALYZER / REAGENT / CONSUMABLE lines **must remain on this same fast form**. It must not open Qualify / product mix, Strategic lab intelligence, or Product Intelligence. Optional `<details>` keep their open state across add-line re-renders. The six-step wizard opens **only** from the explicit **Qualify / product mix** control.
+Lab size & wallet captures `lab_size_band`, `estimated_monthly_wallet_inr`, and `wallet_range_band`. `wallet_confidence` and `evidence_confidence` remain on the visit header contract/database but are **not** unlabeled Skip controls on the normal fast form.
+
+Adding ANALYZER / REAGENT / CONSUMABLE lines **must remain on this same fast form**. It must not open Deep qualification, Strategic lab intelligence, or Product Intelligence. Optional `<details>` keep their open state across add-line re-renders. The six-step wizard opens **only** from the explicit **Deep qualification** control (copy: “Optional — open the detailed qualification and product-mix workflow.”).
 
 **Click/tap count (minimal useful visit):**
 1. Open Log Visit (or tap Prospect **Log Visit**)
@@ -406,15 +408,15 @@ Adding ANALYZER / REAGENT / CONSUMABLE lines **must remain on this same fast for
 
 That is **2–4 taps**. 60–90 seconds is realistic on a phone when the account is already in context.
 
-**Start Visit / Log Visit entry:** Labs (assigned lab **Start Visit**), sourced PROSPECT **Log Visit**, and workspace visit actions write a fast entry intent (`primecare_visit_entry_intent` + pending task) and always open the VE-3 fast form. A legacy wizard draft is **not** applied on this path. The six-step wizard opens only from **Qualify / product mix**.
+**Start Visit / Log Visit entry:** Labs (assigned lab **Start Visit**), sourced PROSPECT **Log Visit**, and workspace visit actions write a fast entry intent (`primecare_visit_entry_intent` + pending task) and always open the VE-3 fast form. A legacy wizard draft is **not** applied on this path and the “Draft restored” banner is **wizard-only**. The six-step wizard opens only from **Deep qualification**.
 
 **Visit eligibility** is `partitionVisitEligibleAccounts`: assigned operational labs (assigned Agent id match, not `PROSPECT`) **union** prospects with `sourced_by_agent_id` = current Agent. The operational Orders/AR filter (`filterLabsForUser`) is **unchanged** and is **not imported** by the visit helper. Prospect cards expose **Log Visit only**. A prospect visit does not activate the lab.
 
-**Partial save:** VE-2 `header_only` shows “Visit was saved, but some evidence details could not be saved.” Retry uses `createAgentVisitDiscoveryLinesWrite` with stable line UUIDs. Header is not re-submitted.
+**Partial save:** VE-2 `header_only` shows “Visit was saved, but some evidence details could not be saved.” Retry uses `createAgentVisitDiscoveryLinesWrite` with stable line UUIDs. Header is not re-submitted. Same visit + same line UUID is **idempotent**: already-persisted rows are not duplicated and must not surface `agent_visit_discovery_lines_pkey` to the Agent. A UUID that already belongs to a **different** visit still fails. Complete save remounts/clears the fast form so the next Save cannot reuse those UUIDs on a new header.
 
 **Duplicate submit:** Save is disabled and `savingRef` blocks re-entry while persistence is in flight.
 
-**Parity:** Qualify / product mix wizard remains for snapshot qualification and `lab_product_intelligence`. Fast Log Visit does **not** dual-write those snapshots. Add Prospect remains the four-field RPC.
+**Parity:** Deep qualification (legacy six-step wizard) remains for snapshot qualification and `lab_product_intelligence`. Fast Log Visit does **not** dual-write those snapshots. Add Prospect remains the four-field RPC.
 
 Wallet/size/product notes are labeled as field estimates — not PrimeCare revenue, AR, or inventory.
 

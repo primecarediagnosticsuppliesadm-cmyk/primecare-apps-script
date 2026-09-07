@@ -72,7 +72,7 @@ Baseline schema dump: `primecare_public_schema.sql` (repo root).
 | **Labs** | `createLabWrite`, `getLabsCredit` | LabsPage | labs, ar_credit_control |
 | **Operations** | `userProvisioningApi`, `labOwnershipApi` | OperationsCenterAdmin | profiles, lab_ownership |
 | **Agent** | collections, visits APIs | AgentDashboard, Visits | agent_visits, lab_product_intelligence, ownership |
-| **Agent Visit Evidence** | visit write/read (VE-2) + Agent Log Visit UX (VE-3) | AgentVisitPage fast form + qualify wizard, Labs Log Visit | `agent_visits`, `agent_visit_discovery_lines` (see [26](./26_Agent_Visit_Evidence.md)) |
+| **Agent Visit Evidence** | visit write/read (VE-2) + Agent Log Visit UX (VE-3) | AgentVisitPage fast form + Deep qualification wizard, Labs Log Visit | `agent_visits`, `agent_visit_discovery_lines` (see [26](./26_Agent_Visit_Evidence.md)) |
 | **Agent Resources (field library)** | `agentResourceSupabaseApi` (publisher AR-1B + agent AR-1C) | `AgentResourcesPublisherPage` (Admin/Exec) · `AgentResourcesPage` (Agent) | `agent_resources`, versions, audiences, acknowledgements |
 | **Executive** | `founderSnapshotApi`, EFI engines | ExecutiveControlTower, EFI pages | read aggregates |
 | **Lab portal** | `getLabCatalogRead`, `getLabOrderDetailsRead` | LabOrderingPage | orders (scoped) |

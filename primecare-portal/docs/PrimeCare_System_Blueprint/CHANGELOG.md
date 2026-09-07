@@ -56,7 +56,27 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ### Verification
 
-- `node scripts/verify-hq-freeze-policy.mjs`
+---
+
+## 2026-09-07 — VE-3 Founder UAT: idempotent discovery lines + Skip/Deep qualification UX
+
+### Gap found
+
+- Hosted QA browser UAT: after a successful fast Log Visit, the form kept the same discovery-line UUIDs. A second Save created a **new** visit header then reused those PKs → `duplicate key value violates unique constraint "agent_visit_discovery_lines_pkey"`. Retry evidence replayed all three stable IDs (including rows already on the first visit) and did not recreate the header.
+- Lab size & wallet showed two unlabeled Skip dropdowns (`wallet_confidence`, `evidence_confidence`). Qualify / product mix opened the six-step wizard without saying so. Draft restored banner could remain visible above fast Log Visit.
+
+### Change
+
+- Same visit + same line UUID insert is idempotent in `persistAgentVisitDiscoveryLines`. Cross-visit UUID reuse still fails. No new RPC, no RLS change.
+- Complete save remounts/clears the fast form. Fast Lab size is labeled; confidence enums stay on the contract but are not unlabeled Skip controls. Qualify renamed **Deep qualification** with optional-workflow copy. Draft banner is wizard-only.
+
+### Verification
+
+- `node scripts/verify-agent-visit-evidence-api.mjs` and `--remote` (QA only)
+- `node scripts/verify-agent-visit-evidence-ux.mjs` and `--remote` (QA only)
+- Hosted QA browser: Labs → Start Visit → Save once with three lines; Deep qualification opens wizard
+
+Production **UNCHANGED**. No merge to main. No VE-4.
 
 ---
 

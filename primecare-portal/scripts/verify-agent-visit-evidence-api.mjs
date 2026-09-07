@@ -95,7 +95,16 @@ assert(
 assert(/pickVisitEvidenceHeaderFields/.test(api), "header.builder", "header builder maps VE-1 fields");
 assert(/createAgentVisitDiscoveryLinesWrite/.test(api), "lines.write_api", "discovery-line write API");
 assert(/getAgentVisitEvidenceRead/.test(api), "read.api", "bounded evidence read API");
-assert(/visit_uuid/.test(evidenceApi) && !/visit_id text/.test(evidenceApi), "lines.uuid_fk", "child relationship is visit_uuid");
+assert(
+  /isUniqueViolation/.test(evidenceApi) && /partitionDiscoveryLineInserts/.test(evidenceApi),
+  "lines.idempotent_helper",
+  "same visit + same line UUID retry is handled without a new RPC"
+);
+assert(
+  /A UUID that already belongs to a different visit still fails/.test(evidenceApi),
+  "lines.no_steal",
+  "idempotent retry does not attach another visit's line"
+);
 assert(
   /discovery lines must use visit_uuid, not visit_id text/.test(contract),
   "lines.forbid_text_fk",
@@ -420,18 +429,28 @@ async function runLive() {
 
   const retryDup = await persistAgentVisitDiscoveryLines(agent.sb, multi.data.id, [
     { id: analyzerId, line_kind: "ANALYZER", manufacturer: "Sysmex" },
+    { id: reagentId, line_kind: "REAGENT", brand: "BrandR", monthly_spend_inr: 8000 },
+    { id: consumableId, line_kind: "CONSUMABLE", product_category: "EDTA", approx_volume: 4 },
   ]);
   r.assert(
-    Boolean(retryDup.error),
-    "live.retry.no_duplicate",
-    retryDup.error || "retry with same line id unexpectedly inserted a duplicate"
+    !retryDup.error && (retryDup.rows || []).length === 3,
+    "live.retry.idempotent",
+    retryDup.error || `retry returned ${(retryDup.rows || []).length} rows`
   );
   const afterDup = await fetchAgentVisitEvidenceBundle(agent.sb, multi.data.id);
   r.assert(
     (afterDup.lines || []).length === 3,
     "live.retry.still_three",
-    `${(afterDup.lines || []).length} lines after failed retry`
+    `${(afterDup.lines || []).length} lines after idempotent retry`
   );
+  r.assert(
+    afterDup.header?.id === multi.data.id,
+    "live.retry.same_header",
+    "child retry must not create a second visit header"
+  );
+  const retryIds = (afterDup.lines || []).map((row) => row.id).sort().join(",");
+  const originalIds = [analyzerId, reagentId, consumableId].sort().join(",");
+  r.assert(retryIds === originalIds, "live.retry.stable_ids", "retry reused the same line UUIDs");
 
   const emptyOptional = await persistAgentVisitWithOptionalDiscovery(agent.sb, {
     insertRow: headerRow({ labId: assignedLabId, notes: `${PREFIX} empty optional lines` }),

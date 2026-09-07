@@ -74,6 +74,12 @@ function isMissingColumnOrTable(error) {
   );
 }
 
+function isUniqueViolation(error) {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "");
+  return code === "23505" || /duplicate key value violates unique constraint/i.test(message);
+}
+
 function compactDefined(row, allowed) {
   const out = {};
   for (const [key, value] of Object.entries(row || {})) {
@@ -184,6 +190,30 @@ export async function fetchAgentVisitEvidenceBundle(client, visitUuid, options =
   };
 }
 
+function partitionDiscoveryLineInserts(insertRows, existingRows) {
+  const existingById = new Map((existingRows || []).map((row) => [str(row.id), row]));
+  const already = [];
+  const pending = [];
+  for (const row of insertRows) {
+    const found = existingById.get(str(row.id));
+    if (found) already.push(found);
+    else pending.push(row);
+  }
+  return { already, pending };
+}
+
+async function insertDiscoveryLineRows(client, rows) {
+  return client
+    .from("agent_visit_discovery_lines")
+    .insert(rows)
+    .select(HQ_AGENT_VISIT_DISCOVERY_LINE_COLUMNS);
+}
+
+/**
+ * Insert discovery lines for one visit.
+ * Same visit_uuid + same stable line UUID is idempotent (retry / double-submit).
+ * A UUID that already belongs to a different visit still fails — no steal, no RLS change.
+ */
 export async function persistAgentVisitDiscoveryLines(client, visitUuid, lines, extras = {}) {
   const built = buildAgentVisitDiscoveryLineInsertRows(visitUuid, lines, extras);
   if (built.error) {
@@ -199,18 +229,52 @@ export async function persistAgentVisitDiscoveryLines(client, visitUuid, lines, 
     compact.line_kind = row.line_kind;
     return compact;
   });
-  const { data, error } = await client
-    .from("agent_visit_discovery_lines")
-    .insert(insertRows)
-    .select(HQ_AGENT_VISIT_DISCOVERY_LINE_COLUMNS);
-  if (error) {
+
+  const first = await insertDiscoveryLineRows(client, insertRows);
+  if (!first.error) {
+    return { rows: first.data || [], error: null };
+  }
+  if (!isUniqueViolation(first.error)) {
     return {
       rows: [],
-      error: error.message || "Discovery line insert failed",
+      error: first.error.message || "Discovery line insert failed",
       pendingLineIds: insertRows.map((row) => row.id),
     };
   }
-  return { rows: data || [], error: null };
+
+  const existingRes = await fetchAgentVisitDiscoveryLines(client, visitUuid, {
+    tenantId: extras.tenant_id,
+  });
+  if (existingRes.error && !isMissingColumnOrTable(existingRes.error)) {
+    return {
+      rows: [],
+      error: existingRes.error.message || first.error.message || "Discovery line insert failed",
+      pendingLineIds: insertRows.map((row) => row.id),
+    };
+  }
+  const split = partitionDiscoveryLineInserts(insertRows, existingRes.data || []);
+  if (!split.pending.length) {
+    return { rows: split.already, error: null };
+  }
+
+  const second = await insertDiscoveryLineRows(client, split.pending);
+  if (!second.error) {
+    return { rows: [...split.already, ...(second.data || [])], error: null };
+  }
+  if (isUniqueViolation(second.error)) {
+    const again = await fetchAgentVisitDiscoveryLines(client, visitUuid, {
+      tenantId: extras.tenant_id,
+    });
+    const againSplit = partitionDiscoveryLineInserts(insertRows, again.data || []);
+    if (!againSplit.pending.length) {
+      return { rows: againSplit.already, error: null };
+    }
+  }
+  return {
+    rows: [],
+    error: second.error.message || first.error.message || "Discovery line insert failed",
+    pendingLineIds: split.pending.map((row) => row.id),
+  };
 }
 
 /**
@@ -220,7 +284,8 @@ export async function persistAgentVisitDiscoveryLines(client, visitUuid, lines, 
  *
  * Not a database transaction. If lines fail after header insert, returns
  * success=false with persistence=header_only so callers retry lines by uuid
- * instead of inserting a second visit.
+ * instead of inserting a second visit. Same visit + same line UUID retry is
+ * idempotent; a UUID owned by another visit still fails.
  */
 export async function persistAgentVisitWithOptionalDiscovery(client, { insertRow, discoveryLines } = {}) {
   const lineInput = Array.isArray(discoveryLines) ? discoveryLines : [];
