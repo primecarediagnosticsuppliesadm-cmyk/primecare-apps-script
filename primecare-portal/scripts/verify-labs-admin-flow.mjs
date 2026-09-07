@@ -339,18 +339,37 @@ async function main() {
     );
   }
 
+  // Attention + coverage SoT is operational (non-PROSPECT). Do not count leftover
+  // AR on golden PROSPECT labs or unassigned sourced prospects as HQ attention.
+  const operationalLabs = visibleLabs.filter((lab) => !labsEngine.isHqProspectLab(lab));
+  const leftoverProspectAr = visibleLabs.filter(
+    (lab) =>
+      labsEngine.isHqProspectLab(lab) && num(lab.outstandingAmount ?? lab.outstanding) > 0
+  );
+
   const attentionCards = labsEngine.buildLabsAttentionCards(visibleLabs, []);
   const outstandingCard = attentionCards.find((c) => c.id === "outstanding");
-  const expectedOutstanding = visibleLabs.filter(
+  const expectedOutstanding = operationalLabs.filter(
     (lab) => num(lab.outstandingAmount ?? lab.outstanding) > 0
   ).length;
   if (outstandingCard?.count === expectedOutstanding) {
-    pass("attention.outstanding", `${expectedOutstanding} lab(s) with outstanding`);
+    pass("attention.outstanding", `${expectedOutstanding} operational lab(s) with outstanding`);
   } else {
     fail(
       "attention.outstanding",
-      `Card count ${outstandingCard?.count} != recomputed ${expectedOutstanding}`
+      `Card count ${outstandingCard?.count} != operational recompute ${expectedOutstanding}`
     );
+  }
+
+  if (leftoverProspectAr.length) {
+    pass(
+      "attention.prospect_ar_excluded",
+      `${leftoverProspectAr.length} PROSPECT lab(s) with leftover AR excluded from outstanding card (${leftoverProspectAr
+        .map((lab) => str(lab.labId || lab.lab_id))
+        .join(", ")})`
+    );
+  } else {
+    pass("attention.prospect_ar_excluded", "No leftover PROSPECT AR in tenant window");
   }
 
   const holdFiltered = labsEngine.filterLabsForAttention(visibleLabs, "HOLD", []);
@@ -363,24 +382,27 @@ async function main() {
     fail("filter.credit_hold", `Filter returned ${holdFiltered.length}, expected ${holdCount}`);
   }
 
+  // Directory click-through is not the card formula (deferred). Assert the filter
+  // function against the current-tab list, including leftover PROSPECT rows.
   const unassignedFiltered = labsEngine.filterLabsForAttention(visibleLabs, "UNASSIGNED", []);
-  const unassignedCount = visibleLabs.filter((lab) => !isLabAssigned(lab)).length;
-  if (unassignedFiltered.length === unassignedCount) {
-    pass("filter.unassigned", `${unassignedCount} unassigned lab(s) by resolver`);
+  const directoryUnassigned = visibleLabs.filter((lab) => !isLabAssigned(lab)).length;
+  if (unassignedFiltered.length === directoryUnassigned) {
+    pass("filter.unassigned", `${directoryUnassigned} directory unassigned lab(s) by resolver`);
   } else {
     fail(
       "filter.unassigned",
-      `Filter ${unassignedFiltered.length} != recomputed ${unassignedCount}`
+      `Filter ${unassignedFiltered.length} != directory unassigned ${directoryUnassigned}`
     );
   }
 
   const coverage = labsEngine.buildAgentCoverage(visibleLabs, []);
+  const unassignedCount = operationalLabs.filter((lab) => !isLabAssigned(lab)).length;
   if (coverage.unassigned.count === unassignedCount) {
     pass("assignment.coverage", `${coverage.agents.length} agent bucket(s); unassigned ${unassignedCount}`);
   } else {
     fail(
       "assignment.coverage",
-      `Coverage unassigned ${coverage.unassigned.count} != filter ${unassignedCount}`
+      `Coverage unassigned ${coverage.unassigned.count} != operational unassigned ${unassignedCount}`
     );
   }
 

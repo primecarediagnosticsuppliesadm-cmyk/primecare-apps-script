@@ -4,6 +4,40 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-07 — QA E2E closure: HQ Labs attention/coverage verifier vs operational denominator
+
+### Gap found
+
+Hosted QA E2E AMBER P1s were **verifier misinterpretation**, not a product KPI bug:
+
+- Attention outstanding: UI **2** vs `verify-labs-admin-flow.mjs` recompute **4**
+- Assignment coverage: UI unassigned **0** vs recompute **1**
+
+Engine SoT (`buildLabsAttentionCards` / `buildAgentCoverage`) already excludes `PROSPECT`. The verifier recomputed outstanding and unassigned over **all** visible labs.
+
+Authoritative four outstanding rows (HQ tenant): `QA_LAB_001` ACTIVE 7789.98, `PILOT_LAB_011` ACTIVE 53 (UI counts these **2**); `QA_LAB_002` PROSPECT 1400, `QA_LAB_003` PROSPECT 100 (omitted). Authoritative unassigned: `LAB-P-64EF26B1CA07` PROSPECT with NULL `assigned_agent_id` (correct for `create_prospect_lab`; coverage excludes it).
+
+### Change
+
+- Blueprint: HQ Labs attention/coverage **cards** explicitly use the **non-PROSPECT operational denominator** (`09_Lab_Portal_Rules.md`).
+- Verifier: recompute outstanding and unassigned on operational labs; assert leftover PROSPECT AR does not increment the outstanding card.
+- Hosted click-through directory filters are **unchanged** (deferred; not required for E2E GREEN card reconciliation). `labsHqEngine.filterLabsForAttention` is not part of this freeze.
+
+No card-formula change. Hosted UI stays **2** and **0**. No AR/lifecycle/RLS/status mutation of golden prospects. No Production.
+
+### Deferred
+
+Leftover AR on golden `PROSPECT` labs `QA_LAB_002` / `QA_LAB_003` (fixture labeling). Negative wallet/spend; notes metadata; recent-visits lab_id; SELECT *; delivery_log 403; mobile Save; badge P2s; readonly-script gate; spinner frames.
+
+### Verification
+
+- `node scripts/verify-labs-admin-flow.mjs` — `attention.outstanding` and `assignment.coverage` PASS against operational denominator
+- Hosted Admin Labs: Outstanding **2**, Unassigned **0**, reload persists
+
+Production **UNCHANGED**. No merge to main. No VE-4.
+
+---
+
 ## 2026-09-07 — VE-3 DEEP CERT P1 closure: follow-up type + empty discovery lines
 
 ### Gap found

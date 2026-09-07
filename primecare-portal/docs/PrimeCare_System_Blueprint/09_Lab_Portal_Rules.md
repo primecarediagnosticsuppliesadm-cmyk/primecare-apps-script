@@ -107,6 +107,22 @@ Ordering mode and lifecycle status are separate dimensions.
 
 `Prospect Labs`, `Active Labs`, and `Inactive Labs` are mutually exclusive lifecycle counts. `Order-Eligible Labs` and `Ordering Suspended` are operational posture counts and must not be used to silently redefine lifecycle status.
 
+### HQ Labs attention queue and Agent Coverage (operational denominator)
+
+HQ Labs attention cards (`buildLabsAttentionCards`) and Agent Coverage (`buildAgentCoverage`) count **non-PROSPECT** labs only. Sourced `PROSPECT` is reviewed on the Prospects tab and is not collections/assignment operational attention.
+
+| KPI | Formula | Does not count |
+|-----|---------|----------------|
+| **Outstanding Collections** | Non-PROSPECT labs with `outstanding > 0` | `PROSPECT` rows, including golden/fixture leftover AR |
+| **Credit Hold Labs** | Non-PROSPECT labs with `credit_status = HOLD` | `PROSPECT` |
+| **Follow-Ups Due** | Non-PROSPECT labs with `next_follow_up` today or overdue | `PROSPECT` |
+| **Unassigned Labs** | Non-PROSPECT labs with no resolved `assigned_agent_id` | `PROSPECT` (Agent `create_prospect_lab` leaves assignment NULL until `activate_prospect_lab`) |
+| **Agent Coverage unassigned** | Same unassigned set as Unassigned Labs | `PROSPECT` |
+
+Click-through directory filters (`filterLabsForAttention` Outstanding / Unassigned / Follow-Ups) currently apply on the **current tab list** and may still include leftover `PROSPECT` AR or unassigned sourced prospects. That directory mismatch is **deferred**. Attention cards and Agent Coverage remain the operational SoT. Credit-status pills (`OK` / `NEAR_LIMIT` / `HOLD`) are credit-directory filters on the current tab list and are not the attention-card formula.
+
+**Do not** “fix” leftover AR on golden `PROSPECT` labs (`QA_LAB_002`, `QA_LAB_003`) by counting them in operational attention. Flow 2A: new prospects get no AR; those rows are pre-existing fixture labeling.
+
 ### Agent Add Prospect (Flow 2B)
 
 Agent My Laboratories can capture a PROSPECT for HQ review via `createProspectLabWrite` → `create_prospect_lab`. The Agent UI categorizes RLS-visible rows into sourced prospects vs assigned operational Labs (`partitionAgentLabs`). Prospects show name, contact, phone, locality, and “Awaiting HQ review” only. `filterLabsForUser` excludes `PROSPECT` so visits/collections cannot treat a sourced prospect as operational via area matching. HQ Labs (Admin/Executive) review sourced prospects via All / Active Labs / Prospects filters. **Activate Lab** calls `activateProspectLabWrite` → `activate_prospect_lab`. Lab login and self-service ordering remain later sprints.
