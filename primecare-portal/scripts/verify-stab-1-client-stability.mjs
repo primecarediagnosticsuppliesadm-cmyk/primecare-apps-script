@@ -13,8 +13,13 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   AUTH_PROFILE_FETCH_TIMEOUT_MS,
+  AUTH_PROFILE_FETCH_MAX_ATTEMPTS,
+  AUTH_PROFILE_TIMEOUT_MESSAGE,
   createAuthApplyGate,
+  isAuthProfileTimeoutError,
+  isTransientAuthProfileError,
   runAuthApply,
+  runWithTransientRetries,
   withTimeout,
 } from "../src/utils/authSessionApply.js";
 import {
@@ -199,6 +204,48 @@ async function main() {
       AUTH_PROFILE_FETCH_TIMEOUT_MS >= 10000 && AUTH_PROFILE_FETCH_TIMEOUT_MS <= 15000,
       `bootstrap profile timeout is ${AUTH_PROFILE_FETCH_TIMEOUT_MS}ms (10–15s)`
     );
+    assert(
+      "auth-11c",
+      AUTH_PROFILE_FETCH_MAX_ATTEMPTS >= 2 && AUTH_PROFILE_FETCH_MAX_ATTEMPTS <= 4,
+      `profile fetch retries are bounded (${AUTH_PROFILE_FETCH_MAX_ATTEMPTS} attempts)`
+    );
+    assert(
+      "auth-11d",
+      isAuthProfileTimeoutError(new Error(AUTH_PROFILE_TIMEOUT_MESSAGE)) &&
+        isTransientAuthProfileError(new Error(AUTH_PROFILE_TIMEOUT_MESSAGE)) &&
+        !isTransientAuthProfileError(new Error("Your PrimeCare profile is inactive. Contact an administrator.")) &&
+        !isTransientAuthProfileError(new Error("Your PrimeCare profile is missing. Contact an administrator.")) &&
+        !isTransientAuthProfileError(new Error("Your PrimeCare role is not authorized for pilot access.")),
+      "timeout is transient; missing/inactive/unauthorized stay fail-closed"
+    );
+    {
+      let calls = 0;
+      const value = await runWithTransientRetries(
+        async () => {
+          calls += 1;
+          if (calls < 2) throw new Error(AUTH_PROFILE_TIMEOUT_MESSAGE);
+          return "ok";
+        },
+        { attempts: 3, delayMs: 0 }
+      );
+      assert("auth-11e", value === "ok" && calls === 2, "transient timeout retries then succeeds");
+    }
+    {
+      let calls = 0;
+      let denied = false;
+      try {
+        await runWithTransientRetries(
+          async () => {
+            calls += 1;
+            throw new Error("Your PrimeCare profile is inactive. Contact an administrator.");
+          },
+          { attempts: 3, delayMs: 0 }
+        );
+      } catch {
+        denied = true;
+      }
+      assert("auth-11f", denied && calls === 1, "inactive profile is not retried");
+    }
   }
 
   const authSrc = readSrc("src/context/AuthContext.jsx");
@@ -243,6 +290,29 @@ async function main() {
       authSrc.includes("AUTH_PROFILE_FETCH_TIMEOUT_MS"),
     "applySupabaseSession uses generation + profile timeout"
   );
+  assert(
+    "auth-15d",
+    authSrc.includes("isTransientAuthProfileError") &&
+      authSrc.includes("commitTransientProfileFailure") &&
+      authSrc.includes("runWithTransientRetries") &&
+      authSrc.includes("AUTH_PROFILE_TIMEOUT_KEPT_SESSION"),
+    "profile timeout keeps a valid session instead of treating it as invalid credentials"
+  );
+  assert(
+    "auth-15e",
+    /const commitTransientProfileFailure = \(error\) => \{[\s\S]*?return true;\s*\};/.test(authSrc) &&
+      !/const commitTransientProfileFailure = \(error\) => \{[\s\S]*?setCurrentUser\(null\)[\s\S]*?return true;\s*\};/.test(
+        authSrc
+      ),
+    "transient profile failure does not wipe currentUser"
+  );
+  assert(
+    "auth-15f",
+    authSrc.includes('if (event === "INITIAL_SESSION")') &&
+      authSrc.includes("lastAppliedUserIdRef") &&
+      authSrc.includes("retryProfileSession"),
+    "INITIAL_SESSION is not a second full apply; retry helper exists"
+  );
   {
     const listenerCatch = authSrc.match(
       /applySupabaseSession\(session, \{ recordLastLogin \}\)\.catch\(\(err\) => \{[\s\S]*?\}\);/
@@ -255,6 +325,14 @@ async function main() {
   }
 
   const appSrc = readSrc("src/App.jsx");
+  assert(
+    "auth-16-timeout-ui",
+    appSrc.includes("ProfileSessionRetryScreen") &&
+      appSrc.includes("isAuthProfileTimeoutError") &&
+      appSrc.includes("retryProfileSession") &&
+      !/if \(!isAuthenticated\) \{\s*if \(authError\) \{\s*return <UnauthorizedScreen/.test(appSrc),
+    "timeout shows retry UI and is not treated as UnauthorizedScreen"
+  );
   const boundarySrc = readSrc("src/components/AppErrorBoundary.jsx");
   const prefetchSrc = readSrc("src/utils/routePrefetch.js");
 

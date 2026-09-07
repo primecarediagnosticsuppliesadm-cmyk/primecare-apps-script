@@ -19,7 +19,11 @@ import { recordPredatorTiming, predatorTrace } from "@/predator/predatorTiming.j
 import { logClientError } from "@/utils/debugLogger.js";
 import {
   AUTH_PROFILE_FETCH_TIMEOUT_MS,
+  AUTH_PROFILE_FETCH_MAX_ATTEMPTS,
+  AUTH_PROFILE_TIMEOUT_MESSAGE,
   createAuthApplyGate,
+  isTransientAuthProfileError,
+  runWithTransientRetries,
   withTimeout,
 } from "@/utils/authSessionApply.js";
 
@@ -112,14 +116,22 @@ export function AuthProvider({ children }) {
   /** Legacy Apps Script token at first mount only — bootstrap must not re-run on token refresh. */
   const initialLegacyAuthTokenRef = useRef(authToken);
   const applyGateRef = useRef(createAuthApplyGate());
+  const currentUserRef = useRef(currentUser);
+  const lastAppliedUserIdRef = useRef("");
+  const applyingUserIdRef = useRef("");
+  currentUserRef.current = currentUser;
 
   const applySupabaseSession = useCallback(async (session, { recordLastLogin = false } = {}) => {
     const gate = applyGateRef.current;
     const generation = gate.begin();
+    const sessionUserId = session?.user?.id ? String(session.user.id) : "";
+    if (sessionUserId) applyingUserIdRef.current = sessionUserId;
 
-    const commitFailure = (error) => {
+    const commitAuthorizationFailure = (error) => {
       if (!gate.isCurrent(generation)) return false;
       const message = error?.message || "Authentication failed.";
+      lastAppliedUserIdRef.current = "";
+      applyingUserIdRef.current = "";
       setAuthError(message);
       setAuthToken("");
       setCurrentUser(null);
@@ -135,9 +147,46 @@ export function AuthProvider({ children }) {
       return true;
     };
 
+    const commitTransientProfileFailure = (error) => {
+      if (!gate.isCurrent(generation)) return false;
+      applyingUserIdRef.current = "";
+      const existing = currentUserRef.current;
+      const sameUser = Boolean(existing?.id && sessionUserId && existing.id === sessionUserId);
+      if (sameUser) {
+        setAuthError("");
+        if (session?.access_token) {
+          setAuthToken((prev) => (prev === session.access_token ? prev : session.access_token));
+        }
+        void logClientError({
+          page: "Auth",
+          component: "AuthContext",
+          actionType: "AUTH_PROFILE_TIMEOUT_KEPT_SESSION",
+          errorCode: "AUTH_PROFILE_TIMEOUT_KEPT_SESSION",
+          errorMessage: error?.message || AUTH_PROFILE_TIMEOUT_MESSAGE,
+          stackTrace: error?.stack || "",
+        });
+        return true;
+      }
+      setAuthError(error?.message || AUTH_PROFILE_TIMEOUT_MESSAGE);
+      if (session?.access_token) {
+        setAuthToken(session.access_token);
+      }
+      void logClientError({
+        page: "Auth",
+        component: "AuthContext",
+        actionType: "AUTH_PROFILE_TIMEOUT_RETRYABLE",
+        errorCode: "AUTH_PROFILE_TIMEOUT_RETRYABLE",
+        errorMessage: error?.message || AUTH_PROFILE_TIMEOUT_MESSAGE,
+        stackTrace: error?.stack || "",
+      });
+      return true;
+    };
+
     try {
       if (!session?.user) {
         if (!gate.isCurrent(generation)) return { status: "stale" };
+        lastAppliedUserIdRef.current = "";
+        applyingUserIdRef.current = "";
         setAuthError("");
         setAuthToken("");
         setCurrentUser(null);
@@ -148,15 +197,21 @@ export function AuthProvider({ children }) {
       const user = await predatorTrace("Auth", "login.bootstrap.profile", async () => {
         const endProfile = perfTime("auth.profile.fetch");
         const t0 = performance.now();
-        const { data: profile, error } = await withTimeout(
-          supabase
-            .from("profiles")
-            .select("user_id, tenant_id, role, lab_id, agent_id, agent_name, distributor_id, active")
-            .eq("user_id", session.user.id)
-            .maybeSingle(),
-          AUTH_PROFILE_FETCH_TIMEOUT_MS,
-          "Profile lookup timed out. Refresh the page and try again."
-        );
+        const { data: profile, error } = await runWithTransientRetries(async () => {
+          const result = await withTimeout(
+            supabase
+              .from("profiles")
+              .select("user_id, tenant_id, role, lab_id, agent_id, agent_name, distributor_id, active")
+              .eq("user_id", session.user.id)
+              .maybeSingle(),
+            AUTH_PROFILE_FETCH_TIMEOUT_MS,
+            AUTH_PROFILE_TIMEOUT_MESSAGE
+          );
+          if (result.error) {
+            throw new Error(result.error.message || "Failed to load PrimeCare profile.");
+          }
+          return result;
+        }, { attempts: AUTH_PROFILE_FETCH_MAX_ATTEMPTS });
         recordPredatorTiming({
           module: "Auth",
           step: "login.profile_fetch",
@@ -174,6 +229,8 @@ export function AuthProvider({ children }) {
 
       if (!gate.isCurrent(generation)) return { status: "stale" };
 
+      lastAppliedUserIdRef.current = sessionUserId;
+      applyingUserIdRef.current = "";
       setAuthError("");
       setAuthToken(session.access_token || "");
       setCurrentUser((prev) => {
@@ -199,7 +256,11 @@ export function AuthProvider({ children }) {
       }
       return { status: "applied" };
     } catch (error) {
-      if (!commitFailure(error)) return { status: "stale", error };
+      if (isTransientAuthProfileError(error) && session?.user) {
+        if (!commitTransientProfileFailure(error)) return { status: "stale", error };
+        return { status: "failed", error, recoverable: true };
+      }
+      if (!commitAuthorizationFailure(error)) return { status: "stale", error };
       throw error;
     }
   }, []);
@@ -305,6 +366,23 @@ export function AuthProvider({ children }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "TOKEN_REFRESHED") {
+        const nextToken = session?.access_token;
+        if (nextToken) {
+          setAuthToken((prev) => (prev === nextToken ? prev : nextToken));
+        }
+        return;
+      }
+
+      if (event === "INITIAL_SESSION") {
+        return;
+      }
+
+      const sessionUserId = session?.user?.id ? String(session.user.id) : "";
+      if (
+        event === "SIGNED_IN" &&
+        sessionUserId &&
+        (lastAppliedUserIdRef.current === sessionUserId || applyingUserIdRef.current === sessionUserId)
+      ) {
         const nextToken = session?.access_token;
         if (nextToken) {
           setAuthToken((prev) => (prev === nextToken ? prev : nextToken));
@@ -448,6 +526,23 @@ export function AuthProvider({ children }) {
     return res;
   }, [applySupabaseSession, useSupabaseAuth]);
 
+  const retryProfileSession = useCallback(async () => {
+    if (!useSupabaseAuth) return { success: false };
+    setAuthError("");
+    setAuthLoading(true);
+    try {
+      const { data, error } = await supabase.auth.getSession();
+      if (error) throw new Error(error.message || "Failed to restore Supabase session.");
+      const result = await applySupabaseSession(data?.session || null);
+      return { success: result?.status === "applied" };
+    } catch (err) {
+      setAuthError(err?.message || AUTH_PROFILE_TIMEOUT_MESSAGE);
+      return { success: false, error: err?.message };
+    } finally {
+      setAuthLoading(false);
+    }
+  }, [applySupabaseSession, useSupabaseAuth]);
+
   const signOut = useCallback(async () => {
     try {
       if (useSupabaseAuth) {
@@ -464,6 +559,8 @@ export function AuthProvider({ children }) {
     } catch (err) {
       console.error("Logout request failed", err);
     } finally {
+      lastAppliedUserIdRef.current = "";
+      applyingUserIdRef.current = "";
       localStorage.removeItem(STORAGE_KEY);
       setAuthToken("");
       setCurrentUser(null);
@@ -480,6 +577,7 @@ export function AuthProvider({ children }) {
       authError,
       isAuthenticated: !!currentUser,
       login,
+      retryProfileSession,
       devLoginLocalAdmin,
       devLoginLocalAgent,
       devLoginLocalLab,
@@ -497,6 +595,7 @@ export function AuthProvider({ children }) {
     devLoginLocalLab,
     devLoginLocalExecutive,
     login,
+    retryProfileSession,
     signOut,
   ]);
 

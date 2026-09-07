@@ -34,6 +34,7 @@ import { prefetchLikelyRoutes } from "@/utils/routePrefetch.js";
 import { isNavigationPageCacheWarm } from "@/utils/hqNavigationWarmth.js";
 import { QA_DIAGNOSTICS_ENABLED } from "@/config/environment.js";
 import { clearChunkLoadRecoveryGuard } from "@/utils/chunkLoadRecovery.js";
+import { AUTH_PROFILE_TIMEOUT_MESSAGE, isAuthProfileTimeoutError } from "@/utils/authSessionApply.js";
 
 const QaDiagnosticsPanel = lazy(() => import("@/components/qa/QaDiagnosticsPanel.jsx"));
 
@@ -63,6 +64,26 @@ function UnauthorizedScreen({ message, onLogout }) {
         variant="unauthorized"
         description={message || "Your account is not authorized for PrimeCare access."}
         action={<PortalAccessAction label="Back to sign in" onClick={onLogout} />}
+      />
+    </div>
+  );
+}
+
+function ProfileSessionRetryScreen({ message, onRetry, onLogout }) {
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <PortalAccessCard
+        variant="error"
+        title="Still signed in"
+        description={
+          message || AUTH_PROFILE_TIMEOUT_MESSAGE
+        }
+        action={
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <PortalAccessAction label="Retry" onClick={onRetry} />
+            <PortalAccessAction label="Back to sign in" variant="outline" onClick={onLogout} />
+          </div>
+        }
       />
     </div>
   );
@@ -144,7 +165,7 @@ function PortalLoadingScreenWrapper() {
 }
 
 export default function App() {
-  const { user, loading, isAuthenticated, signOut, authToken, authError } = useAuth();
+  const { user, loading, isAuthenticated, signOut, authToken, authError, retryProfileSession } = useAuth();
 
   const isResetPasswordRoute =
     typeof window !== "undefined" &&
@@ -387,6 +408,17 @@ export default function App() {
   }
 
   if (!isAuthenticated) {
+    if (isAuthProfileTimeoutError(authError)) {
+      return (
+        <ProfileSessionRetryScreen
+          message={authError}
+          onRetry={() => {
+            void retryProfileSession();
+          }}
+          onLogout={signOut}
+        />
+      );
+    }
     if (authError) {
       return <UnauthorizedScreen message={authError} onLogout={signOut} />;
     }

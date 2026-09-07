@@ -12,7 +12,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 
 | Script | Checks | When |
 |--------|--------|------|
-| verify-stab-1-client-stability.mjs | Stale lazy-chunk detect/one-shot reload/guard; auth apply generation (older fail cannot wipe newer user); profile-read timeout; TOKEN_REFRESHED token-only; inactive/unauthorized fail-closed; `NonPilotReleaseScreen` removed | STAB-1 client stability |
+| verify-stab-1-client-stability.mjs | Stale lazy-chunk detect/one-shot reload/guard; auth apply generation (older fail cannot wipe newer user); profile-read timeout; bounded transient retry; timeout does not destroy a valid session; TOKEN_REFRESHED token-only; INITIAL_SESSION not a second full apply; inactive/unauthorized fail-closed; `NonPilotReleaseScreen` removed | STAB-1 client stability |
 
 ### Finance & invoices
 

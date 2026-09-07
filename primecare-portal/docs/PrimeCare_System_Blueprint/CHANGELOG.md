@@ -4,6 +4,26 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-07 — STAB-1 profile timeout must not eject a valid session
+
+### Gap found
+
+- STAB-1 wrapped `profiles` `maybeSingle()` in a 12s `withTimeout`. On timeout, `applySupabaseSession` treated the failure like authorization denial: `setCurrentUser(null)`, cleared the client token, and App rendered “Access not available”. The Supabase Auth session often remained. Reload could restore HQ if the next profile read succeeded. Production Admin sessions were ejected during Flow 3A HQ use.
+
+### Change
+
+- Timeout / network profile failures are classified as **transient**, not invalid credentials.
+- Bounded retry (3 attempts, 12s each). If an authenticated user is already loaded, keep that session.
+- First-load timeout shows a retry screen (`Retry` re-reads profile via `getSession`; `Back to sign in` still signs out).
+- Skip duplicate `INITIAL_SESSION` / already-applied `SIGNED_IN` full profile applies. `TOKEN_REFRESHED` remains token-only.
+- Missing, inactive, unauthorized role, and invalid session still fail-closed. No RLS, finance, orders, or freeze change.
+
+### Verification
+
+- `node scripts/verify-stab-1-client-stability.mjs`
+
+---
+
 ## 2026-09-07 — Flow 3A anon EXECUTE revoke on financial posting RPCs
 
 ### Gap found
