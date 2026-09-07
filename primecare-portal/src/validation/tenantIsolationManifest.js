@@ -208,6 +208,16 @@ export const TENANT_ISOLATION_TABLE_SPECS = [
     scope: "agent_scoped",
   },
   {
+    id: "visit_discovery_lines",
+    table: "agent_visit_discovery_lines",
+    label: "Agent visit discovery lines",
+    tenantColumn: "tenant_id",
+    selectColumns: ["tenant_id", "lab_id", "visit_uuid", "line_kind"],
+    allowedRoles: [ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.AGENT],
+    scope: "agent_scoped",
+    optional: true,
+  },
+  {
     id: "lab_product_intelligence",
     table: "lab_product_intelligence",
     label: "Lab product intelligence",

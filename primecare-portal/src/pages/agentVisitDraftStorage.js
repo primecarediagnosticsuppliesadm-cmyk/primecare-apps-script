@@ -47,17 +47,33 @@ export function saveAgentVisitDraft({
   qualificationForm,
   qualificationEditing,
   productLines,
+  visitMode = "fast",
 }) {
   if (typeof window === "undefined") return;
   try {
+    let existing = null;
+    try {
+      const raw = window.localStorage.getItem(buildAgentVisitDraftKey(user));
+      existing = raw ? JSON.parse(raw) : null;
+    } catch {
+      existing = null;
+    }
+    const keepWizard = visitMode !== "wizard" && existing && existing.version === DRAFT_VERSION;
     const payload = {
       version: DRAFT_VERSION,
       savedAt: new Date().toISOString(),
-      currentStepIndex,
-      form,
-      qualificationForm,
-      qualificationEditing: Boolean(qualificationEditing),
-      productLines: Array.isArray(productLines) ? productLines : [],
+      visitMode: visitMode === "wizard" ? "wizard" : "fast",
+      currentStepIndex: keepWizard ? existing.currentStepIndex : currentStepIndex,
+      form: visitMode === "wizard" ? form : existing?.form && keepWizard ? existing.form : form,
+      qualificationForm: keepWizard ? existing.qualificationForm : qualificationForm,
+      qualificationEditing: keepWizard
+        ? Boolean(existing.qualificationEditing)
+        : Boolean(qualificationEditing),
+      productLines: keepWizard
+        ? existing.productLines
+        : Array.isArray(productLines)
+          ? productLines
+          : [],
     };
     window.localStorage.setItem(buildAgentVisitDraftKey(user), JSON.stringify(payload));
   } catch {

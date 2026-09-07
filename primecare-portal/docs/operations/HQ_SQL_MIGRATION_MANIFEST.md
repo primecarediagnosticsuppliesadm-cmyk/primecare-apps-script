@@ -59,7 +59,20 @@ Apply in Supabase SQL Editor. Verify after each tier with scripts in §4.
 
 **Apply note:** `purchase_orders_migration.sql` installs temporary `temp_anon_*` policies on PO tables; `production_auth_rls_pilot_migration.sql` (step 2) drops them and applies tenant-scoped authenticated RLS. Do not skip step 1 on greenfield databases.
 
-**Machine verification:** `node scripts/verify-pilot-migrations.mjs` — expects 31/31 on disk.
+**Machine verification:** `node scripts/verify-pilot-migrations.mjs` — expects 31/31 on disk. VE-1 is **not** in this Production 31-file track.
+
+---
+
+## §1b — Agent Visit Evidence VE-1 (QA only — not Production)
+
+| File | Track | Classification |
+|------|-------|----------------|
+| `agent_visit_evidence_ve1_migration.sql` | A | **QA ONLY** — do **not** apply to Production during VE-1 |
+| `20260907140000_agent_visit_evidence_ve1.sql` | B | **QA ONLY** — same SQL; do **not** `db push` while CLI is linked to Production |
+
+**QA apply (only after `npm run db:qa:check` PASSes with linked ref `zipuzmfkwwucbchlphcj`):** paste Track A SQL in the QA SQL editor, or `supabase db query -f supabase/sql/agent_visit_evidence_ve1_migration.sql` against the QA project. Then `node scripts/verify-agent-visit-evidence-schema.mjs --remote` and `node scripts/verify-agent-visit-evidence-rls.mjs --remote`.
+
+**Destructive statements:** none (no DROP TABLE/COLUMN, no TRUNCATE, no DELETE FROM). DROP POLICY/TRIGGER only to replace visit RLS.
 
 ---
 
@@ -76,6 +89,7 @@ Apply in Supabase SQL Editor. Verify after each tier with scripts in §4.
 | `20260831200000_agent_resources_v1.sql` | `agent_resources_v1_migration.sql` | **ACTIVE MIGRATION** (CLI) — Agent Resources V1; **do not apply to Production from AR-1A** |
 | `20260831201000_agent_resources_v1_privilege_lockdown.sql` | `agent_resources_v1_privilege_lockdown.sql` | **ACTIVE MIGRATION** (CLI) — privilege lockdown after default ALL; **do not apply to Production from AR-1A** |
 | `20260831202000_agent_resources_v1_visibility_fix.sql` | `agent_resources_v1_visibility_fix.sql` | **ACTIVE MIGRATION** (CLI) — agent composite-null visibility fix; **do not apply to Production from AR-1A** |
+| `20260907140000_agent_visit_evidence_ve1.sql` | `agent_visit_evidence_ve1_migration.sql` | **QA ONLY (VE-1)** — **DO NOT APPLY** to Production |
 
 **Note:** Track B does **not** include the full 27-file manifest. Production using Track B alone is **incomplete** — use Track A for full HQ pilot.
 
@@ -102,6 +116,7 @@ Apply in Supabase SQL Editor. Verify after each tier with scripts in §4.
 | `order_status_update_migration.sql` | **LEGACY / ARCHIVE** | Absorbed by `order_write_migration.sql` |
 | `pilot_hardening_validation_queries.sql` | **MANUAL VALIDATION** | **DO NOT APPLY** — run as read-only checks |
 | `qa_role_seed_and_rls_validation.sql` | **MANUAL VALIDATION** | **DO NOT APPLY** to Production — QA seed only |
+| `agent_visit_evidence_ve1_migration.sql` | **QA ONLY (VE-1)** | **DO NOT APPLY** to Production — Agent Visit Evidence schema/RLS |
 
 ---
 

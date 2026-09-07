@@ -54,6 +54,10 @@ import {
   peekAgentWorkspaceReturnPath,
   notifyAgentWorkspaceRefresh,
   AGENT_PENDING_VISIT_TASK_KEY,
+  VISIT_ENTRY_INTENT_KEY,
+  START_FAST_VISIT_EVENT,
+  peekNewFastVisitIntent,
+  shouldSkipWizardDraftRestore,
 } from "@/pages/agentVisitContext.js";
 import {
   computeSuggestedCollectionToday,
@@ -117,6 +121,9 @@ import {
 } from "@/utils/migrationTrace.js";
 import { logClientError } from "@/utils/debugLogger";
 import { filterLabsForUser } from "@/utils/accessFilters";
+import { getAgentVisitEligibleAccountsRead } from "@/visits/visitEligibleAccountsApi.js";
+import { isProspectLab } from "@/visits/visitEligibleAccounts.js";
+import AgentVisitEvidenceForm from "@/components/agent/AgentVisitEvidenceForm.jsx";
 import {
   buildLabSelectOptions,
   extractLabsCreditRows,
@@ -991,6 +998,9 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
   const [savePhase, setSavePhase] = useState("idle");
   const [saveError, setSaveError] = useState("");
   const [savedVisitSummary, setSavedVisitSummary] = useState(null);
+  const [visitMode, setVisitMode] = useState("fast");
+  const [visitAccounts, setVisitAccounts] = useState({ operational: [], prospects: [], all: [] });
+  const [fastFormLabId, setFastFormLabId] = useState("");
   const [showWorkspaceReturnCta, setShowWorkspaceReturnCta] = useState(false);
   const [workspaceReturnPath, setWorkspaceReturnPath] = useState(() => peekAgentWorkspaceReturnPath());
   const lastSavedVisitRef = useRef(null);
@@ -999,6 +1009,8 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
   const authTokenRef = useRef(authToken);
   authTokenRef.current = authToken;
   const draftRestoreAttemptedRef = useRef(false);
+  const newFastVisitIntentRef = useRef(Boolean(peekNewFastVisitIntent()));
+  const skippedWizardDraftRef = useRef(null);
   const wizardStartedAtRef = useRef(Date.now());
   const stepEnteredAtRef = useRef(Date.now());
   const prevStepIndexRef = useRef(0);
@@ -1167,6 +1179,23 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
     return labs;
   }, [labs, currentUser]);
 
+  const fastAccounts = useMemo(() => {
+    if ((visitAccounts.all || []).length) return visitAccounts;
+    const operational = (visibleLabs || []).filter((lab) => !isProspectLab(lab));
+    return { operational, prospects: [], all: operational };
+  }, [visitAccounts, visibleLabs]);
+
+  useEffect(() => {
+    if (!visitAccessAllowed) return undefined;
+    let cancelled = false;
+    getAgentVisitEligibleAccountsRead(currentUser).then((res) => {
+      if (!cancelled && res?.success) setVisitAccounts(res.data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadUserKey, visitAccessAllowed, currentUser]);
+
   useEffect(() => {
     if (loading || !visibleLabs.length) return;
     const ctx = consumeHqNavContext("visits");
@@ -1176,8 +1205,13 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
 
   useEffect(() => {
     if (loading || draftRestoreAttemptedRef.current) return;
-    if (typeof window !== "undefined" && sessionStorage.getItem("primecare_pending_visit_task")) {
+    const hasIntent = newFastVisitIntentRef.current || Boolean(peekNewFastVisitIntent());
+    if (shouldSkipWizardDraftRestore({ hasNewFastVisitIntent: hasIntent })) {
       draftRestoreAttemptedRef.current = true;
+      const skipped = loadAgentVisitDraft(currentUser, visibleLabs);
+      if (skipped.restored && skipped.draft) skippedWizardDraftRef.current = skipped.draft;
+      setVisitMode("fast");
+      setDraftBannerVisible(false);
       return;
     }
 
@@ -1185,33 +1219,13 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
     const { restored, draft } = loadAgentVisitDraft(currentUser, visibleLabs);
     if (!restored || !draft) return;
 
+    skippedWizardDraftRef.current = draft;
+    if (draft.visitMode === "wizard") {
+      return;
+    }
     if (draft.form && typeof draft.form === "object") {
       setForm((prev) => ({ ...prev, ...draft.form }));
     }
-    if (draft.qualificationForm && typeof draft.qualificationForm === "object") {
-      setQualificationForm((prev) => ({ ...prev, ...draft.qualificationForm }));
-    }
-    if (typeof draft.qualificationEditing === "boolean") {
-      setQualificationEditing(draft.qualificationEditing);
-    }
-    if (Array.isArray(draft.productLines) && draft.productLines.length) {
-      skipNextProductLoadRef.current = true;
-      setProductLines(draft.productLines);
-    }
-    const stepIdx = Math.min(
-      Math.max(0, Number(draft.currentStepIndex) || 0),
-      AGENT_VISIT_SECTION_STEPS.length - 1
-    );
-    setCurrentStepIndex(stepIdx);
-    prevStepIndexRef.current = stepIdx;
-    stepEnteredAtRef.current = Date.now();
-    wizardStartedAtRef.current = Date.now();
-    setDraftBannerVisible(true);
-    showToast("info", "Draft restored — continue where you left off.");
-    recordAgentVisitDraftRestore({
-      stepIndex: stepIdx,
-      stepKey: AGENT_VISIT_SECTION_STEPS[stepIdx]?.key,
-    });
   }, [loading, currentUser, visibleLabs, showToast]);
 
   useEffect(() => {
@@ -1223,6 +1237,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
       qualificationForm,
       qualificationEditing,
       productLines,
+      visitMode,
     });
   }, [
     loading,
@@ -1234,6 +1249,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
     productLines,
     currentUser,
     savePhase,
+    visitMode,
   ]);
 
   useEffect(() => {
@@ -1336,83 +1352,81 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
   });
   const visibleCollections = useMemo(() => collections, [collections]);
 
+  const applyFastVisitEntry = useCallback((task = {}, visitContext = null) => {
+    const labId = task.labId || visitContext?.labId || "";
+    const matchingLab =
+      visibleLabs.find((lab) => String(lab.labId) === String(labId)) || null;
+    newFastVisitIntentRef.current = true;
+    draftRestoreAttemptedRef.current = true;
+    setVisitMode("fast");
+    setDraftBannerVisible(false);
+    setCurrentStepIndex(0);
+    setFastFormLabId(labId);
+    setForm((prev) => ({
+      ...prev,
+      labId: labId || prev.labId,
+      labName: task.labName || visitContext?.labName || matchingLab?.labName || prev.labName,
+      area: matchingLab?.area || prev.area || "",
+      visitType: task.visitType || "Follow-up",
+      nextAction: task.nextAction || visitContext?.nextAction || prev.nextAction || "",
+      nextFollowUpType: task.followUpType || prev.nextFollowUpType || "Call",
+      nextFollowUpDate: task.followUpDate || visitContext?.followUpDate || prev.nextFollowUpDate || "",
+    }));
+  }, [visibleLabs]);
+
   useEffect(() => {
     function handleOpenVisitTask(event) {
       const detail = event?.detail || {};
       const task = detail.task || {};
-      if (!task) return;
-
-      const matchingLab =
-        visibleLabs.find((lab) => String(lab.labId) === String(task.labId)) || null;
-
-      setForm((prev) => ({
-        ...prev,
-        labId: task.labId || "",
-        labName: task.labName || matchingLab?.labName || "",
-        area: matchingLab?.area || prev.area || "",
-        visitType: task.visitType || "Follow-up",
-        nextAction: task.nextAction || prev.nextAction || "",
-        nextFollowUpType: task.followUpType || prev.nextFollowUpType || "Call",
-        nextFollowUpDate: task.followUpDate || prev.nextFollowUpDate || "",
-      }));
-
+      if (!task || (!task.labId && !detail.labId)) return;
+      applyFastVisitEntry({ ...detail, ...task }, detail);
       showToast(
         "info",
-        `Task loaded for ${task.labName || "selected lab"}. Review and save your visit update.`
+        `Task loaded for ${task.labName || detail.labName || "selected lab"}. Log the visit.`
       );
     }
 
+    function handleStartFastVisit(event) {
+      const detail = event?.detail || {};
+      applyFastVisitEntry(detail, detail);
+    }
+
     window.addEventListener("primecare:openVisitTask", handleOpenVisitTask);
+    window.addEventListener(START_FAST_VISIT_EVENT, handleStartFastVisit);
 
     return () => {
       window.removeEventListener("primecare:openVisitTask", handleOpenVisitTask);
+      window.removeEventListener(START_FAST_VISIT_EVENT, handleStartFastVisit);
     };
-  }, [visibleLabs, showToast]);
+  }, [applyFastVisitEntry, showToast]);
 
   useEffect(() => {
     const raw =
       sessionStorage.getItem(AGENT_PENDING_VISIT_TASK_KEY) ||
       sessionStorage.getItem("primecare_pending_visit_task");
-    if (!raw) return;
+    if (!raw && !peekNewFastVisitIntent()) return;
 
     try {
-      const task = JSON.parse(raw);
+      const task = raw ? JSON.parse(raw) : peekNewFastVisitIntent() || {};
       const contextRaw = sessionStorage.getItem(AGENT_VISIT_CONTEXT_KEY);
       const visitContext = contextRaw ? JSON.parse(contextRaw) : null;
-      const matchingLab =
-        visibleLabs.find((lab) => String(lab.labId) === String(task.labId)) || null;
-
-      setForm((prev) => ({
-        ...prev,
-        labId: task.labId || visitContext?.labId || "",
-        labName: task.labName || visitContext?.labName || matchingLab?.labName || "",
-        area: matchingLab?.area || prev.area || "",
-        visitType: task.visitType || "Follow-up",
-        nextAction:
-          task.nextAction || visitContext?.nextAction || prev.nextAction || "",
-        nextFollowUpType: task.followUpType || prev.nextFollowUpType || "Call",
-        nextFollowUpDate: task.followUpDate || prev.nextFollowUpDate || "",
-      }));
+      applyFastVisitEntry(task, visitContext);
 
       const label = task.labName || visitContext?.labName || "selected lab";
-      const fromDaily = visitContext?.source === "agent_daily_workspace";
-      showToast(
-        "info",
-        fromDaily
-          ? `Daily workspace: ${label} loaded. Complete the visit wizard.`
-          : `Task loaded for ${label}. Review and save your visit update.`
-      );
+      showToast("info", `Log visit: ${label}`);
 
       sessionStorage.removeItem(AGENT_PENDING_VISIT_TASK_KEY);
       sessionStorage.removeItem("primecare_pending_visit_task");
       sessionStorage.removeItem(AGENT_VISIT_CONTEXT_KEY);
+      sessionStorage.removeItem(VISIT_ENTRY_INTENT_KEY);
     } catch (err) {
       console.error("Failed to read pending visit task", err);
       sessionStorage.removeItem(AGENT_PENDING_VISIT_TASK_KEY);
       sessionStorage.removeItem("primecare_pending_visit_task");
       sessionStorage.removeItem(AGENT_VISIT_CONTEXT_KEY);
+      sessionStorage.removeItem(VISIT_ENTRY_INTENT_KEY);
     }
-  }, [visibleLabs, showToast]);
+  }, [visibleLabs, showToast, applyFastVisitEntry]);
 
   const selectedLab = useMemo(() => {
     const labId = String(form.labId || "").trim();
@@ -2158,7 +2172,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
   }
 
   const isReviewStep = currentStepIndex === AGENT_VISIT_SECTION_STEPS.length - 1;
-  const showMobileNav = !isReviewStep;
+  const showMobileNav = visitMode === "wizard" && !isReviewStep;
   const isSubmitting = saving || evidenceUploading || savePhase === "saving";
 
   useEffect(() => {
@@ -2205,7 +2219,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
     >
       <PageHeader
         title="Agent Visits"
-        subtitle="Quick guided visit log — tap through each step, then save on review."
+        subtitle="Log a useful visit in about a minute. Extra discovery is optional."
         icon={ClipboardCheck}
       />
 
@@ -2271,6 +2285,104 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
         />
       ) : null}
 
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant={visitMode === "fast" ? "default" : "outline"}
+          className="h-11"
+          onClick={() => setVisitMode("fast")}
+        >
+          Log Visit
+        </Button>
+        <Button
+          type="button"
+          variant={visitMode === "wizard" ? "default" : "outline"}
+          className="h-11"
+          data-ve3-open-wizard="true"
+          onClick={() => {
+            const draft = skippedWizardDraftRef.current;
+            const selectedId = labIdKey(fastFormLabId || form.labId);
+            const draftLabId = labIdKey(draft?.form?.labId);
+            const resumeSameLab =
+              Boolean(draft && selectedId && draftLabId === selectedId) &&
+              !newFastVisitIntentRef.current;
+            setVisitMode("wizard");
+            if (resumeSameLab) {
+              if (draft.qualificationForm && typeof draft.qualificationForm === "object") {
+                setQualificationForm((prev) => ({ ...prev, ...draft.qualificationForm }));
+              }
+              if (typeof draft.qualificationEditing === "boolean") {
+                setQualificationEditing(draft.qualificationEditing);
+              }
+              if (Array.isArray(draft.productLines) && draft.productLines.length) {
+                skipNextProductLoadRef.current = true;
+                setProductLines(draft.productLines);
+              }
+              const stepIdx = Math.min(
+                Math.max(0, Number(draft.currentStepIndex) || 0),
+                AGENT_VISIT_SECTION_STEPS.length - 1
+              );
+              setCurrentStepIndex(stepIdx);
+              setDraftBannerVisible(true);
+              showToast("info", "Draft restored — pick up where you left off.");
+              recordAgentVisitDraftRestore({
+                stepIndex: stepIdx,
+                stepKey: AGENT_VISIT_SECTION_STEPS[stepIdx]?.key,
+              });
+            } else {
+              setCurrentStepIndex(0);
+            }
+          }}
+        >
+          Qualify / product mix
+        </Button>
+      </div>
+
+      {visitMode === "fast" ? (
+        <Card className="overflow-hidden rounded-2xl border-border/80 shadow-[var(--pc-shadow-card)]" data-ve3-fast-form="true">
+          <CardHeader className="space-y-1 border-b border-border/50 bg-muted/20 pb-2 pt-3">
+            <CardTitle className="text-lg">Log Visit</CardTitle>
+            <CardDescription>
+              Save with a result and notes. Open optional sections only if you learned more.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-3">
+            {(fastAccounts.prospects || []).length ? (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Sourced prospects
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {fastAccounts.prospects.map((lab) => (
+                    <button
+                      key={lab.labId}
+                      type="button"
+                      className="rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2 text-left"
+                      onClick={() => setFastFormLabId(lab.labId)}
+                    >
+                      <span className="block text-sm font-semibold">{lab.labName}</span>
+                      <span className="text-xs text-muted-foreground">Log Visit · Prospect</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            <AgentVisitEvidenceForm
+              key={fastFormLabId || "fast-visit"}
+              currentUser={currentUser}
+              accounts={fastAccounts}
+              initialLabId={fastFormLabId || form.labId}
+              onSuccess={(res) => {
+                const vid = res?.data?.visit_id ?? res?.data?.visitId ?? res?.data?.id ?? "";
+                setSavedVisitSummary({ visitId: vid, labName: form.labName });
+                setSavePhase("success");
+                showToast("success", "Visit saved.");
+                void loadPageData();
+              }}
+            />
+          </CardContent>
+        </Card>
+      ) : (
       <Card className="overflow-hidden rounded-2xl border-border/80 shadow-[var(--pc-shadow-card)]">
         <CardHeader className="space-y-1.5 border-b border-border/50 bg-muted/20 pb-2 pt-3">
           <div>
@@ -3126,6 +3238,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
           )}
         </CardContent>
       </Card>
+      )}
 
       <section className="space-y-3">
         <SectionTitle icon={Clock3} title="Recent visits" subtitle="Your latest field activity" />

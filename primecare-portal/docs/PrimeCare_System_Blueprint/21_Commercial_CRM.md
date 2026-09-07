@@ -12,7 +12,8 @@ Years 1–3 commercial workspace for PrimeCare’s Diagnostics Distribution Oper
 |-----------------|-----|-----------------|
 | Labs lifecycle | `labs.status` (PROSPECT / ACTIVE / INACTIVE) | Account master |
 | Qualification pipeline | `lab_qualifications.pipeline_stage` | Pre-contract pipeline |
-| Agent visits | `agent_visits` | Activities / meetings |
+| Agent visits | `agent_visits` | Activities / meetings **header** |
+| Visit discovery lines | `agent_visit_discovery_lines` (VE-1) | Historical field evidence **children** — **not** a CRM table (see below) |
 | Lab contracts | `lab_contracts` | Contract / activation / renewal |
 | Business ownership | `lab_ownership` + People Ops 8.4 read façade | Owner / territory context |
 | Revenue Funnel | `revenueFunnelEngine` (read-only) | Conversion / post-qual integrity |
@@ -20,6 +21,10 @@ Years 1–3 commercial workspace for PrimeCare’s Diagnostics Distribution Oper
 | Ops Command Center | Action queue | Exception work items |
 
 **Not found (do not invent without approval):** leads table, quotes/quotations table, meetings calendar object, Salesforce Activities clone.
+
+**Visit Evidence exception (VE-0, ADR-VE-003):** `agent_visit_discovery_lines` is **not** a new CRM table. It is a visit-scoped observational child of `agent_visits` (analyzer / reagent / consumable lines). It is **not** a parallel activity SoT, opportunity engine, quotes object, or second `lab_product_intelligence`. Commercial Workspace **may read** these lines on Activities / Lab 360 after VE-1; it still **must not** duplicate mutation paths.
+
+**Snapshot vs history:** `lab_qualifications` and `lab_product_intelligence` remain **current** snapshots. Historical discovery is Visit Evidence only ([26_Agent_Visit_Evidence.md](./26_Agent_Visit_Evidence.md)).
 
 **Sample capture (Year-1):** optional fields on `lab_product_intelligence` (requested/issued SKU/qty/date) — **not** a samples shipment object or kit catalog. Pipeline `sample_sent` remains lab-level qualification stage only.
 
@@ -58,6 +63,7 @@ Reads only from existing APIs:
 - `getQualificationReviewRead`
 - `loadVisibleLabContracts`
 - `fetchAgentVisitsBoundedRows` / `getLabVisitsRead`
+- Visit discovery lines (VE-1, read-only compose) — same visit APIs, not a CRM writer
 - Ownership façade (optional context)
 - Revenue funnel widgets via deep-link / light reuse
 
@@ -67,7 +73,11 @@ Reads only from existing APIs:
 
 ## Explicitly out of scope
 
-Payroll, compensation engines, finance mutations, orders lifecycle, payments, AR, inventory, People Ops payroll modules, RLS changes, new CRM tables.
+Payroll, compensation engines, finance mutations, orders lifecycle, payments, AR, inventory, People Ops payroll modules, **new CRM tables** (leads, quotes, Salesforce Activities clone).
+
+`agent_visit_discovery_lines` is Visit Evidence (doc 26), **out of CRM schema ownership**. Commercial Phase 9.0 still does not mutate visits; VE-1 writes stay on the Agent visit path.
+
+RLS for Visit Evidence is certified in 26 / ADR-VE-005 (tighten visit policies) — not a Commercial CRM sprint.
 
 ---
 
@@ -80,3 +90,5 @@ Payroll, compensation engines, finance mutations, orders lifecycle, payments, AR
 - `verify-commercial-activities.mjs`
 - `verify-commercial-reuse.mjs`
 - `audit-phase-9-certification.mjs`
+
+Related: [26_Agent_Visit_Evidence.md](./26_Agent_Visit_Evidence.md).

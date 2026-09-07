@@ -25,6 +25,7 @@ import { ROLES } from "@/config/roles";
 import { deriveCreditTierFromLabRecord } from "@/metrics/creditTier.js";
 import { summarizeLabsCreditPortfolio } from "@/metrics/computeRiskMetrics.js";
 import { filterLabsForUser } from "@/utils/accessFilters.js";
+import { getAgentVisitEligibleAccountsRead } from "@/visits/visitEligibleAccountsApi.js";
 import {
   startCollectionFromWorkspaceItem,
   startVisitFromWorkspaceItem,
@@ -401,6 +402,7 @@ function AgentMyLabCard({
   const recommended = deriveLabRecommendedAction(lab);
   const creditHold =
     String(lab.creditHold || lab.creditStatus || "").toUpperCase() === "HOLD";
+  const prospect = String(lab.status || "").toUpperCase() === "PROSPECT";
 
   return (
     <article className="flex h-full flex-col rounded-xl border border-border bg-card p-3 shadow-sm">
@@ -414,6 +416,11 @@ function AgentMyLabCard({
           </h3>
           {lab.area ? (
             <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{lab.area}</p>
+          ) : null}
+          {prospect ? (
+            <StatusBadge variant="warning" compact className="mt-1">
+              Prospect
+            </StatusBadge>
           ) : null}
           {creditHold ? (
             <StatusBadge variant="danger" compact className="mt-1">
@@ -454,10 +461,10 @@ function AgentMyLabCard({
           className="h-8 rounded-lg px-2.5 text-xs font-semibold"
           onClick={() => onStartVisit(lab)}
         >
-          Start Visit
+          {prospect ? "Log Visit" : "Start Visit"}
           <ArrowRight className="ml-1 h-3 w-3" />
         </Button>
-        {outstanding > 0 ? (
+        {!prospect && outstanding > 0 ? (
           <Button
             type="button"
             size="sm"
@@ -469,6 +476,7 @@ function AgentMyLabCard({
             Record Payment
           </Button>
         ) : null}
+        {!prospect ? (
         <Button
           type="button"
           size="sm"
@@ -478,6 +486,7 @@ function AgentMyLabCard({
         >
           Open Lab
         </Button>
+        ) : null}
       </div>
     </article>
   );
@@ -526,6 +535,7 @@ export default function LabsPage({
   const [provisionAgents, setProvisionAgents] = useState([]);
   const [focusLabId, setFocusLabId] = useState("");
   const [initialReviewLabId, setInitialReviewLabId] = useState("");
+  const [visitProspects, setVisitProspects] = useState([]);
 
   const canAddLab =
     currentUser?.role === ROLES.EXECUTIVE || currentUser?.role === ROLES.ADMIN;
@@ -694,6 +704,17 @@ export default function LabsPage({
     }
     return labs;
   }, [labs, currentUser, selectedDistributorTenantId, homeTenantId]);
+
+  useEffect(() => {
+    if (!isAgentView || isDistributorOs) return undefined;
+    let cancelled = false;
+    getAgentVisitEligibleAccountsRead(currentUser).then((res) => {
+      if (!cancelled && res?.success) setVisitProspects(res.data?.prospects || []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAgentView, isDistributorOs, currentUser]);
 
   usePredatorModuleValidation(
     "PrimeCare OS",
@@ -950,6 +971,31 @@ export default function LabsPage({
               ))}
             </div>
           </div>
+          {visitProspects.length ? (
+            <div className="mb-4 space-y-2">
+              <p className="text-sm font-semibold">Sourced prospects</p>
+              <p className="text-xs text-muted-foreground">
+                Log Visit only — no orders, payments, or activation.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {visitProspects.map((lab) => (
+                  <AgentMyLabCard
+                    key={`prospect-${lab.labId}`}
+                    lab={lab}
+                    onStartVisit={(item) => {
+                      startVisitFromWorkspaceItem(item, {
+                        visitType: "Field Visit",
+                        source: "agent_prospects",
+                      });
+                      setActivePage?.("visits");
+                    }}
+                    onRecordPayment={() => {}}
+                    onOpenLab={() => {}}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
           {filteredLabs.length === 0 ? (
             <div className="text-sm text-slate-500">No labs assigned to you yet.</div>
           ) : (

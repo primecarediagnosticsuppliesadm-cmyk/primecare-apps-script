@@ -139,6 +139,18 @@ import {
   AGENT_VISITS_INSERT_COLUMNS,
   sanitizeRowToKnownColumns,
 } from "@/predator/schemaAwareness.js";
+import {
+  fetchAgentVisitEvidenceBundle,
+  mapAgentVisitEvidenceBundle,
+  persistAgentVisitDiscoveryLines,
+  persistAgentVisitEvidenceUpdate,
+  persistAgentVisitWithOptionalDiscovery,
+  validateDiscoveryLinesForVisit,
+} from "@/visits/agentVisitEvidenceApi.js";
+import {
+  normalizeDiscoveryLinesInput,
+  pickVisitEvidenceHeaderFields,
+} from "@/visits/agentVisitEvidenceContract.js";
 import { isPerfLogEnabled, perfLog, perfTime, shouldRunDashboardKpiAudit } from "@/utils/perfLog.js";
 import { fireNotificationEvent } from "@/notifications/fireNotificationEvent.js";
 import { buildAgentVisitLoggedNotificationEvent } from "@/notifications/notificationEventInsert.js";
@@ -4727,6 +4739,11 @@ export function buildAgentVisitInsertRow(payload = {}) {
     labName: lab_name,
   });
 
+  const evidence = pickVisitEvidenceHeaderFields(payload);
+  if (evidence.error) {
+    return { row: {}, dropped: [], error: evidence.error };
+  }
+
   const candidate = {
     tenant_id,
     visit_id,
@@ -4746,6 +4763,12 @@ export function buildAgentVisitInsertRow(payload = {}) {
     area,
   };
 
+  for (const [key, value] of Object.entries(evidence.fields)) {
+    if (value !== null && value !== undefined && value !== "") {
+      candidate[key] = value;
+    }
+  }
+
   const { row, dropped } = sanitizeRowToKnownColumns(
     "agent_visits",
     candidate,
@@ -4756,9 +4779,11 @@ export function buildAgentVisitInsertRow(payload = {}) {
 }
 
 /**
- * Inserts one row into `agent_visits` (PrimeCare agent visit log).
- * Maps frontend payload to schema-safe columns only.
- * @returns {{ success: boolean, data?: object, error?: string }}
+ * Inserts one row into `agent_visits` (canonical Agent visit write path).
+ * Optional VE-2 discovery lines persist after the header using visit uuid.
+ * Client agent_id/tenant_id are not authoritative — VE-1 stamps identity.
+ * Does not write lab_qualifications, lab_product_intelligence, or finance tables.
+ * @returns {{ success: boolean, data?: object, error?: string, persistence?: string }}
  */
 export async function createAgentVisitWrite(payload = {}) {
   traceSupabaseRead("Visits.createAgentVisitWrite", { table: "agent_visits" });
@@ -4769,22 +4794,44 @@ export async function createAgentVisitWrite(payload = {}) {
   try {
     const { row: insertRow, error: buildError } = buildAgentVisitInsertRow(payload);
     if (buildError) {
-      return { success: false, error: buildError, data: null };
+      return { success: false, error: buildError, data: null, persistence: "failed" };
     }
 
-    const { data, error } = await supabase.from("agent_visits").insert([insertRow]).select();
-
-    if (error) {
-      hqDebugWarn("[createAgentVisitWrite]", error.message);
-      return { success: false, error: error.message || "Insert failed", data: null };
+    const lineInput = normalizeDiscoveryLinesInput(payload);
+    if (lineInput && lineInput.error) {
+      return { success: false, error: lineInput.error, data: null, persistence: "failed" };
+    }
+    const discoveryLines = Array.isArray(lineInput) ? lineInput : [];
+    if (discoveryLines.length) {
+      const preview = validateDiscoveryLinesForVisit(discoveryLines);
+      if (preview.error) {
+        return { success: false, error: preview.error, data: null, persistence: "failed" };
+      }
     }
 
-    const saved = Array.isArray(data) ? data[0] : data;
+    const persisted = await persistAgentVisitWithOptionalDiscovery(supabase, {
+      insertRow,
+      discoveryLines,
+    });
+
+    if (persisted.persistence === "failed") {
+      hqDebugWarn("[createAgentVisitWrite]", persisted.error);
+      return {
+        success: false,
+        error: persisted.error || "Insert failed",
+        data: null,
+        persistence: "failed",
+      };
+    }
+
+    const saved = persisted.data;
     if (isPerfLogEnabled()) {
       perfLog("createAgentVisitWrite.success", { visit_id: insertRow.visit_id });
     }
 
-    const visitTenantId = str(insertRow.tenant_id ?? payload.tenantId ?? payload.tenant_id);
+    const visitTenantId = str(
+      saved?.tenant_id ?? insertRow.tenant_id ?? payload.tenantId ?? payload.tenant_id
+    );
     if (visitTenantId) {
       fireNotificationEvent(
         buildAgentVisitLoggedNotificationEvent({
@@ -4799,10 +4846,119 @@ export async function createAgentVisitWrite(payload = {}) {
       );
     }
 
-    return { success: true, data: saved ?? null, error: null };
+    return {
+      success: persisted.success,
+      data: saved ?? null,
+      error: persisted.error,
+      persistence: persisted.persistence,
+      discoveryLines: persisted.discoveryLines || [],
+      discoveryLineError: persisted.discoveryLineError || null,
+      pendingLineIds: persisted.pendingLineIds || null,
+    };
   } catch (err) {
     hqDebugWarn("[createAgentVisitWrite] failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err), data: null, persistence: "failed" };
+  }
+}
+
+/**
+ * Append discovery lines to an existing visit (retry / correction).
+ * Child FK is visit_uuid → agent_visits.id. Never visit_id text.
+ */
+export async function createAgentVisitDiscoveryLinesWrite(payload = {}) {
+  traceSupabaseRead("Visits.createAgentVisitDiscoveryLinesWrite", {
+    table: "agent_visit_discovery_lines",
+  });
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: [] };
+  }
+  const visitUuid = str(payload.visitUuid ?? payload.visit_uuid ?? payload.id);
+  const lineInput = normalizeDiscoveryLinesInput(payload);
+  if (!visitUuid) {
+    return { success: false, error: "visit_uuid is required", data: [] };
+  }
+  if (lineInput && lineInput.error) {
+    return { success: false, error: lineInput.error, data: [] };
+  }
+  const lines = Array.isArray(lineInput) ? lineInput : [];
+  try {
+    const persisted = await persistAgentVisitDiscoveryLines(supabase, visitUuid, lines, {
+      lab_id: payload.labId ?? payload.lab_id,
+      tenant_id: payload.tenantId ?? payload.tenant_id,
+    });
+    if (persisted.error) {
+      return {
+        success: false,
+        error: persisted.error,
+        data: [],
+        pendingLineIds: persisted.pendingLineIds || null,
+      };
+    }
+    return { success: true, data: persisted.rows, error: null };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err), data: [] };
+  }
+}
+
+/**
+ * Agent same-visit header correction. Cannot set agent_id, tenant_id, or lab_id.
+ */
+export async function updateAgentVisitEvidenceWrite(payload = {}) {
+  traceSupabaseRead("Visits.updateAgentVisitEvidenceWrite", { table: "agent_visits" });
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: null };
+  }
+  const visitUuid = str(payload.id ?? payload.visitUuid ?? payload.visit_uuid);
+  try {
+    return await persistAgentVisitEvidenceUpdate(supabase, visitUuid, payload);
+  } catch (err) {
     return { success: false, error: err?.message || String(err), data: null };
+  }
+}
+
+/**
+ * Bounded Visit Evidence read: header + discovery lines by visit uuid.
+ */
+export async function getAgentVisitEvidenceRead(payload = {}) {
+  const visitUuid = str(payload.id ?? payload.visitUuid ?? payload.visit_uuid);
+  const tenantId = str(payload.tenantId ?? payload.tenant_id);
+  traceSupabaseRead("Visits.getAgentVisitEvidenceRead", {
+    table: "agent_visits",
+    visitUuid,
+  });
+  if (!supabase) {
+    return { success: false, error: "Supabase is not configured", data: { visit: null, discoveryLines: [] } };
+  }
+  if (!visitUuid) {
+    return { success: false, error: "visit uuid is required", data: { visit: null, discoveryLines: [] } };
+  }
+  try {
+    const bundle = await fetchAgentVisitEvidenceBundle(supabase, visitUuid, { tenantId });
+    if (bundle.error) {
+      return {
+        success: false,
+        error: bundle.error,
+        data: { visit: null, discoveryLines: [] },
+      };
+    }
+    if (!bundle.header) {
+      return {
+        success: false,
+        error: "Visit not found or not visible",
+        data: { visit: null, discoveryLines: [] },
+      };
+    }
+    return {
+      success: true,
+      error: null,
+      data: mapAgentVisitEvidenceBundle(bundle),
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err?.message || String(err),
+      data: { visit: null, discoveryLines: [] },
+    };
   }
 }
 
@@ -8832,7 +8988,7 @@ function mapUsersTableAgentRow(row) {
   };
 }
 
-function mapProfilesPlatformUserRow(row, directory = null) {
+export function mapProfilesPlatformUserRow(row, directory = null) {
   const role = str(row.role).toLowerCase();
   const profileEmail = str(row.email);
   return {

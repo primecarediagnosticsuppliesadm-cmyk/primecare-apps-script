@@ -36,3 +36,14 @@ Year-1 HQ pilot runs under PrimeCare HQ tenant. Distributor OS and `public.distr
 
 ### Deferred Until
 Post-pilot multi-distributor rollout.
+
+## DA-004: Customer-level working-capital allocation
+
+### Current
+Conceptual WC days = Inventory Days + Receivable Days − Payable Days. Receivable days can later be derived per ACTIVE lab from AR / invoices / payments. Inventory days are HQ/SKU (`inventory`, `inventory_ledger`). Payable days are HQ AP (`purchase_orders`). Agent visit `approx_credit_days` / wallet are discovery only.
+
+### Future
+A certified allocation methodology (how HQ inventory and payables attach to a customer or segment) before any “contribution per ₹1 working capital” or “WC days per lab” KPI.
+
+### Deferred Until
+Analytics certification after Visit Evidence V1 exists and O2C data is sufficient. ADR-VE-008. Do not fake per-lab inventory days.

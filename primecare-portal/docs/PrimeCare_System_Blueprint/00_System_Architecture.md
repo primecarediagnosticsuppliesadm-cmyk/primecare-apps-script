@@ -55,6 +55,8 @@ Baseline schema dump: `primecare_public_schema.sql` (repo root).
 | Page permissions | `rolePermissionMatrix.js` | Hardcoded role checks in pages |
 | Compensation / payroll | HQ payroll domain tables derived from `payments` cash collected | Existing distributor/revenue commission analytics |
 | Agent Resources (field library) | `agent_resources` + `agent_resource_versions` + bucket `agent-resources` | `operational_evidence`, `invoice-pdfs`, Employee 360 Documents, WhatsApp |
+| Field visit evidence (historical) | `agent_visits` + `agent_visit_discovery_lines` | `labs` economic columns, Agent estimates as finance, Salesforce-style CRM |
+| Current qualify / product mix | `lab_qualifications`, `lab_product_intelligence` | Visit history |
 
 ---
 
@@ -70,11 +72,12 @@ Baseline schema dump: `primecare_public_schema.sql` (repo root).
 | **Labs** | `createLabWrite`, `getLabsCredit` | LabsPage | labs, ar_credit_control |
 | **Operations** | `userProvisioningApi`, `labOwnershipApi` | OperationsCenterAdmin | profiles, lab_ownership |
 | **Agent** | collections, visits APIs | AgentDashboard, Visits | agent_visits, lab_product_intelligence, ownership |
+| **Agent Visit Evidence** | visit write/read (VE-2) + Agent Log Visit UX (VE-3) | AgentVisitPage fast form + qualify wizard, Labs Log Visit | `agent_visits`, `agent_visit_discovery_lines` (see [26](./26_Agent_Visit_Evidence.md)) |
 | **Agent Resources (field library)** | `agentResourceSupabaseApi` (publisher AR-1B + agent AR-1C) | `AgentResourcesPublisherPage` (Admin/Exec) · `AgentResourcesPage` (Agent) | `agent_resources`, versions, audiences, acknowledgements |
 | **Executive** | `founderSnapshotApi`, EFI engines | ExecutiveControlTower, EFI pages | read aggregates |
 | **Lab portal** | `getLabCatalogRead`, `getLabOrderDetailsRead` | LabOrderingPage | orders (scoped) |
 | **Compensation / Payroll** | planned compensation APIs | planned Executive Compensation / Payroll screens | planned payroll, run line, adjustment, approval, audit tables |
-| **Commercial CRM** | qualification + visits + contracts reads composed | CommercialCrmPage (Phase 9.0) | `lab_qualifications`, `agent_visits`, `lab_contracts`, `labs` (no new CRM tables) |
+| **Commercial CRM** | qualification + visits + contracts reads composed | CommercialCrmPage (Phase 9.0) | `lab_qualifications`, `agent_visits`, `lab_contracts`, `labs`; may **read** visit discovery lines — **not** a CRM table (see 21 + 26) |
 
 ---
 
@@ -157,3 +160,4 @@ Three layers — see `CHANGELOG.md` for gaps:
 3. **Non-blocking ops hooks** — shipment failure does not roll back fulfill
 4. **Additive logistics** — no finance module imports shipment tables
 5. **Blueprint-first** — doc leads schema/rule changes
+6. **Three truth layers** — `labs` identity; visit evidence (discovery); O2C finance. Agent estimates never become a second financial SoT ([26](./26_Agent_Visit_Evidence.md))
