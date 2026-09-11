@@ -544,7 +544,7 @@ export default function AgentResourcesPublisherPage({ currentUser = null }) {
               Required reading
             </label>
             <div className="space-y-1 sm:col-span-2">
-              <FieldLabel>File * (PDF, JPEG, PNG, or DOCX · max 10 MB)</FieldLabel>
+              <FieldLabel>File * (PDF, JPEG, or PNG · max 10 MB)</FieldLabel>
               <input
                 required
                 type="file"
@@ -552,8 +552,8 @@ export default function AgentResourcesPublisherPage({ currentUser = null }) {
                 onChange={(e) => setForm((f) => ({ ...f, file: e.target.files?.[0] || null }))}
               />
               <p className="text-[11px] text-muted-foreground">
-                Word (.docx) files download for the agent. They do not preview in the browser. Legacy
-                .doc, Excel, and PowerPoint are not supported.
+                New files must be PDF, JPEG, or PNG. Existing Word (.docx) resources remain downloadable
+                for agents. Excel, PowerPoint, ZIP, and new Word uploads are not supported.
               </p>
             </div>
           </div>
@@ -691,7 +691,7 @@ export default function AgentResourcesPublisherPage({ currentUser = null }) {
                     accept={AGENT_RESOURCE_FILE_ACCEPT}
                     onChange={(e) => setNewVersionFile(e.target.files?.[0] || null)}
                   />
-                  <p className="text-[11px] text-muted-foreground">PDF, JPEG, PNG, or DOCX · max 10 MB</p>
+                  <p className="text-[11px] text-muted-foreground">PDF, JPEG, or PNG · max 10 MB</p>
                 </div>
                 <Button type="submit" size="sm" disabled={saving || !newVersionFile}>
                   Upload draft

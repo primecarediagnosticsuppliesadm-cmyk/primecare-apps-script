@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Agent Resources file-type inspection: PDF/JPEG/PNG magic bytes + DOCX OPC package.
+ * Agent Resources file-type inspection: new publish PDF/JPEG/PNG only.
+ * Legacy DOCX read is covered by signed-URL/open helpers, not this publish inspect.
  * Static. Does not call Production or QA.
  */
 import { inspectAgentResourceFile } from "../src/api/agentResourceFileInspect.js";
@@ -143,16 +144,14 @@ const cases = [
     mime: "image/png",
   },
   {
-    id: "pass.docx",
+    id: "fail.docx_new_publish",
     file: fakeFile("playbook.docx", VALID_DOCX, DOCX_MIME),
-    ok: true,
-    mime: DOCX_MIME,
+    ok: false,
   },
   {
-    id: "pass.docx_zip_browser_mime",
+    id: "fail.docx_zip_browser_mime",
     file: fakeFile("playbook.docx", VALID_DOCX, "application/zip"),
-    ok: true,
-    mime: DOCX_MIME,
+    ok: false,
   },
   {
     id: "fail.doc",

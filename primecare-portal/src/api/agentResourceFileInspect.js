@@ -1,6 +1,8 @@
 /**
- * Agent Resources file inspection (no Supabase). PDF/JPEG/PNG magic bytes plus
- * DOCX as an OPC package (ZIP names only — no decompression, no extra deps).
+ * Agent Resources file inspection (no Supabase).
+ * New publish: PDF/JPEG/PNG magic bytes only, max size enforced by caller.
+ * Legacy DOCX remains readable via isDocxMime / signed-URL download helpers.
+ * ZIP name listing is kept so renamed Office packages are still rejected.
  */
 export const AGENT_RESOURCE_DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -9,17 +11,19 @@ export const AGENT_RESOURCE_ALLOWED_MIME = new Set([
   "application/pdf",
   "image/jpeg",
   "image/png",
-  AGENT_RESOURCE_DOCX_MIME,
 ]);
 
 export const AGENT_RESOURCE_FILE_ACCEPT =
-  "application/pdf,image/jpeg,image/png,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.pdf,.jpg,.jpeg,.png,.docx";
+  "application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png";
+
+const NEW_PUBLISH_HINT = "Use a PDF, JPEG, or PNG file.";
 
 const BLOCKED_EXTENSIONS = new Set([
   "doc",
   "dot",
   "docm",
   "dotm",
+  "docx",
   "zip",
   "xlsx",
   "xlsm",
@@ -173,9 +177,9 @@ export function inspectDocxPackageNames(names) {
   const hasXl = list.some((name) => name === "xl/" || name.startsWith("xl/"));
   const hasPpt = list.some((name) => name === "ppt/" || name.startsWith("ppt/"));
   if (hasVba) return { ok: false, error: "Macro-enabled Word files are not allowed." };
-  if (hasXl && !hasWordDir) return { ok: false, error: "Excel files are not allowed. Use PDF, JPEG, PNG, or DOCX." };
+  if (hasXl && !hasWordDir) return { ok: false, error: "Excel files are not allowed. Use PDF, JPEG, or PNG." };
   if (hasPpt && !hasWordDir) {
-    return { ok: false, error: "PowerPoint files are not allowed. Use PDF, JPEG, PNG, or DOCX." };
+    return { ok: false, error: "PowerPoint files are not allowed. Use PDF, JPEG, or PNG." };
   }
   if (!hasContentTypes || !hasWordDir || !hasDocument) {
     return { ok: false, error: "That file is not a valid Word document." };
@@ -183,66 +187,42 @@ export function inspectDocxPackageNames(names) {
   return { ok: true };
 }
 
-async function inspectDocxFile(file) {
-  const header = new Uint8Array(await file.slice(0, 8).arrayBuffer());
-  if (isOleHeader(header)) {
-    return { ok: false, error: "Legacy Word (.doc) files are not allowed. Save as .docx or PDF." };
-  }
-  if (!isZipHeader(header)) {
-    return { ok: false, error: "That file is not a valid Word document." };
-  }
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const names = listZipEntryNames(bytes);
-  const pack = inspectDocxPackageNames(names);
-  if (!pack.ok) return pack;
-  return {
-    ok: true,
-    mime: AGENT_RESOURCE_DOCX_MIME,
-    size: file.size,
-    filename: str(file.name) || "document.docx",
-  };
-}
-
 export async function inspectAgentResourceFile(file, maxBytes) {
   if (!file) return { ok: false, error: "Choose a file to upload." };
   const name = str(file.name);
   const ext = extensionOf(name);
   if (BLOCKED_EXTENSIONS.has(ext)) {
+    if (ext === "docx") {
+      return { ok: false, error: "Word (.docx) files cannot be newly published. Use PDF, JPEG, or PNG." };
+    }
     if (ext === "doc" || ext === "dot") {
-      return { ok: false, error: "Legacy Word (.doc) files are not allowed. Save as .docx or PDF." };
+      return { ok: false, error: "Legacy Word (.doc) files are not allowed. Use PDF, JPEG, or PNG." };
     }
     if (ext === "docm" || ext === "dotm") {
       return { ok: false, error: "Macro-enabled Word files are not allowed." };
     }
     if (ext === "zip") {
-      return { ok: false, error: "ZIP files are not allowed. Use PDF, JPEG, PNG, or DOCX." };
+      return { ok: false, error: "ZIP files are not allowed. Use PDF, JPEG, or PNG." };
     }
     if (ext === "xlsx" || ext === "xlsm" || ext === "xls") {
-      return { ok: false, error: "Excel files are not allowed. Use PDF, JPEG, PNG, or DOCX." };
+      return { ok: false, error: "Excel files are not allowed. Use PDF, JPEG, or PNG." };
     }
-    return { ok: false, error: "PowerPoint files are not allowed. Use PDF, JPEG, PNG, or DOCX." };
+    return { ok: false, error: "PowerPoint files are not allowed. Use PDF, JPEG, or PNG." };
   }
   if (file.size <= 0) return { ok: false, error: "The file is empty." };
   if (Number.isFinite(maxBytes) && file.size > maxBytes) {
     return { ok: false, error: "File is larger than 10 MB." };
   }
   const browserMime = mapBrowserMime(file);
-  if (ext === "docx" || browserMime === AGENT_RESOURCE_DOCX_MIME) {
-    if (ext !== "docx") {
-      return { ok: false, error: "Word files must use the .docx extension." };
-    }
-    try {
-      return await inspectDocxFile(file);
-    } catch {
-      return { ok: false, error: "Could not read the file. Try another file." };
-    }
+  if (isDocxMime(browserMime)) {
+    return { ok: false, error: "Word (.docx) files cannot be newly published. Use PDF, JPEG, or PNG." };
   }
   if (browserMime === "application/zip" || ext === "zip") {
-    return { ok: false, error: "ZIP files are not allowed. Use PDF, JPEG, PNG, or DOCX." };
+    return { ok: false, error: "ZIP files are not allowed. Use PDF, JPEG, or PNG." };
   }
   const mime = browserMime;
-  if (!AGENT_RESOURCE_ALLOWED_MIME.has(mime) || isDocxMime(mime)) {
-    return { ok: false, error: "Use a PDF, JPEG, PNG, or Word (.docx) file." };
+  if (!AGENT_RESOURCE_ALLOWED_MIME.has(mime)) {
+    return { ok: false, error: NEW_PUBLISH_HINT };
   }
   try {
     const header = new Uint8Array(await file.slice(0, 8).arrayBuffer());

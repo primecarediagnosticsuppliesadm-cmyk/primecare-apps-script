@@ -89,7 +89,7 @@ export function publicAgentResourceError(error, fallback = "Something went wrong
   if (/23505|duplicate|unique/.test(lower)) return "That version already exists. Retry.";
   if (/413|too large|file_size|payload/.test(lower)) return "File is larger than 10 MB.";
   if (/mime|unsupported|docx|wordprocessingml|\.doc\b|zip/.test(lower)) {
-    return "Use a PDF, JPEG, PNG, or Word (.docx) file.";
+    return "Use a PDF, JPEG, or PNG file.";
   }
   if (/failed to fetch|networkerror|network/.test(lower)) return "Network error. Check your connection and retry.";
   return fallback;

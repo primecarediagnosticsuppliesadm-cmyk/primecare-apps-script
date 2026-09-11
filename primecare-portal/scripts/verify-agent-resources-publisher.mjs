@@ -71,8 +71,14 @@ assert(/HQ_AGENT_RESOURCE_ACK_COLUMNS/.test(bounds), "bounds.ack", "ack roster c
 assert(/inspectAgentResourceFile/.test(api), "api.file_inspect", "client file inspection");
 assert(/agentResourceFileInspect/.test(api), "api.file_inspect_module", "file inspect extracted");
 assert(/AGENT_RESOURCE_FILE_ACCEPT/.test(page), "ui.accept_const", "publisher uses shared accept list");
-assert(/\.docx/.test(page), "ui.accept_docx", "publisher accept includes .docx");
-assert(/PDF, JPEG, PNG, or DOCX/.test(page), "ui.file_label", "create form lists DOCX");
+assert(
+  /application\/pdf,image\/jpeg,image\/png,\.pdf,\.jpg,\.jpeg,\.png/.test(inspect) &&
+    !/\.docx/.test(inspect.split("AGENT_RESOURCE_FILE_ACCEPT")[1]?.split(";")[0] || ""),
+  "ui.accept_no_docx",
+  "publisher accept is PDF/JPEG/PNG only"
+);
+assert(/PDF, JPEG, or PNG/.test(page) && !/PNG, or DOCX/.test(page), "ui.file_label", "create form lists PDF/JPEG/PNG only");
+assert(/existing Word \(\.docx\) resources remain downloadable/i.test(page), "ui.legacy_docx_copy", "publisher notes legacy DOCX remains readable");
 assert(/agentResourceOpenLabel/.test(page) && /agentResourceOpenLabel/.test(agentPage), "ui.open_label", "Open vs Download by MIME");
 assert(/createSignedUrl\([\s\S]*download: filename/.test(api), "api.docx_download", "DOCX signed URL uses download filename");
 assert(/sanitizeAgentResourceDownloadName/.test(api), "api.download_name", "DOCX download uses original filename");

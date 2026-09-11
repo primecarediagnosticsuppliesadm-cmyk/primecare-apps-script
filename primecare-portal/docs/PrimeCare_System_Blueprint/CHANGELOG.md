@@ -4,6 +4,26 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-11 — VE integration: new Agent Resource publish is PDF/JPEG/PNG; legacy DOCX remains readable
+
+### Gap found
+
+- Production hotfix `3e514af` allowed HQ to **publish** validated `.docx`. Frozen QA and the VE production-candidate policy require **new** publishes to be PDF/JPEG/PNG only (max 10 MB), while the three Production legacy DOCX versions must remain readable.
+
+### Change
+
+- `inspectAgentResourceFile` / publisher accept reject new DOCX/XLSX/PPTX/ZIP. Read path unchanged: `isDocxMime`, signed-URL `download` filename, `mime_type` on open columns, `20260901210000_agent_resources_docx_mime.sql` kept.
+- QA verifier helper `resolveQaHrPassword` is env-only (`QA_HR_PASSWORD`). No secret committed. `158fb0a` not cherry-picked. `QA_HR.password` stays the existing non-secret test stub.
+
+### Verification
+
+- `node scripts/verify-agent-resources-file-types.mjs`
+- `node scripts/verify-agent-resources-publisher.mjs`
+- `node scripts/verify-agent-visit-evidence-api.mjs`
+- `node scripts/verify-agent-visit-evidence-ux.mjs`
+
+---
+
 ## 2026-09-07 — generate-invoice-pdf CORS missing canonical Production origin
 
 ### Gap found

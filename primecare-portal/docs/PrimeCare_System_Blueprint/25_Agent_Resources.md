@@ -135,7 +135,9 @@ Original filename lives on the version row only. No `getPublicUrl`. No authentic
 
 Signed URLs (AR-1B/C): after metadata SELECT, `createSignedUrl` TTL **300 seconds**. Storage SELECT still requires metadata authorization. PDF/JPEG/PNG open inline. **DOCX** signed URLs set `download` to the sanitized original filename (Content-Disposition attachment). No public URL.
 
-**Publish formats:** PDF (canonical field-readable copy), JPEG/PNG (simple sheets), DOCX (downloadable Word playbook). Client inspection (`agentResourceFileInspect.js`) keeps PDF/JPEG/PNG magic-byte checks and validates DOCX as an OPC package (ZIP **names only**, no decompression): requires `[Content_Types].xml` and `word/document.xml`. Rejects `.doc`, `.docm`, generic `.zip`, XLSX, PPTX, macro `vbaProject.bin`, and ZIP files renamed to `.docx` that lack a Word package.
+**New publish formats:** PDF (canonical field-readable copy), JPEG/PNG (simple sheets) only. Maximum **10 MB**. Client inspection (`agentResourceFileInspect.js`) magic-byte-checks PDF/JPEG/PNG and **rejects** new `.docx` / `.xlsx` / `.pptx` / `.zip` (and `.doc` / `.docm`). Do not newly publish Word, Excel, PowerPoint, or ZIP.
+
+**Legacy DOCX read:** Existing stored `.docx` versions remain readable. Signed URLs for DOCX still set `download` to the sanitized original filename. Do not delete, migrate, or rewrite stored MIME for those versions. The DOCX MIME CHECK / bucket allowlist migration (`20260901210000_agent_resources_docx_mime.sql`) stays in git so legacy objects remain valid.
 
 There is **no** in-app Word preview, **no** collaborative editing, and **no** DOCX→PDF conversion in this release.
 
@@ -290,7 +292,7 @@ Run on QA only. Do not use Production.
 3. Category: Start Here.
 4. Required Reading: Yes.
 5. Audience: All Agents.
-6. Upload an approved PDF or validated `.docx`.
+6. Upload an approved PDF, JPEG, or PNG (not `.docx`).
 7. Confirm the resource is Draft (no published version).
 8. Confirm no Published version.
 9. Publish V1.
@@ -330,7 +332,7 @@ Run on QA only. Do not use Production.
 
 ### File validation
 
-30. Valid `.docx` accepted (OPC package). `.doc`, `.docm`, generic `.zip`, XLSX, PPTX rejected.
+30. New `.docx` rejected. PDF/JPEG/PNG accepted. `.doc`, `.docm`, generic `.zip`, XLSX, PPTX rejected. Existing stored DOCX versions still open/download.
 31. File larger than 10 MiB rejected.
 32. PNG accepted.
 33. Original filename is not used in the storage path. DOCX signed download may use the original filename as Content-Disposition.
