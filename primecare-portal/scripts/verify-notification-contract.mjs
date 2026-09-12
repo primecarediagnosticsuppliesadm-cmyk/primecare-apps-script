@@ -135,6 +135,30 @@ if (
   fail("pn1b1.no_send", "PN-1B1 send surface or helper contract missing");
 }
 
+const pn1b2Rel = "supabase/migrations/20260913020000_pn1b2_email_dispatch_claim.sql";
+const pn1b2TwinRel = "supabase/sql/pn1b2_email_dispatch_claim.sql";
+const pn1b2 = existsSync(resolve(root, pn1b2Rel)) ? read(pn1b2Rel) : "";
+const pn1b2Twin = existsSync(resolve(root, pn1b2TwinRel)) ? read(pn1b2TwinRel) : "";
+if (pn1b2 && pn1b2 === pn1b2Twin) pass("pn1b2.twin", "PN-1B2 migration matches SQL twin");
+else fail("pn1b2.twin", "PN-1B2 migration / twin missing or mismatched");
+
+const dispatchSrc = existsSync(resolve(root, "supabase/functions/dispatch-notification-email/index.ts"))
+  ? read("supabase/functions/dispatch-notification-email/index.ts")
+  : "";
+const configToml = existsSync(resolve(root, "supabase/config.toml")) ? read("supabase/config.toml") : "";
+if (
+  /EMAIL_DISPATCH_CRON_SECRET/.test(dispatchSrc) &&
+  /ignore_caller_payload/.test(dispatchSrc) &&
+  /Idempotency-Key/.test(dispatchSrc) &&
+  /shouldClaimRows/.test(dispatchSrc) &&
+  /verify_jwt = false/.test(configToml.split("[functions.dispatch-notification-email]")[1] || "") &&
+  !/VITE_EMAIL_/.test(dispatchSrc)
+) {
+  pass("pn1b2.dispatcher", "cron-secret auth, no-claim when disabled, no VITE secrets");
+} else {
+  fail("pn1b2.dispatcher", "dispatcher contract incomplete");
+}
+
 const constants = read("src/notifications/notificationConstants.js");
 const insertSrc2 = insertSrc;
 const centerPage = read("src/pages/NotificationCenterPage.jsx");

@@ -113,6 +113,14 @@ supabase functions deploy provision-platform-user --project-ref zipuzmfkwwucbchl
 supabase functions deploy reset-platform-user-password --project-ref zipuzmfkwwucbchlphcj
 ```
 
+PN-1B2 QA dispatcher (not part of the three-function bundle; QA only; no Production):
+
+```bash
+supabase functions deploy dispatch-notification-email --project-ref zipuzmfkwwucbchlphcj
+```
+
+Required Edge secret **names** (values never in git): `EMAIL_PROVIDER_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME`, `APP_PUBLIC_URL`, `EMAIL_ENABLED`, `EMAIL_QA_MODE`, `EMAIL_TEST_RECIPIENT`, `EMAIL_QA_ALLOWLIST`, `EMAIL_DISPATCH_CRON_SECRET`, `EMAIL_REPLY_TO`, `APP_ENV`.
+
 ---
 
 ## 6. Smoke-test curl (after deploy)

@@ -4,6 +4,30 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-13 — PN-1B2 prospect email dispatcher + QA safety (QA only)
+
+### Gap found
+
+- PN-1B1 queues `channel=email` rows but has no dispatcher, provider, or QA suppression. Live QA HQ includes an Executive Gmail snapshot that must never be contacted.
+
+### Change
+
+- Edge Function `dispatch-notification-email` (QA only). **Not an open relay:** ignores caller `to` / `subject` / `body` / `html`. Auth is `Authorization: Bearer EMAIL_DISPATCH_CRON_SECRET` only (`verify_jwt=false` at the gateway so the cron secret is not rejected as a non-JWT). User JWTs are insufficient.
+- SECURITY DEFINER `claim_notification_email_deliveries` uses `FOR UPDATE SKIP LOCKED` (batch 10). `finalize_notification_email_delivery` marks sent/failed/skipped. Authenticated/anon EXECUTE revoked; `service_role` may call these RPCs from the function only.
+- `EMAIL_ENABLED=false` → **do not claim**, do not call Resend, return `disabled`.
+- QA fail-closed: `APP_ENV=qa` OR `EMAIL_QA_MODE=true`. Allowlisted domains (default `primecare.test`) may send as queued. Else rewrite To `EMAIL_TEST_RECIPIENT` or `skipped` / `qa_suppressed` with **no provider call**. Never send to gmail/yahoo/outlook/hotmail unless the **final** provider recipient equals `EMAIL_TEST_RECIPIENT`. `recipient_email` snapshot is immutable; actual To stored in `provider_recipient`.
+- Resend `Idempotency-Key: <delivery_id>`. Skip provider if `status=sent` or `provider_message_id` set. Max 4 attempts; retryable 429/5xx/timeout; no cron/`pg_cron`/`pg_net` in this slice.
+- **QA only.** No Production secrets, DNS, or dispatcher deploy. FZ-P1-07 Production freeze remains.
+
+### Verification
+
+- `node scripts/verify-prospect-email-1b2.mjs`
+- `node scripts/verify-prospect-email-1b2.mjs --apply` (QA only; live send requires QA secrets)
+- `node scripts/verify-prospect-email-1b1.mjs`
+- `node scripts/verify-notification-contract.mjs`
+
+---
+
 ## 2026-09-13 — PN-1B1 prospect email delivery queue foundation (QA only)
 
 ### Gap found

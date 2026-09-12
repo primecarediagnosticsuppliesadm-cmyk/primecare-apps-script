@@ -96,6 +96,28 @@ node scripts/verify-primecare-production-golden-path.mjs   # GP-30–32
 
 ---
 
+## 4. `dispatch-notification-email` (PN-1B2, QA only)
+
+| Field | Detail |
+|-------|--------|
+| **Purpose** | Claim queued `channel=email` rows and send via Resend with QA rewrite/suppression |
+| **Method** | POST |
+| **Auth** | `Authorization: Bearer EMAIL_DISPATCH_CRON_SECRET` only. User JWT is **not** sufficient |
+| **verify_jwt** | `false` (gateway must not reject the cron secret) |
+| **Open relay** | Caller `to` / `subject` / `body` / `html` are ignored |
+| **EMAIL_ENABLED=false** | Returns `{ disabled: true, claimed: 0 }` — no claim, no provider call |
+| **Production** | Do not deploy. Do not set Production secrets |
+
+Manual invoke only in PN-1B2. No cron / pg_cron / GitHub Actions.
+
+```bash
+supabase functions deploy dispatch-notification-email --project-ref zipuzmfkwwucbchlphcj
+```
+
+Not included in `npm run supabase:functions:deploy:qa`.
+
+---
+
 ## Health checklist (per environment)
 
 | # | Check | QA | Production |

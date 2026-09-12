@@ -74,3 +74,6 @@ verify_jwt = true
 
 [functions.reset-platform-user-password]
 verify_jwt = true
+
+[functions.dispatch-notification-email]
+verify_jwt = false
