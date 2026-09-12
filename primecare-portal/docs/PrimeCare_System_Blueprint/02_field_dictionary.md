@@ -365,7 +365,8 @@ Critical fields across PrimeCare. For full column lists see [01_schema_catalog.m
 - **Examples:** `order_created`, `order_fulfilled`, `payment_received`, `agent_visit_logged`, `prospect_created`, `prospect_activated`
 - **Written by:** `fireNotificationEvent` from order/payment/visit modules for existing types. **`prospect_created` and `prospect_activated` are server-authoritative only** — `create_prospect_lab` / `activate_prospect_lab` via `emit_prospect_in_app_notification`. Client `buildNotificationEventInsertRows` rejects those two types; DB trigger raises `prospect_notify_forbidden` if a client INSERT attempts them.
 - **Idempotency (PN-1A):** unique `(tenant_id, event_type, source_id)` for those two types only; `source_id` is the created `lab_id` and must be non-null.
-- **Contract:** `buildNotificationEventInsertRows` — foundation columns on QA; legacy stub (`title`/`message`/`payload`) fallback on Production until `20260816140000` applied
+- **Email queue (PN-1B1):** not sent. `enqueue_prospect_email_deliveries` after insert. HQ create: one row per distinct usable Admin/Executive mailbox (prefer admin, then executive, then `user_id`). Activation: sourcing Agent only; `skipped` + `missing_email` / `inactive_profile` / `missing_profile` when not sendable.
+- **Contract:** `buildNotificationEventInsertRows` — foundation columns on QA; legacy stub (`title`/`message`/`payload`) fallback on Production until `20260816140000` applied. Client delivery builder must never emit `channel=email`.
 - **UUID rule:** `actor_user_id` must be auth UUID or null — never `AGT-*`
 - **Bounded payload (Prospect):** `lab_id`, `lab_name`, `contact_name`, `phone`, `area`, `sourcing_agent_id`, `sourcing_agent_name`, `assigned_agent_id`, `created_at` / `activated_at`, `cta` (`/labs`), `next_action`. No `SELECT *` on the notification read path (`HQ_NOTIFICATION_EVENT_LIST_COLUMNS`).
 

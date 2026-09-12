@@ -110,6 +110,31 @@ if (/resend/i.test(pn) || /sendgrid/i.test(pn) || /smtp/i.test(pn) || /email_pla
   pass("pn1a.no_email", "in-app only");
 }
 
+const pn1bRel = "supabase/migrations/20260913010000_pn1b1_prospect_email_delivery_queue.sql";
+const pn1bTwinRel = "supabase/sql/pn1b1_prospect_email_delivery_queue.sql";
+const pn1b = existsSync(resolve(root, pn1bRel)) ? read(pn1bRel) : "";
+const pn1bTwin = existsSync(resolve(root, pn1bTwinRel)) ? read(pn1bTwinRel) : "";
+if (pn1b && pn1b === pn1bTwin) pass("pn1b1.twin", "PN-1B1 migration matches SQL twin");
+else fail("pn1b1.twin", "PN-1B1 migration / twin missing or mismatched");
+
+if (
+  /enqueue_prospect_email_deliveries/.test(pn1b) &&
+  /REVOKE ALL ON FUNCTION public\.enqueue_prospect_email_deliveries[\s\S]*FROM authenticated/.test(pn1b) &&
+  /email_delivery_forbidden/.test(pn1b) &&
+  /notification_delivery_log_email_recipient_uidx/.test(pn1b) &&
+  !/resend/i.test(pn1b) &&
+  !/sendgrid/i.test(pn1b) &&
+  !/postmark/i.test(pn1b) &&
+  !/smtp/i.test(pn1b) &&
+  !/\bfetch\s*\(/.test(pn1b) &&
+  !/pg_net/.test(pn1b) &&
+  !/cron\.schedule/.test(pn1b)
+) {
+  pass("pn1b1.no_send", "queue helper present; no provider/send mechanism");
+} else {
+  fail("pn1b1.no_send", "PN-1B1 send surface or helper contract missing");
+}
+
 const constants = read("src/notifications/notificationConstants.js");
 const insertSrc2 = insertSrc;
 const centerPage = read("src/pages/NotificationCenterPage.jsx");
@@ -132,6 +157,16 @@ if (/Server-authoritative event_type/.test(insertSrc2) && /SERVER_AUTHORITATIVE_
   pass("pn1a.client_builder", "client insert builder rejects prospect_* types");
 } else {
   fail("pn1a.client_builder", "client builder can still construct prospect_* rows");
+}
+
+if (
+  /"email"/.test(constants) &&
+  /SERVER_QUEUED_NOTIFICATION_CHANNELS/.test(constants) &&
+  /ch === "email"/.test(insertSrc2)
+) {
+  pass("pn1b1.client_no_email_insert", "client builder drops channel=email");
+} else {
+  fail("pn1b1.client_no_email_insert", "client may still construct email delivery rows");
 }
 
 const labSafeBlock = centerPage.split("const LAB_SAFE_EVENT_TYPES")[1]?.split("function")[0] || "";

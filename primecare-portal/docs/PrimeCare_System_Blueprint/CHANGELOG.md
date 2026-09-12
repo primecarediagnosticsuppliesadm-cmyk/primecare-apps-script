@@ -4,6 +4,34 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-13 — PN-1B1 prospect email delivery queue foundation (QA only)
+
+### Gap found
+
+- PN-1A certifies `prospect_created` / `prospect_activated` in-app events, but `notification_delivery_log` has no real `email` channel, no recipient identity, and no queue statuses.
+- Live QA status CHECK allows only `placeholder_not_sent` | `logged_in_app` (client constants listed `skipped`/`failed` ahead of live schema).
+- HQ UPDATE RLS on `notification_delivery_log` would let Admin/Executive mutate future email status/provider fields.
+- No live email provider exists. Production transactional-email freeze (FZ-P1-07) remains in force.
+
+### Change
+
+- **Prospect Email Delivery Queue Foundation.** `notification_events` remains the business-event SoT. `notification_delivery_log` becomes the delivery-attempt SoT for channel `email` only for the two Prospect lifecycle events.
+- AFTER INSERT trigger on `notification_events` calls `enqueue_prospect_email_deliveries` (SECURITY DEFINER, nested exception isolation). Queue failure cannot roll back Flow 2 or the in-app event.
+- `prospect_created` queues one `channel=email` row per distinct eligible same-tenant active Admin/Executive mailbox (`lower(btrim(email))`), preferring admin then executive then `user_id`.
+- `prospect_activated` queues (or skips) only the immutable sourcing Agent validated from `labs.sourced_by_agent_id` + event `target_user_id`. Never assigned/ownership/HQ.
+- Email remains **disabled**. No provider, no Edge Function, no cron, no webhook, no DNS, no send. `queued` means ready for a future dispatcher.
+- **QA only.** Not applied to Production. Do not mark transactional email Production-ready.
+
+### Verification
+
+- `node scripts/verify-prospect-email-1b1.mjs`
+- `node scripts/verify-prospect-email-1b1.mjs --apply` (QA only)
+- `node scripts/verify-notification-contract.mjs`
+- `node scripts/verify-agent-prospect-2a.mjs` / `2b` / `2c` / `2e` (static)
+- `node scripts/verify-flow-3a.mjs` (static)
+
+---
+
 ## 2026-09-12 — PN-1A prospect in-app notifications (QA only)
 
 ### Gap found
