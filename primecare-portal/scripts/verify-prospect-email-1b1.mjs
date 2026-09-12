@@ -233,10 +233,13 @@ if (forbiddenSend(mig) || /\bfetch\s*\(/.test(mig)) {
 
 const fnDir = resolve(root, "supabase/functions");
 const fnNames = existsSync(fnDir) ? readdirSync(fnDir) : [];
-if (fnNames.some((n) => /email|resend|dispatch-notification/i.test(n))) {
-  fail("static.no_send.edge", `unexpected email function: ${fnNames.join(",")}`);
+const unexpectedSenders = fnNames.filter(
+  (n) => /resend|sendgrid|smtp/i.test(n) && n !== "dispatch-notification-email"
+);
+if (unexpectedSenders.length) {
+  fail("static.no_send.edge", `unexpected email function: ${unexpectedSenders.join(",")}`);
 } else {
-  pass("static.no_send.edge", "no email Edge Function added");
+  pass("static.no_send.edge", "PN-1B1 has no provider function; dispatcher is a later slice");
 }
 
 if (/"email"/.test(constants) && /SERVER_QUEUED_NOTIFICATION_CHANNELS/.test(constants) && /queued/.test(constants)) {

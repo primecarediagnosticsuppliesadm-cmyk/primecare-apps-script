@@ -410,6 +410,7 @@ Major tables and objects in PrimeCare QA/Prod Supabase (`public` schema).
 
 | Migration | Summary |
 |-----------|---------|
+| `20260913020000` | PN-1B2: email claim/finalize RPCs + `provider_recipient`. QA only. No send unless Edge secrets + Resend. |
 | `20260913010000` | PN-1B1: prospect email delivery queue (`email` channel, queue columns/statuses, enqueue helper + trigger, client write lock). QA only. No send. |
 | `20260912200000` | PN-1A: prospect in-app notifications (`emit_prospect_in_app_notification`, unique index, server-only trigger, CREATE OR REPLACE Flow 2 RPCs). QA only. |
 | `20260815120000` | `lab_product_intelligence` + visit follow-up columns |
