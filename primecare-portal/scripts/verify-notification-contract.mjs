@@ -78,9 +78,89 @@ for (const mig of [
   "20260816140000_notification_events_foundation_parity.sql",
   "20260816145000_notification_event_visibility_helper_parity.sql",
   "20260816150000_notification_delivery_log_parity.sql",
+  "20260912200000_pn1a_prospect_in_app_notifications.sql",
 ]) {
   if (existsSync(resolve(root, "supabase/migrations", mig))) pass(`db.${mig}`, "versioned");
   else fail(`db.${mig}`, "missing migration");
+}
+
+const pnRel = "supabase/migrations/20260912200000_pn1a_prospect_in_app_notifications.sql";
+const pnTwinRel = "supabase/sql/pn1a_prospect_in_app_notifications.sql";
+const pn = existsSync(resolve(root, pnRel)) ? read(pnRel) : "";
+const pnTwin = existsSync(resolve(root, pnTwinRel)) ? read(pnTwinRel) : "";
+if (pn && pn === pnTwin) pass("pn1a.twin", "migration matches SQL twin");
+else fail("pn1a.twin", "PN-1A migration / twin missing or mismatched");
+
+if (
+  /CREATE OR REPLACE FUNCTION public\.emit_prospect_in_app_notification/.test(pn) &&
+  /REVOKE ALL ON FUNCTION public\.emit_prospect_in_app_notification[\s\S]*FROM authenticated/.test(pn) &&
+  /RAISE EXCEPTION 'prospect_notify_forbidden'/.test(pn) &&
+  /notification_events_prospect_lifecycle_uidx/.test(pn) &&
+  /EXCEPTION\s+WHEN unique_violation THEN/.test(pn) &&
+  /EXCEPTION\s+WHEN OTHERS THEN/.test(pn)
+) {
+  pass("pn1a.server", "helper + unique index + spoof trigger + isolated unique_violation");
+} else {
+  fail("pn1a.server", "PN-1A server contract incomplete");
+}
+
+if (/resend/i.test(pn) || /sendgrid/i.test(pn) || /smtp/i.test(pn) || /email_placeholder/.test(pn)) {
+  fail("pn1a.no_email", "PN-1A must not add email delivery");
+} else {
+  pass("pn1a.no_email", "in-app only");
+}
+
+const constants = read("src/notifications/notificationConstants.js");
+const insertSrc2 = insertSrc;
+const centerPage = read("src/pages/NotificationCenterPage.jsx");
+const activityEngine = read("src/operations/activityCenterEngine.js");
+const bounds = read("src/api/hqReadBounds.js");
+const notifyApi = read("src/api/notificationApi.js");
+
+if (
+  /prospect_created/.test(constants) &&
+  /prospect_activated/.test(constants) &&
+  /SERVER_AUTHORITATIVE_NOTIFICATION_EVENT_TYPES/.test(constants) &&
+  /"labs"/.test(constants)
+) {
+  pass("pn1a.constants", "event types + server-authoritative allowlist + labs module");
+} else {
+  fail("pn1a.constants", "notification constants missing Prospect types");
+}
+
+if (/Server-authoritative event_type/.test(insertSrc2) && /SERVER_AUTHORITATIVE_NOTIFICATION_EVENT_TYPES/.test(insertSrc2)) {
+  pass("pn1a.client_builder", "client insert builder rejects prospect_* types");
+} else {
+  fail("pn1a.client_builder", "client builder can still construct prospect_* rows");
+}
+
+const labSafeBlock = centerPage.split("const LAB_SAFE_EVENT_TYPES")[1]?.split("function")[0] || "";
+if (
+  /New Prospect Added/.test(centerPage) &&
+  /Prospect Approved/.test(centerPage) &&
+  /Open Lab/.test(centerPage) &&
+  !/prospect_created/.test(labSafeBlock) &&
+  !/prospect_activated/.test(labSafeBlock)
+) {
+  pass("pn1a.ui.copy", "Activity Center / Agent copy present; Lab filter excludes Prospect events");
+} else {
+  fail("pn1a.ui.copy", "UI copy or Lab filter contract missing");
+}
+
+if (/prospect_created/.test(activityEngine) && /was added by/.test(activityEngine) && /has been approved/.test(activityEngine)) {
+  pass("pn1a.activity_sentences", "HQ Activity Center sentences for Prospect events");
+} else {
+  fail("pn1a.activity_sentences", "activityCenterEngine missing Prospect sentences");
+}
+
+if (
+  /HQ_NOTIFICATION_EVENT_LIST_COLUMNS/.test(bounds) &&
+  /HQ_NOTIFICATION_EVENT_LIST_COLUMNS/.test(notifyApi) &&
+  !/\.select\("\*"\)/.test(notifyApi)
+) {
+  pass("pn1a.bounded_read", "notification_events list uses bounded columns");
+} else {
+  fail("pn1a.bounded_read", "SELECT * still on notification read path");
 }
 
 console.log(failures ? `\nNOTIFICATION CONTRACT: BLOCKED (${failures})\n` : "\nNOTIFICATION CONTRACT: PASS\n");

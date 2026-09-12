@@ -60,8 +60,21 @@ function statusVariant(status) {
   return "outline";
 }
 
-function payloadSummary(payload) {
+function payloadSummary(payload, eventType) {
   if (!payload || typeof payload !== "object") return "—";
+  const t = String(eventType || "").toLowerCase();
+  const labName = String(payload.lab_name || payload.labName || "").trim();
+  const agentName = String(payload.sourcing_agent_name || payload.sourcingAgentName || "").trim();
+  const area = String(payload.area || "").trim();
+  if (t === "prospect_created") {
+    const added = labName
+      ? `${labName} was added by ${agentName || "Agent"}.`
+      : "A new Prospect was added.";
+    return area ? `${added} ${area}` : added;
+  }
+  if (t === "prospect_activated") {
+    return labName ? `${labName} has been approved.` : "Prospect has been approved.";
+  }
   if (typeof payload.message === "string" && payload.message.trim()) {
     return payload.message.trim();
   }
@@ -131,6 +144,8 @@ function pageTitleForRole(role) {
 
 function eventTitle(eventType) {
   const t = String(eventType || "").toLowerCase();
+  if (t === "prospect_created") return "New Prospect Added";
+  if (t === "prospect_activated") return "Prospect Approved";
   if (t === "order_created") return "Order received";
   if (t === "order_fulfilled") return "Order fulfilled";
   if (t === "payment_received") return "Payment received";
@@ -800,7 +815,7 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
                               </p>
                             ) : null}
                             {section.key === "completed" ? (
-                              <p className="mt-0.5 text-[10px] text-slate-500">{payloadSummary(payload)}</p>
+                              <p className="mt-0.5 text-[10px] text-slate-500">{payloadSummary(payload, row.event_type)}</p>
                             ) : null}
                           </div>
                           <Button
@@ -883,12 +898,23 @@ export default function NotificationCenterPage({ currentUser, setActivePage }) {
                             {row.source_module ? ` · ${row.source_module}` : null}
                           </p>
                           <p className="mt-1 text-[11px] leading-snug text-foreground/90">
-                            {payloadSummary(payload)}
+                            {payloadSummary(payload, row.event_type)}
                           </p>
                         </div>
                       </div>
                       {row.event_id ? (
                         <div className="mt-2 flex justify-end gap-1.5">
+                          {String(row.event_type || "").toLowerCase() === "prospect_activated" ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs"
+                              onClick={() => handleActivityCta("labs")}
+                            >
+                              Open Lab
+                            </Button>
+                          ) : null}
                           {isPending ? (
                             <Button
                               type="button"

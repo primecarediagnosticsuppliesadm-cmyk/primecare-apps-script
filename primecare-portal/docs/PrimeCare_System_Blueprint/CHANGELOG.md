@@ -4,6 +4,32 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-12 — PN-1A prospect in-app notifications (QA only)
+
+### Gap found
+
+- Flow 2 create/activate had audit (`lab_prospect_created` / `lab_prospect_activated`) but no server-authoritative in-app inbox events.
+- `notification_events` INSERT RLS allowed an authenticated caller to set `event_type` / `target_user_id` / `target_role`, so client writers could forge HQ or Agent-targeted Prospect events.
+- No uniqueness on `(tenant_id, event_type, source_id)` for Prospect lifecycle events.
+
+### Change
+
+- Reuse existing `notification_events` / Activity Center. No new inbox table, event bus, email provider, or email Edge Function.
+- Server helper `emit_prospect_in_app_notification` (SECURITY DEFINER) emits `prospect_created` (HQ Admin/Executive, `target_role=admin`, `target_user_id` null) after `create_prospect_lab` audit, and `prospect_activated` (sourcing Agent only, from `labs.sourced_by_agent_id`) after `activate_prospect_lab` audit.
+- Partial unique index on those two `event_type`s. Nested exception isolation: notification failure cannot roll back Prospect create/activate.
+- BEFORE INSERT trigger `notification_events_prospect_server_only` blocks authenticated client inserts of the two event types unless GUC `primecare.prospect_notify=1`.
+- `target_lab_id` is always null so Lab users cannot see Prospect events. Recipients are server-derived.
+- **QA only.** Not applied to Production. No live email.
+
+### Verification
+
+- `node scripts/verify-notification-contract.mjs`
+- `node scripts/verify-agent-prospect-2a.mjs` / `--apply` (QA only)
+- `node scripts/verify-agent-prospect-2c.mjs` / `--apply` (QA only)
+- `node scripts/verify-flow-3a.mjs` (static)
+
+---
+
 ## 2026-09-11 — VE integration: new Agent Resource publish is PDF/JPEG/PNG; legacy DOCX remains readable
 
 ### Gap found

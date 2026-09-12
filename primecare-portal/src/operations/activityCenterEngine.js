@@ -15,6 +15,7 @@ export const ACTIVITY_CENTER_MODULE_OPTIONS = [
   { value: "audit", label: "Access Audit" },
   { value: "agent_visits", label: "Visits" },
   { value: "qualification", label: "Qualification" },
+  { value: "labs", label: "Labs" },
   { value: "system", label: "System" },
 ];
 
@@ -43,26 +44,36 @@ function mapNotificationEvent(row = {}) {
   const payload = parsePayload(row.payload_json ?? row.payload);
   const eventType = str(row.event_type ?? row.eventType);
   const module = str(row.source_module ?? row.sourceModule) || "system";
+  const labName = str(payload.labName ?? payload.lab_name);
   const entity =
+    labName ||
     str(payload.orderId ?? payload.order_id) ||
-    str(payload.labName ?? payload.lab_name) ||
     str(row.source_id ?? row.sourceId) ||
     str(payload.message).slice(0, 80) ||
     eventType.replace(/_/g, " ");
+  const eventLabel =
+    eventType === "prospect_created"
+      ? "New Prospect Added"
+      : eventType === "prospect_activated"
+        ? "Prospect Approved"
+        : eventType.replace(/_/g, " ");
 
   return {
     id: `notification:${row.event_id ?? row.id}`,
     source: "notification",
     timestamp: row.created_at ?? row.createdAt,
     eventType,
-    eventLabel: eventType.replace(/_/g, " "),
+    eventLabel,
     module,
     entity,
-    actor: str(payload.actorName ?? payload.actor ?? row.created_by) || "System",
+    actor:
+      str(payload.sourcing_agent_name ?? payload.actorName ?? payload.actor ?? row.created_by) ||
+      "System",
     status: str(row.status) || "pending",
     severity: str(row.severity).toLowerCase() || "info",
-    labId: str(payload.labId ?? payload.lab_id),
+    labId: str(payload.labId ?? payload.lab_id ?? row.source_id),
     orderId: str(payload.orderId ?? payload.order_id),
+    area: str(payload.area),
     raw: row,
   };
 }
@@ -218,6 +229,7 @@ const MODULE_LABELS = {
   audit: "Access Audit",
   agent_visits: "Visits",
   qualification: "Qualification",
+  labs: "Labs",
   system: "System",
 };
 
@@ -232,6 +244,16 @@ export function formatActivityTimelineSentence(ev = {}) {
   const entity = str(ev.entity) || "record";
   const label = str(ev.eventLabel) || "Activity recorded";
   const status = str(ev.status).toLowerCase();
+  const eventType = str(ev.eventType).toLowerCase();
+
+  if (eventType === "prospect_created") {
+    const area = str(ev.area);
+    const line = `${entity} was added by ${actor}.`;
+    return area ? `${line} ${area}` : line;
+  }
+  if (eventType === "prospect_activated") {
+    return `${entity} has been approved.`;
+  }
 
   if (status === "failure") {
     return `${actor} attempted ${label.toLowerCase()} for ${entity} — action failed.`;

@@ -1,4 +1,5 @@
 import { supabase } from "@/api/supabaseClient.js";
+import { HQ_NOTIFICATION_EVENT_LIST_COLUMNS } from "@/api/hqReadBounds.js";
 import { NOTIFICATION_EVENT_STATUSES } from "@/notifications/notificationConstants.js";
 
 function str(v) {
@@ -22,7 +23,7 @@ export async function getNotificationEventsRead(filters = {}) {
   try {
     let query = supabase
       .from("notification_events")
-      .select("*")
+      .select(HQ_NOTIFICATION_EVENT_LIST_COLUMNS)
       .order("created_at", { ascending: false })
       .limit(Math.min(Number(filters.limit) || 100, 200));
 
@@ -113,7 +114,7 @@ export async function updateNotificationEventStatusWrite({ eventId, status }) {
       .from("notification_events")
       .update({ status: nextStatus })
       .eq("event_id", id)
-      .select()
+      .select(HQ_NOTIFICATION_EVENT_LIST_COLUMNS)
       .single();
 
     if (error) {

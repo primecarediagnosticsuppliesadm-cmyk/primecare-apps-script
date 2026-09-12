@@ -356,9 +356,10 @@ Major tables and objects in PrimeCare QA/Prod Supabase (`public` schema).
 | Attribute | Value |
 |-----------|-------|
 | **Purpose** | Internal event log for in-app notifications |
-| **Owner module** | Notification Center |
+| **Owner module** | Notification Center / Activity Center |
 | **PK** | `event_id` |
 | **RLS** | Yes — role/target visibility |
+| **PN-1A** | `prospect_created` / `prospect_activated` are server-only (RPC helper + GUC trigger). Partial unique `(tenant_id, event_type, source_id)` for those types. `target_lab_id` null so Lab cannot see Prospect events. |
 
 ### `notification_templates`, `notification_preferences`, `notification_delivery_log`
 | Attribute | Value |
@@ -407,6 +408,7 @@ Major tables and objects in PrimeCare QA/Prod Supabase (`public` schema).
 
 | Migration | Summary |
 |-----------|---------|
+| `20260912200000` | PN-1A: prospect in-app notifications (`emit_prospect_in_app_notification`, unique index, server-only trigger, CREATE OR REPLACE Flow 2 RPCs). QA only. |
 | `20260815120000` | `lab_product_intelligence` + visit follow-up columns |
 | `20260624120000` | HQ profiles RLS tenant scope |
 | `20260624120001` | Orders/payments date indexes |
