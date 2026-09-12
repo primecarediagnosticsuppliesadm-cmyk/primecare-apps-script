@@ -26,6 +26,7 @@ export const NOTIFICATION_CHANNELS = [
   "email_placeholder",
   "whatsapp_placeholder",
   "sms_placeholder",
+  "email",
 ];
 
 /** Channels that must never perform live external delivery in this foundation phase. */
@@ -45,9 +46,15 @@ export const NOTIFICATION_EVENT_STATUSES = ["pending", "read", "acknowledged", "
 export const NOTIFICATION_DELIVERY_STATUSES = [
   "placeholder_not_sent",
   "logged_in_app",
+  "queued",
+  "processing",
+  "sent",
   "skipped",
   "failed",
 ];
+
+/** Real email channel is server-queued only. Client writers must never INSERT it. */
+export const SERVER_QUEUED_NOTIFICATION_CHANNELS = ["email"];
 
 export const NOTIFICATION_SOURCE_MODULES = [
   "orders",

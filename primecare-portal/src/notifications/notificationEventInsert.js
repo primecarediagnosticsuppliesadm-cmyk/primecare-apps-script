@@ -232,8 +232,11 @@ export function buildNotificationDeliveryLogInsertRows(args = {}) {
     return { ok: false, error: "tenantId and eventId are required", rows: [] };
   }
 
-  const rows = channels.map((channel) => {
+  const rows = channels.flatMap((channel) => {
     const ch = str(channel);
+    if (ch === "email") {
+      return [];
+    }
     const inApp = ch === "in_app";
     const row = {
       tenant_id: tenantId,
@@ -246,9 +249,9 @@ export function buildNotificationDeliveryLogInsertRows(args = {}) {
       provider_error: null,
     };
     // Hard allowlist — drops any accidental legacy keys if this object is extended later.
-    return Object.fromEntries(
-      Object.entries(row).filter(([key]) => DELIVERY_LOG_INSERT_KEY_SET.has(key))
-    );
+    return [
+      Object.fromEntries(Object.entries(row).filter(([key]) => DELIVERY_LOG_INSERT_KEY_SET.has(key))),
+    ];
   });
 
   return { ok: true, error: null, rows };
