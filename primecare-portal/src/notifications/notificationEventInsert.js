@@ -6,6 +6,7 @@ import {
   NOTIFICATION_EVENT_TYPES,
   NOTIFICATION_SEVERITIES,
   NOTIFICATION_EVENT_STATUSES,
+  SERVER_AUTHORITATIVE_NOTIFICATION_EVENT_TYPES,
 } from "./notificationConstants.js";
 
 function str(v) {
@@ -44,6 +45,8 @@ const EVENT_TITLE = {
   low_stock: "Low stock",
   purchase_order_created: "PO created",
   purchase_order_received: "PO received",
+  prospect_created: "New Prospect Added",
+  prospect_activated: "Prospect Approved",
 };
 
 /**
@@ -68,6 +71,16 @@ export function buildNotificationEventInsertRows(event = {}) {
     return {
       ok: false,
       error: `Unknown event_type: ${eventType}`,
+      eventType,
+      tenantId,
+      foundation: null,
+      legacy: null,
+    };
+  }
+  if (SERVER_AUTHORITATIVE_NOTIFICATION_EVENT_TYPES.includes(eventType)) {
+    return {
+      ok: false,
+      error: `Server-authoritative event_type: ${eventType}`,
       eventType,
       tenantId,
       foundation: null,

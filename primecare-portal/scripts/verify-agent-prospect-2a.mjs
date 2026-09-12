@@ -19,6 +19,7 @@ import {
   QA_HR,
   QA_LAB,
   hydrateQaHrPasswordFromEnv,
+  resolveQaHrPassword,
 } from "./qaCredentials.mjs";
 import { PRIMECARE_SUPABASE_PROJECTS } from "./lib/primecareReleaseManifest.mjs";
 
@@ -31,6 +32,8 @@ const QA_LAB_ID = "QA_LAB_001";
 const FOREIGN_TENANT = "00000000-0000-0000-0000-000000000001";
 const MIG_REL = "supabase/migrations/20260905160000_agent_prospect_2a_sourced_by_and_create_rpc.sql";
 const TWIN_REL = "supabase/sql/agent_prospect_2a_sourced_by_and_create_rpc.sql";
+const PN_REL = "supabase/migrations/20260912200000_pn1a_prospect_in_app_notifications.sql";
+const PN_TWIN_REL = "supabase/sql/pn1a_prospect_in_app_notifications.sql";
 const HQ_RPC_REL = "supabase/sql/create_lab_with_ar_credit_rpc.sql";
 const FLOW1_SCRIPTS = [
   "scripts/verify-lab-ordering-1a-security.mjs",
@@ -39,6 +42,7 @@ const FLOW1_SCRIPTS = [
   "scripts/verify-lab-ordering-1f-anon-order-lockdown.mjs",
   "scripts/verify-lab-ordering-1h-ar-and-projection.mjs",
 ];
+const FLOW3_SCRIPT = "scripts/verify-flow-3a.mjs";
 
 let failures = 0;
 function pass(id, detail) {
@@ -317,6 +321,75 @@ for (const rel of FLOW1_SCRIPTS) {
 }
 if (flow1Fail === 0) pass("static.flow1_bundle", "Lab Ordering Flow 1 static verifiers GREEN");
 
+{
+  const r3 = spawnSync(process.execPath, [resolve(root, FLOW3_SCRIPT)], { cwd: root, encoding: "utf8" });
+  if (r3.status === 0) pass("static.flow3a", "Flow 3A static GREEN");
+  else fail("static.flow3a", `exit ${r3.status}`);
+}
+
+const pn = readSrc(PN_REL);
+const pnTwin = readSrc(PN_TWIN_REL);
+if (pn === pnTwin) pass("static.pn1a.twin", "PN-1A migration matches SQL twin");
+else fail("static.pn1a.twin", "PN-1A migration / twin mismatch");
+
+const pnCreate = pn.split("CREATE OR REPLACE FUNCTION public.create_prospect_lab")[1]?.split("CREATE OR REPLACE FUNCTION public.activate_prospect_lab")[0] || "";
+if (
+  /CREATE OR REPLACE FUNCTION public\.emit_prospect_in_app_notification/.test(pn) &&
+  /SECURITY DEFINER/.test(pn) &&
+  /REVOKE ALL ON FUNCTION public\.emit_prospect_in_app_notification/.test(pn) &&
+  /FROM authenticated/.test(pn)
+) {
+  pass("static.pn1a.helper", "emit_prospect_in_app_notification SECURITY DEFINER, authenticated revoked");
+} else {
+  fail("static.pn1a.helper", "helper missing or executable by authenticated");
+}
+
+if (
+  /notification_events_prospect_lifecycle_uidx/.test(pn) &&
+  /event_type IN \('prospect_created', 'prospect_activated'\)/.test(pn) &&
+  /source_id IS NOT NULL/.test(pn)
+) {
+  pass("static.pn1a.unique", "partial unique (tenant_id, event_type, source_id) for Prospect events");
+} else {
+  fail("static.pn1a.unique", "idempotency index missing");
+}
+
+if (
+  /RAISE EXCEPTION 'prospect_notify_forbidden'/.test(pn) &&
+  /primecare\.prospect_notify/.test(pn) &&
+  /BEFORE INSERT ON public\.notification_events/.test(pn)
+) {
+  pass("static.pn1a.spoof", "BEFORE INSERT trigger blocks client prospect_* inserts");
+} else {
+  fail("static.pn1a.spoof", "server-only trigger missing");
+}
+
+const createAuditAt = pnCreate.indexOf("'action', 'lab_prospect_created'");
+const createEmitAt = pnCreate.indexOf("PERFORM public.emit_prospect_in_app_notification");
+if (
+  createAuditAt >= 0 &&
+  createEmitAt > createAuditAt &&
+  /'prospect_created'/.test(pnCreate) &&
+  /EXCEPTION\s+WHEN OTHERS THEN/.test(pnCreate) &&
+  /'admin'/.test(pnCreate)
+) {
+  pass("static.pn1a.create_hook", "create_prospect_lab emits prospect_created after audit, exception-isolated");
+} else {
+  fail("static.pn1a.create_hook", "create notify hook missing or not isolated");
+}
+
+if (/INSERT INTO public\.ar_credit_control/.test(pnCreate) || /INSERT INTO public\.lab_ownership/.test(pnCreate) || /INSERT INTO public\.profiles/.test(pnCreate)) {
+  fail("static.pn1a.create_no_side_effects", "create_prospect_lab gained AR/ownership/profile inserts");
+} else {
+  pass("static.pn1a.create_no_side_effects", "create_prospect_lab still has no AR/ownership/profile inserts");
+}
+
+if (/email_placeholder/.test(pn) || /resend/i.test(pn) || /sendgrid/i.test(pn) || /smtp/i.test(pn)) {
+  fail("static.pn1a.no_email", "PN-1A SQL must not introduce email delivery");
+} else {
+  pass("static.pn1a.no_email", "no email provider in PN-1A SQL");
+}
+
 if (!APPLY) {
   console.log("\nStatic only. Live QA: node scripts/verify-agent-prospect-2a.mjs --apply\n");
   process.exit(failures ? 1 : 0);
@@ -369,6 +442,7 @@ async function cleanup() {
     await adminSb.from("labs").delete().eq("tenant_id", QA_HQ_TENANT_ID).eq("lab_id", labId);
   }
   for (const labId of createdLabIds) {
+    await adminSb.from("notification_events").delete().eq("tenant_id", QA_HQ_TENANT_ID).eq("source_id", labId);
     await adminSb.from("user_provisioning_events").delete().contains("payload", { lab_id: labId });
     await adminSb.from("lab_ownership").delete().eq("tenant_id", QA_HQ_TENANT_ID).eq("lab_id", labId);
     await adminSb.from("ar_credit_control").delete().eq("tenant_id", QA_HQ_TENANT_ID).eq("lab_id", labId);
@@ -434,7 +508,7 @@ try {
   }
   pass("live.auth.lab", QA_LAB.email);
 
-  const hrPassword = str(QA_HR.password);
+  const hrPassword = str(resolveQaHrPassword());
   let hrOk = false;
   if (hrPassword.length >= 6) {
     const hrAuth = await signInRole(hrClient, { email: QA_HR.email, password: hrPassword }, env);
@@ -602,6 +676,97 @@ try {
     fail("live.audit", "user_provisioning_events row missing");
   }
 
+  const notifyCols =
+    "event_id,tenant_id,event_type,source_module,source_id,actor_user_id,target_role,target_user_id,target_lab_id,payload_json,severity,status";
+  const { data: createdEvents, error: createdEvErr } = await adminSb
+    .from("notification_events")
+    .select(notifyCols)
+    .eq("tenant_id", QA_HQ_TENANT_ID)
+    .eq("event_type", "prospect_created")
+    .eq("source_id", createdLabId);
+  if (createdEvErr) {
+    fail("live.notify.created.one", errText(createdEvErr));
+  } else if ((createdEvents || []).length === 1) {
+    const ev = createdEvents[0];
+    const payload = ev.payload_json && typeof ev.payload_json === "object" ? ev.payload_json : {};
+    if (
+      str(ev.source_module) === "labs" &&
+      str(ev.target_role) === "admin" &&
+      ev.target_user_id == null &&
+      ev.target_lab_id == null &&
+      str(ev.status) === "pending" &&
+      str(payload.lab_name) === uniqueName &&
+      str(payload.cta) === "/labs"
+    ) {
+      pass("live.notify.created.one", ev.event_id);
+    } else {
+      fail("live.notify.created.one", JSON.stringify(ev));
+    }
+  } else {
+    fail("live.notify.created.one", `count ${(createdEvents || []).length}`);
+  }
+
+  const forgeCreated = await agentSb.from("notification_events").insert({
+    tenant_id: agentTenantId,
+    event_type: "prospect_created",
+    source_module: "labs",
+    source_id: `FORGE-${stamp()}`,
+    actor_user_id: agentUserId,
+    target_role: "admin",
+    target_user_id: null,
+    target_lab_id: null,
+    payload_json: { lab_name: "forged" },
+    severity: "info",
+    status: "pending",
+  });
+  if (hasToken(errText(forgeCreated.error), "prospect_notify_forbidden") || forgeCreated.error) {
+    pass("live.notify.forge.created", errText(forgeCreated.error) || "denied");
+  } else {
+    fail("live.notify.forge.created", "agent forged prospect_created");
+  }
+
+  const adminCreatedVis = await adminClient
+    .from("notification_events")
+    .select("event_id")
+    .eq("event_type", "prospect_created")
+    .eq("source_id", createdLabId);
+  if ((adminCreatedVis.data || []).length === 1) pass("live.notify.vis.admin", "HQ Admin sees prospect_created");
+  else fail("live.notify.vis.admin", errText(adminCreatedVis.error) || `count ${(adminCreatedVis.data || []).length}`);
+
+  const execCreatedVis = await execClient
+    .from("notification_events")
+    .select("event_id")
+    .eq("event_type", "prospect_created")
+    .eq("source_id", createdLabId);
+  if ((execCreatedVis.data || []).length === 1) pass("live.notify.vis.executive", "HQ Executive sees prospect_created");
+  else fail("live.notify.vis.executive", errText(execCreatedVis.error) || `count ${(execCreatedVis.data || []).length}`);
+
+  const agentCreatedVis = await agentSb
+    .from("notification_events")
+    .select("event_id")
+    .eq("event_type", "prospect_created")
+    .eq("source_id", createdLabId);
+  if ((agentCreatedVis.data || []).length === 0) pass("live.notify.vis.agent_hidden", "sourcing Agent does not see HQ prospect_created");
+  else fail("live.notify.vis.agent_hidden", "Agent saw HQ-targeted prospect_created");
+
+  const labCreatedVis = await labClient
+    .from("notification_events")
+    .select("event_id")
+    .eq("event_type", "prospect_created")
+    .eq("source_id", createdLabId);
+  if ((labCreatedVis.data || []).length === 0) pass("live.notify.vis.lab", "Lab cannot see prospect_created");
+  else fail("live.notify.vis.lab", "Lab saw prospect_created");
+
+  if (hrOk) {
+    const hrCreatedVis = await hrClient
+      .from("notification_events")
+      .select("event_id")
+      .eq("event_type", "prospect_created")
+      .eq("source_id", createdLabId);
+    if ((hrCreatedVis.data || []).length === 0) pass("live.notify.vis.hr", "HR cannot see prospect_created");
+    else fail("live.notify.vis.hr", "HR saw prospect_created");
+  }
+
   const agentRead = await agentSb.from("labs").select("lab_id,status,sourced_by_agent_id").eq("lab_id", createdLabId);
   if ((agentRead.data || []).some((r) => r.lab_id === createdLabId)) pass("live.vis.sourcer", "sourcing Agent can read own prospect");
   else fail("live.vis.sourcer", errText(agentRead.error) || "0 rows");
@@ -759,6 +924,16 @@ try {
     fail("live.dup.name_area", errText(dupName.error) || "duplicate name+area allowed");
     if (dupName.data?.lab_id) createdLabIds.push(dupName.data.lab_id);
   }
+
+  const { data: createdEventsAfterDup, error: createdDupErr } = await adminSb
+    .from("notification_events")
+    .select("event_id")
+    .eq("tenant_id", QA_HQ_TENANT_ID)
+    .eq("event_type", "prospect_created")
+    .eq("source_id", createdLabId);
+  if (createdDupErr) fail("live.notify.created.nodup", errText(createdDupErr));
+  else if ((createdEventsAfterDup || []).length === 1) pass("live.notify.created.nodup", "duplicate create attempts did not emit a second event");
+  else fail("live.notify.created.nodup", `count ${(createdEventsAfterDup || []).length}`);
 
   if (otherTenantId && foreignBaitIds.length) {
     pass("live.dup.cross_tenant", "matching phone/name on another tenant did not block HQ create (create already succeeded)");

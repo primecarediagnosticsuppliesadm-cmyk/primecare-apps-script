@@ -10,6 +10,14 @@ export const NOTIFICATION_EVENT_TYPES = [
   "purchase_order_received",
   "agent_visit_logged",
   "qualification_updated",
+  "prospect_created",
+  "prospect_activated",
+];
+
+/** Server-authoritative only — client INSERT / fireNotificationEvent must not emit these. */
+export const SERVER_AUTHORITATIVE_NOTIFICATION_EVENT_TYPES = [
+  "prospect_created",
+  "prospect_activated",
 ];
 
 /** @readonly */
@@ -49,4 +57,5 @@ export const NOTIFICATION_SOURCE_MODULES = [
   "agent_visits",
   "qualification",
   "system",
+  "labs",
 ];
