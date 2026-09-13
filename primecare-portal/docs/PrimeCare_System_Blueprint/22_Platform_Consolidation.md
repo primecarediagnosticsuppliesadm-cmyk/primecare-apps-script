@@ -124,7 +124,7 @@ No backend changes in 9.1. Registry: `NOTIFICATION_GROUPS`.
 | Information | order_created, payment_received, visits, qualification_updated |
 | Tasks | purchase_order_* |
 | Approvals | (future) |
-| Future automation | email/whatsapp/sms placeholders |
+| Future automation | whatsapp/sms placeholders; **email** is QA-queued for Prospect lifecycle only and is **not** sent (PN-1B1). Production freeze remains. |
 
 ---
 

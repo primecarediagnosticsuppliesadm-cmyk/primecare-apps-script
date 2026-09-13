@@ -4,6 +4,104 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-13 — PN-1B3A QA recipient rewrite (synthetic domains)
+
+### Gap found
+
+- PN-1B3 live activation send failed `provider_permanent` because `resolveQaRecipient` treated `@primecare.test` as a domain allowlist hit and sent that To to Resend. Resend cannot deliver to the synthetic QA domain. Flow 2 activation, queue, and sourcing attribution were correct. `recipient_email` snapshot was not the defect.
+
+### Change
+
+- QA provider routing no longer uses domain allowlisting (`EMAIL_QA_ALLOWLIST`, default `primecare.test`) to decide Resend `to`. That secret is **not** provider-deliverable.
+- In QA (`APP_ENV=qa` OR `EMAIL_QA_MODE=true`): send directly only if the queued address **exactly equals** `EMAIL_TEST_RECIPIENT`, or is on optional exact-address `EMAIL_QA_EXACT_ALLOWLIST` **and** is not `@primecare.test` / personal webmail. All other QA recipients, including `@primecare.test` and Gmail/Outlook/Yahoo, rewrite To `EMAIL_TEST_RECIPIENT`. Missing test recipient → `qa_suppressed`, no provider call.
+- `recipient_email` snapshot remains immutable. Actual To stays in `provider_recipient`.
+- Non-QA (`APP_ENV` not `qa` and `EMAIL_QA_MODE` not true) still `production_freeze` — no rewrite, no send. No Production/DNS/cron change.
+
+### Verification
+
+- `node scripts/verify-prospect-email-1b2.mjs` (unit: primecare.test rewrite, Gmail rewrite, exact test recipient, missing sink, production freeze)
+- Controlled QA live send of `prospect_activated` after Edge Function deploy (QA only)
+
+---
+
+## 2026-09-13 — PN-1B2 prospect email dispatcher + QA safety (QA only)
+
+### Gap found
+
+- PN-1B1 queues `channel=email` rows but has no dispatcher, provider, or QA suppression. Live QA HQ includes an Executive Gmail snapshot that must never be contacted.
+
+### Change
+
+- Edge Function `dispatch-notification-email` (QA only). **Not an open relay:** ignores caller `to` / `subject` / `body` / `html`. Auth is `Authorization: Bearer EMAIL_DISPATCH_CRON_SECRET` only (`verify_jwt=false` at the gateway so the cron secret is not rejected as a non-JWT). User JWTs are insufficient.
+- SECURITY DEFINER `claim_notification_email_deliveries` uses `FOR UPDATE SKIP LOCKED` (batch 10). `finalize_notification_email_delivery` marks sent/failed/skipped. Authenticated/anon EXECUTE revoked; `service_role` may call these RPCs from the function only.
+- `EMAIL_ENABLED=false` → **do not claim**, do not call Resend, return `disabled`.
+- QA fail-closed: `APP_ENV=qa` OR `EMAIL_QA_MODE=true`. Allowlisted domains (default `primecare.test`) may send as queued. Else rewrite To `EMAIL_TEST_RECIPIENT` or `skipped` / `qa_suppressed` with **no provider call**. Never send to gmail/yahoo/outlook/hotmail unless the **final** provider recipient equals `EMAIL_TEST_RECIPIENT`. `recipient_email` snapshot is immutable; actual To stored in `provider_recipient`.
+- Resend `Idempotency-Key: <delivery_id>`. Skip provider if `status=sent` or `provider_message_id` set. Max 4 attempts; retryable 429/5xx/timeout; no cron/`pg_cron`/`pg_net` in this slice.
+- **QA only.** No Production secrets, DNS, or dispatcher deploy. FZ-P1-07 Production freeze remains.
+
+### Verification
+
+- `node scripts/verify-prospect-email-1b2.mjs`
+- `node scripts/verify-prospect-email-1b2.mjs --apply` (QA only; live send requires QA secrets)
+- `node scripts/verify-prospect-email-1b1.mjs`
+- `node scripts/verify-notification-contract.mjs`
+
+---
+
+## 2026-09-13 — PN-1B1 prospect email delivery queue foundation (QA only)
+
+### Gap found
+
+- PN-1A certifies `prospect_created` / `prospect_activated` in-app events, but `notification_delivery_log` has no real `email` channel, no recipient identity, and no queue statuses.
+- Live QA status CHECK allows only `placeholder_not_sent` | `logged_in_app` (client constants listed `skipped`/`failed` ahead of live schema).
+- HQ UPDATE RLS on `notification_delivery_log` would let Admin/Executive mutate future email status/provider fields.
+- No live email provider exists. Production transactional-email freeze (FZ-P1-07) remains in force.
+
+### Change
+
+- **Prospect Email Delivery Queue Foundation.** `notification_events` remains the business-event SoT. `notification_delivery_log` becomes the delivery-attempt SoT for channel `email` only for the two Prospect lifecycle events.
+- AFTER INSERT trigger on `notification_events` calls `enqueue_prospect_email_deliveries` (SECURITY DEFINER, nested exception isolation). Queue failure cannot roll back Flow 2 or the in-app event.
+- `prospect_created` queues one `channel=email` row per distinct eligible same-tenant active Admin/Executive mailbox (`lower(btrim(email))`), preferring admin then executive then `user_id`.
+- `prospect_activated` queues (or skips) only the immutable sourcing Agent validated from `labs.sourced_by_agent_id` + event `target_user_id`. Never assigned/ownership/HQ.
+- Email remains **disabled**. No provider, no Edge Function, no cron, no webhook, no DNS, no send. `queued` means ready for a future dispatcher.
+- **QA only.** Not applied to Production. Do not mark transactional email Production-ready.
+
+### Verification
+
+- `node scripts/verify-prospect-email-1b1.mjs`
+- `node scripts/verify-prospect-email-1b1.mjs --apply` (QA only)
+- `node scripts/verify-notification-contract.mjs`
+- `node scripts/verify-agent-prospect-2a.mjs` / `2b` / `2c` / `2e` (static)
+- `node scripts/verify-flow-3a.mjs` (static)
+
+---
+
+## 2026-09-12 — PN-1A prospect in-app notifications (QA only)
+
+### Gap found
+
+- Flow 2 create/activate had audit (`lab_prospect_created` / `lab_prospect_activated`) but no server-authoritative in-app inbox events.
+- `notification_events` INSERT RLS allowed an authenticated caller to set `event_type` / `target_user_id` / `target_role`, so client writers could forge HQ or Agent-targeted Prospect events.
+- No uniqueness on `(tenant_id, event_type, source_id)` for Prospect lifecycle events.
+
+### Change
+
+- Reuse existing `notification_events` / Activity Center. No new inbox table, event bus, email provider, or email Edge Function.
+- Server helper `emit_prospect_in_app_notification` (SECURITY DEFINER) emits `prospect_created` (HQ Admin/Executive, `target_role=admin`, `target_user_id` null) after `create_prospect_lab` audit, and `prospect_activated` (sourcing Agent only, from `labs.sourced_by_agent_id`) after `activate_prospect_lab` audit.
+- Partial unique index on those two `event_type`s. Nested exception isolation: notification failure cannot roll back Prospect create/activate.
+- BEFORE INSERT trigger `notification_events_prospect_server_only` blocks authenticated client inserts of the two event types unless GUC `primecare.prospect_notify=1`.
+- `target_lab_id` is always null so Lab users cannot see Prospect events. Recipients are server-derived.
+- **QA only.** Not applied to Production. No live email.
+
+### Verification
+
+- `node scripts/verify-notification-contract.mjs`
+- `node scripts/verify-agent-prospect-2a.mjs` / `--apply` (QA only)
+- `node scripts/verify-agent-prospect-2c.mjs` / `--apply` (QA only)
+- `node scripts/verify-flow-3a.mjs` (static)
+
+---
+
 ## 2026-09-11 — VE integration: new Agent Resource publish is PDF/JPEG/PNG; legacy DOCX remains readable
 
 ### Gap found

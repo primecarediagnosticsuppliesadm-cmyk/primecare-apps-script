@@ -202,12 +202,33 @@ export function resolveActivityEventNav(event = {}) {
   const labName = str(payload.labName ?? payload.lab_name);
   const userId = str(payload.userId ?? payload.user_id ?? raw.subjectUserId);
   const module = str(event.module).toLowerCase();
+  const eventType = str(event.eventType ?? event.event_type).toLowerCase();
 
   if (orderId) {
     return { page: "orders", orderId, labId, label: orderId };
   }
   if (labId && (module === "collections" || module === "payments" || event.eventType?.includes("collection"))) {
     return { page: "collections", labId, label: labName || labId };
+  }
+  if (eventType === "prospect_created" && labId) {
+    return {
+      page: "labs",
+      labId,
+      labName,
+      openReviewDrawer: true,
+      label: labName || labId,
+      ctaLabel: "Review Prospect",
+    };
+  }
+  if (eventType === "prospect_activated" && labId) {
+    return {
+      page: "labs",
+      labId,
+      labName,
+      openReviewDrawer: true,
+      label: labName || labId,
+      ctaLabel: "Open Lab",
+    };
   }
   if (labId) {
     return { page: "labs", labId, labName, openReviewDrawer: true, label: labName || labId };
