@@ -1,0 +1,63 @@
+# PN-EMAIL Stage 1 — automated Production release (DRY_RUN only in this commit)
+#
+# Schedule is DISABLED until a later enablement gate.
+# Recommended window after the daily ~10:24–10:32 UTC physical backup:
+#   schedule:
+#     - cron: "45 10 * * *"
+#
+# This workflow never applies Production migrations, never deploys Edge/Vercel,
+# never promotes main, and never enables EMAIL_ENABLED.
+
+name: PN-EMAIL Stage 1 Auto Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      note:
+        description: "This commit always runs DRY_RUN regardless of note text"
+        required: false
+        default: "dry-run"
+
+concurrency:
+  group: primecare-production-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    name: Stage 1 DRY_RUN (no Production mutation)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: primecare-portal
+    env:
+      PN_EMAIL_STAGE1_CI_FORCE_DRY_RUN: "true"
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROD_SUPABASE_DB_URL: ${{ secrets.PROD_SUPABASE_DB_URL }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      PROD_EMAIL_DISPATCH_CRON_SECRET: ${{ secrets.PROD_EMAIL_DISPATCH_CRON_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: primecare-portal/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Fetch release identity refs
+        run: |
+          git fetch origin main release/pn-email-prod-candidate
+
+      - name: PN-EMAIL Stage 1 DRY_RUN
+        run: node scripts/release/pn-email-stage1-auto-release.mjs --dry-run

@@ -30,6 +30,7 @@
     "verify:flow-3a": "node scripts/verify-flow-3a.mjs",
     "verify:prospect-email-1b1": "node scripts/verify-prospect-email-1b1.mjs",
     "verify:prospect-email-1b2": "node scripts/verify-prospect-email-1b2.mjs",
+    "release:pn-email-stage1:dry-run": "node scripts/release/pn-email-stage1-auto-release.mjs --dry-run",
     "enforce:pre-commit": "node scripts/enforcement/run-architecture-enforcement.mjs --profile pre-commit",
     "enforce:pr": "node scripts/enforcement/run-architecture-enforcement.mjs --profile pr --all",
     "enforce:full": "ENFORCEMENT_MODE=full node scripts/enforcement/run-architecture-enforcement.mjs --profile nightly --all",
