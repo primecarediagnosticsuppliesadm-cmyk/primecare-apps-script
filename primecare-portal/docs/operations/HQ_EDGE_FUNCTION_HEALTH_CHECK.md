@@ -106,6 +106,7 @@ node scripts/verify-primecare-production-golden-path.mjs   # GP-30–32
 | **verify_jwt** | `false` (gateway must not reject the cron secret) |
 | **Open relay** | Caller `to` / `subject` / `body` / `html` are ignored |
 | **EMAIL_ENABLED=false** | Returns `{ disabled: true, claimed: 0 }` — no claim, no provider call |
+| **QA rewrite** | `@primecare.test` and other non-exact-test addresses rewrite to `EMAIL_TEST_RECIPIENT`. `EMAIL_QA_ALLOWLIST` is not provider-deliverable |
 | **Production** | Do not deploy. Do not set Production secrets |
 
 Manual invoke only in PN-1B2. No cron / pg_cron / GitHub Actions.

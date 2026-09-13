@@ -99,24 +99,60 @@ if (!/cron\.schedule/.test(fn) && !/pg_net/.test(fn) && !/pg_cron/.test(mig)) {
   pass("static.no_cron", "no pg_cron/pg_net/GitHub cron in this slice");
 } else fail("static.no_cron", "unexpected scheduler");
 
-if (/EMAIL_PROVIDER_API_KEY=/.test(envEx) && /EMAIL_DISPATCH_CRON_SECRET=/.test(envEx) && !/VITE_EMAIL_/.test(envEx)) {
-  pass("static.env_example", "EMAIL_* names only; no VITE_ secrets");
+if (
+  /EMAIL_PROVIDER_API_KEY=/.test(envEx) &&
+  /EMAIL_DISPATCH_CRON_SECRET=/.test(envEx) &&
+  /EMAIL_QA_EXACT_ALLOWLIST=/.test(envEx) &&
+  /not a Resend-deliverable signal/.test(envEx) &&
+  !/VITE_EMAIL_/.test(envEx)
+) {
+  pass("static.env_example", "EMAIL_* names only; domain allowlist not provider-deliverable");
 } else fail("static.env_example", "example secrets contract missing");
+if (/qa_rewrite_synthetic/.test(policy) && /EMAIL_QA_EXACT_ALLOWLIST/.test(fn) && /allowlistRaw: _allowlistRaw/.test(policy)) {
+  pass("static.qa.no_domain_direct_send", "policy ignores domain allowlist for Resend To");
+} else fail("static.qa.no_domain_direct_send", "PN-1B3A rewrite contract missing");
 
 if (!/supabase:functions:deploy:qa".*dispatch-notification-email/.test(pkg)) {
   pass("static.deploy_bundle", "default QA deploy bundle does not auto-include dispatcher");
 } else fail("static.deploy_bundle", "do not silently add dispatcher to the three-function QA bundle");
 
+const SINK = "qa.sink@example.com";
 const gmail = resolveQaRecipient({
   intendedEmail: "person@gmail.com",
   qaMode: "true",
   appEnv: "qa",
   allowlistRaw: "primecare.test",
-  testRecipient: "qa.sink@primecare.test",
+  testRecipient: SINK,
 });
-if (gmail.action === "rewrite" && gmail.providerTo === "qa.sink@primecare.test") {
+if (gmail.action === "rewrite" && gmail.providerTo === SINK && gmail.reason === "qa_rewrite_personal") {
   pass("unit.qa.gmail_rewrite", `${maskEmail("person@gmail.com")} -> ${maskEmail(gmail.providerTo)}`);
 } else fail("unit.qa.gmail_rewrite", JSON.stringify(gmail));
+
+const synthetic = resolveQaRecipient({
+  intendedEmail: "qa.test.agent1@primecare.test",
+  qaMode: "true",
+  appEnv: "qa",
+  allowlistRaw: "primecare.test",
+  testRecipient: SINK,
+});
+if (
+  synthetic.action === "rewrite" &&
+  synthetic.providerTo === SINK &&
+  synthetic.reason === "qa_rewrite_synthetic"
+) {
+  pass("unit.qa.primecare_test_rewrite", "domain allowlist does not send @primecare.test to Resend");
+} else fail("unit.qa.primecare_test_rewrite", JSON.stringify(synthetic));
+
+const exactSink = resolveQaRecipient({
+  intendedEmail: SINK,
+  qaMode: "true",
+  appEnv: "qa",
+  allowlistRaw: "primecare.test",
+  testRecipient: SINK,
+});
+if (exactSink.action === "send" && exactSink.providerTo === SINK && exactSink.reason === "qa_test_recipient") {
+  pass("unit.qa.exact_test_recipient", "EMAIL_TEST_RECIPIENT may send as queued");
+} else fail("unit.qa.exact_test_recipient", JSON.stringify(exactSink));
 
 const gmailNoSink = resolveQaRecipient({
   intendedEmail: "person@gmail.com",
@@ -129,26 +165,37 @@ if (gmailNoSink.action === "suppress" && gmailNoSink.reason === "qa_suppressed")
   pass("unit.qa.gmail_suppress", "no provider call path");
 } else fail("unit.qa.gmail_suppress", JSON.stringify(gmailNoSink));
 
-const allow = resolveQaRecipient({
+const unknown = resolveQaRecipient({
+  intendedEmail: "ops@unknown-lab.example",
+  qaMode: "true",
+  appEnv: "qa",
+  allowlistRaw: "primecare.test",
+  testRecipient: SINK,
+});
+if (unknown.action === "rewrite" && unknown.providerTo === SINK && unknown.reason === "qa_rewrite") {
+  pass("unit.qa.unknown_domain_rewrite", "unknown domains rewrite to EMAIL_TEST_RECIPIENT");
+} else fail("unit.qa.unknown_domain_rewrite", JSON.stringify(unknown));
+
+const missingSinkSynthetic = resolveQaRecipient({
   intendedEmail: "qa.admin@primecare.test",
   qaMode: "true",
   appEnv: "qa",
   allowlistRaw: "primecare.test",
-  testRecipient: "qa.sink@primecare.test",
+  testRecipient: "",
 });
-if (allow.action === "send" && allow.providerTo === "qa.admin@primecare.test") {
-  pass("unit.qa.allowlist_send", "primecare.test may send as queued");
-} else fail("unit.qa.allowlist_send", JSON.stringify(allow));
+if (missingSinkSynthetic.action === "suppress" && missingSinkSynthetic.reason === "qa_suppressed") {
+  pass("unit.qa.missing_test_recipient", "missing EMAIL_TEST_RECIPIENT suppresses");
+} else fail("unit.qa.missing_test_recipient", JSON.stringify(missingSinkSynthetic));
 
 const freeze = resolveQaRecipient({
   intendedEmail: "qa.admin@primecare.test",
   qaMode: "false",
   appEnv: "production",
   allowlistRaw: "primecare.test",
-  testRecipient: "",
+  testRecipient: SINK,
 });
 if (freeze.action === "suppress" && freeze.reason === "production_freeze") {
-  pass("unit.qa.production_freeze", "non-QA mode does not send");
+  pass("unit.qa.production_freeze", "non-QA mode does not apply rewrite or send");
 } else fail("unit.qa.production_freeze", JSON.stringify(freeze));
 
 if (!shouldClaimRows("false") && shouldClaimRows("true")) pass("unit.enabled_gate", "EMAIL_ENABLED=false does not claim");
