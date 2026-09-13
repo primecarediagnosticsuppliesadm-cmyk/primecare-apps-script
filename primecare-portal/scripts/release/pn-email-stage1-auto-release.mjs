@@ -13,6 +13,7 @@
  * and must NOT have PN_EMAIL_STAGE1_CI_FORCE_DRY_RUN=true.
  *
  * This commit's GitHub workflow always forces dry-run.
+ * pull_request events can never unlock execute, even if env/argv are tampered with.
  */
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -25,19 +26,24 @@ import {
   CANDIDATE_BRANCH,
   CANONICAL_HOST,
   DISPATCH_FUNCTION,
+  DRY_RUN_SECRET_NAMES,
+  EXECUTE_SECRET_NAMES,
   EXPECTED_CANDIDATE_SHA,
-  EXPECTED_PREVIOUS_MAIN_SHA,
   HOLD_BACKUP,
   HOLD_PREFIX,
   MAIN_BRANCH,
   MIGRATION_ALLOWLIST,
   MIGRATION_REL_PREFIX,
+  PN_EMAIL_CANDIDATE_SHA,
+  PRE_RELEASE_PRODUCT_BASELINE_SHA,
   PROD_PROJECT_REF,
+  PRODUCT_DRIFT,
   QA_PROJECT_REF,
   READY_BANNER,
-  REQUIRED_PROD_SECRET_NAMES,
   STAGE1_EMAIL_SECRETS,
 } from "./pnEmailStage1Constants.mjs";
+import { classifyGitRange } from "./pnEmailMainDrift.mjs";
+import { ciForceDryRun, isExecuteUnlocked, isPullRequestEvent } from "./pnEmailExecuteGuard.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const portalRoot = resolve(__dirname, "../..");
@@ -95,6 +101,7 @@ const report = {
   migrations: [],
   secretsPresent: [],
   mainUnchanged: null,
+  mainClass: null,
   edge: null,
   vercel: null,
   dispatcher: null,
@@ -192,19 +199,10 @@ function denyDangerousArgv() {
   }
   return true;
 }
-function ciForceDryRun() {
-  return String(process.env.PN_EMAIL_STAGE1_CI_FORCE_DRY_RUN || "").trim() === "true";
-}
-function isExecuteUnlocked() {
-  return (
-    process.argv.includes("--execute-prod") &&
-    !ciForceDryRun() &&
-    String(process.env.PRIMECARE_CONFIRM_PROD || "").trim() === "YES" &&
-    String(process.env.APPLY_PN_EMAIL_STAGE1 || "").trim() === "YES" &&
-    String(process.env.PN_EMAIL_STAGE1_ALLOW_EXECUTE || "").trim() === "true"
-  );
-}
 function parseMode() {
+  if (isPullRequestEvent()) {
+    return { dryRun: true, refusedExecute: process.argv.includes("--execute-prod") };
+  }
   if (process.argv.includes("--execute-prod")) {
     if (!isExecuteUnlocked()) {
       return { dryRun: true, refusedExecute: true };
@@ -232,30 +230,59 @@ function revParse(ref) {
   const r = git(["rev-parse", ref]);
   return r.status === 0 ? r.stdout.trim() : "";
 }
+function classifyCurrentMain() {
+  return classifyGitRange((args) => git(args), {
+    baselineSha: PRE_RELEASE_PRODUCT_BASELINE_SHA,
+    mainRef: `origin/${MAIN_BRANCH}`,
+  });
+}
 function verifyImmutableShas() {
   const candidate = revParse(`origin/${CANDIDATE_BRANCH}`);
   const main = revParse(`origin/${MAIN_BRANCH}`);
-  report.mainUnchanged = main === EXPECTED_PREVIOUS_MAIN_SHA;
   let ok = true;
-  if (candidate !== EXPECTED_CANDIDATE_SHA) {
+  if (candidate !== PN_EMAIL_CANDIDATE_SHA) {
     gate(
       "sha.candidate",
       "HOLD",
-      `origin/${CANDIDATE_BRANCH}=${candidate || "missing"} expected ${EXPECTED_CANDIDATE_SHA}`
+      `origin/${CANDIDATE_BRANCH}=${candidate || "missing"} expected ${PN_EMAIL_CANDIDATE_SHA}`
     );
     ok = false;
   } else {
     gate("sha.candidate", "PASS", candidate);
   }
-  if (main !== EXPECTED_PREVIOUS_MAIN_SHA) {
+  const ancestor = git(["merge-base", "--is-ancestor", PRE_RELEASE_PRODUCT_BASELINE_SHA, `origin/${CANDIDATE_BRANCH}`]);
+  if (ancestor.status !== 0) {
     gate(
-      "sha.main",
+      "sha.candidate_ancestry",
       "HOLD",
-      `origin/${MAIN_BRANCH}=${main || "missing"} expected ${EXPECTED_PREVIOUS_MAIN_SHA}`
+      `candidate is not based on product baseline ${PRE_RELEASE_PRODUCT_BASELINE_SHA}`
     );
     ok = false;
   } else {
-    gate("sha.main", "PASS", main);
+    gate("sha.candidate_ancestry", "PASS", `baseline ${PRE_RELEASE_PRODUCT_BASELINE_SHA} is ancestor of candidate`);
+  }
+  const classified = classifyCurrentMain();
+  report.mainClass = classified.class;
+  report.mainUnchanged = main === PRE_RELEASE_PRODUCT_BASELINE_SHA;
+  if (classified.files.length) {
+    log("main changed files vs product baseline:");
+    for (const file of classified.files) log(`  ${file}`);
+  }
+  if (classified.class === PRODUCT_DRIFT) {
+    gate(
+      "sha.main",
+      "HOLD",
+      `PRODUCT_DRIFT vs ${PRE_RELEASE_PRODUCT_BASELINE_SHA}: ${classified.disallowed.join(", ") || "unknown"}`
+    );
+    ok = false;
+  } else {
+    gate(
+      "sha.main",
+      "PASS",
+      classified.files.length
+        ? `AUTOMATION_ONLY on ${main}`
+        : `origin/main=${main} equals product baseline`
+    );
   }
   return ok;
 }
@@ -551,6 +578,17 @@ function curlHttp(url, opts = {}) {
 }
 function runStaticVerifiers() {
   let ok = true;
+  const driftTests = run("node", [resolve(__dirname, "pnEmailMainDrift.test.mjs")], {
+    cwd: portalRoot,
+    timeout: 30000,
+  });
+  if (driftTests.status !== 0) {
+    gate("static.main_drift_tests", "HOLD", (driftTests.stderr || driftTests.stdout).trim().slice(-300));
+    ok = false;
+  } else {
+    gate("static.main_drift_tests", "PASS", "pnEmailMainDrift.test.mjs");
+    report.completed.push("static.main_drift_tests");
+  }
   const build = run("npm", ["run", "build"], { cwd: portalRoot, timeout: 300000 });
   if (build.status !== 0) {
     gate("static.build", "HOLD", (build.stderr || build.stdout).trim().slice(-400));
@@ -614,12 +652,18 @@ function confirmMainUnchanged() {
     return false;
   }
   const main = revParse(`origin/${MAIN_BRANCH}`);
-  report.mainUnchanged = main === EXPECTED_PREVIOUS_MAIN_SHA;
-  if (!report.mainUnchanged) {
-    gate("main.unchanged", "HOLD", `origin/main=${main} drifted from ${EXPECTED_PREVIOUS_MAIN_SHA}`);
+  const classified = classifyCurrentMain();
+  report.mainClass = classified.class;
+  report.mainUnchanged = main === PRE_RELEASE_PRODUCT_BASELINE_SHA;
+  if (classified.class === PRODUCT_DRIFT) {
+    gate(
+      "main.unchanged",
+      "HOLD",
+      `PRODUCT_DRIFT: ${classified.disallowed.join(", ")}`
+    );
     return false;
   }
-  return gate("main.unchanged", "PASS", main);
+  return gate("main.unchanged", "PASS", `${classified.class} ${main}`);
 }
 function printFounderBanner() {
   log("\n========================================");
@@ -631,9 +675,10 @@ function printFounderBanner() {
     log(READY_BANNER);
   }
   log(`mode: ${report.mode}`);
-  log(`candidate: ${EXPECTED_CANDIDATE_SHA}`);
-  log(`origin/main: ${revParse(`origin/${MAIN_BRANCH}`)} (must remain ${EXPECTED_PREVIOUS_MAIN_SHA})`);
-  log(`main unchanged: ${report.mainUnchanged === true ? "yes" : "no"}`);
+  log(`candidate: ${PN_EMAIL_CANDIDATE_SHA}`);
+  log(`product baseline: ${PRE_RELEASE_PRODUCT_BASELINE_SHA}`);
+  log(`origin/main: ${revParse(`origin/${MAIN_BRANCH}`)} class=${report.mainClass || "n/a"}`);
+  log(`main equals baseline: ${report.mainUnchanged === true ? "yes" : "no"}`);
   if (report.backup) {
     log(
       `backup: id=${report.backup.id} at=${report.backup.inserted_at} status=${report.backup.status} physical=${report.backup.is_physical_backup} age_min=${report.backup.age_minutes}`
@@ -661,7 +706,8 @@ function printFounderBanner() {
   log(`db migrated: ${report.dbMigrated}  app promoted: ${report.appPromoted}`);
   if (report.recovery) log(`recovery: ${report.recovery}`);
   log(`completed gates: ${report.completed.join(", ") || "none"}`);
-  log(`required CI secret names: ${REQUIRED_PROD_SECRET_NAMES.join(", ")}`);
+  log(`DRY_RUN secret names: ${DRY_RUN_SECRET_NAMES.join(", ")}`);
+  log(`EXECUTE secret names: ${EXECUTE_SECRET_NAMES.join(", ")}`);
   log("========================================\n");
 }
 
@@ -975,6 +1021,10 @@ function verifyCanonicalServesCandidate() {
 }
 
 function executeStage1(states, live) {
+  if (isPullRequestEvent()) {
+    hold("pull_request event cannot execute Production mutation");
+    return false;
+  }
   if (ciForceDryRun()) {
     hold("CI force dry-run is set; refusing execute");
     return false;
@@ -1020,7 +1070,9 @@ async function main() {
   }
   const mode = parseMode();
   report.mode = mode.dryRun ? "DRY_RUN" : "EXECUTE";
-  if (mode.refusedExecute) {
+  if (isPullRequestEvent()) {
+    gate("execute.lock", "PASS", "pull_request hard-block: execute-prod refused");
+  } else if (mode.refusedExecute) {
     gate(
       "execute.lock",
       "HOLD",
