@@ -2,6 +2,7 @@
 
 export const MAX_ATTEMPTS = 4;
 export const CLAIM_BATCH_SIZE = 10;
+/** Legacy domain list. Not used for Resend To (PN-1B3A). */
 export const DEFAULT_QA_ALLOWLIST = ["primecare.test"];
 
 export function str(v) {
@@ -73,22 +74,35 @@ export function isQaSafetyOn({ appEnv, qaMode }) {
   return lower(appEnv) === "qa" || isTruthyEnv(qaMode);
 }
 
+export function parseExactAllowlist(raw) {
+  return str(raw)
+    .split(/[,\s]+/)
+    .map((item) => lower(item))
+    .filter((item) => item.includes("@"));
+}
+
+export function isSyntheticQaDomain(domain) {
+  return lower(domain) === "primecare.test" || lower(domain).endsWith(".primecare.test");
+}
+
 /**
  * Resolve the actual provider recipient without mutating the intended snapshot.
+ * Domain EMAIL_QA_ALLOWLIST is ignored for Resend To (not provider-deliverable).
  * @returns {{ action: "send"|"rewrite"|"suppress", providerTo: string, reason: string }}
  */
 export function resolveQaRecipient({
   intendedEmail,
   qaMode,
   appEnv,
-  allowlistRaw,
+  allowlistRaw: _allowlistRaw,
+  exactAllowlistRaw,
   testRecipient,
 }) {
   const intended = lower(intendedEmail);
   const testTo = lower(testRecipient);
   const qaOn = isQaSafetyOn({ appEnv, qaMode });
-  const allowlist = parseAllowlist(allowlistRaw);
   const intendedDomain = emailDomain(intended);
+  const exactAllowlist = parseExactAllowlist(exactAllowlistRaw);
 
   if (!qaOn) {
     return { action: "suppress", providerTo: "", reason: "production_freeze" };
@@ -97,29 +111,33 @@ export function resolveQaRecipient({
     return { action: "suppress", providerTo: "", reason: "missing_recipient" };
   }
 
-  const allowlisted = isAllowlisted(intendedDomain, allowlist);
-  const personal = isPersonalWebmail(intendedDomain);
+  const exactTestRecipient = Boolean(testTo) && intended === testTo;
+  const exactAllowlisted =
+    exactAllowlist.includes(intended) &&
+    !isSyntheticQaDomain(intendedDomain) &&
+    !isPersonalWebmail(intendedDomain);
 
-  let providerTo = intended;
-  let action = "send";
-  let reason = "allowlisted";
-
-  if (!allowlisted || personal) {
-    if (testTo) {
-      providerTo = testTo;
-      action = "rewrite";
-      reason = personal ? "qa_rewrite_personal" : "qa_rewrite";
-    } else {
-      return { action: "suppress", providerTo: "", reason: "qa_suppressed" };
-    }
+  if (exactTestRecipient || exactAllowlisted) {
+    return {
+      action: "send",
+      providerTo: intended,
+      reason: exactTestRecipient ? "qa_test_recipient" : "qa_exact_allowlist",
+    };
   }
 
-  const finalDomain = emailDomain(providerTo);
-  if (isPersonalWebmail(finalDomain) && providerTo !== testTo) {
+  if (!testTo) {
     return { action: "suppress", providerTo: "", reason: "qa_suppressed" };
   }
 
-  return { action, providerTo, reason };
+  return {
+    action: "rewrite",
+    providerTo: testTo,
+    reason: isSyntheticQaDomain(intendedDomain)
+      ? "qa_rewrite_synthetic"
+      : isPersonalWebmail(intendedDomain)
+        ? "qa_rewrite_personal"
+        : "qa_rewrite",
+  };
 }
 
 export function nextAttemptAtIso(attemptCount, now = new Date()) {

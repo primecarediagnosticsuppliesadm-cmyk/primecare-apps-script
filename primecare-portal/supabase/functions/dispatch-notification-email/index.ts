@@ -207,6 +207,7 @@ Deno.serve(async (req) => {
       qaMode: env("EMAIL_QA_MODE"),
       appEnv: env("APP_ENV"),
       allowlistRaw: env("EMAIL_QA_ALLOWLIST"),
+      exactAllowlistRaw: env("EMAIL_QA_EXACT_ALLOWLIST"),
       testRecipient: env("EMAIL_TEST_RECIPIENT"),
     });
 

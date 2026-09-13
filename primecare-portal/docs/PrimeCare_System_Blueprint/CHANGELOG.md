@@ -4,6 +4,26 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-09-13 — PN-1B3A QA recipient rewrite (synthetic domains)
+
+### Gap found
+
+- PN-1B3 live activation send failed `provider_permanent` because `resolveQaRecipient` treated `@primecare.test` as a domain allowlist hit and sent that To to Resend. Resend cannot deliver to the synthetic QA domain. Flow 2 activation, queue, and sourcing attribution were correct. `recipient_email` snapshot was not the defect.
+
+### Change
+
+- QA provider routing no longer uses domain allowlisting (`EMAIL_QA_ALLOWLIST`, default `primecare.test`) to decide Resend `to`. That secret is **not** provider-deliverable.
+- In QA (`APP_ENV=qa` OR `EMAIL_QA_MODE=true`): send directly only if the queued address **exactly equals** `EMAIL_TEST_RECIPIENT`, or is on optional exact-address `EMAIL_QA_EXACT_ALLOWLIST` **and** is not `@primecare.test` / personal webmail. All other QA recipients, including `@primecare.test` and Gmail/Outlook/Yahoo, rewrite To `EMAIL_TEST_RECIPIENT`. Missing test recipient → `qa_suppressed`, no provider call.
+- `recipient_email` snapshot remains immutable. Actual To stays in `provider_recipient`.
+- Non-QA (`APP_ENV` not `qa` and `EMAIL_QA_MODE` not true) still `production_freeze` — no rewrite, no send. No Production/DNS/cron change.
+
+### Verification
+
+- `node scripts/verify-prospect-email-1b2.mjs` (unit: primecare.test rewrite, Gmail rewrite, exact test recipient, missing sink, production freeze)
+- Controlled QA live send of `prospect_activated` after Edge Function deploy (QA only)
+
+---
+
 ## 2026-09-13 — PN-1B2 prospect email dispatcher + QA safety (QA only)
 
 ### Gap found
