@@ -18,7 +18,7 @@ export const HQ_ADMIN_MENU_SECTIONS = [
   {
     id: "operations",
     label: "OPERATIONS",
-    keys: ["labs", "orders", "logisticsDelivery", "risk", "agentResources"],
+    keys: ["labs", "orders", "logisticsDelivery", "risk", "agentResources", "myBusiness"],
   },
   {
     id: "inventory",
@@ -50,7 +50,7 @@ export const HQ_EXECUTIVE_MENU_SECTIONS = [
   {
     id: "operations",
     label: "OPERATIONS",
-    keys: ["operationsCenter", "orders", "logisticsDelivery", "risk", "agentResources"],
+    keys: ["operationsCenter", "orders", "logisticsDelivery", "risk", "agentResources", "myBusiness"],
   },
   {
     id: "inventory",
@@ -97,6 +97,7 @@ const EXECUTIVE_HQ_MENU_KEYS = new Set([
   "qaCommandCenter",
   "projectionOpsCenter",
   "agentResources",
+  "myBusiness",
 ]);
 
 const ADMIN_HQ_MENU_KEYS = new Set([
@@ -118,10 +119,11 @@ const ADMIN_HQ_MENU_KEYS = new Set([
   "notifications",
   "predatorDebug",
   "agentResources",
+  "myBusiness",
 ]);
 
 /** Agent sidebar: execution workflow only (Activity Center merged into Dashboard). */
-const AGENT_MENU_ORDER = ["dashboard", "visits", "agentResources", "labs", "collections"];
+const AGENT_MENU_ORDER = ["myBusiness", "dashboard", "visits", "agentResources", "labs", "collections"];
 
 /** Lab sidebar: ordering, account — Activity Center hidden for pilot speed. */
 const LAB_MENU_ORDER = ["labOrders", "labInvoices", "labAccount"];
@@ -168,6 +170,7 @@ export const MENU_ITEMS = [
   { key: "labContractEngine", label: ENTERPRISE_PAGE_LABELS.labContractEngine, icon: "FileText" },
   { key: "operationsCenter", label: ENTERPRISE_PAGE_LABELS.operationsCenter, icon: "Radio" },
   { key: "agentResources", label: "Agent Resources", icon: "BookOpen" },
+  { key: "myBusiness", label: "My Business", icon: "BarChart3" },
   { key: "accessAudit", label: ENTERPRISE_PAGE_LABELS.accessAudit, icon: "Shield" },
 
   // Field Ops
@@ -241,6 +244,7 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "projectionOpsCenter",
   "productionReadiness",
   "agentResources",
+  "myBusiness",
 ]);
 
 /**

@@ -1,7 +1,8 @@
-import { memo, useMemo, useCallback } from "react";
+import { memo, useMemo, useCallback, useState } from "react";
 import { getMenuForRole, getMenuSectionsForRole } from "../config/menuConfig";
 import { ROLES } from "../config/roles";
 import { prefetchRoute } from "@/utils/routePrefetch.js";
+import { splitFieldMobileNav } from "@/layout/fieldMobileNav.js";
 import {
   LayoutDashboard,
   Compass,
@@ -29,6 +30,7 @@ import {
   Database,
   ShieldCheck,
   BookOpen,
+  MoreHorizontal,
 } from "lucide-react";
 
 const ICONS = {
@@ -48,6 +50,7 @@ const ICONS = {
   labContractEngine: FileText,
   operationsCenter: Radio,
   agentResources: BookOpen,
+  myBusiness: BarChart3,
   accessAudit: Shield,
   visits: ClipboardList,
   collections: Wallet,
@@ -124,6 +127,8 @@ function PortalLayout({
 }) {
   const menu = useMemo(() => getMenuForRole(role), [role]);
   const menuSections = useMemo(() => getMenuSectionsForRole(role), [role]);
+  const fieldMobileNav = useMemo(() => splitFieldMobileNav(role, menu), [role, menu]);
+  const [moreOpen, setMoreOpen] = useState(false);
   const activeMenuItem = useMemo(
     () => menu.find((item) => item.key === activePage),
     [menu, activePage]
@@ -227,20 +232,49 @@ function PortalLayout({
 
       {isFieldMobileRole ? (
         <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-white/95 backdrop-blur md:hidden">
+          {moreOpen && fieldMobileNav.more.length > 0 ? (
+            <div className="border-b bg-white px-3 py-2" data-testid="field-mobile-more">
+              {fieldMobileNav.more.map((item) => {
+                const isActive = activePage === item.key;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => {
+                      handleSelect(item.key);
+                      setMoreOpen(false);
+                    }}
+                    className={`mb-1 flex w-full items-center rounded-md px-3 py-2 text-left text-sm ${
+                      isActive ? "bg-slate-900 text-white" : "text-slate-700"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
           <div
             className="grid h-16"
             style={{
-              gridTemplateColumns: `repeat(${Math.min(menu.length, 4)}, minmax(0, 1fr))`,
+              gridTemplateColumns: `repeat(${
+                fieldMobileNav.primary.length + (fieldMobileNav.more.length ? 1 : 0)
+              }, minmax(0, 1fr))`,
             }}
+            data-testid="field-mobile-primary-nav"
           >
-            {menu.slice(0, 4).map((item) => {
+            {fieldMobileNav.primary.map((item) => {
               const Icon = ICONS[item.key] || LayoutDashboard;
               const isActive = activePage === item.key;
               return (
                 <button
                   key={item.key}
                   type="button"
-                  onClick={() => handleSelect(item.key)}
+                  data-testid={`field-nav-${item.key}`}
+                  onClick={() => {
+                    setMoreOpen(false);
+                    handleSelect(item.key);
+                  }}
                   onMouseEnter={() => warmRoute(item.key)}
                   aria-current={isActive ? "page" : undefined}
                   aria-label={item.label}
@@ -249,10 +283,28 @@ function PortalLayout({
                   }`}
                 >
                   <Icon className={`h-4 w-4 ${isActive ? "stroke-[2.5]" : ""}`} />
-                  <span className="truncate max-w-[70px]">{item.label}</span>
+                  <span className="w-full truncate px-0.5 text-center text-[10px] leading-tight">
+                    {item.label}
+                  </span>
                 </button>
               );
             })}
+            {fieldMobileNav.more.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setMoreOpen((open) => !open)}
+                aria-label="More"
+                aria-expanded={moreOpen}
+                className={`flex flex-col items-center justify-center gap-1 text-xs ${
+                  moreOpen || fieldMobileNav.more.some((item) => item.key === activePage)
+                    ? "text-slate-900"
+                    : "text-slate-500"
+                }`}
+              >
+                <MoreHorizontal className="h-4 w-4" />
+                <span>More</span>
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}

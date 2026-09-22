@@ -60,7 +60,7 @@ assert(!/<table/.test(page), "ui.no_table", "no desktop table");
 assert(/agentResources: \[ROLES\.EXECUTIVE, ROLES\.ADMIN, ROLES\.AGENT\]/.test(perms), "perm.agent", "Agent permitted");
 assert(!/agentResources: \[[^\]]*ROLES\.LAB/.test(perms), "perm.no_lab", "Lab denied");
 assert(!/agentResources: \[[^\]]*ROLES\.HR/.test(perms), "perm.no_hr", "HR denied");
-assert(/AGENT_MENU_ORDER = \["dashboard", "visits", "agentResources"/.test(menu), "menu.agent", "Resources in agent menu");
+assert(/AGENT_MENU_ORDER = \[[^\]]*agentResources/.test(menu.replace(/\n/g, " ")), "menu.agent", "Resources in agent menu");
 assert(/label: "Resources"/.test(menu), "menu.label", "agent label Resources");
 assert(/LAB_MENU_ORDER = \["labOrders", "labInvoices", "labAccount"\]/.test(menu), "menu.no_lab", "Lab menu unchanged");
 assert(/AgentResourcesPage/.test(portal), "route.agent", "agent consumer routed");
