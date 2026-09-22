@@ -190,9 +190,9 @@ export function startVisitFromWorkspaceItem(item, overrides = {}) {
 /**
  * @param {Object} item
  */
-export function startCollectionFromWorkspaceItem(item) {
+export function startCollectionFromWorkspaceItem(item, overrides = {}) {
   if (typeof window === "undefined") return;
-  writeAgentWorkspaceReturnPath("dashboard");
+  writeAgentWorkspaceReturnPath(overrides.returnPath || "dashboard");
   sessionStorage.setItem(
     AGENT_PENDING_COLLECTION_TASK_KEY,
     JSON.stringify({

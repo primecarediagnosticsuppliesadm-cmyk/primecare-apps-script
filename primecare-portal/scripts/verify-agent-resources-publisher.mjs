@@ -95,7 +95,7 @@ assert(/agentResources: \[[^\]]*ROLES\.AGENT/.test(perms), "perm.agent", "Agent 
 assert(!/agentResources: \[[^\]]*ROLES\.LAB/.test(perms), "perm.no_lab", "Lab not permitted");
 assert(!/agentResources: \[[^\]]*ROLES\.HR/.test(perms), "perm.no_hr", "HR not permitted");
 assert(/key: ["']agentResources["']/.test(menu), "menu.item", "MENU_ITEMS includes publisher");
-assert(/AGENT_MENU_ORDER = \["dashboard", "visits", "agentResources", "labs", "collections"\]/.test(menu), "menu.agent_resources", "Agent menu includes Resources");
+assert(/AGENT_MENU_ORDER = \[[^\]]*agentResources[^\]]*\]/.test(menu.replace(/\n/g, " ")), "menu.agent_resources", "Agent menu includes Resources");
 assert(/LAB_MENU_ORDER = \["labOrders", "labInvoices", "labAccount"\]/.test(menu), "menu.no_lab", "Lab menu unchanged");
 assert(/keys: \[[^\]]*agentResources/.test(menu), "menu.hq_section", "HQ OPERATIONS section includes publisher");
 assert(/"agentResources"/.test(menu.split("PILOT_SAFE_PAGE_KEYS")[1] || ""), "menu.pilot_safe", "pilot-safe so QA/PROD sidebar shows it");

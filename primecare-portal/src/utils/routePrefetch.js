@@ -23,11 +23,13 @@ export const PREFETCH_BY_ROLE = {
     labs: ["orders", "collections", "logisticsDelivery"],
     collections: ["orders", "labs", "logisticsDelivery"],
     logisticsDelivery: ["orders", "labs", "collections"],
+    myBusiness: ["labs", "collections"],
   },
   [ROLES.AGENT]: {
     dashboard: ["collections", "visits"],
     collections: ["dashboard", "visits"],
     visits: ["dashboard", "collections"],
+    myBusiness: ["visits", "labs", "collections"],
   },
   [ROLES.LAB]: {
     labOrders: ["labInvoices"],
@@ -56,6 +58,7 @@ export const PAGE_LOADERS = {
   labInvoices: () => import("@/pages/LabInvoiceCenterPage.jsx"),
   labAccount: () => import("@/pages/LabOrderingPage.jsx"),
   agentResources: () => import("@/pages/AgentResourcesPublisherPage.jsx"),
+  myBusiness: () => import("@/pages/MyBusinessPage.jsx"),
 };
 
 function resolvePageLoader(role, pageKey) {

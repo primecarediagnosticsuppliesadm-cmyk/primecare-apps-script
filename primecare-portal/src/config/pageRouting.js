@@ -140,6 +140,9 @@ export function normalizePageKey(page) {
     case "resources":
     case "agentResources":
       return "agentResources";
+    case "my-business":
+    case "myBusiness":
+      return "myBusiness";
     default:
       return page;
   }

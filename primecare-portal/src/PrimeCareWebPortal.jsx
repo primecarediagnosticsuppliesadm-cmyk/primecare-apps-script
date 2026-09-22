@@ -8,6 +8,7 @@ import PortalAccessCard, {
   PortalAccessAction,
 } from "@/components/ux/PortalAccessCard.jsx";
 
+const MyBusinessPage = lazy(() => import("./pages/MyBusinessPage.jsx"));
 const AgentDashboard = lazy(() => import("./pages/AgentDashboard"));
 const AgentPortalShell = lazy(() => import("./components/agent/AgentPortalShell.jsx"));
 const AgentVisitPage = lazy(() => import("./pages/AgentVisitPage"));
@@ -134,6 +135,15 @@ export default function PrimeCareWebPortal({
           />
         );
 
+      case "myBusiness":
+      case "my-business":
+        return (
+          <MyBusinessPage
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+          />
+        );
+
       case "visits":
         return (
           <AgentVisitPage
@@ -199,6 +209,15 @@ export default function PrimeCareWebPortal({
       setActivePage={setActivePage}
     />
   );
+
+      case "myBusiness":
+      case "my-business":
+        return (
+          <MyBusinessPage
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+          />
+        );
 
       case "visits":
         return (
@@ -366,6 +385,15 @@ export default function PrimeCareWebPortal({
       case "dashboard":
         return (
           <ExecutiveControlTower
+            currentUser={currentUser}
+            setActivePage={setActivePage}
+          />
+        );
+
+      case "myBusiness":
+      case "my-business":
+        return (
+          <MyBusinessPage
             currentUser={currentUser}
             setActivePage={setActivePage}
           />
