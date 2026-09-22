@@ -6,6 +6,7 @@ import {
   NOTIFICATION_EVENT_TYPES,
   NOTIFICATION_SEVERITIES,
   NOTIFICATION_EVENT_STATUSES,
+  SERVER_AUTHORITATIVE_NOTIFICATION_EVENT_TYPES,
 } from "./notificationConstants.js";
 
 function str(v) {
@@ -44,6 +45,8 @@ const EVENT_TITLE = {
   low_stock: "Low stock",
   purchase_order_created: "PO created",
   purchase_order_received: "PO received",
+  prospect_created: "New Prospect Added",
+  prospect_activated: "Prospect Approved",
 };
 
 /**
@@ -68,6 +71,16 @@ export function buildNotificationEventInsertRows(event = {}) {
     return {
       ok: false,
       error: `Unknown event_type: ${eventType}`,
+      eventType,
+      tenantId,
+      foundation: null,
+      legacy: null,
+    };
+  }
+  if (SERVER_AUTHORITATIVE_NOTIFICATION_EVENT_TYPES.includes(eventType)) {
+    return {
+      ok: false,
+      error: `Server-authoritative event_type: ${eventType}`,
       eventType,
       tenantId,
       foundation: null,
@@ -219,8 +232,11 @@ export function buildNotificationDeliveryLogInsertRows(args = {}) {
     return { ok: false, error: "tenantId and eventId are required", rows: [] };
   }
 
-  const rows = channels.map((channel) => {
+  const rows = channels.flatMap((channel) => {
     const ch = str(channel);
+    if (ch === "email") {
+      return [];
+    }
     const inApp = ch === "in_app";
     const row = {
       tenant_id: tenantId,
@@ -233,9 +249,9 @@ export function buildNotificationDeliveryLogInsertRows(args = {}) {
       provider_error: null,
     };
     // Hard allowlist — drops any accidental legacy keys if this object is extended later.
-    return Object.fromEntries(
-      Object.entries(row).filter(([key]) => DELIVERY_LOG_INSERT_KEY_SET.has(key))
-    );
+    return [
+      Object.fromEntries(Object.entries(row).filter(([key]) => DELIVERY_LOG_INSERT_KEY_SET.has(key))),
+    ];
   });
 
   return { ok: true, error: null, rows };

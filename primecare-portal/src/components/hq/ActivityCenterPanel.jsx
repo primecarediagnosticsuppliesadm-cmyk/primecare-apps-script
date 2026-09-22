@@ -280,9 +280,9 @@ export default function ActivityCenterPanel({ tenantId, setActivePage }) {
                   <HqObjectLink
                     onClick={() => navigateFromActivityEvent(setActivePage, ev)}
                     className="text-[10px]"
-                    title={`Open ${navTarget.label}`}
+                    title={navTarget.ctaLabel || `Open ${navTarget.label}`}
                   >
-                    Open {navTarget.label}
+                    {navTarget.ctaLabel || `Open ${navTarget.label}`}
                   </HqObjectLink>
                 ) : null}
               </div>
@@ -320,7 +320,7 @@ export default function ActivityCenterPanel({ tenantId, setActivePage }) {
                     {navTarget ? (
                       <HqObjectLink
                         onClick={() => navigateFromActivityEvent(setActivePage, ev)}
-                        title={`Open ${navTarget.label}`}
+                        title={navTarget.ctaLabel || `Open ${navTarget.label}`}
                       >
                         {ev.entity}
                       </HqObjectLink>

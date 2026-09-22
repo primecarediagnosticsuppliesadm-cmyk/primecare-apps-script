@@ -179,6 +179,9 @@ export const HQ_AGENT_RESOURCE_AGENT_VERSION_COLUMNS =
   "id,resource_id,version_number,mime_type,published_at,status";
 export const HQ_AGENT_RESOURCE_AGENT_ACK_COLUMNS = "version_id,acknowledged_at";
 
+export const HQ_NOTIFICATION_EVENT_LIST_COLUMNS =
+  "event_id,tenant_id,event_type,source_module,source_id,actor_user_id,target_role,target_user_id,target_lab_id,payload_json,severity,status,created_at";
+
 export function clampLimit(value, fallback, max) {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return fallback;

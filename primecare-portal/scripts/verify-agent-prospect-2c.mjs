@@ -17,6 +17,8 @@ const APPLY = process.argv.includes("--apply") || process.env.CONFIRM_MUTATION =
 
 const MIG_REL = "supabase/migrations/20260905200000_agent_prospect_2c_activate_prospect_lab.sql";
 const TWIN_REL = "supabase/sql/agent_prospect_2c_activate_prospect_lab.sql";
+const PN_REL = "supabase/migrations/20260912200000_pn1a_prospect_in_app_notifications.sql";
+const PN_TWIN_REL = "supabase/sql/pn1a_prospect_in_app_notifications.sql";
 const HQ_RPC_REL = "supabase/sql/create_lab_with_ar_credit_rpc.sql";
 const API_REL = "src/api/primecareSupabaseApi.js";
 const BOUNDS_REL = "src/api/hqReadBounds.js";
@@ -33,6 +35,7 @@ const FLOW1_SCRIPTS = [
   "scripts/verify-lab-ordering-1f-anon-order-lockdown.mjs",
   "scripts/verify-lab-ordering-1h-ar-and-projection.mjs",
 ];
+const FLOW3_SCRIPT = "scripts/verify-flow-3a.mjs";
 
 let failures = 0;
 function pass(id, detail) {
@@ -327,6 +330,54 @@ for (const rel of FLOW1_SCRIPTS) {
 }
 if (flow1Fail === 0) pass("static.flow1_bundle", "Flow 1 static verifiers GREEN");
 
+{
+  const r3 = spawnSync(process.execPath, [resolve(root, FLOW3_SCRIPT)], { cwd: root, encoding: "utf8" });
+  if (r3.status === 0) pass("static.flow3a", "Flow 3A static GREEN");
+  else fail("static.flow3a", `exit ${r3.status}`);
+}
+
+const pn = readSrc(PN_REL);
+const pnTwin = readSrc(PN_TWIN_REL);
+if (pn === pnTwin) pass("static.pn1a.twin", "PN-1A migration matches SQL twin");
+else fail("static.pn1a.twin", "PN-1A migration / twin mismatch");
+
+const pnActivate = pn.split("CREATE OR REPLACE FUNCTION public.activate_prospect_lab")[1] || "";
+const labsUpdatePn = pnActivate.split("UPDATE public.labs")[1]?.split("GET DIAGNOSTICS")[0] || "";
+if (
+  /status = 'ACTIVE'/.test(labsUpdatePn) &&
+  /ordering_mode = 'hq_managed'/.test(labsUpdatePn) &&
+  /assigned_agent_id = v_assign/.test(labsUpdatePn) &&
+  !/sourced_by_agent_id\s*=/.test(labsUpdatePn)
+) {
+  pass("static.pn1a.no_sourced_write", "PN-1A activate UPDATE still never writes sourced_by_agent_id");
+} else {
+  fail("static.pn1a.no_sourced_write", "PN-1A activation UPDATE must not SET sourced_by_agent_id");
+}
+
+const activateAuditAt = pnActivate.indexOf("'action', 'lab_prospect_activated'");
+const activateEmitAt = pnActivate.indexOf("PERFORM public.emit_prospect_in_app_notification");
+const sourceResolveAt = pnActivate.indexOf("v_lab.sourced_by_agent_id");
+if (
+  activateAuditAt >= 0 &&
+  activateEmitAt > activateAuditAt &&
+  /'prospect_activated'/.test(pnActivate) &&
+  /EXCEPTION\s+WHEN OTHERS THEN/.test(pnActivate) &&
+  /v_source_user_id/.test(pnActivate) &&
+  sourceResolveAt >= 0 &&
+  /p_initial_agent_id/.test(pnActivate) &&
+  !/target_user_id[\s\S]*v_assign/.test(pnActivate.slice(activateEmitAt, activateEmitAt + 400))
+) {
+  pass("static.pn1a.activate_hook", "activate emits prospect_activated after audit to sourced_by Agent, exception-isolated");
+} else {
+  fail("static.pn1a.activate_hook", "activate notify hook missing, not isolated, or retargets assigned Agent");
+}
+
+if (/activate_already_active/.test(pnActivate) && pnActivate.indexOf("activate_already_active") < activateEmitAt) {
+  pass("static.pn1a.already_active_before_notify", "already_active raises before notify");
+} else {
+  fail("static.pn1a.already_active_before_notify", "retry path may emit a second notification");
+}
+
 if (!APPLY) {
   if (failures) {
     console.log(`\nAGENT PROSPECT 2C: FAIL (${failures})\n`);
@@ -346,6 +397,7 @@ const {
   QA_HR,
   QA_LAB,
   hydrateQaHrPasswordFromEnv,
+  resolveQaHrPassword,
 } = await import("./qaCredentials.mjs");
 const { PRIMECARE_SUPABASE_PROJECTS } = await import("./lib/primecareReleaseManifest.mjs");
 
@@ -469,6 +521,7 @@ async function cleanup() {
     await adminSb.from("labs").delete().eq("tenant_id", QA_HQ_TENANT_ID).eq("lab_id", labId);
   }
   for (const labId of createdLabIds) {
+    await adminSb.from("notification_events").delete().eq("tenant_id", QA_HQ_TENANT_ID).eq("source_id", labId);
     await adminSb.from("user_provisioning_events").delete().contains("payload", { lab_id: labId });
     await adminSb.from("lab_ownership").delete().eq("tenant_id", QA_HQ_TENANT_ID).eq("lab_id", labId);
     await adminSb.from("ar_credit_control").delete().eq("tenant_id", QA_HQ_TENANT_ID).eq("lab_id", labId);
@@ -541,7 +594,7 @@ try {
   }
   pass("live.auth.lab", QA_LAB.email);
 
-  const hrPassword = str(QA_HR.password);
+  const hrPassword = str(resolveQaHrPassword());
   let hrOk = false;
   if (hrPassword.length >= 6) {
     const hrAuth = await signInRole(hrClient, { email: QA_HR.email, password: hrPassword }, env);
@@ -706,6 +759,36 @@ try {
   if (str(after?.assigned_agent_id) === sourcedBy) pass("live.after.assigned", "defaults to sourcing Agent");
   else fail("live.after.assigned", str(after?.assigned_agent_id));
 
+  const notifyCols =
+    "event_id,tenant_id,event_type,source_module,source_id,actor_user_id,target_role,target_user_id,target_lab_id,payload_json,severity,status";
+  const { data: activatedEvents, error: activatedEvErr } = await adminSb
+    .from("notification_events")
+    .select(notifyCols)
+    .eq("tenant_id", QA_HQ_TENANT_ID)
+    .eq("event_type", "prospect_activated")
+    .eq("source_id", createdLabId);
+  const agentUserId = str(agentUserData?.user?.id);
+  if (activatedEvErr) {
+    fail("live.notify.activated.one", errText(activatedEvErr));
+  } else if ((activatedEvents || []).length === 1) {
+    const ev = activatedEvents[0];
+    const payload = ev.payload_json && typeof ev.payload_json === "object" ? ev.payload_json : {};
+    if (
+      str(ev.source_module) === "labs" &&
+      str(ev.target_role) === "agent" &&
+      str(ev.target_user_id) === agentUserId &&
+      ev.target_lab_id == null &&
+      str(ev.status) === "pending" &&
+      str(payload.cta) === "/labs"
+    ) {
+      pass("live.notify.activated.one", ev.event_id);
+    } else {
+      fail("live.notify.activated.one", JSON.stringify(ev));
+    }
+  } else {
+    fail("live.notify.activated.one", `count ${(activatedEvents || []).length}`);
+  }
+
   const { data: arRows } = await adminSb
     .from("ar_credit_control")
     .select("lab_id,credit_limit,outstanding,total_delivered,total_paid,collections_notes")
@@ -800,6 +883,109 @@ try {
     pass("live.repeat.ownership", "still exactly one ACTIVE ownership row");
   } else {
     fail("live.repeat.ownership", JSON.stringify(ownAfterRepeat));
+  }
+
+  const { data: activatedAfterRepeat, error: activatedRepeatErr } = await adminSb
+    .from("notification_events")
+    .select("event_id")
+    .eq("tenant_id", QA_HQ_TENANT_ID)
+    .eq("event_type", "prospect_activated")
+    .eq("source_id", createdLabId);
+  if (activatedRepeatErr) fail("live.notify.activated.nodup", errText(activatedRepeatErr));
+  else if ((activatedAfterRepeat || []).length === 1) pass("live.notify.activated.nodup", "activate_already_active did not emit a second event");
+  else fail("live.notify.activated.nodup", `count ${(activatedAfterRepeat || []).length}`);
+
+  const agentActivatedVis = await agentSb
+    .from("notification_events")
+    .select("event_id")
+    .eq("event_type", "prospect_activated")
+    .eq("source_id", createdLabId);
+  if ((agentActivatedVis.data || []).length === 1) pass("live.notify.vis.sourcer", "sourcing Agent sees prospect_activated");
+  else fail("live.notify.vis.sourcer", errText(agentActivatedVis.error) || `count ${(agentActivatedVis.data || []).length}`);
+
+  const adminActivatedVis = await adminClient
+    .from("notification_events")
+    .select("event_id")
+    .eq("event_type", "prospect_activated")
+    .eq("source_id", createdLabId);
+  if ((adminActivatedVis.data || []).length === 1) pass("live.notify.vis.admin", "HQ Admin retains tenant visibility of Agent-targeted event");
+  else fail("live.notify.vis.admin", errText(adminActivatedVis.error) || `count ${(adminActivatedVis.data || []).length}`);
+
+  const labActivatedVis = await labClient
+    .from("notification_events")
+    .select("event_id")
+    .eq("event_type", "prospect_activated")
+    .eq("source_id", createdLabId);
+  if ((labActivatedVis.data || []).length === 0) pass("live.notify.vis.lab", "Lab cannot see prospect_activated");
+  else fail("live.notify.vis.lab", "Lab saw prospect_activated");
+
+  if (hrOk) {
+    const hrActivatedVis = await hrClient
+      .from("notification_events")
+      .select("event_id")
+      .eq("event_type", "prospect_activated")
+      .eq("source_id", createdLabId);
+    if ((hrActivatedVis.data || []).length === 0) pass("live.notify.vis.hr", "HR cannot see prospect_activated");
+    else fail("live.notify.vis.hr", "HR saw prospect_activated");
+  }
+
+  const agent2Client = client(env);
+  const agent2Email = process.env.QA_AGENT_2_EMAIL || "qa.test.agent2@primecare.test";
+  const agent2Password = process.env.QA_AGENT_2_PASSWORD || "1234";
+  let agent2Ok = false;
+  let agent2UserId = "";
+  const otherAgentsRes = await adminSb
+    .from("profiles")
+    .select("user_id,email")
+    .eq("tenant_id", QA_HQ_TENANT_ID)
+    .eq("role", "agent")
+    .eq("active", true)
+    .neq("user_id", agentUserId)
+    .limit(5);
+  const tryEmails = [agent2Email, ...((otherAgentsRes.data || []).map((p) => p.email).filter(Boolean))];
+  for (const email of tryEmails) {
+    const attempt = await signInRole(agent2Client, { email, password: agent2Password }, env, { repair: true });
+    if (attempt.ok) {
+      agent2Ok = true;
+      const { data: agent2User } = await agent2Client.auth.getUser();
+      agent2UserId = str(agent2User?.user?.id);
+      pass("live.auth.agent2", email);
+      break;
+    }
+  }
+  if (agent2Ok) {
+    const otherActivatedVis = await agent2Client
+      .from("notification_events")
+      .select("event_id")
+      .eq("event_type", "prospect_activated")
+      .eq("source_id", createdLabId);
+    if ((otherActivatedVis.data || []).length === 0) {
+      pass("live.notify.vis.other_agent", "other Agent cannot see sourcing Agent prospect_activated");
+    } else {
+      fail("live.notify.vis.other_agent", "other Agent saw targeted activation");
+    }
+  } else {
+    fail("live.notify.vis.other_agent", "no second same-tenant Agent login available");
+  }
+
+  const forgeTarget = agent2UserId || "00000000-0000-0000-0000-000000000099";
+  const forgeActivated = await agentSb.from("notification_events").insert({
+    tenant_id: QA_HQ_TENANT_ID,
+    event_type: "prospect_activated",
+    source_module: "labs",
+    source_id: `FORGE-${stamp()}`,
+    actor_user_id: agentUserId,
+    target_role: "agent",
+    target_user_id: forgeTarget,
+    target_lab_id: null,
+    payload_json: { lab_name: "forged" },
+    severity: "info",
+    status: "pending",
+  });
+  if (hasToken(errText(forgeActivated.error), "prospect_notify_forbidden") || forgeActivated.error) {
+    pass("live.notify.forge.activated", errText(forgeActivated.error) || "denied");
+  } else {
+    fail("live.notify.forge.activated", "agent forged prospect_activated targeting another Agent");
   }
 
   const sourcedHack = await adminClient

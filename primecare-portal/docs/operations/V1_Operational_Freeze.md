@@ -82,7 +82,7 @@ Complete before calling the codebase “production frozen.”
 | **FZ-P1-04** | **P1** | Field | Agent offline — no durable queue | RC1 Production Readiness | Ops discipline; no feature in freeze |
 | **FZ-P1-05** | **P1** | Cert | Inventory/Purchase Gold unsigned | Certification packs | Sign UAT |
 | **FZ-P1-06** | **P1** | UX trust | Edge CORS `*` on provision/reset functions (`generate-invoice-pdf` uses request origin) | RC8 P1-6 | Accept with JWT; harden later |
-| **FZ-P1-07** | **P1** | Customer | No transactional email | notification placeholders | Expectation brief (not a build) |
+| **FZ-P1-07** | **P1** | Customer | No transactional email | notification placeholders | **Still in force for Production.** QA PN-1B1 may queue `channel=email` rows; nothing is sent. Do not mark email Production-ready. |
 | **FZ-P2-01** | **P2** | Perf | MON-14 orders/payments scale FAIL at 100k | RC1 Performance | Pilot volume OK |
 | **FZ-P2-02** | **P2** | Perf | Large bundles (predator-tools); god pages | RC1 Performance | Keep Predator off prod |
 | **FZ-P2-03** | **P2** | Perf | Unbounded / soft-bound HQ reads (Ops profiles, some SELECT *) | Sprint5 / Admin cert | Monitor; no rewrite in freeze |
