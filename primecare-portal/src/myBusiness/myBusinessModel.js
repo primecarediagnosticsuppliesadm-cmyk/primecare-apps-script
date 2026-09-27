@@ -4,6 +4,18 @@ import { ymdInInclusiveRange } from "@/myBusiness/myBusinessCalendar.js";
 export const MY_BUSINESS_LEDGER_CAP = 200;
 export const STALE_VISIT_DAYS = 14;
 
+export const ATTENTION_PRIORITY = Object.freeze([
+  "FOLLOW_UP_OVERDUE",
+  "FOLLOW_UP_DUE",
+  "REQUIREMENT_FOLLOW_UP",
+  "COLLECTION_DUE",
+  "REVISIT",
+]);
+
+const ATTENTION_RANK = Object.freeze(
+  Object.fromEntries(ATTENTION_PRIORITY.map((type, index) => [type, index]))
+);
+
 export const MY_BUSINESS_KPI_SOURCES = Object.freeze({
   prospectsAdded: "labs.sourced_by_agent_id + labs.created_at",
   visitsLogged: "agent_visits.visit_date",
@@ -378,47 +390,95 @@ export function buildMyBusinessModel({
   const truncated = ledger.length > ledgerCap;
   const ledgerRows = truncated ? ledger.slice(0, ledgerCap) : ledger;
 
-  const attention = [];
-  const pushAttn = (type, title, items) => {
-    if (!items.length) return;
-    attention.push({ type, title, count: items.length, items });
-  };
-  pushAttn(
-    "FOLLOW_UP_DUE",
-    "Follow-up due today",
-    followUpDueLabIds.map((lid) => ({
-      labId: lid,
-      labName: str(labById.get(lid)?.labName),
-      dueDate: todayYmd,
-    }))
-  );
-  pushAttn(
-    "FOLLOW_UP_OVERDUE",
-    "Overdue follow-up",
-    followUpOverdueLabIds.map((lid) => {
-      const latest = visitsByLab.get(lid)?.[0];
-      return {
+  const attentionByLab = new Map();
+  const addAttentionReason = (labId, reason, extra = {}) => {
+    const lid = labIdKey(labId);
+    if (!lid || !reason) return;
+    if (!attentionByLab.has(lid)) {
+      attentionByLab.set(lid, {
         labId: lid,
         labName: str(labById.get(lid)?.labName),
-        dueDate: ymd(latest?.nextFollowUpDate || latest?.next_follow_up_date),
+        reasons: [],
+      });
+    }
+    const row = attentionByLab.get(lid);
+    if (!row.reasons.includes(reason)) row.reasons.push(reason);
+    if (extra.labName && !row.labName) row.labName = str(extra.labName);
+    if (extra.outcome) row.outcome = str(extra.outcome);
+    if (extra.followUpStatus) row.followUpStatus = str(extra.followUpStatus);
+    if (extra.followUpDate) row.followUpDate = str(extra.followUpDate);
+    if (extra.nextAction != null && extra.nextAction !== "") row.nextAction = str(extra.nextAction);
+    if (extra.outstanding != null) row.outstanding = extra.outstanding;
+    if (extra.lastVisitDate) row.lastVisitDate = str(extra.lastVisitDate);
+    if (extra.daysSinceVisit != null) row.daysSinceVisit = extra.daysSinceVisit;
+  };
+
+  for (const lid of followUpOverdueLabIds) {
+    const latest = visitsByLab.get(lid)?.[0];
+    addAttentionReason(lid, "FOLLOW_UP_OVERDUE", {
+      followUpStatus: "OVERDUE",
+      followUpDate: ymd(latest?.nextFollowUpDate || latest?.next_follow_up_date),
+      nextAction: str(latest?.nextAction || latest?.next_action),
+      outcome: str(latest?.commercialOutcome || latest?.commercial_outcome),
+    });
+  }
+  for (const lid of followUpDueLabIds) {
+    const latest = visitsByLab.get(lid)?.[0];
+    addAttentionReason(lid, "FOLLOW_UP_DUE", {
+      followUpStatus: "DUE",
+      followUpDate: todayYmd,
+      nextAction: str(latest?.nextAction || latest?.next_action),
+      outcome: str(latest?.commercialOutcome || latest?.commercial_outcome),
+    });
+  }
+  for (const item of requirementFollowUp) {
+    const latest = visitsByLab.get(item.labId)?.[0];
+    addAttentionReason(item.labId, "REQUIREMENT_FOLLOW_UP", {
+      labName: item.labName,
+      outcome: item.outcome,
+      followUpStatus: item.followUpStatus,
+      followUpDate: item.followUpDate,
+      nextAction: str(latest?.nextAction || latest?.next_action),
+    });
+  }
+  for (const lab of collectionDue) {
+    addAttentionReason(lab.labId, "COLLECTION_DUE", {
+      labName: lab.labName,
+      outstanding: numAmount(lab.outstanding),
+    });
+  }
+  for (const lab of staleLabs) {
+    addAttentionReason(lab.labId, "REVISIT", {
+      labName: lab.labName,
+      lastVisitDate: lab.lastVisitDate,
+      daysSinceVisit: lab.daysSinceVisit,
+    });
+  }
+
+  const attention = [...attentionByLab.values()]
+    .map((row) => {
+      const reasons = [...row.reasons].sort(
+        (a, b) => (ATTENTION_RANK[a] ?? 99) - (ATTENTION_RANK[b] ?? 99)
+      );
+      return {
+        labId: row.labId,
+        labName: row.labName,
+        primaryType: reasons[0] || "",
+        reasons,
+        outcome: row.outcome || "",
+        followUpStatus: row.followUpStatus || "",
+        followUpDate: row.followUpDate || "",
+        nextAction: row.nextAction || "",
+        outstanding: row.outstanding ?? null,
+        lastVisitDate: row.lastVisitDate || "",
+        daysSinceVisit: row.daysSinceVisit ?? null,
       };
     })
-  );
-  pushAttn(
-    "COLLECTION_DUE",
-    "Collection due",
-    collectionDue.map((lab) => ({
-      labId: labIdKey(lab.labId),
-      labName: str(lab.labName),
-      outstanding: numAmount(lab.outstanding),
-    }))
-  );
-  pushAttn("REVISIT", "Labs needing revisit", staleLabs);
-  pushAttn(
-    "REQUIREMENT_FOLLOW_UP",
-    "Requirement / quote follow-up",
-    requirementFollowUp
-  );
+    .sort((a, b) => {
+      const byRank = (ATTENTION_RANK[a.primaryType] ?? 99) - (ATTENTION_RANK[b.primaryType] ?? 99);
+      if (byRank) return byRank;
+      return str(a.labName).localeCompare(str(b.labName));
+    });
 
   const formatInr = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
