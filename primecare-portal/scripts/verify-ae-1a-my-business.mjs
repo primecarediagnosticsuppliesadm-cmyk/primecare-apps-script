@@ -45,6 +45,12 @@ const {
   MY_BUSINESS_KPI_SOURCES,
   STALE_VISIT_DAYS,
 } = await import("../src/myBusiness/myBusinessModel.js");
+const {
+  attentionContextLabels,
+  attentionPrimaryLabel,
+  displayVisitNotes,
+  formatMyBusinessDisplayLabel,
+} = await import("../src/myBusiness/myBusinessDisplay.js");
 const { splitFieldMobileNav, AGENT_FIELD_PRIMARY_NAV_KEYS } = await import(
   "../src/layout/fieldMobileNav.js"
 );
@@ -359,25 +365,94 @@ assert(
 );
 
 assert(
-  modelA.attention.some((g) => g.type === "FOLLOW_UP_DUE") &&
-    !modelA.attention.some((g) => g.type === "FOLLOW_UP_OVERDUE"),
+  modelA.attention.filter((item) => item.labId === "LAB-A").length === 1 &&
+    modelA.attention.find((item) => item.labId === "LAB-A")?.primaryType === "FOLLOW_UP_DUE",
   "attention.later_visit_no_overdue",
   "later visit prevents overdue attention for LAB-A"
 );
 assert(
-  modelA.attention.some((g) => g.type === "REVISIT" && g.items.some((i) => i.labId === "LAB-STALE")),
+  modelA.attention.find((item) => item.labId === "LAB-A")?.reasons.includes("REQUIREMENT_FOLLOW_UP") &&
+    attentionContextLabels(modelA.attention.find((item) => item.labId === "LAB-A")).includes(
+      "Quote Opportunity"
+    ),
+  "attention.dedup_quote_context",
+  "quote follow-up is context on the same lab, not a second item"
+);
+assert(
+  modelA.attention.some((item) => item.labId === "LAB-STALE" && item.primaryType === "REVISIT"),
   "attention.stale",
   `stale revisit after ${STALE_VISIT_DAYS}d`
 );
+const labBAttn = modelB.attention.filter((item) => item.labId === "LAB-B");
 assert(
-  modelB.attention.some((g) => g.type === "COLLECTION_DUE"),
+  labBAttn.length === 1 &&
+    labBAttn[0].primaryType === "FOLLOW_UP_OVERDUE" &&
+    labBAttn[0].reasons.includes("COLLECTION_DUE"),
   "attention.collection",
-  "collection due from outstanding/overdue"
+  "collection due is context on the same lab card, not a duplicate row"
 );
 assert(
-  !modelA.attention.some((g) => /waiting on primecare/i.test(g.title)),
+  new Set(modelA.attention.map((item) => item.labId)).size === modelA.attention.length,
+  "attention.one_per_lab",
+  "one attention item per lab"
+);
+assert(
+  !modelA.attention.some((item) => /waiting on primecare/i.test(JSON.stringify(item))),
   "attention.no_waiting_on_hq",
   "Waiting on PrimeCare not shown"
+);
+
+const pilotRange = { from: "2026-09-01", to: "2026-09-23", todayYmd: "2026-09-23" };
+const pilotModel = buildMyBusinessModel({
+  range: pilotRange,
+  subjectAgentId: "AGT-A",
+  actor: agentA,
+  labs: [
+    {
+      labId: "PILOT-7",
+      labName: "Pilot Lab 7",
+      status: "ACTIVE",
+      assignedAgentId: "AGT-A",
+      sourcedByAgentId: "AGT-A",
+      createdAt: "2026-01-01",
+    },
+  ],
+  visits: [
+    {
+      id: "v-p7",
+      labId: "PILOT-7",
+      agentId: "AGT-A",
+      visitDate: "2026-09-22",
+      nextFollowUpDate: "2026-09-23",
+      commercialOutcome: "QUOTE_OPPORTUNITY",
+      notes: "test\n[Visit] Area: Guntur · Lab: Pilot Lab 7",
+      nextAction: "test",
+    },
+  ],
+});
+const pilotItem = pilotModel.attention.find((item) => item.labId === "PILOT-7");
+assert(
+  pilotModel.attention.filter((item) => item.labId === "PILOT-7").length === 1,
+  "attention.pilot7_once",
+  "Pilot Lab 7 appears once"
+);
+assert(
+  pilotItem?.primaryType === "FOLLOW_UP_DUE" &&
+    attentionPrimaryLabel(pilotItem.primaryType) === "Follow-up due today" &&
+    attentionContextLabels(pilotItem).includes("Quote Opportunity") &&
+    pilotItem.nextAction === "test",
+  "attention.pilot7_combined",
+  "Pilot Lab 7: Follow-up due today + Quote Opportunity + next action"
+);
+assert(
+  pilotModel.kpis.visitsLogged === 1 &&
+    pilotModel.kpis.quoteOpportunities === 1 &&
+    pilotModel.kpis.followUpsDue === 1 &&
+    pilotModel.kpis.ordersFromMyLabs === 0 &&
+    pilotModel.kpis.rupeesOrdered === 0 &&
+    pilotModel.kpis.rupeesCollected === 0,
+  "attention.pilot7_kpis",
+  "quote opportunity does not create ₹ ordered/collected"
 );
 
 assert(
@@ -419,6 +494,31 @@ const capModel = buildMyBusinessModel({
 });
 assert(capModel.ledgerTruncated && capModel.ledger.length === 200, "perf.ledger_cap", "ledger cap 200 with truncate flag");
 
+assert(formatMyBusinessDisplayLabel("QUOTE_OPPORTUNITY") === "Quote Opportunity", "label.quote", "QUOTE_OPPORTUNITY");
+assert(formatMyBusinessDisplayLabel("NO_OPPORTUNITY") === "No Opportunity", "label.no_opp", "NO_OPPORTUNITY");
+assert(formatMyBusinessDisplayLabel("ORDER_OPPORTUNITY") === "Order Opportunity", "label.order_opp", "ORDER_OPPORTUNITY");
+assert(formatMyBusinessDisplayLabel("FOLLOW_UP") === "Follow-up", "label.follow_up", "FOLLOW_UP");
+assert(formatMyBusinessDisplayLabel("REQUIREMENT") === "Requirement", "label.requirement", "REQUIREMENT");
+assert(formatMyBusinessDisplayLabel("UNKNOWN") === "Not specified", "label.unknown", "UNKNOWN");
+assert(formatMyBusinessDisplayLabel("ACTIVE") === "Active", "label.active", "ACTIVE");
+assert(formatMyBusinessDisplayLabel("PROSPECT") === "Prospect", "label.prospect", "PROSPECT");
+assert(formatMyBusinessDisplayLabel("test next action") === "test next action", "label.passthrough", "human text unchanged");
+assert(
+  displayVisitNotes("test\n[Visit] Area: Guntur · Lab: Pilot Lab 7") === "test",
+  "notes.strip_visit_tag",
+  "composed [Visit] metadata hidden"
+);
+assert(
+  displayVisitNotes("[Visit] Area: Guntur · Lab: Pilot Lab 7") === "",
+  "notes.metadata_only",
+  "metadata-only notes display empty"
+);
+assert(
+  displayVisitNotes("agent typed this") === "agent typed this",
+  "notes.human_kept",
+  "human-entered notes kept"
+);
+
 const menu = [
   { key: "myBusiness", label: "My Business" },
   { key: "dashboard", label: "Dashboard" },
@@ -455,6 +555,7 @@ const src = {
   nav: readRel("src/layout/fieldMobileNav.js"),
   read: readRel("src/myBusiness/myBusinessRead.js"),
   model: readRel("src/myBusiness/myBusinessModel.js"),
+  display: readRel("src/myBusiness/myBusinessDisplay.js"),
   prefetch: readRel("src/utils/routePrefetch.js"),
 };
 const ae1aBlob = Object.values(src).join("\n");
@@ -478,6 +579,10 @@ assert(/fetchLabsForSubject/.test(src.read) && !/fetchLabsForTenant/.test(src.re
 assert(/requestedSubjectAgentId: isHq \? selectedAgentId : ""/.test(src.page), "ui.agent_no_picker_id", "Agent does not send client Agent ID");
 assert(/data-testid="my-business-agent-picker"/.test(src.page), "ui.hq_picker", "Admin/Executive Agent picker");
 assert(/data-testid="my-business-attention"/.test(src.page), "ui.attention_first", "Needs my attention present");
+assert(/As of today/.test(src.page) && /my-business-attention-as-of/.test(src.page), "ui.as_of_today", "attention heading is current-state");
+assert(/No activity recorded for this period/.test(src.page), "ui.empty_activity", "explicit activity empty state");
+assert(/formatMyBusinessDisplayLabel/.test(src.page) && /displayVisitNotes/.test(src.page), "ui.display_formatter", "shared display formatter, not scattered replacements");
+assert(/my-business-attention-item/.test(src.page), "ui.attention_cards", "one attention card per lab");
 assert(src.page.indexOf("my-business-attention") < src.page.indexOf("my-business-kpis"), "ui.attention_above_kpis", "attention above KPIs");
 assert(/md:hidden/.test(src.page) && /hidden overflow-x-auto[\s\S]*md:block/.test(src.page), "mobile.390_cards", "ledger cards on small screens, table on md+");
 assert(/field-mobile-primary-nav/.test(src.layout) && /MoreHorizontal/.test(src.layout), "mobile.nav_more", "bottom nav More sheet");
@@ -499,3 +604,9 @@ if (failures) {
   process.exit(1);
 }
 console.log("\nOverall: GO — AE-1A My Business static certification\n");
+
+if (process.argv.includes("--live")) {
+  const { runLiveAe1aIsolation } = await import("./lib/ae1aLiveIsolation.mjs");
+  const live = await runLiveAe1aIsolation();
+  if (live.failures || live.criticalSkips) process.exit(1);
+}

@@ -28,6 +28,14 @@ import {
   startCollectionFromWorkspaceItem,
   startVisitFromWorkspaceItem,
 } from "@/pages/agentVisitContext.js";
+import {
+  attentionContextLabels,
+  attentionHasCollection,
+  attentionHasVisitWork,
+  attentionPrimaryLabel,
+  displayVisitNotes,
+  formatMyBusinessDisplayLabel,
+} from "@/myBusiness/myBusinessDisplay.js";
 
 const PRESETS = [
   { id: "today", label: "Today" },
@@ -44,12 +52,14 @@ function followUpVariant(status) {
   return "neutral";
 }
 
-function activityLabel(activity) {
-  if (activity === "PROSPECT_CREATED") return "Prospect created";
-  if (activity === "VISIT") return "Visit";
-  if (activity === "ORDER") return "Order";
-  if (activity === "COLLECTION") return "Collection";
-  return activity || "—";
+function NotesText({ notes }) {
+  const visible = displayVisitNotes(notes);
+  if (!visible) return "—";
+  return (
+    <span className="block max-w-[12rem] truncate" title={visible}>
+      {visible}
+    </span>
+  );
 }
 
 export default function MyBusinessPage({ currentUser = null, setActivePage = null }) {
@@ -227,66 +237,78 @@ export default function MyBusinessPage({ currentUser = null, setActivePage = nul
       {model && !error ? (
         <>
           <section data-testid="my-business-attention">
-            <h2 className="mb-2 text-sm font-semibold">Needs my attention</h2>
+            <div className="mb-2">
+              <h2 className="text-sm font-semibold">Needs my attention</h2>
+              <p className="text-[11px] text-muted-foreground" data-testid="my-business-attention-as-of">
+                As of today
+              </p>
+            </div>
             {model.attention.length === 0 ? (
               <p className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
                 Nothing due right now.
               </p>
             ) : (
               <div className="space-y-2">
-                {model.attention.map((group) => (
-                  <div key={group.type} className="rounded-lg border border-border bg-card px-3 py-2">
-                    <div className="mb-1 flex items-center justify-between gap-2">
-                      <p className="text-xs font-semibold">{group.title}</p>
-                      <StatusBadge
-                        variant={group.type === "FOLLOW_UP_OVERDUE" ? "danger" : "warning"}
-                      >
-                        {group.count}
-                      </StatusBadge>
-                    </div>
-                    <ul className="space-y-1">
-                      {group.items.slice(0, 5).map((item) => (
-                        <li
-                          key={`${group.type}:${item.labId}`}
-                          className="flex items-center justify-between gap-2 text-xs"
+                {model.attention.map((item) => {
+                  const context = attentionContextLabels(item);
+                  const showCollect = attentionHasCollection(item) && canCollect;
+                  const showVisit = attentionHasVisitWork(item) && canLogVisit;
+                  return (
+                    <article
+                      key={item.labId}
+                      data-testid="my-business-attention-item"
+                      data-lab-id={item.labId}
+                      className="rounded-lg border border-border bg-card px-3 py-2"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <button
+                          type="button"
+                          className="min-w-0 truncate text-left text-sm font-semibold underline-offset-2 hover:underline"
+                          onClick={() => openLab(item.labId)}
                         >
-                          <button
+                          {item.labName || item.labId}
+                        </button>
+                        <StatusBadge
+                          variant={item.primaryType === "FOLLOW_UP_OVERDUE" ? "danger" : "warning"}
+                        >
+                          {attentionPrimaryLabel(item.primaryType)}
+                        </StatusBadge>
+                      </div>
+                      {context.length ? (
+                        <p className="mt-1 text-xs text-muted-foreground">{context.join(" · ")}</p>
+                      ) : null}
+                      {item.nextAction ? (
+                        <p className="mt-1 text-xs">Next action: {item.nextAction}</p>
+                      ) : null}
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {showCollect ? (
+                          <Button
                             type="button"
-                            className="truncate text-left font-medium underline-offset-2 hover:underline"
-                            onClick={() => openLab(item.labId)}
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2"
+                            onClick={() => openCollection(item)}
                           >
-                            {item.labName || item.labId}
-                          </button>
-                          <span className="flex shrink-0 gap-1">
-                            {group.type === "COLLECTION_DUE" && canCollect ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="h-7 px-2"
-                                onClick={() => openCollection(item)}
-                              >
-                                <Wallet className="mr-1 h-3 w-3" />
-                                Collect
-                              </Button>
-                            ) : canLogVisit ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="h-7 px-2"
-                                onClick={() => logVisit(item)}
-                              >
-                                <ClipboardList className="mr-1 h-3 w-3" />
-                                Log visit
-                              </Button>
-                            ) : null}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
+                            <Wallet className="mr-1 h-3 w-3" />
+                            Collect
+                          </Button>
+                        ) : null}
+                        {showVisit ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2"
+                            onClick={() => logVisit(item)}
+                          >
+                            <ClipboardList className="mr-1 h-3 w-3" />
+                            Log visit
+                          </Button>
+                        ) : null}
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             )}
           </section>
@@ -323,7 +345,15 @@ export default function MyBusinessPage({ currentUser = null, setActivePage = nul
           <section data-testid="my-business-ledger">
             <h2 className="mb-2 text-sm font-semibold">Activity</h2>
             {model.ledger.length === 0 ? (
-              <EmptyState compact title="No activity in this period" />
+              <p
+                className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground"
+                data-testid="my-business-ledger-empty"
+              >
+                No activity recorded for this period.
+                <span className="mt-1 block">
+                  Current follow-ups and labs needing attention are shown above.
+                </span>
+              </p>
             ) : (
               <>
                 <div className="space-y-2 md:hidden">
@@ -340,17 +370,24 @@ export default function MyBusinessPage({ currentUser = null, setActivePage = nul
                         <span className="text-[10px] text-muted-foreground">{row.date}</span>
                       </div>
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        {activityLabel(row.activity)}
-                        {row.lifecycle ? ` · ${row.lifecycle}` : ""}
-                        {row.commercialOutcome ? ` · ${row.commercialOutcome}` : ""}
+                        {formatMyBusinessDisplayLabel(row.activity)}
+                        {row.lifecycle ? ` · ${formatMyBusinessDisplayLabel(row.lifecycle)}` : ""}
+                        {row.commercialOutcome
+                          ? ` · ${formatMyBusinessDisplayLabel(row.commercialOutcome)}`
+                          : ""}
                       </p>
+                      {displayVisitNotes(row.notes) ? (
+                        <p className="mt-1 truncate text-xs" title={displayVisitNotes(row.notes)}>
+                          {displayVisitNotes(row.notes)}
+                        </p>
+                      ) : null}
                       {row.nextAction ? (
                         <p className="mt-1 text-xs">Next: {row.nextAction}</p>
                       ) : null}
                       <div className="mt-2 flex flex-wrap gap-1">
                         {row.followUpStatus && row.followUpStatus !== "NONE" ? (
                           <StatusBadge variant={followUpVariant(row.followUpStatus)}>
-                            {row.followUpStatus}
+                            {formatMyBusinessDisplayLabel(row.followUpStatus)}
                           </StatusBadge>
                         ) : null}
                         {row.activity === "VISIT" && canLogVisit ? (
@@ -406,18 +443,26 @@ export default function MyBusinessPage({ currentUser = null, setActivePage = nul
                               {row.labName || row.labId}
                             </button>
                           </td>
-                          <td className="px-2 py-2">{row.lifecycle || "—"}</td>
-                          <td className="px-2 py-2">{activityLabel(row.activity)}</td>
-                          <td className="px-2 py-2">{row.commercialOutcome || "—"}</td>
+                          <td className="px-2 py-2">{formatMyBusinessDisplayLabel(row.lifecycle) || "—"}</td>
+                          <td className="px-2 py-2">{formatMyBusinessDisplayLabel(row.activity)}</td>
+                          <td className="px-2 py-2">
+                            {row.commercialOutcome
+                              ? formatMyBusinessDisplayLabel(row.commercialOutcome)
+                              : "—"}
+                          </td>
                           <td className="max-w-[10rem] truncate px-2 py-2">{row.discovery || "—"}</td>
-                          <td className="px-2 py-2">{row.qualification || "—"}</td>
-                          <td className="max-w-[12rem] truncate px-2 py-2">{row.notes || "—"}</td>
+                          <td className="px-2 py-2">
+                            {row.qualification ? formatMyBusinessDisplayLabel(row.qualification) : "—"}
+                          </td>
+                          <td className="px-2 py-2">
+                            <NotesText notes={row.notes} />
+                          </td>
                           <td className="max-w-[10rem] truncate px-2 py-2">{row.nextAction || "—"}</td>
                           <td className="px-2 py-2 whitespace-nowrap">{row.followUpDate || "—"}</td>
                           <td className="px-2 py-2">
                             {row.followUpStatus && row.followUpStatus !== "NONE" ? (
                               <StatusBadge variant={followUpVariant(row.followUpStatus)}>
-                                {row.followUpStatus}
+                                {formatMyBusinessDisplayLabel(row.followUpStatus)}
                               </StatusBadge>
                             ) : (
                               "—"
