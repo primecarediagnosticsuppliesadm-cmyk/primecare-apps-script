@@ -16,11 +16,16 @@ export const STAGE2_CERT_DELIVERY_ID = "3face3b7-abac-46ff-839a-eccc1ef2b79e";
 export const STAGE3E_MODE = "pn_email_stage3e_lifecycle";
 export const STAGE3E_LAB_NAME_PREFIX = "PN EMAIL STAGE3E REAL RECIPIENT CERT";
 export const STAGE3F_LAB_NAME_PREFIX = "PN EMAIL STAGE3F REAL RECIPIENT CERT";
+export const STAGE3F_COPY_KIND = "pn_email_stage3f_activated_copy";
+export const STAGE3F_COPY_MODE = "pn_email_stage3f_activated_copy";
+export const STAGE3F_CERT_LAB_ID = "LAB-P-E9FFF046A399";
 export const STAGE3E_FORENSIC_DELIVERY_IDS = [
   "c02c0d63-9a0f-4ec6-8966-6035258364ad",
   "424796d2-3e78-438c-8fb6-ab5c3bb3e28b",
   "63561826-8bb3-4004-b857-b58c397b2aae",
   "b2b5f1a9-5678-4c1c-85ac-c06ea5b7fe64",
+  "3cbbe9bf-0d1a-42f7-9170-b74dd5a60b79",
+  "fd799383-62f3-499f-a1e3-17c1bdc4ea89",
 ];
 
 export function str(v) {
@@ -190,6 +195,10 @@ export function isCertificationRequest(body) {
 
 export function isStage3eRequest(body) {
   return lower(body?.mode) === STAGE3E_MODE;
+}
+
+export function isStage3fActivatedCopyRequest(body) {
+  return lower(body?.mode) === STAGE3F_COPY_MODE;
 }
 
 export function isProductionBatchClaimForbidden({ appEnv, qaMode }) {

@@ -380,5 +380,25 @@ if (
   fail("pn3fr.prefixes", "Stage 3F-R prefix contract incomplete");
 }
 
+const pn3fCopyRel = "supabase/migrations/20260928260000_pn_email_stage3f_activated_founder_copy.sql";
+const pn3fCopyTwinRel = "supabase/sql/pn_email_stage3f_activated_founder_copy.sql";
+const pn3fCopy = existsSync(resolve(root, pn3fCopyRel)) ? read(pn3fCopyRel) : "";
+const pn3fCopyTwin = existsSync(resolve(root, pn3fCopyTwinRel)) ? read(pn3fCopyTwinRel) : "";
+if (pn3fCopy && pn3fCopy === pn3fCopyTwin) pass("pn3f.copy.twin", "Stage 3F Founder-copy migration matches SQL twin");
+else fail("pn3f.copy.twin", "Stage 3F Founder-copy migration / twin missing or mismatched");
+
+if (
+  /create_pn_email_stage3f_activated_founder_copy\(\)/.test(pn3fCopy) &&
+  /claim_notification_email_stage3f_activated_copy/.test(pn3fCopy) &&
+  /handleStage3fActivatedCopy/.test(dispatchSrc) &&
+  /pn_email_stage3f_activated_copy/.test(dispatchSrc) &&
+  !/p_to /.test(pn3fCopy) &&
+  !/UPDATE public\.notification_email_routes/.test(pn3fCopy)
+) {
+  pass("pn3f.copy.safety", "one-time Founder copy; no caller To; routes unchanged");
+} else {
+  fail("pn3f.copy.safety", "Stage 3F Founder-copy contract incomplete");
+}
+
 console.log(failures ? `\nNOTIFICATION CONTRACT: BLOCKED (${failures})\n` : "\nNOTIFICATION CONTRACT: PASS\n");
 process.exit(failures ? 1 : 0);

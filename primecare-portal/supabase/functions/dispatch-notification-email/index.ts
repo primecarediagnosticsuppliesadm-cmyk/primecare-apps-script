@@ -19,6 +19,7 @@ import {
   isStage3eLabNameEligible,
   isStage3eRecipientRole,
   isStage3eRequest,
+  isStage3fActivatedCopyRequest,
   maskEmail,
   nextAttemptAtIso,
   NON_DISPATCHABLE_DOMAIN,
@@ -484,6 +485,185 @@ async function handleStage3eLifecycle(
   }, 200);
 }
 
+async function handleStage3fActivatedCopy(admin: ReturnType<typeof createClient>) {
+  const envGate = evaluateStage3eEnv({
+    emailEnabled: env("EMAIL_ENABLED"),
+    appEnv: env("APP_ENV"),
+    qaMode: env("EMAIL_QA_MODE"),
+    stage3eMode: true,
+  });
+  if (!envGate.ok) {
+    return failClosed(envGate.reason);
+  }
+
+  const { data: created, error: createErr } = await admin.rpc(
+    "create_pn_email_stage3f_activated_founder_copy",
+  );
+  if (createErr) {
+    return failClosed("stage3f_copy_create_failed");
+  }
+  const createdRow = Array.isArray(created) ? created[0] : created;
+  const createOutcome = str(createdRow?.create_outcome);
+  const createdId = str(createdRow?.delivery_id);
+  if (!createdId) {
+    return failClosed(createOutcome || "stage3f_copy_create_failed");
+  }
+  if (createOutcome === "already_sent") {
+    return jsonResponse({
+      success: true,
+      disabled: false,
+      claimed: 0,
+      processed: [{ delivery_id: createdId, status: "sent", skipped: "already_sent" }],
+    });
+  }
+
+  const denied = stage3eDeniedDelivery(createdId);
+  if (denied.denied) {
+    return failClosed(denied.reason, { delivery_id: createdId });
+  }
+
+  const { data: claimed, error: claimErr } = await admin.rpc(
+    "claim_notification_email_stage3f_activated_copy",
+    { p_delivery_id: createdId },
+  );
+  if (claimErr) {
+    return failClosed("stage3f_copy_claim_failed");
+  }
+  const rows = Array.isArray(claimed) ? claimed : claimed ? [claimed] : [];
+  if (rows.length !== 1) {
+    return failClosed("not_found", { delivery_id: createdId });
+  }
+  const row = rows[0];
+  const outcome = str(row.claim_outcome);
+  const deliveryId = str(row.delivery_id);
+  if (outcome === "already_sent") {
+    return jsonResponse({
+      success: true,
+      disabled: false,
+      claimed: 0,
+      processed: [{ delivery_id: deliveryId, status: "sent", skipped: "already_sent" }],
+    });
+  }
+  if (outcome !== "claimed") {
+    return failClosed(outcome || "not_claimable", { delivery_id: deliveryId || createdId });
+  }
+
+  const eventType = str(row.event_type);
+  const payload = row.payload_json && typeof row.payload_json === "object" ? row.payload_json : {};
+  const labName = payloadText(payload, "lab_name");
+  const intended = str(row.recipient_email);
+  const role = str(row.recipient_role);
+  const kind = str(row.certification_kind);
+
+  if (
+    eventType !== "prospect_activated"
+    || kind !== "pn_email_stage3f_activated_copy"
+    || role !== "executive"
+    || !isStage3eLabNameEligible(labName)
+    || !isProductionDispatchableEmail(intended)
+  ) {
+    await admin.rpc("finalize_notification_email_delivery", {
+      p_delivery_id: deliveryId,
+      p_status: "skipped",
+      p_error_code: "stage3f_copy_row_gate",
+      p_error_summary: "stage3f_copy_row_gate",
+    });
+    return failClosed("stage3f_copy_row_gate", { delivery_id: deliveryId });
+  }
+
+  const apiKey = env("EMAIL_PROVIDER_API_KEY");
+  const fromAddress = env("EMAIL_FROM_ADDRESS");
+  if (!apiKey || !fromAddress) {
+    await admin.rpc("finalize_notification_email_delivery", {
+      p_delivery_id: deliveryId,
+      p_status: "failed",
+      p_error_code: "provider_unconfigured",
+      p_error_summary: "provider_unconfigured",
+      p_provider_recipient: intended,
+    });
+    return failClosed("provider_unconfigured", { delivery_id: deliveryId });
+  }
+
+  const assignedName = await resolveAssignedName(admin, str(row.tenant_id), payload as Record<string, unknown>);
+  const rendered = renderForEventType(eventType, {
+    payload,
+    appPublicUrl: env("APP_PUBLIC_URL") || "https://app.primecarediagnostics.in",
+    assignedName,
+  });
+  if (!rendered.ok) {
+    await admin.rpc("finalize_notification_email_delivery", {
+      p_delivery_id: deliveryId,
+      p_status: "skipped",
+      p_error_code: rendered.errorCode,
+      p_error_summary: rendered.errorCode,
+    });
+    return failClosed(rendered.errorCode || "unsupported_event_type", { delivery_id: deliveryId });
+  }
+
+  const send = await sendResend({
+    apiKey,
+    fromName: env("EMAIL_FROM_NAME") || "PrimeCare",
+    fromAddress,
+    replyTo: env("EMAIL_REPLY_TO"),
+    to: intended,
+    subject: rendered.subject,
+    text: rendered.text,
+    html: rendered.html,
+    deliveryId,
+  });
+
+  if (send.ok) {
+    await admin.rpc("finalize_notification_email_delivery", {
+      p_delivery_id: deliveryId,
+      p_status: "sent",
+      p_provider_message_id: send.id,
+      p_provider_recipient: intended,
+    });
+    logSafe({
+      event: "stage3f_activated_copy_sent",
+      delivery_id: deliveryId,
+      event_type: eventType,
+      intended: maskEmail(intended),
+      actual: maskEmail(intended),
+      provider_message_id: send.id,
+    });
+    return jsonResponse({
+      success: true,
+      disabled: false,
+      claimed: 1,
+      processed: [{
+        delivery_id: deliveryId,
+        status: "sent",
+        provider_message_id: send.id,
+        actual: maskEmail(intended),
+        intended: maskEmail(intended),
+        event_type: eventType,
+        certification_kind: kind,
+      }],
+    });
+  }
+
+  const classified = classifyProviderError(send.status, send.kind);
+  await admin.rpc("finalize_notification_email_delivery", {
+    p_delivery_id: deliveryId,
+    p_status: "failed",
+    p_error_code: classified.errorCode,
+    p_error_summary: classified.errorCode,
+    p_provider_error: String(send.status || send.kind || "error"),
+    p_provider_recipient: intended,
+  });
+  return jsonResponse({
+    success: false,
+    disabled: false,
+    claimed: 1,
+    processed: [{
+      delivery_id: deliveryId,
+      status: "failed",
+      error_code: classified.errorCode,
+    }],
+  }, 200);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -523,7 +703,13 @@ Deno.serve(async (req) => {
   }
 
   const stage3eMode = isStage3eRequest({ mode: requestMode });
-  if (!cronOk && !(stage3eOk && stage3eMode)) {
+  const stage3fCopyMode = isStage3fActivatedCopyRequest({ mode: requestMode });
+  if (stage3fCopyMode) {
+    if (!stage3eOk) {
+      logSafe({ event: "auth_denied" });
+      return jsonResponse({ success: false, error: "unauthorized" }, 401);
+    }
+  } else if (!cronOk && !(stage3eOk && stage3eMode)) {
     logSafe({ event: "auth_denied" });
     return jsonResponse({ success: false, error: "unauthorized" }, 401);
   }
@@ -542,6 +728,10 @@ Deno.serve(async (req) => {
   const admin = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+
+  if (isStage3fActivatedCopyRequest({ mode: requestMode })) {
+    return await handleStage3fActivatedCopy(admin);
+  }
 
   if (isStage3eRequest({ mode: requestMode })) {
     return await handleStage3eLifecycle(admin, requestedDeliveryId);

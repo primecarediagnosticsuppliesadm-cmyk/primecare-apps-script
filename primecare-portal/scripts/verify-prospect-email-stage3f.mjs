@@ -12,6 +12,9 @@ import {
   STAGE2_CERT_MODE,
   STAGE3E_FORENSIC_DELIVERY_IDS,
   STAGE3E_MODE,
+  STAGE3F_CERT_LAB_ID,
+  STAGE3F_COPY_KIND,
+  STAGE3F_COPY_MODE,
   STAGE3F_LAB_NAME_PREFIX,
   evaluateStage3eEnv,
   isProductionBatchClaimForbidden,
@@ -19,6 +22,7 @@ import {
   isStage3eLabNameEligible,
   isStage3eRecipientRole,
   isStage3eRequest,
+  isStage3fActivatedCopyRequest,
   resolveQaRecipient,
   shouldClaimRows,
   stage3eDeniedDelivery,
@@ -260,6 +264,57 @@ if (/already_sent/.test(mig) && /outcome === "already_sent"/.test(fn)) {
 if (/ignore_caller_payload/.test(fn) && /to: intended/.test(fn) && !/body\?\.to/.test(fn.split("sendResend")[1] || "")) {
   pass("unit.fr.caller", "caller To/subject/html cannot override provider recipient");
 } else fail("unit.fr.caller", "caller override path present");
+
+const copyRel = "supabase/migrations/20260928260000_pn_email_stage3f_activated_founder_copy.sql";
+const copyTwinRel = "supabase/sql/pn_email_stage3f_activated_founder_copy.sql";
+const copy = readRel(copyRel);
+const copyTwin = readRel(copyTwinRel);
+if (copy && copy === copyTwin) pass("static.copy.twin", "Stage 3F Founder-copy migration matches twin");
+else fail("static.copy.twin", "Stage 3F Founder-copy migration / twin mismatch");
+
+if (
+  /create_pn_email_stage3f_activated_founder_copy\(\)/.test(copy) &&
+  /claim_notification_email_stage3f_activated_copy\(uuid\)/.test(copy) &&
+  /pn_email_stage3f_activated_copy/.test(copy) &&
+  /LAB-P-E9FFF046A399/.test(copy) &&
+  /f49f7627-0b98-4d07-8b72-16846e454ca4/.test(copy) &&
+  /fd799383-62f3-499f-a1e3-17c1bdc4ea89/.test(copy) &&
+  /v_founder\.email/.test(copy) &&
+  !/p_to /.test(copy) &&
+  !/p_subject/.test(copy) &&
+  !/p_html/.test(copy) &&
+  !/p_event_type/.test(copy) &&
+  !/p_lab_id/.test(copy) &&
+  !/UPDATE public\.notification_email_routes/.test(copy) &&
+  !/UPDATE public\.profiles/.test(copy) &&
+  !/EMAIL_ENABLED\s*=\s*true/.test(copy) &&
+  !/cron\.schedule/.test(copy)
+) {
+  pass("static.copy.sql", "no-arg create; exact-row claim; Founder email from profile; no route/profile rewrite");
+} else fail("static.copy.sql", "Founder-copy SQL contract incomplete");
+
+if (
+  /handleStage3fActivatedCopy/.test(fn) &&
+  /create_pn_email_stage3f_activated_founder_copy/.test(fn) &&
+  /claim_notification_email_stage3f_activated_copy/.test(fn) &&
+  /isStage3fActivatedCopyRequest/.test(fn) &&
+  fn.indexOf("isStage3fActivatedCopyRequest") < fn.indexOf("claim_notification_email_deliveries") &&
+  /renderForEventType\(eventType/.test(fn)
+) {
+  pass("static.copy.dispatcher", "copy mode is exact-row; batch remains after freeze");
+} else fail("static.copy.dispatcher", "dispatcher Founder-copy path missing");
+
+if (
+  isStage3fActivatedCopyRequest({ mode: STAGE3F_COPY_MODE }) &&
+  !isStage3fActivatedCopyRequest({ mode: STAGE3E_MODE }) &&
+  !isStage3eRequest({ mode: STAGE3F_COPY_MODE }) &&
+  STAGE3F_COPY_KIND === "pn_email_stage3f_activated_copy" &&
+  STAGE3F_CERT_LAB_ID === "LAB-P-E9FFF046A399" &&
+  stage3eDeniedDelivery("3cbbe9bf-0d1a-42f7-9170-b74dd5a60b79").reason === "rejected_forensic" &&
+  stage3eDeniedDelivery("fd799383-62f3-499f-a1e3-17c1bdc4ea89").reason === "rejected_forensic"
+) {
+  pass("unit.copy.gates", "copy mode isolated; Created and natural Vishwa rows denied on 3E path");
+} else fail("unit.copy.gates", "copy mode or deny-list gate failed");
 
 console.log(failures ? `\nSTAGE 3F: BLOCKED (${failures})\n` : "\nSTAGE 3F: PASS\n");
 process.exit(failures ? 1 : 0);
