@@ -282,5 +282,24 @@ if (
   fail("pn2c.safety", "Stage 2C SQL safety contract incomplete");
 }
 
+const pn3brRel = "supabase/migrations/20260928210000_pn_email_stage3br_event_identity.sql";
+const pn3brTwinRel = "supabase/sql/pn_email_stage3br_event_identity.sql";
+const pn3br = existsSync(resolve(root, pn3brRel)) ? read(pn3brRel) : "";
+const pn3brTwin = existsSync(resolve(root, pn3brTwinRel)) ? read(pn3brTwinRel) : "";
+if (pn3br && pn3br === pn3brTwin) pass("pn3br.twin", "Stage 3B-R migration matches SQL twin");
+else fail("pn3br.twin", "Stage 3B-R migration / twin missing or mismatched");
+
+if (
+  /NEW\.event_id := COALESCE\(NEW\.id, gen_random_uuid\(\)\)/.test(pn3br) &&
+  /BEFORE INSERT ON public\.notification_events/.test(pn3br) &&
+  /CANONICAL EVENT IDENTITY = event_id/.test(pn3br) &&
+  !/UPDATE public\.notification_events/.test(pn3br) &&
+  !/DELETE FROM/.test(pn3br)
+) {
+  pass("pn3br.identity", "BEFORE INSERT fills omitted event_id; no historical rewrite");
+} else {
+  fail("pn3br.identity", "Stage 3B-R identity contract incomplete");
+}
+
 console.log(failures ? `\nNOTIFICATION CONTRACT: BLOCKED (${failures})\n` : "\nNOTIFICATION CONTRACT: PASS\n");
 process.exit(failures ? 1 : 0);
