@@ -86,6 +86,9 @@ BEGIN
     'AGT_STAGE3F_LOCAL_PROOF', 'agent@primecare.local', true
   );
 
+  PERFORM set_config('primecare.prospect_notify', '1', true);
+  PERFORM set_config('primecare.email_delivery', '1', true);
+
   SELECT error_code INTO v_inactive_code
   FROM public.resolve_prospect_lifecycle_email_route(
     v_tenant, 'prospect_activated', 'AGT_STAGE3F_INACTIVE_PROOF'
