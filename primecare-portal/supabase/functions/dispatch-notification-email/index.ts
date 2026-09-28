@@ -493,11 +493,10 @@ Deno.serve(async (req) => {
   }
 
   const cronSecret = env("EMAIL_DISPATCH_CRON_SECRET");
+  const stage3eSecret = env("EMAIL_STAGE3E_INVOKE_SECRET");
   const token = bearerToken(req);
-  if (!cronSecret || !timingSafeEqual(token, cronSecret)) {
-    logSafe({ event: "auth_denied" });
-    return jsonResponse({ success: false, error: "unauthorized" }, 401);
-  }
+  const cronOk = Boolean(cronSecret) && timingSafeEqual(token, cronSecret);
+  const stage3eOk = Boolean(stage3eSecret) && timingSafeEqual(token, stage3eSecret);
 
   // Open-relay fields are parsed only to prove they are ignored.
   // Caller to/subject/html/delivery_id never select the certification row.
@@ -521,6 +520,12 @@ Deno.serve(async (req) => {
   }
   if (ignoredTo || ignoredEventType) {
     logSafe({ event: "ignore_caller_payload" });
+  }
+
+  const stage3eMode = isStage3eRequest({ mode: requestMode });
+  if (!cronOk && !(stage3eOk && stage3eMode)) {
+    logSafe({ event: "auth_denied" });
+    return jsonResponse({ success: false, error: "unauthorized" }, 401);
   }
 
   if (!shouldClaimRows(env("EMAIL_ENABLED"))) {

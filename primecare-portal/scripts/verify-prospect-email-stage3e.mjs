@@ -89,6 +89,7 @@ if (
   /isStage3eRequest/.test(fn) &&
   /claim_notification_email_stage3e_delivery/.test(fn) &&
   /production_freeze_batch_forbidden/.test(fn) &&
+  /EMAIL_STAGE3E_INVOKE_SECRET/.test(fn) &&
   fn.indexOf("isStage3eRequest") < fn.indexOf("claim_notification_email_deliveries") &&
   fn.indexOf("isProductionBatchClaimForbidden") < fn.lastIndexOf("claim_notification_email_deliveries") &&
   /ignore_caller_payload/.test(fn) &&
