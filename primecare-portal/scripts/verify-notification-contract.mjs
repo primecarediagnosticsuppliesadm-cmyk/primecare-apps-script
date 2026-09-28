@@ -222,5 +222,46 @@ if (
   fail("pn1a.bounded_read", "SELECT * still on notification read path");
 }
 
+const pn2aRel = "supabase/migrations/20260928120000_pn_email_stage2a_certification.sql";
+const pn2aTwinRel = "supabase/sql/pn_email_stage2a_certification.sql";
+const pn2a = existsSync(resolve(root, pn2aRel)) ? read(pn2aRel) : "";
+const pn2aTwin = existsSync(resolve(root, pn2aTwinRel)) ? read(pn2aTwinRel) : "";
+if (pn2a && pn2a === pn2aTwin) pass("pn2a.twin", "Stage 2A migration matches SQL twin");
+else fail("pn2a.twin", "Stage 2A migration / twin missing or mismatched");
+
+if (
+  /certification_kind/.test(pn2a) &&
+  /claim_notification_email_certification_delivery/.test(pn2a) &&
+  /d\.certification_kind IS NULL/.test(pn2a) &&
+  /REVOKE ALL ON FUNCTION public\.claim_notification_email_certification_delivery[\s\S]*FROM authenticated/.test(pn2a) &&
+  /GRANT EXECUTE ON FUNCTION public\.claim_notification_email_certification_delivery[\s\S]*TO service_role/.test(pn2a) &&
+  !/DROP TABLE/.test(pn2a) &&
+  !/DELETE FROM public\.notification_delivery_log/.test(pn2a)
+) {
+  pass("pn2a.safety", "marker + exact-ID claim; batch excludes cert rows; no destructive rewrite");
+} else {
+  fail("pn2a.safety", "Stage 2A SQL safety contract incomplete");
+}
+
+if (
+  /EMAIL_PROD_TEST_RECIPIENT/.test(dispatchSrc) &&
+  /handleProductionCertification/.test(dispatchSrc) &&
+  /isCertificationRequest/.test(dispatchSrc) &&
+  /evaluateProductionCertificationEnv/.test(dispatchSrc) &&
+  /create_pn_email_stage2_certification_delivery/.test(dispatchSrc) &&
+  /claim_notification_email_certification_delivery/.test(dispatchSrc) &&
+  !/primecarediagnosticsuppliesadm@gmail\.com/.test(dispatchSrc)
+) {
+  pass("pn2a.dispatcher", "cert path uses secret recipient; Gmail not hardcoded");
+} else {
+  fail("pn2a.dispatcher", "Stage 2A dispatcher contract incomplete");
+}
+
+if (!/pn_email_stage2_certification/.test(constants)) {
+  pass("pn2a.client_unaware", "browser constants do not expose certification event type");
+} else {
+  fail("pn2a.client_unaware", "do not add certification event type to client constants");
+}
+
 console.log(failures ? `\nNOTIFICATION CONTRACT: BLOCKED (${failures})\n` : "\nNOTIFICATION CONTRACT: PASS\n");
 process.exit(failures ? 1 : 0);

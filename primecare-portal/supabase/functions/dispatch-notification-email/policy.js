@@ -4,6 +4,13 @@ export const MAX_ATTEMPTS = 4;
 export const CLAIM_BATCH_SIZE = 10;
 /** Legacy domain list. Not used for Resend To (PN-1B3A). */
 export const DEFAULT_QA_ALLOWLIST = ["primecare.test"];
+/** PN-EMAIL Stage 2A — explicit Production certification marker. Not a customer event. */
+export const STAGE2_CERT_KIND = "pn_email_stage2";
+export const STAGE2_CERT_MODE = "pn_email_stage2_certification";
+export const STAGE2_CERT_EVENT_TYPE = "pn_email_stage2_certification";
+export const STAGE2_CERT_SUBJECT = "PrimeCare Production Email Certification";
+export const STAGE2_CERT_BODY =
+  "This is a controlled PrimeCare production email delivery certification. No customer or lab action is required.";
 
 export function str(v) {
   return String(v ?? "").trim();
@@ -140,6 +147,81 @@ export function resolveQaRecipient({
   };
 }
 
+export function emailsEqual(a, b) {
+  const left = lower(a);
+  const right = lower(b);
+  return Boolean(left) && left === right && left.includes("@");
+}
+
+export function isCertificationRequest(body) {
+  return lower(body?.mode) === STAGE2_CERT_MODE;
+}
+
+/**
+ * Production Stage 2A env gate. Does not inspect a delivery row.
+ * EMAIL_ENABLED=false always fails closed (no provider send).
+ */
+export function evaluateProductionCertificationEnv({
+  emailEnabled,
+  appEnv,
+  qaMode,
+  certificationMode,
+  prodTestRecipient,
+}) {
+  if (!shouldClaimRows(emailEnabled)) {
+    return { ok: false, reason: "email_disabled" };
+  }
+  if (!certificationMode) {
+    return { ok: false, reason: "not_certification_mode" };
+  }
+  if (lower(appEnv) !== "prod") {
+    return { ok: false, reason: "certification_prod_only" };
+  }
+  if (isTruthyEnv(qaMode)) {
+    return { ok: false, reason: "certification_qa_mode_forbidden" };
+  }
+  const approved = lower(prodTestRecipient);
+  if (!approved || !approved.includes("@")) {
+    return { ok: false, reason: "missing_prod_test_recipient" };
+  }
+  return { ok: true, reason: "env_ready", approvedRecipient: approved };
+}
+
+/**
+ * Production Stage 2A row gate. Certification marker is required; recipient
+ * must equal EMAIL_PROD_TEST_RECIPIENT. Address alone is not sufficient.
+ */
+export function evaluateProductionCertificationRow({
+  certificationKind,
+  intendedEmail,
+  approvedRecipient,
+  deliveryId,
+}) {
+  if (!str(deliveryId)) {
+    return { ok: false, reason: "missing_delivery_id" };
+  }
+  if (lower(certificationKind) !== STAGE2_CERT_KIND) {
+    return { ok: false, reason: "not_certification_row" };
+  }
+  if (!emailsEqual(intendedEmail, approvedRecipient)) {
+    return { ok: false, reason: "recipient_mismatch" };
+  }
+  return {
+    ok: true,
+    reason: "certification_eligible",
+    providerTo: lower(approvedRecipient),
+  };
+}
+
+export function renderCertificationEmail({ appPublicUrl } = {}) {
+  const portal = str(appPublicUrl).replace(/\/$/, "") || "https://app.primecarediagnostics.in";
+  const subject = STAGE2_CERT_SUBJECT;
+  const text = [STAGE2_CERT_BODY, `Portal: ${portal}`].join("\n");
+  const html = `<p>${escapeHtml(STAGE2_CERT_BODY)}</p>
+<p>Portal: <a href="${escapeHtml(portal)}">${escapeHtml(portal)}</a></p>`;
+  return { ok: true, subject, text, html };
+}
+
 export function nextAttemptAtIso(attemptCount, now = new Date()) {
   const n = Number(attemptCount) || 0;
   if (n >= MAX_ATTEMPTS) return null;
@@ -226,5 +308,6 @@ export function renderForEventType(eventType, args) {
   const type = lower(eventType);
   if (type === "prospect_created") return { ok: true, ...renderProspectCreated(args) };
   if (type === "prospect_activated") return { ok: true, ...renderProspectActivated(args) };
+  if (type === STAGE2_CERT_EVENT_TYPE) return renderCertificationEmail(args);
   return { ok: false, errorCode: "unsupported_event_type" };
 }

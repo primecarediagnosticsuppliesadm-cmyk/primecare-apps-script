@@ -9,8 +9,12 @@ import {
   CLAIM_BATCH_SIZE,
   MAX_ATTEMPTS,
   classifyProviderError,
+  evaluateProductionCertificationEnv,
+  evaluateProductionCertificationRow,
+  isCertificationRequest,
   maskEmail,
   nextAttemptAtIso,
+  renderCertificationEmail,
   renderForEventType,
   resolveQaRecipient,
   shouldClaimRows,
@@ -120,6 +124,174 @@ async function sendResend(args: {
   }
 }
 
+function failClosed(reason: string, extra: Record<string, unknown> = {}) {
+  logSafe({ event: "certification_fail_closed", reason, ...extra });
+  return jsonResponse({
+    success: false,
+    disabled: false,
+    claimed: 0,
+    processed: [],
+    error: "certification_fail_closed",
+    reason,
+  }, 200);
+}
+
+async function handleProductionCertification(admin: ReturnType<typeof createClient>) {
+  const envGate = evaluateProductionCertificationEnv({
+    emailEnabled: env("EMAIL_ENABLED"),
+    appEnv: env("APP_ENV"),
+    qaMode: env("EMAIL_QA_MODE"),
+    certificationMode: true,
+    prodTestRecipient: env("EMAIL_PROD_TEST_RECIPIENT"),
+  });
+  if (!envGate.ok) {
+    return failClosed(envGate.reason);
+  }
+
+  const approved = str(envGate.approvedRecipient);
+  const { data: created, error: createErr } = await admin.rpc(
+    "create_pn_email_stage2_certification_delivery",
+    { p_recipient_email: approved }
+  );
+  if (createErr) {
+    return failClosed("certification_create_failed");
+  }
+  const createdRow = Array.isArray(created) ? created[0] : created;
+  const certDeliveryId = str(createdRow?.delivery_id);
+  if (!certDeliveryId) {
+    return failClosed("certification_create_failed");
+  }
+
+  const { data: claimed, error: claimErr } = await admin.rpc(
+    "claim_notification_email_certification_delivery",
+    { p_delivery_id: certDeliveryId }
+  );
+  if (claimErr) {
+    return failClosed("certification_claim_failed");
+  }
+  const rows = Array.isArray(claimed) ? claimed : claimed ? [claimed] : [];
+  if (rows.length !== 1) {
+    return failClosed("certification_claim_empty");
+  }
+  const row = rows[0];
+  const outcome = str(row.claim_outcome);
+  const deliveryId = str(row.delivery_id);
+  if (outcome === "already_sent") {
+    logSafe({
+      event: "certification_already_sent",
+      delivery_id: deliveryId,
+      provider_message_id: str(row.provider_message_id),
+    });
+    return jsonResponse({
+      success: true,
+      disabled: false,
+      claimed: 0,
+      processed: [{ delivery_id: deliveryId, status: "sent", skipped: "already_sent" }],
+    });
+  }
+  if (outcome !== "claimed") {
+    return failClosed(outcome || "not_claimable", { delivery_id: deliveryId });
+  }
+
+  const rowGate = evaluateProductionCertificationRow({
+    certificationKind: str(row.certification_kind),
+    intendedEmail: str(row.recipient_email),
+    approvedRecipient: approved,
+    deliveryId,
+  });
+  if (!rowGate.ok) {
+    await admin.rpc("finalize_notification_email_delivery", {
+      p_delivery_id: deliveryId,
+      p_status: "skipped",
+      p_error_code: rowGate.reason,
+      p_error_summary: rowGate.reason,
+    });
+    return failClosed(rowGate.reason, { delivery_id: deliveryId });
+  }
+
+  const apiKey = env("EMAIL_PROVIDER_API_KEY");
+  const fromAddress = env("EMAIL_FROM_ADDRESS");
+  if (!apiKey || !fromAddress) {
+    await admin.rpc("finalize_notification_email_delivery", {
+      p_delivery_id: deliveryId,
+      p_status: "failed",
+      p_error_code: "provider_unconfigured",
+      p_error_summary: "provider_unconfigured",
+      p_provider_recipient: rowGate.providerTo,
+    });
+    return failClosed("provider_unconfigured", { delivery_id: deliveryId });
+  }
+
+  const rendered = renderCertificationEmail({
+    appPublicUrl: env("APP_PUBLIC_URL") || "https://app.primecarediagnostics.in",
+  });
+  const send = await sendResend({
+    apiKey,
+    fromName: env("EMAIL_FROM_NAME") || "PrimeCare",
+    fromAddress,
+    replyTo: env("EMAIL_REPLY_TO"),
+    to: rowGate.providerTo,
+    subject: rendered.subject,
+    text: rendered.text,
+    html: rendered.html,
+    deliveryId,
+  });
+
+  if (send.ok) {
+    await admin.rpc("finalize_notification_email_delivery", {
+      p_delivery_id: deliveryId,
+      p_status: "sent",
+      p_provider_message_id: send.id,
+      p_provider_recipient: rowGate.providerTo,
+    });
+    logSafe({
+      event: "certification_sent",
+      delivery_id: deliveryId,
+      intended: maskEmail(str(row.recipient_email)),
+      actual: maskEmail(rowGate.providerTo),
+      provider_message_id: send.id,
+    });
+    return jsonResponse({
+      success: true,
+      disabled: false,
+      claimed: 1,
+      processed: [{
+        delivery_id: deliveryId,
+        status: "sent",
+        provider_message_id: send.id,
+        actual: maskEmail(rowGate.providerTo),
+        intended: maskEmail(str(row.recipient_email)),
+      }],
+    });
+  }
+
+  const classified = classifyProviderError(send.status, send.kind);
+  await admin.rpc("finalize_notification_email_delivery", {
+    p_delivery_id: deliveryId,
+    p_status: "failed",
+    p_error_code: classified.errorCode,
+    p_error_summary: classified.errorCode,
+    p_provider_error: String(send.status || send.kind || "error"),
+    p_provider_recipient: rowGate.providerTo,
+  });
+  logSafe({
+    event: "certification_failed",
+    delivery_id: deliveryId,
+    error_code: classified.errorCode,
+    actual: maskEmail(rowGate.providerTo),
+  });
+  return jsonResponse({
+    success: false,
+    disabled: false,
+    claimed: 1,
+    processed: [{
+      delivery_id: deliveryId,
+      status: "failed",
+      error_code: classified.errorCode,
+    }],
+  }, 200);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -136,12 +308,16 @@ Deno.serve(async (req) => {
   }
 
   // Open-relay fields are parsed only to prove they are ignored.
+  // Caller to/subject/html/delivery_id never select the certification row.
   let ignoredTo = "";
+  let requestMode = "";
   try {
     const body = await req.json();
     ignoredTo = str(body?.to) || str(body?.subject) || str(body?.body) || str(body?.html);
+    requestMode = str(body?.mode);
   } catch {
     ignoredTo = "";
+    requestMode = "";
   }
   if (ignoredTo) {
     logSafe({ event: "ignore_caller_payload" });
@@ -161,6 +337,10 @@ Deno.serve(async (req) => {
   const admin = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+
+  if (isCertificationRequest({ mode: requestMode })) {
+    return await handleProductionCertification(admin);
+  }
 
   const { data: claimed, error: claimErr } = await admin.rpc("claim_notification_email_deliveries", {
     p_limit: CLAIM_BATCH_SIZE,
