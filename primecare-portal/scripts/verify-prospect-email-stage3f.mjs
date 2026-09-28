@@ -12,9 +12,6 @@ import {
   STAGE2_CERT_MODE,
   STAGE3E_FORENSIC_DELIVERY_IDS,
   STAGE3E_MODE,
-  STAGE3F_CERT_LAB_ID,
-  STAGE3F_COPY_KIND,
-  STAGE3F_COPY_MODE,
   STAGE3F_LAB_NAME_PREFIX,
   evaluateStage3eEnv,
   isProductionBatchClaimForbidden,
@@ -22,7 +19,6 @@ import {
   isStage3eLabNameEligible,
   isStage3eRecipientRole,
   isStage3eRequest,
-  isStage3fActivatedCopyRequest,
   resolveQaRecipient,
   shouldClaimRows,
   stage3eDeniedDelivery,
@@ -265,56 +261,49 @@ if (/ignore_caller_payload/.test(fn) && /to: intended/.test(fn) && !/body\?\.to/
   pass("unit.fr.caller", "caller To/subject/html cannot override provider recipient");
 } else fail("unit.fr.caller", "caller override path present");
 
-const copyRel = "supabase/migrations/20260928260000_pn_email_stage3f_activated_founder_copy.sql";
-const copyTwinRel = "supabase/sql/pn_email_stage3f_activated_founder_copy.sql";
-const copy = readRel(copyRel);
-const copyTwin = readRel(copyTwinRel);
-if (copy && copy === copyTwin) pass("static.copy.twin", "Stage 3F Founder-copy migration matches twin");
-else fail("static.copy.twin", "Stage 3F Founder-copy migration / twin mismatch");
+const goldRel = "supabase/migrations/20260928270000_pn_email_gold_cleanup.sql";
+const goldTwinRel = "supabase/sql/pn_email_gold_cleanup.sql";
+const gold = readRel(goldRel);
+const goldTwin = readRel(goldTwinRel);
+if (gold && gold === goldTwin) pass("static.gold.twin", "PN-EMAIL GOLD cleanup migration matches twin");
+else fail("static.gold.twin", "PN-EMAIL GOLD migration / twin mismatch");
 
 if (
-  /create_pn_email_stage3f_activated_founder_copy\(\)/.test(copy) &&
-  /claim_notification_email_stage3f_activated_copy\(uuid\)/.test(copy) &&
-  /pn_email_stage3f_activated_copy/.test(copy) &&
-  /LAB-P-E9FFF046A399/.test(copy) &&
-  /f49f7627-0b98-4d07-8b72-16846e454ca4/.test(copy) &&
-  /fd799383-62f3-499f-a1e3-17c1bdc4ea89/.test(copy) &&
-  /v_founder\.email/.test(copy) &&
-  !/p_to /.test(copy) &&
-  !/p_subject/.test(copy) &&
-  !/p_html/.test(copy) &&
-  !/p_event_type/.test(copy) &&
-  !/p_lab_id/.test(copy) &&
-  !/UPDATE public\.notification_email_routes/.test(copy) &&
-  !/UPDATE public\.profiles/.test(copy) &&
-  !/EMAIL_ENABLED\s*=\s*true/.test(copy) &&
-  !/cron\.schedule/.test(copy)
+  /create_outcome text/.test(gold) &&
+  /'disabled'/.test(gold) &&
+  /'already_sent'/.test(gold) &&
+  /3c165e0c-b2e9-406b-a9ea-09c85dcf6355/.test(gold) &&
+  /c02c0d63-9a0f-4ec6-8966-6035258364ad/.test(gold) &&
+  /424796d2-3e78-438c-8fb6-ab5c3bb3e28b/.test(gold) &&
+  /63561826-8bb3-4004-b857-b58c397b2aae/.test(gold) &&
+  /WHEN v_status = 'sent' THEN NULL/.test(gold) &&
+  /delivered_at stays NULL until a real delivery signal exists/.test(gold) &&
+  !/UPDATE public\.notification_email_routes/.test(gold) &&
+  !/UPDATE public\.profiles/.test(gold) &&
+  !/EMAIL_ENABLED\s*=\s*true/.test(gold) &&
+  !/cron\.schedule/.test(gold) &&
+  !/DELETE FROM public\.notification_delivery_log/.test(gold)
 ) {
-  pass("static.copy.sql", "no-arg create; exact-row claim; Founder email from profile; no route/profile rewrite");
-} else fail("static.copy.sql", "Founder-copy SQL contract incomplete");
+  pass("static.gold.sql", "copy retired; forensic batch deny; sent≠delivered; no route rewrite");
+} else fail("static.gold.sql", "PN-EMAIL GOLD SQL contract incomplete");
 
 if (
-  /handleStage3fActivatedCopy/.test(fn) &&
-  /create_pn_email_stage3f_activated_founder_copy/.test(fn) &&
-  /claim_notification_email_stage3f_activated_copy/.test(fn) &&
-  /isStage3fActivatedCopyRequest/.test(fn) &&
-  fn.indexOf("isStage3fActivatedCopyRequest") < fn.indexOf("claim_notification_email_deliveries") &&
-  /renderForEventType\(eventType/.test(fn)
+  !/handleStage3fActivatedCopy/.test(fn) &&
+  !/create_pn_email_stage3f_activated_founder_copy/.test(fn) &&
+  !/claim_notification_email_stage3f_activated_copy/.test(fn) &&
+  /production_freeze_batch_forbidden/.test(fn) &&
+  /ignore_caller_payload/.test(fn)
 ) {
-  pass("static.copy.dispatcher", "copy mode is exact-row; batch remains after freeze");
-} else fail("static.copy.dispatcher", "dispatcher Founder-copy path missing");
+  pass("static.gold.dispatcher", "Founder-copy send path removed; freeze and caller-ignore remain");
+} else fail("static.gold.dispatcher", "dispatcher still has copy send or lost freeze");
 
 if (
-  isStage3fActivatedCopyRequest({ mode: STAGE3F_COPY_MODE }) &&
-  !isStage3fActivatedCopyRequest({ mode: STAGE3E_MODE }) &&
-  !isStage3eRequest({ mode: STAGE3F_COPY_MODE }) &&
-  STAGE3F_COPY_KIND === "pn_email_stage3f_activated_copy" &&
-  STAGE3F_CERT_LAB_ID === "LAB-P-E9FFF046A399" &&
-  stage3eDeniedDelivery("3cbbe9bf-0d1a-42f7-9170-b74dd5a60b79").reason === "rejected_forensic" &&
-  stage3eDeniedDelivery("fd799383-62f3-499f-a1e3-17c1bdc4ea89").reason === "rejected_forensic"
+  stage3eDeniedDelivery("c02c0d63-9a0f-4ec6-8966-6035258364ad").reason === "rejected_forensic" &&
+  stage3eDeniedDelivery("424796d2-3e78-438c-8fb6-ab5c3bb3e28b").reason === "rejected_forensic" &&
+  stage3eDeniedDelivery("63561826-8bb3-4004-b857-b58c397b2aae").reason === "rejected_forensic"
 ) {
-  pass("unit.copy.gates", "copy mode isolated; Created and natural Vishwa rows denied on 3E path");
-} else fail("unit.copy.gates", "copy mode or deny-list gate failed");
+  pass("unit.gold.forensic", "queued forensic IDs remain denied on exact-row path");
+} else fail("unit.gold.forensic", "forensic deny list missing GOLD IDs");
 
 console.log(failures ? `\nSTAGE 3F: BLOCKED (${failures})\n` : "\nSTAGE 3F: PASS\n");
 process.exit(failures ? 1 : 0);
