@@ -340,5 +340,28 @@ if (
   fail("pn3e.safety", "Stage 3E exact-row contract incomplete");
 }
 
+const pn3fRel = "supabase/migrations/20260928240000_pn_email_stage3f_notification_routing.sql";
+const pn3fTwinRel = "supabase/sql/pn_email_stage3f_notification_routing.sql";
+const pn3f = existsSync(resolve(root, pn3fRel)) ? read(pn3fRel) : "";
+const pn3fTwin = existsSync(resolve(root, pn3fTwinRel)) ? read(pn3fTwinRel) : "";
+if (pn3f && pn3f === pn3fTwin) pass("pn3f.twin", "Stage 3F migration matches SQL twin");
+else fail("pn3f.twin", "Stage 3F migration / twin missing or mismatched");
+
+if (
+  /notification_email_routes/.test(pn3f) &&
+  /resolve_prospect_lifecycle_email_route/.test(pn3f) &&
+  /primecarediagnosticsuppliesadm@gmail\.com/.test(pn3f) &&
+  /vishu\.sen80@gmail\.com/.test(pn3f) &&
+  /missing_route/.test(pn3f) &&
+  /b2b5f1a9-5678-4c1c-85ac-c06ea5b7fe64/.test(pn3f) &&
+  !/CREATE TABLE IF NOT EXISTS public\.notification_preferences/.test(pn3f) &&
+  !/primecarediagnosticsuppliesadm@gmail\.com/.test(dispatchSrc) &&
+  !/vishu\.sen80@gmail\.com/.test(dispatchSrc)
+) {
+  pass("pn3f.routing", "explicit tenant/event/agent routes; destinations not in dispatcher");
+} else {
+  fail("pn3f.routing", "Stage 3F routing contract incomplete");
+}
+
 console.log(failures ? `\nNOTIFICATION CONTRACT: BLOCKED (${failures})\n` : "\nNOTIFICATION CONTRACT: PASS\n");
 process.exit(failures ? 1 : 0);

@@ -19,6 +19,7 @@ export const STAGE3E_FORENSIC_DELIVERY_IDS = [
   "c02c0d63-9a0f-4ec6-8966-6035258364ad",
   "424796d2-3e78-438c-8fb6-ab5c3bb3e28b",
   "63561826-8bb3-4004-b857-b58c397b2aae",
+  "b2b5f1a9-5678-4c1c-85ac-c06ea5b7fe64",
 ];
 
 export function str(v) {
@@ -206,7 +207,9 @@ export function isStage3eEventType(eventType) {
 export function isStage3eRecipientRole(eventType, role) {
   const r = lower(role);
   if (r === "lab" || r === "customer") return false;
-  if (lower(eventType) === "prospect_created") return r === "admin" || r === "executive";
+  if (lower(eventType) === "prospect_created") {
+    return r === "admin" || r === "executive" || r === "operations" || r === "";
+  }
   if (lower(eventType) === "prospect_activated") return r === "agent";
   return false;
 }
