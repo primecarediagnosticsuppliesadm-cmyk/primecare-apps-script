@@ -263,5 +263,24 @@ if (!/pn_email_stage2_certification/.test(constants)) {
   fail("pn2a.client_unaware", "do not add certification event type to client constants");
 }
 
+const pn2cRel = "supabase/migrations/20260928140000_pn_email_stage2c_certification_repair.sql";
+const pn2cTwinRel = "supabase/sql/pn_email_stage2c_certification_repair.sql";
+const pn2c = existsSync(resolve(root, pn2cRel)) ? read(pn2cRel) : "";
+const pn2cTwin = existsSync(resolve(root, pn2cTwinRel)) ? read(pn2cTwinRel) : "";
+if (pn2c && pn2c === pn2cTwin) pass("pn2c.twin", "Stage 2C migration matches SQL twin");
+else fail("pn2c.twin", "Stage 2C migration / twin missing or mismatched");
+
+if (
+  /INTO v_existing_id, v_existing_event, v_existing_recipient/.test(pn2c) &&
+  !/INTO v_delivery_id, v_event_id, v_email,/.test(pn2c) &&
+  /3face3b7-abac-46ff-839a-eccc1ef2b79e/.test(pn2c) &&
+  /RAISE EXCEPTION 'stage2c_cert_row_already_sent'/.test(pn2c) &&
+  !/DELETE FROM public\.notification_delivery_log/.test(pn2c)
+) {
+  pass("pn2c.safety", "input recipient preserved; UNSENT repair guarded; SENT blocked");
+} else {
+  fail("pn2c.safety", "Stage 2C SQL safety contract incomplete");
+}
+
 console.log(failures ? `\nNOTIFICATION CONTRACT: BLOCKED (${failures})\n` : "\nNOTIFICATION CONTRACT: PASS\n");
 process.exit(failures ? 1 : 0);
