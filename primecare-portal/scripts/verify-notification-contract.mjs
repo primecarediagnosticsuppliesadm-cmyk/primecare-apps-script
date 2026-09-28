@@ -301,5 +301,24 @@ if (
   fail("pn3br.identity", "Stage 3B-R identity contract incomplete");
 }
 
+const pn3dRel = "supabase/migrations/20260928220000_pn_email_stage3d_recipient_safety.sql";
+const pn3dTwinRel = "supabase/sql/pn_email_stage3d_recipient_safety.sql";
+const pn3d = existsSync(resolve(root, pn3dRel)) ? read(pn3dRel) : "";
+const pn3dTwin = existsSync(resolve(root, pn3dTwinRel)) ? read(pn3dTwinRel) : "";
+if (pn3d && pn3d === pn3dTwin) pass("pn3d.twin", "Stage 3D migration matches SQL twin");
+else fail("pn3d.twin", "Stage 3D migration / twin missing or mismatched");
+
+if (
+  /prospect_email_is_production_dispatchable/.test(pn3d) &&
+  /non_dispatchable_domain/.test(pn3d) &&
+  /NOT LIKE '%\.local'/.test(pn3d) &&
+  !/AGT_VISHWAK/.test(pn3d) &&
+  !/PROD_AGENT_001/.test(pn3d)
+) {
+  pass("pn3d.safety", "canonical .local rejection; no fixture identity hard-codes");
+} else {
+  fail("pn3d.safety", "Stage 3D recipient-safety contract incomplete");
+}
+
 console.log(failures ? `\nNOTIFICATION CONTRACT: BLOCKED (${failures})\n` : "\nNOTIFICATION CONTRACT: PASS\n");
 process.exit(failures ? 1 : 0);

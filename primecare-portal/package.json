@@ -34,6 +34,7 @@
     "verify:prospect-email-stage2a": "node scripts/verify-prospect-email-stage2a.mjs",
     "verify:prospect-email-stage2c": "node scripts/verify-prospect-email-stage2c.mjs",
     "verify:prospect-email-stage3br": "node scripts/verify-prospect-email-stage3br.mjs",
+    "verify:prospect-email-stage3d": "node scripts/verify-prospect-email-stage3d.mjs",
     "enforce:pre-commit": "node scripts/enforcement/run-architecture-enforcement.mjs --profile pre-commit",
     "enforce:pr": "node scripts/enforcement/run-architecture-enforcement.mjs --profile pr --all",
     "enforce:full": "ENFORCEMENT_MODE=full node scripts/enforcement/run-architecture-enforcement.mjs --profile nightly --all",

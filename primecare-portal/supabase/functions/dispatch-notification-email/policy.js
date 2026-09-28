@@ -43,6 +43,26 @@ export function emailDomain(email) {
   return raw.slice(at + 1);
 }
 
+const EMAIL_SYNTAX_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Canonical Production lifecycle dispatch eligibility.
+ * Syntax-usable AND not a .local / primecare.local domain.
+ * Does not reject Gmail. Does not require a company domain.
+ */
+export function isProductionDispatchableEmail(email) {
+  const raw = lower(email);
+  if (!raw || !EMAIL_SYNTAX_RE.test(raw)) return false;
+  const domain = emailDomain(raw);
+  if (!domain) return false;
+  if (domain === "local" || domain === "primecare.local" || domain.endsWith(".local")) {
+    return false;
+  }
+  return true;
+}
+
+export const NON_DISPATCHABLE_DOMAIN = "non_dispatchable_domain";
+
 export function parseAllowlist(raw) {
   const parts = str(raw)
     .split(/[,\s]+/)

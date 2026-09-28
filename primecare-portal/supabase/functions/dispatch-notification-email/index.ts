@@ -12,8 +12,10 @@ import {
   evaluateProductionCertificationEnv,
   evaluateProductionCertificationRow,
   isCertificationRequest,
+  isProductionDispatchableEmail,
   maskEmail,
   nextAttemptAtIso,
+  NON_DISPATCHABLE_DOMAIN,
   renderCertificationEmail,
   renderForEventType,
   resolveQaRecipient,
@@ -209,6 +211,19 @@ async function handleProductionCertification(admin: ReturnType<typeof createClie
     return failClosed(rowGate.reason, { delivery_id: deliveryId });
   }
 
+  if (
+    !isProductionDispatchableEmail(str(row.recipient_email))
+    || !isProductionDispatchableEmail(rowGate.providerTo)
+  ) {
+    await admin.rpc("finalize_notification_email_delivery", {
+      p_delivery_id: deliveryId,
+      p_status: "skipped",
+      p_error_code: NON_DISPATCHABLE_DOMAIN,
+      p_error_summary: NON_DISPATCHABLE_DOMAIN,
+    });
+    return failClosed(NON_DISPATCHABLE_DOMAIN, { delivery_id: deliveryId });
+  }
+
   const apiKey = env("EMAIL_PROVIDER_API_KEY");
   const fromAddress = env("EMAIL_FROM_ADDRESS");
   if (!apiKey || !fromAddress) {
@@ -382,6 +397,22 @@ Deno.serve(async (req) => {
       continue;
     }
 
+    if (!isProductionDispatchableEmail(intended)) {
+      await admin.rpc("finalize_notification_email_delivery", {
+        p_delivery_id: deliveryId,
+        p_status: "skipped",
+        p_error_code: NON_DISPATCHABLE_DOMAIN,
+        p_error_summary: NON_DISPATCHABLE_DOMAIN,
+      });
+      logSafe({ ...baseLog, status: "skipped", error_code: NON_DISPATCHABLE_DOMAIN, actual: "***" });
+      processed.push({
+        delivery_id: deliveryId,
+        status: "skipped",
+        error_code: NON_DISPATCHABLE_DOMAIN,
+      });
+      continue;
+    }
+
     const qa = resolveQaRecipient({
       intendedEmail: intended,
       qaMode: env("EMAIL_QA_MODE"),
@@ -400,6 +431,27 @@ Deno.serve(async (req) => {
       });
       logSafe({ ...baseLog, status: "skipped", error_code: qa.reason, actual: "***" });
       processed.push({ delivery_id: deliveryId, status: "skipped", error_code: qa.reason });
+      continue;
+    }
+
+    if (!isProductionDispatchableEmail(qa.providerTo)) {
+      await admin.rpc("finalize_notification_email_delivery", {
+        p_delivery_id: deliveryId,
+        p_status: "skipped",
+        p_error_code: NON_DISPATCHABLE_DOMAIN,
+        p_error_summary: NON_DISPATCHABLE_DOMAIN,
+      });
+      logSafe({
+        ...baseLog,
+        status: "skipped",
+        error_code: NON_DISPATCHABLE_DOMAIN,
+        actual: maskEmail(qa.providerTo),
+      });
+      processed.push({
+        delivery_id: deliveryId,
+        status: "skipped",
+        error_code: NON_DISPATCHABLE_DOMAIN,
+      });
       continue;
     }
 
