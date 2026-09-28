@@ -11,6 +11,15 @@ export const STAGE2_CERT_EVENT_TYPE = "pn_email_stage2_certification";
 export const STAGE2_CERT_SUBJECT = "PrimeCare Production Email Certification";
 export const STAGE2_CERT_BODY =
   "This is a controlled PrimeCare production email delivery certification. No customer or lab action is required.";
+export const STAGE2_CERT_DELIVERY_ID = "3face3b7-abac-46ff-839a-eccc1ef2b79e";
+/** PN-EMAIL Stage 3E — exact-row real-recipient lifecycle certification. */
+export const STAGE3E_MODE = "pn_email_stage3e_lifecycle";
+export const STAGE3E_LAB_NAME_PREFIX = "PN EMAIL STAGE3E REAL RECIPIENT CERT";
+export const STAGE3E_FORENSIC_DELIVERY_IDS = [
+  "c02c0d63-9a0f-4ec6-8966-6035258364ad",
+  "424796d2-3e78-438c-8fb6-ab5c3bb3e28b",
+  "63561826-8bb3-4004-b857-b58c397b2aae",
+];
 
 export function str(v) {
   return String(v ?? "").trim();
@@ -175,6 +184,68 @@ export function emailsEqual(a, b) {
 
 export function isCertificationRequest(body) {
   return lower(body?.mode) === STAGE2_CERT_MODE;
+}
+
+export function isStage3eRequest(body) {
+  return lower(body?.mode) === STAGE3E_MODE;
+}
+
+export function isProductionBatchClaimForbidden({ appEnv, qaMode }) {
+  return lower(appEnv) === "prod" && !isTruthyEnv(qaMode);
+}
+
+export function isStage3eLabNameEligible(name) {
+  return str(name).toUpperCase().startsWith(STAGE3E_LAB_NAME_PREFIX);
+}
+
+export function isStage3eEventType(eventType) {
+  const type = lower(eventType);
+  return type === "prospect_created" || type === "prospect_activated";
+}
+
+export function isStage3eRecipientRole(eventType, role) {
+  const r = lower(role);
+  if (r === "lab" || r === "customer") return false;
+  if (lower(eventType) === "prospect_created") return r === "admin" || r === "executive";
+  if (lower(eventType) === "prospect_activated") return r === "agent";
+  return false;
+}
+
+export function stage3eDeniedDelivery(deliveryId) {
+  const id = lower(deliveryId);
+  if (!id) return { denied: true, reason: "missing_delivery_id" };
+  if (STAGE3E_FORENSIC_DELIVERY_IDS.includes(id)) {
+    return { denied: true, reason: "rejected_forensic" };
+  }
+  if (id === lower(STAGE2_CERT_DELIVERY_ID)) {
+    return { denied: true, reason: "rejected_stage2_cert" };
+  }
+  return { denied: false, reason: "" };
+}
+
+/**
+ * Stage 3E env gate. EMAIL_ENABLED=false fails closed.
+ * Does not open normal batch. Does not require EMAIL_PROD_TEST_RECIPIENT.
+ */
+export function evaluateStage3eEnv({
+  emailEnabled,
+  appEnv,
+  qaMode,
+  stage3eMode,
+}) {
+  if (!shouldClaimRows(emailEnabled)) {
+    return { ok: false, reason: "email_disabled" };
+  }
+  if (!stage3eMode) {
+    return { ok: false, reason: "not_stage3e_mode" };
+  }
+  if (lower(appEnv) !== "prod") {
+    return { ok: false, reason: "stage3e_prod_only" };
+  }
+  if (isTruthyEnv(qaMode)) {
+    return { ok: false, reason: "stage3e_qa_mode_forbidden" };
+  }
+  return { ok: true, reason: "env_ready" };
 }
 
 /**

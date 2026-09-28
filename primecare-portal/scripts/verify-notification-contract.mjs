@@ -320,5 +320,25 @@ if (
   fail("pn3d.safety", "Stage 3D recipient-safety contract incomplete");
 }
 
+const pn3eRel = "supabase/migrations/20260928230000_pn_email_stage3e_lifecycle_cert.sql";
+const pn3eTwinRel = "supabase/sql/pn_email_stage3e_lifecycle_cert.sql";
+const pn3e = existsSync(resolve(root, pn3eRel)) ? read(pn3eRel) : "";
+const pn3eTwin = existsSync(resolve(root, pn3eTwinRel)) ? read(pn3eTwinRel) : "";
+if (pn3e && pn3e === pn3eTwin) pass("pn3e.twin", "Stage 3E migration matches SQL twin");
+else fail("pn3e.twin", "Stage 3E migration / twin missing or mismatched");
+
+if (
+  /claim_notification_email_stage3e_delivery/.test(pn3e) &&
+  /rejected_forensic/.test(pn3e) &&
+  /PN EMAIL STAGE3E REAL RECIPIENT CERT%/.test(pn3e) &&
+  /production_freeze_batch_forbidden/.test(dispatchSrc) &&
+  /handleStage3eLifecycle/.test(dispatchSrc) &&
+  !/claim_notification_email_deliveries\(/.test(pn3e)
+) {
+  pass("pn3e.safety", "exact-row Stage 3E claim; Production batch remains forbidden");
+} else {
+  fail("pn3e.safety", "Stage 3E exact-row contract incomplete");
+}
+
 console.log(failures ? `\nNOTIFICATION CONTRACT: BLOCKED (${failures})\n` : "\nNOTIFICATION CONTRACT: PASS\n");
 process.exit(failures ? 1 : 0);

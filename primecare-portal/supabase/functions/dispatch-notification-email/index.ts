@@ -11,15 +11,23 @@ import {
   classifyProviderError,
   evaluateProductionCertificationEnv,
   evaluateProductionCertificationRow,
+  evaluateStage3eEnv,
   isCertificationRequest,
+  isProductionBatchClaimForbidden,
   isProductionDispatchableEmail,
+  isStage3eEventType,
+  isStage3eLabNameEligible,
+  isStage3eRecipientRole,
+  isStage3eRequest,
   maskEmail,
   nextAttemptAtIso,
   NON_DISPATCHABLE_DOMAIN,
+  payloadText,
   renderCertificationEmail,
   renderForEventType,
   resolveQaRecipient,
   shouldClaimRows,
+  stage3eDeniedDelivery,
   str,
 } from "./policy.js";
 
@@ -307,6 +315,175 @@ async function handleProductionCertification(admin: ReturnType<typeof createClie
   }, 200);
 }
 
+async function handleStage3eLifecycle(
+  admin: ReturnType<typeof createClient>,
+  requestedDeliveryId: string,
+) {
+  const envGate = evaluateStage3eEnv({
+    emailEnabled: env("EMAIL_ENABLED"),
+    appEnv: env("APP_ENV"),
+    qaMode: env("EMAIL_QA_MODE"),
+    stage3eMode: true,
+  });
+  if (!envGate.ok) {
+    return failClosed(envGate.reason);
+  }
+
+  const denied = stage3eDeniedDelivery(requestedDeliveryId);
+  if (denied.denied) {
+    return failClosed(denied.reason, { delivery_id: requestedDeliveryId || null });
+  }
+
+  const { data: claimed, error: claimErr } = await admin.rpc(
+    "claim_notification_email_stage3e_delivery",
+    { p_delivery_id: requestedDeliveryId },
+  );
+  if (claimErr) {
+    return failClosed("stage3e_claim_failed");
+  }
+  const rows = Array.isArray(claimed) ? claimed : claimed ? [claimed] : [];
+  if (rows.length !== 1) {
+    return failClosed("not_found", { delivery_id: requestedDeliveryId });
+  }
+  const row = rows[0];
+  const outcome = str(row.claim_outcome);
+  const deliveryId = str(row.delivery_id);
+  if (outcome === "already_sent") {
+    logSafe({
+      event: "stage3e_already_sent",
+      delivery_id: deliveryId,
+      provider_message_id: str(row.provider_message_id),
+    });
+    return jsonResponse({
+      success: true,
+      disabled: false,
+      claimed: 0,
+      processed: [{ delivery_id: deliveryId, status: "sent", skipped: "already_sent" }],
+    });
+  }
+  if (outcome !== "claimed") {
+    return failClosed(outcome || "not_claimable", { delivery_id: deliveryId || requestedDeliveryId });
+  }
+
+  const eventType = str(row.event_type);
+  const payload = row.payload_json && typeof row.payload_json === "object" ? row.payload_json : {};
+  const labName = payloadText(payload, "lab_name");
+  const intended = str(row.recipient_email);
+  const role = str(row.recipient_role);
+
+  if (
+    !isStage3eEventType(eventType)
+    || !isStage3eLabNameEligible(labName)
+    || !isStage3eRecipientRole(eventType, role)
+    || !isProductionDispatchableEmail(intended)
+  ) {
+    await admin.rpc("finalize_notification_email_delivery", {
+      p_delivery_id: deliveryId,
+      p_status: "skipped",
+      p_error_code: "stage3e_row_gate",
+      p_error_summary: "stage3e_row_gate",
+    });
+    return failClosed("stage3e_row_gate", { delivery_id: deliveryId });
+  }
+
+  const apiKey = env("EMAIL_PROVIDER_API_KEY");
+  const fromAddress = env("EMAIL_FROM_ADDRESS");
+  if (!apiKey || !fromAddress) {
+    await admin.rpc("finalize_notification_email_delivery", {
+      p_delivery_id: deliveryId,
+      p_status: "failed",
+      p_error_code: "provider_unconfigured",
+      p_error_summary: "provider_unconfigured",
+      p_provider_recipient: intended,
+    });
+    return failClosed("provider_unconfigured", { delivery_id: deliveryId });
+  }
+
+  const assignedName = await resolveAssignedName(admin, str(row.tenant_id), payload as Record<string, unknown>);
+  const rendered = renderForEventType(eventType, {
+    payload,
+    appPublicUrl: env("APP_PUBLIC_URL") || "https://app.primecarediagnostics.in",
+    assignedName,
+  });
+  if (!rendered.ok) {
+    await admin.rpc("finalize_notification_email_delivery", {
+      p_delivery_id: deliveryId,
+      p_status: "skipped",
+      p_error_code: rendered.errorCode,
+      p_error_summary: rendered.errorCode,
+    });
+    return failClosed(rendered.errorCode || "unsupported_event_type", { delivery_id: deliveryId });
+  }
+
+  const send = await sendResend({
+    apiKey,
+    fromName: env("EMAIL_FROM_NAME") || "PrimeCare",
+    fromAddress,
+    replyTo: env("EMAIL_REPLY_TO"),
+    to: intended,
+    subject: rendered.subject,
+    text: rendered.text,
+    html: rendered.html,
+    deliveryId,
+  });
+
+  if (send.ok) {
+    await admin.rpc("finalize_notification_email_delivery", {
+      p_delivery_id: deliveryId,
+      p_status: "sent",
+      p_provider_message_id: send.id,
+      p_provider_recipient: intended,
+    });
+    logSafe({
+      event: "stage3e_sent",
+      delivery_id: deliveryId,
+      event_type: eventType,
+      intended: maskEmail(intended),
+      actual: maskEmail(intended),
+      provider_message_id: send.id,
+    });
+    return jsonResponse({
+      success: true,
+      disabled: false,
+      claimed: 1,
+      processed: [{
+        delivery_id: deliveryId,
+        status: "sent",
+        provider_message_id: send.id,
+        actual: maskEmail(intended),
+        intended: maskEmail(intended),
+        event_type: eventType,
+      }],
+    });
+  }
+
+  const classified = classifyProviderError(send.status, send.kind);
+  await admin.rpc("finalize_notification_email_delivery", {
+    p_delivery_id: deliveryId,
+    p_status: "failed",
+    p_error_code: classified.errorCode,
+    p_error_summary: classified.errorCode,
+    p_provider_error: String(send.status || send.kind || "error"),
+    p_provider_recipient: intended,
+  });
+  logSafe({
+    event: "stage3e_failed",
+    delivery_id: deliveryId,
+    error_code: classified.errorCode,
+    actual: maskEmail(intended),
+  });
+  return jsonResponse({
+    success: false,
+    disabled: false,
+    claimed: 1,
+    processed: [{
+      delivery_id: deliveryId,
+      status: "failed",
+      error_code: classified.errorCode,
+    }],
+  }, 200);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -324,17 +501,25 @@ Deno.serve(async (req) => {
 
   // Open-relay fields are parsed only to prove they are ignored.
   // Caller to/subject/html/delivery_id never select the certification row.
+  // Stage 3E exact-row mode is the only path that reads caller delivery_id;
+  // to/subject/html/event_type still never become provider payload.
   let ignoredTo = "";
   let requestMode = "";
+  let requestedDeliveryId = "";
+  let ignoredEventType = "";
   try {
     const body = await req.json();
     ignoredTo = str(body?.to) || str(body?.subject) || str(body?.body) || str(body?.html);
     requestMode = str(body?.mode);
+    requestedDeliveryId = str(body?.delivery_id);
+    ignoredEventType = str(body?.event_type);
   } catch {
     ignoredTo = "";
     requestMode = "";
+    requestedDeliveryId = "";
+    ignoredEventType = "";
   }
-  if (ignoredTo) {
+  if (ignoredTo || ignoredEventType) {
     logSafe({ event: "ignore_caller_payload" });
   }
 
@@ -353,8 +538,26 @@ Deno.serve(async (req) => {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
+  if (isStage3eRequest({ mode: requestMode })) {
+    return await handleStage3eLifecycle(admin, requestedDeliveryId);
+  }
+
   if (isCertificationRequest({ mode: requestMode })) {
     return await handleProductionCertification(admin);
+  }
+
+  if (isProductionBatchClaimForbidden({
+    appEnv: env("APP_ENV"),
+    qaMode: env("EMAIL_QA_MODE"),
+  })) {
+    logSafe({ event: "production_freeze_batch_forbidden" });
+    return jsonResponse({
+      success: false,
+      disabled: false,
+      claimed: 0,
+      processed: [],
+      error: "production_freeze_batch_forbidden",
+    });
   }
 
   const { data: claimed, error: claimErr } = await admin.rpc("claim_notification_email_deliveries", {
