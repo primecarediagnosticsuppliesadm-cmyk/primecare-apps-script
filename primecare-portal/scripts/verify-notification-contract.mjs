@@ -363,5 +363,22 @@ if (
   fail("pn3f.routing", "Stage 3F routing contract incomplete");
 }
 
+const pn3frRel = "supabase/migrations/20260928250000_pn_email_stage3fr_lab_name_eligibility.sql";
+const pn3frTwinRel = "supabase/sql/pn_email_stage3fr_lab_name_eligibility.sql";
+const pn3fr = existsSync(resolve(root, pn3frRel)) ? read(pn3frRel) : "";
+const pn3frTwin = existsSync(resolve(root, pn3frTwinRel)) ? read(pn3frTwinRel) : "";
+if (pn3fr && pn3fr === pn3frTwin) pass("pn3fr.twin", "Stage 3F-R eligibility migration matches SQL twin");
+else fail("pn3fr.twin", "Stage 3F-R migration / twin missing or mismatched");
+
+if (
+  /PN EMAIL STAGE3E REAL RECIPIENT CERT%/.test(pn3fr) &&
+  /PN EMAIL STAGE3F REAL RECIPIENT CERT%/.test(pn3fr) &&
+  /PN EMAIL STAGE3E REAL RECIPIENT CERT%/.test(pn3e)
+) {
+  pass("pn3fr.prefixes", "exact-row prefixes are explicit Stage 3E and Stage 3F only");
+} else {
+  fail("pn3fr.prefixes", "Stage 3F-R prefix contract incomplete");
+}
+
 console.log(failures ? `\nNOTIFICATION CONTRACT: BLOCKED (${failures})\n` : "\nNOTIFICATION CONTRACT: PASS\n");
 process.exit(failures ? 1 : 0);

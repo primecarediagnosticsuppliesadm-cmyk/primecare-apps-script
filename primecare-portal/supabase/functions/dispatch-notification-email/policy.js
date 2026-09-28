@@ -15,6 +15,7 @@ export const STAGE2_CERT_DELIVERY_ID = "3face3b7-abac-46ff-839a-eccc1ef2b79e";
 /** PN-EMAIL Stage 3E — exact-row real-recipient lifecycle certification. */
 export const STAGE3E_MODE = "pn_email_stage3e_lifecycle";
 export const STAGE3E_LAB_NAME_PREFIX = "PN EMAIL STAGE3E REAL RECIPIENT CERT";
+export const STAGE3F_LAB_NAME_PREFIX = "PN EMAIL STAGE3F REAL RECIPIENT CERT";
 export const STAGE3E_FORENSIC_DELIVERY_IDS = [
   "c02c0d63-9a0f-4ec6-8966-6035258364ad",
   "424796d2-3e78-438c-8fb6-ab5c3bb3e28b",
@@ -196,7 +197,8 @@ export function isProductionBatchClaimForbidden({ appEnv, qaMode }) {
 }
 
 export function isStage3eLabNameEligible(name) {
-  return str(name).toUpperCase().startsWith(STAGE3E_LAB_NAME_PREFIX);
+  const n = str(name).toUpperCase();
+  return n.startsWith(STAGE3E_LAB_NAME_PREFIX) || n.startsWith(STAGE3F_LAB_NAME_PREFIX);
 }
 
 export function isStage3eEventType(eventType) {

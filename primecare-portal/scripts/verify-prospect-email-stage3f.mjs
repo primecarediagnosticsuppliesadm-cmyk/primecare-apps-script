@@ -12,9 +12,11 @@ import {
   STAGE2_CERT_MODE,
   STAGE3E_FORENSIC_DELIVERY_IDS,
   STAGE3E_MODE,
+  STAGE3F_LAB_NAME_PREFIX,
   evaluateStage3eEnv,
   isProductionBatchClaimForbidden,
   isProductionDispatchableEmail,
+  isStage3eLabNameEligible,
   isStage3eRecipientRole,
   isStage3eRequest,
   resolveQaRecipient,
@@ -211,6 +213,53 @@ if (!/zipuzmfkwwucbchlphcj/.test(mig) && !/EMAIL_QA_MODE=true/.test(mig) && !/EM
 if (/verify:prospect-email-stage3f/.test(pkg)) {
   pass("static.pkg", "Stage 3F verifier script registered");
 } else fail("static.pkg", "package.json missing 3F verifier");
+
+const frRel = "supabase/migrations/20260928250000_pn_email_stage3fr_lab_name_eligibility.sql";
+const frTwinRel = "supabase/sql/pn_email_stage3fr_lab_name_eligibility.sql";
+const fr = readRel(frRel);
+const frTwin = readRel(frTwinRel);
+if (fr && fr === frTwin) pass("static.fr.twin", "Stage 3F-R eligibility migration matches twin");
+else fail("static.fr.twin", "Stage 3F-R migration / twin mismatch");
+
+if (
+  /PN EMAIL STAGE3E REAL RECIPIENT CERT%/.test(fr) &&
+  /PN EMAIL STAGE3F REAL RECIPIENT CERT%/.test(fr) &&
+  /PN EMAIL STAGE3E REAL RECIPIENT CERT%/.test(pn3e) &&
+  !/DELETE FROM/.test(fr) &&
+  !/EMAIL_ENABLED\s*=\s*true/.test(fr) &&
+  !/cron\.schedule/.test(fr)
+) {
+  pass("static.fr.sql", "3F prefix added; 3E prefix retained; no send/cron");
+} else fail("static.fr.sql", "3F-R eligibility SQL incomplete");
+
+if (
+  isStage3eLabNameEligible("PN EMAIL STAGE3F REAL RECIPIENT CERT — DO NOT CONTACT") &&
+  isStage3eLabNameEligible("PN EMAIL STAGE3E REAL RECIPIENT CERT — DO NOT CONTACT") &&
+  STAGE3F_LAB_NAME_PREFIX === "PN EMAIL STAGE3F REAL RECIPIENT CERT" &&
+  !isStage3eLabNameEligible("LAB-P-3CD3204FEFC8") &&
+  !isStage3eLabNameEligible("Some customer lab") &&
+  !isStage3eLabNameEligible("PN EMAIL STAGE3F ROUTING PROOF — DELETE")
+) {
+  pass("unit.fr.prefix", "Stage 3F and 3E prefixes accepted; arbitrary labs rejected");
+} else fail("unit.fr.prefix", "lab-name eligibility too wide or missing 3F");
+
+if (
+  stage3eDeniedDelivery("c02c0d63-9a0f-4ec6-8966-6035258364ad").reason === "rejected_forensic" &&
+  stage3eDeniedDelivery("424796d2-3e78-438c-8fb6-ab5c3bb3e28b").reason === "rejected_forensic" &&
+  stage3eDeniedDelivery("63561826-8bb3-4004-b857-b58c397b2aae").reason === "rejected_forensic" &&
+  stage3eDeniedDelivery("b2b5f1a9-5678-4c1c-85ac-c06ea5b7fe64").reason === "rejected_forensic" &&
+  stage3eDeniedDelivery(STAGE2_CERT_DELIVERY_ID).reason === "rejected_stage2_cert"
+) {
+  pass("unit.fr.deny", "forensic IDs and Stage 2 cert remain rejected");
+} else fail("unit.fr.deny", "deny list broken");
+
+if (/already_sent/.test(mig) && /outcome === "already_sent"/.test(fn)) {
+  pass("unit.fr.sent_rows", "sent rows remain non-resendable");
+} else fail("unit.fr.sent_rows", "already_sent protection missing");
+
+if (/ignore_caller_payload/.test(fn) && /to: intended/.test(fn) && !/body\?\.to/.test(fn.split("sendResend")[1] || "")) {
+  pass("unit.fr.caller", "caller To/subject/html cannot override provider recipient");
+} else fail("unit.fr.caller", "caller override path present");
 
 console.log(failures ? `\nSTAGE 3F: BLOCKED (${failures})\n` : "\nSTAGE 3F: PASS\n");
 process.exit(failures ? 1 : 0);
