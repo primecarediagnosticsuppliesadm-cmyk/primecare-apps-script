@@ -18,6 +18,11 @@ import {
   createEmptyDiscoveryLine,
   createEmptyVisitEvidenceForm,
 } from "@/visits/agentVisitEvidenceFormModel.js";
+import { createVisitHandoffWrite } from "@/visits/visitHandoffsApi.js";
+import {
+  isHandoffTriggerOutcome,
+  prefillRequirementSummary,
+} from "@/visits/visitHandoffsContract.js";
 import { cn } from "@/lib/utils";
 
 const FIELD =
@@ -118,6 +123,7 @@ export default function AgentVisitEvidenceForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [partial, setPartial] = useState(null);
+  const [handoffStep, setHandoffStep] = useState(null);
   const savingRef = useRef(false);
 
   const selected = useMemo(
@@ -192,10 +198,32 @@ export default function AgentVisitEvidenceForm({
         setError(res?.error || "Visit could not be saved.");
         return;
       }
-      setForm({
-        ...createEmptyVisitEvidenceForm(),
-        labId: form.labId,
-      });
+      const visitUuid = res.data?.id;
+      const outcome = String(payload.commercialOutcome || "").toUpperCase();
+      if (visitUuid && isHandoffTriggerOutcome(outcome)) {
+        setHandoffStep({
+          visitUuid,
+          labId: form.labId,
+          labName: selected?.labName || form.labId,
+          prospect,
+          outcome,
+          requirementSummary: prefillRequirementSummary({
+            notes: form.notes,
+            nextAction: form.nextAction,
+            discoveryLines: payload.discoveryLines,
+          }),
+          neededBy: "",
+          sending: false,
+          error: "",
+          handoff: null,
+        });
+      } else {
+        setHandoffStep(null);
+        setForm({
+          ...createEmptyVisitEvidenceForm(),
+          labId: form.labId,
+        });
+      }
       onSuccess?.(res);
     } catch (err) {
       setError(err?.message || String(err));
@@ -435,9 +463,115 @@ export default function AgentVisitEvidenceForm({
         </p>
       ) : null}
 
-      <Button type="submit" className={cn("h-12 w-full text-base")} disabled={saving}>
+      <Button type="submit" className={cn("h-12 w-full text-base")} disabled={saving} data-ae1c-save-visit="true">
         {saving ? "Saving…" : "Save visit"}
       </Button>
+
+      {isHandoffTriggerOutcome(form.commercialOutcome) && !handoffStep ? (
+        <section className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3" data-ae1c-support-needed="true">
+          <h3 className="text-sm font-semibold text-slate-900">PrimeCare Support Needed</h3>
+          <p className="mt-0.5 text-[11px] text-slate-600">
+            Save this visit first. Then you can send the lab&apos;s need to PrimeCare.
+          </p>
+        </section>
+      ) : null}
+
+      {handoffStep ? (
+        <PrimeCareSupportNeeded
+          step={handoffStep}
+          saving={saving}
+          onChange={(next) => setHandoffStep((prev) => ({ ...prev, ...next }))}
+          onSent={(handoff) => {
+            setHandoffStep((prev) => ({ ...prev, handoff, sending: false, error: "" }));
+            setForm({
+              ...createEmptyVisitEvidenceForm(),
+              labId: form.labId,
+            });
+          }}
+        />
+      ) : null}
     </form>
+  );
+}
+
+function PrimeCareSupportNeeded({ step, saving, onChange, onSent }) {
+  const sent = Boolean(step.handoff);
+  async function send(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (step.sending || sent) return;
+    if (!String(step.requirementSummary || "").trim()) {
+      onChange({ error: "Tell PrimeCare what the lab needs." });
+      return;
+    }
+    onChange({ sending: true, error: "" });
+    const res = await createVisitHandoffWrite({
+      visitUuid: step.visitUuid,
+      requirementSummary: step.requirementSummary,
+      neededBy: step.neededBy || null,
+    });
+    if (!res?.success) {
+      onChange({ sending: false, error: res?.error || "Could not send to PrimeCare." });
+      return;
+    }
+    onSent(res.handoff);
+  }
+
+  return (
+    <section
+      className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3"
+      data-ae1c-support-needed="true"
+      data-ae1c-prospect={step.prospect ? "true" : "false"}
+    >
+      <h3 className="text-sm font-semibold text-slate-900">PrimeCare Support Needed</h3>
+      <p className="mt-0.5 text-[11px] text-slate-600">
+        {step.prospect
+          ? "Prospects can wait on PrimeCare. This does not activate the account or create an order."
+          : "Send only if the lab asked PrimeCare to source, price, or respond."}
+      </p>
+      {sent ? (
+        <p className="mt-2 text-sm font-medium text-indigo-900" data-ae1c-waiting="true">
+          {step.handoff?.humanStatus || "Waiting on PrimeCare"}
+        </p>
+      ) : (
+        <>
+          <label className="mt-3 block text-xs font-medium text-slate-700">
+            What does the lab need?
+            <Textarea
+              className="mt-1 min-h-[72px] text-sm"
+              value={step.requirementSummary}
+              onChange={(e) => onChange({ requirementSummary: e.target.value, error: "" })}
+              disabled={saving || step.sending}
+              data-ae1c-requirement-summary="true"
+            />
+          </label>
+          <label className="mt-2 block text-xs font-medium text-slate-700">
+            Needed by
+            <Input
+              type="date"
+              className="mt-1 h-10 text-sm"
+              value={step.neededBy}
+              onChange={(e) => onChange({ neededBy: e.target.value })}
+              disabled={saving || step.sending}
+              data-ae1c-needed-by="true"
+            />
+          </label>
+          {step.error ? (
+            <p className="mt-2 text-xs text-destructive" role="alert">
+              {step.error}
+            </p>
+          ) : null}
+          <Button
+            type="button"
+            className="mt-3 h-11 w-full"
+            disabled={saving || step.sending}
+            onClick={send}
+            data-ae1c-send="true"
+          >
+            {step.sending ? "Sending…" : "Send to PrimeCare"}
+          </Button>
+        </>
+      )}
+    </section>
   );
 }

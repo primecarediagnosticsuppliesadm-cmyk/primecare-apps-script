@@ -36,6 +36,8 @@ import {
   displayVisitNotes,
   formatMyBusinessDisplayLabel,
 } from "@/myBusiness/myBusinessDisplay.js";
+import { resolveVisitHandoffWrite } from "@/visits/visitHandoffsApi.js";
+import { LOSS_REASON_OPTIONS } from "@/visits/visitHandoffsContract.js";
 
 const PRESETS = [
   { id: "today", label: "Today" },
@@ -313,6 +315,45 @@ export default function MyBusinessPage({ currentUser = null, setActivePage = nul
             )}
           </section>
 
+          {(model.waitingOnPrimecare || []).length ? (
+            <section data-ae1c-waiting-on-primecare="true" className="space-y-2">
+              <h2 className="text-sm font-semibold">Waiting on PrimeCare</h2>
+              {model.waitingOnPrimecare.map((item) => (
+                <article
+                  key={item.id}
+                  className="rounded-lg border border-indigo-200 bg-indigo-50/60 px-3 py-2"
+                  data-ae1c-waiting-item={item.id}
+                >
+                  <p className="text-sm font-semibold">{item.labName || item.labId}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{item.requirementSummary}</p>
+                  <p className="mt-1 text-xs font-medium text-indigo-900">Waiting on PrimeCare</p>
+                </article>
+              ))}
+            </section>
+          ) : null}
+
+          {(model.primecareResponded || []).length ? (
+            <section data-ae1c-primecare-responded="true" className="space-y-2">
+              <h2 className="text-sm font-semibold">PrimeCare Responded — Your Action</h2>
+              {model.primecareResponded.map((item) => (
+                <PrimeCareRespondedCard
+                  key={item.id}
+                  item={item}
+                  canAct={canLogVisit}
+                  onOpenLab={openLab}
+                  onConverted={(labStatus, labId) => {
+                    if (labStatus === "PROSPECT") {
+                      openLab(labId);
+                      return;
+                    }
+                    setActivePage?.("orders");
+                  }}
+                  onResolved={() => load({ refresh: true })}
+                />
+              ))}
+            </section>
+          ) : null}
+
           <section data-testid="my-business-kpis">
             <KpiCardGrid columns={4} dense>
               <KpiCard title="Prospects added" value={model.kpis.prospectsAdded} subtitle="Sourced in period" />
@@ -495,5 +536,183 @@ export default function MyBusinessPage({ currentUser = null, setActivePage = nul
         <Phone className="h-3 w-3" />
       </span>
     </div>
+  );
+}
+
+function PrimeCareRespondedCard({ item, canAct, onOpenLab, onConverted, onResolved }) {
+  const [mode, setMode] = useState("");
+  const [followDate, setFollowDate] = useState(item.followUpDate || "");
+  const [nextAction, setNextAction] = useState(item.nextAction || "");
+  const [lossReason, setLossReason] = useState("");
+  const [closeNote, setCloseNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const prospect = String(item.labStatus || "").toUpperCase() === "PROSPECT";
+
+  async function run(action, extra = {}) {
+    setBusy(true);
+    setError("");
+    const res = await resolveVisitHandoffWrite({
+      handoffId: item.id,
+      action,
+      ...extra,
+    });
+    setBusy(false);
+    if (!res.success) {
+      setError(res.error || "Could not save.");
+      return;
+    }
+    setMode("");
+    onResolved?.();
+  }
+
+  return (
+    <article
+      className="rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2"
+      data-ae1c-responded-item={item.id}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <button
+          type="button"
+          className="text-left text-sm font-semibold underline-offset-2 hover:underline"
+          onClick={() => onOpenLab(item.labId)}
+        >
+          {item.labName || item.labId}
+        </button>
+        <span className="text-[11px] font-medium text-amber-900">PrimeCare Responded — Your Action</span>
+      </div>
+      <p className="mt-1 text-xs">
+        <span className="text-muted-foreground">Asked: </span>
+        {item.requirementSummary}
+      </p>
+      <p className="mt-1 text-xs">
+        <span className="text-muted-foreground">PrimeCare: </span>
+        {item.hqResponse}
+      </p>
+      {item.hqRespondedAt ? (
+        <p className="mt-0.5 text-[11px] text-muted-foreground">{item.hqRespondedAt}</p>
+      ) : null}
+      {item.nextAction || item.followUpDate ? (
+        <p className="mt-1 text-xs">
+          Next: {item.nextAction || "—"}
+          {item.followUpDate ? ` · ${item.followUpDate}` : ""}
+        </p>
+      ) : null}
+
+      {canAct ? (
+        <div className="mt-2 flex flex-wrap gap-1">
+          <Button type="button" size="sm" variant="outline" className="h-7 px-2" onClick={() => setMode("follow")}>
+            Followed up — still deciding
+          </Button>
+          <Button type="button" size="sm" variant="outline" className="h-7 px-2" onClick={() => setMode("converted")}>
+            Converted to order
+          </Button>
+          <Button type="button" size="sm" variant="outline" className="h-7 px-2" onClick={() => setMode("loss")}>
+            Not proceeding
+          </Button>
+        </div>
+      ) : null}
+
+      {mode === "follow" ? (
+        <div className="mt-2 space-y-2 rounded-md border bg-white p-2">
+          <label className="block text-[11px] font-medium">
+            Next follow-up date
+            <input
+              type="date"
+              className="mt-1 block w-full rounded-md border px-2 py-1 text-sm"
+              value={followDate}
+              onChange={(e) => setFollowDate(e.target.value)}
+            />
+          </label>
+          <label className="block text-[11px] font-medium">
+            Next action
+            <input
+              className="mt-1 block w-full rounded-md border px-2 py-1 text-sm"
+              value={nextAction}
+              onChange={(e) => setNextAction(e.target.value)}
+            />
+          </label>
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy || !followDate}
+            onClick={() =>
+              run("FOLLOWED_UP", { nextFollowUpDate: followDate, nextAction })
+            }
+          >
+            Save follow-up
+          </Button>
+        </div>
+      ) : null}
+
+      {mode === "converted" ? (
+        <div className="mt-2 space-y-2 rounded-md border bg-white p-2" data-ae1c-converted-next="true">
+          {prospect ? (
+            <p className="text-xs">
+              This lab is still a Prospect. Activate the Prospect, then use the existing Orders workflow. This
+              does not create an order.
+            </p>
+          ) : (
+            <p className="text-xs">Mark converted, then continue in the existing Orders workflow. No order is created here.</p>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy}
+            onClick={async () => {
+              await run("CONVERTED");
+              onConverted?.(item.labStatus, item.labId);
+            }}
+          >
+            {prospect ? "Mark converted and open activation" : "Mark converted and open Orders"}
+          </Button>
+        </div>
+      ) : null}
+
+      {mode === "loss" ? (
+        <div className="mt-2 space-y-2 rounded-md border bg-white p-2">
+          <label className="block text-[11px] font-medium">
+            Why not proceeding
+            <select
+              className="mt-1 block w-full rounded-md border px-2 py-1 text-sm"
+              value={lossReason}
+              onChange={(e) => setLossReason(e.target.value)}
+              data-ae1c-loss-reason="true"
+            >
+              <option value="">Select a reason</option>
+              {LOSS_REASON_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {lossReason === "OTHER" ? (
+            <label className="block text-[11px] font-medium">
+              Explain
+              <input
+                className="mt-1 block w-full rounded-md border px-2 py-1 text-sm"
+                value={closeNote}
+                onChange={(e) => setCloseNote(e.target.value)}
+              />
+            </label>
+          ) : null}
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy || !lossReason || (lossReason === "OTHER" && !String(closeNote).trim())}
+            onClick={() => run("NOT_PROCEEDING", { lossReason, closeNote })}
+          >
+            Close as not proceeding
+          </Button>
+        </div>
+      ) : null}
+
+      {error ? (
+        <p className="mt-2 text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </article>
   );
 }

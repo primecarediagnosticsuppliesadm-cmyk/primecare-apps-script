@@ -17,6 +17,7 @@ import { ROLES } from "@/config/roles.js";
 import { resolveMyBusinessRange } from "@/myBusiness/myBusinessCalendar.js";
 import { resolveMyBusinessSubjectAgent } from "@/myBusiness/myBusinessAuth.js";
 import { buildMyBusinessModel, MY_BUSINESS_LEDGER_CAP } from "@/myBusiness/myBusinessModel.js";
+import { listAgentOpenVisitHandoffsRead } from "@/visits/visitHandoffsApi.js";
 
 const VISIT_EVIDENCE_SELECT =
   `${HQ_AGENT_VISIT_COLUMNS},commercial_outcome,lab_size_band`;
@@ -376,11 +377,16 @@ export async function getMyBusinessRead({
   const scopedLabIds = labs.map((lab) => lab.labId).filter(Boolean);
 
   const visitUuids = visits.map((v) => v.id).filter(Boolean);
-  const [discoveryLines, qualifications, orders, payments] = await Promise.all([
+  const [discoveryLines, qualifications, orders, payments, handoffsRes] = await Promise.all([
     fetchDiscoveryForVisits(visitUuids),
     fetchQualificationsForLabs(scopedLabIds, tenantId),
     fetchOrdersForLabs({ labIds: scopedLabIds, tenantId, from: range.from, to: range.to }),
     fetchPaymentsForLabs({ labIds: scopedLabIds, tenantId, from: range.from, to: range.to }),
+    listAgentOpenVisitHandoffsRead({
+      agentId: subjectAgentId,
+      tenantId,
+      limit: 200,
+    }),
   ]);
 
   const model = buildMyBusinessModel({
@@ -394,6 +400,7 @@ export async function getMyBusinessRead({
     qualifications,
     discoveryLines,
     ownershipLabIds,
+    visitHandoffs: handoffsRes?.data || [],
     ledgerCap: MY_BUSINESS_LEDGER_CAP,
   });
 

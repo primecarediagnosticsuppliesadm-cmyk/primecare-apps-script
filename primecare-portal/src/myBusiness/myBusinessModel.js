@@ -117,6 +117,34 @@ function visitBelongsToSubject(visit, subjectAgentId) {
   return normalizeAgentIdKey(visit.agentId || visit.agent_id) === normalizeAgentIdKey(subjectAgentId);
 }
 
+function decorateHandoffWorkspaceItem(row, labById, visitsByLab) {
+  const lid = labIdKey(row.labId || row.lab_id);
+  const lab = labById.get(lid);
+  const visitUuid = str(row.visitUuid || row.visit_uuid);
+  let visit = null;
+  for (const list of visitsByLab.values()) {
+    visit = (list || []).find((item) => str(item.id || item.visitUuid) === visitUuid);
+    if (visit) break;
+  }
+  return {
+    id: str(row.id),
+    visitUuid,
+    labId: lid,
+    labName: str(lab?.labName || row.labName),
+    labStatus: str(lab?.status).toUpperCase(),
+    requirementSummary: str(row.requirementSummary || row.requirement_summary),
+    hqResponse: str(row.hqResponse || row.hq_response),
+    hqRespondedAt: str(row.hqRespondedAt || row.hq_responded_at),
+    neededBy: str(row.neededBy || row.needed_by).slice(0, 10),
+    triggerOutcome: str(row.triggerOutcome || row.trigger_outcome).toUpperCase(),
+    status: str(row.status).toUpperCase(),
+    owner: str(row.owner).toUpperCase(),
+    nextAction: str(visit?.nextAction || visit?.next_action),
+    followUpDate: ymd(visit?.nextFollowUpDate || visit?.next_follow_up_date),
+    visitDate: ymd(visit?.visitDate || visit?.visit_date),
+  };
+}
+
 /**
  * Pure My Business compose. Callers must already restrict rows to the
  * authorized subject. This function still re-filters so HQ-wide arrays
@@ -133,6 +161,7 @@ export function buildMyBusinessModel({
   qualifications = [],
   discoveryLines = [],
   ownershipLabIds = [],
+  visitHandoffs = [],
   ledgerCap = MY_BUSINESS_LEDGER_CAP,
 } = {}) {
   const subject = normalizeAgentIdKey(subjectAgentId);
@@ -190,6 +219,19 @@ export function buildMyBusinessModel({
     list.sort((a, b) => ymd(b.visitDate || b.visit_date).localeCompare(ymd(a.visitDate || a.visit_date)));
   }
 
+  const handoffByVisit = new Map();
+  for (const row of visitHandoffs || []) {
+    const visitUuid = str(row.visitUuid || row.visit_uuid || row.id);
+    if (!visitUuid) continue;
+    if (normalizeAgentIdKey(row.agentId || row.agent_id) !== subject) continue;
+    handoffByVisit.set(visitUuid, row);
+  }
+
+  function visitWaitingOnHq(visit) {
+    const row = handoffByVisit.get(str(visit?.id || visit?.visitUuid));
+    return str(row?.status).toUpperCase() === "OPEN_HQ" && str(row?.owner).toUpperCase() === "HQ";
+  }
+
   const followUpDueLabIds = [];
   const followUpOverdueLabIds = [];
   const latestByLab = [];
@@ -197,6 +239,7 @@ export function buildMyBusinessModel({
     const latest = list[0];
     if (!latest) continue;
     latestByLab.push(latest);
+    if (visitWaitingOnHq(latest)) continue;
     const due = ymd(latest.nextFollowUpDate || latest.next_follow_up_date);
     const status = deriveFollowUpStatus(due, todayYmd, false);
     if (status === "DUE") followUpDueLabIds.push(lid);
@@ -233,6 +276,7 @@ export function buildMyBusinessModel({
 
   const requirementFollowUp = [];
   for (const visit of latestByLab) {
+    if (visitWaitingOnHq(visit)) continue;
     const outcome = str(visit.commercialOutcome || visit.commercial_outcome).toUpperCase();
     if (outcome !== "REQUIREMENT" && outcome !== "QUOTE_OPPORTUNITY") continue;
     const lid = labIdKey(visit.labId);
@@ -512,6 +556,18 @@ export function buildMyBusinessModel({
       rupeesCollected: formatInr(rupeesCollected),
     },
     attention,
+    waitingOnPrimecare: (visitHandoffs || [])
+      .filter((row) => {
+        if (normalizeAgentIdKey(row.agentId || row.agent_id) !== subject) return false;
+        return str(row.status).toUpperCase() === "OPEN_HQ" && str(row.owner).toUpperCase() === "HQ";
+      })
+      .map((row) => decorateHandoffWorkspaceItem(row, labById, visitsByLab)),
+    primecareResponded: (visitHandoffs || [])
+      .filter((row) => {
+        if (normalizeAgentIdKey(row.agentId || row.agent_id) !== subject) return false;
+        return str(row.status).toUpperCase() === "HQ_RESPONDED" && str(row.owner).toUpperCase() === "AGENT";
+      })
+      .map((row) => decorateHandoffWorkspaceItem(row, labById, visitsByLab)),
     ledger: ledgerRows,
     ledgerTruncated: truncated,
     ledgerTotal: ledger.length,

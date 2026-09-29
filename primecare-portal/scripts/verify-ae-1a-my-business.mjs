@@ -399,7 +399,65 @@ assert(
 assert(
   !modelA.attention.some((item) => /waiting on primecare/i.test(JSON.stringify(item))),
   "attention.no_waiting_on_hq",
-  "Waiting on PrimeCare not shown"
+  "default fixtures do not invent Waiting on PrimeCare attention"
+);
+
+const waitingModel = buildMyBusinessModel({
+  range,
+  subjectAgentId: "AGT-A",
+  actor: agentA,
+  labs,
+  visits,
+  orders,
+  payments,
+  visitHandoffs: [
+    {
+      id: "h-open",
+      visitUuid: "v-new",
+      labId: "LAB-A",
+      agentId: "AGT-A",
+      status: "OPEN_HQ",
+      owner: "HQ",
+      requirementSummary: "Need Sysmex reagents",
+    },
+  ],
+});
+assert(
+  !waitingModel.attention.some((item) => item.labId === "LAB-A" && item.reasons.includes("REQUIREMENT_FOLLOW_UP")) &&
+    waitingModel.waitingOnPrimecare.some((item) => item.labId === "LAB-A") &&
+    waitingModel.primecareResponded.length === 0,
+  "ae1c.open_hq_suppresses_requirement_nag",
+  "OPEN_HQ visit is Waiting on PrimeCare, not Agent requirement follow-up"
+);
+
+const respondedModel = buildMyBusinessModel({
+  range,
+  subjectAgentId: "AGT-A",
+  actor: agentA,
+  labs,
+  visits,
+  orders,
+  payments,
+  visitHandoffs: [
+    {
+      id: "h-back",
+      visitUuid: "v-new",
+      labId: "LAB-A",
+      agentId: "AGT-A",
+      status: "HQ_RESPONDED",
+      owner: "AGENT",
+      requirementSummary: "Need Sysmex reagents",
+      hqResponse: "Available next week",
+      hqRespondedAt: "2026-09-16T10:00:00.000Z",
+    },
+  ],
+});
+assert(
+  respondedModel.attention.find((item) => item.labId === "LAB-A")?.reasons.includes("REQUIREMENT_FOLLOW_UP") &&
+    respondedModel.primecareResponded.some((item) => item.labId === "LAB-A") &&
+    respondedModel.waitingOnPrimecare.length === 0,
+  "ae1c.hq_responded_restores_agent_attention",
+  "HQ_RESPONDED restores Agent-owned requirement attention"
 );
 
 const pilotRange = { from: "2026-09-01", to: "2026-09-23", todayYmd: "2026-09-23" };
@@ -588,8 +646,8 @@ assert(/md:hidden/.test(src.page) && /hidden overflow-x-auto[\s\S]*md:block/.tes
 assert(/field-mobile-primary-nav/.test(src.layout) && /MoreHorizontal/.test(src.layout), "mobile.nav_more", "bottom nav More sheet");
 assert(/text-\[10px\]/.test(src.layout) && !/max-w-\[70px\]/.test(src.layout), "mobile.truncation_fix", "primary labels use cell width, not 70px clip");
 assert(/PAGE_LOADERS[\s\S]*myBusiness:/.test(src.prefetch), "prefetch.loader", "myBusiness lazy loader");
-assert(!/Waiting on PrimeCare|Waiting on HQ/.test(ae1aBlob), "scope.no_waiting_on_hq", "AE-1C ownership not invented");
-assert(!/visit_handoffs|agent_tasks|Daily Notes|meaningful flag|xlsx|XLSX/.test(ae1aBlob), "scope.no_future_slices", "no AE-1B/C, VE-4, tasks, XLSX");
+assert(/visitWaitingOnHq/.test(src.model) && /OPEN_HQ/.test(src.model), "ae1c.coupling", "OPEN_HQ suppresses Agent requirement nag");
+assert(!/agent_tasks|Daily Notes|meaningful flag|xlsx|XLSX/.test(ae1aBlob), "scope.no_future_slices", "no AE-1B, VE-4, tasks, XLSX");
 assert(!/\.insert\(|\.update\(|\.upsert\(/.test(src.read), "security.no_financial_write", "My Business read has no write path");
 assert(!/soldValue|pipeline_expected_value|salesLoggedToday/.test(src.model), "firewall.model_no_proxies", "model source has no CRM money proxies");
 assert(/totalAmount \?\? order\.total_amount/.test(src.model) && /amountReceived \?\? pay\.amount_received/.test(src.model), "firewall.model_canonical", "canonical order/payment fields");

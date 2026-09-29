@@ -29,8 +29,10 @@ import {
   navigateToVisits,
 } from "@/operations/hqWorkflowNav.js";
 import HqObjectLink from "@/components/hq/HqObjectLink.jsx";
+import VisitHandoffHqPanel from "@/components/hq/VisitHandoffHqPanel.jsx";
 import { labIdKey } from "@/utils/labId.js";
 import { cn } from "@/lib/utils";
+import { listOpenVisitHandoffsRead } from "@/visits/visitHandoffsApi.js";
 import {
   AlertTriangle,
   Building2,
@@ -44,6 +46,7 @@ import {
 
 const HQ_LAB_TABS = [
   { id: "all", label: "All Labs" },
+  { id: "waiting_on_primecare", label: "Waiting on PrimeCare" },
   { id: "active", label: "Active Labs" },
   { id: "prospects", label: "Prospects" },
 ];
@@ -350,6 +353,19 @@ export default function HqLabsAdminView({
   const [attentionFilter, setAttentionFilter] = useState(null);
   const [directoryUsers, setDirectoryUsers] = useState([]);
   const [hqLabTab, setHqLabTab] = useState("all");
+  const [waitingOnPrimecareCount, setWaitingOnPrimecareCount] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!homeTenantId) return undefined;
+    void listOpenVisitHandoffsRead({ tenantId: homeTenantId, limit: 200 }).then((res) => {
+      if (cancelled) return;
+      if (res?.success) setWaitingOnPrimecareCount((res.data || []).length);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [homeTenantId]);
 
   const attentionCards = useMemo(
     () => buildLabsAttentionCards(visibleLabs, directoryUsers),
@@ -463,7 +479,7 @@ export default function HqLabsAdminView({
 
   function handleHqLabTab(tabId) {
     setHqLabTab(tabId);
-    if (tabId === "prospects") {
+    if (tabId === "prospects" || tabId === "waiting_on_primecare") {
       setAttentionFilter(null);
       setCreditFilter("ALL");
     }
@@ -702,10 +718,16 @@ export default function HqLabsAdminView({
 
       <section aria-label="Lab directory" className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-slate-900">Lab Directory</h2>
+          <h2 className="text-sm font-semibold text-slate-900">
+            {hqLabTab === "waiting_on_primecare" ? "Waiting on PrimeCare" : "Lab Directory"}
+          </h2>
+          {hqLabTab === "waiting_on_primecare" ? (
+            <span className="text-[11px] text-slate-500">PrimeCare still owes the Agent an answer</span>
+          ) : (
           <span className="text-[11px] text-slate-500">
             {filteredLabs.length} of {visibleLabs.length} labs
           </span>
+          )}
         </div>
 
         <div className="mb-3 flex flex-wrap gap-1">
@@ -720,13 +742,23 @@ export default function HqLabsAdminView({
                   ? "border-slate-900 bg-slate-900 text-white"
                   : "border-slate-200 bg-white text-slate-700"
               )}
+              data-ae1c-hq-tab={tab.id}
             >
-              {tab.label}
+              {tab.id === "waiting_on_primecare" && waitingOnPrimecareCount != null
+                ? `${tab.label} (${waitingOnPrimecareCount})`
+                : tab.label}
             </button>
           ))}
         </div>
 
-        {hqLabTab !== "prospects" ? (
+        {hqLabTab === "waiting_on_primecare" ? (
+          <VisitHandoffHqPanel
+            tenantId={homeTenantId}
+            labs={visibleLabs}
+            directoryUsers={directoryUsers}
+            onQueueCount={setWaitingOnPrimecareCount}
+          />
+        ) : hqLabTab !== "prospects" ? (
           <div className="mb-3 flex flex-wrap gap-1.5">
             {["ALL", "OK", "NEAR_LIMIT", "HOLD"].map((filter) => (
               <button
@@ -762,7 +794,7 @@ export default function HqLabsAdminView({
           </p>
         )}
 
-        {filteredLabs.length === 0 ? (
+        {hqLabTab === "waiting_on_primecare" ? null : filteredLabs.length === 0 ? (
           <p className="py-4 text-center text-sm text-slate-500">
             {hqLabTab === "prospects" ? "No prospects awaiting activation." : "No labs match the current filter."}
           </p>
