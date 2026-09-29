@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { getAgentVisitEvidenceRead } from "@/api/primecareSupabaseApi.js";
@@ -30,6 +30,20 @@ function neededByTone(neededBy) {
   return "";
 }
 
+function hqRespondMessage(res) {
+  const code = str(res?.code);
+  if (code === "already_responded") {
+    return "Another PrimeCare user already answered this. It will leave the waiting list.";
+  }
+  if (code === "stale_or_closed") {
+    return "This request is no longer waiting. Refreshing the list.";
+  }
+  if (code === "forbidden") {
+    return "You cannot respond to this request.";
+  }
+  return res?.error || "Could not send back to Agent.";
+}
+
 export default function VisitHandoffHqPanel({
   tenantId,
   labs = [],
@@ -42,8 +56,11 @@ export default function VisitHandoffHqPanel({
   const [error, setError] = useState("");
   const [reviewId, setReviewId] = useState("");
   const [evidence, setEvidence] = useState(null);
+  const [evidenceError, setEvidenceError] = useState("");
   const [response, setResponse] = useState("");
   const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
+  const reviewRef = useRef(null);
 
   const labById = useMemo(() => {
     const map = new Map();
@@ -91,37 +108,81 @@ export default function VisitHandoffHqPanel({
 
   const review = rows.find((r) => r.id === reviewId) || null;
 
+  function openReview(handoffId) {
+    const id = str(handoffId);
+    if (!id) {
+      setError("Could not open that request. Missing handoff ID.");
+      return;
+    }
+    setError("");
+    setReviewId(id);
+  }
+
+  function closeReview() {
+    setReviewId("");
+    setResponse("");
+    setEvidence(null);
+    setEvidenceError("");
+  }
+
   useEffect(() => {
     let cancelled = false;
     async function loadReview() {
       setEvidence(null);
+      setEvidenceError("");
       setResponse("");
       if (!review) return;
-      const ev = await getAgentVisitEvidenceRead({ visitUuid: review.visitUuid });
+      const ev = await getAgentVisitEvidenceRead({
+        visitUuid: review.visitUuid,
+        tenantId,
+      });
       if (cancelled) return;
-      setEvidence(ev?.success ? ev.data : null);
+      if (!ev?.success) {
+        setEvidenceError(ev?.error || "Could not load visit context.");
+        setEvidence(null);
+        return;
+      }
+      setEvidence(ev.data);
     }
     loadReview();
     return () => {
       cancelled = true;
     };
-  }, [review?.id, review?.visitUuid]);
+  }, [review?.id, review?.visitUuid, tenantId]);
+
+  useEffect(() => {
+    if (!reviewId || !reviewRef.current) return;
+    reviewRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [reviewId]);
 
   async function sendBack() {
-    if (!review || sending) return;
-    setSending(true);
-    const res = await respondVisitHandoffWrite({
-      handoffId: review.id,
-      hqResponse: response,
-    });
-    setSending(false);
-    if (!res.success) {
-      setError(res.error || "Could not send back to Agent.");
+    if (!review || sendingRef.current || sending) return;
+    if (!str(response)) {
+      setError("Write a PrimeCare response before sending back.");
       return;
     }
-    setReviewId("");
-    setResponse("");
-    await load();
+    sendingRef.current = true;
+    setSending(true);
+    setError("");
+    try {
+      const res = await respondVisitHandoffWrite({
+        handoffId: review.id,
+        hqResponse: response,
+      });
+      const stale = ["already_responded", "stale_or_closed"].includes(str(res?.code));
+      if (!res.success && !stale) {
+        setError(hqRespondMessage(res));
+        return;
+      }
+      closeReview();
+      await load();
+      if (stale) {
+        setError(hqRespondMessage(res));
+      }
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
   }
 
   const visit = evidence?.visit || {};
@@ -142,63 +203,31 @@ export default function VisitHandoffHqPanel({
           {error}
         </p>
       ) : null}
-      {loading ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
-      {!loading && rows.length === 0 ? (
-        <p className="rounded-lg border bg-muted/30 px-3 py-6 text-center text-sm text-muted-foreground">
-          Nothing waiting on PrimeCare.
+      {reviewId && !review && !loading ? (
+        <p className="text-sm text-destructive" role="alert">
+          That request is no longer waiting on PrimeCare.
         </p>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full min-w-[720px] text-left text-sm">
-            <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2">Lab</th>
-                <th className="px-3 py-2">Agent</th>
-                <th className="px-3 py-2">Outcome</th>
-                <th className="px-3 py-2">Visit date</th>
-                <th className="px-3 py-2">Waiting</th>
-                <th className="px-3 py-2">Needed by</th>
-                <th className="px-3 py-2">Requirement</th>
-                <th className="px-3 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const tone = neededByTone(row.neededBy);
-                const lab = labById.get(labIdKey(row.labId));
-                const visitHeader = visitsById[row.visitUuid] || {};
-                const agentLabel =
-                  agentNameById.get(str(row.agentId).toLowerCase()) ||
-                  str(visitHeader.agent_name) ||
-                  row.agentId;
-                return (
-                  <tr key={row.id} className="border-t" data-ae1c-hq-row={row.id} data-ae1c-hq-status="OPEN_HQ">
-                    <td className="px-3 py-2 font-medium">{lab?.labName || lab?.lab_name || row.labId}</td>
-                    <td className="px-3 py-2">{agentLabel}</td>
-                    <td className="px-3 py-2">{row.triggerOutcome}</td>
-                    <td className="px-3 py-2">{str(visitHeader.visit_date).slice(0, 10) || "—"}</td>
-                    <td className="px-3 py-2">{ageLabel(row.createdAt)}</td>
-                    <td className={tone === "overdue" ? "px-3 py-2 font-semibold text-amber-800" : "px-3 py-2"}>
-                      {row.neededBy || "—"}
-                      {tone === "overdue" ? " (overdue)" : tone === "today" ? " (today)" : ""}
-                    </td>
-                    <td className="max-w-[240px] truncate px-3 py-2">{row.requirementSummary}</td>
-                    <td className="px-3 py-2">
-                      <Button type="button" size="sm" variant="outline" onClick={() => setReviewId(row.id)}>
-                        Review
-                      </Button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      ) : null}
 
       {review ? (
-        <section className="rounded-xl border bg-white p-4" data-ae1c-hq-review={review.id}>
-          <h3 className="text-base font-semibold">Review</h3>
+        <section
+          ref={reviewRef}
+          className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4"
+          data-ae1c-hq-review={review.id}
+          data-ae1c-hq-review-open="true"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <h3 className="text-base font-semibold">Review</h3>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={closeReview}
+              data-ae1c-hq-review-close="true"
+            >
+              Close
+            </Button>
+          </div>
           <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
             <div>
               <dt className="text-xs text-muted-foreground">Lab</dt>
@@ -238,6 +267,11 @@ export default function VisitHandoffHqPanel({
               </dd>
             </div>
           </dl>
+          {evidenceError ? (
+            <p className="mt-3 text-sm text-destructive" role="alert">
+              {evidenceError}
+            </p>
+          ) : null}
           {lines.length ? (
             <ul className="mt-3 list-disc space-y-1 pl-5 text-sm" data-ae1c-hq-discovery="true">
               {lines.map((line) => (
@@ -250,22 +284,92 @@ export default function VisitHandoffHqPanel({
           <label className="mt-4 block text-sm font-medium">
             PrimeCare Response
             <Textarea
-              className="mt-1 min-h-[96px]"
+              className="mt-1 min-h-[96px] bg-white"
               value={response}
               onChange={(e) => setResponse(e.target.value)}
               data-ae1c-hq-response="true"
             />
           </label>
-          <Button
-            type="button"
-            className="mt-3"
-            disabled={sending || !str(response)}
-            onClick={sendBack}
-            data-ae1c-hq-send-back="true"
-          >
-            {sending ? "Sending…" : "Send back to Agent"}
-          </Button>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              disabled={sending || !str(response)}
+              onClick={sendBack}
+              data-ae1c-hq-send-back="true"
+            >
+              {sending ? "Sending…" : "Send back to Agent"}
+            </Button>
+            <Button type="button" variant="outline" disabled={sending} onClick={closeReview}>
+              Cancel
+            </Button>
+          </div>
         </section>
+      ) : null}
+
+      {loading ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
+      {!loading && rows.length === 0 ? (
+        <p className="rounded-lg border bg-muted/30 px-3 py-6 text-center text-sm text-muted-foreground">
+          Nothing waiting on PrimeCare.
+        </p>
+      ) : !loading ? (
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full min-w-[720px] text-left text-sm">
+            <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2">Lab</th>
+                <th className="px-3 py-2">Agent</th>
+                <th className="px-3 py-2">Outcome</th>
+                <th className="px-3 py-2">Visit date</th>
+                <th className="px-3 py-2">Waiting</th>
+                <th className="px-3 py-2">Needed by</th>
+                <th className="px-3 py-2">Requirement</th>
+                <th className="px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const tone = neededByTone(row.neededBy);
+                const lab = labById.get(labIdKey(row.labId));
+                const visitHeader = visitsById[row.visitUuid] || {};
+                const agentLabel =
+                  agentNameById.get(str(row.agentId).toLowerCase()) ||
+                  str(visitHeader.agent_name) ||
+                  row.agentId;
+                const selected = row.id === reviewId;
+                return (
+                  <tr
+                    key={row.id}
+                    className={selected ? "border-t bg-indigo-50" : "border-t"}
+                    data-ae1c-hq-row={row.id}
+                    data-ae1c-hq-status="OPEN_HQ"
+                  >
+                    <td className="px-3 py-2 font-medium">{lab?.labName || lab?.lab_name || row.labId}</td>
+                    <td className="px-3 py-2">{agentLabel}</td>
+                    <td className="px-3 py-2">{row.triggerOutcome}</td>
+                    <td className="px-3 py-2">{str(visitHeader.visit_date).slice(0, 10) || "—"}</td>
+                    <td className="px-3 py-2">{ageLabel(row.createdAt)}</td>
+                    <td className={tone === "overdue" ? "px-3 py-2 font-semibold text-amber-800" : "px-3 py-2"}>
+                      {row.neededBy || "—"}
+                      {tone === "overdue" ? " (overdue)" : tone === "today" ? " (today)" : ""}
+                    </td>
+                    <td className="max-w-[240px] truncate px-3 py-2">{row.requirementSummary}</td>
+                    <td className="px-3 py-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openReview(row.id)}
+                        data-ae1c-hq-review-open={row.id}
+                      >
+                        Review
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       ) : null}
     </div>
   );

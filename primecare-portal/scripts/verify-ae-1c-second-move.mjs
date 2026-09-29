@@ -292,6 +292,40 @@ assert(/data-ae1c-hq-queue/.test(hqPanel) && /OPEN_HQ/.test(hqPanel), "ui.hq.ope
 assert(/Send back to Agent/.test(hqPanel) && /PrimeCare Response/.test(hqPanel), "ui.hq.respond", "HQ response CTA");
 assert(/listOpenVisitHandoffsRead/.test(hqPanel) && /respondVisitHandoffWrite/.test(hqPanel), "ui.hq.reload", "successful respond reloads OPEN_HQ list");
 assert(
+  /Review/.test(hqPanel) &&
+    /openReview\(row\.id\)/.test(hqPanel) &&
+    /data-ae1c-hq-review-open=\{row\.id\}/.test(hqPanel),
+  "ui.hq.review_click_id",
+  "Review click uses the exact handoff ID, not lab/agent/outcome"
+);
+assert(
+  /data-ae1c-hq-review=\{review\.id\}/.test(hqPanel) &&
+    /data-ae1c-hq-review-open="true"/.test(hqPanel) &&
+    /scrollIntoView/.test(hqPanel),
+  "ui.hq.review_visible",
+  "Review surface becomes visible for the selected handoff ID"
+);
+assert(/key=\{row\.id\}/.test(hqPanel) && /row\.id === reviewId/.test(hqPanel), "ui.hq.same_lab_independent", "same-lab handoffs open independently by handoff ID");
+assert(/data-ae1c-hq-response/.test(hqPanel) && /PrimeCare Response/.test(hqPanel), "ui.hq.response_textarea", "PrimeCare Response textarea is on the review surface");
+assert(
+  /disabled=\{sending \|\| !str\(response\)\}/.test(hqPanel) &&
+    /Write a PrimeCare response before sending back/.test(hqPanel),
+  "ui.hq.blank_blocked",
+  "blank response cannot Send Back"
+);
+assert(/handoffId: review\.id/.test(hqPanel) && /p_handoff_id/.test(api), "ui.hq.send_exact_id", "Send Back calls respond_visit_handoff with exact handoff ID");
+assert(/await load\(\)/.test(hqPanel) && /onQueueCount\?\.\(list\.length\)/.test(hqPanel), "ui.hq.queue_refresh", "successful response reloads OPEN_HQ rows and count");
+assert(/already_responded/.test(hqPanel) && /Another PrimeCare user already answered/.test(hqPanel), "ui.hq.stale_visible", "already-responded is shown and the queue refreshes");
+assert(
+  /function closeReview/.test(hqPanel) &&
+    /data-ae1c-hq-review-close/.test(hqPanel) &&
+    /Cancel/.test(hqPanel) &&
+    !/respondVisitHandoffWrite/.test(hqPanel.match(/function closeReview\(\) \{[\s\S]+?\n  \}/)?.[0] || ""),
+  "ui.hq.close_no_mutate",
+  "Close/Cancel does not call respond RPC"
+);
+assert(/if \(tenantId\) q = q\.eq\("tenant_id", tenantId\)/.test(api) && !/p_tenant_id/.test(api), "ui.hq.no_cross_tenant", "HQ list is tenant-scoped; respond RPC does not accept tenant spoof");
+assert(
   !/selling_price|quote_amount|monthlySpendInr|approxPricePack/.test(hqPanel) &&
     /line\.brand/.test(hqPanel),
   "ui.hq.no_quote_rupees",
