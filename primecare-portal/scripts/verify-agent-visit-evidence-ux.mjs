@@ -152,7 +152,7 @@ assert(qualifyAt >= 0 && wizardSetAt >= 0 && Math.abs(qualifyAt - wizardSetAt) <
 assert(/data-ve3-open-wizard/.test(page) && /data-ve3-deep-qualify/.test(page), "uat.F.qualify_attr", "explicit Deep qualification toggle marked");
 assert(/Optional — open the detailed qualification and product-mix workflow/.test(page), "uat.F.qualify_hint", "Deep qualification is labeled as optional detailed workflow");
 assert(/draftBannerVisible && visitMode === "wizard"/.test(page), "uat.draft_banner_wizard_only", "draft restored banner cannot appear on fast Log Visit");
-assert(/setFastFormEpoch/.test(page), "uat.fast_remount_after_save", "successful save remounts fast form so line UUIDs are not reused on a new visit");
+assert(/setFastFormEpoch/.test(page) && /!meta\?\.deferRemount/.test(page), "uat.fast_remount_after_save", "successful non-handoff save remounts fast form so line UUIDs are not reused on a new visit");
 assert(/visitMode === "wizard" && !isReviewStep/.test(page), "uat.nav_wizard_only", "sticky Continue bar only while wizard is open");
 assert(/visitMode === "fast" \?/.test(page), "uat.fast_not_wizard", "fast Log Visit unmounts wizard");
 assert(/upsertLabProductIntelligenceWrite/.test(page) && !/upsertLabProductIntelligenceWrite/.test(form), "uat.G.H.pi_wizard_only", "PI snapshot remains wizard-only");

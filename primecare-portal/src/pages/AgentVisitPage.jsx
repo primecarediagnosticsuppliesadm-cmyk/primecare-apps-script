@@ -2382,14 +2382,19 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
               currentUser={currentUser}
               accounts={fastAccounts}
               initialLabId={fastFormLabId || form.labId}
-              onSuccess={(res) => {
+              onSuccess={(res, meta) => {
                 const vid = res?.data?.visit_id ?? res?.data?.visitId ?? res?.data?.id ?? "";
                 setSavedVisitSummary({ visitId: vid, labName: form.labName });
                 setSavePhase("success");
-                setFastFormEpoch((n) => n + 1);
+                // Remount clears client discovery-line UUIDs for the next visit.
+                // Qualifying AE-1C visits must keep the post-save Send step first.
+                if (!meta?.deferRemount) {
+                  setFastFormEpoch((n) => n + 1);
+                }
                 showToast("success", "Visit saved.");
                 void loadPageData();
               }}
+              onReadyForNextVisit={() => setFastFormEpoch((n) => n + 1)}
             />
           </CardContent>
         </Card>

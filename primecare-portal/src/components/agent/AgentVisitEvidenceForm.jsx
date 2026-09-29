@@ -110,11 +110,16 @@ function DiscoveryLineFields({ line, onChange, onRemove }) {
   );
 }
 
+function savedVisitUuidFromWrite(res) {
+  return String(res?.data?.id || "").trim();
+}
+
 export default function AgentVisitEvidenceForm({
   currentUser,
   accounts = { operational: [], prospects: [], all: [] },
   initialLabId = "",
   onSuccess,
+  onReadyForNextVisit,
 }) {
   const [form, setForm] = useState(() => ({
     ...createEmptyVisitEvidenceForm(),
@@ -161,10 +166,32 @@ export default function AgentVisitEvidenceForm({
     });
   }
 
+  const visitLocked = Boolean(handoffStep);
+
+  function beginQualifyingHandoff(visitUuid, payload) {
+    const outcome = String(payload?.commercialOutcome || form.commercialOutcome || "").toUpperCase();
+    setHandoffStep({
+      visitUuid,
+      labId: form.labId,
+      labName: selected?.labName || form.labId,
+      prospect,
+      outcome,
+      requirementSummary: prefillRequirementSummary({
+        notes: form.notes,
+        nextAction: form.nextAction,
+        discoveryLines: payload?.discoveryLines || form.discoveryLines,
+      }),
+      neededBy: "",
+      sending: false,
+      error: "",
+      handoff: null,
+    });
+  }
+
   async function handleSave(event) {
     event?.preventDefault?.();
     event?.stopPropagation?.();
-    if (savingRef.current) return;
+    if (savingRef.current || handoffStep) return;
     if (!form.labId) {
       setError("Select a lab or prospect first.");
       return;
@@ -198,33 +225,19 @@ export default function AgentVisitEvidenceForm({
         setError(res?.error || "Visit could not be saved.");
         return;
       }
-      const visitUuid = res.data?.id;
+      const visitUuid = savedVisitUuidFromWrite(res);
       const outcome = String(payload.commercialOutcome || "").toUpperCase();
       if (visitUuid && isHandoffTriggerOutcome(outcome)) {
-        setHandoffStep({
-          visitUuid,
-          labId: form.labId,
-          labName: selected?.labName || form.labId,
-          prospect,
-          outcome,
-          requirementSummary: prefillRequirementSummary({
-            notes: form.notes,
-            nextAction: form.nextAction,
-            discoveryLines: payload.discoveryLines,
-          }),
-          neededBy: "",
-          sending: false,
-          error: "",
-          handoff: null,
-        });
+        beginQualifyingHandoff(visitUuid, payload);
+        onSuccess?.(res, { deferRemount: true });
       } else {
         setHandoffStep(null);
         setForm({
           ...createEmptyVisitEvidenceForm(),
           labId: form.labId,
         });
+        onSuccess?.(res);
       }
-      onSuccess?.(res);
     } catch (err) {
       setError(err?.message || String(err));
     } finally {
@@ -247,7 +260,19 @@ export default function AgentVisitEvidenceForm({
         return;
       }
       setPartial(null);
-      onSuccess?.({ success: true, persistence: "complete", data: { id: partial.visitUuid } });
+      const retryRes = { success: true, persistence: "complete", data: { id: partial.visitUuid } };
+      const outcome = String(form.commercialOutcome || "").toUpperCase();
+      if (partial.visitUuid && isHandoffTriggerOutcome(outcome)) {
+        beginQualifyingHandoff(partial.visitUuid, { commercialOutcome: outcome, discoveryLines: form.discoveryLines });
+        onSuccess?.(retryRes, { deferRemount: true });
+      } else {
+        setHandoffStep(null);
+        setForm({
+          ...createEmptyVisitEvidenceForm(),
+          labId: form.labId,
+        });
+        onSuccess?.(retryRes);
+      }
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -268,7 +293,7 @@ export default function AgentVisitEvidenceForm({
           className={FIELD}
           value={form.labId}
           onChange={(e) => patch({ labId: e.target.value })}
-          disabled={saving}
+          disabled={saving || visitLocked}
         >
           <option value="">Select…</option>
           {(accounts.operational || []).length ? (
@@ -316,7 +341,7 @@ export default function AgentVisitEvidenceForm({
             className={FIELD}
             value={form.visitDate}
             onChange={(e) => patch({ visitDate: e.target.value })}
-            disabled={saving}
+            disabled={saving || visitLocked}
           />
         </div>
         <div>
@@ -325,7 +350,7 @@ export default function AgentVisitEvidenceForm({
             className={FIELD}
             value={form.commercialOutcome}
             onChange={(e) => patch({ commercialOutcome: e.target.value })}
-            disabled={saving}
+            disabled={saving || visitLocked}
           >
             {VISIT_OUTCOME_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -463,9 +488,15 @@ export default function AgentVisitEvidenceForm({
         </p>
       ) : null}
 
-      <Button type="submit" className={cn("h-12 w-full text-base")} disabled={saving} data-ae1c-save-visit="true">
-        {saving ? "Saving…" : "Save visit"}
-      </Button>
+      {visitLocked ? (
+        <p className="text-sm font-medium text-emerald-800" data-ae1c-visit-saved="true">
+          Visit saved.
+        </p>
+      ) : (
+        <Button type="submit" className={cn("h-12 w-full text-base")} disabled={saving} data-ae1c-save-visit="true">
+          {saving ? "Saving…" : "Save visit"}
+        </Button>
+      )}
 
       {isHandoffTriggerOutcome(form.commercialOutcome) && !handoffStep ? (
         <section className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3" data-ae1c-support-needed="true">
@@ -480,41 +511,60 @@ export default function AgentVisitEvidenceForm({
         <PrimeCareSupportNeeded
           step={handoffStep}
           saving={saving}
-          onChange={(next) => setHandoffStep((prev) => ({ ...prev, ...next }))}
+          onChange={(next) =>
+            setHandoffStep((prev) => ({
+              ...prev,
+              ...next,
+              visitUuid: prev.visitUuid,
+              labId: prev.labId,
+              outcome: prev.outcome,
+            }))
+          }
           onSent={(handoff) => {
-            setHandoffStep((prev) => ({ ...prev, handoff, sending: false, error: "" }));
-            setForm({
-              ...createEmptyVisitEvidenceForm(),
-              labId: form.labId,
-            });
+            setHandoffStep((prev) => ({
+              ...prev,
+              handoff: handoff || { humanStatus: "Waiting on PrimeCare" },
+              sending: false,
+              error: "",
+            }));
           }}
+          onNotNow={() => onReadyForNextVisit?.()}
+          onLogAnother={() => onReadyForNextVisit?.()}
         />
       ) : null}
     </form>
   );
 }
 
-function PrimeCareSupportNeeded({ step, saving, onChange, onSent }) {
+function PrimeCareSupportNeeded({ step, saving, onChange, onSent, onNotNow, onLogAnother }) {
   const sent = Boolean(step.handoff);
+  const sendingRef = useRef(false);
+
   async function send(event) {
     event?.preventDefault?.();
     event?.stopPropagation?.();
-    if (step.sending || sent) return;
+    if (sendingRef.current || step.sending || sent) return;
     if (!String(step.requirementSummary || "").trim()) {
       onChange({ error: "Tell PrimeCare what the lab needs." });
       return;
     }
+    sendingRef.current = true;
     onChange({ sending: true, error: "" });
-    const res = await createVisitHandoffWrite({
-      visitUuid: step.visitUuid,
-      requirementSummary: step.requirementSummary,
-      neededBy: step.neededBy || null,
-    });
-    if (!res?.success) {
-      onChange({ sending: false, error: res?.error || "Could not send to PrimeCare." });
-      return;
+    try {
+      const res = await createVisitHandoffWrite({
+        visitUuid: step.visitUuid,
+        requirementSummary: step.requirementSummary,
+        neededBy: step.neededBy || null,
+      });
+      const persisted = Boolean(res?.success) || String(res?.code || "") === "already_exists";
+      if (!persisted) {
+        onChange({ sending: false, error: res?.error || "Could not send to PrimeCare." });
+        return;
+      }
+      onSent(res.handoff || { humanStatus: "Waiting on PrimeCare" });
+    } finally {
+      sendingRef.current = false;
     }
-    onSent(res.handoff);
   }
 
   return (
@@ -522,6 +572,8 @@ function PrimeCareSupportNeeded({ step, saving, onChange, onSent }) {
       className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3"
       data-ae1c-support-needed="true"
       data-ae1c-prospect={step.prospect ? "true" : "false"}
+      data-ae1c-saved-visit-uuid={step.visitUuid || ""}
+      data-ae1c-saved-outcome={step.outcome || ""}
     >
       <h3 className="text-sm font-semibold text-slate-900">PrimeCare Support Needed</h3>
       <p className="mt-0.5 text-[11px] text-slate-600">
@@ -530,9 +582,20 @@ function PrimeCareSupportNeeded({ step, saving, onChange, onSent }) {
           : "Send only if the lab asked PrimeCare to source, price, or respond."}
       </p>
       {sent ? (
-        <p className="mt-2 text-sm font-medium text-indigo-900" data-ae1c-waiting="true">
-          {step.handoff?.humanStatus || "Waiting on PrimeCare"}
-        </p>
+        <>
+          <p className="mt-2 text-sm font-medium text-indigo-900" data-ae1c-waiting="true">
+            {step.handoff?.humanStatus || "Waiting on PrimeCare"}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-3 h-11 w-full"
+            onClick={onLogAnother}
+            data-ae1c-log-another="true"
+          >
+            Log another visit
+          </Button>
+        </>
       ) : (
         <>
           <label className="mt-3 block text-xs font-medium text-slate-700">
@@ -569,6 +632,16 @@ function PrimeCareSupportNeeded({ step, saving, onChange, onSent }) {
             data-ae1c-send="true"
           >
             {step.sending ? "Sending…" : "Send to PrimeCare"}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="mt-1 h-11 w-full"
+            disabled={saving || step.sending}
+            onClick={onNotNow}
+            data-ae1c-not-now="true"
+          >
+            Not now
           </Button>
         </>
       )}

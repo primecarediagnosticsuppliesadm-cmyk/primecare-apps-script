@@ -35,6 +35,7 @@ const mig = readRel("supabase/migrations/20260929010000_ae_1c_visit_handoffs.sql
 const api = readRel("src/visits/visitHandoffsApi.js");
 const contract = readRel("src/visits/visitHandoffsContract.js");
 const form = readRel("src/components/agent/AgentVisitEvidenceForm.jsx");
+const page = readRel("src/pages/AgentVisitPage.jsx");
 const hq = readRel("src/components/hq/HqLabsAdminView.jsx");
 const hqPanel = readRel("src/components/hq/VisitHandoffHqPanel.jsx");
 const mbPage = readRel("src/pages/MyBusinessPage.jsx");
@@ -224,6 +225,66 @@ assert(/isHandoffTriggerOutcome\(outcome\)/.test(form) && /isHandoffTriggerOutco
 assert(/data-ae1c-send/.test(form) && /step\.handoff/.test(form), "ui.visit.no_duplicate", "existing handoff hides Send CTA");
 assert(/Waiting on PrimeCare/.test(form), "ui.visit.waiting_label", "OPEN_HQ displays Waiting on PrimeCare");
 assert(!/Create Ticket|Create Handoff/.test(form), "ui.visit.plain_language", "no ticket/handoff jargon");
+assert(
+  /function savedVisitUuidFromWrite/.test(form) &&
+    /res\?\.data\?\.id/.test(form) &&
+    /beginQualifyingHandoff\(visitUuid/.test(form),
+  "ui.visit.saved_uuid",
+  "qualifying save freezes write-result visit UUID for Send"
+);
+assert(
+  /deferRemount: true/.test(form) &&
+    /!meta\?\.deferRemount/.test(page) &&
+    /onReadyForNextVisit/.test(page),
+  "ui.visit.defer_remount",
+  "Fast Visit does not remount away AE-1C post-save state"
+);
+assert(
+  /data-ae1c-send/.test(form) &&
+    /visitUuid: step\.visitUuid/.test(form) &&
+    /data-ae1c-saved-visit-uuid=\{step\.visitUuid/.test(form) &&
+    /visitUuid: prev\.visitUuid/.test(form),
+  "ui.visit.send_uses_saved_uuid",
+  "SEND TO PRIMECARE uses the exact saved visit UUID"
+);
+assert(
+  /already_exists/.test(form) &&
+    /Waiting on PrimeCare/.test(form) &&
+    /sendingRef\.current \|\| step\.sending \|\| sent/.test(form),
+  "ui.visit.send_idempotent",
+  "successful Send and already_exists show Waiting; double click is ignored"
+);
+assert(
+  /Not now/.test(form) &&
+    /data-ae1c-not-now/.test(form) &&
+    /onNotNow=\{\(\) => onReadyForNextVisit\?\.\(\)\}/.test(form) &&
+    !/createVisitHandoffWrite/.test(form.match(/onNotNow=\{\(\) => onReadyForNextVisit\?\.\(\)\}/)?.[0] || ""),
+  "ui.visit.not_now",
+  "explicit Not now remounts and does not create a handoff"
+);
+assert(
+  /Log another visit/.test(form) &&
+    /data-ae1c-log-another/.test(form) &&
+    /onLogAnother=\{\(\) => onReadyForNextVisit\?\.\(\)\}/.test(form) &&
+    /onReadyForNextVisit=\{\(\) => setFastFormEpoch/.test(page),
+  "ui.visit.log_another",
+  "after Send or abandon the Agent can remount to log another visit"
+);
+assert(
+  isHandoffTriggerOutcome("REQUIREMENT") &&
+    isHandoffTriggerOutcome("QUOTE_OPPORTUNITY") &&
+    /isHandoffTriggerOutcome\(outcome\)/.test(form) &&
+    /deferRemount: true/.test(form),
+  "ui.visit.quote_same_path",
+  "QUOTE_OPPORTUNITY uses the same post-save Send path as REQUIREMENT"
+);
+assert(
+  !isHandoffTriggerOutcome("FOLLOW_UP") &&
+    !isHandoffTriggerOutcome("NO_OPPORTUNITY") &&
+    /onSuccess\?\.\(res\);/.test(form),
+  "ui.visit.non_qualifying_reset",
+  "FOLLOW_UP and NO_OPPORTUNITY keep the existing immediate remount/reset"
+);
 
 assert(/waiting_on_primecare/.test(hq) && /Waiting on PrimeCare/.test(hq), "ui.hq.tab", "HQ sibling tab");
 assert(!/Operations Center/.test(hqPanel) && !/localStorage/.test(hqPanel), "ui.hq.not_ops_center", "not Operations Center / localStorage tasks");
