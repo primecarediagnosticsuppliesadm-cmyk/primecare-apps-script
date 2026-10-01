@@ -4,6 +4,22 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-10-01 — PN-email prospect CTA deep link
+
+### Change
+
+- `prospect_created` Review Prospect now links to `/labs?tab=prospects&labId=<canonical_lab_id>&action=review` on `APP_PUBLIC_URL`.
+- The lookup key is the canonical lab id already stored on the lifecycle payload or event source id. The lab name is not a lookup key.
+- Labs reuses the existing HQ Review Prospect drawer. Login keeps only an internal `/labs` return path.
+- Already-sent emails keep the CTA that was rendered when they were sent. No delivery rewrite and no resend.
+
+### Verification
+
+- `node scripts/verify-prospect-email-deep-link.mjs`
+- Existing prospect-email verify scripts
+
+---
+
 ## 2026-09-13 — PN-1B3A QA recipient rewrite (synthetic domains)
 
 ### Gap found

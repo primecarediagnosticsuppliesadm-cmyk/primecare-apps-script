@@ -35,6 +35,7 @@ import { isNavigationPageCacheWarm } from "@/utils/hqNavigationWarmth.js";
 import { QA_DIAGNOSTICS_ENABLED } from "@/config/environment.js";
 import { clearChunkLoadRecoveryGuard } from "@/utils/chunkLoadRecovery.js";
 import { AUTH_PROFILE_TIMEOUT_MESSAGE, isAuthProfileTimeoutError } from "@/utils/authSessionApply.js";
+import { rememberLabsReturn, takeLabsReturn } from "@/labs/prospectDeepLink.js";
 
 const QaDiagnosticsPanel = lazy(() => import("@/components/qa/QaDiagnosticsPanel.jsx"));
 
@@ -204,10 +205,24 @@ export default function App() {
 
   useEffect(() => {
     if (!isAuthenticated || !user) {
+      if (!isAuthenticated && typeof window !== "undefined") {
+        rememberLabsReturn(
+          `${window.location.pathname}${window.location.search}`,
+          window.sessionStorage
+        );
+      }
       setRole(null);
       setActivePage(null);
       setCurrentUser(null);
       return;
+    }
+
+    if (typeof window !== "undefined") {
+      const saved = takeLabsReturn(window.sessionStorage);
+      const path = window.location.pathname.replace(/\/+$/, "") || "/";
+      if (saved && path === "/labs" && !window.location.search.includes("labId=")) {
+        window.history.replaceState({ primecarePage: "labs" }, "", saved);
+      }
     }
 
     const normalizedRole = normalizeRole(user.role);

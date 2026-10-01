@@ -354,14 +354,35 @@ export function payloadText(payload, key) {
   return str(payload[key]);
 }
 
-export function renderProspectCreated({ payload, appPublicUrl }) {
+const PROSPECT_LAB_ID_RE = /^[A-Z0-9][A-Z0-9_-]{0,80}$/;
+
+/** Canonical lab id for the prospect CTA. Lab name is never a lookup key. */
+export function canonicalProspectLabId(value) {
+  const id = str(value).toUpperCase();
+  return PROSPECT_LAB_ID_RE.test(id) ? id : "";
+}
+
+export function prospectReviewCta(appPublicUrl, labId) {
+  const base = str(appPublicUrl).replace(/\/$/, "") || "https://app.primecarediagnostics.in";
+  const id = canonicalProspectLabId(labId);
+  if (!id) return `${base}/labs`;
+  const params = new URLSearchParams({
+    tab: "prospects",
+    labId: id,
+    action: "review",
+  });
+  return `${base}/labs?${params.toString()}`;
+}
+
+export function renderProspectCreated({ payload, appPublicUrl, sourceId }) {
   const labName = payloadText(payload, "lab_name") || "Prospect";
   const contact = payloadText(payload, "contact_name");
   const phone = payloadText(payload, "phone");
   const area = payloadText(payload, "area");
   const agent = payloadText(payload, "sourcing_agent_name") || payloadText(payload, "sourcing_agent_id");
   const created = payloadText(payload, "created_at");
-  const cta = `${str(appPublicUrl).replace(/\/$/, "")}/labs`;
+  const labId = payloadText(payload, "lab_id") || str(sourceId);
+  const cta = prospectReviewCta(appPublicUrl, labId);
   const subject = stripHeaderBreaks(`New PrimeCare Prospect: ${labName}`);
   const text = [
     "A new PrimeCare Prospect is ready for review.",

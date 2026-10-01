@@ -344,6 +344,7 @@ export default function HqLabsAdminView({
   currentUser,
   focusLabId = "",
   initialReviewLabId = "",
+  initialHqTab = "",
   onRefresh,
 }) {
   const homeTenantId = str(currentUser?.tenantId || currentUser?.tenant_id);
@@ -352,7 +353,7 @@ export default function HqLabsAdminView({
   const [opsLoading, setOpsLoading] = useState(false);
   const [attentionFilter, setAttentionFilter] = useState(null);
   const [directoryUsers, setDirectoryUsers] = useState([]);
-  const [hqLabTab, setHqLabTab] = useState("all");
+  const [hqLabTab, setHqLabTab] = useState(initialHqTab === "prospects" || initialHqTab === "all" ? initialHqTab : "all");
   const [waitingOnPrimecareCount, setWaitingOnPrimecareCount] = useState(null);
 
   useEffect(() => {
@@ -413,6 +414,12 @@ export default function HqLabsAdminView({
   useEffect(() => {
     if (initialReviewLabId) setReviewLabId(initialReviewLabId);
   }, [initialReviewLabId]);
+
+  useEffect(() => {
+    if (initialHqTab === "prospects" || initialHqTab === "all" || initialHqTab === "active") {
+      setHqLabTab(initialHqTab);
+    }
+  }, [initialHqTab]);
 
   useEffect(() => {
     if (!homeTenantId) return;

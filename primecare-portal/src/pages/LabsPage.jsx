@@ -50,6 +50,7 @@ import { sortByAgentRouteOrder } from "@/pages/agentOsModel.js";
 import { AgentRouteStopBadge } from "@/components/agent/AgentOsSections.jsx";
 import { AgentLabFieldStrip } from "@/components/agent/AgentFieldExecution.jsx";
 import { labIdKey } from "@/utils/labId.js";
+import { resolveProspectDeepLink } from "@/labs/prospectDeepLink.js";
 import StatusBadge from "@/components/ux/StatusBadge";
 import PageSkeleton from "@/components/ux/PageSkeleton";
 import PageHeader from "@/components/ux/PageHeader";
@@ -589,6 +590,9 @@ export default function LabsPage({
   const [provisionAgents, setProvisionAgents] = useState([]);
   const [focusLabId, setFocusLabId] = useState("");
   const [initialReviewLabId, setInitialReviewLabId] = useState("");
+  const [deepLinkTab, setDeepLinkTab] = useState("");
+  const [deepLinkMessage, setDeepLinkMessage] = useState("");
+  const appliedDeepLinkRef = useRef("");
 
   const canAddLab =
     currentUser?.role === ROLES.EXECUTIVE || currentUser?.role === ROLES.ADMIN;
@@ -689,6 +693,35 @@ export default function LabsPage({
       });
     }, 150);
   }, [loading, labs.length]);
+
+  useEffect(() => {
+    if (loading || !isHqAdminView) return;
+    const search = typeof window !== "undefined" ? window.location.search : "";
+    if (!search || appliedDeepLinkRef.current === `opened:${search}`) return;
+    const decision = resolveProspectDeepLink({
+      search,
+      labs: visibleLabs,
+      canReview: true,
+    });
+    if (!decision.labId && !decision.message) return;
+    const signature = decision.openReview
+      ? `opened:${search}`
+      : `pending:${search}:${visibleLabs.length}`;
+    if (appliedDeepLinkRef.current === signature) return;
+    appliedDeepLinkRef.current = signature;
+    setDeepLinkMessage(decision.message || "");
+    if (decision.tab) setDeepLinkTab(decision.tab);
+    if (decision.labId) setFocusLabId(decision.labId);
+    if (decision.openReview) {
+      setInitialReviewLabId(decision.labId);
+      window.setTimeout(() => {
+        document.getElementById(`hq-lab-row-${decision.labId}`)?.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+      }, 150);
+    }
+  }, [loading, isHqAdminView, visibleLabs]);
 
   useEffect(() => {
     if (!canAddLab || !homeTenantId) return;
@@ -1166,6 +1199,12 @@ export default function LabsPage({
           ) : null}
         </>
       ) : isHqAdminView ? (
+        <>
+        {deepLinkMessage ? (
+          <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+            {deepLinkMessage}
+          </p>
+        ) : null}
         <HqLabsAdminView
           visibleLabs={visibleLabs}
           summary={summary}
@@ -1175,8 +1214,10 @@ export default function LabsPage({
           currentUser={currentUser}
           focusLabId={focusLabId}
           initialReviewLabId={initialReviewLabId}
+          initialHqTab={deepLinkTab}
           onRefresh={() => loadLabs({ silent: true })}
         />
+        </>
       ) : (
         <>
       <div className="grid md:grid-cols-4 gap-4">

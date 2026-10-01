@@ -411,6 +411,7 @@ async function handleStage3eLifecycle(
   const assignedName = await resolveAssignedName(admin, str(row.tenant_id), payload as Record<string, unknown>);
   const rendered = renderForEventType(eventType, {
     payload,
+    sourceId: str(row.source_id),
     appPublicUrl: env("APP_PUBLIC_URL") || "https://app.primecarediagnostics.in",
     assignedName,
   });
@@ -539,6 +540,7 @@ async function sendStoredProductionDelivery(
   const assignedName = await resolveAssignedName(admin, str(row.tenant_id), payload as Record<string, unknown>);
   const rendered = renderForEventType(eventType, {
     payload,
+    sourceId: str(row.source_id),
     appPublicUrl: env("APP_PUBLIC_URL") || "https://app.primecarediagnostics.in",
     assignedName,
   });
@@ -911,6 +913,7 @@ Deno.serve(async (req) => {
     const assignedName = await resolveAssignedName(admin, str(row.tenant_id), payload as Record<string, unknown>);
     const rendered = renderForEventType(eventType, {
       payload,
+      sourceId: str(row.source_id),
       appPublicUrl: env("APP_PUBLIC_URL") || "https://primecare-portal.vercel.app",
       assignedName,
     });
