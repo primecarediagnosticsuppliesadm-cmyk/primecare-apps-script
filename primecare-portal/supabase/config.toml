@@ -77,3 +77,6 @@ verify_jwt = true
 
 [functions.dispatch-notification-email]
 verify_jwt = false
+
+[functions.resend-notification-webhook]
+verify_jwt = false

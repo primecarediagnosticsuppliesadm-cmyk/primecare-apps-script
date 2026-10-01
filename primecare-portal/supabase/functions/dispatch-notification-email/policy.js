@@ -313,7 +313,7 @@ export function evaluateProductionCertificationRow({
 
 export function renderCertificationEmail({ appPublicUrl } = {}) {
   const portal = str(appPublicUrl).replace(/\/$/, "") || "https://app.primecarediagnostics.in";
-  const subject = STAGE2_CERT_SUBJECT;
+  const subject = stripHeaderBreaks(STAGE2_CERT_SUBJECT);
   const text = [STAGE2_CERT_BODY, `Portal: ${portal}`].join("\n");
   const html = `<p>${escapeHtml(STAGE2_CERT_BODY)}</p>
 <p>Portal: <a href="${escapeHtml(portal)}">${escapeHtml(portal)}</a></p>`;
@@ -329,14 +329,22 @@ export function nextAttemptAtIso(attemptCount, now = new Date()) {
   return new Date(now.getTime() + ms).toISOString();
 }
 
-export function classifyProviderError(status, kind) {
+export function classifyProviderError(status, kind, providerCode) {
   const k = lower(kind);
+  const named = lower(providerCode);
   if (k === "timeout" || k === "network" || k === "abort") {
     return { retryable: true, errorCode: "provider_timeout" };
+  }
+  if (named === "concurrent_idempotent_requests") {
+    return { retryable: true, errorCode: "provider_idempotency_concurrent" };
+  }
+  if (named === "invalid_idempotent_request" || named === "invalid_idempotency_key") {
+    return { retryable: false, errorCode: "provider_idempotency_conflict" };
   }
   const code = Number(status);
   if (code === 429) return { retryable: true, errorCode: "provider_rate_limited" };
   if (code >= 500 && code <= 599) return { retryable: true, errorCode: "provider_5xx" };
+  if (code === 409) return { retryable: false, errorCode: "provider_409" };
   if (code >= 400 && code < 500) return { retryable: false, errorCode: "provider_permanent" };
   return { retryable: true, errorCode: "provider_unknown" };
 }
@@ -354,7 +362,7 @@ export function renderProspectCreated({ payload, appPublicUrl }) {
   const agent = payloadText(payload, "sourcing_agent_name") || payloadText(payload, "sourcing_agent_id");
   const created = payloadText(payload, "created_at");
   const cta = `${str(appPublicUrl).replace(/\/$/, "")}/labs`;
-  const subject = `New PrimeCare Prospect: ${labName}`;
+  const subject = stripHeaderBreaks(`New PrimeCare Prospect: ${labName}`);
   const text = [
     "A new PrimeCare Prospect is ready for review.",
     `Lab: ${labName}`,
@@ -384,7 +392,7 @@ export function renderProspectActivated({ payload, appPublicUrl, assignedName })
   const nextAction = payloadText(payload, "next_action") || "Open the lab and continue coverage.";
   const cta = `${str(appPublicUrl).replace(/\/$/, "")}/labs`;
   const assignment = str(assignedName);
-  const subject = `Prospect Approved: ${labName}`;
+  const subject = stripHeaderBreaks(`Prospect Approved: ${labName}`);
   const text = [
     `${labName} has been approved.`,
     activated ? `Activation time: ${activated}` : "",
@@ -408,4 +416,73 @@ export function renderForEventType(eventType, args) {
   if (type === "prospect_activated") return { ok: true, ...renderProspectActivated(args) };
   if (type === STAGE2_CERT_EVENT_TYPE) return renderCertificationEmail(args);
   return { ok: false, errorCode: "unsupported_event_type" };
+}
+
+/** Production exact-row mode. Not Stage 3E certification. */
+export const PRODUCTION_EXACT_MODE = "production_exact";
+export const IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** Queued forensic rows that must never be claimed, including the Gmail forensic row. */
+export const PRODUCTION_FORENSIC_DELIVERY_IDS = [
+  "c02c0d63-9a0f-4ec6-8966-6035258364ad",
+  "424796d2-3e78-438c-8fb6-ab5c3bb3e28b",
+  "63561826-8bb3-4004-b857-b58c397b2aae",
+];
+
+export function stripHeaderBreaks(value) {
+  return str(value).replace(/[\r\n\u2028\u2029]+/g, " ").replace(/[ \t]{2,}/g, " ").trim();
+}
+
+export function isProductionExactRequest(body) {
+  return lower(body?.mode) === PRODUCTION_EXACT_MODE;
+}
+
+export function isProductionQaModeForbidden({ appEnv, qaMode }) {
+  return lower(appEnv) === "prod" && isTruthyEnv(qaMode);
+}
+
+export function mayClaimProduction({ appEnv, emailEnabled, qaMode, productionDispatch }) {
+  return (
+    shouldClaimRows(emailEnabled)
+    && lower(appEnv) === "prod"
+    && !isTruthyEnv(qaMode)
+    && isTruthyEnv(productionDispatch)
+  );
+}
+
+export function isForensicProductionDelivery(deliveryId) {
+  const id = lower(deliveryId);
+  if (!id) return false;
+  return (
+    PRODUCTION_FORENSIC_DELIVERY_IDS.includes(id)
+    || STAGE3E_FORENSIC_DELIVERY_IDS.includes(id)
+    || id === lower(STAGE2_CERT_DELIVERY_ID)
+  );
+}
+
+export function crashWindowOutcome(row, now = new Date()) {
+  const status = lower(row?.status);
+  const providerId = str(row?.provider_message_id);
+  if (providerId) return "";
+  if (status !== "processing" && status !== "queued" && status !== "failed") return "";
+  const attempt = Number(row?.attempt_count) || 0;
+  const lastMs = Date.parse(str(row?.last_attempt_at));
+  const stale24h = Number.isFinite(lastMs) && now.getTime() - lastMs > IDEMPOTENCY_WINDOW_MS;
+  if (status === "processing" && stale24h) return "send_uncertain_do_not_retry";
+  if (attempt >= MAX_ATTEMPTS && status === "processing") return "attempts_exhausted";
+  if (attempt >= MAX_ATTEMPTS && (status === "queued" || status === "failed")) return "attempts_exhausted";
+  return "";
+}
+
+/**
+ * A claimed row may call Resend only for this attempt.
+ * Uncertain, exhausted, forensic, certification, and already-accepted rows must not.
+ */
+export function providerCallAllowed(outcome, row) {
+  if (lower(outcome) !== "claimed") return false;
+  if (str(row?.provider_message_id)) return false;
+  if (str(row?.certification_kind)) return false;
+  if (isForensicProductionDelivery(row?.delivery_id)) return false;
+  const attempt = Number(row?.attempt_count) || 0;
+  if (attempt < 1 || attempt > MAX_ATTEMPTS) return false;
+  return true;
 }

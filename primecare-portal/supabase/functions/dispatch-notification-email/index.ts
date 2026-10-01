@@ -13,16 +13,21 @@ import {
   evaluateProductionCertificationRow,
   evaluateStage3eEnv,
   isCertificationRequest,
+  isForensicProductionDelivery,
   isProductionBatchClaimForbidden,
   isProductionDispatchableEmail,
+  isProductionExactRequest,
+  isProductionQaModeForbidden,
   isStage3eEventType,
   isStage3eLabNameEligible,
   isStage3eRecipientRole,
   isStage3eRequest,
   maskEmail,
+  mayClaimProduction,
   nextAttemptAtIso,
   NON_DISPATCHABLE_DOMAIN,
   payloadText,
+  providerCallAllowed,
   renderCertificationEmail,
   renderForEventType,
   resolveQaRecipient,
@@ -96,7 +101,7 @@ async function sendResend(args: {
   text: string;
   html: string;
   deliveryId: string;
-}): Promise<{ ok: boolean; status: number; id: string; error: string; kind?: string }> {
+}): Promise<{ ok: boolean; status: number; id: string; error: string; kind?: string; providerCode?: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
@@ -124,7 +129,11 @@ async function sendResend(args: {
     const err =
       str((json as { message?: string }).message) ||
       str((json as { error?: { message?: string } }).error?.message);
-    return { ok: res.ok && Boolean(id), status: res.status, id, error: err };
+    const providerCode =
+      str((json as { name?: string }).name) ||
+      str((json as { code?: string }).code) ||
+      str((json as { error?: { name?: string } }).error?.name);
+    return { ok: res.ok && Boolean(id), status: res.status, id, error: err, providerCode };
   } catch (err) {
     const name = str((err as { name?: string })?.name);
     const kind = name === "AbortError" ? "timeout" : "network";
@@ -288,7 +297,7 @@ async function handleProductionCertification(admin: ReturnType<typeof createClie
     });
   }
 
-  const classified = classifyProviderError(send.status, send.kind);
+  const classified = classifyProviderError(send.status, send.kind, send.providerCode);
   await admin.rpc("finalize_notification_email_delivery", {
     p_delivery_id: deliveryId,
     p_status: "failed",
@@ -457,7 +466,7 @@ async function handleStage3eLifecycle(
     });
   }
 
-  const classified = classifyProviderError(send.status, send.kind);
+  const classified = classifyProviderError(send.status, send.kind, send.providerCode);
   await admin.rpc("finalize_notification_email_delivery", {
     p_delivery_id: deliveryId,
     p_status: "failed",
@@ -482,6 +491,186 @@ async function handleStage3eLifecycle(
       error_code: classified.errorCode,
     }],
   }, 200);
+}
+
+async function sendStoredProductionDelivery(
+  admin: ReturnType<typeof createClient>,
+  row: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const deliveryId = str(row.delivery_id);
+  const eventId = str(row.event_id);
+  const intended = str(row.recipient_email);
+  const attempt = Number(row.attempt_count) || 0;
+  const eventType = str(row.event_type);
+  const outcome = str(row.claim_outcome) || "claimed";
+  const payload = row.payload_json && typeof row.payload_json === "object" ? row.payload_json : {};
+  const baseLog = {
+    delivery_id: deliveryId,
+    event_id: eventId,
+    intended: maskEmail(intended),
+    attempt,
+    event_type: eventType,
+  };
+
+  if (!providerCallAllowed(outcome, row)) {
+    logSafe({ ...baseLog, status: "not_sent", error_code: outcome || "provider_call_forbidden" });
+    return { delivery_id: deliveryId, status: "not_sent", error_code: outcome || "provider_call_forbidden" };
+  }
+
+  if (str(row.provider_message_id)) {
+    await admin.rpc("finalize_notification_email_delivery", {
+      p_delivery_id: deliveryId,
+      p_status: "sent",
+      p_provider_message_id: str(row.provider_message_id),
+    });
+    return { delivery_id: deliveryId, status: "sent", skipped: "already_sent" };
+  }
+
+  if (!isProductionDispatchableEmail(intended)) {
+    await admin.rpc("finalize_notification_email_delivery", {
+      p_delivery_id: deliveryId,
+      p_status: "skipped",
+      p_error_code: NON_DISPATCHABLE_DOMAIN,
+      p_error_summary: NON_DISPATCHABLE_DOMAIN,
+    });
+    return { delivery_id: deliveryId, status: "skipped", error_code: NON_DISPATCHABLE_DOMAIN };
+  }
+
+  const assignedName = await resolveAssignedName(admin, str(row.tenant_id), payload as Record<string, unknown>);
+  const rendered = renderForEventType(eventType, {
+    payload,
+    appPublicUrl: env("APP_PUBLIC_URL") || "https://app.primecarediagnostics.in",
+    assignedName,
+  });
+  if (!rendered.ok) {
+    await admin.rpc("finalize_notification_email_delivery", {
+      p_delivery_id: deliveryId,
+      p_status: "skipped",
+      p_error_code: rendered.errorCode,
+      p_error_summary: rendered.errorCode,
+    });
+    return { delivery_id: deliveryId, status: "skipped", error_code: rendered.errorCode };
+  }
+
+  const apiKey = env("EMAIL_PROVIDER_API_KEY");
+  const fromAddress = env("EMAIL_FROM_ADDRESS");
+  if (!apiKey || !fromAddress) {
+    const nextAt = nextAttemptAtIso(attempt);
+    await admin.rpc("finalize_notification_email_delivery", {
+      p_delivery_id: deliveryId,
+      p_status: "failed",
+      p_error_code: "provider_unconfigured",
+      p_error_summary: "provider_unconfigured",
+      p_next_attempt_at: nextAt,
+      p_provider_recipient: intended,
+    });
+    return { delivery_id: deliveryId, status: "failed", error_code: "provider_unconfigured" };
+  }
+
+  const send = await sendResend({
+    apiKey,
+    fromName: env("EMAIL_FROM_NAME") || "PrimeCare",
+    fromAddress,
+    replyTo: env("EMAIL_REPLY_TO"),
+    to: intended,
+    subject: rendered.subject,
+    text: rendered.text,
+    html: rendered.html,
+    deliveryId,
+  });
+
+  if (send.ok) {
+    await admin.rpc("finalize_notification_email_delivery", {
+      p_delivery_id: deliveryId,
+      p_status: "sent",
+      p_provider_message_id: send.id,
+      p_provider_recipient: intended,
+    });
+    logSafe({
+      ...baseLog,
+      status: "sent",
+      actual: maskEmail(intended),
+      provider_message_id: send.id,
+    });
+    return {
+      delivery_id: deliveryId,
+      status: "sent",
+      provider_message_id: send.id,
+      actual: maskEmail(intended),
+      intended: maskEmail(intended),
+    };
+  }
+
+  const classified = classifyProviderError(send.status, send.kind, send.providerCode);
+  const retryable = classified.retryable && attempt < MAX_ATTEMPTS;
+  const nextAt = retryable ? nextAttemptAtIso(attempt) : null;
+  await admin.rpc("finalize_notification_email_delivery", {
+    p_delivery_id: deliveryId,
+    p_status: "failed",
+    p_error_code: classified.errorCode,
+    p_error_summary: classified.errorCode,
+    p_next_attempt_at: nextAt,
+    p_provider_error: String(send.status || send.kind || "error"),
+    p_provider_recipient: intended,
+  });
+  return {
+    delivery_id: deliveryId,
+    status: "failed",
+    error_code: classified.errorCode,
+    retryable,
+  };
+}
+
+async function handleProductionExact(
+  admin: ReturnType<typeof createClient>,
+  requestedDeliveryId: string,
+) {
+  if (!requestedDeliveryId || isForensicProductionDelivery(requestedDeliveryId)) {
+    return jsonResponse({
+      success: false,
+      disabled: false,
+      claimed: 0,
+      processed: [],
+      error: requestedDeliveryId ? "forensic_excluded" : "missing_delivery_id",
+    });
+  }
+
+  const { data: claimed, error: claimErr } = await admin.rpc(
+    "claim_notification_email_production_delivery",
+    { p_delivery_id: requestedDeliveryId },
+  );
+  if (claimErr) {
+    logSafe({ event: "production_exact_claim_failed" });
+    return jsonResponse({ success: false, disabled: false, claimed: 0, processed: [], error: "claim_failed" }, 500);
+  }
+  const rows = Array.isArray(claimed) ? claimed : claimed ? [claimed] : [];
+  const row = rows[0] || {};
+  const outcome = str(row.claim_outcome);
+  if (outcome !== "claimed") {
+    logSafe({
+      event: "production_exact_not_sent",
+      delivery_id: requestedDeliveryId,
+      error_code: outcome || "not_claimable",
+    });
+    return jsonResponse({
+      success: false,
+      disabled: false,
+      claimed: 0,
+      processed: [{
+        delivery_id: str(row.delivery_id) || requestedDeliveryId,
+        status: outcome || "not_claimable",
+      }],
+      error: outcome || "not_claimable",
+    });
+  }
+
+  const processed = await sendStoredProductionDelivery(admin, row as Record<string, unknown>);
+  return jsonResponse({
+    success: processed.status === "sent",
+    disabled: false,
+    claimed: 1,
+    processed: [processed],
+  });
 }
 
 Deno.serve(async (req) => {
@@ -523,6 +712,11 @@ Deno.serve(async (req) => {
   }
 
   const stage3eMode = isStage3eRequest({ mode: requestMode });
+  const exactMode = isProductionExactRequest({ mode: requestMode });
+  if (exactMode && !cronOk) {
+    logSafe({ event: "auth_denied", reason: "production_exact_requires_cron_secret" });
+    return jsonResponse({ success: false, error: "unauthorized" }, 401);
+  }
   if (!cronOk && !(stage3eOk && stage3eMode)) {
     logSafe({ event: "auth_denied" });
     return jsonResponse({ success: false, error: "unauthorized" }, 401);
@@ -532,6 +726,24 @@ Deno.serve(async (req) => {
     logSafe({ event: "disabled_no_claim" });
     return jsonResponse({ success: true, disabled: true, claimed: 0, processed: [] });
   }
+
+  if (isProductionQaModeForbidden({ appEnv: env("APP_ENV"), qaMode: env("EMAIL_QA_MODE") })) {
+    logSafe({ event: "production_qa_mode_forbidden" });
+    return jsonResponse({
+      success: false,
+      disabled: false,
+      claimed: 0,
+      processed: [],
+      error: "production_qa_mode_forbidden",
+    });
+  }
+
+  const productionClaim = mayClaimProduction({
+    appEnv: env("APP_ENV"),
+    emailEnabled: env("EMAIL_ENABLED"),
+    qaMode: env("EMAIL_QA_MODE"),
+    productionDispatch: env("EMAIL_PRODUCTION_DISPATCH"),
+  });
 
   const supabaseUrl = env("SUPABASE_URL");
   const serviceRoleKey = env("SUPABASE_SERVICE_ROLE_KEY");
@@ -551,10 +763,27 @@ Deno.serve(async (req) => {
     return await handleProductionCertification(admin);
   }
 
-  if (isProductionBatchClaimForbidden({
-    appEnv: env("APP_ENV"),
-    qaMode: env("EMAIL_QA_MODE"),
-  })) {
+  if (exactMode) {
+    if (!productionClaim) {
+      logSafe({ event: "production_dispatch_disabled" });
+      return jsonResponse({
+        success: false,
+        disabled: false,
+        claimed: 0,
+        processed: [],
+        error: "production_dispatch_disabled",
+      });
+    }
+    return await handleProductionExact(admin, requestedDeliveryId);
+  }
+
+  if (
+    isProductionBatchClaimForbidden({
+      appEnv: env("APP_ENV"),
+      qaMode: env("EMAIL_QA_MODE"),
+    })
+    && !productionClaim
+  ) {
     logSafe({ event: "production_freeze_batch_forbidden" });
     return jsonResponse({
       success: false,
@@ -574,6 +803,22 @@ Deno.serve(async (req) => {
   }
 
   const rows = Array.isArray(claimed) ? claimed : [];
+  if (productionClaim) {
+    const processed: Record<string, unknown>[] = [];
+    for (const row of rows) {
+      processed.push(await sendStoredProductionDelivery(admin, {
+        ...(row as Record<string, unknown>),
+        claim_outcome: "claimed",
+      }));
+    }
+    return jsonResponse({
+      success: true,
+      disabled: false,
+      claimed: rows.length,
+      processed,
+    });
+  }
+
   const processed: Record<string, unknown>[] = [];
 
   for (const row of rows) {
@@ -733,7 +978,7 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    const classified = classifyProviderError(send.status, send.kind);
+    const classified = classifyProviderError(send.status, send.kind, send.providerCode);
     const retryable = classified.retryable && attempt < MAX_ATTEMPTS;
     const nextAt = retryable ? nextAttemptAtIso(attempt) : null;
     await admin.rpc("finalize_notification_email_delivery", {
