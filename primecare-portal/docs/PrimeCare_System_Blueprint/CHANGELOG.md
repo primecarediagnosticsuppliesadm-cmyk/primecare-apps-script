@@ -4,6 +4,20 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-10-01 — PN-email prospect deep-link render hotfix
+
+### Change
+
+- The Labs deep-link effect now runs only after `visibleLabs` is initialized. The previous hook dependency read that binding during render and threw `ReferenceError: Cannot access 'visibleLabs' before initialization`, which the application error boundary caught.
+- An already-ACTIVE lab still opens the existing operational drawer on the All Labs context. The effect does not write lab status.
+- Email rendering is unchanged.
+
+### Verification
+
+- `node scripts/verify-prospect-email-deep-link.mjs`
+
+---
+
 ## 2026-10-01 — PN-email prospect CTA deep link
 
 ### Change

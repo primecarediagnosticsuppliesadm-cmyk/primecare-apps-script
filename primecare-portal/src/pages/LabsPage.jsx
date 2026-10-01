@@ -50,7 +50,7 @@ import { sortByAgentRouteOrder } from "@/pages/agentOsModel.js";
 import { AgentRouteStopBadge } from "@/components/agent/AgentOsSections.jsx";
 import { AgentLabFieldStrip } from "@/components/agent/AgentFieldExecution.jsx";
 import { labIdKey } from "@/utils/labId.js";
-import { resolveProspectDeepLink } from "@/labs/prospectDeepLink.js";
+import { applyProspectDeepLinkEffect } from "@/labs/prospectDeepLink.js";
 import StatusBadge from "@/components/ux/StatusBadge";
 import PageSkeleton from "@/components/ux/PageSkeleton";
 import PageHeader from "@/components/ux/PageHeader";
@@ -695,35 +695,6 @@ export default function LabsPage({
   }, [loading, labs.length]);
 
   useEffect(() => {
-    if (loading || !isHqAdminView) return;
-    const search = typeof window !== "undefined" ? window.location.search : "";
-    if (!search || appliedDeepLinkRef.current === `opened:${search}`) return;
-    const decision = resolveProspectDeepLink({
-      search,
-      labs: visibleLabs,
-      canReview: true,
-    });
-    if (!decision.labId && !decision.message) return;
-    const signature = decision.openReview
-      ? `opened:${search}`
-      : `pending:${search}:${visibleLabs.length}`;
-    if (appliedDeepLinkRef.current === signature) return;
-    appliedDeepLinkRef.current = signature;
-    setDeepLinkMessage(decision.message || "");
-    if (decision.tab) setDeepLinkTab(decision.tab);
-    if (decision.labId) setFocusLabId(decision.labId);
-    if (decision.openReview) {
-      setInitialReviewLabId(decision.labId);
-      window.setTimeout(() => {
-        document.getElementById(`hq-lab-row-${decision.labId}`)?.scrollIntoView({
-          behavior: "smooth",
-          block: "center",
-        });
-      }, 150);
-    }
-  }, [loading, isHqAdminView, visibleLabs]);
-
-  useEffect(() => {
     if (!canAddLab || !homeTenantId) return;
     return scheduleIdleTask(() => {
       void readLabOwnershipBundleBroker(homeTenantId, { currentUser }).then((res) => {
@@ -798,6 +769,35 @@ export default function LabsPage({
     }
     return labs;
   }, [labs, currentUser, selectedDistributorTenantId, homeTenantId, agentLabPartition]);
+
+  // Must stay below `const visibleLabs`. A hook dependency above that const
+  // throws ReferenceError during render and hits AppErrorBoundary.
+  useEffect(() => {
+    if (!isHqAdminView) return;
+    const search = typeof window !== "undefined" ? window.location.search : "";
+    const result = applyProspectDeepLinkEffect({
+      search,
+      labs: visibleLabs,
+      canReview: true,
+      loading,
+      previousSignature: appliedDeepLinkRef.current,
+    });
+    if (!result.changed) return;
+    appliedDeepLinkRef.current = result.signature;
+    setDeepLinkMessage(result.message || "");
+    if (result.tab) setDeepLinkTab(result.tab);
+    if (!result.labId) return;
+    const targetId = labIdKey(result.labId);
+    setFocusLabId(targetId);
+    if (!result.openReview) return;
+    setInitialReviewLabId(targetId);
+    window.setTimeout(() => {
+      document.getElementById(`hq-lab-row-${targetId}`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 150);
+  }, [loading, isHqAdminView, visibleLabs]);
 
   usePredatorModuleValidation(
     "PrimeCare OS",

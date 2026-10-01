@@ -81,9 +81,58 @@ export function parseProspectDeepLink(search) {
 }
 
 /**
- * Decide how Labs should react to a deep link using only labs the caller
- * is already allowed to see. Does not fetch or reveal other records.
+ * Idempotent Labs deep-link step. Uses only labs the caller can already see.
+ * Call only after `visibleLabs` exists. A hook dependency above that const
+ * throws during render. Never writes lab status.
  */
+export function applyProspectDeepLinkEffect({
+  search = "",
+  labs = [],
+  canReview = false,
+  loading = false,
+  previousSignature = "",
+} = {}) {
+  const idle = {
+    changed: false,
+    signature: previousSignature,
+    openReview: false,
+    tab: "",
+    labId: "",
+    message: "",
+    alreadyActive: false,
+    mutate: false,
+  };
+  if (loading) return idle;
+  const query = String(search || "");
+  if (!query || previousSignature === `opened:${query}`) return idle;
+  let decision;
+  try {
+    decision = resolveProspectDeepLink({ search: query, labs, canReview });
+  } catch {
+    return {
+      ...idle,
+      changed: true,
+      signature: `opened:${query}`,
+      message: "This review link is not valid.",
+    };
+  }
+  if (!decision.labId && !decision.message) return idle;
+  const signature = decision.openReview
+    ? `opened:${query}`
+    : `pending:${query}:${Array.isArray(labs) ? labs.length : 0}`;
+  if (previousSignature === signature) return { ...idle, signature };
+  return {
+    changed: true,
+    signature,
+    openReview: Boolean(decision.openReview),
+    tab: decision.tab || "",
+    labId: decision.labId || "",
+    message: decision.message || "",
+    alreadyActive: Boolean(decision.alreadyActive),
+    mutate: false,
+  };
+}
+
 export function resolveProspectDeepLink({ search, labs, canReview }) {
   const parsed = parseProspectDeepLink(search);
   if (!parsed.active) {

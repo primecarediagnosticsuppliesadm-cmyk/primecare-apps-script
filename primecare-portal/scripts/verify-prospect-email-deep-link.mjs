@@ -8,6 +8,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderForEventType } from "../supabase/functions/dispatch-notification-email/policy.js";
 import {
+  applyProspectDeepLinkEffect,
   rememberLabsReturn,
   resolveProspectDeepLink,
   safeInternalReturnPath,
@@ -163,6 +164,128 @@ const index = readFileSync(resolve(root, "supabase/functions/dispatch-notificati
 if (!/cron\.schedule/.test(policy) && !/EMAIL_ENABLED\s*=\s*true/.test(index.slice(index.indexOf("prospectReviewCta") > -1 ? 0 : 0))) {
   pass("automation_untouched", "deep link does not schedule mail or set email flags");
 } else fail("automation_untouched", "unexpected scheduler or flag write");
+
+const activeLabId = "LAB-P-419A33712601";
+const activeSearch = `?tab=prospects&labId=${activeLabId}&action=review`;
+const activeLabs = [
+  { labId: activeLabId, status: "ACTIVE", labName: "Acclin Diagonistic" },
+  { labId: otherId, status: "PROSPECT", labName: "Other Lab" },
+];
+const loadingPass = applyProspectDeepLinkEffect({
+  search: activeSearch,
+  labs: [],
+  canReview: true,
+  loading: true,
+  previousSignature: "",
+});
+const activeOpen = applyProspectDeepLinkEffect({
+  search: activeSearch,
+  labs: activeLabs,
+  canReview: true,
+  loading: false,
+  previousSignature: loadingPass.signature,
+});
+const activeAgain = applyProspectDeepLinkEffect({
+  search: activeSearch,
+  labs: activeLabs,
+  canReview: true,
+  loading: false,
+  previousSignature: activeOpen.signature,
+});
+if (
+  !loadingPass.changed &&
+  !loadingPass.openReview &&
+  activeOpen.changed &&
+  activeOpen.openReview &&
+  activeOpen.tab === "all" &&
+  activeOpen.labId === activeLabId &&
+  activeOpen.alreadyActive &&
+  activeOpen.mutate === false &&
+  !activeAgain.changed &&
+  !activeAgain.openReview
+) {
+  pass("18.active_production_fixture", "ACTIVE lab deep link opens the existing drawer once and does not mutate");
+} else fail("18.active_production_fixture", JSON.stringify({ loadingPass, activeOpen, activeAgain }));
+
+const prospectOpen = applyProspectDeepLinkEffect({
+  search: `?tab=prospects&labId=${labId}&action=review`,
+  labs,
+  canReview: true,
+  loading: false,
+  previousSignature: "",
+});
+if (prospectOpen.openReview && prospectOpen.tab === "prospects" && !prospectOpen.alreadyActive && prospectOpen.mutate === false) {
+  pass("19.prospect_still_opens", "PROSPECT lab still requests the existing review drawer");
+} else fail("19.prospect_still_opens", JSON.stringify(prospectOpen));
+
+const missingLab = applyProspectDeepLinkEffect({
+  search: activeSearch,
+  labs: [{ labId: otherId, status: "ACTIVE" }],
+  canReview: true,
+  loading: false,
+  previousSignature: "",
+});
+if (!missingLab.openReview && missingLab.message === "Prospect not found or no longer available." && missingLab.mutate === false) {
+  pass("20.missing_lab", "missing lab stays on Labs with a safe message");
+} else fail("20.missing_lab", JSON.stringify(missingLab));
+
+const denied = applyProspectDeepLinkEffect({
+  search: activeSearch,
+  labs: activeLabs,
+  canReview: false,
+  loading: false,
+  previousSignature: "",
+});
+if (!denied.changed && !denied.openReview && !denied.message && !denied.labId) {
+  pass("21.unauthorized", "unauthorized caller does not open or describe the lab");
+} else fail("21.unauthorized", JSON.stringify(denied));
+
+const badId = applyProspectDeepLinkEffect({
+  search: "?tab=prospects&labId=not a lab&action=review",
+  labs: activeLabs,
+  canReview: true,
+  loading: false,
+  previousSignature: "",
+});
+if (!badId.openReview && badId.message === "This review link is not valid." && !badId.message.includes("not a lab")) {
+  pass("22.invalid_effect", "invalid id fails inside the effect without echoing it");
+} else fail("22.invalid_effect", JSON.stringify(badId));
+
+const plainEffect = applyProspectDeepLinkEffect({
+  search: "",
+  labs: activeLabs,
+  canReview: true,
+  loading: false,
+  previousSignature: "",
+});
+if (!plainEffect.changed && !plainEffect.openReview) {
+  pass("23.plain_effect", "normal /labs does not open a drawer");
+} else fail("23.plain_effect", JSON.stringify(plainEffect));
+
+const labsPage = readFileSync(resolve(root, "src/pages/LabsPage.jsx"), "utf8");
+const visibleDecl = labsPage.indexOf("const visibleLabs = useMemo");
+const deepLinkCall = labsPage.indexOf("applyProspectDeepLinkEffect(");
+if (visibleDecl > -1 && deepLinkCall > visibleDecl && labsPage.includes("setInitialReviewLabId(targetId)")) {
+  pass("24.render_order", "deep-link effect runs only after visibleLabs is initialized and reuses the existing review id");
+} else fail("24.render_order", `decl ${visibleDecl} call ${deepLinkCall}`);
+
+function useEffectStub(_fn, deps) {
+  return deps;
+}
+function brokenHookOrder() {
+  useEffectStub(() => {}, [visibleLabs]);
+  const visibleLabs = [];
+  return visibleLabs;
+}
+let tdz = "";
+try {
+  brokenHookOrder();
+} catch (err) {
+  tdz = err instanceof ReferenceError ? err.message : "";
+}
+if (tdz === "Cannot access 'visibleLabs' before initialization") {
+  pass("25.tdz_guard", "reading visibleLabs before initialization is the Production render exception");
+} else fail("25.tdz_guard", tdz);
 
 console.log(failures ? `\nPROSPECT DEEP LINK: BLOCKED (${failures})\n` : "\nPROSPECT DEEP LINK: PASS\n");
 process.exit(failures ? 1 : 0);
