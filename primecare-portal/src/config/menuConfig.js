@@ -171,6 +171,7 @@ export const MENU_ITEMS = [
   { key: "operationsCenter", label: ENTERPRISE_PAGE_LABELS.operationsCenter, icon: "Radio" },
   { key: "agentResources", label: "Agent Resources", icon: "BookOpen" },
   { key: "myBusiness", label: "My Business", icon: "BarChart3" },
+  { key: "agentReviews", label: "Reviews & Development", icon: "ClipboardList" },
   { key: "accessAudit", label: ENTERPRISE_PAGE_LABELS.accessAudit, icon: "Shield" },
 
   // Field Ops
@@ -245,6 +246,7 @@ const PILOT_SAFE_PAGE_KEYS = new Set([
   "productionReadiness",
   "agentResources",
   "myBusiness",
+  "agentReviews",
 ]);
 
 /**

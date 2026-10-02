@@ -128,6 +128,7 @@ export const PERMISSION_BY_KEY = {
   productionReadiness: [ROLES.EXECUTIVE, ROLES.ADMIN],
   agentResources: [ROLES.EXECUTIVE, ROLES.ADMIN, ROLES.AGENT],
   myBusiness: [ROLES.AGENT, ROLES.ADMIN, ROLES.EXECUTIVE],
+  agentReviews: [ROLES.AGENT, ROLES.ADMIN, ROLES.EXECUTIVE],
 };
 
 /** Sidebar allowlist for distributor-scoped roles (HQ executive/admin use menuConfig HQ sets). */

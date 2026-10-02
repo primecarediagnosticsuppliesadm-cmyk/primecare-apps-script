@@ -158,6 +158,20 @@ export default function MyBusinessPage({ currentUser = null, setActivePage = nul
         icon={Briefcase}
         compact
         actions={
+          <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => {
+              if (isHq && selectedAgentId) {
+                window.sessionStorage.setItem("primecare.reviewSubject", selectedAgentId);
+              }
+              setActivePage?.("agentReviews");
+            }}
+            data-testid="open-reviews-development"
+          >
+            Reviews & Development
+          </Button>
           <Button
             type="button"
             size="sm"
@@ -168,6 +182,7 @@ export default function MyBusinessPage({ currentUser = null, setActivePage = nul
             <RefreshCw className={`mr-1 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
             Refresh
           </Button>
+          </div>
         }
       />
 

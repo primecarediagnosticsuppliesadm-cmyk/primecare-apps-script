@@ -59,6 +59,7 @@ export const PAGE_LOADERS = {
   labAccount: () => import("@/pages/LabOrderingPage.jsx"),
   agentResources: () => import("@/pages/AgentResourcesPublisherPage.jsx"),
   myBusiness: () => import("@/pages/MyBusinessPage.jsx"),
+  agentReviews: () => import("@/pages/AgentReviewsPage.jsx"),
 };
 
 function resolvePageLoader(role, pageKey) {

@@ -13,6 +13,7 @@ export const NAV_DEEP_LINK_ONLY_KEYS = new Set([
   "commissionEngine",
   "labContractEngine",
   "pilotReadiness",
+  "agentReviews",
 ]);
 
 /** Primary workspace home per domain (canonical menu entry). */
