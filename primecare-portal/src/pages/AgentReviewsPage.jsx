@@ -58,6 +58,10 @@ export default function AgentReviewsPage({ currentUser = null, setActivePage = n
   const [busy, setBusy] = useState("");
   const pendingRef = useRef(new Map());
   const timerRef = useRef(null);
+  const [startState, setStartState] = useState("idle");
+  const startLockRef = useRef("");
+  const openCycleRef = useRef(openCycleId);
+  openCycleRef.current = openCycleId;
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -121,6 +125,33 @@ export default function AgentReviewsPage({ currentUser = null, setActivePage = n
   const cycle = packet?.cycle || null;
   const editing = isAgent && canAgentEdit(cycle);
   const preview = isHq;
+
+  const startPublishedReview = useCallback(async (cycleId) => {
+    if (!cycleId || startLockRef.current === cycleId) return;
+    startLockRef.current = cycleId;
+    setStartState("starting");
+    setError("");
+    const result = await transitionReview(cycleId, "IN_PROGRESS");
+    if (startLockRef.current === cycleId) startLockRef.current = "";
+    if (openCycleRef.current !== cycleId) return;
+    if (!result.ok || result.cycle?.status !== "IN_PROGRESS") {
+      setStartState("failed");
+      setError("This review could not be started. Answers stay locked until it starts.");
+      return;
+    }
+    setPacket((current) => {
+      if (!current || current.cycle?.id !== result.cycle.id) return current;
+      return { ...current, cycle: result.cycle };
+    });
+    setStartState("ready");
+  }, []);
+
+  useEffect(() => {
+    if (!isAgent || !cycle || cycle.id !== openCycleId) return;
+    if (cycle.status !== "PUBLISHED") return;
+    if (startState !== "idle") return;
+    void startPublishedReview(cycle.id);
+  }, [isAgent, openCycleId, cycle, startState, startPublishedReview]);
   const shown = useMemo(() => visibleQuestions(questions, answers), [questions, answers]);
   const sections = useMemo(() => groupSections(shown), [shown]);
   const progress = useMemo(() => requiredProgress(questions, answers), [questions, answers]);
@@ -176,6 +207,9 @@ export default function AgentReviewsPage({ currentUser = null, setActivePage = n
   }
 
   async function openCycle(cycleId) {
+    startLockRef.current = "";
+    setStartState("idle");
+    setError("");
     writeCycleUrl(cycleId);
     setOpenCycleId(cycleId);
   }
@@ -183,6 +217,8 @@ export default function AgentReviewsPage({ currentUser = null, setActivePage = n
   async function exitReview() {
     const ok = await flushSaves();
     if (!ok) return;
+    startLockRef.current = "";
+    setStartState("idle");
     writeCycleUrl("");
     setOpenCycleId("");
     setPacket(null);
@@ -312,7 +348,7 @@ export default function AgentReviewsPage({ currentUser = null, setActivePage = n
   const title = `${formatReviewPeriod(cycle.period_start, cycle.period_end)} — ${reviewTypeLabel(cycle.review_type)}`;
 
   return (
-    <div className="mx-auto max-w-lg space-y-4 overflow-x-hidden px-4 pb-28" data-testid="review-workspace">
+    <div className="mx-auto max-w-lg space-y-4 overflow-x-hidden px-4 pb-64 md:pb-48" data-testid="review-workspace">
       <PageHeader title={title} compact />
       {preview ? (
         <div className="rounded-xl border border-amber-300 bg-amber-50 p-4" data-testid="agent-view-preview">
@@ -329,6 +365,13 @@ export default function AgentReviewsPage({ currentUser = null, setActivePage = n
       )}
       <p className="text-sm text-slate-600">Approximately 15–20 minutes.</p>
       <p className="text-sm font-medium">Status: {agentStatusLabel(cycle)}</p>
+      {startState === "starting" ? <p className="text-sm text-slate-600">Starting your review…</p> : null}
+      {error ? <p className="text-sm text-red-700" role="alert">{error}</p> : null}
+      {startState === "failed" && cycle.status === "PUBLISHED" ? (
+        <Button type="button" className="min-h-11" data-testid="review-start-retry" onClick={() => startPublishedReview(cycle.id)}>
+          Retry
+        </Button>
+      ) : null}
       {cycle.status === "SUBMITTED" || view === "submitted" ? (
         <div className="rounded-xl border border-slate-200 bg-white p-4" data-testid="review-submitted">
           <p className="text-lg font-semibold">Review submitted</p>
@@ -337,7 +380,6 @@ export default function AgentReviewsPage({ currentUser = null, setActivePage = n
           </p>
         </div>
       ) : null}
-      {error ? <p className="text-sm text-red-700" role="alert">{error}</p> : null}
 
       {view === "review" ? (
         <ReviewAnswers
@@ -372,7 +414,10 @@ export default function AgentReviewsPage({ currentUser = null, setActivePage = n
         <p>This review has no questions to show.</p>
       )}
 
-      <div className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white px-4 py-3">
+      <div
+        className="fixed inset-x-0 bottom-16 z-50 border-t border-slate-200 bg-white px-4 py-3 md:bottom-0"
+        data-testid="review-action-bar"
+      >
         <div className="mx-auto flex max-w-lg flex-col gap-2">
           <p className="text-sm" data-testid="review-save-state" role="status">
             {saveState === "saving" ? "Saving…" : null}
@@ -409,6 +454,7 @@ export default function AgentReviewsPage({ currentUser = null, setActivePage = n
             <Button
               type="button"
               className="min-h-11"
+              data-testid="review-submit"
               disabled={Boolean(busy)}
               onClick={() => runTransition("SUBMITTED", "submit")}
             >
@@ -419,10 +465,10 @@ export default function AgentReviewsPage({ currentUser = null, setActivePage = n
             <Button
               type="button"
               className="min-h-11"
-              disabled={Boolean(busy)}
-              onClick={() => runTransition("IN_PROGRESS", "start")}
+              disabled={startState === "starting" || Boolean(busy)}
+              onClick={() => startPublishedReview(cycle.id)}
             >
-              Start Review
+              {startState === "failed" ? "Retry" : "Start Review"}
             </Button>
           ) : null}
         </div>
