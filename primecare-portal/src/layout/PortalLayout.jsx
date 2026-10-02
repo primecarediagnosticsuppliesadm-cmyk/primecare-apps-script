@@ -187,7 +187,7 @@ function PortalLayout({
           </nav>
         </aside>
 
-        <main className="flex-1">
+        <main className="min-w-0 flex-1">
           <div className="sticky top-0 z-30 border-b bg-white/95 backdrop-blur md:hidden">
             <div className="flex items-center justify-between px-4 py-3">
               <div>
