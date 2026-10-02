@@ -113,7 +113,7 @@ export const HQ_V_LAB_CATALOG_COLUMNS = "product_id,product_name,category,tenant
 
 /** Lab catalog / ordering projection (view-safe). */
 export const HQ_LAB_CATALOG_LIST_COLUMNS =
-  "product_id,product_name,category,tenant_id,current_stock,min_stock,reorder_qty,reorder_status,unit_selling_price,unit_cost,brand,tax_rate,active_flag";
+  "product_id,product_name,category,tenant_id,current_stock,min_stock,reorder_qty,reorder_status,unit_selling_price,brand,tax_rate,active_flag";
 
 export const HQ_REORDER_CANDIDATE_COLUMNS =
   "product_id,product_name,category,tenant_id,current_stock,min_stock,reorder_qty,reorder_status,selling_price,cost_price,preferred_supplier,unit";

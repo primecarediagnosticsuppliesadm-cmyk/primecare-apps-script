@@ -3,8 +3,11 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { getAgentVisitEvidenceRead } from "@/api/primecareSupabaseApi.js";
 import { labIdKey } from "@/utils/labId.js";
+import { computeMarginPct, formatMarginPct } from "@/catalog/masterCatalogEngine.js";
+import { composeAgentVisibleCommercialText } from "@/visits/commercialResponse.js";
 import {
   getVisitHeadersForHandoffsRead,
+  listCommercialProductChoicesRead,
   listOpenVisitHandoffsRead,
   respondVisitHandoffWrite,
 } from "@/visits/visitHandoffsApi.js";
@@ -58,6 +61,19 @@ export default function VisitHandoffHqPanel({
   const [evidence, setEvidence] = useState(null);
   const [evidenceError, setEvidenceError] = useState("");
   const [response, setResponse] = useState("");
+  const [decision, setDecision] = useState("YES");
+  const [productId, setProductId] = useState("");
+  const [specification, setSpecification] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const [packUom, setPackUom] = useState("");
+  const [supplierName, setSupplierName] = useState("");
+  const [verifiedCost, setVerifiedCost] = useState("");
+  const [availability, setAvailability] = useState("");
+  const [leadTime, setLeadTime] = useState("");
+  const [sellingPrice, setSellingPrice] = useState("");
+  const [validUntil, setValidUntil] = useState("");
+  const [internalNote, setInternalNote] = useState("");
+  const [productChoices, setProductChoices] = useState([]);
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const reviewRef = useRef(null);
@@ -121,6 +137,18 @@ export default function VisitHandoffHqPanel({
   function closeReview() {
     setReviewId("");
     setResponse("");
+    setDecision("YES");
+    setProductId("");
+    setSpecification("");
+    setQuantity("");
+    setPackUom("");
+    setSupplierName("");
+    setVerifiedCost("");
+    setAvailability("");
+    setLeadTime("");
+    setSellingPrice("");
+    setValidUntil("");
+    setInternalNote("");
     setEvidence(null);
     setEvidenceError("");
   }
@@ -131,7 +159,21 @@ export default function VisitHandoffHqPanel({
       setEvidence(null);
       setEvidenceError("");
       setResponse("");
+      setDecision("YES");
+      setProductId("");
+      setSpecification("");
+      setQuantity("");
+      setPackUom("");
+      setSupplierName("");
+      setVerifiedCost("");
+      setAvailability("");
+      setLeadTime("");
+      setSellingPrice("");
+      setValidUntil("");
+      setInternalNote("");
       if (!review) return;
+      const products = await listCommercialProductChoicesRead({ tenantId });
+      if (!cancelled) setProductChoices(products.success ? products.data : []);
       const ev = await getAgentVisitEvidenceRead({
         visitUuid: review.visitUuid,
         tenantId,
@@ -155,11 +197,37 @@ export default function VisitHandoffHqPanel({
     reviewRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [reviewId]);
 
+  const selectedProduct = productChoices.find((row) => str(row.product_id) === str(productId));
+  const marginPct = computeMarginPct(sellingPrice, verifiedCost);
+  const preview = composeAgentVisibleCommercialText({
+    decision,
+    productId,
+    productName: selectedProduct?.product_name || "",
+    specification,
+    quantity,
+    packUom,
+    availability,
+    leadTime,
+    sellingPrice,
+    validUntil,
+    agentResponse: response,
+  });
+
   async function sendBack() {
     if (!review || sendingRef.current || sending) return;
     if (!str(response)) {
       setError("Write a PrimeCare response before sending back.");
       return;
+    }
+    if (decision === "YES") {
+      if (!str(productId) && !str(specification)) {
+        setError("Match a product or write the specification.");
+        return;
+      }
+      if (!str(supplierName) || verifiedCost === "" || sellingPrice === "" || !str(availability) || !str(leadTime) || !str(validUntil)) {
+        setError("A YES answer needs source, verified cost, selling price, availability, lead time, and validity.");
+        return;
+      }
     }
     sendingRef.current = true;
     setSending(true);
@@ -168,6 +236,21 @@ export default function VisitHandoffHqPanel({
       const res = await respondVisitHandoffWrite({
         handoffId: review.id,
         hqResponse: response,
+        commercial: {
+          decision,
+          agentResponse: response,
+          productId: decision === "YES" ? productId : "",
+          specification,
+          quantity: decision === "YES" ? quantity : "",
+          packUom: decision === "YES" ? packUom : "",
+          supplierName: decision === "YES" ? supplierName : "",
+          verifiedCost: decision === "YES" ? verifiedCost : "",
+          availability: decision === "YES" ? availability : "",
+          leadTime: decision === "YES" ? leadTime : "",
+          sellingPrice: decision === "YES" ? sellingPrice : "",
+          validUntil: decision === "YES" ? validUntil : "",
+          internalNote,
+        },
       });
       const stale = ["already_responded", "stale_or_closed"].includes(str(res?.code));
       if (!res.success && !stale) {
@@ -282,7 +365,151 @@ export default function VisitHandoffHqPanel({
             </ul>
           ) : null}
           <label className="mt-4 block text-sm font-medium">
-            PrimeCare Response
+            Decision
+            <select
+              className="mt-1 w-full rounded-md border bg-white px-3 py-2 text-sm"
+              value={decision}
+              onChange={(e) => setDecision(e.target.value)}
+              data-commercial-decision="true"
+            >
+              <option value="YES">YES — we can supply</option>
+              <option value="NO">NO</option>
+              <option value="NEED_MORE_INFORMATION">Need more information</option>
+            </select>
+          </label>
+          {decision === "YES" ? (
+            <div className="mt-3 grid gap-3 sm:grid-cols-2" data-commercial-yes="true">
+              <label className="block text-sm font-medium sm:col-span-2">
+                Existing product
+                <select
+                  className="mt-1 w-full rounded-md border bg-white px-3 py-2 text-sm"
+                  value={productId}
+                  onChange={(e) => setProductId(e.target.value)}
+                  data-commercial-product="true"
+                >
+                  <option value="">Not matched yet</option>
+                  {productChoices.map((row) => (
+                    <option key={row.product_id} value={row.product_id}>
+                      {row.product_name} ({row.product_id})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm font-medium sm:col-span-2">
+                Specification
+                <Textarea
+                  className="mt-1 min-h-[72px] bg-white"
+                  value={specification}
+                  onChange={(e) => setSpecification(e.target.value)}
+                  data-commercial-specification="true"
+                />
+              </label>
+              <label className="block text-sm font-medium">
+                Quantity
+                <input
+                  className="mt-1 w-full rounded-md border bg-white px-3 py-2 text-sm"
+                  inputMode="decimal"
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  data-commercial-quantity="true"
+                />
+              </label>
+              <label className="block text-sm font-medium">
+                Pack
+                <input
+                  className="mt-1 w-full rounded-md border bg-white px-3 py-2 text-sm"
+                  value={packUom}
+                  onChange={(e) => setPackUom(e.target.value)}
+                  data-commercial-pack="true"
+                />
+              </label>
+              <label className="block text-sm font-medium">
+                Source
+                <input
+                  className="mt-1 w-full rounded-md border bg-white px-3 py-2 text-sm"
+                  value={supplierName}
+                  onChange={(e) => setSupplierName(e.target.value)}
+                  data-commercial-supplier="true"
+                />
+              </label>
+              <label className="block text-sm font-medium">
+                Verified cost
+                <input
+                  className="mt-1 w-full rounded-md border bg-white px-3 py-2 text-sm"
+                  inputMode="decimal"
+                  value={verifiedCost}
+                  onChange={(e) => setVerifiedCost(e.target.value)}
+                  data-commercial-cost="true"
+                />
+              </label>
+              <label className="block text-sm font-medium">
+                Selling price
+                <input
+                  className="mt-1 w-full rounded-md border bg-white px-3 py-2 text-sm"
+                  inputMode="decimal"
+                  value={sellingPrice}
+                  onChange={(e) => setSellingPrice(e.target.value)}
+                  data-commercial-selling="true"
+                />
+              </label>
+              <label className="block text-sm font-medium">
+                Availability
+                <input
+                  className="mt-1 w-full rounded-md border bg-white px-3 py-2 text-sm"
+                  value={availability}
+                  onChange={(e) => setAvailability(e.target.value)}
+                  data-commercial-availability="true"
+                />
+              </label>
+              <label className="block text-sm font-medium">
+                Lead time
+                <input
+                  className="mt-1 w-full rounded-md border bg-white px-3 py-2 text-sm"
+                  value={leadTime}
+                  onChange={(e) => setLeadTime(e.target.value)}
+                  data-commercial-lead-time="true"
+                />
+              </label>
+              <label className="block text-sm font-medium">
+                Valid until
+                <input
+                  type="date"
+                  className="mt-1 w-full rounded-md border bg-white px-3 py-2 text-sm"
+                  value={validUntil}
+                  onChange={(e) => setValidUntil(e.target.value)}
+                  data-commercial-valid-until="true"
+                />
+              </label>
+              <p className="text-sm sm:col-span-2" data-commercial-margin="true">
+                Margin, HQ only: {formatMarginPct(marginPct, marginPct != null)}
+              </p>
+            </div>
+          ) : (
+            <label className="mt-3 block text-sm font-medium">
+              Specification, if it helps the agent
+              <Textarea
+                className="mt-1 min-h-[72px] bg-white"
+                value={specification}
+                onChange={(e) => setSpecification(e.target.value)}
+                data-commercial-specification="true"
+              />
+            </label>
+          )}
+          <label className="mt-3 block text-sm font-medium">
+            HQ internal note
+            <Textarea
+              className="mt-1 min-h-[72px] bg-white"
+              value={internalNote}
+              onChange={(e) => setInternalNote(e.target.value)}
+              data-commercial-internal-note="true"
+            />
+          </label>
+          <div className="mt-3 rounded-md border bg-white p-3 text-sm" data-commercial-preview="true">
+            <p className="text-xs font-medium text-muted-foreground">PrimeCare Response</p>
+            <pre className="mt-1 whitespace-pre-wrap font-sans">{preview || "The agent-visible answer appears here."}</pre>
+          </div>
+          <label className="mt-4 block text-sm font-medium">
+            Next action for the agent
             <Textarea
               className="mt-1 min-h-[96px] bg-white"
               value={response}

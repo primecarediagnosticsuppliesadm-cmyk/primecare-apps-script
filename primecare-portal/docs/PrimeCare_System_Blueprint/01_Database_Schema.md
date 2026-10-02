@@ -572,5 +572,48 @@ Phase 3C allows payroll statuses `draft`, `previewed`, `submitted`, `approved`, 
 | 20260905170000 | Agent Prospect 2B append `sourced_by_agent_id` to `v_labs_credit` (QA only in 2B) |
 | 20260905200000 | Agent Prospect 2C `activate_prospect_lab` + `v_labs_credit.created_at` (QA only in 2C) |
 | 20260906080000 | Flow 2E: `create_lab_order` ACTIVE for all callers + PROSPECT `ordering_mode=hq_managed` (QA only in 2E) |
+| 20261002120000 | P0-A commercial response: `suppliers`, `supplier_offers`, `handoff_commercial_responses`, `handoff_commercial_economics`. Lab catalog no longer exposes purchase cost. |
 
 Full manual SQL: `supabase/sql/` (includes `agent_resources_v1_migration.sql` mirror).
+
+---
+
+## suppliers
+
+| Attribute | Value |
+|-----------|-------|
+| **Purpose** | Distinguish one supply source from another for a commercial response |
+| **PK** | `id` |
+| **Required** | `tenant_id`, `supplier_name`, `active` |
+| **Not included** | Contacts, credit days, GST, freight, portal access |
+| **RLS** | HQ admin/executive in the same tenant. Agent and lab cannot select |
+| **Write** | `resolve_visit_handoff_commercial` only |
+
+## supplier_offers
+
+| Attribute | Value |
+|-----------|-------|
+| **Purpose** | Verified purchase cost for a source at a point in time |
+| **Required** | `tenant_id`, `supplier_id`, `verified_cost`, `verified_at` |
+| **Optional** | `product_id` (canonical `products.product_id` when matched), `specification` |
+| **Do not** | Overwrite `products.cost_price`. This is not a selling price |
+| **RLS** | HQ only |
+
+## handoff_commercial_responses
+
+| Attribute | Value |
+|-----------|-------|
+| **Purpose** | Agent-visible decision and selling terms for one `visit_handoffs` row |
+| **Decision** | `YES`, `NO`, `NEED_MORE_INFORMATION` |
+| **Visible** | Decision, product/specification, quantity, pack, selling price, availability, lead time, valid-until, next action |
+| **Absent** | Supplier, purchase cost, margin, HQ note |
+| **RLS** | HQ, or the agent who already owns that handoff |
+| **Not** | A quote, an order, or a second product master |
+
+## handoff_commercial_economics
+
+| Attribute | Value |
+|-----------|-------|
+| **Purpose** | HQ-only source, verified cost, and internal note for that response |
+| **RLS** | HQ admin/executive, same tenant |
+| **Write** | Same transaction as `respond_visit_handoff` |

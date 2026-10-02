@@ -40,13 +40,59 @@ export async function createVisitHandoffWrite({ visitUuid, requirementSummary, n
   return mapRpc(data, error);
 }
 
-export async function respondVisitHandoffWrite({ handoffId, hqResponse } = {}) {
+function commercialRpcError(error) {
+  const message = error?.message || "Handoff request failed";
+  const matched = message.match(/commercial_respond_failed:([a-z0-9_]+)/i);
+  return {
+    success: false,
+    error: message,
+    code: matched?.[1] || "rpc_error",
+    handoff: null,
+  };
+}
+
+export async function respondVisitHandoffWrite({ handoffId, hqResponse, commercial } = {}) {
   if (!supabase) return { success: false, error: "Supabase is not configured", code: "offline", handoff: null };
+  if (commercial) {
+    const { data, error } = await supabase.rpc("resolve_visit_handoff_commercial", {
+      p_handoff_id: handoffId,
+      p_decision: commercial.decision,
+      p_agent_response: commercial.agentResponse || hqResponse,
+      p_product_id: commercial.productId || null,
+      p_specification: commercial.specification || null,
+      p_quantity: commercial.quantity === "" || commercial.quantity == null ? null : commercial.quantity,
+      p_pack_uom: commercial.packUom || null,
+      p_supplier_name: commercial.supplierName || null,
+      p_verified_cost: commercial.verifiedCost === "" || commercial.verifiedCost == null ? null : commercial.verifiedCost,
+      p_availability: commercial.availability || null,
+      p_lead_time: commercial.leadTime || null,
+      p_selling_price: commercial.sellingPrice === "" || commercial.sellingPrice == null ? null : commercial.sellingPrice,
+      p_valid_until: commercial.validUntil || null,
+      p_internal_note: commercial.internalNote || null,
+    });
+    if (error) return commercialRpcError(error);
+    return mapRpc(data, error);
+  }
   const { data, error } = await supabase.rpc("respond_visit_handoff", {
     p_handoff_id: handoffId,
     p_hq_response: hqResponse,
   });
   return mapRpc(data, error);
+}
+
+export async function listCommercialProductChoicesRead({ tenantId } = {}) {
+  if (!supabase) return { success: false, error: "Supabase is not configured", data: [] };
+  const id = str(tenantId);
+  if (!id) return { success: false, error: "tenant is required", data: [] };
+  const { data, error } = await supabase
+    .from("products")
+    .select("product_id,product_name,unit")
+    .eq("tenant_id", id)
+    .eq("active", true)
+    .order("product_name", { ascending: true })
+    .limit(200);
+  if (error) return { success: false, error: error.message, data: [] };
+  return { success: true, data: data || [], error: null };
 }
 
 export async function resolveVisitHandoffWrite({

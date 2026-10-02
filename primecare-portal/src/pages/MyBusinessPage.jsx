@@ -600,7 +600,7 @@ function PrimeCareRespondedCard({ item, canAct, onOpenLab, onConverted, onResolv
         <span className="text-muted-foreground">Asked: </span>
         {item.requirementSummary}
       </p>
-      <p className="mt-1 text-xs">
+      <p className="mt-1 whitespace-pre-wrap text-xs">
         <span className="text-muted-foreground">PrimeCare: </span>
         {item.hqResponse}
       </p>

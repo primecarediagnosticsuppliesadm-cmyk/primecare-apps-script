@@ -222,3 +222,9 @@ Lab portal is **not default Day-1 for all labs**. Access requires lab user provi
 
 - Only `ACTIVE` Labs may receive `create_lab_order` (Lab, Admin, Executive, other authenticated ops). Error: `lab_inactive`.
 - While `status` remains `PROSPECT`, ordinary `ordering_mode` writes cannot leave `hq_managed` (`prospect_ordering_hq_managed`). Activation is unaffected.
+
+### P0-A commercial response
+
+- Admin and executive in the same tenant resolve an `OPEN_HQ` handoff and can read supplier cost.
+- The owning agent can read the selling terms and `hq_response`. The agent cannot read supplier, verified cost, or the HQ note.
+- Lab can read `v_lab_catalog` selling price and stock. Lab cannot read `products` or purchase cost.

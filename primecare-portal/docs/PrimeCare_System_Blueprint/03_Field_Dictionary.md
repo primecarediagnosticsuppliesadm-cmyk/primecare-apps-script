@@ -417,6 +417,7 @@ Do not put these discovery fields on `labs`.
 | Key Agent Resource audience on `agent_id` | `profiles.user_id` / `auth.uid()` |
 | Treat notification read as document acknowledgement | `agent_resource_acknowledgements` |
 | Put wallet/size/analyzers on `labs` | `agent_visits` + discovery lines |
+| Put purchase cost in `hq_response` or `v_lab_catalog` | `handoff_commercial_economics.verified_cost` |
 | Use Agent estimates as finance | Orders / invoices / payments / AR |
 | FK discovery lines to `visit_id` text | FK `agent_visits.id` |
 | Dual-write visit history into `lab_qualifications` | Keep snapshot vs history separate |

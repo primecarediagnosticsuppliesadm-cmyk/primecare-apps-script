@@ -77,6 +77,7 @@ Verification scripts in `primecare-portal/scripts/` are **read-only by default**
 | verify-collections-certification-closure.mjs | COL-CERT-011/003/004 discoverability, context, continuity | Collections UX |
 | verify-agent-collections-ownership-filter.mjs | Ownership scoping | Agent collections |
 | verify-agent-visit-product-intelligence.mjs | Visit Products & Purchasing; follow-up; runtime import safety; notification_events + visibility helper + notification_delivery_log QA contracts; authenticated grants | Agent visits / notifications |
+| verify-commercial-response-p0a.mjs | HQ YES/NO/NEED MORE INFORMATION on an OPEN_HQ handoff; agent sees selling terms; agent and lab cannot read purchase cost; `v_lab_catalog` has no cost column; orders, invoices, and `products.cost_price` unchanged. Default static; `--apply` QA only | P0-A commercial response |
 | `primecare-website` `npm run verify` | Public marketing site isolation, portal login URL, WhatsApp env contract, build | Public website |
 | verify-agent-visit-relative-date.mjs | Recent Visits TODAY/YESTERDAY uses `visit_date` calendar days; date-only TZ safety; ignores created_at/updated_at | Agent visits |
 | verify-agent-visit-evidence-schema.mjs | **VE-1:** visit additive columns + `agent_visit_discovery_lines` FK to `agent_visits.id`; no ₹ threshold CHECKs; Track A/B SQL mirror | Visit Evidence |

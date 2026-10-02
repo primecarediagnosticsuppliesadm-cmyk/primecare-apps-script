@@ -52,6 +52,7 @@ Read Blueprint → Inspect code/migrations → Compare doc vs implementation
 | 24 | [24_Collections_Credit_Risk.md](./24_Collections_Credit_Risk.md) | Collections / Credit & Risk payment UX, action feedback |
 | 25 | [25_Agent_Resources.md](./25_Agent_Resources.md) | Agent Resources V1 — field library SoT (not evidence, invoices, or Employee Documents) |
 | 26 | [26_Agent_Visit_Evidence.md](./26_Agent_Visit_Evidence.md) | Agent Visit Evidence V1 — historical field discovery; VE-2 write/read contract; VE-3 Agent Log Visit UX (QA); not CRM, not finance |
+| 28 | [28_Distribution_Commercial_Response.md](./28_Distribution_Commercial_Response.md) | P0-A requirement response on AE-1C. Not a quote or an order |
 | — | [CHANGELOG.md](./CHANGELOG.md) | Gaps, conflicts, structural changes |
 | — | [decisions/ADR_VE_Visit_Evidence.md](./decisions/ADR_VE_Visit_Evidence.md) | ADR-VE-001 … ADR-VE-008 (Accepted VE-0) |
 

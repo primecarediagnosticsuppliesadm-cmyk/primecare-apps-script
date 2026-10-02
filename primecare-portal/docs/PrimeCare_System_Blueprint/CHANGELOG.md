@@ -4,6 +4,23 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-10-02 — P0-A commercial response
+
+### Change
+
+- A lab requirement on an existing AE-1C handoff can be resolved YES, NO, or NEED MORE INFORMATION.
+- YES records a minimal supplier, a verified source cost, and agent-visible selling terms. The cost is not written to `products.cost_price` and is not copied into `hq_response`.
+- `v_lab_catalog` no longer exposes purchase cost. Lab customers no longer select `products`.
+- This is not a quote and does not create an order.
+
+### Verification
+
+- `node scripts/verify-commercial-response-p0a.mjs`
+- `node scripts/verify-commercial-response-p0a.mjs --apply` (QA only)
+- `node scripts/verify-ae-1c-second-move.mjs`
+
+---
+
 ## 2026-10-01 — PN-email prospect deep-link render hotfix
 
 ### Change

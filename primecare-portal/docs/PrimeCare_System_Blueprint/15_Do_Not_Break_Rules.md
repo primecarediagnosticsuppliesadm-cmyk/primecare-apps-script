@@ -85,6 +85,7 @@ Hard constraints. Violations require explicit approval + blueprint amendment + v
 | P18 | Sourced `PROSPECT` may receive visits without operational activation; do not broaden operational lab filters (`filterLabsForUser`) to include PROSPECT |
 | P19 | Do not encode wallet ₹ thresholds, 8/8/4 sampling quotas, or a per-lab working-capital formula until a certified analytics methodology exists |
 | P20 | Do not dual-write Visit Evidence into `lab_qualifications` or `lab_product_intelligence` in V1 |
+| P21 | Purchase cost, supplier identity, and HQ commercial notes stay off Agent and Lab reads. `v_lab_catalog` has no purchase-cost column. Do not copy cost into `visit_handoffs.hq_response`. Do not treat a P0-A commercial response as a quote or an order |
 
 ---
 

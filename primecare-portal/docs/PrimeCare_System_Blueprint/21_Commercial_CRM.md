@@ -22,6 +22,8 @@ Years 1–3 commercial workspace for PrimeCare’s Diagnostics Distribution Oper
 
 **Not found (do not invent without approval):** leads table, quotes/quotations table, meetings calendar object, Salesforce Activities clone.
 
+**P0-A commercial response (not a quote):** `handoff_commercial_responses` is the agent-visible answer on an existing `visit_handoffs` row. Supplier cost lives only in `handoff_commercial_economics` / `supplier_offers`. It does not create a quotation, an order, or a second product master. See [28_Distribution_Commercial_Response.md](./28_Distribution_Commercial_Response.md).
+
 **Visit Evidence exception (VE-0, ADR-VE-003):** `agent_visit_discovery_lines` is **not** a new CRM table. It is a visit-scoped observational child of `agent_visits` (analyzer / reagent / consumable lines). It is **not** a parallel activity SoT, opportunity engine, quotes object, or second `lab_product_intelligence`. Commercial Workspace **may read** these lines on Activities / Lab 360 after VE-1; it still **must not** duplicate mutation paths.
 
 **Snapshot vs history:** `lab_qualifications` and `lab_product_intelligence` remain **current** snapshots. Historical discovery is Visit Evidence only ([26_Agent_Visit_Evidence.md](./26_Agent_Visit_Evidence.md)).

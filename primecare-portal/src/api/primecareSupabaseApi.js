@@ -524,7 +524,10 @@ export function mapLabCatalogRow(row) {
         row.selling_price ??
         row.sellingPrice
     ),
-    unitCost: num(row.unit_cost ?? row.unitCost ?? row.cost_price ?? row.costPrice),
+    unitCost:
+      row.unit_cost == null && row.unitCost == null && row.cost_price == null && row.costPrice == null
+        ? null
+        : num(row.unit_cost ?? row.unitCost ?? row.cost_price ?? row.costPrice),
     transferPrice: num(
       row.transfer_price ??
         row.transferPrice ??
