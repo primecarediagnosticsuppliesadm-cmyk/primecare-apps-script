@@ -14,6 +14,8 @@ It is not a quote, an order, a second product master, or a supplier portal.
 
 `respond_visit_handoff` still moves `OPEN_HQ` to `HQ_RESPONDED`. The commercial rows and that status change commit together. `hq_response` is the agent-visible text. It does not contain purchase cost, supplier, margin, or the internal note.
 
+On My Business, a YES reply is shown on the existing “PrimeCare Responded — Your Action” card as product, pack, PrimeCare price, availability, lead time, price valid until, and next action. A reply with no commercial row still shows `hq_response` as text. NO and NEED MORE INFORMATION show the next action and do not invent a price.
+
 Verified cost is a `supplier_offers` row. It does not overwrite `products.cost_price`.
 
 ## Who can read cost

@@ -1,5 +1,6 @@
 import { labIdKey, normalizeAgentIdKey } from "@/utils/labId.js";
 import { ymdInInclusiveRange } from "@/myBusiness/myBusinessCalendar.js";
+import { presentAgentCommercialTerms } from "@/visits/commercialResponse.js";
 
 export const MY_BUSINESS_LEDGER_CAP = 200;
 export const STALE_VISIT_DAYS = 14;
@@ -142,6 +143,7 @@ function decorateHandoffWorkspaceItem(row, labById, visitsByLab) {
     nextAction: str(visit?.nextAction || visit?.next_action),
     followUpDate: ymd(visit?.nextFollowUpDate || visit?.next_follow_up_date),
     visitDate: ymd(visit?.visitDate || visit?.visit_date),
+    commercialTerms: presentAgentCommercialTerms(row.commercial),
   };
 }
 

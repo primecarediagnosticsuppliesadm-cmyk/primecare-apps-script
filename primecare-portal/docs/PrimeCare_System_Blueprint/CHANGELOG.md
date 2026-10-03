@@ -4,6 +4,21 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-10-03 — Agent commercial card
+
+### Change
+
+- The existing My Business “PrimeCare Responded — Your Action” card labels a YES reply: product, pack, PrimeCare price, availability, lead time, price valid until, and next action.
+- The card reads `handoff_commercial_responses` columns the agent may already see. It does not read supplier, verified cost, or the HQ note.
+- A reply with no commercial row still shows `hq_response` as text.
+
+### Verification
+
+- `node scripts/verify-commercial-response-p0a.mjs`
+- `node scripts/verify-ae-1c-second-move.mjs`
+
+---
+
 ## 2026-10-02 — P0-A commercial response
 
 ### Change

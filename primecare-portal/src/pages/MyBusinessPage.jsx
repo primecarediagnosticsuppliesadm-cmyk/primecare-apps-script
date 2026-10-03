@@ -37,6 +37,7 @@ import {
   formatMyBusinessDisplayLabel,
 } from "@/myBusiness/myBusinessDisplay.js";
 import { resolveVisitHandoffWrite } from "@/visits/visitHandoffsApi.js";
+import { commercialTermLines } from "@/visits/commercialResponse.js";
 import { LOSS_REASON_OPTIONS } from "@/visits/visitHandoffsContract.js";
 
 const PRESETS = [
@@ -554,6 +555,28 @@ export default function MyBusinessPage({ currentUser = null, setActivePage = nul
   );
 }
 
+function CommercialTerms({ terms }) {
+  const lines = commercialTermLines(terms);
+  return (
+    <dl className="mt-2 space-y-1.5 text-xs" data-commercial-terms={terms.decision}>
+      {lines.map((line) =>
+        line.label === "Pack" ? (
+          <p key={`${line.label}:${line.value}`} className="text-muted-foreground">
+            Pack: {line.value}
+          </p>
+        ) : line.label ? (
+          <div key={`${line.label}:${line.value}`}>
+            <dt className="text-[10px] font-semibold tracking-wide text-amber-950/70">{line.label}</dt>
+            <dd>{line.value}</dd>
+          </div>
+        ) : (
+          <p key={line.value}>{line.value}</p>
+        )
+      )}
+    </dl>
+  );
+}
+
 function PrimeCareRespondedCard({ item, canAct, onOpenLab, onConverted, onResolved }) {
   const [mode, setMode] = useState("");
   const [followDate, setFollowDate] = useState(item.followUpDate || "");
@@ -600,10 +623,14 @@ function PrimeCareRespondedCard({ item, canAct, onOpenLab, onConverted, onResolv
         <span className="text-muted-foreground">Asked: </span>
         {item.requirementSummary}
       </p>
-      <p className="mt-1 whitespace-pre-wrap text-xs">
-        <span className="text-muted-foreground">PrimeCare: </span>
-        {item.hqResponse}
-      </p>
+      {item.commercialTerms ? (
+        <CommercialTerms terms={item.commercialTerms} />
+      ) : (
+        <p className="mt-1 whitespace-pre-wrap text-xs">
+          <span className="text-muted-foreground">PrimeCare: </span>
+          {item.hqResponse}
+        </p>
+      )}
       {item.hqRespondedAt ? (
         <p className="mt-0.5 text-[11px] text-muted-foreground">{item.hqRespondedAt}</p>
       ) : null}

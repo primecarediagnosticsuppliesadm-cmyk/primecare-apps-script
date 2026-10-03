@@ -4,6 +4,7 @@
 import { supabase } from "@/api/supabaseClient.js";
 import {
   HQ_AGENT_VISIT_COLUMNS,
+  AGENT_COMMERCIAL_RESPONSE_COLUMNS,
   HQ_VISIT_HANDOFF_COLUMNS,
   HQ_VISIT_HANDOFF_LIST_LIMIT,
   clampLimit,
@@ -176,11 +177,32 @@ export async function listAgentOpenVisitHandoffsRead({ agentId, tenantId, limit 
     }
     return { success: false, error: error.message, data: [] };
   }
+  const rows = (data || []).map((row) => withHumanStatus(mapVisitHandoffRow(row)));
+  const commercial = await listCommercialResponsesForHandoffsRead(rows.map((row) => row.id));
+  const byHandoff = new Map((commercial.data || []).map((row) => [str(row.handoff_id), row]));
   return {
     success: true,
-    data: (data || []).map((row) => withHumanStatus(mapVisitHandoffRow(row))),
+    data: rows.map((row) => ({ ...row, commercial: byHandoff.get(row.id) || null })),
     error: null,
   };
+}
+
+export async function listCommercialResponsesForHandoffsRead(handoffIds = []) {
+  if (!supabase) return { success: false, error: "Supabase is not configured", data: [] };
+  const ids = [...new Set((handoffIds || []).map((id) => str(id)).filter(Boolean))];
+  if (!ids.length) return { success: true, data: [], error: null };
+  const { data, error } = await supabase
+    .from("handoff_commercial_responses")
+    .select(AGENT_COMMERCIAL_RESPONSE_COLUMNS)
+    .in("handoff_id", ids)
+    .limit(clampLimit(ids.length, HQ_VISIT_HANDOFF_LIST_LIMIT, HQ_VISIT_HANDOFF_LIST_LIMIT));
+  if (error) {
+    if (/schema cache|does not exist|handoff_commercial_responses/i.test(error.message || "")) {
+      return { success: true, data: [], error: null, missing: true };
+    }
+    return { success: false, error: error.message, data: [] };
+  }
+  return { success: true, data: data || [], error: null };
 }
 
 export async function getVisitHeadersForHandoffsRead(visitUuids = []) {

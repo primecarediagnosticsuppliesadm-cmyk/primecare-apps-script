@@ -154,6 +154,10 @@ export const HQ_VISIT_HANDOFF_LIST_LIMIT = 200;
 export const HQ_VISIT_HANDOFF_COLUMNS =
   "id,tenant_id,visit_uuid,lab_id,agent_id,trigger_outcome,status,owner,requirement_summary,needed_by,hq_response,hq_responded_at,hq_responded_by,close_reason,close_note,closed_at,closed_by,order_id,created_at,created_by,updated_at";
 
+/** Agent-visible commercial terms. No supplier, verified cost, or HQ note. */
+export const AGENT_COMMERCIAL_RESPONSE_COLUMNS =
+  "handoff_id,decision,product_id,specification,quantity,pack_uom,availability,lead_time,selling_price,valid_until,agent_visible_text";
+
 /** Visit-only account picker. Not used by Orders/AR/Collections. */
 export const HQ_VISIT_ELIGIBLE_ACCOUNT_LIMIT = 500;
 export const HQ_VISIT_ELIGIBLE_ACCOUNT_COLUMNS =

@@ -5,11 +5,14 @@
  * Live QA: node scripts/verify-commercial-response-p0a.mjs --apply
  * Never targets Production.
  */
+import { register } from "node:module";
 import { createClient } from "@supabase/supabase-js";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { composeAgentVisibleCommercialText } from "../src/visits/commercialResponse.js";
+import { commercialTermLines, composeAgentVisibleCommercialText, presentAgentCommercialTerms } from "../src/visits/commercialResponse.js";
+
+register("./lib/srcAliasLoader.mjs", import.meta.url);
 import { QA_ADMIN, QA_AGENT, QA_HQ_TENANT_ID, QA_LAB } from "./qaCredentials.mjs";
 import { PRIMECARE_SUPABASE_PROJECTS } from "./lib/primecareReleaseManifest.mjs";
 
@@ -143,6 +146,170 @@ const needPreview = composeAgentVisibleCommercialText({
 if (needPreview.includes("NEED MORE INFORMATION") && needPreview.includes("Which analyzer") && !needPreview.includes("Selling price")) {
   pass("static.need_preview", "need-more preview has no price");
 } else fail("static.need_preview", needPreview);
+
+const card = presentAgentCommercialTerms({
+  decision: "YES",
+  product_id: "HEM-5",
+  specification: "500 ml",
+  quantity: 1,
+  pack_uom: "bottle",
+  availability: "Available",
+  lead_time: "2 days",
+  selling_price: 1250,
+  valid_until: "2026-10-10",
+  agent_visible_text: "Decision: YES\nProduct: 5-Part Hematology Reagent (HEM-5)\nNext action: Confirm quantity with lab",
+  verified_cost: 80,
+  supplier_name: "Hidden Source",
+  internal_note: "do not show",
+});
+const cardKeys = Object.keys(card || {}).join(",");
+if (
+  card?.product === "5-Part Hematology Reagent" &&
+  card.pack === "1 × bottle" &&
+  card.price === "₹1,250" &&
+  card.availability === "Available" &&
+  card.leadTime === "2 days" &&
+  card.validUntil === "10 Oct 2026" &&
+  card.nextAction === "Confirm quantity with lab" &&
+  !cardKeys.includes("cost") &&
+  !cardKeys.includes("supplier") &&
+  !cardKeys.includes("note")
+) {
+  pass("static.agent_card", "agent card labels selling terms and drops cost");
+} else fail("static.agent_card", JSON.stringify(card));
+
+const noCard = presentAgentCommercialTerms({
+  decision: "NO",
+  selling_price: 10,
+  agent_visible_text: "Decision: NO\nNext action: Tell the lab we cannot supply this.",
+});
+if (noCard?.price === "" && noCard.nextAction.includes("cannot supply")) {
+  pass("static.agent_card_no", "NO card does not invent a price");
+} else fail("static.agent_card_no", JSON.stringify(noCard));
+
+const noPrice = presentAgentCommercialTerms({
+  decision: "YES",
+  specification: "5-Part Hematology Reagent",
+  availability: "Available",
+  selling_price: null,
+  pack_uom: null,
+  quantity: 1,
+  lead_time: "",
+  valid_until: "2026-10-10",
+  agent_visible_text: "Decision: YES\nNext action: Confirm quantity with lab",
+  verified_cost: 80,
+  supplier_name: "Hidden Source",
+});
+const noPriceLabels = commercialTermLines(noPrice).map((line) => line.label);
+if (
+  noPrice?.price === "" &&
+  noPrice.pack === "" &&
+  noPrice.leadTime === "" &&
+  noPriceLabels.includes("PRODUCT") &&
+  noPriceLabels.includes("AVAILABILITY") &&
+  noPriceLabels.includes("PRICE VALID UNTIL") &&
+  noPriceLabels.includes("NEXT ACTION") &&
+  !noPriceLabels.includes("PRIMECARE PRICE") &&
+  !noPriceLabels.includes("Pack") &&
+  !noPriceLabels.includes("LEAD TIME")
+) {
+  pass("static.agent_card_optional", "missing price, pack, and lead time omit those labels");
+} else fail("static.agent_card_optional", JSON.stringify({ noPrice, noPriceLabels }));
+
+const needCard = presentAgentCommercialTerms({
+  decision: "NEED_MORE_INFORMATION",
+  specification: "Which analyzer",
+  selling_price: 99,
+  agent_visible_text: "Decision: NEED MORE INFORMATION\nSpecification: Which analyzer\nNext action: Ask which analyzer the lab uses.",
+  verified_cost: 40,
+  internal_note: "do not show",
+});
+const needLines = commercialTermLines(needCard);
+const needText = JSON.stringify(needLines);
+if (
+  needCard?.price === "" &&
+  needLines.some((line) => line.value.includes("Ask which analyzer")) &&
+  needLines.some((line) => line.value === "Which analyzer") &&
+  !needText.includes("99") &&
+  !needText.includes("40") &&
+  !needText.toLowerCase().includes("do not show")
+) {
+  pass("static.agent_card_need", "need-more card asks for the missing fact and invents no price");
+} else fail("static.agent_card_need", needText);
+
+const completeLines = commercialTermLines(card);
+const completeText = JSON.stringify(completeLines);
+if (
+  completeLines.map((line) => line.label).join("|") ===
+    "PRODUCT|Pack|PRIMECARE PRICE|AVAILABILITY|LEAD TIME|PRICE VALID UNTIL|NEXT ACTION" &&
+  !completeText.includes("80") &&
+  !completeText.includes("Hidden Source") &&
+  !completeText.toLowerCase().includes("do not show") &&
+  !completeText.toLowerCase().includes("margin") &&
+  !completeText.toLowerCase().includes("supplier")
+) {
+  pass("static.agent_card_render", "complete YES lines are the selling terms only");
+} else fail("static.agent_card_render", completeText);
+
+const { buildMyBusinessModel } = await import("../src/myBusiness/myBusinessModel.js");
+const legacyModel = buildMyBusinessModel({
+  range: { from: "2026-10-01", to: "2026-10-03", todayYmd: "2026-10-03" },
+  subjectAgentId: "AGT-A",
+  actor: { role: "agent", agentId: "AGT-A" },
+  labs: [{ labId: "LAB-A", labName: "Alpha", status: "ACTIVE", assignedAgentId: "AGT-A", sourcedByAgentId: "AGT-A" }],
+  visits: [],
+  visitHandoffs: [{
+    id: "h-legacy",
+    labId: "LAB-A",
+    agentId: "AGT-A",
+    status: "HQ_RESPONDED",
+    owner: "AGENT",
+    requirementSummary: "Need reagent",
+    hqResponse: "We can supply this next week.",
+    commercial: null,
+  }],
+});
+const legacyItem = (legacyModel.primecareResponded || [])[0];
+if (legacyItem?.commercialTerms == null && legacyItem?.hqResponse === "We can supply this next week.") {
+  pass("static.legacy_response", "a reply without a commercial row keeps hq_response");
+} else fail("static.legacy_response", JSON.stringify(legacyItem || null));
+
+const page = readFileSync(resolve(root, "src/pages/MyBusinessPage.jsx"), "utf8");
+if (
+  page.includes("item.commercialTerms") &&
+  page.includes("item.hqResponse") &&
+  page.includes("commercialTermLines") &&
+  !page.includes("verified_cost") &&
+  !page.includes("internal_note") &&
+  !page.includes("handoff_commercial_economics") &&
+  !/margin/i.test(page) &&
+  !/supplier/i.test(page)
+) {
+  pass("static.card_source", "My Business card renders safe lines or the legacy reply");
+} else fail("static.card_source", "card source references a confidential field");
+
+const agentRead = api.split("export async function listCommercialResponsesForHandoffsRead")[1]?.split("export async function")[0] || "";
+if (
+  agentRead.includes(".select(AGENT_COMMERCIAL_RESPONSE_COLUMNS)") &&
+  agentRead.includes('from("handoff_commercial_responses")') &&
+  !agentRead.includes("handoff_commercial_economics") &&
+  !agentRead.includes("verified_cost") &&
+  !agentRead.includes("internal_note") &&
+  !agentRead.includes("supplier")
+) {
+  pass("static.card_read", "agent read selects the safe commercial columns only");
+} else fail("static.card_read", "agent commercial read reaches economics or cost");
+
+const agentColumns = bounds.match(/AGENT_COMMERCIAL_RESPONSE_COLUMNS =\s*"([^"]+)"/)?.[1] || "";
+if (
+  agentColumns.includes("selling_price") &&
+  agentColumns.includes("agent_visible_text") &&
+  !agentColumns.includes("verified_cost") &&
+  !agentColumns.includes("internal_note") &&
+  !agentColumns.includes("supplier")
+) {
+  pass("static.agent_columns", "agent commercial read omits cost, supplier, and the HQ note");
+} else fail("static.agent_columns", agentColumns || "agent commercial columns missing");
 
 if (!APPLY) {
   console.log("\nStatic checks complete. Rerun with --apply for live QA.\n");
