@@ -4,6 +4,22 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-10-05 — My Business agent presentation
+
+### Change
+
+- My Business keeps the same metrics, attention order, activity rows, and commercial card.
+- The page now leads with a short business strip, then Your actions, then the remaining counts, then recent activity grouped by the date already on each row.
+- Agent-facing subtitles no longer show field names such as `orders.total_amount`.
+
+### Verification
+
+- `node scripts/verify-ae-1a-my-business.mjs`
+- `node scripts/verify-ae-1c-second-move.mjs`
+- `node scripts/verify-commercial-response-p0a.mjs`
+
+---
+
 ## 2026-10-03 — Agent commercial card
 
 ### Change

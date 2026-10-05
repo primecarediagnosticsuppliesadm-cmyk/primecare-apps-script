@@ -118,3 +118,29 @@ export function attentionHasVisitWork(item = {}) {
   const reasons = Array.isArray(item.reasons) ? item.reasons : [];
   return reasons.some((reason) => reason !== "COLLECTION_DUE");
 }
+
+const ACTIVITY_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function previousCivilYmd(ymd) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || ""));
+  if (!match) return "";
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Day heading for an activity row. Uses the civil date already on the row.
+ */
+export function activityDayLabel(dateYmd, todayYmd) {
+  const date = String(dateYmd || "").slice(0, 10);
+  const today = String(todayYmd || "").slice(0, 10);
+  if (!date) return "";
+  if (today && date === today) return "Today";
+  if (today && date === previousCivilYmd(today)) return "Yesterday";
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return date;
+  const month = ACTIVITY_MONTHS[Number(match[2]) - 1];
+  if (!month) return date;
+  return `${Number(match[3])} ${month} ${match[1]}`;
+}

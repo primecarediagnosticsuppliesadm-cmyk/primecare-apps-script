@@ -46,6 +46,7 @@ const {
   STALE_VISIT_DAYS,
 } = await import("../src/myBusiness/myBusinessModel.js");
 const {
+  activityDayLabel,
   attentionContextLabels,
   attentionPrimaryLabel,
   displayVisitNotes,
@@ -561,6 +562,9 @@ assert(formatMyBusinessDisplayLabel("UNKNOWN") === "Not specified", "label.unkno
 assert(formatMyBusinessDisplayLabel("ACTIVE") === "Active", "label.active", "ACTIVE");
 assert(formatMyBusinessDisplayLabel("PROSPECT") === "Prospect", "label.prospect", "PROSPECT");
 assert(formatMyBusinessDisplayLabel("test next action") === "test next action", "label.passthrough", "human text unchanged");
+assert(activityDayLabel("2026-10-05", "2026-10-05") === "Today", "activity.today", "same civil date is Today");
+assert(activityDayLabel("2026-10-04", "2026-10-05") === "Yesterday", "activity.yesterday", "previous civil date is Yesterday");
+assert(activityDayLabel("2026-10-03", "2026-10-05") === "3 Oct 2026", "activity.older", "older activity keeps its civil date");
 assert(
   displayVisitNotes("test\n[Visit] Area: Guntur · Lab: Pilot Lab 7") === "test",
   "notes.strip_visit_tag",
@@ -641,7 +645,27 @@ assert(/As of today/.test(src.page) && /my-business-attention-as-of/.test(src.pa
 assert(/No activity recorded for this period/.test(src.page), "ui.empty_activity", "explicit activity empty state");
 assert(/formatMyBusinessDisplayLabel/.test(src.page) && /displayVisitNotes/.test(src.page), "ui.display_formatter", "shared display formatter, not scattered replacements");
 assert(/my-business-attention-item/.test(src.page), "ui.attention_cards", "one attention card per lab");
-assert(src.page.indexOf("my-business-attention") < src.page.indexOf("my-business-kpis"), "ui.attention_above_kpis", "attention above KPIs");
+assert(src.page.indexOf("my-business-attention") < src.page.indexOf("my-business-kpis"), "ui.attention_above_kpis", "attention above secondary KPIs");
+assert(
+  src.page.indexOf("my-business-primary") < src.page.indexOf("my-business-actions") &&
+    src.page.indexOf("my-business-actions") < src.page.indexOf("my-business-kpis"),
+  "ui.v2_hierarchy",
+  "primary metrics, then actions, then secondary metrics"
+);
+assert(
+  /Your business/.test(src.page) &&
+    /Your actions/.test(src.page) &&
+    /Recent activity/.test(src.page) &&
+    /PrimeCare Responded — Your Action/.test(src.page) &&
+    /commercialTermLines/.test(src.page),
+  "ui.v2_sections",
+  "execution sections and the commercial card remain"
+);
+assert(
+  !/Canonical orders|orders\.total_amount|payments\.amount_received|Visit outcome, not a quote/.test(src.page),
+  "ui.v2_language",
+  "agent page hides implementation labels"
+);
 assert(/md:hidden/.test(src.page) && /hidden overflow-x-auto[\s\S]*md:block/.test(src.page), "mobile.390_cards", "ledger cards on small screens, table on md+");
 assert(/field-mobile-primary-nav/.test(src.layout) && /MoreHorizontal/.test(src.layout), "mobile.nav_more", "bottom nav More sheet");
 assert(/text-\[10px\]/.test(src.layout) && !/max-w-\[70px\]/.test(src.layout), "mobile.truncation_fix", "primary labels use cell width, not 70px clip");
