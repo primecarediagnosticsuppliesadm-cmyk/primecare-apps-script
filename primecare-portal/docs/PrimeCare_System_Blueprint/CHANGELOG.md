@@ -4,6 +4,21 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-10-07 — My Business response clock
+
+### Change
+
+- The Agent card no longer prints `visit_handoffs.hq_responded_at`. That column is the time HQ saved the reply. It is not the price deadline. Price valid until remains the labeled commercial date.
+- QA diagnostics stay on QA and development builds for HQ roles. A Production build does not mount the panel, and the field-agent view does not show it.
+
+### Verification
+
+- `node scripts/verify-ae-1a-my-business.mjs`
+- `node scripts/verify-ae-1c-second-move.mjs`
+- `node scripts/verify-commercial-response-p0a.mjs`
+
+---
+
 ## 2026-10-07 — My Business agent presentation width
 
 ### Change

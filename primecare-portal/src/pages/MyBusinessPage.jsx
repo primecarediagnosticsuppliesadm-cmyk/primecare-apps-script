@@ -729,9 +729,6 @@ function PrimeCareRespondedCard({ item, canAct, onOpenLab, onConverted, onResolv
           {item.hqResponse}
         </p>
       )}
-      {item.hqRespondedAt ? (
-        <p className="mt-0.5 text-[11px] text-muted-foreground">{item.hqRespondedAt}</p>
-      ) : null}
       {item.nextAction || item.followUpDate ? (
         <p className="mt-1 text-xs">
           Next: {item.nextAction || "—"}

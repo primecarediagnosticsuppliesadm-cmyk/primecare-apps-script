@@ -37,10 +37,12 @@ export default function QaDiagnosticsPanel({ currentUser = null }) {
   const [expanded, setExpanded] = useState(true);
   const [, tick] = useState(0);
 
+  const agentView = String(currentUser?.role || "").trim().toLowerCase() === "agent";
+
   useEffect(() => {
-    if (!QA_DIAGNOSTICS_ENABLED) return undefined;
+    if (!QA_DIAGNOSTICS_ENABLED || agentView) return undefined;
     return qaDiagnosticsStore.subscribe(() => tick((n) => n + 1));
-  }, []);
+  }, [agentView]);
 
   const snapshot = useMemo(
     () =>
@@ -52,7 +54,7 @@ export default function QaDiagnosticsPanel({ currentUser = null }) {
     [currentUser, open]
   );
 
-  if (!QA_DIAGNOSTICS_ENABLED) return null;
+  if (!QA_DIAGNOSTICS_ENABLED || agentView) return null;
 
   if (!open) {
     return (

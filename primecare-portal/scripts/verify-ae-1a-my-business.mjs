@@ -678,6 +678,21 @@ assert(
   "ui.v2_log_visit",
   "Agent Log visit opens the existing Visits page"
 );
+assert(
+  !/\{item\.hqRespondedAt\}/.test(src.page),
+  "ui.v2_response_clock",
+  "Agent card does not print the HQ reply timestamp"
+);
+const diagnosticsEnv = readRel("src/config/environment.js");
+const appShell = readRel("src/App.jsx");
+const diagnosticsPanel = readRel("src/components/qa/QaDiagnosticsPanel.jsx");
+assert(
+  /export const QA_DIAGNOSTICS_ENABLED =\s*!IS_PROD &&/.test(diagnosticsEnv) &&
+    /\{QA_DIAGNOSTICS_ENABLED \?/.test(appShell) &&
+    /QA_DIAGNOSTICS_ENABLED \|\| agentView/.test(diagnosticsPanel),
+  "ui.qa_diagnostics_gate",
+  "QA diagnostics stay off in Production and off for the field agent"
+);
 assert(/md:hidden/.test(src.page) && /hidden overflow-x-auto[\s\S]*md:block/.test(src.page), "mobile.390_cards", "ledger cards on small screens, table on md+");
 assert(/field-mobile-primary-nav/.test(src.layout) && /MoreHorizontal/.test(src.layout), "mobile.nav_more", "bottom nav More sheet");
 assert(/text-\[10px\]/.test(src.layout) && !/max-w-\[70px\]/.test(src.layout), "mobile.truncation_fix", "primary labels use cell width, not 70px clip");
