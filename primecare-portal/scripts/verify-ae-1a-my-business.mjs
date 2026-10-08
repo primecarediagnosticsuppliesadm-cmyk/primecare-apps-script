@@ -666,6 +666,18 @@ assert(
   "ui.v2_language",
   "agent page hides implementation labels"
 );
+assert(
+  /className="mx-auto w-full max-w-5xl space-y-4" data-testid="my-business-page"/.test(src.page),
+  "ui.v2_width",
+  "My Business content uses the existing bounded page width"
+);
+assert(
+  /const openVisitWorkspace = \(\) => \{\s*setActivePage\?\.\("visits"\);\s*\}/.test(src.page) &&
+    /data-testid="my-business-log-visit"/.test(src.page) &&
+    /canLogVisit \?/.test(src.page),
+  "ui.v2_log_visit",
+  "Agent Log visit opens the existing Visits page"
+);
 assert(/md:hidden/.test(src.page) && /hidden overflow-x-auto[\s\S]*md:block/.test(src.page), "mobile.390_cards", "ledger cards on small screens, table on md+");
 assert(/field-mobile-primary-nav/.test(src.layout) && /MoreHorizontal/.test(src.layout), "mobile.nav_more", "bottom nav More sheet");
 assert(/text-\[10px\]/.test(src.layout) && !/max-w-\[70px\]/.test(src.layout), "mobile.truncation_fix", "primary labels use cell width, not 70px clip");

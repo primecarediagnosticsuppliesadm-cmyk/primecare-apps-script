@@ -152,6 +152,10 @@ export default function MyBusinessPage({ currentUser = null, setActivePage = nul
     setActivePage("labs", { labId });
   };
 
+  const openVisitWorkspace = () => {
+    setActivePage?.("visits");
+  };
+
   const logVisit = (item) => {
     startVisitFromWorkspaceItem(
       {
@@ -175,7 +179,7 @@ export default function MyBusinessPage({ currentUser = null, setActivePage = nul
   }
 
   return (
-    <div className="space-y-4" data-testid="my-business-page">
+    <div className="mx-auto w-full max-w-5xl space-y-4" data-testid="my-business-page">
       <PageHeader
         title="My Business"
         subtitle={rangeLabel}
@@ -183,9 +187,23 @@ export default function MyBusinessPage({ currentUser = null, setActivePage = nul
         className="flex-col sm:flex-row"
         actions={
           <div className="flex flex-wrap gap-2">
+          {canLogVisit ? (
+            <Button
+              type="button"
+              size="sm"
+              className="min-h-10"
+              onClick={openVisitWorkspace}
+              data-testid="my-business-log-visit"
+            >
+              <ClipboardList className="mr-1 h-3.5 w-3.5" />
+              Log visit
+            </Button>
+          ) : null}
           <Button
             type="button"
             size="sm"
+            variant="outline"
+            className="min-h-10"
             onClick={() => {
               if (isHq && selectedAgentId) {
                 window.sessionStorage.setItem("primecare.reviewSubject", selectedAgentId);
@@ -200,6 +218,7 @@ export default function MyBusinessPage({ currentUser = null, setActivePage = nul
             type="button"
             size="sm"
             variant="outline"
+            className="min-h-10"
             onClick={() => load({ refresh: true })}
             disabled={refreshing}
           >
@@ -417,7 +436,7 @@ export default function MyBusinessPage({ currentUser = null, setActivePage = nul
 
             {(model.waitingOnPrimecare || []).length ? (
               <section data-ae1c-waiting-on-primecare="true" className="space-y-1.5">
-                <h3 className="text-sm font-semibold">Waiting on PrimeCare</h3>
+                <h3 className="text-xs font-medium text-muted-foreground">Waiting on PrimeCare</h3>
                 {model.waitingOnPrimecare.map((item) => (
                   <article
                     key={item.id}

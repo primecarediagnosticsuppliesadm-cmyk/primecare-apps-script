@@ -4,6 +4,22 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-10-07 — My Business agent presentation width
+
+### Change
+
+- My Business content uses the existing `max-w-5xl` page width so the agent view does not stretch across a wide desktop.
+- Agents get a Log visit button beside the heading. It opens the existing Visits page and does not create a visit.
+- Waiting on PrimeCare stays after the agent’s own actions and uses a quieter heading.
+
+### Verification
+
+- `node scripts/verify-ae-1a-my-business.mjs`
+- `node scripts/verify-ae-1c-second-move.mjs`
+- `node scripts/verify-commercial-response-p0a.mjs`
+
+---
+
 ## 2026-10-05 — My Business agent presentation
 
 ### Change
