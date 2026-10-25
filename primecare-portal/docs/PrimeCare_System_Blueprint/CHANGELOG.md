@@ -4,6 +4,25 @@ Gaps, conflicts, and structural changes. **Add entry when doc vs code disagree o
 
 ---
 
+## 2026-10-24 — Field Execution V1.1
+
+### Change
+
+- `labs.record_origin` and `orders.record_origin` classify `field`, `certification`, and `test`. My Business prospect, order, and sales cards count `field` only. Cancelled orders are also omitted from those two cards. The order row, invoice, payment, stock, and receivable stay unchanged. Sales attribution is unchanged.
+- The migration file names the two certification labs and `ORD-1788803535585-vfjqng`. Founder approved the production apply of this file. The apply does not cancel or delete that order.
+- New fast Log Visit saves require an observation or a structured no-discussion reason, and a next step when the result needs one. Historical visits stay readable. A correction can leave the old note untouched.
+- `agent_visits.client_request_id` is the duplicate-submit key. The original row is returned only after `agent_visit_for_client_request` checks tenant and agent.
+- Follow-up completion history is not in this release. A later visit still does not complete a follow-up.
+- Log Visit defaults the date to the Asia/Kolkata calendar date. On a narrow screen the save control stays above the field navigation, the validation message, and the keyboard.
+
+### Verification
+
+- `node scripts/verify-field-execution-v11.mjs`
+- `node scripts/verify-ae-1a-my-business.mjs`
+- `node scripts/verify-agent-visit-evidence-ux.mjs`
+
+---
+
 ## 2026-10-07 — My Business response clock
 
 ### Change

@@ -151,6 +151,11 @@ import {
   pickVisitEvidenceHeaderFields,
   resolveAgentVisitFollowUpWriteFields,
 } from "@/visits/agentVisitEvidenceContract.js";
+import {
+  isClientRequestId,
+  isNoDiscussionReason,
+  validateFastVisit,
+} from "@/visits/fastVisitValidation.js";
 import { isPerfLogEnabled, perfLog, perfTime, shouldRunDashboardKpiAudit } from "@/utils/perfLog.js";
 import { fireNotificationEvent } from "@/notifications/fireNotificationEvent.js";
 import { buildAgentVisitLoggedNotificationEvent } from "@/notifications/notificationEventInsert.js";
@@ -1297,6 +1302,10 @@ export function mapLabsCreditRow(row) {
         row.agentName
     ),
     sourcedByAgentId: str(row.sourced_by_agent_id ?? row.sourcedByAgentId ?? ""),
+    recordOrigin: (() => {
+      const origin = str(row.record_origin ?? row.recordOrigin).toLowerCase();
+      return origin === "certification" || origin === "test" ? origin : "field";
+    })(),
     createdAt: str(row.created_at ?? row.createdAt ?? ""),
     status: str(row.status ?? row.Status),
     activeFlag: str(row.active_flag ?? row.activeFlag ?? row.Active_Flag ?? ""),
@@ -4566,6 +4575,21 @@ export function buildAgentVisitInsertRow(payload = {}) {
     return { row: {}, dropped: [], error: evidence.error };
   }
 
+  const clientRequestId = str(payload.clientRequestId ?? payload.client_request_id);
+  const noDiscussion = str(payload.noDiscussionReason ?? payload.no_discussion_reason).toUpperCase();
+  if (payload.fastVisit) {
+    const visitErrors = validateFastVisit(payload, { mode: "create" });
+    if (visitErrors.length) {
+      return { row: {}, dropped: [], error: visitErrors[0] };
+    }
+    if (!isClientRequestId(clientRequestId)) {
+      return { row: {}, dropped: [], error: "This visit could not be protected against a duplicate save. Try again." };
+    }
+  }
+  if (noDiscussion && !isNoDiscussionReason(noDiscussion)) {
+    return { row: {}, dropped: [], error: "Choose a listed reason for no discussion." };
+  }
+
   const candidate = {
     tenant_id,
     visit_id,
@@ -4584,6 +4608,8 @@ export function buildAgentVisitInsertRow(payload = {}) {
     lab_name,
     area,
   };
+  if (isClientRequestId(clientRequestId)) candidate.client_request_id = clientRequestId;
+  if (isNoDiscussionReason(noDiscussion)) candidate.no_discussion_reason = noDiscussion;
 
   for (const [key, value] of Object.entries(evidence.fields)) {
     if (value !== null && value !== undefined && value !== "") {
@@ -4654,7 +4680,7 @@ export async function createAgentVisitWrite(payload = {}) {
     const visitTenantId = str(
       saved?.tenant_id ?? insertRow.tenant_id ?? payload.tenantId ?? payload.tenant_id
     );
-    if (visitTenantId) {
+    if (visitTenantId && !persisted.duplicate) {
       fireNotificationEvent(
         buildAgentVisitLoggedNotificationEvent({
           tenantId: visitTenantId,
@@ -4673,6 +4699,7 @@ export async function createAgentVisitWrite(payload = {}) {
       data: saved ?? null,
       error: persisted.error,
       persistence: persisted.persistence,
+      duplicate: Boolean(persisted.duplicate),
       discoveryLines: persisted.discoveryLines || [],
       discoveryLineError: persisted.discoveryLineError || null,
       pendingLineIds: persisted.pendingLineIds || null,

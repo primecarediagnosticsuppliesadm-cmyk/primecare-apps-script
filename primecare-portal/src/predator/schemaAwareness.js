@@ -33,6 +33,8 @@ export const AGENT_VISITS_INSERT_COLUMNS = [
   "approx_credit_days",
   "top_complaint",
   "top_complaint_notes",
+  "client_request_id",
+  "no_discussion_reason",
 ];
 
 export const AGENT_VISIT_DISCOVERY_LINE_INSERT_COLUMNS = [

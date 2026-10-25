@@ -169,6 +169,25 @@ export default function MyBusinessPage({ currentUser = null, setActivePage = nul
     setActivePage?.("visits");
   };
 
+  const finishVisit = (visit) => {
+    startVisitFromWorkspaceItem(
+      {
+        labId: visit.labId,
+        labName: visit.labName,
+        nextAction: visit.nextAction,
+        dueDate: visit.followUpDate,
+        visitId: visit.id,
+        storedNotes: visit.notes,
+        visitDate: visit.visitDate,
+        commercialOutcome: visit.commercialOutcome,
+        noDiscussionReason: visit.noDiscussionReason,
+        createdAt: visit.createdAt,
+      },
+      { source: "my_business_finish", returnPath: "myBusiness" }
+    );
+    setActivePage?.("visits");
+  };
+
   const openCollection = (item) => {
     startCollectionFromWorkspaceItem(item, { returnPath: "myBusiness" });
     setActivePage?.("collections");
@@ -304,7 +323,7 @@ export default function MyBusinessPage({ currentUser = null, setActivePage = nul
               <KpiCard
                 title="Prospects added"
                 value={model.kpis.prospectsAdded}
-                subtitle="Sourced in period"
+                subtitle="Excludes certification"
                 className="shadow-none hover:shadow-none"
               />
               <KpiCard
@@ -316,17 +335,55 @@ export default function MyBusinessPage({ currentUser = null, setActivePage = nul
               <KpiCard
                 title="Orders"
                 value={model.kpis.ordersFromMyLabs}
-                subtitle="Orders placed"
+                subtitle="Excludes certification"
                 className="shadow-none hover:shadow-none"
               />
               <KpiCard
                 title="Sales"
                 value={model.kpiDisplay.rupeesOrdered}
                 kpiRawValue={model.kpis.rupeesOrdered}
-                subtitle="Total sales"
+                subtitle="Excludes certification"
                 className="shadow-none hover:shadow-none"
               />
             </KpiCardGrid>
+            <div className="mt-3 space-y-2" data-testid="my-business-visit-quality">
+              <p className="text-xs text-muted-foreground">
+                {model.kpis.visitsEnteredLate} entered late · {model.kpis.incompleteVisits} incomplete ·{" "}
+                {model.kpis.followUpsDue} follow-ups due · {model.kpis.followUpsOverdue} overdue
+              </p>
+              {(model.visitQuality?.incompleteVisits || []).length === 0 &&
+              (model.visitQuality?.lateVisits || []).length === 0 ? (
+                <p className="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
+                  Visit records in this period have an observation, or they were saved on the visit date.
+                  Follow-ups stay in Your actions. Another visit does not complete a follow-up.
+                </p>
+              ) : null}
+              {(model.visitQuality?.incompleteVisits || []).slice(0, 8).map((visit) => (
+                <article key={`incomplete-${visit.id}`} className="rounded-md border border-border px-3 py-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">{visit.labName || visit.labId}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Visit {visit.visitDate || "—"} · Needs an observation or a no-discussion reason
+                      </p>
+                    </div>
+                    {canLogVisit ? (
+                      <Button type="button" size="sm" variant="outline" className="min-h-10" onClick={() => finishVisit(visit)}>
+                        Finish
+                      </Button>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+              {(model.visitQuality?.lateVisits || []).slice(0, 8).map((visit) => (
+                <article key={`late-${visit.id}`} className="rounded-md border border-border px-3 py-2">
+                  <p className="truncate text-sm font-semibold">{visit.labName || visit.labId}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Visit {visit.visitDate || "—"} · Entered late
+                  </p>
+                </article>
+              ))}
+            </div>
           </section>
 
           <section aria-labelledby="my-business-your-actions" data-testid="my-business-actions" className="space-y-3">

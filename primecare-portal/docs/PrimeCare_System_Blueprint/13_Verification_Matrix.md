@@ -333,6 +333,8 @@ verify-hq-rls-reads.mjs
 
 **Compensation / payroll change:** planned compensation verify bundle + `verify-financial-reconciliation.mjs` + `verify-payment-allocation-flow.mjs` + `verify-hq-rls-reads.mjs` + `verify-ar-reconcile.mjs` + `verify-agent-collections-ownership-filter.mjs` + `run-browser-smoke-all-roles.mjs`
 
+**Field Execution V1.1:** `verify-field-execution-v11.mjs` + `verify-ae-1a-my-business.mjs` + `verify-agent-visit-evidence-ux.mjs` + `verify-agent-visit-evidence-api.mjs`. Does not apply the migration.
+
 ---
 
 ## Manual UAT (per module)

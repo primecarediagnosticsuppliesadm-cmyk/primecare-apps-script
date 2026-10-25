@@ -19,6 +19,7 @@ import {
   normalizeDiscoveryLinesInput,
   pickVisitEvidenceHeaderFields,
 } from "./agentVisitEvidenceContract.js";
+import { acceptDuplicateVisit } from "./fastVisitValidation.js";
 
 const DISCOVERY_LINE_WRITE_COLUMNS = new Set([
   "id",
@@ -61,6 +62,7 @@ const HEADER_UPDATE_COLUMNS = new Set([
   "approx_credit_days",
   "top_complaint",
   "top_complaint_notes",
+  "no_discussion_reason",
 ]);
 
 function str(v) {
@@ -101,19 +103,58 @@ export function validateDiscoveryLinesForVisit(lines, visitUuid = "00000000-0000
   return buildAgentVisitDiscoveryLineInsertRows(visitUuid, normalized, {});
 }
 
+function isClientRequestConflict(error) {
+  if (!isUniqueViolation(error)) return false;
+  return /agent_visits_client_request/i.test(String(error?.message || error?.details || ""));
+}
+
+async function loadAuthorizedOriginalVisit(client, insertRow) {
+  const requestId = insertRow?.client_request_id;
+  if (!requestId || typeof client?.rpc !== "function") {
+    return { row: null, error: "Duplicate visit could not be confirmed for this agent." };
+  }
+  const { data, error } = await client.rpc("agent_visit_for_client_request", {
+    p_client_request_id: requestId,
+  });
+  if (error || data == null) {
+    return { row: null, error: "Duplicate visit could not be confirmed for this agent." };
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  if (
+    !acceptDuplicateVisit(row, {
+      tenantId: insertRow.tenant_id,
+      agentId: insertRow.agent_id,
+      viaAuthorizedRpc: true,
+    })
+  ) {
+    return { row: null, error: "Duplicate visit could not be confirmed for this agent." };
+  }
+  return { row, error: null, duplicate: true };
+}
+
 export async function persistAgentVisitHeader(client, insertRow) {
   if (!client) {
     return { row: null, error: "Supabase client not configured" };
   }
-  const { data, error } = await client
-    .from("agent_visits")
-    .insert([insertRow])
-    .select(HQ_AGENT_VISIT_COLUMNS);
-  if (error) {
-    return { row: null, error: error.message || "Visit insert failed" };
+  const attempt = await client.from("agent_visits").insert([insertRow]).select(HQ_AGENT_VISIT_COLUMNS);
+  if (!attempt.error) {
+    const saved = Array.isArray(attempt.data) ? attempt.data[0] : attempt.data;
+    return { row: saved ?? null, error: null };
   }
-  const saved = Array.isArray(data) ? data[0] : data;
-  return { row: saved ?? null, error: null };
+  if (
+    isMissingColumnOrTable(attempt.error) &&
+    insertRow &&
+    (insertRow.client_request_id || insertRow.no_discussion_reason)
+  ) {
+    const rest = { ...insertRow };
+    delete rest.client_request_id;
+    delete rest.no_discussion_reason;
+    return persistAgentVisitHeader(client, rest);
+  }
+  if (isClientRequestConflict(attempt.error)) {
+    return loadAuthorizedOriginalVisit(client, insertRow);
+  }
+  return { row: null, error: attempt.error.message || "Visit insert failed" };
 }
 
 export async function fetchAgentVisitEvidenceHeader(client, visitUuid, options = {}) {
@@ -323,6 +364,7 @@ export async function persistAgentVisitWithOptionalDiscovery(client, { insertRow
       discoveryLines: [],
       error: header.error || "Visit insert returned no row",
       discoveryLineError: null,
+      duplicate: false,
     };
   }
 
@@ -336,11 +378,12 @@ export async function persistAgentVisitWithOptionalDiscovery(client, { insertRow
   if (!lineInput.length) {
     return {
       success: true,
-      persistence: "complete",
+      persistence: header.duplicate ? "duplicate" : "complete",
       data: evidenceHeader,
       discoveryLines: [],
       error: null,
       discoveryLineError: null,
+      duplicate: Boolean(header.duplicate),
     };
   }
 
@@ -367,6 +410,7 @@ export async function persistAgentVisitWithOptionalDiscovery(client, { insertRow
     discoveryLines: linesRes.rows,
     error: null,
     discoveryLineError: null,
+    duplicate: Boolean(header.duplicate),
   };
 }
 
@@ -384,6 +428,7 @@ export function buildAgentVisitEvidenceUpdateRow(payload = {}) {
     next_follow_up_date: payload.nextFollowUpDate ?? payload.next_follow_up_date,
     next_follow_up_type: payload.nextFollowUpType ?? payload.next_follow_up_type,
     next_action: payload.nextAction ?? payload.next_action,
+    no_discussion_reason: payload.noDiscussionReason ?? payload.no_discussion_reason,
   };
   const row = compactDefined(candidate, HEADER_UPDATE_COLUMNS);
   if (evidence.fields.decision_maker_met === true || evidence.fields.decision_maker_met === false) {

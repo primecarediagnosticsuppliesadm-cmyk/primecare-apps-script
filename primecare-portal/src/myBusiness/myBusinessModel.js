@@ -1,6 +1,7 @@
 import { labIdKey, normalizeAgentIdKey } from "@/utils/labId.js";
-import { ymdInInclusiveRange } from "@/myBusiness/myBusinessCalendar.js";
+import { businessYmd, ymdInInclusiveRange } from "@/myBusiness/myBusinessCalendar.js";
 import { presentAgentCommercialTerms } from "@/visits/commercialResponse.js";
+import { visitEnteredLate, visitRecordIncomplete } from "@/visits/fastVisitValidation.js";
 
 export const MY_BUSINESS_LEDGER_CAP = 200;
 export const STALE_VISIT_DAYS = 14;
@@ -18,12 +19,12 @@ const ATTENTION_RANK = Object.freeze(
 );
 
 export const MY_BUSINESS_KPI_SOURCES = Object.freeze({
-  prospectsAdded: "labs.sourced_by_agent_id + labs.created_at",
+  prospectsAdded: "labs.sourced_by_agent_id + labs.created_at, record_origin field",
   visitsLogged: "agent_visits.visit_date",
   requirements: "agent_visits.commercial_outcome = REQUIREMENT",
   quoteOpportunities: "agent_visits.commercial_outcome = QUOTE_OPPORTUNITY",
   followUpsDue: "agent_visits.next_follow_up_date (latest visit per lab)",
-  ordersFromMyLabs: "orders for assigned/sourced/owned labs",
+  ordersFromMyLabs: "orders for assigned/sourced/owned labs, record_origin field, status not cancelled",
   rupeesOrdered: "orders.total_amount",
   rupeesCollected: "payments.amount_received",
 });
@@ -33,7 +34,22 @@ function str(v) {
 }
 
 function ymd(v) {
-  return str(v).slice(0, 10);
+  return businessYmd(v);
+}
+
+function recordOrigin(row) {
+  const value = str(row?.recordOrigin ?? row?.record_origin).toLowerCase();
+  if (value === "certification" || value === "test") return value;
+  return "field";
+}
+
+function countsInAgentKpis(row) {
+  return recordOrigin(row) === "field";
+}
+
+function isCancelledOrder(order) {
+  const status = str(order?.status).toLowerCase().replace(/[\s_-]+/g, "");
+  return status === "cancelled" || status === "canceled";
 }
 
 function numAmount(v) {
@@ -174,7 +190,9 @@ export function buildMyBusinessModel({
     (ownershipLabIds || []).map((id) => labIdKey(id)).filter(Boolean)
   );
 
-  const scopedLabs = (labs || []).filter((lab) => labBelongsToSubject(lab, subject, owned));
+  const scopedLabs = (labs || []).filter(
+    (lab) => labBelongsToSubject(lab, subject, owned) && countsInAgentKpis(lab)
+  );
   const labById = new Map();
   for (const lab of scopedLabs) {
     const id = labIdKey(lab.labId || lab.lab_id);
@@ -309,17 +327,48 @@ export function buildMyBusinessModel({
     (v) => str(v.commercialOutcome || v.commercial_outcome).toUpperCase() === "QUOTE_OPPORTUNITY"
   );
 
+  const lateVisits = [];
+  const incompleteVisits = [];
+  for (const visit of periodVisits) {
+    const lid = labIdKey(visit.labId || visit.lab_id);
+    const lab = labById.get(lid);
+    const item = {
+      id: str(visit.id || visit.visitUuid),
+      labId: lid,
+      labName: str(lab?.labName || visit.labName),
+      visitDate: ymd(visit.visitDate || visit.visit_date),
+      createdAt: str(visit.createdAt || visit.created_at),
+      notes: str(visit.notes),
+      commercialOutcome: str(visit.commercialOutcome || visit.commercial_outcome),
+      nextAction: str(visit.nextAction || visit.next_action),
+      followUpDate: ymd(visit.nextFollowUpDate || visit.next_follow_up_date),
+      noDiscussionReason: str(visit.noDiscussionReason || visit.no_discussion_reason),
+    };
+    if (visitEnteredLate(visit)) lateVisits.push(item);
+    if (visitRecordIncomplete(visit)) incompleteVisits.push(item);
+  }
+
   const scopedOrders = (orders || []).filter((order) => {
+    if (!countsInAgentKpis(order)) return false;
+    if (isCancelledOrder(order)) return false;
     const lid = labIdKey(order.labId || order.lab_id);
     if (!inScopeLabIds.has(lid)) return false;
     return ymdInInclusiveRange(ymd(order.orderDate || order.order_date || order.createdAt), from, to);
   });
+  const excludedOrderIds = new Set(
+    (orders || [])
+      .filter((order) => !countsInAgentKpis(order))
+      .map((order) => str(order.orderId || order.order_id))
+      .filter(Boolean)
+  );
   const rupeesOrdered = scopedOrders.reduce(
     (sum, order) => sum + numAmount(order.totalAmount ?? order.total_amount),
     0
   );
 
   const scopedPayments = (payments || []).filter((pay) => {
+    const linkedOrderId = str(pay.orderId || pay.order_id);
+    if (linkedOrderId && excludedOrderIds.has(linkedOrderId)) return false;
     const lid = labIdKey(pay.labId || pay.lab_id);
     if (!inScopeLabIds.has(lid)) return false;
     return ymdInInclusiveRange(ymd(pay.paymentDate || pay.payment_date), from, to);
@@ -538,6 +587,9 @@ export function buildMyBusinessModel({
       requirements: requirements.length,
       quoteOpportunities: quoteOpportunities.length,
       followUpsDue: followUpDueLabIds.length,
+      followUpsOverdue: followUpOverdueLabIds.length,
+      visitsEnteredLate: lateVisits.length,
+      incompleteVisits: incompleteVisits.length,
       ordersFromMyLabs: scopedOrders.length,
       rupeesOrdered,
       rupeesCollected,
@@ -574,5 +626,9 @@ export function buildMyBusinessModel({
     ledgerTruncated: truncated,
     ledgerTotal: ledger.length,
     ledgerCap,
+    visitQuality: {
+      lateVisits,
+      incompleteVisits,
+    },
   };
 }

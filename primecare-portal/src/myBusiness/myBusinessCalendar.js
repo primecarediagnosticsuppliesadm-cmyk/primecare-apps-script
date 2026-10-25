@@ -34,9 +34,29 @@ export function isValidYmd(ymd) {
 }
 
 /**
- * @param {Date} [date]
+ * Civil date in Asia/Kolkata.
+ * A date-only value stays as written. A timestamp crosses midnight in India,
+ * not in UTC.
+ * @param {unknown} value
  * @param {string} [timeZone]
  */
+export function businessYmd(value, timeZone = MY_BUSINESS_TIME_ZONE) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (YMD_RE.test(raw)) return isValidYmd(raw) ? raw : "";
+  if (!/[T ]\d{2}:\d{2}/.test(raw)) {
+    const sliced = raw.slice(0, 10);
+    return isValidYmd(sliced) ? sliced : "";
+  }
+  const iso = raw.includes(" ") && !raw.includes("T") ? raw.replace(" ", "T") : raw;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    const sliced = raw.slice(0, 10);
+    return isValidYmd(sliced) ? sliced : "";
+  }
+  return formatYmdInTimeZone(date, timeZone);
+}
+
 export function formatYmdInTimeZone(date = new Date(), timeZone = MY_BUSINESS_TIME_ZONE) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,

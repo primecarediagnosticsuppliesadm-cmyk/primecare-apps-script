@@ -439,6 +439,20 @@ Wallet/size/product notes are labeled as field estimates — not PrimeCare reven
 
 ---
 
+## Field Execution V1.1 — new visit quality
+
+A new Log Visit date defaults to today's Asia/Kolkata calendar date. The agent can change it to the real visit date. `created_at` and the late-entry comparison stay on the save timestamp.
+
+New fast Log Visit saves require a laboratory, a visit date, a result, and either a customer observation or `no_discussion_reason`. Product lines stay optional. Unknown quantities stay null. The area/lab stamp does not count as the observation.
+
+An existing visit can be corrected without inventing that observation. The stored note, including `[Visit]`, is kept when the agent does not edit it. Late entry compares the India date of `created_at` with the India date of `visit_date`. It is a label, not a status write.
+
+`client_request_id` is generated when the form opens and reused on retry. Unique `(tenant_id, client_request_id)`. A conflict calls `agent_visit_for_client_request` (`SECURITY INVOKER`) and returns the row only when tenant and agent match.
+
+Follow-up dates stay on the visit. Completion and reschedule history are a later release.
+
+---
+
 ## VE-1 implementation contract
 
 1. Blueprint already updated (this document).  

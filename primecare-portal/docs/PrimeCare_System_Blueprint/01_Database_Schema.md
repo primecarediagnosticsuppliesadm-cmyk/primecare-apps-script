@@ -50,7 +50,7 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 | **PK** | `id` (uuid) |
 | **Business key** | `(tenant_id, lab_id)` |
 | **Required** | `tenant_id`, `lab_id`, `lab_name` |
-| **Optional** | `owner_name`, `phone`, `area`, `assigned_agent_id`, `sourced_by_agent_id`, `status`, `credit_terms`, `ordering_mode` |
+| **Optional** | `owner_name`, `phone`, `area`, `assigned_agent_id`, `sourced_by_agent_id`, `status`, `credit_terms`, `ordering_mode`, `record_origin` |
 | **Not** | Visit Evidence discovery (size band, wallet, analyzers, terms, complaints) is **not** a second economic-truth layer on `labs`. Those observations belong on `agent_visits` / `agent_visit_discovery_lines` ([26](./26_Agent_Visit_Evidence.md)). Flow 2 lifecycle and sourcing fields on `labs` (`status`, `ordering_mode`, `sourced_by_agent_id`) remain as certified. |
 | **Relationships** | → orders, AR, qualifications, ownership, agent_visits |
 | **RLS** | Yes — lab visibility (`lab_is_visible_to_current_user` / `lab_record_is_visible_to_current_user`) |
@@ -67,6 +67,8 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 **Flow 2E invariants:** `create_lab_order` requires `labs.status = ACTIVE` for every caller (`lab_inactive` otherwise). `orders_insert_by_role` HQ insert also requires `lab_row_is_active`. WHILE `status` remains `PROSPECT`, `ordering_mode` must stay `hq_managed` (`labs_prospect_ordering_hq_managed` BEFORE INSERT/UPDATE; `prospect_ordering_hq_managed`). `activate_prospect_lab` is not blocked (it sets `ACTIVE` + `hq_managed` in one UPDATE).
 
 **Visit Evidence:** Log Visit on a sourced `PROSPECT` writes `agent_visits` (+ optional discovery lines). It does **not** activate the lab, create AR, or grant orders/collections/inventory.
+
+**Field Execution V1.1 `record_origin`:** `field` (default), `certification`, or `test`. My Business prospect counts use `field` only. The column does not change lab lifecycle, ordering, or RLS. Agents cannot set it: `labs` writes stay on `can_write_ops_for_tenant`, and `protect_record_origin` rejects a non-admin change. The approved backfill, applied only with a later production migration, marks exactly `LAB-P-7CDAE963963F` and `LAB-P-E9FFF046A399`. Rows are not deleted.
 
 ---
 
@@ -95,11 +97,13 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 | **PK** | `id` (uuid) |
 | **Business key** | `order_id` text; UNIQUE `(tenant_id, order_id)` |
 | **Required** | `tenant_id`, `order_id`, `lab_id`, `status`, `total_amount` |
-| **Optional** | `fulfilled_at`, `invoice_id`, `client_request_id`, delivery columns (Phase 3A), flags |
+| **Optional** | `fulfilled_at`, `invoice_id`, `client_request_id`, delivery columns (Phase 3A), flags, `record_origin` |
 | **Relationships** | → invoice, lines, shipment, ledger |
 | **RLS** | Yes — lab visibility |
 | **Read** | lab (own), agent, admin, executive |
 | **Write** | lab insert; admin/executive status update |
+
+`orders.record_origin` uses the same values as labs. Agent order and sales cards skip `certification`, `test`, and cancelled orders. Attribution stays assigned, sourced, or ownership. The column and the card filter do not change status, `total_amount`, invoices, payments, stock, or receivables. The approved backfill marks only `ORD-1788803535585-vfjqng` when that migration is applied. `protect_record_origin` blocks a non-admin change. Finance and operations reports do not filter on this column.
 
 ---
 
@@ -328,6 +332,7 @@ Supabase `public` schema. Inspect `supabase/migrations/`, `supabase/sql/`, and `
 | **Business key** | `visit_id` (text — **no unique DB constraint** — do **not** use as child FK) |
 | **Follow-up** | `next_follow_up_date`, `next_follow_up_type`, `next_action`, `follow_up_required` |
 | **Compatibility** | `visit_date`, `visit_type`, `notes`, `tenant_id`, `lab_id`, `agent_id`, `agent_name`, `created_at` |
+| **Field Execution V1.1** | Nullable `client_request_id` (unique per tenant when present) and `no_discussion_reason` (`RECEPTION_ONLY`, `DECISION_MAKER_UNAVAILABLE`, `NOT_DISCUSSED`). Historical rows stay null. A duplicate insert returns the original row only through `agent_visit_for_client_request`, which checks tenant and agent and stays `SECURITY INVOKER`. |
 | **VE-1 additive (SQL in repo, QA apply pending, Production unchanged)** | Nullable discovery: `visited_at`, `decision_maker_met`, `decision_maker_name`, `decision_maker_role`, `commercial_outcome`, `lab_size_band`, `estimated_monthly_wallet_inr`, `wallet_range_band`, `wallet_confidence`, `evidence_confidence`, `reorder_interval`, `payment_method_or_terms`, `approx_credit_days`, `top_complaint`, `top_complaint_notes`, `updated_at` |
 | **RLS today / VE-1** | INSERT/UPDATE: `can_write_agent_work` **AND** `lab_record_is_visible_to_current_user`; Agent identity server-stamped; Admin/Exec SELECT tenant; Lab/HR none |
 | **Prospects** | Sourced `PROSPECT` may receive visits; does **not** become operational (ADR-VE-004) |

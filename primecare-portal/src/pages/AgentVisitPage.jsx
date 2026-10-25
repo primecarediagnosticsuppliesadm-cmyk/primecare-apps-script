@@ -1002,6 +1002,7 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
   const [visitAccounts, setVisitAccounts] = useState({ operational: [], prospects: [], all: [] });
   const [fastFormLabId, setFastFormLabId] = useState("");
   const [fastFormEpoch, setFastFormEpoch] = useState(0);
+  const [fastEditVisit, setFastEditVisit] = useState(null);
   const [showWorkspaceReturnCta, setShowWorkspaceReturnCta] = useState(false);
   const [workspaceReturnPath, setWorkspaceReturnPath] = useState(() => peekAgentWorkspaceReturnPath());
   const lastSavedVisitRef = useRef(null);
@@ -1363,6 +1364,22 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
     setDraftBannerVisible(false);
     setCurrentStepIndex(0);
     setFastFormLabId(labId);
+    setFastEditVisit(
+      task.visitId
+        ? {
+            id: task.visitId,
+            labId,
+            labName: task.labName || visitContext?.labName || "",
+            visitDate: task.visitDate || "",
+            notes: task.storedNotes || "",
+            commercialOutcome: task.commercialOutcome || "",
+            nextAction: task.nextAction || "",
+            followUpDate: task.followUpDate || "",
+            noDiscussionReason: task.noDiscussionReason || "",
+            createdAt: task.createdAt || "",
+          }
+        : null
+    );
     setForm((prev) => ({
       ...prev,
       labId: labId || prev.labId,
@@ -2378,10 +2395,11 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
               </div>
             ) : null}
             <AgentVisitEvidenceForm
-              key={`${fastFormLabId || "fast-visit"}-${fastFormEpoch}`}
+              key={`${fastEditVisit?.id || fastFormLabId || "fast-visit"}-${fastFormEpoch}`}
               currentUser={currentUser}
               accounts={fastAccounts}
               initialLabId={fastFormLabId || form.labId}
+              existingVisit={fastEditVisit}
               onSuccess={(res, meta) => {
                 const vid = res?.data?.visit_id ?? res?.data?.visitId ?? res?.data?.id ?? "";
                 setSavedVisitSummary({ visitId: vid, labName: form.labName });
@@ -2389,12 +2407,16 @@ export default function AgentVisitPage({ currentUser, authToken, setActivePage }
                 // Remount clears client discovery-line UUIDs for the next visit.
                 // Qualifying AE-1C visits must keep the post-save Send step first.
                 if (!meta?.deferRemount) {
+                  setFastEditVisit(null);
                   setFastFormEpoch((n) => n + 1);
                 }
                 showToast("success", "Visit saved.");
                 void loadPageData();
               }}
-              onReadyForNextVisit={() => setFastFormEpoch((n) => n + 1)}
+              onReadyForNextVisit={() => {
+                setFastEditVisit(null);
+                setFastFormEpoch((n) => n + 1);
+              }}
             />
           </CardContent>
         </Card>

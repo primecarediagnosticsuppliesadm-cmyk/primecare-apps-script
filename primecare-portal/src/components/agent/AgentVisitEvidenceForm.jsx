@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -6,6 +6,7 @@ import StatusBadge from "@/components/ux/StatusBadge";
 import {
   createAgentVisitDiscoveryLinesWrite,
   createAgentVisitWrite,
+  updateAgentVisitEvidenceWrite,
 } from "@/api/primecareSupabaseApi.js";
 import { labIdKey } from "@/utils/labId.js";
 import { isProspectLab } from "@/visits/visitEligibleAccounts.js";
@@ -18,6 +19,14 @@ import {
   createEmptyDiscoveryLine,
   createEmptyVisitEvidenceForm,
 } from "@/visits/agentVisitEvidenceFormModel.js";
+import {
+  FOLLOW_UP_OUTCOMES,
+  NO_DISCUSSION_REASONS,
+  notesForVisitWrite,
+  validateFastVisit,
+  visitEnteredLate,
+} from "@/visits/fastVisitValidation.js";
+import { displayVisitNotes } from "@/myBusiness/myBusinessDisplay.js";
 import { createVisitHandoffWrite } from "@/visits/visitHandoffsApi.js";
 import {
   isHandoffTriggerOutcome,
@@ -92,18 +101,31 @@ function DiscoveryLineFields({ line, onChange, onRemove }) {
         <>
           <Input className={FIELD} placeholder="Description / family" value={line.description} onChange={(e) => onChange({ description: e.target.value })} />
           <Input className={FIELD} placeholder="Brand" value={line.brand} onChange={(e) => onChange({ brand: e.target.value })} />
-          <Input className={FIELD} inputMode="decimal" placeholder="Approx. monthly spend (₹)" value={line.monthlySpendInr} onChange={(e) => onChange({ monthlySpendInr: e.target.value })} />
-          <Input className={FIELD} inputMode="decimal" placeholder="Approx. monthly quantity" value={line.monthlyQuantity} onChange={(e) => onChange({ monthlyQuantity: e.target.value })} />
-          <Input className={FIELD} placeholder="Supplier" value={line.supplier} onChange={(e) => onChange({ supplier: e.target.value })} />
+          <Input className={FIELD} inputMode="decimal" placeholder="Approx. monthly spend (₹), if shared" value={line.monthlySpendInr} onChange={(e) => onChange({ monthlySpendInr: e.target.value })} disabled={Boolean(line.quantityDisclosure)} />
+          <Input className={FIELD} inputMode="decimal" placeholder="Monthly quantity, if shared" value={line.monthlyQuantity} onChange={(e) => onChange({ monthlyQuantity: e.target.value })} disabled={Boolean(line.quantityDisclosure)} />
+          <select className={FIELD} value={line.quantityDisclosure || ""} onChange={(e) => onChange({ quantityDisclosure: e.target.value, monthlyQuantity: e.target.value ? "" : line.monthlyQuantity })}>
+            <option value="">Quantity was shared, or leave blank</option>
+            <option value="NOT_SHARED">Quantity not shared</option>
+            <option value="UNKNOWN">Quantity unknown</option>
+            <option value="NOT_DISCUSSED">Quantity not discussed</option>
+          </select>
+          <Input className={FIELD} placeholder="Supplier, or Not shared" value={line.supplier} onChange={(e) => onChange({ supplier: e.target.value })} />
         </>
       ) : null}
       {kind === "CONSUMABLE" ? (
         <>
           <Input className={FIELD} placeholder="Product / category" value={line.productCategory} onChange={(e) => onChange({ productCategory: e.target.value })} />
-          <Input className={FIELD} placeholder="Brand" value={line.brand} onChange={(e) => onChange({ brand: e.target.value })} />
-          <Input className={FIELD} inputMode="decimal" placeholder="Approx. volume" value={line.approxVolume} onChange={(e) => onChange({ approxVolume: e.target.value })} />
-          <Input className={FIELD} inputMode="decimal" placeholder="Approx. price / pack (₹)" value={line.approxPricePack} onChange={(e) => onChange({ approxPricePack: e.target.value })} />
-          <Input className={FIELD} placeholder="Supplier" value={line.supplier} onChange={(e) => onChange({ supplier: e.target.value })} />
+          <Input className={FIELD} placeholder="Brand, or Not shared" value={line.brand} onChange={(e) => onChange({ brand: e.target.value })} />
+          <Input className={FIELD} placeholder="Pack size, if shared" value={line.description} onChange={(e) => onChange({ description: e.target.value })} />
+          <Input className={FIELD} inputMode="decimal" placeholder="Monthly quantity, if shared" value={line.approxVolume} onChange={(e) => onChange({ approxVolume: e.target.value })} disabled={Boolean(line.quantityDisclosure)} />
+          <select className={FIELD} value={line.quantityDisclosure || ""} onChange={(e) => onChange({ quantityDisclosure: e.target.value, approxVolume: e.target.value ? "" : line.approxVolume, approxPricePack: e.target.value ? "" : line.approxPricePack })}>
+            <option value="">Quantity was shared, or leave blank</option>
+            <option value="NOT_SHARED">Quantity not shared</option>
+            <option value="UNKNOWN">Quantity unknown</option>
+            <option value="NOT_DISCUSSED">Quantity not discussed</option>
+          </select>
+          <Input className={FIELD} inputMode="decimal" placeholder="Current price, if disclosed" value={line.approxPricePack} onChange={(e) => onChange({ approxPricePack: e.target.value })} disabled={Boolean(line.quantityDisclosure)} />
+          <Input className={FIELD} placeholder="Supplier, or Not shared" value={line.supplier} onChange={(e) => onChange({ supplier: e.target.value })} />
         </>
       ) : null}
     </div>
@@ -114,18 +136,56 @@ function savedVisitUuidFromWrite(res) {
   return String(res?.data?.id || "").trim();
 }
 
+const SAVE_BAR_ABOVE_NAV = "calc(5.5rem + env(safe-area-inset-bottom, 0px))";
+
+function useFastVisitSaveOffset() {
+  const [offset, setOffset] = useState(SAVE_BAR_ABOVE_NAV);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return undefined;
+    const update = () => {
+      const keyboard = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+      setOffset(keyboard > 80 ? `${Math.round(keyboard + 8)}px` : SAVE_BAR_ABOVE_NAV);
+    };
+    update();
+    viewport.addEventListener("resize", update);
+    viewport.addEventListener("scroll", update);
+    return () => {
+      viewport.removeEventListener("resize", update);
+      viewport.removeEventListener("scroll", update);
+    };
+  }, []);
+  return offset;
+}
+
 export default function AgentVisitEvidenceForm({
   currentUser,
   accounts = { operational: [], prospects: [], all: [] },
   initialLabId = "",
+  existingVisit = null,
   onSuccess,
   onReadyForNextVisit,
 }) {
-  const [form, setForm] = useState(() => ({
-    ...createEmptyVisitEvidenceForm(),
-    labId: initialLabId ? labIdKey(initialLabId) : "",
-  }));
+  const [form, setForm] = useState(() => {
+    const empty = {
+      ...createEmptyVisitEvidenceForm(),
+      labId: initialLabId ? labIdKey(initialLabId) : "",
+    };
+    if (!existingVisit?.id) return empty;
+    return {
+      ...empty,
+      labId: labIdKey(existingVisit.labId || initialLabId),
+      visitDate: String(existingVisit.visitDate || empty.visitDate).slice(0, 10),
+      commercialOutcome: existingVisit.commercialOutcome || "UNKNOWN",
+      notes: displayVisitNotes(existingVisit.notes),
+      noDiscussionReason: existingVisit.noDiscussionReason || "",
+      nextAction: existingVisit.nextAction || "",
+      nextFollowUpDate: String(existingVisit.followUpDate || "").slice(0, 10),
+      clientRequestId: empty.clientRequestId,
+    };
+  });
   const [saving, setSaving] = useState(false);
+  const saveOffset = useFastVisitSaveOffset();
   const [error, setError] = useState("");
   const [partial, setPartial] = useState(null);
   const [handoffStep, setHandoffStep] = useState(null);
@@ -161,6 +221,7 @@ export default function AgentVisitEvidenceForm({
     return createAgentVisitWrite({
       ...payload,
       tenantId: currentUser?.tenantId || currentUser?.tenant_id,
+      agentId: currentUser?.agentId || currentUser?.agent_id || "",
       agentName: currentUser?.agentName || currentUser?.name || "",
       userId: currentUser?.id || "",
     });
@@ -192,12 +253,15 @@ export default function AgentVisitEvidenceForm({
     event?.preventDefault?.();
     event?.stopPropagation?.();
     if (savingRef.current || handoffStep) return;
-    if (!form.labId) {
-      setError("Select a lab or prospect first.");
-      return;
-    }
-    if (!form.visitDate) {
-      setError("Visit date is required.");
+    const editing = Boolean(existingVisit?.id);
+    const validationErrors = validateFastVisit(form, {
+      mode: editing ? "update" : "create",
+      storedNotes: existingVisit?.notes || "",
+      storedOutcome: existingVisit?.commercialOutcome || "",
+      storedFollowUpDate: existingVisit?.followUpDate || "",
+    });
+    if (validationErrors.length) {
+      setError(validationErrors[0]);
       return;
     }
     savingRef.current = true;
@@ -205,13 +269,41 @@ export default function AgentVisitEvidenceForm({
     setError("");
     setPartial(null);
     try {
+      const editing = Boolean(existingVisit?.id);
       const payload = buildVisitEvidenceWritePayload(form, {
         labName: selected?.labName,
         area: selected?.area,
         agentName: currentUser?.agentName || currentUser?.name,
         userId: currentUser?.id,
+        fastVisit: !editing,
+        notesForWrite: notesForVisitWrite(form, {
+          mode: editing ? "update" : "create",
+          storedNotes: existingVisit?.notes || "",
+        }),
       });
-      const res = await persist(payload);
+      const res = editing
+        ? await updateAgentVisitEvidenceWrite({
+            id: existingVisit.id,
+            ...payload,
+            notes: payload.notes,
+          })
+        : await persist(payload);
+      if (editing && res?.success && payload.discoveryLines?.length) {
+        const linesRes = await createAgentVisitDiscoveryLinesWrite({
+          visitUuid: existingVisit.id,
+          discoveryLines: payload.discoveryLines,
+          labId: form.labId,
+        });
+        if (!linesRes?.success) {
+          setPartial({
+            visitUuid: existingVisit.id,
+            lines: payload.discoveryLines,
+            error: linesRes?.error || "Evidence details could not be saved.",
+          });
+          setError("");
+          return;
+        }
+      }
       if (res?.persistence === "header_only") {
         setPartial({
           visitUuid: res.data?.id,
@@ -281,19 +373,25 @@ export default function AgentVisitEvidenceForm({
 
   return (
     <form
-      className="space-y-3"
+      className="space-y-3 pb-28 md:pb-0"
       onSubmit={handleSave}
       data-ve3-fast-form="true"
       data-ve3-uat-fix="idempotent-20260907"
       data-ve3-p1-fix="followup-compact-20260907"
     >
+      {existingVisit?.id ? (
+        <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+          This visit is already saved. Correct a field here, or add an observation if you have one.
+          {visitEnteredLate(existingVisit) ? " It was entered after the visit date." : ""}
+        </p>
+      ) : null}
       <div className="rounded-xl border border-border bg-card p-3">
         <FieldLabel>Lab or prospect</FieldLabel>
         <select
           className={FIELD}
           value={form.labId}
           onChange={(e) => patch({ labId: e.target.value })}
-          disabled={saving || visitLocked}
+          disabled={saving || visitLocked || Boolean(existingVisit?.id)}
         >
           <option value="">Select…</option>
           {(accounts.operational || []).length ? (
@@ -362,23 +460,42 @@ export default function AgentVisitEvidenceForm({
       </div>
 
       <div>
-        <FieldLabel optional>Notes</FieldLabel>
+        <FieldLabel optional={Boolean(form.noDiscussionReason)}>What the customer said</FieldLabel>
         <Textarea
           className="min-h-[88px] text-base md:text-sm"
-          placeholder="What happened on this visit?"
+          placeholder="One real observation. The area and lab name are not enough."
           value={form.notes}
           onChange={(e) => patch({ notes: e.target.value })}
           disabled={saving}
         />
       </div>
+      <div>
+        <FieldLabel optional>If there was no discussion</FieldLabel>
+        <select
+          className={FIELD}
+          value={form.noDiscussionReason}
+          onChange={(e) => patch({ noDiscussionReason: e.target.value })}
+          disabled={saving || visitLocked}
+        >
+          <option value="">We discussed the work</option>
+          {NO_DISCUSSION_REASONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Reception-only and unavailable decision-makers do not need product details.
+        </p>
+      </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
-          <FieldLabel optional>Next action</FieldLabel>
+          <FieldLabel optional={!FOLLOW_UP_OUTCOMES.has(form.commercialOutcome) && !form.nextFollowUpDate}>Next action</FieldLabel>
           <Input className={FIELD} value={form.nextAction} onChange={(e) => patch({ nextAction: e.target.value })} disabled={saving} />
         </div>
         <div>
-          <FieldLabel optional>Follow-up date</FieldLabel>
+          <FieldLabel optional={!FOLLOW_UP_OUTCOMES.has(form.commercialOutcome)}>Follow-up date</FieldLabel>
           <Input type="date" className={FIELD} value={form.nextFollowUpDate} onChange={(e) => patch({ nextFollowUpDate: e.target.value })} disabled={saving} />
         </div>
       </div>
@@ -482,21 +599,27 @@ export default function AgentVisitEvidenceForm({
         </div>
       ) : null}
 
-      {error ? (
-        <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      ) : null}
+      <div
+        className="fixed inset-x-0 z-50 border-t border-border bg-background/95 px-3 py-3 shadow-[0_-8px_24px_rgba(15,23,42,0.12)] backdrop-blur md:static md:z-auto md:border-0 md:bg-transparent md:px-0 md:py-0 md:shadow-none"
+        style={{ bottom: saveOffset }}
+        data-testid="fast-visit-save-bar"
+      >
+        {error ? (
+          <p className="mb-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        ) : null}
 
-      {visitLocked ? (
-        <p className="text-sm font-medium text-emerald-800" data-ae1c-visit-saved="true">
-          Visit saved.
-        </p>
-      ) : (
-        <Button type="submit" className={cn("h-12 w-full text-base")} disabled={saving} data-ae1c-save-visit="true">
-          {saving ? "Saving…" : "Save visit"}
-        </Button>
-      )}
+        {visitLocked ? (
+          <p className="text-sm font-medium text-emerald-800" data-ae1c-visit-saved="true">
+            Visit saved.
+          </p>
+        ) : (
+          <Button type="submit" className={cn("h-12 w-full text-base")} disabled={saving} data-ae1c-save-visit="true">
+            {saving ? "Saving…" : existingVisit?.id ? "Save corrections" : "Save visit"}
+          </Button>
+        )}
+      </div>
 
       {isHandoffTriggerOutcome(form.commercialOutcome) && !handoffStep ? (
         <section className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3" data-ae1c-support-needed="true">

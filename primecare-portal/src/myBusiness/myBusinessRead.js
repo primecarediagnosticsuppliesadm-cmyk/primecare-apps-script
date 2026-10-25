@@ -21,6 +21,16 @@ import { listAgentOpenVisitHandoffsRead } from "@/visits/visitHandoffsApi.js";
 
 const VISIT_EVIDENCE_SELECT =
   `${HQ_AGENT_VISIT_COLUMNS},commercial_outcome,lab_size_band`;
+const VISIT_QUALITY_SELECT = `${VISIT_EVIDENCE_SELECT},no_discussion_reason`;
+const LAB_COLUMNS_WITH_ORIGIN = `${HQ_V_LABS_CREDIT_LIST_COLUMNS},record_origin`;
+const ORDER_COLUMNS_WITH_ORIGIN =
+  "order_id,lab_id,order_date,created_at,total_amount,status,tenant_id,record_origin";
+const ORDER_COLUMNS =
+  "order_id,lab_id,order_date,created_at,total_amount,status,tenant_id";
+const PAYMENT_COLUMNS_WITH_ORDER =
+  "payment_id,lab_id,payment_date,amount_received,agent_id,tenant_id,order_id";
+const PAYMENT_COLUMNS =
+  "payment_id,lab_id,payment_date,amount_received,agent_id,tenant_id";
 
 const DISCOVERY_SAFE_SELECT =
   "id,visit_uuid,lab_id,line_kind,brand,model,description,notes";
@@ -62,12 +72,15 @@ async function fetchAgentDirectory(tenantId) {
 
 async function fetchLabsByColumn({ column, values, tenantId }) {
   if (!supabase || !values.length) return [];
-  let q = supabase
-    .from("v_labs_credit")
-    .select(HQ_V_LABS_CREDIT_LIST_COLUMNS)
-    .in(column, values);
-  if (tenantId) q = q.eq("tenant_id", tenantId);
-  const { data, error } = await q.limit(clampLimit(undefined, HQ_LABS_CREDIT_LIMIT, HQ_LABS_CREDIT_LIMIT));
+  const run = async (columns) => {
+    let q = supabase.from("v_labs_credit").select(columns).in(column, values);
+    if (tenantId) q = q.eq("tenant_id", tenantId);
+    return q.limit(clampLimit(undefined, HQ_LABS_CREDIT_LIMIT, HQ_LABS_CREDIT_LIMIT));
+  };
+  let { data, error } = await run(LAB_COLUMNS_WITH_ORIGIN);
+  if (error && isMissingColumnError(error.message)) {
+    ({ data, error } = await run(HQ_V_LABS_CREDIT_LIST_COLUMNS));
+  }
   if (error) return [];
   return data || [];
 }
@@ -131,7 +144,10 @@ async function fetchVisitsForAgent({ tenantId, agentId, agentIdRaw = "", from, t
     return q.limit(clampLimit(undefined, HQ_DASHBOARD_VISITS_LIMIT, HQ_DASHBOARD_VISITS_LIMIT));
   };
 
-  let { data, error } = await run(VISIT_EVIDENCE_SELECT);
+  let { data, error } = await run(VISIT_QUALITY_SELECT);
+  if (error && isMissingColumnError(error.message)) {
+    ({ data, error } = await run(VISIT_EVIDENCE_SELECT));
+  }
   if (error && isMissingColumnError(error.message)) {
     ({ data, error } = await run(HQ_AGENT_VISIT_COLUMNS));
   }
@@ -143,13 +159,15 @@ async function fetchVisitsForAgent({ tenantId, agentId, agentIdRaw = "", from, t
     labId: labIdKey(row.lab_id),
     agentId: str(row.agent_id),
     agentName: str(row.agent_name),
-    visitDate: str(row.visit_date).slice(0, 10),
+    visitDate: str(row.visit_date),
+    createdAt: str(row.created_at),
     visitType: str(row.visit_type),
     notes: str(row.notes),
     nextFollowUpDate: str(row.next_follow_up_date).slice(0, 10),
     nextFollowUpType: str(row.next_follow_up_type),
     nextAction: str(row.next_action),
     commercialOutcome: str(row.commercial_outcome),
+    noDiscussionReason: str(row.no_discussion_reason),
     followUpRequired: row.follow_up_required,
   }));
 
@@ -217,26 +235,33 @@ async function fetchOrdersForLabs({ labIds, tenantId, from, to }) {
   if (!supabase || !labIds.length) return [];
   const rows = [];
   for (const ids of chunk(labIds, 80)) {
-    let q = supabase
-      .from("orders")
-      .select("order_id,lab_id,order_date,created_at,total_amount,status,tenant_id")
-      .in("lab_id", ids)
-      .gte("order_date", from)
-      .lte("order_date", to)
-      .order("order_date", { ascending: false });
-    if (tenantId) q = q.eq("tenant_id", tenantId);
-    const { data, error } = await q.limit(
-      clampLimit(undefined, HQ_ORDERS_LIST_MAX_LIMIT, HQ_ORDERS_LIST_MAX_LIMIT)
-    );
+    const run = async (columns) => {
+      let q = supabase
+        .from("orders")
+        .select(columns)
+        .in("lab_id", ids)
+        .gte("order_date", from)
+        .lte("order_date", to)
+        .order("order_date", { ascending: false });
+      if (tenantId) q = q.eq("tenant_id", tenantId);
+      return q.limit(clampLimit(undefined, HQ_ORDERS_LIST_MAX_LIMIT, HQ_ORDERS_LIST_MAX_LIMIT));
+    };
+    let { data, error } = await run(ORDER_COLUMNS_WITH_ORIGIN);
+    if (error && isMissingColumnError(error.message)) {
+      ({ data, error } = await run(ORDER_COLUMNS));
+    }
     if (error) continue;
     rows.push(...(data || []));
   }
   return rows.map((row) => ({
     orderId: str(row.order_id),
     labId: labIdKey(row.lab_id),
-    orderDate: str(row.order_date || row.created_at).slice(0, 10),
+    orderDate: str(row.order_date || row.created_at),
     totalAmount: Number(row.total_amount) || 0,
     status: str(row.status),
+    recordOrigin: str(row.record_origin).toLowerCase() === "certification" || str(row.record_origin).toLowerCase() === "test"
+      ? str(row.record_origin).toLowerCase()
+      : "field",
   }));
 }
 
@@ -244,26 +269,31 @@ async function fetchPaymentsForLabs({ labIds, tenantId, from, to }) {
   if (!supabase || !labIds.length) return [];
   const rows = [];
   for (const ids of chunk(labIds, 80)) {
-    let q = supabase
-      .from("payments")
-      .select("payment_id,lab_id,payment_date,amount_received,agent_id,tenant_id")
-      .in("lab_id", ids)
-      .gte("payment_date", from)
-      .lte("payment_date", to)
-      .order("payment_date", { ascending: false });
-    if (tenantId) q = q.eq("tenant_id", tenantId);
-    const { data, error } = await q.limit(
-      clampLimit(undefined, HQ_PAYMENTS_RECENT_LIMIT, HQ_PAYMENTS_RECENT_LIMIT)
-    );
+    const run = async (columns) => {
+      let q = supabase
+        .from("payments")
+        .select(columns)
+        .in("lab_id", ids)
+        .gte("payment_date", from)
+        .lte("payment_date", to)
+        .order("payment_date", { ascending: false });
+      if (tenantId) q = q.eq("tenant_id", tenantId);
+      return q.limit(clampLimit(undefined, HQ_PAYMENTS_RECENT_LIMIT, HQ_PAYMENTS_RECENT_LIMIT));
+    };
+    let { data, error } = await run(PAYMENT_COLUMNS_WITH_ORDER);
+    if (error && isMissingColumnError(error.message)) {
+      ({ data, error } = await run(PAYMENT_COLUMNS));
+    }
     if (error) continue;
     rows.push(...(data || []));
   }
   return rows.map((row) => ({
     paymentId: str(row.payment_id),
     labId: labIdKey(row.lab_id),
-    paymentDate: str(row.payment_date).slice(0, 10),
+    paymentDate: str(row.payment_date),
     amountReceived: Number(row.amount_received) || 0,
     agentId: str(row.agent_id),
+    orderId: str(row.order_id),
   }));
 }
 

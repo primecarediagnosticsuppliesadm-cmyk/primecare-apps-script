@@ -9,6 +9,12 @@ import {
   VISIT_EVIDENCE_LAB_SIZE_BANDS,
   VISIT_EVIDENCE_LINE_KINDS,
 } from "./agentVisitEvidenceContract.js";
+import { formatYmdInTimeZone } from "../myBusiness/myBusinessCalendar.js";
+import {
+  createClientRequestId,
+  isNoDiscussionReason,
+  quantityOrNull,
+} from "./fastVisitValidation.js";
 
 function newId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -86,6 +92,7 @@ export function createEmptyDiscoveryLine(kind) {
     brand: "",
     monthlySpendInr: "",
     monthlyQuantity: "",
+    quantityDisclosure: "",
     supplier: "",
     productCategory: "",
     approxVolume: "",
@@ -94,15 +101,13 @@ export function createEmptyDiscoveryLine(kind) {
 }
 
 export function createEmptyVisitEvidenceForm() {
-  const now = new Date();
-  const ymd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
-    now.getDate()
-  ).padStart(2, "0")}`;
   return {
     labId: "",
-    visitDate: ymd,
+    visitDate: formatYmdInTimeZone(new Date()),
     commercialOutcome: "UNKNOWN",
     notes: "",
+    noDiscussionReason: "",
+    clientRequestId: createClientRequestId(),
     nextAction: "",
     nextFollowUpDate: "",
     nextFollowUpType: "Call",
@@ -129,31 +134,37 @@ function trimText(value) {
   return text === "" ? null : text;
 }
 
-function finiteNumberOrAbsent(value) {
-  if (value == null) return null;
-  if (typeof value === "string" && value.trim() === "") return null;
-  if (value === "") return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
 export function compactDiscoveryLine(line) {
   if (!line || typeof line !== "object") return null;
+  const disclosureCode = String(line.quantityDisclosure || line.quantity_disclosure || "")
+    .trim()
+    .toUpperCase();
+  const disclosureLabel =
+    {
+      NOT_SHARED: "Not shared",
+      UNKNOWN: "Unknown",
+      NOT_DISCUSSED: "Not discussed",
+    }[disclosureCode] || "";
+  const baseNotes = trimText(line.notes);
+  const notes =
+    disclosureLabel && !(baseNotes || "").toLowerCase().includes(disclosureLabel.toLowerCase())
+      ? [baseNotes, `Quantity: ${disclosureLabel}`].filter(Boolean).join("\n")
+      : baseNotes;
   const row = {
     id: line.id,
     line_kind: line.lineKind || line.line_kind,
     confidence: trimText(line.confidence),
     manufacturer: trimText(line.manufacturer),
     model: trimText(line.model),
-    notes: trimText(line.notes),
+    notes,
     description: trimText(line.description),
     brand: trimText(line.brand),
-    monthly_spend_inr: finiteNumberOrAbsent(line.monthlySpendInr ?? line.monthly_spend_inr),
-    monthly_quantity: finiteNumberOrAbsent(line.monthlyQuantity ?? line.monthly_quantity),
+    monthly_spend_inr: quantityOrNull(line.monthlySpendInr ?? line.monthly_spend_inr, disclosureLabel),
+    monthly_quantity: quantityOrNull(line.monthlyQuantity ?? line.monthly_quantity, disclosureLabel),
     supplier: trimText(line.supplier),
     product_category: trimText(line.productCategory ?? line.product_category),
-    approx_volume: finiteNumberOrAbsent(line.approxVolume ?? line.approx_volume),
-    approx_price_pack: finiteNumberOrAbsent(line.approxPricePack ?? line.approx_price_pack),
+    approx_volume: quantityOrNull(line.approxVolume ?? line.approx_volume, disclosureLabel),
+    approx_price_pack: quantityOrNull(line.approxPricePack ?? line.approx_price_pack, disclosureLabel),
   };
   const meaningful = Object.entries(row).some(([key, value]) => {
     if (key === "id" || key === "line_kind") return false;
@@ -169,7 +180,10 @@ export function buildVisitEvidenceWritePayload(form, extras = {}) {
     labId: form.labId,
     visitDate: form.visitDate,
     visitType: extras.visitType || "Follow-up",
-    notes: form.notes,
+    notes: extras.notesForWrite != null ? extras.notesForWrite : form.notes,
+    noDiscussionReason: isNoDiscussionReason(form.noDiscussionReason) ? form.noDiscussionReason : "",
+    clientRequestId: form.clientRequestId || "",
+    fastVisit: extras.fastVisit !== false,
     nextAction: form.nextAction,
     nextFollowUpDate,
     nextFollowUpType: nextFollowUpDate ? form.nextFollowUpType || "Call" : "",
